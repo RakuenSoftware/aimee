@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a05e2b-08b7-7880-a7b1-1caad0ee5d58"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"mcp_tool_call","server":"s1","tool":"lsp_definition","arguments":{"workspace":"/tmp/aimee-s1-s06-location_only-0qfiupi6/work","file":"/tmp/aimee-s1-s06-location_only-0qfiupi6/work/server-go/bus/client.go","line":185,"column":17},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"mcp_tool_call","server":"s1","tool":"lsp_definition","arguments":{"workspace":"/tmp/aimee-s1-s06-location_only-0qfiupi6/work","file":"/tmp/aimee-s1-s06-location_only-0qfiupi6/work/server-go/bus/client.go","line":185,"column":17},"result":{"content":[{"type":"text","text":"{\"locations\": [], \"observed_at_monotonic_ms\": 9036, \"status\": \"empty\"}"}],"structured_content":{"status":"empty","locations":[],"observed_at_monotonic_ms":9036}},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\"answer_status\":\"empty\",\"targets\":[],\"authority\":\"local_checkout:.\",\"decisive_evidence\":{\"tool\":\"mcp__s1__lsp_definition\",\"timestamp_ms\":9036}}"}}
+{"type":"turn.completed","usage":{"input_tokens":25274,"cached_input_tokens":21760,"cache_write_input_tokens":0,"output_tokens":495,"reasoning_output_tokens":297}}

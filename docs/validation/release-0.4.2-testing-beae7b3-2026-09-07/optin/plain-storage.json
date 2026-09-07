@@ -1,0 +1,46 @@
+[
+  {
+    "name": "default starts without elevated capabilities or host devices",
+    "passed": true
+  },
+  {
+    "name": "default persists an ordinary cluster without a LUKS image",
+    "passed": true
+  },
+  {
+    "name": "unencrypted SQL transport remains refused",
+    "passed": true
+  },
+  {
+    "name": "runtime role remains non-superuser",
+    "passed": true
+  },
+  {
+    "name": "create persistent fixture",
+    "passed": true
+  },
+  {
+    "name": "ordinary store retains data across PostgreSQL restart",
+    "passed": true
+  },
+  {
+    "name": "explicit plain mode retains data across container replacement",
+    "passed": true
+  },
+  {
+    "name": "LUKS refuses implicit conversion of an existing plain store",
+    "passed": true
+  },
+  {
+    "name": "unknown storage mode is refused",
+    "passed": true
+  },
+  {
+    "name": "default refuses encrypted storage without creating an empty database",
+    "passed": true
+  },
+  {
+    "name": "refused mode switches leave the original database usable",
+    "passed": true
+  }
+]

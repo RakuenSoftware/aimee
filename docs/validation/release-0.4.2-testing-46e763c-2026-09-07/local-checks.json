@@ -1,0 +1,31 @@
+{
+  "native_suite": {
+    "passed": true,
+    "executables": 656
+  },
+  "script_suites": {
+    "passed": true,
+    "suites": 56
+  },
+  "published_thin_client": {
+    "passed": true,
+    "tests": 26,
+    "artifact_run": 34089084581
+  },
+  "lint": {
+    "passed": true,
+    "checks": 77
+  },
+  "native_confidence_regression": {
+    "original_exit": 134,
+    "repaired_exit": 0
+  },
+  "headless_classifier_regression": {
+    "original_failed": true,
+    "repaired_passed": true
+  },
+  "repository_release_pins": {
+    "passed": false,
+    "error": "check_c_repository_lock: error: core vendored mirror differs from its repository pin"
+  }
+}

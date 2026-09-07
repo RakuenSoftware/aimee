@@ -1,0 +1,79 @@
+{
+  "checks": [
+    {
+      "name": "chat",
+      "passed": true
+    },
+    {
+      "name": "dashboard",
+      "passed": true
+    },
+    {
+      "name": "logs",
+      "passed": true
+    },
+    {
+      "name": "edit-workflows",
+      "passed": true
+    },
+    {
+      "name": "workflow-actions",
+      "passed": true
+    },
+    {
+      "name": "providers",
+      "passed": true
+    },
+    {
+      "name": "models",
+      "passed": true
+    },
+    {
+      "name": "personas",
+      "passed": true
+    },
+    {
+      "name": "roles",
+      "passed": true
+    },
+    {
+      "name": "roundtable",
+      "passed": true
+    },
+    {
+      "name": "projects",
+      "passed": true
+    },
+    {
+      "name": "graph",
+      "passed": true
+    },
+    {
+      "name": "editor",
+      "passed": true
+    },
+    {
+      "name": "memory",
+      "passed": true
+    },
+    {
+      "name": "settings",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "apiErrors": [
+    {
+      "path": "/api/plugins",
+      "status": 404
+    },
+    {
+      "path": "/api/sessions/workflows/channel/Chat",
+      "status": 404
+    },
+    {
+      "path": "/api/sessions/workflows/channel/Session%201",
+      "status": 404
+    }
+  ]
+}

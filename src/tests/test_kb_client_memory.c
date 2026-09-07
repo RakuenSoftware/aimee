@@ -23,6 +23,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The classifier itself belongs to the memory module. This suite exercises the
+ * client-side no-transmit boundary with a deterministic module answer. */
+int gate_check_sensitive(const char *content, char *redacted, size_t redacted_cap)
+{
+   (void)redacted;
+   (void)redacted_cap;
+   return content && (strstr(content, "password") || strstr(content, "hunter2trustno1")) ? 2 : 0;
+}
+
 static int activation_writes;
 static int64_t activation_write_id;
 static int64_t activation_write_turn;

@@ -1,158 +1,157 @@
 # Deployment
 
-## Managed server
+## Standard local Server
+
+`compose.yaml` starts a KB-free Server, standardized PostgreSQL, and a local embedder.
+`compose.server-managed.yaml` adds Docker-socket access so the browser can manage model containers.
+Both use the same application image and PostgreSQL module. Follow the [Quickstart](QUICKSTART.md)
+for first-boot credentials. Ordinary storage needs no LUKS host preparation.
 
 ```bash
-docker compose -f compose.server-managed.yaml up -d
+scripts/compose-local.sh -f compose.yaml up -d
+# Or, for browser-managed embedding and synthesis:
+scripts/compose-local.sh -f compose.server-managed.yaml up -d
 ```
 
-The browser wizard launches the KB container. This requires the host Docker socket, which gives the
-server Docker-host authority.
+The application image `ghcr.io/rakuensoftware/aimee` contains both Server and KB compositions.
+The Go role module persists an instance UUID and role in the application home before startup.
+Later attempts to change role fail. The event-bus host also refuses a second or conflicting role.
+This is one application image; PostgreSQL and model services remain separate containers.
 
-Use it for a trusted single-host install where browser-managed setup matters more than that larger
-boundary.
+The standard PostgreSQL image is `ghcr.io/rakuensoftware/aimee-postgres`, with PostgreSQL 18,
+pgvector, pgvectorscale, and optional LUKS2 storage. Both roles use it. Server personal
+memory uses local tables and vectors; the optional KB holds shared knowledge behind its own API.
 
-## Split stack
+## Optional shared KB
+
+Install a KB separately using `compose.kb.yaml` and a distinct Compose project. It has its own
+Vault, PostgreSQL store, embedder, and optional synthesis. Never reuse a Server home or
+PostgreSQL volume for a KB. The base Server compose and web wizard do not install this deployment.
+
+A KB requires database role passwords and an authority bearer. Server-to-KB access also requires an
+enrolled client identity and a matching service-identity credential. For a connection authorized as
+`service:aimee-server`, both independent token values use the prefix `scope:service:aimee-server:`.
+Generate separate unpredictable secrets for them. Set `AIMEE_KB_HOST` to the DNS name that clients
+will actually reach before first boot; that name is included in the service certificate.
 
 ```bash
-cp -n .env.example .env
-for v in ADMIN MIGRATOR RUNTIME; do
-  echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
-done
-export AIMEE_KB_API_BEARER_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
+# Use a separate private environment file containing the KB's three SQL passwords
+# and AIMEE_KB_API_BEARER_TOKEN. The service identity is first-boot Vault input.
 export AIMEE_KB_SERVICE_IDENTITY_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
-./scripts/aimee-compose-vault-bootstrap.sh -f deploy/compose/aimee.yaml all
-unset AIMEE_KB_API_BEARER_TOKEN AIMEE_KB_SERVICE_IDENTITY_TOKEN
-docker compose --env-file .env -f deploy/compose/aimee.yaml up -d
+scripts/aimee-compose-vault-bootstrap.sh -p team-kb -e kb.env -f compose.kb.yaml kb
+unset AIMEE_KB_SERVICE_IDENTITY_TOKEN
+scripts/compose-local.sh --env-file kb.env -p team-kb -f compose.kb.yaml up -d
+scripts/compose-local.sh --env-file kb.env -p team-kb -f compose.kb.yaml exec -u aimee aimee-kb   aimee-kb enroll --host=kb.example.internal --port=8745 --scope=service:aimee-server
 ```
 
-Server and one KB are declared together, and no browser action needs to create them. The KB owns its
-embedding and synthesis role placements. Embedding runs in the KB image or its selected sidecar.
-Local synthesis uses a model-specific `aimee-llm` sidecar; remote synthesis uses an endpoint. This is intended
-as the safer default when the server must not control Docker.
+The last command returns a sensitive, single-use `aimee://` enrollment string. Enter it in the
+Server's **Settings → Knowledge base** together with the two matching service credentials, then
+restart Server when Settings requests it. The connection is optional: an unreachable KB does not
+move personal data to shared storage or prevent local personal-memory operations.
 
-Use `all` so the connection bearer and application-identity token are sealed into both Vaults. The
-one-shot `aimee-server-identity` service then issues the server's separate client
-certificate before the long-lived server starts. Server-to-KB requests use all three checks over
-mTLS on the private Compose network. The KB's plain HTTP listener remains loopback-only for its
-container healthcheck and is not published on the host.
+## Model services
 
-**`--env-file .env` is not optional on this path.** Compose takes its project directory from the
-first `-f` file, so for `deploy/compose/aimee.yaml` it looks for `deploy/compose/.env` and never
-reads the one at the repository root. Without the flag the command fails on the store passwords even
-though the file exists. The root-level profiles need no flag, because their project directory
-already is the repository root.
+Model services belong to the composition using them. Server creates its own model identities from
+its Vault; a KB does the same. Private TLS material is materialized only into private tmpfs volumes.
+Embedding and synthesis have separate identities and internal network endpoints.
 
-The one-KB Compose files are deployment profiles, not the fleet limit. The target architecture can
-route among several KB containers with explicit corpus, authority, and capability identity. Fleet
-routing is not integrated in this checkout; see [KB fleet and model placement](KB_FLEET.md).
+Local embedding starts by default. Synthesis is optional through the `synthesis` Compose profile or
+managed model setup. Both roles can use external model endpoints instead. Remote embedding sends
+input text to the configured provider; local embedding keeps it on the deployment host. The native
+and Go clients validate the managed model services through fixed mutual-TLS profiles.
 
-## The server's store database
+## PostgreSQL storage and volumes
 
-Every Compose file that runs `aimee-server` also runs `aimee-store-db`: a stock
-upstream `postgres:18` holding DB1, the tables the daemon keeps. It is a plain
-image on purpose. DB1 declares no extensions, so unlike DB2 it needs neither
-pgvector nor pgvectorscale, and any PostgreSQL an operator already supports will
-do.
+Each composition owns these durable volumes:
 
-It is reached only across the Compose network and publishes no port. To use your
-own PostgreSQL instead, set `AIMEE_STORE_URL` and the bundled service goes
-unused:
+| Volume suffix | Contents |
+| --- | --- |
+| `aimee-server-home` | Instance identity, local Vault, configuration, audit and application artifacts; the shared name also applies to KB |
+| `aimee-postgres-encrypted` | Ordinary database directory by default; LUKS2 container and manifest when explicitly enabled. Historical volume name retained for safe upgrades |
+| `aimee-server-workspaces` | Workspace files |
+| `aimee-store-tls` | PostgreSQL public certificate for clients |
+| `aimee-postgres-control` (LUKS only) | Local unlock control socket; no persistent key |
+
+The default `plain` storage mode keeps PostgreSQL data and its private TLS key under
+`/var/lib/aimee-postgres/plain` on the ordinary volume. It does not provide database encryption
+at rest. SQL TLS, scoped database roles, and application Vault credentials remain enabled.
+The three model TLS volumes remain private tmpfs volumes.
+
+### Optional LUKS encryption
+
+Add the matching overlay to explicitly enable LUKS: `compose.luks.yaml` for Server or
+`compose.kb.luks.yaml` for KB. The overlay sets `AIMEE_POSTGRES_STORAGE=luks`, attaches the
+Vault unlock socket, and grants PostgreSQL the required device access. Direct image users may
+set that variable themselves, but must also arrange the devices, capabilities, and owning
+application's unlock connection. An unknown storage mode is rejected.
+
+The operator is responsible for LUKS support on the **Docker daemon's Linux host**, including
+loop and dm-crypt/device-mapper support, control devices, `SYS_ADMIN`, and memory locking.
+Docker Desktop users who opt in must provide those features inside its Linux backend;
+they are not prerequisites for the default deployment. The launcher does not inspect a
+Windows client or mistake it for a remote Docker daemon's host.
+
+For a local Linux Docker host:
 
 ```bash
-export AIMEE_STORE_URL='postgres://user:password@host:5432/aimee_store'
-docker compose -f compose.server.yaml up -d
+sudo modprobe loop
+sudo modprobe dm_mod
+sudo modprobe dm_crypt
+export AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)
+scripts/compose-local.sh -f compose.yaml -f compose.luks.yaml up -d
+# Separate KB project:
+# scripts/compose-local.sh --env-file kb.env -p team-kb -f compose.kb.yaml -f compose.kb.luks.yaml up -d
 ```
 
-The bundled service still needs `AIMEE_STORE_ADMIN_PASSWORD`,
-`AIMEE_STORE_MIGRATOR_PASSWORD` and `AIMEE_STORE_RUNTIME_PASSWORD` to be set even when
-`AIMEE_STORE_URL` points elsewhere, because Compose interpolates every service it parses before it
-decides which to start. Generate them into `.env` as above.
+Keep the same overlays for subsequent Compose commands. For browser-managed Server models,
+use `-f compose.server-managed.yaml -f compose.luks.yaml`.
 
-Create that database `ENCODING UTF8 TEMPLATE template0`. This is load-bearing
-rather than tidiness: the store bounds text with `octet_length`, and in a
-SQL_ASCII database `octet_length` and `char_length` are the same function, so
-every byte-limit `CHECK` would pass whether or not it held.
+In LUKS mode, PostgreSQL data, private TLS keys, and database logs stay inside the encrypted
+filesystem. Its 32-byte passphrase persists only in the owning Vault; private pipes and
+protected memory carry it during unlock. There is no plaintext fallback if unlock or host
+support fails. `AIMEE_POSTGRES_VOLUME_MIB` defaults to 32768 MiB and applies only to LUKS;
+changing the size of an existing encrypted store is refused.
 
-One profile, one database: being PostgreSQL does not make DB1 shareable.
+Both modes use the same persistent volume identity. Plain mode refuses an existing LUKS
+store; LUKS refuses an existing plain store. Enabling or disabling an overlay does not convert
+existing data. Use an explicit backup/restore into a separate store when changing modes.
+Existing encrypted deployments must retain the LUKS overlay when upgrading.
 
-## External PostgreSQL
-
-Use `AIMEE_DB2_URL` only as first-boot input, seal it into the KB Vault with a
-disposable container, then remove it before creating the long-lived service:
-
-```bash
-export AIMEE_DB2_URL='postgresql://...'
-./scripts/aimee-compose-vault-bootstrap.sh -f deploy/compose/aimee.yaml kb
-unset AIMEE_DB2_URL
-docker compose -f deploy/compose/aimee.yaml up -d
-```
-
-The operator owns:
-
-- PostgreSQL availability and backups;
-- TLS and service identity;
-- pgvector/pgvectorscale versions;
-- connection limits and latency;
-- migration and restore testing.
-
-No long-lived server or KB container stores DB2 credentials in `Config.Env`.
-The disposable `--rm` bootstrap streams first-boot values over stdin, seals
-them synchronously, and exits before the service is created.
-
-## Inference
-
-Embedding and synthesis belong to the KB that serves the request. Embedding runs in the KB image or
-selected embedder sidecar. Local synthesis runs in a model-specific `aimee-llm` sidecar over mTLS;
-remote synthesis needs an explicit endpoint and credential.
-
-The KB must report explicit degradation when a configured inference stage is unavailable. It cannot
-claim a dense or synthesized result after silently skipping that stage.
-
-## Network ports
-
-Use the compose files and generated configuration as the source of truth. Typical defaults are:
-
-| Service | Port | Exposure |
-| --- | ---: | --- |
-| browser | 8443 | user network, HTTPS |
-| server `/v1` | 8743 | enrolled clients only |
-| KB service mTLS | 8745 | deployment network only |
-| remote model endpoint | provider-defined | deployment network only |
-
-Do not publish PostgreSQL or a remote model endpoint unless a separate host needs it. Apply TLS and
-service identity before crossing a trusted container network.
+SQL role passwords are separate PostgreSQL bootstrap credentials. The PostgreSQL container
+receives them for role initialization. Before creating the application, `scripts/compose-local.sh`
+streams its fixed SQL credentials and optional KB authority into Vault through a disposable
+container. Long-lived application metadata contains no SQL or enrollment credentials. The
+PostgreSQL Go module retrieves only its runtime and migration DSNs through an attested local
+Vault resource. These credentials are distinct from the LUKS passphrase.
 
 ## Volumes and backup
 
-Back up:
+Back up the application home and PostgreSQL volume as a matched instance. In LUKS mode, losing the
+Vault loses the LUKS key. Losing the application's own Vault root key also makes that Vault
+unreadable. Never regenerate either as a recovery shortcut.
 
-- server config and DB1;
-- PostgreSQL-backed workflow state and filesystem artifacts;
-- KB PostgreSQL;
-- vault root-key or external custody metadata;
-- TLS enrollment and revocation state;
-- both persistent SQLite WORM ledgers, seals, and off-host anchor state;
-- workspace mirrors when rebuilding them is expensive.
+Take PostgreSQL-native consistent dumps while the store is open, or stop writes and shut down the
+composition before taking matched volume snapshots. Protect plaintext dump exports separately.
+Include workspace files, audit ledgers, seals, and off-host witness state. Test restoring into an
+isolated project with the same role and original Vault. An encrypted database backup alone is
+insufficient to restore service.
 
-Use the KB export helper for the embedded database. Test a restore. `docker compose down -v` deletes
-named volumes.
+`docker compose down` retains volumes; `down --volumes` deletes them. Legacy plaintext PostgreSQL
+migration is explicit and preserves the old source for rollback; see [Upgrading](UPGRADING.md).
 
-## Hardening
+## Network ports
 
-- change bootstrap browser credentials;
-- keep server and KB networks private;
-- verify TLS fingerprints and issue one client identity per machine;
-- configure server ID, team ID, and the root-owned management-JWKS trust bundle;
-- grant remote users individually and review revoked rows;
-- use the split stack if the Docker socket is not required;
-- keep delegates networkless by default;
-- stream first-boot provider, git, database, and witness secrets into their owning Vault, then
-  recreate/start long-lived services without credential environment mappings;
-- ship WORM evidence to an off-host witness when host compromise is in scope;
-- run exactly one KB WORM worker with its own persistent volume and credential;
-- alert on failed health, audit verification, witness lag, bus drops, database pressure, and agent
-  reaping.
+| Service | Default host port | Exposure |
+| --- | ---: | --- |
+| Browser | 8443 | HTTPS |
+| Server API | 8743 | Enrolled clients |
+| Optional KB | 8745 | Mutual TLS |
+| KB health | 8741 | Host loopback only |
+| PostgreSQL and local models | None | Private Compose networks |
+
+Keep the KB reachable only by intended clients and preserve all three authentication layers:
+client certificate, authority bearer, and service identity. Use the standard composition without
+Docker-socket access when models are managed outside the browser.
 
 ### Git forge credential
 
@@ -186,5 +185,6 @@ authenticates over SSH.
 
 ## Upgrade
 
-See [Upgrading from v0.2.192](UPGRADING.md). Deployment topology changes are data migrations, not
-just compose edits.
+See [Upgrading](UPGRADING.md). Role changes and PostgreSQL storage migration are distinct from
+replacing an application image. Keep the old deployment and its backups until the new one has
+passed a restore and application-data check.

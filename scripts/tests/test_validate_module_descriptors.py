@@ -369,7 +369,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
             {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
-             "contracts": 0, "docs": 1, "go_sources": 0, "go_tests": 0},
+             "contracts": 0, "docs": 1, "go_sources": 4, "go_tests": 2},
         )
 
     def test_contract_ownership_is_scoped_and_complete(self) -> None:
@@ -481,8 +481,8 @@ class DescriptorTests(unittest.TestCase):
              "server-go/modules/response-composition/response_composition_test.go"),
             ("workflows", "sources", "src/modules/workflows/wfe_engine.c"),
             ("workflows", "private_headers", "src/modules/workflows/wfe_engine.h"),
-            ("memory", "sources", "src/modules/memory/memory_core.c"),
-            ("memory", "private_headers", "src/modules/memory/memory_core_internal.h"),
+            ("memory", "sources", "src/modules/memory/memory_data_bus.c"),
+            ("memory", "private_headers", "src/modules/memory/memory_ontology.h"),
             ("memory", "go_sources", "server-go/modules/memory/memory.go"),
             ("memory", "go_tests", "server-go/modules/memory/memory_test.go"),
             ("roundtable", "sources", "src/modules/roundtable/module_adapter.c"),

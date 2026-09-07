@@ -1,6 +1,6 @@
 /* harness_memory_scope.h: the per-client memory-surface registry — the single
  * source of truth for "what is an agent's local memory" — consumed by both the
- * interception detector (memory_redirect) and the session-start hydrator. Lets
+ * server hook connection and the session-start hydrator. Lets
  * new agents be supported by adding a row rather than editing detection logic.
  * See docs/proposals/pending/central-agent-memory-interception.md (§6).
  */

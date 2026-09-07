@@ -1,0 +1,25 @@
+{
+  "checks": [
+    {
+      "name": "authenticated page defaults to local personal memories",
+      "passed": true
+    },
+    {
+      "name": "KB selection replaces local results",
+      "passed": true
+    },
+    {
+      "name": "personal retirement removes active row and appears in retired view",
+      "passed": true
+    },
+    {
+      "name": "personal retirement leaves colliding KB row active",
+      "passed": true
+    },
+    {
+      "name": "desktop and mobile render without JavaScript errors",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

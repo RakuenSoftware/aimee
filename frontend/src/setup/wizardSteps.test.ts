@@ -4,76 +4,22 @@ import { RESTART_KEYS, FIELD_HELP } from '../pages/settingsHelp';
 import { saveConfigValue, loadConfig } from './configApi';
 import type { StepId } from './readiness';
 
-describe('WIZARD_STEPS structure', () => {
-  it('gives every bespoke step sole ownership of its primary action', () => {
-    for (const step of WIZARD_STEPS) {
-      expect(ownsPrimaryAction(step)).toBe(step.kind !== undefined);
+describe('WIZARD_STEPS', () => {
+  const expected: StepId[] = ['account', 'provider', 'embedding', 'git_identity', 'connection', 'project'];
+  it('has no KB installation or shared database step in any deployment', () => {
+    for (const mode of ['none', 'local', 'remote'] as const) {
+      for (const appliance of [false, true]) expect(visibleSteps(mode, appliance).map(s => s.id)).toEqual(expected);
     }
-    expect(ownsPrimaryAction(WIZARD_STEPS.find((step) => step.kind === 'git_identity')!)).toBe(true);
   });
-
-  it('covers every readiness StepId exactly once, in dependency order', () => {
-    const ids = WIZARD_STEPS.map((s) => s.id);
-    expect(ids).toEqual<StepId[]>(['account', 'provider', 'knowledge_base', 'embedding', 'db2', 'git_identity', 'connection', 'project']);
-    expect(new Set(ids).size).toBe(ids.length); // no dupes
+  it('keeps model setup required independently of shared knowledge', () => {
+    const models = WIZARD_STEPS.find(s => s.id === 'embedding')!;
+    expect(models.kind).toBe('deploy');
+    expect(models.optional).not.toBe(true);
+    expect(ownsPrimaryAction(models)).toBe(true);
+    expect(WIZARD_STEPS.find(s => s.id === 'connection')?.optional).toBe(true);
   });
-
-  it('account is first, provider is the chooser, and the KB fork follows', () => {
-    expect(WIZARD_STEPS[0].kind).toBe('account');
-    const provider = WIZARD_STEPS.find((s) => s.id === 'provider')!;
-    expect(provider.kind).toBe('chooser');
-    const kb = WIZARD_STEPS[2];
-    expect(kb.id).toBe('knowledge_base');
-    expect(kb.kind).toBe('kb');
-    expect(kb.keys).toEqual([]);
-  });
-
-  it('deploy-topology + DB2 are local-only; the tail is identity → connection → workspaces', () => {
-    const embedding = WIZARD_STEPS.find((s) => s.id === 'embedding')!;
-    const db2 = WIZARD_STEPS.find((s) => s.id === 'db2')!;
-    expect(embedding.kind).toBe('deploy');
-    expect(embedding.showWhen!('local')).toBe(true);
-    expect(embedding.showWhen!('remote')).toBe(false);
-    // DB2 is a bespoke step (bundled vs existing Postgres); db2_url is no longer a
-    // required generic key.
-    expect(db2.kind).toBe('db2');
-    expect(db2.keys).toEqual([]);
-    expect(db2.showWhen!('local')).toBe(true);
-    expect(db2.showWhen!('remote')).toBe(false);
-
-    const connection = WIZARD_STEPS.find((s) => s.id === 'connection')!;
-    const identity = WIZARD_STEPS.find((s) => s.id === 'git_identity')!;
-    const project = WIZARD_STEPS.find((s) => s.id === 'project')!;
-    expect(connection.optional).toBe(true);
-    expect(identity.kind).toBe('git_identity');
-    expect(identity.optional).not.toBe(true);
-    expect(connection.kind).toBe('connection');
-    expect(project.kind).toBe('workspace');
-    // Folded in: no longer a route hand-off.
-    expect(project.keys).toEqual([]);
-    expect('route' in project).toBe(false);
-  });
-
-  it('visibleSteps forks on kb_mode: remote hides deploy + db2', () => {
-    const local = visibleSteps('local').map((s) => s.id);
-    const remote = visibleSteps('remote').map((s) => s.id);
-    expect(local).toEqual(['account', 'provider', 'knowledge_base', 'embedding', 'db2', 'git_identity', 'connection', 'project']);
-    expect(remote).toEqual(['account', 'provider', 'knowledge_base', 'git_identity', 'connection', 'project']);
-  });
-
-  it('appliance mode hides the baked-infra steps (kb/deploy/db2)', () => {
-    const applianceLocal = visibleSteps('local', true).map((s) => s.id);
-    expect(applianceLocal).toEqual(['account', 'provider', 'git_identity', 'connection', 'project']);
-    // Same regardless of kb mode — the appliance bakes it.
-    expect(visibleSteps('remote', true).map((s) => s.id)).toEqual(['account', 'provider', 'git_identity', 'connection', 'project']);
-  });
-
   it('every keyed step references documented config keys', () => {
-    for (const step of WIZARD_STEPS) {
-      for (const k of step.keys) {
-        expect(FIELD_HELP, `${step.id}: ${k} undocumented`).toHaveProperty(k);
-      }
-    }
+    for (const step of WIZARD_STEPS) for (const key of step.keys) expect(FIELD_HELP).toHaveProperty(key);
   });
 });
 

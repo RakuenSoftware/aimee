@@ -7,7 +7,7 @@
 #include <stdatomic.h>       /* atomic_int for the per-turn cancel flag */
 
 int agent_load_config(agent_config_t *cfg);
-int agent_save_config(const agent_config_t *cfg);
+int agent_save_config(agent_config_t *cfg);
 
 /* As agent_save_config, but the caller has just removed an agent and an empty
  * registry is therefore the intended result. The deletion guard in
@@ -15,7 +15,7 @@ int agent_save_config(const agent_config_t *cfg);
  * zeroed or failed-to-load cfg, so it refuses both; removing the only configured
  * delegate failed with "could not save agents.json" until this existed. Only the
  * remove handler may use it — it is the one caller that knows. */
-int agent_save_config_after_removal(const agent_config_t *cfg);
+int agent_save_config_after_removal(agent_config_t *cfg);
 
 /* A valid agent/model slug: 1–48 chars, starting alphanumeric, then alphanumeric
  * or . _ - . Agent names surface as model ids in /v1/models, so this keeps junk
@@ -110,6 +110,12 @@ int agent_is_available_for_routing(const agent_t *agent);
 typedef int (*agent_route_selection_fn)(int randomized, uint32_t candidate_count,
                                         uint32_t *selected_index);
 void agent_set_route_selection_provider(agent_route_selection_fn provider);
+/* Rank a qualified pool using request-size pricing; negative return fails closed. */
+typedef int (*agent_route_cost_fn)(const agent_config_t *cfg, const char *role,
+                                  agent_t *const candidates[], int count, int min_context);
+void agent_set_route_cost_provider(agent_route_cost_fn provider);
+int agent_role_competence(const agent_t *agent, const char *role);
+int agent_role_meets_competence(const agent_t *agent, const char *role);
 /* Test/bench seam: clear the provider AND the latched authority, so a suite can
  * exercise the built-in balancer after installing one. Daemons never call it. */
 void agent_reset_route_selection_authority(void);

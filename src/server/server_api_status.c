@@ -11,7 +11,6 @@
 #include "harness_memory_scope.h"  /* hmem_scope_for_client */
 #include "kb_client.h"             /* kb_client_health */
 #include "json_fluent.h"           /* jo_ok */
-#include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
 #include "runtime_secret.h"
 #include "vault_config_bootstrap.h"
 #include "server.h"
@@ -121,6 +120,16 @@ void server_health_add_kb(cJSON *resp)
 {
    if (!resp)
       return;
+   if (!kb_client_connection_configured())
+   {
+      cJSON *disabled = cJSON_AddObjectToObject(resp, "kb");
+      if (disabled)
+      {
+         cJSON_AddStringToObject(disabled, "status", "disabled");
+         cJSON_AddBoolToObject(disabled, "configured", 0);
+      }
+      return;
+   }
    kb_health_t kb;
    memset(&kb, 0, sizeof(kb));
    int kb_rc = kb_client_health(&kb);

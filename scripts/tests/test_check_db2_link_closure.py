@@ -757,7 +757,7 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 140)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 149)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
@@ -766,7 +766,7 @@ class LinkClosureTest(unittest.TestCase):
             contract["summary"]["dispositions"]["portable-core-promotion"], 0
         )
         self.assertEqual(
-            contract["summary"]["dispositions"]["injected-module-contract"], 0
+            contract["summary"]["dispositions"]["injected-module-contract"], 9
         )
         self.assertFalse(any(
             row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
@@ -803,21 +803,14 @@ class LinkClosureTest(unittest.TestCase):
         self.assertFalse(any(
             row["symbol"] == "code_match_line" for row in contract["unresolved"]
         ))
-        self.assertFalse(any(
-            row["symbol"] == "memory_ontology_node_kind_to_text"
-            for row in contract["unresolved"]
-        ))
-        self.assertFalse(any(
-            row["symbol"] == "memory_pii_should_inject"
-            for row in contract["unresolved"]
-        ))
-        self.assertFalse(any(
-            row["symbol"] in {
-                "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
-                "memory_pii_turn_requests_sensitive",
-            }
-            for row in contract["unresolved"]
-        ))
+        unresolved = {row["symbol"]: row["disposition"] for row in contract["unresolved"]}
+        for symbol in {
+            "memory_ontology_node_kind_to_text", "memory_pii_rel_sensitivity",
+            "memory_pii_turn_requests_sensitive",
+        }:
+            self.assertEqual(unresolved[symbol], "injected-module-contract")
+        self.assertNotIn("memory_pii_should_inject", unresolved)
+        self.assertNotIn("memory_pii_rel_sensitivity_batch", unresolved)
         self.assertFalse(any(
             row["symbol"] in {"code_import_identity", "code_import_resolves_path"}
             for row in contract["unresolved"]
@@ -904,64 +897,90 @@ class LinkClosureTest(unittest.TestCase):
             code_audit_support["path"],
             json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
         )
-        node_kind_support = next(
-            unit for unit in contract["descriptor_support_units"]
-            if unit["path"] == "src/modules/db2/support/node_kind_text_primitives.c"
+
+
+class MemoryMigrationComparisonTest(unittest.TestCase):
+    """Exercise the exact release admission independently of schema/probe tests."""
+
+    def setUp(self):
+        self.current = json.loads((REPO / checker.CONTRACT).read_text())
+        self.previous = copy.deepcopy(self.current)
+        self.previous["fingerprint"] = checker.MEMORY_MIGRATION_BASE
+        self.previous["translation_units"] += sorted(checker.MEMORY_RETIRED_UNITS)
+        self.previous["descriptor_support_units"] += [
+            {"path": path} for path in sorted(checker.MEMORY_RETIRED_SUPPORT)
+        ]
+        self.previous["unresolved"] = [
+            row for row in self.previous["unresolved"]
+            if row["symbol"] not in checker.MEMORY_ADAPTER_IMPORTS
+        ]
+        for row in self.previous["unresolved"]:
+            if row["symbol"] == "memchr":
+                row["references"].remove("src/modules/db2/c/fact_recall.c")
+
+    def compare(self):
+        # Structural validation has its own failure-mode suite above. This
+        # isolates the policy comparison so every mutation reaches that policy.
+        def validated(root, contract, **kwargs):
+            return (contract["translation_units"], contract["descriptor_support_units"],
+                    {row["symbol"]: row for row in contract["unresolved"]})
+        with mock.patch.object(checker, "validate_contract", side_effect=validated):
+            checker.compare_contracts(REPO, self.previous, self.current)
+
+    def test_exact_migration_passes(self):
+        self.compare()
+
+    def test_another_base_cannot_use_migration_admissions(self):
+        self.previous["fingerprint"] = "0" * 64
+        with self.assertRaisesRegex(checker.ClosureError, "previous-source-removal"):
+            self.compare()
+
+    def test_unreviewed_source_retirement_fails(self):
+        self.previous["translation_units"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-source-removal"):
+            self.compare()
+
+    def test_unreviewed_support_retirement_fails(self):
+        self.previous["descriptor_support_units"].append(
+            {"path": "src/modules/db2/support/unreviewed.c"}
         )
-        self.assertEqual(
-            node_kind_support["defines"], ["memory_ontology_node_kind_to_text"]
-        )
-        self.assertEqual(node_kind_support["resolves"], node_kind_support["defines"])
-        self.assertEqual(node_kind_support["allowed_undefined"], [])
-        self.assertEqual(
-            node_kind_support["source_sha256"],
-            hashlib.sha256((REPO / node_kind_support["path"]).read_bytes()).hexdigest(),
-        )
-        self.assertIn(
-            node_kind_support["path"],
-            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
-        )
-        pii_gate_support = next(
-            unit for unit in contract["descriptor_support_units"]
-            if unit["path"] == "src/modules/db2/support/pii_inject_gate_primitives.c"
-        )
-        self.assertEqual(
-            pii_gate_support["defines"], ["memory_pii_should_inject"]
-        )
-        self.assertEqual(pii_gate_support["resolves"], pii_gate_support["defines"])
-        self.assertEqual(pii_gate_support["allowed_undefined"], [])
-        self.assertEqual(
-            pii_gate_support["source_sha256"],
-            hashlib.sha256((REPO / pii_gate_support["path"]).read_bytes()).hexdigest(),
-        )
-        self.assertIn(
-            pii_gate_support["path"],
-            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
-        )
-        pii_classifier_support = next(
-            unit for unit in contract["descriptor_support_units"]
-            if unit["path"] == "src/modules/db2/support/pii_classifier_primitives.c"
-        )
-        self.assertEqual(pii_classifier_support["defines"], [
-            "memory_pii_register_sensitivity_batch", "memory_pii_register_turn_classifier",
-            "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
-            "memory_pii_turn_requests_sensitive",
-        ])
-        self.assertEqual(pii_classifier_support["resolves"], [
-            "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
-            "memory_pii_turn_requests_sensitive",
-        ])
-        self.assertEqual(pii_classifier_support["allowed_undefined"], [
-            "__ctype_tolower_loc", "rel_type_normalize", "rel_types_seed_lookup", "strlen",
-        ])
-        self.assertEqual(
-            pii_classifier_support["source_sha256"],
-            hashlib.sha256((REPO / pii_classifier_support["path"]).read_bytes()).hexdigest(),
-        )
-        self.assertIn(
-            pii_classifier_support["path"],
-            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
-        )
+        with self.assertRaisesRegex(checker.ClosureError, "previous-support-removal"):
+            self.compare()
+
+    def test_additional_adapter_consumer_fails(self):
+        row = next(r for r in self.current["unresolved"] if r["symbol"] in checker.MEMORY_ADAPTER_IMPORTS)
+        row["references"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-symbol-growth"):
+            self.compare()
+
+    def test_adapter_cannot_be_reclassified_as_system_or_core(self):
+        row = next(r for r in self.current["unresolved"] if r["symbol"] in checker.MEMORY_ADAPTER_IMPORTS)
+        for disposition in ("system-link", "portable-core-promotion"):
+            with self.subTest(disposition=disposition):
+                row["disposition"] = disposition
+                with self.assertRaisesRegex(checker.ClosureError, "previous-symbol-growth"):
+                    self.compare()
+
+    def test_unreviewed_symbol_fails(self):
+        self.current["unresolved"].append({
+            "symbol": "unreviewed_import", "references": ["src/modules/db2/c/fact_recall.c"],
+            "disposition": "injected-module-contract",
+        })
+        with self.assertRaisesRegex(checker.ClosureError, "previous-symbol-growth"):
+            self.compare()
+
+    def test_system_reference_admission_is_exact(self):
+        row = next(r for r in self.current["unresolved"] if r["symbol"] == "memchr")
+        row["references"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-reference-growth"):
+            self.compare()
+
+    def test_post_migration_base_still_rejects_adapter_growth(self):
+        self.previous = copy.deepcopy(self.current)
+        row = next(r for r in self.current["unresolved"] if r["symbol"] in checker.MEMORY_ADAPTER_IMPORTS)
+        row["references"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-reference-growth"):
+            self.compare()
 
 
 if __name__ == "__main__":

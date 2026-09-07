@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "answer_status": {
+      "type": "string",
+      "enum": ["ok", "empty", "unavailable", "unsupported", "stale", "unauthorized", "abstained"]
+    },
+    "targets": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {"type": "string"},
+          "line": {"type": "integer", "minimum": 1},
+          "symbol": {"type": "string"}
+        },
+        "required": ["file", "line", "symbol"]
+      }
+    },
+    "authority": {"type": "string"},
+    "decisive_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tool": {"type": "string"},
+        "timestamp_ms": {"type": "integer", "minimum": 0}
+      },
+      "required": ["tool", "timestamp_ms"]
+    }
+  },
+  "required": ["answer_status", "targets", "authority", "decisive_evidence"]
+}

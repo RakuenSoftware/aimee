@@ -155,7 +155,7 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
  * branch in run_completion is their first caller. */
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature,
-                                  parsed_response_t *out);
+                                  parsed_response_t *out, char *error, size_t error_cap);
 static int openai_governance_enabled(void);
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
@@ -271,10 +271,12 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 && tools)
       {
          parsed_response_t parsed;
+         char upstream_error[512];
          int trc = agent_execute_messages(
              ag, messages, tools, instructions ? instructions : pi_env,
              openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768),
-             openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed);
+             openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed,
+             upstream_error, sizeof(upstream_error));
          free(instructions);
          free(pi_env);
          free(prompt);
@@ -284,7 +286,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
             agent_free_parsed_response(&parsed);
             cJSON_Delete(messages);
             cJSON_Delete(tools);
-            openai_format_error(resp, cap, "upstream_error", "completion failed");
+            openai_format_error(resp, cap, "upstream_error", upstream_error);
             return 502;
          }
 
@@ -899,16 +901,20 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
       if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 && tools)
       {
          parsed_response_t parsed;
-         int trc = agent_execute_messages(ag, messages, tools, instructions, max_tokens,
-                                          temperature, &parsed);
+         char upstream_error[512];
+         int trc =
+             agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
+                                    &parsed, upstream_error, sizeof(upstream_error));
          free(instructions);
          free(prompt);
 
          emit_chunk(emit, ctx, id, model, created, 1, NULL, 0); /* role frame */
          if (trc != 0)
          {
-            emit_chunk(emit, ctx, id, model, created, 0, "completion failed", 0);
-            emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
+            char error_frame[1024];
+            openai_format_error(error_frame, sizeof(error_frame), "upstream_error", upstream_error);
+            emit(ctx, error_frame);
+            emit(ctx, "[DONE]");
             agent_free_parsed_response(&parsed);
             cJSON_Delete(messages);
             cJSON_Delete(tools);
@@ -1172,8 +1178,9 @@ static int strip_unusable_tools(cJSON *tools)
 
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature,
-                                  parsed_response_t *out)
+                                  parsed_response_t *out, char *error, size_t error_cap)
 {
+   snprintf(error, error_cap, "upstream model request failed");
    if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
@@ -1192,6 +1199,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    {
       LOG_WARN("openai.responses", "no usable driver for provider=%s (agent=%s)",
                agent->provider ? agent->provider : "?", agent->name ? agent->name : "?");
+      snprintf(error, error_cap, "upstream model provider has no usable driver");
       return -1;
    }
 
@@ -1200,6 +1208,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    {
       LOG_WARN("openai.responses", "build_url failed: driver=%s endpoint=%s", driver->name,
                agent->endpoint ? agent->endpoint : "?");
+      snprintf(error, error_cap, "upstream model endpoint is invalid");
       return -1;
    }
 
@@ -1208,6 +1217,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    {
       LOG_WARN("openai.responses", "auth unresolved: agent=%s auth_type=%s",
                agent->name ? agent->name : "?", agent->auth_type ? agent->auth_type : "?");
+      snprintf(error, error_cap, "upstream model credentials are unavailable");
       return -1;
    }
    char extra_headers[512];
@@ -1352,18 +1362,9 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    if (http_status != 200 || !response_body)
    {
-      /* Say WHAT the provider said. This path reports a single generic
-       * "upstream model request failed" to the client, which is all a Codex user
-       * ever sees -- and the buffered /v1/responses handler on the SAME agent and
-       * the SAME url succeeds, so "the provider is down" is not the explanation
-       * and the difference is in this request. Discarding the body here meant the
-       * only way to find out was to read the source and guess.
-       *
-       * Truncated because a provider error can carry an HTML error page. */
-      LOG_WARN("openai.responses",
-               "streaming upstream failed: status=%d provider=%s model=%s url=%s body=%.400s",
-               http_status, agent->provider ? agent->provider : "?",
-               agent->model ? agent->model : "?", url, response_body ? response_body : "(none)");
+      openai_upstream_error_message(http_status, response_body, error, error_cap);
+      LOG_WARN("openai.responses", "provider=%s model=%s: %s", agent->provider, agent->model,
+               error);
       free(response_body);
       return -1;
    }
@@ -1497,8 +1498,9 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
     * S5-style streaming disable-only code). If a future refactor introduces a real
     * agent_http_post_stream path here, it must add the streaming mutation contract. */
    parsed_response_t parsed;
-   int erc =
-       agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature, &parsed);
+   char upstream_error[512];
+   int erc = agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
+                                    &parsed, upstream_error, sizeof(upstream_error));
 
    /* `response.created` is the per-response envelope event: emitted exactly
     * once here for EVERY downstream path (error -> response.failed, text turn,
@@ -1516,8 +1518,8 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
        * the OpenAI backend would, so Codex applies its typed-error handling
        * (retry/backoff) instead of treating a failed turn as an empty success.
        * Unknown `code` maps to ApiError::Retryable in Codex's parser. */
-      if (openai_format_responses_failed(id, model, created, "server_error",
-                                         "upstream model request failed", frame, sizeof(frame)) > 0)
+      if (openai_format_responses_failed(id, model, created, "server_error", upstream_error, frame,
+                                         sizeof(frame)) > 0)
          emit(ctx, "response.failed", frame);
       agent_free_parsed_response(&parsed);
       free(instructions);

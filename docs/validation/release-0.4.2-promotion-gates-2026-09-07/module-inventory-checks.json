@@ -1,0 +1,173 @@
+[
+  {
+    "name": "Validate canonical inventory",
+    "returncode": 0,
+    "seconds": 0.02
+  },
+  {
+    "name": "Test inventory failure modes",
+    "returncode": 0,
+    "seconds": 0.9
+  },
+  {
+    "name": "Test that a principal ref is an identity, not a position",
+    "returncode": 0,
+    "seconds": 0.17
+  },
+  {
+    "name": "Enforce background skill-curator removal",
+    "returncode": 0,
+    "seconds": 0.37
+  },
+  {
+    "name": "Test background skill-curator absence failure modes",
+    "returncode": 0,
+    "seconds": 0.43
+  },
+  {
+    "name": "Enforce canonical module source ownership",
+    "returncode": 0,
+    "seconds": 9.14
+  },
+  {
+    "name": "Test module source ownership failure modes",
+    "returncode": 0,
+    "seconds": 16.97
+  },
+  {
+    "name": "Freeze the DB2 source boundary and consumer inventory",
+    "returncode": 0,
+    "seconds": 0.72
+  },
+  {
+    "name": "Test DB2 source-boundary failure modes",
+    "returncode": 0,
+    "seconds": 1.55
+  },
+  {
+    "name": "Enforce generated DB2 operation contract",
+    "returncode": 0,
+    "seconds": 0.07
+  },
+  {
+    "name": "Test DB2 operation-contract failure modes",
+    "returncode": 0,
+    "seconds": 0.68
+  },
+  {
+    "name": "Enforce generated DB2 declaration ledger",
+    "returncode": 0,
+    "seconds": 0.84
+  },
+  {
+    "name": "Test DB2 declaration-ledger failure modes",
+    "returncode": 0,
+    "seconds": 8.92
+  },
+  {
+    "name": "Measure DB2 C link closure",
+    "returncode": 0,
+    "seconds": 15.52
+  },
+  {
+    "name": "Refuse DB2 C link-closure debt growth",
+    "returncode": 0,
+    "seconds": 0.18
+  },
+  {
+    "name": "Test DB2 C link-closure failure modes",
+    "returncode": 0,
+    "seconds": 15.8
+  },
+  {
+    "name": "Refuse premature DB2 process activation",
+    "returncode": 0,
+    "seconds": 0.02
+  },
+  {
+    "name": "Test DB2 activation-gate failure modes",
+    "returncode": 0,
+    "seconds": 0.04
+  },
+  {
+    "name": "Enforce module bus boundary",
+    "returncode": 0,
+    "seconds": 0.08
+  },
+  {
+    "name": "Test module bus-boundary failure modes",
+    "returncode": 0,
+    "seconds": 0.15
+  },
+  {
+    "name": "Enforce memory C boundary",
+    "returncode": 0,
+    "seconds": 0.02
+  },
+  {
+    "name": "Test memory C-boundary failure modes",
+    "returncode": 0,
+    "seconds": 0.04
+  },
+  {
+    "name": "Enforce panel contract boundary",
+    "returncode": 0,
+    "seconds": 0.3
+  },
+  {
+    "name": "Test panel contract boundary failure modes",
+    "returncode": 0,
+    "seconds": 0.43
+  },
+  {
+    "name": "Enforce refactor surface baselines",
+    "returncode": 0,
+    "seconds": 1.45
+  },
+  {
+    "name": "Enforce refactor cleanup accounting",
+    "returncode": 0,
+    "seconds": 0.04
+  },
+  {
+    "name": "Test refactor baseline failure modes",
+    "returncode": 0,
+    "seconds": 4.21
+  },
+  {
+    "name": "Test cleanup-ledger failure modes",
+    "returncode": 0,
+    "seconds": 0.07
+  },
+  {
+    "name": "Test Dockerfile hub-fetch retry",
+    "returncode": 0,
+    "seconds": 0.03
+  },
+  {
+    "name": "Test embedder bake script",
+    "returncode": 0,
+    "seconds": 0.02
+  },
+  {
+    "name": "Enforce individual module documentation",
+    "returncode": 0,
+    "seconds": null,
+    "verification": "rerun after documentation repair; all 35 modules pass"
+  },
+  {
+    "name": "Test module-documentation failure modes",
+    "returncode": 0,
+    "seconds": 0.06
+  },
+  {
+    "name": "Enforce descriptor-declared module test registration",
+    "returncode": 0,
+    "seconds": 0.03
+  },
+  {
+    "name": "Test module test-registration failure modes",
+    "returncode": 0,
+    "seconds": 0.21
+  }
+]

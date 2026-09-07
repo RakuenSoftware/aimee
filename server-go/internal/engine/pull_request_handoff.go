@@ -13,7 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 )
 
 const (
@@ -304,7 +304,7 @@ func redactPullRequestMarkdown(value string) string {
 	return strings.Join(redacted, "\n")
 }
 
-func reviewProposalPath(item db1.WorkItem) string {
+func reviewProposalPath(item workflowstore.WorkItem) string {
 	path := filepath.ToSlash(strings.TrimSpace(item.SourcePath))
 	if path == "" || filepath.IsAbs(path) || strings.HasPrefix(path, "../") {
 		return ""
@@ -484,7 +484,7 @@ func parseDiffHighlights(diff string) []string {
 	return highlights
 }
 
-func (r *NativeRunner) pullRequestSpec(ctx context.Context, req StepRequest, item db1.WorkItem,
+func (r *NativeRunner) pullRequestSpec(ctx context.Context, req StepRequest, item workflowstore.WorkItem,
 	workdir, head, base string) (PullRequestSpec, error) {
 	title := strings.TrimSpace(paramString(req.Node, "title", ""))
 	if title == "" {

@@ -421,7 +421,8 @@ static void bash_git_target_dir(const char *cmd, const char *fallback_cwd, char 
    if (!cmd || !out_dir || out_len == 0)
       return;
 
-   /* Pattern 1: "cd /path && ..." or "cd '/path' && ..." */
+   /* Pattern 1 includes the thin client's own "cd -- '<worktree>' && ..."
+    * rewrite. The option terminator is not a directory. */
    const char *p = cmd;
    while (*p == ' ' || *p == '\t')
       p++;
@@ -430,6 +431,12 @@ static void bash_git_target_dir(const char *cmd, const char *fallback_cwd, char 
       p += 3;
       while (*p == ' ' || *p == '\t')
          p++;
+      if (strncmp(p, "--", 2) == 0 && (p[2] == ' ' || p[2] == '\t'))
+      {
+         p += 2;
+         while (*p == ' ' || *p == '\t')
+            p++;
+      }
       char quote = 0;
       if (*p == '\'' || *p == '"')
       {
@@ -692,6 +699,9 @@ static int bash_git_push_target_dir(const char *cmd, const char *fallback_cwd, c
    int rc;
    char *resolved = run_cmd(top, &rc);
    free(resolved);
+   if (rc != 0)
+      LOG_WARN("guardrails", "git worktree probe failed: root=%s provider=%d status=%d", out_dir,
+               (int)workspace_provider_active()->kind, rc);
    return rc == 0;
 }
 
@@ -1181,8 +1191,9 @@ static int is_write_intent(const char *tool_name, cJSON *root)
    return 0;
 }
 
-int pre_tool_check_inner(const char *tool_name, const char *input_json, session_state_t *state,
-                         const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len)
+static int pre_tool_check_impl(const char *tool_name, const char *input_json,
+                               session_state_t *state, const char *guardrail_mode, const char *cwd,
+                               char *msg_buf, size_t msg_len)
 {
    if (!tool_name || !input_json || !state)
       return 0;
@@ -1299,9 +1310,10 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
       if ((is_push || is_pr_create) && !target_ok)
       {
          snprintf(msg_buf, msg_len,
-                  "BLOCKED: %s blocked - cannot resolve target worktree for this command. "
+                  "BLOCKED: %s blocked - cannot resolve target worktree '%.384s' "
+                  "(workspace provider %d). "
                   "Run from the repo/worktree or use an aimee-managed worktree.",
-                  is_push ? "push" : "pr create");
+                  is_push ? "push" : "pr create", pdir, (int)workspace_provider_active()->kind);
          cJSON_Delete(root);
          return 2;
       }
@@ -2004,4 +2016,37 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
           normalize_path(fp->valuestring, effective_cwd, norm, sizeof(norm)), msg_buf, msg_len);
    cJSON_Delete(root);
    return 0;
+}
+
+static char *guardrails_workspace_exec(void *ctx, const char *cmd, int *exit_code)
+{
+   const workspace_provider_t *provider = ctx;
+   if (!provider->exec_shell)
+   {
+      if (exit_code)
+         *exit_code = -1;
+      return NULL;
+   }
+   return provider->exec_shell(provider, cmd, exit_code);
+}
+
+int pre_tool_check_inner(const char *tool_name, const char *input_json, session_state_t *state,
+                         const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len)
+{
+   /* Worktree/branch/verify helpers predate workspace providers and use run_cmd.
+    * Keep every probe on the same filesystem as the tool being checked, for
+    * hooks AND ordinary detached tool calls. A transport error must never fall
+    * back to the server filesystem. Shared and container behavior is unchanged;
+    * the shared exec_shell itself calls run_cmd and must not be installed here. */
+   const workspace_provider_t *provider = workspace_provider_active();
+   int detached = provider && provider->kind == WS_PROVIDER_DETACHED;
+   run_cmd_executor_t previous = {0};
+   if (detached)
+      previous = run_cmd_exchange_executor(
+          (run_cmd_executor_t){guardrails_workspace_exec, (void *)provider});
+   int rc =
+       pre_tool_check_impl(tool_name, input_json, state, guardrail_mode, cwd, msg_buf, msg_len);
+   if (detached)
+      run_cmd_exchange_executor(previous);
+   return rc;
 }

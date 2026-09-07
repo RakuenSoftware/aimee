@@ -1,4 +1,5 @@
 #include "aimee.h"
+#include "server.h"
 #include "agent_admission.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
 #include "aimee_errors.h"
@@ -319,7 +320,9 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
       provider_catalog_record_success(ag->name);
    else
    {
-      const char *ec = agent_error_is_retryable(out->error) ? "retryable" : "error";
+      const char *ec = agent_error_is_registration_failure(out->error) ? "registration_error"
+                       : agent_error_is_retryable(out->error)          ? "retryable"
+                                                                       : "error";
       provider_catalog_record_failure(ag->name, ec);
       /* Surface WHY a delegate attempt failed. Without this the only trace of a failed
        * turn is the downstream "fallback: trying same-tier agent" line, which hides the
@@ -355,6 +358,11 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
 {
    memset(out, 0, sizeof(*out));
 
+   cfg->route_input_tokens = (int)((strlen(system_prompt ? system_prompt : "") +
+                                    strlen(user_prompt ? user_prompt : "") + 3) /
+                                   4);
+   cfg->route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
+
    int cache_enabled = delegate_role_result_cache_enabled(role);
    if (cache_enabled)
    {
@@ -386,8 +394,8 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       }
       if (!ag)
       {
-         if (attempt == 0)
-            continue; /* no primary route -> fall through to the random picker */
+         if (attempt == 0 && !agent_route_last_was_module_fault())
+            continue; /* empty primary route -> consider remaining eligible agents */
          break;       /* no viable agent remains */
       }
 
@@ -639,6 +647,10 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       return -1;
    }
 
+   cfg->route_input_tokens = (int)((strlen(system_prompt ? system_prompt : "") +
+                                    strlen(user_prompt ? user_prompt : "") + 3) /
+                                   4);
+   cfg->route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
    agent_t *ag = agent_route(cfg, role);
    if (!ag)
    {
@@ -1597,8 +1609,9 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
    size_t budget_procedures = ctx_category_budget(task_type, CTX_CAT_PROCEDURES, content_budget);
    size_t budget_recent = ctx_category_budget(task_type, CTX_CAT_RECENT, content_budget);
    const char *skip_kb_env = getenv("AIMEE_CONTEXT_NO_KB");
-   int skip_kb_client =
-       skip_kb_context || (skip_kb_env && skip_kb_env[0] && strcmp(skip_kb_env, "0") != 0);
+   const char *kb_mode = config_kb_mode();
+   int skip_kb_client = (kb_mode && strcmp(kb_mode, "none") == 0) || skip_kb_context ||
+                        (skip_kb_env && skip_kb_env[0] && strcmp(skip_kb_env, "0") != 0);
 
    ctx_appendf(buf, cap, &pos, "%s", agent_exec_instructions(task_type));
    ctx_appendf(buf, cap, &pos, "%s", prompt_principles_text(config_current_mode()));
@@ -1738,15 +1751,20 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
    }
    int recall_injected = 0;
    {
-      if (!skip_kb_client && config_memory_recall_enabled())
+      if (config_memory_recall_enabled())
       {
          /* Session-start mode = no task text yet; else the turn prompt is the hint. */
          int session_start = !(custom_prompt && custom_prompt[0]);
          int limit_tokens = session_start ? config_memory_recall_limit_tokens_session()
                                           : config_memory_recall_limit_tokens_turn();
          /* Graph-code fusion is always on for recall. */
-         char *recall_envelope =
-             kb_client_memory_recall_json_ex(custom_prompt, limit_tokens, session_start, "on");
+         char *recall_envelope = skip_kb_client
+                                     ? NULL
+                                     : kb_client_memory_recall_json_ex(custom_prompt, limit_tokens,
+                                                                       session_start, "on");
+         if (!recall_envelope)
+            recall_envelope =
+                server_user_memory_recall_json(custom_prompt, limit_tokens, session_start);
          cJSON *envelope = recall_envelope ? cJSON_Parse(recall_envelope) : NULL;
          free(recall_envelope);
          cJSON *recall_node =

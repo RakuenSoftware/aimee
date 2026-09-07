@@ -177,10 +177,11 @@ static int serve_post(void *vctx, cJSON *response)
  * own stop flag instead of the process-wide SIGINT/SIGTERM handler. Either
  * `sock` (local) or `endpoint` (remote) selects the transport. Returns 0 on a
  * clean stop, 1 if it bailed after too many consecutive transport errors. */
-int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const char *endpoint,
-                             const char *bearer, volatile sig_atomic_t *stop)
+static int cli_workspace_serve_loop_impl(const char *workspace_id, const char *sock,
+                                         const char *endpoint, const char *bearer,
+                                         volatile sig_atomic_t *stop, int quiet_unserved)
 {
-   serve_ctx_t ctx = {sock, workspace_id, endpoint, bearer, 0};
+   serve_ctx_t ctx = {sock, workspace_id, endpoint, bearer, quiet_unserved ? 1 : 0};
    int rc = 0;
    int consecutive_errors = 0;
    while (!*stop)
@@ -200,6 +201,164 @@ int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const c
       }
    }
    return rc;
+}
+
+int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const char *endpoint,
+                             const char *bearer, volatile sig_atomic_t *stop)
+{
+   return cli_workspace_serve_loop_impl(workspace_id, sock, endpoint, bearer, stop, 0);
+}
+
+/* A one-shot remote CLI command cannot block on its own HTTP response AND poll
+ * the detached runner queue on the same thread.  Historically only the
+ * long-running `workspace serve` command (and MCP bridge) drove that queue, so
+ * `aimee git status` against a correctly registered detached workspace waited
+ * forever unless the operator happened to start a second process by hand.
+ *
+ * The scoped helper below finds the longest registered detached root containing
+ * the current directory and serves it on a background thread for exactly one
+ * forwarded Git command.  It never registers, converts, or removes a workspace;
+ * the server remains the authority for the provider choice. */
+static volatile sig_atomic_t g_git_runner_stop;
+static int g_git_runner_active;
+static char g_git_runner_workspace[CLI_TUI_PATH_MAX];
+static char g_git_runner_endpoint[CLI_TUI_PATH_MAX + 32];
+static char *g_git_runner_bearer;
+#ifdef _WIN32
+static HANDLE g_git_runner_thread;
+static unsigned __stdcall git_runner_thread_main(void *unused)
+#else
+static pthread_t g_git_runner_thread;
+static void *git_runner_thread_main(void *unused)
+#endif
+{
+   (void)unused;
+   (void)cli_workspace_serve_loop_impl(g_git_runner_workspace, NULL, g_git_runner_endpoint,
+                                       g_git_runner_bearer, &g_git_runner_stop,
+                                       1 /* a pre-request empty poll is expected */);
+#ifdef _WIN32
+   return 0;
+#else
+   return NULL;
+#endif
+}
+
+static int workspace_root_contains(const char *root, const char *cwd)
+{
+   if (!root || !cwd || root[0] != '/' || cwd[0] != '/')
+      return 0;
+   size_t n = strlen(root);
+   if (n == 1)
+      return 1;
+   while (n > 1 && root[n - 1] == '/')
+      n--;
+   return strncmp(root, cwd, n) == 0 && (cwd[n] == '\0' || cwd[n] == '/');
+}
+
+int cli_workspace_git_runner_start(void)
+{
+   if (g_git_runner_active || !cli_v1_has_remote_endpoint())
+      return 0;
+
+   char cwd[CLI_TUI_PATH_MAX];
+   if (!getcwd(cwd, sizeof(cwd)) || cwd[0] != '/')
+      return -1;
+   char *endpoint = cli_v1_client_endpoint();
+   char *bearer = endpoint ? cli_v1_client_bearer() : NULL;
+   if (!endpoint)
+   {
+      free(bearer);
+      return 0;
+   }
+
+   int status = 0;
+   cJSON *list = cli_http_request(endpoint, "GET", "/v1/workspaces", NULL, bearer, 15000, &status);
+   if (!list || status < 200 || status >= 300)
+   {
+      cJSON_Delete(list);
+      free(endpoint);
+      free(bearer);
+      return -1;
+   }
+
+   const char *best = NULL;
+   size_t best_len = 0;
+   const cJSON *arr = cJSON_GetObjectItemCaseSensitive(list, "workspaces");
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, arr)
+   {
+      const cJSON *provider = cJSON_GetObjectItemCaseSensitive(row, "provider");
+      const cJSON *path = cJSON_GetObjectItemCaseSensitive(row, "path");
+      if (!cJSON_IsString(provider) || strcmp(provider->valuestring, "detached") != 0 ||
+          !cJSON_IsString(path) || !workspace_root_contains(path->valuestring, cwd))
+         continue;
+      size_t n = strlen(path->valuestring);
+      if (n > best_len)
+      {
+         best = path->valuestring;
+         best_len = n;
+      }
+   }
+   if (!best)
+   {
+      cJSON_Delete(list);
+      free(endpoint);
+      free(bearer);
+      return 0; /* shared/mirror/unregistered: no detached runner to service */
+   }
+   if (best_len >= sizeof(g_git_runner_workspace) ||
+       strlen(endpoint) >= sizeof(g_git_runner_endpoint))
+   {
+      cJSON_Delete(list);
+      free(endpoint);
+      free(bearer);
+      return -1;
+   }
+   snprintf(g_git_runner_workspace, sizeof(g_git_runner_workspace), "%s", best);
+   snprintf(g_git_runner_endpoint, sizeof(g_git_runner_endpoint), "%s", endpoint);
+   cJSON_Delete(list);
+   free(endpoint);
+   g_git_runner_bearer = bearer;
+   g_git_runner_stop = 0;
+
+#ifdef _WIN32
+   uintptr_t handle = _beginthreadex(NULL, 0, git_runner_thread_main, NULL, 0, NULL);
+   if (!handle)
+   {
+      free(g_git_runner_bearer);
+      g_git_runner_bearer = NULL;
+      return -1;
+   }
+   g_git_runner_thread = (HANDLE)handle;
+#else
+   if (pthread_create(&g_git_runner_thread, NULL, git_runner_thread_main, NULL) != 0)
+   {
+      free(g_git_runner_bearer);
+      g_git_runner_bearer = NULL;
+      return -1;
+   }
+#endif
+   g_git_runner_active = 1;
+   return 1;
+}
+
+void cli_workspace_git_runner_stop(void)
+{
+   if (!g_git_runner_active)
+      return;
+   g_git_runner_stop = 1;
+#ifdef _WIN32
+   WaitForSingleObject(g_git_runner_thread, INFINITE);
+   CloseHandle(g_git_runner_thread);
+   g_git_runner_thread = NULL;
+#else
+   (void)pthread_join(g_git_runner_thread, NULL);
+#endif
+   g_git_runner_active = 0;
+   g_git_runner_workspace[0] = '\0';
+   g_git_runner_endpoint[0] = '\0';
+   free(g_git_runner_bearer);
+   g_git_runner_bearer = NULL;
 }
 
 int cmd_workspace_serve(const char *workspace_id)

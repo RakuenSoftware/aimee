@@ -9,8 +9,13 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
+#include "cJSON.h"
+#include "aimee_sha256.h"
+#include "config_client.h"
 #include "lsp.h"
+#include "lsp_context.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 
@@ -35,12 +40,182 @@ static void write_text_file(const char *path, const char *text)
    fclose(fp);
 }
 
+static char *read_text_file(const char *path)
+{
+   FILE *fp = fopen(path, "rb");
+   if (!fp || fseek(fp, 0, SEEK_END) != 0)
+   {
+      if (fp)
+         fclose(fp);
+      return NULL;
+   }
+   long size = ftell(fp);
+   if (size < 0 || fseek(fp, 0, SEEK_SET) != 0)
+   {
+      fclose(fp);
+      return NULL;
+   }
+   char *text = malloc((size_t)size + 1);
+   if (!text || fread(text, 1, (size_t)size, fp) != (size_t)size)
+   {
+      free(text);
+      fclose(fp);
+      return NULL;
+   }
+   fclose(fp);
+   text[size] = '\0';
+   return text;
+}
+
 static void restore_env_var(const char *name, const char *old_value)
 {
    if (old_value)
       assert(platform_setenv(name, old_value) == 0);
    else
       assert(platform_unsetenv(name) == 0);
+}
+
+static long long monotonic_milliseconds(void)
+{
+   struct timespec now;
+   assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+   return (long long)now.tv_sec * 1000LL + now.tv_nsec / 1000000LL;
+}
+
+static int configure_real_provider(const char *command, const char *server_arg, const char *ext)
+{
+   cJSON *servers = cJSON_CreateArray();
+   cJSON *server = cJSON_CreateObject();
+   cJSON *args = cJSON_CreateArray();
+   cJSON *extensions = cJSON_CreateArray();
+   if (!servers || !server || !args || !extensions ||
+       !cJSON_AddStringToObject(server, "name", "real-provider-probe") ||
+       !cJSON_AddStringToObject(server, "command", command) ||
+       (server_arg && !cJSON_AddItemToArray(args, cJSON_CreateString(server_arg))) ||
+       !cJSON_AddItemToArray(extensions, cJSON_CreateString(ext)))
+   {
+      cJSON_Delete(servers);
+      cJSON_Delete(server);
+      cJSON_Delete(args);
+      cJSON_Delete(extensions);
+      return -1;
+   }
+   cJSON_AddItemToObject(server, "args", args);
+   cJSON_AddItemToObject(server, "extensions", extensions);
+   cJSON_AddItemToArray(servers, server);
+   if (config_client_set_value("lsp_servers", servers) != 0)
+      return -1;
+   return config_client_set_number("lsp_server_count", 1.0);
+}
+
+static int real_provider_probe_main(int argc, char **argv)
+{
+   if (argc != 11)
+   {
+      fprintf(stderr,
+              "usage: %s --real-provider[-synced] <command> <arg-or-dash> <workspace> <file> "
+              "<line> <col> <expected-file> <expected-line> <min-refs>\n",
+              argv[0]);
+      return 2;
+   }
+
+   const char *command = argv[2];
+   const char *server_arg = strcmp(argv[3], "-") == 0 ? NULL : argv[3];
+   const char *workspace = argv[4];
+   const char *file = argv[5];
+   int line = atoi(argv[6]) - 1;
+   int col = atoi(argv[7]) - 1;
+   const char *expected_file = argv[8];
+   int expected_line = atoi(argv[9]) - 1;
+   int min_refs = atoi(argv[10]);
+   int synced = strcmp(argv[1], "--real-provider-synced") == 0;
+   const char *ext = strrchr(file, '.');
+   if (!command[0] || !workspace[0] || !file[0] || !expected_file[0] || !ext || line < 0 ||
+       col < 0 || expected_line < 0 || min_refs < 0)
+   {
+      fprintf(stderr, "real-provider probe received an invalid argument\n");
+      return 2;
+   }
+
+   if (configure_real_provider(command, server_arg, ext) != 0)
+   {
+      fprintf(stderr, "real-provider probe could not configure the in-process config peer\n");
+      return 2;
+   }
+
+   lsp_manager_init();
+   lsp_diag_t cold_diags[4];
+   int cold_diag_count = lsp_manager_diagnostics(workspace, file, cold_diags, 4);
+   int cold_errors = 0, cold_warnings = 0, cold_active = 0;
+   lsp_manager_diag_summary(&cold_errors, &cold_warnings, &cold_active);
+
+   int document_version = 0;
+   unsigned long provider_generation = 0;
+   char sync_err[256] = "";
+   int sync_rc = 0;
+   if (synced)
+   {
+      char *text = read_text_file(file);
+      if (!text)
+         sync_rc = -1;
+      else
+      {
+         sync_rc = lsp_manager_sync_document(workspace, file, text, &document_version,
+                                             &provider_generation, sync_err, sizeof(sync_err));
+         free(text);
+      }
+   }
+
+   long long definition_started_ms = monotonic_milliseconds();
+   lsp_location_t defs[32];
+   char def_err[256] = "";
+   int def_count =
+       lsp_manager_definition(workspace, file, line, col, defs, 32, def_err, sizeof(def_err));
+   long long cold_definition_ms = monotonic_milliseconds() - definition_started_ms;
+   int definition_matched = 0;
+   for (int i = 0; i < def_count; i++)
+      if (strcmp(defs[i].file, expected_file) == 0 && defs[i].line == expected_line)
+         definition_matched = 1;
+
+   lsp_location_t refs[64];
+   char refs_err[256] = "";
+   long long references_started_ms = monotonic_milliseconds();
+   int ref_count =
+       lsp_manager_references(workspace, file, line, col, refs, 64, refs_err, sizeof(refs_err));
+   long long warm_references_ms = monotonic_milliseconds() - references_started_ms;
+   int active_after_query = 0;
+   lsp_manager_diag_summary(NULL, NULL, &active_after_query);
+
+   cJSON *result = cJSON_CreateObject();
+   assert(result != NULL);
+   cJSON_AddNumberToObject(result, "cold_diagnostics", cold_diag_count);
+   cJSON_AddNumberToObject(result, "cold_active_servers", cold_active);
+   cJSON_AddNumberToObject(result, "definition_count", def_count);
+   cJSON_AddBoolToObject(result, "definition_matched", definition_matched);
+   cJSON_AddNumberToObject(result, "reference_count", ref_count);
+   cJSON_AddNumberToObject(result, "cold_definition_ms", (double)cold_definition_ms);
+   cJSON_AddNumberToObject(result, "warm_references_ms", (double)warm_references_ms);
+   cJSON_AddNumberToObject(result, "active_servers_after_query", active_after_query);
+   cJSON_AddBoolToObject(result, "synchronized", synced && sync_rc == 0);
+   cJSON_AddNumberToObject(result, "document_version", document_version);
+   cJSON_AddNumberToObject(result, "provider_generation", (double)provider_generation);
+   cJSON_AddStringToObject(result, "synchronization_error", sync_err);
+   cJSON_AddStringToObject(result, "definition_error", def_err);
+   cJSON_AddStringToObject(result, "references_error", refs_err);
+   char *rendered = cJSON_PrintUnformatted(result);
+   assert(rendered != NULL);
+   printf("%s\n", rendered);
+   fflush(stdout);
+   free(rendered);
+   cJSON_Delete(result);
+
+   lsp_manager_shutdown_all();
+
+   return cold_diag_count == 0 && cold_active == 0 && (!synced || sync_rc == 0) &&
+                  (!synced || (document_version > 0 && provider_generation > 0)) &&
+                  definition_matched && ref_count >= min_refs
+              ? 0
+              : 1;
 }
 
 static int fake_lsp_main(void)
@@ -67,8 +242,26 @@ static int fake_lsp_main(void)
    if (n <= 0 || !strstr(buf, "\"method\":\"initialized\""))
       return 4;
 
+   int saw_open = 0, saw_change = 0;
    n = lsp_frame_read(STDIN_FILENO, buf, sizeof(buf));
-   if (n <= 0 || !strstr(buf, "\"method\":\"textDocument/definition\""))
+   while (n > 0 && (strstr(buf, "\"method\":\"textDocument/didOpen\"") ||
+                    strstr(buf, "\"method\":\"textDocument/didChange\"")))
+   {
+      if (strstr(buf, "\"method\":\"textDocument/didOpen\""))
+      {
+         saw_open = 1;
+         if (!strstr(buf, "int target(void) { return 1; }\\n"))
+            return 5;
+      }
+      if (strstr(buf, "\"method\":\"textDocument/didChange\""))
+      {
+         saw_change = 1;
+         if (!strstr(buf, "int target(void) { return 2; }\\n"))
+            return 5;
+      }
+      n = lsp_frame_read(STDIN_FILENO, buf, sizeof(buf));
+   }
+   if (n <= 0 || !saw_open || !saw_change || !strstr(buf, "\"method\":\"textDocument/definition\""))
       return 5;
    if (lsp_frame_write(STDOUT_FILENO, diag) != 0)
       return 6;
@@ -498,6 +691,7 @@ static void test_definition_with_interleaved_notifications(const char *argv0)
 
    char file[PATH_MAX];
    snprintf(file, sizeof(file), "%s/test.c", workspace);
+   write_text_file(file, "int target(void) { return 1; }\n");
 
    const char *old_home = getenv("HOME");
    char *old_home_copy = old_home ? strdup(old_home) : NULL;
@@ -512,8 +706,21 @@ static void test_definition_with_interleaved_notifications(const char *argv0)
    assert(platform_unsetenv("AIMEE_HOME") == 0);
    assert(platform_unsetenv("AIMEE_PROFILE") == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
+   assert(configure_real_provider(exe, "--fake-lsp", ".c") == 0);
 
    lsp_manager_init();
+   int version = 0;
+   char sync_err[256] = "";
+   unsigned long generation = 0;
+   assert(lsp_manager_sync_document(workspace, file, "int target(void) { return 1; }\n", &version,
+                                    &generation, sync_err, sizeof(sync_err)) == 0);
+   assert(version == 1);
+   assert(generation > 0);
+   unsigned long first_generation = generation;
+   assert(lsp_manager_sync_document(workspace, file, "int target(void) { return 2; }\n", &version,
+                                    &generation, sync_err, sizeof(sync_err)) == 0);
+   assert(version == 2);
+   assert(generation == first_generation);
    lsp_location_t defs[4];
    char errbuf[256] = "";
    int n = lsp_manager_definition(workspace, file, 0, 0, defs, 4, errbuf, sizeof(errbuf));
@@ -546,6 +753,289 @@ static void test_definition_with_interleaved_notifications(const char *argv0)
    platform_test_rmrf(tmp_home);
 }
 
+typedef struct
+{
+   char root[PATH_MAX];
+   char location[PATH_MAX];
+   int sync_count;
+   int read_count;
+   int query_count;
+   int return_empty;
+   int mutate_on_final_read;
+   int sync_unavailable;
+   int binary_input;
+   int source_version_mismatch;
+} context_fixture_t;
+
+static int context_authorize(void *opaque, const char *relative, char *resolved, size_t cap)
+{
+   context_fixture_t *fixture = opaque;
+   char joined[PATH_MAX];
+   if ((size_t)snprintf(joined, sizeof(joined), "%s/%s", fixture->root, relative) >= sizeof(joined))
+      return -1;
+   return realpath(joined, resolved) && strlen(resolved) < cap ? 0 : -1;
+}
+
+static int context_read(void *opaque, const char *path, char **out, size_t *out_len)
+{
+   context_fixture_t *fixture = opaque;
+   fixture->read_count++;
+   if (fixture->binary_input)
+   {
+      *out = malloc(3);
+      assert(*out);
+      (*out)[0] = 'a';
+      (*out)[1] = '\0';
+      (*out)[2] = 'b';
+      *out_len = 3;
+      return 0;
+   }
+   if (fixture->mutate_on_final_read && fixture->read_count == 3)
+      write_text_file(path, "int changed_after_answer = 1;\n");
+   *out = read_text_file(path);
+   if (!*out)
+      return -1;
+   *out_len = strlen(*out);
+   return 0;
+}
+
+static int context_sync(void *opaque, const char *workspace, const char *file, const char *text,
+                        int *version, unsigned long *generation, char *errbuf, size_t errbuf_size)
+{
+   context_fixture_t *fixture = opaque;
+   assert(strcmp(workspace, fixture->root) == 0);
+   assert(text && file);
+   if (fixture->sync_unavailable)
+   {
+      snprintf(errbuf, errbuf_size, "no LSP server configured for extension '.c'");
+      return -1;
+   }
+   fixture->sync_count++;
+   *version = fixture->sync_count;
+   *generation = 17;
+   return 0;
+}
+
+static int context_query(void *opaque, const char *operation, const char *workspace,
+                         const char *file, int line, int column, lsp_location_t *out, int max,
+                         char *errbuf, size_t errbuf_size)
+{
+   (void)errbuf;
+   (void)errbuf_size;
+   context_fixture_t *fixture = opaque;
+   assert(!strcmp(operation, "definition") || !strcmp(operation, "references"));
+   assert(strcmp(workspace, fixture->root) == 0 && file && line >= 0 && column >= 0 && max == 65);
+   fixture->query_count++;
+   if (fixture->return_empty)
+      return 0;
+   memset(&out[0], 0, sizeof(out[0]));
+   snprintf(out[0].file, sizeof(out[0].file), "%s", fixture->location);
+   out[0].line = 0;
+   out[0].col = 4;
+   return 1;
+}
+
+static cJSON *context_source(void *opaque, const char *relative, int start, int end, int max_lines)
+{
+   (void)start;
+   (void)end;
+   (void)max_lines;
+   context_fixture_t *fixture = opaque;
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/%s", fixture->root, relative);
+   char *text = read_text_file(path);
+   if (!text)
+      return NULL;
+   cJSON *span = cJSON_CreateObject();
+   cJSON_AddStringToObject(span, "content", text);
+   char hash[65];
+   assert(aimee_sha256_hex(text, strlen(text), hash) == 0);
+   if (fixture->source_version_mismatch)
+      hash[0] = hash[0] == '0' ? '1' : '0';
+   cJSON_AddStringToObject(span, "source_version", hash);
+   free(text);
+   return span;
+}
+
+static cJSON *context_args(const char *operation, const char *file, int anchors, int budget)
+{
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "operation", operation);
+   cJSON *array = cJSON_AddArrayToObject(args, "anchors");
+   for (int i = 0; i < anchors; i++)
+   {
+      cJSON *anchor = cJSON_CreateObject();
+      cJSON_AddStringToObject(anchor, "file", file);
+      cJSON_AddNumberToObject(anchor, "line", 1);
+      cJSON_AddNumberToObject(anchor, "column", 5);
+      cJSON_AddItemToArray(array, anchor);
+   }
+   if (budget)
+      cJSON_AddNumberToObject(args, "max_source_bytes", budget);
+   return args;
+}
+
+static const char *json_string(cJSON *object, const char *name)
+{
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+   return cJSON_IsString(item) ? item->valuestring : "";
+}
+
+static void test_context_envelope_and_failures(void)
+{
+   printf("test_context_envelope_and_failures\n");
+   char root[PATH_MAX];
+   snprintf(root, sizeof(root), "%s/aimee-test-lsp-context-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(root) != NULL);
+   char source[PATH_MAX];
+   snprintf(source, sizeof(source), "%s/sample.c", root);
+   char large[700];
+   memset(large, 'x', sizeof(large) - 2);
+   large[sizeof(large) - 2] = '\n';
+   large[sizeof(large) - 1] = '\0';
+   write_text_file(source, large);
+
+   context_fixture_t fixture = {0};
+   snprintf(fixture.root, sizeof(fixture.root), "%s", root);
+   snprintf(fixture.location, sizeof(fixture.location), "%s", source);
+   lsp_context_provider_t provider = {.provider = "local_lsp",
+                                      .root = fixture.root,
+                                      .project = "project-id",
+                                      .worktree = "worktree-id",
+                                      .ctx = &fixture,
+                                      .authorize = context_authorize,
+                                      .read_file = context_read,
+                                      .sync = context_sync,
+                                      .query = context_query,
+                                      .source = context_source};
+
+   cJSON *args = context_args("definition", "sample.c", 2, 256);
+   cJSON *result = lsp_context_execute(&provider, args);
+   assert(result && strcmp(json_string(result, "status"), "ok") == 0);
+   assert(strcmp(json_string(result, "project"), "project-id") == 0);
+   assert(strcmp(json_string(result, "worktree"), "worktree-id") == 0);
+   cJSON *generation = cJSON_GetObjectItemCaseSensitive(result, "provider_generation");
+   assert(cJSON_IsNumber(generation) && generation->valuedouble == 17);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(result, "truncated")));
+   cJSON *source_bytes = cJSON_GetObjectItemCaseSensitive(result, "source_bytes");
+   assert(cJSON_IsNumber(source_bytes) && source_bytes->valuedouble == 256);
+   cJSON *items = cJSON_GetObjectItemCaseSensitive(result, "results");
+   assert(cJSON_GetArraySize(items) == 2 && fixture.sync_count == 2 && fixture.query_count == 2);
+   cJSON *first = cJSON_GetArrayItem(items, 0);
+   assert(strcmp(json_string(first, "status"), "ok") == 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(first, "truncated")));
+   cJSON *locations = cJSON_GetObjectItemCaseSensitive(first, "locations");
+   cJSON *location = cJSON_GetArrayItem(locations, 0);
+   cJSON *span = cJSON_GetObjectItemCaseSensitive(location, "source");
+   assert(strlen(json_string(span, "content")) == 256);
+   cJSON *document = cJSON_GetObjectItemCaseSensitive(first, "document");
+   assert(strcmp(json_string(document, "freshness"), "current") == 0);
+   assert(strlen(json_string(document, "content_sha256")) == 64);
+   cJSON_Delete(result);
+   cJSON_Delete(args);
+
+   char target_source[PATH_MAX];
+   snprintf(target_source, sizeof(target_source), "%s/target.c", root);
+   write_text_file(target_source, "int target(void) { return 1; }\n");
+   snprintf(fixture.location, sizeof(fixture.location), "%s", target_source);
+   fixture.read_count = fixture.sync_count = fixture.query_count = 0;
+   args = context_args("definition", "sample.c", 1, 0);
+   result = lsp_context_execute(&provider, args);
+   assert(strcmp(json_string(result, "status"), "ok") == 0);
+   first = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "results"), 0);
+   locations = cJSON_GetObjectItemCaseSensitive(first, "locations");
+   location = cJSON_GetArrayItem(locations, 0);
+   span = cJSON_GetObjectItemCaseSensitive(location, "source");
+   char *target_text = read_text_file(target_source);
+   char target_hash[65];
+   assert(target_text && aimee_sha256_hex(target_text, strlen(target_text), target_hash) == 0);
+   assert(strcmp(json_string(span, "source_version"), target_hash) == 0);
+   free(target_text);
+   cJSON_Delete(result);
+   cJSON_Delete(args);
+   snprintf(fixture.location, sizeof(fixture.location), "%s", source);
+
+   args = context_args("definition", "../outside.c", 1, 0);
+   result = lsp_context_execute(&provider, args);
+   assert(strcmp(json_string(result, "status"), "unauthorized") == 0);
+   cJSON_Delete(result);
+   cJSON_Delete(args);
+
+   fixture.binary_input = 1;
+   fixture.read_count = fixture.sync_count = fixture.query_count = 0;
+   args = context_args("definition", "sample.c", 1, 0);
+   result = lsp_context_execute(&provider, args);
+   assert(strcmp(json_string(result, "status"), "unsupported") == 0);
+   assert(fixture.sync_count == 0 && fixture.query_count == 0);
+   cJSON_Delete(result);
+   cJSON_Delete(args);
+
+   fixture.binary_input = 0;
+   fixture.source_version_mismatch = 1;
+   fixture.read_count = fixture.sync_count = fixture.query_count = 0;
+   args = context_args("definition", "sample.c", 1, 0);
+   result = lsp_context_execute(&provider, args);
+   assert(strcmp(json_string(result, "status"), "stale") == 0);
+   first = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "results"), 0);
+   assert(strcmp(json_string(first, "status"), "stale") == 0);
+   assert(!cJSON_GetObjectItemCaseSensitive(first, "locations"));
+   cJSON_Delete(result);
+   cJSON_Delete(args);
+
+   fixture.source_version_mismatch = 0;
+   fixture.sync_unavailable = 1;
+   args = context_args("definition", "sample.c", 1, 0);
+   result = lsp_context_execute(&provider, args);
+   assert(strcmp(json_string(result, "status"), "unavailable") == 0);
+   assert(strcmp(json_string(
+                     cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "results"), 0),
+                     "status"),
+                 "unavailable") == 0);
+   cJSON_Delete(result);
+   cJSON_Delete(args);
+
+   fixture.sync_unavailable = 0;
+   fixture.read_count = fixture.sync_count = fixture.query_count = 0;
+   fixture.mutate_on_final_read = 1;
+   write_text_file(source, "int answer(void) { return 1; }\n");
+   args = context_args("references", "sample.c", 1, 0);
+   result = lsp_context_execute(&provider, args);
+   assert(strcmp(json_string(result, "status"), "stale") == 0);
+   first = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "results"), 0);
+   assert(strcmp(json_string(first, "status"), "stale") == 0);
+   document = cJSON_GetObjectItemCaseSensitive(first, "document");
+   assert(strcmp(json_string(document, "freshness"), "stale") == 0);
+   assert(!cJSON_GetObjectItemCaseSensitive(first, "locations"));
+   cJSON_Delete(result);
+   cJSON_Delete(args);
+
+   fixture.mutate_on_final_read = 0;
+   fixture.return_empty = 1;
+   fixture.read_count = fixture.sync_count = fixture.query_count = 0;
+   args = context_args("definition", "sample.c", 1, 0);
+   result = lsp_context_execute(&provider, args);
+   assert(strcmp(json_string(result, "status"), "empty") == 0);
+   first = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "results"), 0);
+   assert(strcmp(json_string(first, "status"), "empty") == 0);
+   assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(first, "locations")) == 0);
+   cJSON_Delete(result);
+   cJSON_Delete(args);
+
+   fixture.return_empty = 0;
+   snprintf(fixture.location, sizeof(fixture.location), "%s", "/etc/hosts");
+   fixture.read_count = fixture.sync_count = fixture.query_count = 0;
+   args = context_args("definition", "sample.c", 1, 0);
+   result = lsp_context_execute(&provider, args);
+   assert(strcmp(json_string(result, "status"), "unauthorized") == 0);
+   first = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "results"), 0);
+   assert(strcmp(json_string(first, "status"), "unauthorized") == 0);
+   assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(first, "locations")) == 0);
+   cJSON_Delete(result);
+   cJSON_Delete(args);
+
+   platform_test_rmrf(root);
+}
+
 /* -----------------------------------------------------------------------
  * main
  * ----------------------------------------------------------------------- */
@@ -554,6 +1044,10 @@ int main(int argc, char **argv)
 {
    if (argc > 1 && strcmp(argv[1], "--fake-lsp") == 0)
       return fake_lsp_main();
+   if (argc > 1 && strcmp(argv[1], "--real-provider") == 0)
+      return real_provider_probe_main(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "--real-provider-synced") == 0)
+      return real_provider_probe_main(argc, argv);
 
    test_severity_label();
 
@@ -577,6 +1071,7 @@ int main(int argc, char **argv)
    test_diag_summary_null_args();
    test_rename_no_server();
    test_definition_with_interleaved_notifications(argv[0]);
+   test_context_envelope_and_failures();
 
    printf("All LSP tests passed.\n");
    return 0;

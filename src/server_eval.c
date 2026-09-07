@@ -10,7 +10,6 @@
 #include "harness_memory_common.h" /* hmem_resolve_project / hmem_project_key_ok */
 #include "harness_memory_scope.h"  /* hmem_scope_for_client */
 #include "json_fluent.h"           /* jo_ok */
-#include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
 #include "server.h"
 #include "turn_registry.h"
 #include "server_http.h" /* server_http_api_status_report */

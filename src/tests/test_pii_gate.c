@@ -1,9 +1,7 @@
-/* test_pii_gate.c: typed-fact §7 per-attribute PII recall gating. Pure. P5. */
+/* test_pii_gate.c: typed-fact PII connection seam and wire contract only. */
 #include "modules/memory/memory_pii_gate.h"
-#include "../headers/rel_types.h"
 #include <aimee/memory/module_api.h>
 #include <assert.h>
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -53,9 +51,9 @@ static void test_registered_turn_classifier_decides(void)
    assert(memory_pii_turn_requests_sensitive(NULL) == 0);
    assert(g_turn_state.calls == 2);
 
-   /* Unregistering restores the local scan. */
+   /* Unregistering leaves no decision source and fails closed. */
    memory_pii_register_turn_classifier(NULL);
-   assert(memory_pii_turn_requests_sensitive("what is my password") == 1);
+   assert(memory_pii_turn_requests_sensitive("what is my password") == 0);
    assert(g_turn_state.calls == 2);
    printf("  PASS: test_registered_turn_classifier_decides\n");
 }
@@ -73,7 +71,7 @@ static void test_turn_classifier_failure_fails_closed(void)
    assert(g_turn_state.calls == 1);
 
    memory_pii_register_turn_classifier(NULL);
-   assert(memory_pii_turn_requests_sensitive("what is my password") == 1);
+   assert(memory_pii_turn_requests_sensitive("what is my password") == 0);
    printf("  PASS: test_turn_classifier_failure_fails_closed\n");
 }
 
@@ -143,12 +141,9 @@ static void test_registered_sensitivity_batch_decides(void)
    const char *rels[3] = {"works_for", "age", "home_password"};
    rel_sensitivity_t tiers[3];
 
-   /* With nothing registered the batch is the local table, row for row. */
+   /* With nothing registered there is no local policy fallback. */
    memory_pii_register_sensitivity_batch(NULL);
-   assert(memory_pii_rel_sensitivity_batch(rels, 3, tiers) == 0);
-   for (int i = 0; i < 3; i++)
-      assert(tiers[i] == memory_pii_rel_sensitivity(rels[i]));
-   assert(tiers[0] == SENS_NORMAL && tiers[1] == SENS_PII && tiers[2] == SENS_SECRET);
+   assert(memory_pii_rel_sensitivity_batch(rels, 3, tiers) == -1);
 
    memset(&g_batch_state, 0, sizeof(g_batch_state));
    memory_pii_register_sensitivity_batch(recording_batch);
@@ -172,8 +167,7 @@ static void test_registered_sensitivity_batch_decides(void)
    assert(g_batch_state.calls == 2);
 
    memory_pii_register_sensitivity_batch(NULL);
-   assert(memory_pii_rel_sensitivity_batch(rels, 3, tiers) == 0);
-   assert(tiers[0] == SENS_NORMAL);
+   assert(memory_pii_rel_sensitivity_batch(rels, 3, tiers) == -1);
    printf("  PASS: test_registered_sensitivity_batch_decides\n");
 }
 
@@ -230,46 +224,6 @@ static void test_sensitivity_batch_wire_layout(void)
 
 int main(void)
 {
-   /* turn-requests-sensitive detection. */
-   assert(memory_pii_turn_requests_sensitive("what is my address again?") == 1);
-   assert(memory_pii_turn_requests_sensitive("remind me of my password") == 1);
-   assert(memory_pii_turn_requests_sensitive("what's my email?") == 1);
-   assert(memory_pii_turn_requests_sensitive("when is my birthday") == 1);
-   assert(memory_pii_turn_requests_sensitive("how are you today?") == 0);
-   assert(memory_pii_turn_requests_sensitive("what do i do for work") == 0);
-   assert(memory_pii_turn_requests_sensitive("") == 0);
-   assert(memory_pii_turn_requests_sensitive(NULL) == 0);
-
-   /* rel_type -> sensitivity. Known: seed lookup. Unknown: default OPEN
-    * (SENS_NORMAL) so free-form extracted relations are not all withheld, except
-    * names that plainly denote a credential or a regulated PII identifier. */
-   assert(memory_pii_rel_sensitivity("works_for") == SENS_NORMAL);
-   assert(memory_pii_rel_sensitivity("also_known_as") == SENS_NORMAL);
-   assert(memory_pii_rel_sensitivity("age") == SENS_PII);
-   assert(memory_pii_rel_sensitivity("totally_unknown_rel") == SENS_NORMAL); /* unknown -> open */
-   assert(memory_pii_rel_sensitivity("favorite_food") == SENS_NORMAL);
-   assert(memory_pii_rel_sensitivity("") == SENS_NORMAL);
-   assert(memory_pii_rel_sensitivity(NULL) == SENS_NORMAL);
-   /* unknown but obviously sensitive by name: still gated by the heuristic. */
-   assert(memory_pii_rel_sensitivity("home_password") == SENS_SECRET);
-   assert(memory_pii_rel_sensitivity("api_key") == SENS_SECRET);
-   assert(memory_pii_rel_sensitivity("ssn") == SENS_PII);
-   assert(memory_pii_rel_sensitivity("home_address") == SENS_PII);
-
-   /* injection decision. */
-   /* NORMAL: passes above the floor regardless of request; withheld below it. */
-   assert(memory_pii_should_inject(SENS_NORMAL, 0.5, 0) == 1);
-   assert(memory_pii_should_inject(SENS_NORMAL, 0.4, 0) == 1); /* at the floor */
-   assert(memory_pii_should_inject(SENS_NORMAL, 0.3, 1) == 0); /* below floor, even if asked */
-   /* PII: only when the turn explicitly asks (and above the floor). */
-   assert(memory_pii_should_inject(SENS_PII, 0.9, 0) == 0);
-   assert(memory_pii_should_inject(SENS_PII, 0.9, 1) == 1);
-   assert(memory_pii_should_inject(SENS_PII, 0.3, 1) == 0); /* below floor */
-   /* SECRET: never injected, even when asked at full confidence. */
-   assert(memory_pii_should_inject(SENS_SECRET, 1.0, 1) == 0);
-   /* non-finite confidence fails closed (must not slip past the floor check). */
-   assert(memory_pii_should_inject(SENS_NORMAL, NAN, 1) == 0);
-
    test_registered_turn_classifier_decides();
    test_turn_classifier_failure_fails_closed();
    test_pii_wire_layout();

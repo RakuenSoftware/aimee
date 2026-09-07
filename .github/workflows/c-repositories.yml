@@ -1,18 +1,22 @@
 name: c-repository-pins
 
 on:
-  # main ONLY, on both triggers. The pins describe a RELEASE, so they are a
-  # main-branch question and nothing else: pushes to main, and pull requests
-  # INTO main. Nothing here runs for a branch or a PR targeting testing.
+  # Standalone exports must build on integration changes as well as releases.
+  # Bundled source snapshots and external dependency pins gate application releases.
   push:
     branches:
       - main
+      - testing
     paths:
       - "dependencies/aimee-repositories.lock.json"
+      - "dependencies/aimee-application-sources.lock.json"
+      - "scripts/check_application_source_lock.py"
+      - "scripts/tests/test_check_application_source_lock.py"
       - "src/core/**"
       - "src/modules/**"
       - "src/tests/**"
       - "docs/modules/**"
+      - "scripts/tests/test_export_c_process_build.py"
       - "scripts/export_c_repositories.py"
       - "scripts/build_c_module_runtime_bundle.py"
       - "scripts/generate_c_embedded_header.py"
@@ -28,12 +32,17 @@ on:
   pull_request:
     branches:
       - main
+      - testing
     paths:
       - "dependencies/aimee-repositories.lock.json"
+      - "dependencies/aimee-application-sources.lock.json"
+      - "scripts/check_application_source_lock.py"
+      - "scripts/tests/test_check_application_source_lock.py"
       - "src/core/**"
       - "src/modules/**"
       - "src/tests/**"
       - "docs/modules/**"
+      - "scripts/tests/test_export_c_process_build.py"
       - "scripts/export_c_repositories.py"
       - "scripts/build_c_module_runtime_bundle.py"
       - "scripts/generate_c_embedded_header.py"
@@ -81,7 +90,14 @@ jobs:
       # one has never had it.
       - run: cd server-go && CGO_ENABLED=0 go test ./bus ./modules/... ./cmd/aimee-module
       - name: Export standalone repositories
-        run: python3 scripts/export_c_repositories.py --output-root "$RUNNER_TEMP/aimee-repositories"
+        run: |
+          set -euo pipefail
+          # Export generates local fixture commits. They must never replace the
+          # checked-in published pins that the main-only gate validates below.
+          published_lock="$RUNNER_TEMP/published-repository-pins.json"
+          cp dependencies/aimee-repositories.lock.json "$published_lock"
+          trap 'cp "$published_lock" dependencies/aimee-repositories.lock.json' EXIT
+          python3 scripts/export_c_repositories.py --output-root "$RUNNER_TEMP/aimee-repositories"
       - name: Install exported C core
         run: |
           cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-core-c" -B "$RUNNER_TEMP/core-build" -DCMAKE_BUILD_TYPE=Release
@@ -92,17 +108,21 @@ jobs:
           cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-module-db2" -B "$RUNNER_TEMP/db2-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
           cmake --build "$RUNNER_TEMP/db2-build" --parallel 2
           test -x "$RUNNER_TEMP/db2-build/aimee-module-db2"
-      # The exact commit/digest pins in dependencies/aimee-repositories.lock.json
-      # describe a RELEASE: which external core/module repository commit each
-      # vendored mirror was cut from. `testing` is the integration tip, where the
-      # vendored source is meant to run ahead of any published repository commit,
-      # so enforcing the lock there only demands a lock refresh after every edit
-      # under src/core|modules/** — noise that says nothing about the change.
-      # `main` (and every PR into it) is where the pins must hold, because that is
-      # what ships and what the main deployments run. Refresh with
-      # `export_c_repositories.py --refresh-lock-root` when a release is cut; see
-      # docs/core/repository-extraction.md.
-      - name: Repository pins (main only)
+      - name: Build isolated role, memory, PostgreSQL and provider repositories
+        run: |
+          set -euo pipefail
+          for module in server kb postgres memory providers; do
+            cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-module-$module" -B "$RUNNER_TEMP/build-$module" -DCMAKE_BUILD_TYPE=Release
+            cmake --build "$RUNNER_TEMP/build-$module" --parallel 2
+            test -x "$RUNNER_TEMP/build-$module/aimee-module-$module"
+          done
+      # Application images build bundled source from this checkout. Publishing
+      # independent repositories is a separate, explicitly initiated operation.
+      # Keep real external dependencies pinned and freeze bundled inputs for the
+      # release without replacing historical external repository provenance.
+      - name: Application sources and external pins (main only)
         if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
-        run: python3 -I scripts/check_c_repository_lock.py
+        run: python3 -I scripts/check_application_source_lock.py
+      - name: Test application source-lock failure modes
+        run: python3 -I scripts/tests/test_check_application_source_lock.py -v
       - run: sh src/tests/test_module_supervisor.sh

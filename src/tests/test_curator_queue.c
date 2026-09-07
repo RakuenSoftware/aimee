@@ -19,7 +19,6 @@
 #include "modules/db2/c/kb_payload.h"
 #include "../kb_curator_queue.h"
 #include "../kb_curator_extract.h"
-#include "../kb/kb_memory_facts.h"
 #include "config.h"
 
 /* An upstream outage must not be charged to the job. The gateway opens a circuit
@@ -70,24 +69,6 @@ static void test_provider_unavailable_is_not_a_job_failure(void)
    assert(!kb_curator_error_is_provider_unavailable(NULL));
    assert(!kb_curator_error_is_provider_unavailable(""));
    printf("  PASS: provider-unavailable is classified apart from job failure\n");
-}
-
-static void test_memory_fact_evidence_spans(void)
-{
-   const char *content = "prefix exact support suffix";
-   char span[64], hash1[65], hash2[65];
-   assert(kb_memory_fact_evidence_span(content, 7, 20, span, sizeof(span), hash1, sizeof(hash1)) ==
-          0);
-   assert(strcmp(span, "bytes:7-20") == 0 && strlen(hash1) == 64);
-   assert(kb_memory_fact_evidence_span("exact support", 0, 13, span, sizeof(span), hash2,
-                                       sizeof(hash2)) == 0);
-   assert(strcmp(hash1, hash2) == 0); /* region hash, independent of surrounding note */
-   assert(kb_memory_fact_evidence_span(content, -1, 5, span, sizeof(span), hash1, sizeof(hash1)) ==
-          -1);
-   assert(kb_memory_fact_evidence_span(content, 20, 7, span, sizeof(span), hash1, sizeof(hash1)) ==
-          -1);
-   assert(kb_memory_fact_evidence_span(content, 0, 999, span, sizeof(span), hash1, sizeof(hash1)) ==
-          -1);
 }
 
 static void test_provider_outage_arms_global_backoff(void)
@@ -264,22 +245,6 @@ static void test_reclaim_stale_running_extract_doc(sqlite3 *db)
    printf("  PASS: reclaim_stale_running (orphan reclaimed; in-flight + other kinds untouched)\n");
 }
 
-/* memory_facts shares kb_async_jobs and had the same missing-reclaim gap: its
- * claim also only selects 'pending', so a wedged LLM call stranded the job
- * forever. Job 9003 above is the stale memory_facts row the extract_doc reclaim
- * correctly refused to touch — here its OWN drain must reclaim it, which also
- * pins the kind scoping from the other side. */
-static void test_reclaim_stale_running_memory_facts(sqlite3 *db)
-{
-   assert(strcmp(job_status(db, 9003), "running") == 0); /* still stale from above */
-
-   (void)kb_memory_facts_drain(8);
-
-   assert(strcmp(job_status(db, 9003), "failed") == 0);  /* orphan reclaimed */
-   assert(strcmp(job_status(db, 9002), "running") == 0); /* extract_doc untouched */
-   printf("  PASS: reclaim_stale_running_memory_facts (orphan reclaimed; other kinds untouched)\n");
-}
-
 /* Retry backoff: a failed job must not be instantly re-claimable.
  *
  * The production shape this guards: ce_mark_retry_or_fail set status='pending'
@@ -446,12 +411,10 @@ int main(void)
    printf("  PASS: queue_docs_all_projects (drain backfill queues indexed docs; disabled=no-op)\n");
 
    test_reclaim_stale_running_extract_doc(db);
-   test_reclaim_stale_running_memory_facts(db);
    test_retry_delay_curve();
    test_retry_backoff_defers_reclaim(db);
    test_retry_backoff_ignores_fresh_jobs(db);
    test_provider_unavailable_is_not_a_job_failure();
-   test_memory_fact_evidence_spans();
    test_provider_outage_arms_global_backoff();
    test_provider_outage_requeues(db);
    test_only_current_document_generation_queues(db);

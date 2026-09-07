@@ -93,7 +93,7 @@ done
 require_job_permission "$auto_release" thin-clients id-token write
 require_job_permission "$auto_release" images id-token write
 
-for image_job in llm-images images; do
+for image_job in llm-images embedder-images images; do
     image_job_block=$(job_block "$auto_release" "$image_job")
     printf '%s\n' "$image_job_block" |
         grep -Fq 'needs: [version, tag, thin-clients]' ||
@@ -133,10 +133,10 @@ printf '%s\n' "$approval_job" |
 # otherwise a green approval can race ahead of a build failure discovered only
 # after the merge to main.
 printf '%s\n' "$approval_job" |
-    grep -Fq 'needs: [thin-clients, llm-images, images]' ||
+    grep -Fq 'needs: [thin-clients, llm-images, embedder-images, images]' ||
     fail "$main_approval approval must wait for every release validation workflow"
 
-for release_job in thin-clients llm-images images; do
+for release_job in thin-clients llm-images embedder-images images; do
     validation_block=$(job_block "$main_approval" "$release_job")
     printf '%s\n' "$validation_block" | grep -Fq 'publish: false' ||
         fail "$main_approval $release_job must validate without publishing"

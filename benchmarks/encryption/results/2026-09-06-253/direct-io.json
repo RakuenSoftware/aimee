@@ -1,0 +1,146 @@
+[
+  {
+    "mode": "ordinary",
+    "trial": 0,
+    "operation": "sequential_write",
+    "bytes": 536870912,
+    "seconds": 3.9951614790006715,
+    "mib_per_second": 128.15502018908856
+  },
+  {
+    "mode": "ordinary",
+    "trial": 0,
+    "operation": "sequential_read",
+    "bytes": 536870912,
+    "seconds": 0.09514544199919328,
+    "mib_per_second": 5381.2351831246015
+  },
+  {
+    "mode": "ordinary",
+    "trial": 0,
+    "operation": "random_read_4k",
+    "operations": 4000,
+    "median_us": 7.2385,
+    "p95_us": 21.49
+  },
+  {
+    "mode": "luks",
+    "trial": 0,
+    "operation": "sequential_write",
+    "bytes": 536870912,
+    "seconds": 7.728659684002196,
+    "mib_per_second": 66.24693296559629
+  },
+  {
+    "mode": "luks",
+    "trial": 0,
+    "operation": "sequential_read",
+    "bytes": 536870912,
+    "seconds": 0.17569294999702834,
+    "mib_per_second": 2914.1749854428417
+  },
+  {
+    "mode": "luks",
+    "trial": 0,
+    "operation": "random_read_4k",
+    "operations": 4000,
+    "median_us": 10.8915,
+    "p95_us": 32.825
+  },
+  {
+    "mode": "luks",
+    "trial": 1,
+    "operation": "sequential_write",
+    "bytes": 536870912,
+    "seconds": 8.915739656000369,
+    "mib_per_second": 57.426531028799126
+  },
+  {
+    "mode": "luks",
+    "trial": 1,
+    "operation": "sequential_read",
+    "bytes": 536870912,
+    "seconds": 0.18958902800295618,
+    "mib_per_second": 2700.5782211828027
+  },
+  {
+    "mode": "luks",
+    "trial": 1,
+    "operation": "random_read_4k",
+    "operations": 4000,
+    "median_us": 16.567500000000003,
+    "p95_us": 41.894
+  },
+  {
+    "mode": "ordinary",
+    "trial": 1,
+    "operation": "sequential_write",
+    "bytes": 536870912,
+    "seconds": 9.749683441998059,
+    "mib_per_second": 52.51452552751527
+  },
+  {
+    "mode": "ordinary",
+    "trial": 1,
+    "operation": "sequential_read",
+    "bytes": 536870912,
+    "seconds": 0.09196370300196577,
+    "mib_per_second": 5567.413917521957
+  },
+  {
+    "mode": "ordinary",
+    "trial": 1,
+    "operation": "random_read_4k",
+    "operations": 4000,
+    "median_us": 10.1095,
+    "p95_us": 34.145
+  },
+  {
+    "mode": "ordinary",
+    "trial": 2,
+    "operation": "sequential_write",
+    "bytes": 536870912,
+    "seconds": 11.886838843998703,
+    "mib_per_second": 43.07284777049812
+  },
+  {
+    "mode": "ordinary",
+    "trial": 2,
+    "operation": "sequential_read",
+    "bytes": 536870912,
+    "seconds": 0.0817332010010432,
+    "mib_per_second": 6264.284204327995
+  },
+  {
+    "mode": "ordinary",
+    "trial": 2,
+    "operation": "random_read_4k",
+    "operations": 4000,
+    "median_us": 8.0755,
+    "p95_us": 22.754
+  },
+  {
+    "mode": "luks",
+    "trial": 2,
+    "operation": "sequential_write",
+    "bytes": 536870912,
+    "seconds": 11.876062813000317,
+    "mib_per_second": 43.11193095404743
+  },
+  {
+    "mode": "luks",
+    "trial": 2,
+    "operation": "sequential_read",
+    "bytes": 536870912,
+    "seconds": 0.1969211540017568,
+    "mib_per_second": 2600.0253888184725
+  },
+  {
+    "mode": "luks",
+    "trial": 2,
+    "operation": "random_read_4k",
+    "operations": 4000,
+    "median_us": 23.3125,
+    "p95_us": 36.594
+  }
+]

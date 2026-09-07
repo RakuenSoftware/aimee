@@ -124,3 +124,23 @@ ff8e4ed59e0e562c126abcf7abfad0f53679dd13:compose.server.yaml:curl-auth-header:16
 c8daa4b3d58c20c00ada3c9bdebb0e1bb8c8ebeb:benchmarks/results/roi/large-repo-qwen38-trust-pilot.json:generic-api-key:15560
 c8daa4b3d58c20c00ada3c9bdebb0e1bb8c8ebeb:benchmarks/results/roi/large-repo-qwen38-trust-pilot.json:generic-api-key:903
 ed7de9861abc301a488773bf0b3db84dc54e65c8:benchmarks/results/roi/large-repo-qwen38-trust-learned-retry.json:generic-api-key:556
+# Verified false positives: generated memory record identifiers in disposable
+# release-test evidence, not authentication credentials or encryption keys.
+dd572bf21af4b0568433c38ec0f57f812239b99d:docs/validation/release-0.4.2-local-recall-2026-09-06/memory-local-recall.json:generic-api-key:49
+dd572bf21af4b0568433c38ec0f57f812239b99d:docs/validation/release-0.4.2-local-recall-2026-09-06/memory-recall-shared.json:generic-api-key:327
+
+# Verified false positives in PR #2964 release-validation evidence: generated
+# placement-e2e-* memory record identifiers, including confidence-test suffixes.
+# The fixture prefix is generated in tests/e2e/memory-placement-e2e.py; these
+# values identify stored facts and are not authentication credentials.
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/T2/local-memory.json:generic-api-key:49
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/T2/shared-memory.json:generic-api-key:322
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/T3/local-memory.json:generic-api-key:49
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/exploratory-memory.json:generic-api-key:123
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/exploratory-memory.json:generic-api-key:175
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/exploratory-memory.json:generic-api-key:19
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/exploratory-memory.json:generic-api-key:45
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/exploratory-memory.json:generic-api-key:71
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/final-T2/local-memory.json:generic-api-key:49
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/final-T2/shared-memory.json:generic-api-key:327
+d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/final-T3/local-memory.json:generic-api-key:49

@@ -15,36 +15,32 @@ else
     fail "server or KB container definitions persist credentials outside Vault"
 fi
 
-# Docker E2E must exercise the same operator contract as production: build the
-# image, seal first-boot credentials through the disposable helper, and only
-# then create the long-lived service without rebuilding it.
+# Historical smoke commands must execute the maintained topology harness. Its
+# startup path seals credentials before creating any long-lived service.
+smoke_probe_dir=$(mktemp -d /tmp/aimee-smoke-probe.XXXXXX)
+cat > "$smoke_probe_dir/python3" <<'PYTHON_PROBE'
+#!/bin/sh
+[ "$1" = tests/e2e/deployment-matrix.py ] && [ "$2" = --topology ] &&
+[ "$3" = "$EXPECTED_TOPOLOGY" ] && [ "$4" = --output ] &&
+[ "$5" = /tmp/aimee-smoke-probe-output ] && [ "$#" = 5 ]
+PYTHON_PROBE
+chmod +x "$smoke_probe_dir/python3"
 container_smoke_bootstrap_ok=1
 for smoke_spec in \
-    "../scripts/aimee-kb-docker-smoke.sh:kb" \
-    "../scripts/aimee-server-docker-smoke.sh:all" \
-    "../scripts/aimee-server-standalone-docker-smoke.sh:server"; do
-    smoke_script=${smoke_spec%:*}
-    bootstrap_target=${smoke_spec##*:}
-    smoke_build_line=$(grep -nF '"${DC[@]}" build' "$smoke_script" | cut -d: -f1)
-    smoke_bootstrap_line=$(grep -nF \
-        "scripts/aimee-compose-vault-bootstrap.sh -f \"\$bootstrap_compose\" $bootstrap_target" \
-        "$smoke_script" | cut -d: -f1)
-    # The full-stack smoke intentionally has two staged `up` calls. Compare the
-    # bootstrap against the first one; passing both line numbers to `[` makes
-    # the integer comparison error and silently treats a broken ordering as OK.
-    smoke_up_line=$(grep -nF '"${DC[@]}" up -d --no-build' "$smoke_script" | \
-        head -1 | cut -d: -f1)
-    if [ -z "$smoke_build_line" ] || [ -z "$smoke_bootstrap_line" ] || [ -z "$smoke_up_line" ] ||
-       [ "$smoke_build_line" -ge "$smoke_bootstrap_line" ] ||
-       [ "$smoke_bootstrap_line" -ge "$smoke_up_line" ] ||
-       grep -qF '"${DC[@]}" up -d --build' "$smoke_script"; then
+    "../scripts/aimee-kb-docker-smoke.sh:T1" \
+    "../scripts/aimee-server-docker-smoke.sh:T2" \
+    "../scripts/aimee-server-standalone-docker-smoke.sh:T3"; do
+    if ! PATH="$smoke_probe_dir:$PATH" EXPECTED_TOPOLOGY="${smoke_spec##*:}" \
+         AIMEE_E2E_OUTPUT=/tmp/aimee-smoke-probe-output \
+         bash "${smoke_spec%:*}" --up --down; then
         container_smoke_bootstrap_ok=0
     fi
 done
-if [ "$container_smoke_bootstrap_ok" -eq 1 ]; then
-    pass "Docker smokes Vault-bootstrap before creating long-lived containers"
+rm -rf "$smoke_probe_dir"
+if [ "$container_smoke_bootstrap_ok" -eq 1 ] && python3 ../scripts/tests/test_compose_vault_init.py >/dev/null 2>&1; then
+    pass "Docker smokes use isolated topologies and the tested Vault bootstrap"
 else
-    fail "Docker smoke bypasses the disposable Vault bootstrap contract"
+    fail "Docker smoke bypasses the isolated Vault bootstrap contract"
 fi
 
 # Debian installs runuser under /usr/sbin. The disposable helper overrides the
@@ -73,13 +69,20 @@ SH
 chmod +x "$entrypoint_test_dir/aimee-server"
 cat >"$entrypoint_test_dir/runuser" <<'SH'
 #!/bin/sh
-[ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
 case "$*" in
-    *--list-credential-env-names*) printf '%s\n' ENTRYPOINT_TEST_API_KEY ;;
+    *--list-credential-env-names*)
+        [ -n "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
+        printf '%s\n' ENTRYPOINT_TEST_API_KEY ;;
+    *__aimee_instance_read*)
+        [ -z "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3
+        exit 2 ;;
+    *__aimee_instance_bootstrap*)
+        [ -z "${ENTRYPOINT_TEST_API_KEY:-}" ] || exit 3 ;;
 esac
 exit 0
 SH
-chmod +x "$entrypoint_test_dir/runuser"
+printf '#!/bin/sh\nexit 0\n' >"$entrypoint_test_dir/chown"
+chmod +x "$entrypoint_test_dir/chown" "$entrypoint_test_dir/runuser"
 entrypoint_output=$(env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$entrypoint_test_dir/home" ENTRYPOINT_TEST_API_KEY=first-boot-only \
     sh ../deploy/container/server-entrypoint.sh sh -c \
@@ -88,6 +91,16 @@ if [ "$entrypoint_output" = "unset" ]; then
     pass "server entrypoint Vault-ingests and scrubs before an explicit command override"
 else
     fail "server entrypoint bypassed Vault ingestion or leaked a credential to an override"
+fi
+# An old unlabeled home requires an explicit migration role; defaulting it to
+# Server would silently reinterpret a KB after an image-only upgrade.
+mkdir -p "$entrypoint_test_dir/legacy/.vault"
+if env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
+    AIMEE_HOME="$entrypoint_test_dir/legacy" ENTRYPOINT_TEST_API_KEY=first-boot-only \
+    sh ../deploy/container/server-entrypoint.sh sh -c 'exit 0' >/dev/null 2>&1; then
+    fail "unlabeled legacy Vault was silently assigned a default role"
+else
+    pass "unlabeled legacy Vault requires an explicit migration role"
 fi
 entrypoint_fail_output=$(env -i PATH="$entrypoint_test_dir:/usr/bin:/bin" \
     AIMEE_HOME="$entrypoint_test_dir/home" ENTRYPOINT_TEST_API_KEY=first-boot-only \
@@ -362,7 +375,7 @@ fi
 # directions -- an enable-only gate cannot turn anything off.
 if sh tests/test_optional_modules.sh > /dev/null 2>&1 &&
    grep -qF 'apply_optional_modules server' ../deploy/container/server-entrypoint.sh &&
-   grep -qF 'apply_optional_modules kb' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF 'apply_optional_modules kb' ../deploy/container/kb-role-runtime.sh &&
    grep -qF 'optional-modules-lib.sh' ../Dockerfile.server &&
    grep -qF 'optional-modules-lib.sh' ../Dockerfile; then
     pass "operator can enable and disable optional modules in both placements"
@@ -452,22 +465,21 @@ else
     fail "verify-local can race lint against a partial shipping build"
 fi
 
-# The extracted-repository pins record which published core/module repository
-# commit each vendored mirror was cut from, which is a fact about a RELEASE. They
-# bind on `main` alone: every other branch is meant to carry vendored source
-# ahead of the lock, so running the check there only demands a lock refresh after
-# each edit under src/core|modules/**. Guard the placement in both directions --
-# absent from the every-branch gates, present in the workflow under a main-only
-# condition -- so neither half can drift back on its own.
+# Application source snapshots bind bundled sources and real external pins on
+# main. Independent repository publication is not an application prerequisite.
+# Guard both directions: integration can run ahead of the release snapshot,
+# while main must verify it. Keep the separate independent-release checker
+# available explicitly, without inserting it into application promotion.
 if ! sed -n '/^verify-local:/,/^[^[:space:]#].*:/p' Makefile |
-     grep -qF 'python3 -I scripts/check_c_repository_lock.py' &&
-   ! grep '^LINT_CHECKS = ' Makefile | grep -qF 'repository-lock-check' &&
-   grep -B2 -F 'run: python3 -I scripts/check_c_repository_lock.py' \
+     grep -qE 'check_(c_repository|application_source)_lock.py|repository-lock-check' &&
+   ! grep -E '^LINT_CHECKS[[:space:]]*[:+?]?=' Makefile | grep -qE 'repository-lock-check|application-source-lock' &&
+   ! grep -qF 'run: python3 -I scripts/check_c_repository_lock.py' ../.github/workflows/c-repositories.yml &&
+   grep -B2 -F 'run: python3 -I scripts/check_application_source_lock.py' \
         ../.github/workflows/c-repositories.yml |
      grep -qF "if: github.ref == 'refs/heads/main' || github.base_ref == 'main'"; then
-    pass "extracted-repository source pins are enforced for main alone"
+    pass "application source snapshots are enforced for main alone"
 else
-    fail "extracted-repository source pins are enforced off main, or not on it"
+    fail "application release source gate is misplaced or requires independent publication"
 fi
 
 # Verification runs inside the server image, whose deployment posture is
@@ -967,40 +979,16 @@ done
 [ -f kb/http/README.md ] || split_failures="$split_failures missing-src-kb-http-readme"
 find kb/http -maxdepth 1 -name '*.h' | grep -q . ||
     split_failures="$split_failures missing-src-kb-http-header"
-if [ -f ../Dockerfile ]; then
-    if ! grep -Fq 'make -C src ../aimee-kb' ../Dockerfile; then
-        split_failures="$split_failures dockerfile-not-building-aimee-kb"
-    fi
-    if grep -Eq 'aimee-server|DB1|db1/' ../Dockerfile; then
-        split_failures="$split_failures dockerfile-links-server-or-db1"
-    fi
-    if ! grep -Fq '"postgresql-${PG_MAJOR}"' ../Dockerfile ||
-       ! grep -Fq '"postgresql-${PG_MAJOR}-pgvector"' ../Dockerfile; then
-        split_failures="$split_failures dockerfile-missing-embedded-postgres"
-    fi
-    if ! grep -Fq 'ENTRYPOINT ["/usr/local/bin/aimee-kb-entrypoint.sh"]' ../Dockerfile; then
-        split_failures="$split_failures dockerfile-missing-kb-db-entrypoint"
-    fi
-else
-    split_failures="$split_failures missing-dockerfile"
+if ! python3 ../scripts/check-kb-container-packaging.py >/dev/null; then
+    split_failures="$split_failures unified-container-contract"
 fi
-if [ -f ../compose.yaml ]; then
-    if ! grep -Eq '^[[:space:]]+aimee-kb:' ../compose.yaml; then
-        split_failures="$split_failures compose-missing-aimee-kb-service"
-    fi
-    if grep -Eq '^[[:space:]]+postgres:' ../compose.yaml; then
-        split_failures="$split_failures compose-retains-sibling-postgres-service"
-    fi
-    if grep -Eq 'AIMEE_DB2_URL[=:]' ../compose.yaml; then
-        split_failures="$split_failures compose-persists-db2-url-outside-vault"
-    fi
-else
-    split_failures="$split_failures missing-compose-yaml"
+if ! python3 -m unittest discover -s ../scripts/tests -p test_compose_vault_init.py >/dev/null 2>&1; then
+    split_failures="$split_failures compose-vault-bootstrap-contract"
 fi
 if [ -z "$split_failures" ]; then
-    pass "aimee-kb split module directories and container packaging exist"
+    pass "role resource directories and unified container packaging exist"
 else
-    fail "aimee-kb split packaging regressions:$split_failures"
+    fail "unified role packaging regressions:$split_failures"
 fi
 
 # 7h. The retired chat frontends must stay removed.

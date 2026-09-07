@@ -354,6 +354,34 @@ class BoundaryTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
+    def test_private_regression_admissions_are_exact_and_single_include(self) -> None:
+        previous = {"consumers": []}
+        admitted = (
+            ("src/tests/test_fact_recall.c", "modules/db2/c/fact_recall.h"),
+            ("src/tests/test_fact_recall.c", "modules/db2/include/aimee/db2/host_contracts.h"),
+            ("src/tests/test_kb_memory_list.c", "modules/db2/c/memory_query.h"),
+        )
+        for source, header in admitted:
+            current = {"consumers": [{
+                "path": source, "classification": "private-implementation-test",
+                "includes": [{"header": header, "count": 1}],
+            }]}
+            checker.enforce_shrink_only(previous, current)
+            for mutation in ("count", "classification", "source", "header"):
+                changed = json.loads(json.dumps(current))
+                row = changed["consumers"][0]
+                if mutation == "count":
+                    row["includes"][0]["count"] = 2
+                elif mutation == "classification":
+                    row["classification"] = "host-generated-client"
+                elif mutation == "source":
+                    row["path"] = source.replace("src/tests/", "src/server/")
+                else:
+                    row["includes"][0]["header"] = "modules/db2/c/other.h"
+                with self.subTest(source=source, header=header, mutation=mutation):
+                    with self.assertRaisesRegex(checker.BoundaryError, "rule=baseline-growth"):
+                        checker.enforce_shrink_only(previous, changed)
+
     def test_reviewed_allowlist_may_only_shrink(self) -> None:
         tmp = self.repo()
         try:

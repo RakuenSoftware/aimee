@@ -11,6 +11,32 @@
 #include <stdlib.h>
 #include <string.h>
 
+void openai_upstream_error_message(int status, const char *body, char *out, size_t cap)
+{
+   if (!out || !cap)
+      return;
+   if (status <= 0)
+   {
+      snprintf(out, cap, "upstream model transport failed");
+      return;
+   }
+   cJSON *root = body ? cJSON_Parse(body) : NULL;
+   const cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+   const char *message = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(error, "message"));
+   if (!message || !message[0])
+      message = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "detail"));
+   if (message && message[0])
+      snprintf(out, cap, "upstream model HTTP %d: %.400s", status, message);
+   else
+      snprintf(out, cap, "upstream model HTTP %d: no usable error detail", status);
+   /* Provider diagnostics can contain terminal control bytes. Preserve readable
+    * text, but do not allow them to control clients' terminals or log framing. */
+   for (char *p = out; *p; p++)
+      if ((unsigned char)*p < 32 || (unsigned char)*p == 127)
+         *p = ' ';
+   cJSON_Delete(root);
+}
+
 /* ── Parse helpers ─────────────────────────────────────────────────────── */
 
 static int parse_model(const cJSON *root, char *model, size_t model_n)

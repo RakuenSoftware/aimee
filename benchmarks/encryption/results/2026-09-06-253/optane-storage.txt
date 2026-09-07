@@ -1,0 +1,92 @@
+  pool: optane
+ state: ONLINE
+  scan: scrub repaired 0B in 00:00:46 with 0 errors on Sun Aug  9 00:24:47 2026
+config:
+
+	NAME                                                                                                                         STATE     READ WRITE CKSUM
+	optane                                                                                                                       ONLINE       0     0     0
+	  /dev/disk/by-id/nvme-nvme.8086-50484d32393131323030355239363043474e-494e54454c2053534450453231443936304741-00000001-part1  ONLINE       0     0     0
+
+errors: No known data errors
+NAME                           PROPERTY                VALUE                                       SOURCE
+optane/aimee-encryption-bench  type                    filesystem                                  -
+optane/aimee-encryption-bench  creation                Sun Sep  6 18:20 2026                       -
+optane/aimee-encryption-bench  used                    10.2G                                       -
+optane/aimee-encryption-bench  available               539G                                        -
+optane/aimee-encryption-bench  referenced              10.2G                                       -
+optane/aimee-encryption-bench  compressratio           1.00x                                       -
+optane/aimee-encryption-bench  mounted                 yes                                         -
+optane/aimee-encryption-bench  quota                   none                                        default
+optane/aimee-encryption-bench  reservation             none                                        default
+optane/aimee-encryption-bench  recordsize              128K                                        default
+optane/aimee-encryption-bench  mountpoint              /opt/aimee-encryption-bench/storage-optane  local
+optane/aimee-encryption-bench  sharenfs                off                                         default
+optane/aimee-encryption-bench  checksum                on                                          default
+optane/aimee-encryption-bench  compression             off                                         local
+optane/aimee-encryption-bench  atime                   off                                         local
+optane/aimee-encryption-bench  devices                 on                                          default
+optane/aimee-encryption-bench  exec                    on                                          default
+optane/aimee-encryption-bench  setuid                  on                                          default
+optane/aimee-encryption-bench  readonly                off                                         default
+optane/aimee-encryption-bench  zoned                   off                                         default
+optane/aimee-encryption-bench  snapdir                 hidden                                      default
+optane/aimee-encryption-bench  aclmode                 discard                                     default
+optane/aimee-encryption-bench  aclinherit              restricted                                  default
+optane/aimee-encryption-bench  createtxg               1858344                                     -
+optane/aimee-encryption-bench  canmount                on                                          default
+optane/aimee-encryption-bench  xattr                   sa                                          default
+optane/aimee-encryption-bench  copies                  1                                           default
+optane/aimee-encryption-bench  version                 5                                           -
+optane/aimee-encryption-bench  utf8only                off                                         -
+optane/aimee-encryption-bench  normalization           none                                        -
+optane/aimee-encryption-bench  casesensitivity         sensitive                                   -
+optane/aimee-encryption-bench  vscan                   off                                         default
+optane/aimee-encryption-bench  nbmand                  off                                         default
+optane/aimee-encryption-bench  sharesmb                off                                         default
+optane/aimee-encryption-bench  refquota                none                                        default
+optane/aimee-encryption-bench  refreservation          none                                        default
+optane/aimee-encryption-bench  guid                    18047502705052634398                        -
+optane/aimee-encryption-bench  primarycache            metadata                                    local
+optane/aimee-encryption-bench  secondarycache          none                                        local
+optane/aimee-encryption-bench  usedbysnapshots         0B                                          -
+optane/aimee-encryption-bench  usedbydataset           10.2G                                       -
+optane/aimee-encryption-bench  usedbychildren          0B                                          -
+optane/aimee-encryption-bench  usedbyrefreservation    0B                                          -
+optane/aimee-encryption-bench  logbias                 latency                                     default
+optane/aimee-encryption-bench  objsetid                5359                                        -
+optane/aimee-encryption-bench  dedup                   off                                         local
+optane/aimee-encryption-bench  mlslabel                none                                        default
+optane/aimee-encryption-bench  sync                    standard                                    default
+optane/aimee-encryption-bench  dnodesize               legacy                                      default
+optane/aimee-encryption-bench  refcompressratio        1.00x                                       -
+optane/aimee-encryption-bench  written                 10.2G                                       -
+optane/aimee-encryption-bench  logicalused             10.2G                                       -
+optane/aimee-encryption-bench  logicalreferenced       10.2G                                       -
+optane/aimee-encryption-bench  volmode                 default                                     default
+optane/aimee-encryption-bench  filesystem_limit        none                                        default
+optane/aimee-encryption-bench  snapshot_limit          none                                        default
+optane/aimee-encryption-bench  filesystem_count        none                                        default
+optane/aimee-encryption-bench  snapshot_count          none                                        default
+optane/aimee-encryption-bench  snapdev                 hidden                                      default
+optane/aimee-encryption-bench  acltype                 off                                         default
+optane/aimee-encryption-bench  context                 none                                        default
+optane/aimee-encryption-bench  fscontext               none                                        default
+optane/aimee-encryption-bench  defcontext              none                                        default
+optane/aimee-encryption-bench  rootcontext             none                                        default
+optane/aimee-encryption-bench  relatime                on                                          default
+optane/aimee-encryption-bench  redundant_metadata      all                                         default
+optane/aimee-encryption-bench  overlay                 on                                          default
+optane/aimee-encryption-bench  encryption              off                                         default
+optane/aimee-encryption-bench  keylocation             none                                        default
+optane/aimee-encryption-bench  keyformat               none                                        default
+optane/aimee-encryption-bench  pbkdf2iters             0                                           default
+optane/aimee-encryption-bench  special_small_blocks    0                                           default
+optane/aimee-encryption-bench  prefetch                all                                         default
+optane/aimee-encryption-bench  direct                  always                                      local
+optane/aimee-encryption-bench  longname                off                                         default
+optane/aimee-encryption-bench  defaultuserquota        0                                           -
+optane/aimee-encryption-bench  defaultgroupquota       0                                           -
+optane/aimee-encryption-bench  defaultprojectquota     0                                           -
+optane/aimee-encryption-bench  defaultuserobjquota     0                                           -
+optane/aimee-encryption-bench  defaultgroupobjquota    0                                           -
+optane/aimee-encryption-bench  defaultprojectobjquota  0                                           -

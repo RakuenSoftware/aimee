@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
-	wire "github.com/JBailes/aimee/server-go/db1"
 )
 
 // memStore is the family's persistence without a database. It also counts

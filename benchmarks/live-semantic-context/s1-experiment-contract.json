@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "state": "candidate-pinned",
+  "candidate_implementation_allowed": true,
+  "reason": "The comparison and S0 gates were frozen before implementation. The completed S1 candidate is now pinned, so candidate correctness probes and paired cells may run only against that exact commit.",
+  "s0_gate_evidence": {
+    "pull_request": 2950,
+    "head_commit": "a415b76208245612fbfe58b5d695285b3e2b5ee3",
+    "workflow_run": 33520936934,
+    "macos_job": 99900203992,
+    "macos_job_conclusion": "success",
+    "macos_observation_artifact": 9805765992,
+    "macos_observation_artifact_digest": "sha256:265bee5987cd1bfc2cffac50acf673d26cd5c48a9f4887360ed21e6e04b471f9",
+    "macos_observation_source_commit": "d62c7d784b1f8c975ec57d0c6d6cb99f0c5d9170",
+    "macos_observation_platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "macos_observation_baseline_matched": true,
+    "observed_at": "2026-09-01T14:43:50Z"
+  },
+  "content_pins": {
+    "task_manifest": "s1-task-manifest.json",
+    "task_manifest_sha256": "612e64f133ed338c30fff51d52f10823dc22ee3fa5905894a1d38b087fa5dae1",
+    "agent_system_prompt": "prompts/s1-agent-system-v1.md",
+    "agent_system_prompt_sha256": "89200834e9b5ed6cf34d983a5c23cf6e9388aefcdcaa493952bf7896e0cae105",
+    "tool_schemas": "tools/s1-tool-schemas-v1.json",
+    "tool_schemas_sha256": "6ef6a375ebd8da4aad734474edb2f1dfee54f837470ddab2c82fbd9199a95405"
+  },
+  "model_execution_pin": {
+    "provider": "openai-codex",
+    "model_identifier": "gpt-5.6-sol",
+    "reasoning": "medium",
+    "endpoint_contract_version": "openai-codex/gpt-5.6-sol",
+    "client": "codex-cli",
+    "client_version": "0.151.0",
+    "linux_x86_64_executable_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+    "acceptance": "A cell is ineligible unless its result records this exact model, reasoning level, endpoint contract, client version, and executable digest."
+  },
+  "candidate_commit_pin": {
+    "commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+    "runtime_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+    "subject": "style: format semantic source validation",
+    "pinned_at": "2026-09-01T17:52:43Z",
+    "timing": "before the first epoch-3 promotion cell, after the PR lint gate rejected the unformatted candidate source tree",
+    "acceptance": "Every cell must record one identical full Aimee commit; mixed or dirty checkouts are ineligible."
+  },
+  "evidence_epoch": {
+    "number": 3,
+    "reason": "The PR lint gate rejected the epoch-2 source formatting. The candidate source was mechanically formatted, its behavior and LSP unit results remained unchanged, and every earlier model cell was stopped or demoted to calibration.",
+    "supersedes_candidate_commit": "795631825e13e070b2d5d3061a3248b493f2b75b",
+    "prior_model_cells": "epochs 1 and 2 are calibration only; retained outside promotion evidence",
+    "restart": "All paired promotion cells start from this epoch and use only the new candidate pin."
+  },
+  "arms": [
+    {
+      "id": "production",
+      "code_context_mode": "on",
+      "lsp_surface": "none"
+    },
+    {
+      "id": "location_only",
+      "code_context_mode": "on",
+      "lsp_surface": "shipping_definition_and_references"
+    },
+    {
+      "id": "batched_context",
+      "code_context_mode": "on",
+      "lsp_surface": "candidate_definition_and_references_with_bounded_source"
+    }
+  ],
+  "identical_non_lsp_tools": [
+    "local_text_search",
+    "local_structure_search",
+    "file_read",
+    "code_span_get",
+    "file_edit",
+    "test_execution"
+  ],
+  "non_lsp_execution_pins": {
+    "ripgrep": {
+      "version_output": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "linux_x86_64_executable_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849"
+    },
+    "ast_grep": {
+      "version_output": "ast-grep 0.45.0",
+      "linux_x86_64_executable_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f"
+    }
+  },
+  "instrumentation_pins": {
+    "paired_runner": "run_s1_paired_study.py",
+    "paired_runner_sha256": "b9d172f67cdae1747ee22a3cc6c42c4a99f029f04967bf9e07a434a3309931a4",
+    "mcp_server": "s1_mcp_server.py",
+    "mcp_server_sha256": "8dfcdeb620901bea0e0742fd1a4f0656a06e930861f5b5df53458bdf1261e6be",
+    "native_bridge": "s1_lsp_bridge.c",
+    "native_bridge_sha256": "ea0993f2f4c70e37cda49a8b452c1d81b27769343fe46524392110a58664caf3",
+    "result_schema": "schemas/s1-result-v1.json",
+    "result_schema_sha256": "6f9db49390c02edf6f896324b2a21bf02dc15d314da51e69f02ece13d9d554ca",
+    "result_summarizer": "summarize_s1_results.py",
+    "result_summarizer_sha256": "69ba1e6f7479e05b077e009b06bfc673655fceb400b1df2d5d139d07d55d4845",
+    "candidate_probe": "run_s1_candidate_probe.py",
+    "candidate_probe_sha256": "08fbfc34b55d683f61e0cec001ace52e2259a8026b329cb00543ef5d65401cfb"
+  },
+  "execution_amendment_before_first_cell": {
+    "reason": "Codex CLI adds apply_patch and generic MCP resource helpers whenever an MCP server is configured; its MCP interface also prefixes tool names. These identical built-ins cannot be removed independently in client 0.151.0.",
+    "acceptance": "The frozen task MCP schemas remain the only eligible evidence tools. Shell, browser, image, collaboration, apps, memory, plugin, and skill tools are disabled. Any call to an identical Codex built-in makes the cell ineligible and is retained in raw JSONL.",
+    "timing": "Recorded before any model cell was dispatched."
+  },
+  "analysis_amendment_before_promotion_cells": {
+    "reason": "Calibration proved that failure overlays replace the normal task condition and that codex exec records one user turn for every cell regardless of internal tool round trips.",
+    "acceptance": "The 135 primary cells run without injected provider failures. The six frozen overlays run separately as 12 LSP-only adversarial cells. Agent turns remain reported but are ineligible as a varying endpoint; paired tool-call reduction measures agentic round trips.",
+    "timing": "Recorded after calibration and before any epoch-3 promotion cell; all calibration cells remain excluded."
+  },
+  "task_contract": {
+    "semantic_eligible_minimum": 30,
+    "control_minimum": 15,
+    "required_families": [
+      "semantic_disambiguation",
+      "reference_backed_change",
+      "fresh_saved_edit",
+      "batched_anchors",
+      "control_literal_or_short_file",
+      "failure_injection"
+    ],
+    "required_before_candidate_code": [
+      "immutable repository commit per task",
+      "checked expected target or diff",
+      "declared filesystem authority",
+      "semantic eligibility label",
+      "provider and language",
+      "identical task prompt across arms"
+    ]
+  },
+  "provider_pins": [
+    {
+      "name": "gopls",
+      "version": "v0.20.0"
+    },
+    {
+      "name": "pyright",
+      "version": "1.1.413"
+    }
+  ],
+  "run_order": {
+    "method": "per-task deterministic permutation",
+    "seed": 41904,
+    "repetitions": 1,
+    "reruns": "infrastructure failures only, with the original cell retained"
+  },
+  "analysis_plan": {
+    "method": "paired nonparametric percentile bootstrap over task-level deltas",
+    "bootstrap_seed": 91173,
+    "bootstrap_replicates": 5000,
+    "primary_cells": 135,
+    "adversarial_failure_cells": 12,
+    "primary_round_trip_endpoint": "tool_calls",
+    "agent_turns": "reported but constant by execution contract and ineligible for the material-value endpoint"
+  },
+  "required_metrics": [
+    "task_success",
+    "exact_target_correctness",
+    "reference_recall",
+    "reference_false_positive_rate",
+    "false_empty_count",
+    "stale_result_count",
+    "input_output_schema_and_preparation_bytes",
+    "agent_turns",
+    "tool_calls",
+    "cold_and_warm_latency",
+    "provider_process_count",
+    "provider_peak_rss",
+    "provider_setup_success",
+    "candidate_used_before_decisive_edit",
+    "authority_cited"
+  ],
+  "promotion": {
+    "authority_isolation_failures": 0,
+    "false_current_results": 0,
+    "false_ok_empty_failures": 0,
+    "exact_definition_fixture_pass_rate": 1.0,
+    "clean_cold_starts_per_claimed_platform": 20,
+    "cold_start_success_rate_minimum": 0.95,
+    "semantic_task_adoption_minimum": 0.8,
+    "material_value": {
+      "choice_a": "task success improves by at least 0.05 absolute with paired 95% CI excluding zero",
+      "choice_b": "task success holds, median tool calls fall at least 0.20, and median wall time falls at least 0.10, each with paired intervals excluding zero"
+    },
+    "control": "no success loss, no more than one median tool call, and no more than 0.05 median wall-time increase",
+    "platform": "Linux and macOS execute; Windows and detached worktrees advertise unsupported before invocation"
+  },
+  "unresolved_pins": []
+}

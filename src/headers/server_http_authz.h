@@ -6,6 +6,7 @@
 #ifndef AIMEE_SERVER_HTTP_AUTHZ_H
 #define AIMEE_SERVER_HTTP_AUTHZ_H
 
+#include "pki.h"
 #include "server_identity_token.h"
 
 #ifdef __cplusplus
@@ -33,6 +34,13 @@ extern "C"
    /* Count one request refused that the retired aimee.api.remote_writes would
     * formerly have allowed; surfaced as remote_writes.global_ignored. */
    void server_http_note_global_ignored(void);
+
+   /* Translate the durable certificate-roster verdict into the HTTP status for
+    * the request-time mTLS re-check.  An unreadable authority is a temporary
+    * service failure, not evidence that the presented certificate was revoked,
+    * expired, or never issued.  Keep this pure so the fail-closed distinction
+    * is pinned without needing a live TLS connection or store module. */
+   int server_http_mtls_recheck_status(pki_cert_status_t status);
 
    /* Reconstruct the capability set the retired process-global setting would
     * have supplied, for observability only. */

@@ -61,6 +61,7 @@ typedef enum
 {
    DEP_UNKNOWN = 0,
    DEP_OK,
+   DEP_DISABLED,
    DEP_FAIL
 } dep_state_t;
 
@@ -70,6 +71,7 @@ typedef struct
    dep_state_t kb;
    dep_state_t retrieval;
    dep_state_t modules;
+   int kb_disabled;
    char failed_boundary[32];
    char missing_module[32];
    char breaker_state[16];
@@ -149,6 +151,8 @@ static const char *dep_name(dep_state_t s)
    {
    case DEP_OK:
       return "ok";
+   case DEP_DISABLED:
+      return "disabled";
    case DEP_FAIL:
       return "fail";
    default:
@@ -201,28 +205,40 @@ void server_ready_sample_now(void)
 
    s.db1 = db1_store_probe() ? DEP_OK : DEP_FAIL;
 
-   kb_health_t h;
-   memset(&h, 0, sizeof(h));
-   s.kb = (kb_client_health(&h) == 0 && h.process_ok) ? DEP_OK : DEP_FAIL;
-   kb_client_dependency_health_t dependency;
-   kb_client_dependency_health(&dependency);
-   snprintf(s.breaker_state, sizeof(s.breaker_state), "%s", dependency.state);
-   s.retry_after_ms = dependency.retry_after_ms;
-   s.last_success_query_ms = dependency.last_success_ms;
-   snprintf(s.last_ingest_at, sizeof(s.last_ingest_at), "%s", h.last_ingest_at);
-   s.retrieval = (s.kb == DEP_OK && h.db2_ok && h.db2_kb_tables_ok && h.pgvec_ok &&
-                  h.pgvec_collection_ok && h.embed_ok && strcmp(dependency.state, "open") != 0)
-                     ? DEP_OK
-                     : DEP_FAIL;
-   const char *failed = s.kb != DEP_OK                          ? "kb_transport"
-                        : !h.db2_ok                             ? "db2"
-                        : !h.db2_kb_tables_ok                   ? "kb_schema"
-                        : !h.pgvec_ok                           ? "pgvector"
-                        : !h.pgvec_collection_ok                ? "vector_collection"
-                        : !h.embed_ok                           ? "embedder"
-                        : strcmp(dependency.state, "open") == 0 ? "kb_breaker"
-                                                                : "";
-   snprintf(s.failed_boundary, sizeof(s.failed_boundary), "%s", failed);
+   /* No configured KB is a supported standalone composition. Do not probe a
+    * nonexistent service or label its shared-retrieval capabilities as failed. */
+   s.kb_disabled = !kb_client_connection_configured();
+   if (s.kb_disabled)
+   {
+      s.kb = DEP_DISABLED;
+      s.retrieval = DEP_DISABLED;
+      snprintf(s.breaker_state, sizeof(s.breaker_state), "disabled");
+   }
+   else
+   {
+      kb_health_t h;
+      memset(&h, 0, sizeof(h));
+      s.kb = (kb_client_health(&h) == 0 && h.process_ok) ? DEP_OK : DEP_FAIL;
+      kb_client_dependency_health_t dependency;
+      kb_client_dependency_health(&dependency);
+      snprintf(s.breaker_state, sizeof(s.breaker_state), "%s", dependency.state);
+      s.retry_after_ms = dependency.retry_after_ms;
+      s.last_success_query_ms = dependency.last_success_ms;
+      snprintf(s.last_ingest_at, sizeof(s.last_ingest_at), "%s", h.last_ingest_at);
+      s.retrieval = (s.kb == DEP_OK && h.db2_ok && h.db2_kb_tables_ok && h.pgvec_ok &&
+                     h.pgvec_collection_ok && h.embed_ok && strcmp(dependency.state, "open") != 0)
+                        ? DEP_OK
+                        : DEP_FAIL;
+      const char *failed = s.kb != DEP_OK                          ? "kb_transport"
+                           : !h.db2_ok                             ? "db2"
+                           : !h.db2_kb_tables_ok                   ? "kb_schema"
+                           : !h.pgvec_ok                           ? "pgvector"
+                           : !h.pgvec_collection_ok                ? "vector_collection"
+                           : !h.embed_ok                           ? "embedder"
+                           : strcmp(dependency.state, "open") == 0 ? "kb_breaker"
+                                                                   : "";
+      snprintf(s.failed_boundary, sizeof(s.failed_boundary), "%s", failed);
+   }
 
    static const struct
    {
@@ -287,6 +303,9 @@ int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t 
    int modules_ok = diagnostics ? diagnostics->modules_ok : -1;
    dep_state_t modules = (modules_ok > 0) ? DEP_OK : (modules_ok == 0 ? DEP_FAIL : DEP_UNKNOWN);
 
+   if (diagnostics && diagnostics->kb_disabled)
+      kb = retrieval = DEP_DISABLED;
+
    long age = (sampled_at > 0) ? (now - sampled_at) : -1;
 
    /* Never sampled, or too old to trust — including a snapshot stamped in the
@@ -301,7 +320,8 @@ int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t 
       modules = DEP_UNKNOWN;
    }
 
-   int ready = (db1 == DEP_OK && kb == DEP_OK && retrieval == DEP_OK && modules == DEP_OK);
+   int ready = (db1 == DEP_OK && (kb == DEP_OK || kb == DEP_DISABLED) &&
+                (retrieval == DEP_OK || retrieval == DEP_DISABLED) && modules == DEP_OK);
    const char *status = ready ? "ok" : (stale ? "unknown" : "degraded");
 
    if (stale && (sampled_at <= 0 || age < 0))
@@ -357,6 +377,7 @@ static int ready_provider(char *resp, int cap)
    int db1_ok = (s.db1 == DEP_UNKNOWN) ? -1 : (s.db1 == DEP_OK);
    int kb_ok = (s.kb == DEP_UNKNOWN) ? -1 : (s.kb == DEP_OK);
    server_ready_diagnostics_t diagnostics = {
+       .kb_disabled = s.kb_disabled,
        .retrieval_ok = (s.retrieval == DEP_UNKNOWN) ? -1 : (s.retrieval == DEP_OK),
        .modules_ok = (s.modules == DEP_UNKNOWN) ? -1 : (s.modules == DEP_OK),
        .failed_boundary = s.failed_boundary,

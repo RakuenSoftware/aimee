@@ -95,6 +95,12 @@ int lsp_manager_definition(const char *workspace, const char *file, int line, in
 int lsp_manager_references(const char *workspace, const char *file, int line, int col,
                            lsp_location_t *out, int max, char *errbuf, size_t errbuf_size);
 
+/* Send the exact saved-file bytes to the provider before a semantic query.
+ * Uses didOpen for the first observation and didChange thereafter. */
+int lsp_manager_sync_document(const char *workspace, const char *file, const char *text,
+                              int *version_out, unsigned long *generation_out, char *errbuf,
+                              size_t errbuf_size);
+
 /*
  * lsp_manager_rename() — perform a workspace-wide symbol rename via LSP.
  * Sends textDocument/rename for the symbol at |file|:|line|:|col| (0-based)

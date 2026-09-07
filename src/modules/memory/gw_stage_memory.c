@@ -15,6 +15,7 @@
  * gw_memory_system_prompt stays only until the four plain-chat handlers move onto
  * the IR too -- it is now a direct call, not a stage. */
 #include "gw_stage_memory.h"
+#include "module_stage_adapters.h"
 #include "aimee_session_guidance.h"
 #include "ingress_preinject.h"
 #include <aimee/ir/aimee_ir.h>
@@ -22,7 +23,6 @@
 #include "cJSON.h"
 #include "log.h"
 #include <assert.h>
-#include <ctype.h> /* tolower */
 #include <stdatomic.h>
 #include <stdio.h> /* snprintf */
 #include <stdlib.h>
@@ -228,31 +228,9 @@ char *gw_memory_system_prompt(const char *query)
    return recall_gate_skip_turn(query) ? NULL : ingress_preinject_build(query, 0);
 }
 
-/* --- Turn-level recall gate ---------------------------------------------
- *
- * Recall used to run on every turn carrying any non-empty query, gated only by
- * a global on/off toggle. So "thanks, that worked" paid full retrieval cost and
- * received an evidence envelope that reads as authoritative. The cost that
- * matters is not latency: irrelevant evidence injected into an unrelated turn
- * bends the answer, and the bent answer then feeds the improvement loop.
- *
- * Three invariants govern this gate:
- *   - It must be far cheaper than what it guards. This is a scan over a bounded
- *     prefix of the query. A gate that costs what the operation costs is the
- *     operation with extra steps.
- *   - It fails open. Every uncertain case retrieves. A gate that errs toward
- *     skipping produces confident, evidence-free answers, which is strictly
- *     worse than retrieving something irrelevant.
- *   - Every skip is logged with its reason, so the skip rate is measurable
- *     before it is trusted.
- *
- * Nothing is gated that has not first been measured ungated, so the default
- * mode is `observe`: the decision is computed and logged, and recall still
- * runs. `enforce` acts on it. Both error directions have to be read off those
- * logs separately -- a retrieval wrongly skipped and one wrongly performed have
- * different costs, and a single accuracy number hides the worse one. */
-
-#define RECALL_GATE_SCAN_MAX 256
+/* Turn-level recall policy lives in the Go memory module. This file only
+ * translates the gateway call to the shared event-bus data stage and retains
+ * process-local transport telemetry for the legacy metrics endpoint. */
 
 static _Atomic unsigned long long g_recall_gate_predicted_skip = 0;
 static _Atomic unsigned long long g_recall_gate_predicted_retrieve = 0;
@@ -270,108 +248,43 @@ extern int learning_evidence_write_retrieval_event(const char *query_fingerprint
                                                    char *id_out, int id_out_len)
     __attribute__((weak));
 
-static int recall_gate_mode(void)
+static int recall_gate_call(const char *query, int *predicted_skip, int *enforced,
+                            const char **reason_out)
 {
-   /* 0 = off, 1 = observe (default), 2 = enforce. */
-   const char *v = getenv("AIMEE_MEMORY_RECALL_GATE");
-   if (!v || !v[0])
-      return 1;
-   if (strcasecmp(v, "enforce") == 0)
-      return 2;
-   if (strcasecmp(v, "0") == 0 || strcasecmp(v, "off") == 0 || strcasecmp(v, "false") == 0 ||
-       strcasecmp(v, "no") == 0)
-      return 0;
-   return 1;
-}
-
-/* 1 when this turn looks like it needs no stored evidence. Conservative by
- * construction: anything carrying a question, an identifier, a path, a digit or
- * substantial length retrieves. */
-static int recall_gate_should_skip(const char *query, const char **reason_out)
-{
-   const char *reason = NULL;
-   if (!query)
-   {
-      if (reason_out)
-         *reason_out = NULL;
-      return 0; /* fail open */
-   }
-
-   size_t n = strnlen(query, RECALL_GATE_SCAN_MAX);
-   size_t start = 0;
-   while (start < n && (unsigned char)query[start] <= ' ')
-      start++;
-   size_t end = n;
-   while (end > start && (unsigned char)query[end - 1] <= ' ')
-      end--;
-   size_t len = end - start;
-
-   if (len == 0)
-   {
-      if (reason_out)
-         *reason_out = NULL;
-      return 0;
-   }
-
-   /* Any of these mean the turn may well need evidence: a question, a
-    * repository-shaped token, a version or number, or simply enough text that a
-    * cheap classifier has no business deciding. */
-   if (len > 64)
-      goto retrieve;
-   for (size_t i = start; i < end; i++)
-   {
-      unsigned char ch = (unsigned char)query[i];
-      if (ch == '?' || ch == '/' || ch == '.' || ch == '_' || ch == '-' || ch == ':')
-         goto retrieve;
-      if (ch >= '0' && ch <= '9')
-         goto retrieve;
-      if (ch >= 0x80)
-         goto retrieve; /* non-ASCII: out of this classifier's competence */
-      if (ch >= 'A' && ch <= 'Z' && i > start)
-         goto retrieve; /* interior capital: CamelCase identifier */
-   }
-
-   /* Short, plain, punctuation-free text. Treat it as conversational only when
-    * it opens with an acknowledgement and carries no interrogative. */
-   {
-      static const char *const ack[] = {
-          "thanks", "thank", "ok",  "okay", "got it", "great", "perfect", "nice", "cool",
-          "yes",    "no",    "yep", "nope", "sure",   "done",  "ship it", "lgtm", "sounds good"};
-      static const char *const interrogative[] = {"what", "why",   "how",    "when",  "where",
-                                                  "who",  "which", "does",   "did",   "is",
-                                                  "are",  "can",   "should", "would", "explain"};
-      char low[65];
-      size_t j = 0;
-      for (size_t i = start; i < end && j < sizeof(low) - 1; i++, j++)
-         low[j] = (char)tolower((unsigned char)query[i]);
-      low[j] = '\0';
-
-      for (size_t i = 0; i < sizeof(interrogative) / sizeof(interrogative[0]); i++)
-         if (strstr(low, interrogative[i]))
-            goto retrieve;
-
-      for (size_t i = 0; i < sizeof(ack) / sizeof(ack[0]); i++)
-      {
-         size_t al = strlen(ack[i]);
-         if (strncmp(low, ack[i], al) == 0)
-         {
-            reason = "acknowledgement";
-            if (reason_out)
-               *reason_out = reason;
-            return 1;
-         }
-      }
-   }
-
-retrieve:
+   if (predicted_skip)
+      *predicted_skip = 0;
+   if (enforced)
+      *enforced = 0;
    if (reason_out)
       *reason_out = NULL;
+   if (!query)
+      return -1;
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return -1;
+   cJSON_AddStringToObject(request, "operation", "recall-gate");
+   cJSON_AddStringToObject(request, "query", query);
+   cJSON *response = server_module_memory_data(request);
+   cJSON_Delete(request);
+   if (!response)
+      return -1;
+   cJSON *skip = cJSON_GetObjectItemCaseSensitive(response, "skip");
+   cJSON *enforce = cJSON_GetObjectItemCaseSensitive(response, "enforced");
+   cJSON *reason = cJSON_GetObjectItemCaseSensitive(response, "reason");
+   if (predicted_skip)
+      *predicted_skip = cJSON_IsTrue(skip);
+   if (enforced)
+      *enforced = cJSON_IsTrue(enforce);
+   if (reason_out && cJSON_IsString(reason) && strcmp(reason->valuestring, "acknowledgement") == 0)
+      *reason_out = "acknowledgement";
+   cJSON_Delete(response);
    return 0;
 }
 
 int gw_stage_memory_recall_gate_should_skip(const char *query, const char **reason_out)
 {
-   return recall_gate_should_skip(query, reason_out);
+   int predicted = 0;
+   return recall_gate_call(query, &predicted, NULL, reason_out) == 0 ? predicted : 0;
 }
 
 void gw_stage_memory_recall_gate_record_outcome(int gate_predicted_skip, int retrieval_was_needed)
@@ -399,26 +312,24 @@ void gw_stage_memory_recall_gate_metrics(gw_memory_recall_gate_metrics_t *out)
  * decision when the gate fires, in both observe and enforce mode. */
 static int recall_gate_skip_turn(const char *query)
 {
-   int mode = recall_gate_mode();
-   if (mode == 0)
-      return 0;
+   int predicted = 0, enforced = 0;
    const char *reason = NULL;
-   if (!recall_gate_should_skip(query, &reason))
+   if (recall_gate_call(query, &predicted, &enforced, &reason) != 0 || !predicted)
    {
       atomic_fetch_add_explicit(&g_recall_gate_predicted_retrieve, 1, memory_order_relaxed);
       return 0;
    }
    atomic_fetch_add_explicit(&g_recall_gate_predicted_skip, 1, memory_order_relaxed);
-   LOG_INFO("memory", "recall gate: %s turn (reason=%s)", mode == 2 ? "skipping" : "would skip",
+   LOG_INFO("memory", "recall gate: %s turn (reason=%s)", enforced ? "skipping" : "would skip",
             reason ? reason : "unclassified");
    if (learning_evidence_write_retrieval_event)
    {
       char role[96];
-      snprintf(role, sizeof(role), "RecallGate%sSkip/%s", mode == 2 ? "Enforced" : "Observed",
+      snprintf(role, sizeof(role), "RecallGate%sSkip/%s", enforced ? "Enforced" : "Observed",
                reason ? reason : "unclassified");
       (void)learning_evidence_write_retrieval_event(query, role, NULL, 0, NULL, 0);
    }
-   return mode == 2;
+   return enforced;
 }
 
 int gw_stage_memory_enabled(void)

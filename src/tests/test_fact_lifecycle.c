@@ -9,6 +9,7 @@
 #include "../modules/db2/c/db_postgres.h"
 #include "modules/memory/memory_ontology.h"
 #include "modules/memory/memory_fact_gate.h"
+#include "support/memory_policy_stub.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,15 +25,6 @@ typedef struct
    int suppressed;
    char asserted[40];
 } est_t;
-
-static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
-{
-   if (!verdict)
-      return -1;
-   *verdict = (int)memory_fact_gate_check((memory_node_kind_t)head_kind, rel_type,
-                                          (memory_node_kind_t)tail_kind, NULL);
-   return 0;
-}
 
 /* The single currently-believed target of (src, rel), or "" when there is none.
  * Asserting on the value — not just the count — is what distinguishes "the user's
@@ -179,7 +171,7 @@ static void test_pure(void)
 int main(void)
 {
    db2_test_shim_open();
-   aimee_db2_register_fact_gate_provider(check_fact_gate);
+   test_memory_policy_register();
    assert(db2_rel_types_ensure_seed() == 0);
    test_pure();
 

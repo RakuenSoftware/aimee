@@ -40,6 +40,7 @@ pct exec "$CTID" -- bash -lc '
 
 pct exec "$CTID" -- su - postgres -c \
   "psql -qc \"CREATE ROLE aimee LOGIN SUPERUSER PASSWORD 'aimee-e2e';\" \
+        -qc \"CREATE ROLE aimee_migrator LOGIN SUPERUSER PASSWORD 'aimee-migrate-e2e';\" \
         -qc 'CREATE DATABASE aimee_shared OWNER aimee;'" >/dev/null 2>&1
 pct exec "$CTID" -- su - postgres -c \
   "psql -q -d aimee_shared -c 'CREATE EXTENSION IF NOT EXISTS vector;'" >/dev/null 2>&1

@@ -670,6 +670,14 @@ int opt_get_flag(const opt_parsed_t *opts, const char *name)
  * When set, run_cmd() prepends "cd '<dir>' && " to the command so the shell
  * child uses the right directory without calling chdir() on the thread. */
 static __thread char tl_run_cwd[MAX_PATH_LEN];
+static __thread run_cmd_executor_t tl_run_executor;
+
+run_cmd_executor_t run_cmd_exchange_executor(run_cmd_executor_t executor)
+{
+   run_cmd_executor_t previous = tl_run_executor;
+   tl_run_executor = executor;
+   return previous;
+}
 
 void run_cmd_set_cwd(const char *cwd)
 {
@@ -734,6 +742,8 @@ static char *run_cmd_impl(const char *cmd, int *exit_code)
 
 char *run_cmd(const char *cmd, int *exit_code)
 {
+   if (tl_run_executor.exec)
+      return tl_run_executor.exec(tl_run_executor.ctx, cmd, exit_code);
    if (!tl_run_cwd[0])
       return run_cmd_impl(cmd, exit_code);
 

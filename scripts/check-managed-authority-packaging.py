@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static gate for wizard-managed authority isolation and volume direction."""
+"""Keep offline authority tools isolated and absent from the local model wizard."""
 
 from pathlib import Path
 import re
@@ -31,40 +31,16 @@ def main() -> int:
         if not re.search(pattern, dockerfile, re.S):
             failures.append(name)
 
-    if 'profiles: ["authority-bootstrap"]' not in managed:
-        failures.append("authority one-shot profile")
-    identity_service = managed.split("  aimee-server-identity:", 1)[-1].split(
-        "  aimee-authority-bootstrap:", 1
-    )[0]
-    authority_service = managed.split("  aimee-authority-bootstrap:", 1)[-1].split(
-        "\n  aimee-llm:", 1
-    )[0]
-    if "networks: [aimee]" not in identity_service:
-        failures.append("server identity must share the managed KB network")
-    if 'AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK: "1"' not in managed:
-        failures.append("explicit no-swap memory-hardening fallback")
-    if (
-        "mem_limit: 1g" not in authority_service
-        or "memswap_limit: 1g" not in authority_service
-    ):
-        failures.append("authority bootstrap must enforce a zero-swap child cgroup")
-    # An unlimited memlock ulimit is not portable to nested/unprivileged
-    # containers. The OCI runtime rejects it before the bootstrap process can
-    # exercise the explicit no-swap fallback above.
-    if re.search(r"(?:^|\n)\s+memlock:\s*(?:\n|$)", authority_service):
-        failures.append("authority bootstrap must inherit the runtime memlock limit")
-    if "privileged: true" in managed or "cap_add:" in managed:
-        failures.append("authority bootstrap must not request ineffective extra privilege")
-    if "network_mode: none" not in managed:
-        failures.append("offline bootstrap network isolation")
-    if "aimee-managed-jwks-trust:/run/aimee-trust" not in managed:
-        failures.append("authority writable trust volume")
-    if "aimee-managed-jwks-trust:/run/aimee/managed-trust:ro" not in outer:
-        failures.append("server read-only trust volume")
-    if "aimee-managed-authority-home" in outer:
-        failures.append("server must not mount authority custody volume")
-    if "aimee-authority-bootstrap" not in deploy or "deploy_authority_bootstrap_argv" not in deploy:
-        failures.append("wizard deploy orchestration")
+    # The local wizard no longer installs a KB or its management authority.
+    # Retained offline tools still obey their custody boundary below.
+    services = re.findall(r"^  ([a-z][a-z0-9-]*):$", managed.split("\nvolumes:", 1)[0], re.M)
+    if set(services) != {"aimee-embedder", "aimee-llm"}:
+        failures.append("wizard may provision only model services")
+    if any(name in deploy for name in ("deploy_authority_bootstrap_argv", "aimee-authority-bootstrap")):
+        failures.append("wizard must not install a KB authority")
+    for text in (managed, outer, (ROOT / "compose.yaml").read_text()):
+        if "aimee-managed-authority-home" in text or "aimee-authority-bootstrap:" in text:
+            failures.append("local application must not mount or initialize authority custody")
     if "authority_db_role=aimee_managed_authority_login" not in bootstrap:
         failures.append("dedicated authority database login")
     if 'user=$authority_db_role' not in bootstrap:

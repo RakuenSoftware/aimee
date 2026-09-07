@@ -50,6 +50,10 @@ export AIMEE_STORE_MIGRATION_URL="${AIMEE_STORE_MIGRATION_URL:-}"
   echo "AIMEE_STORE_MIGRATION_URL is required and must name the schema owner" >&2; exit 1;
 }
 OBJ="$AIMEE_SRC/build/obj"
+[ -r "$OBJ/module-bundle/grants/kb/config.grant" ] || {
+    python3 "$AIMEE_ROOT/scripts/export_c_repositories.py" --runtime-bundle "$OBJ/module-bundle" >/dev/null || exit 1
+}
+
 KBHOME="$WORKDIR/kbhome"
 SRVHOME="$WORKDIR/srvhome"
 
@@ -95,12 +99,19 @@ deploy() { # deploy <placement> <grant-name> <home> [executable-name]
     [ -x "$bin" ] || return 1
     cp "$bin" "$3/.config/aimee/aimee-module-$executable_name"
     chmod 0755 "$3/.config/aimee/aimee-module-$executable_name"
-    sed "s|^executable=.*|executable=$3/.config/aimee/aimee-module-$executable_name|" "$grant" \
-        > "$3/.config/aimee/modules.d/$1/$2.grant"
+    local companion declared
+    for companion in "$OBJ/module-bundle/grants/$1/"*.grant; do
+        declared=$(sed -n 's/^executable=//p' "$companion")
+        [ "${declared##*/}" = "aimee-module-$executable_name" ] || continue
+        sed "s|^executable=.*|executable=$3/.config/aimee/aimee-module-$executable_name|" "$companion" \
+            > "$3/.config/aimee/modules.d/$1/$(basename "$companion")"
+    done
 }
 attach() { # attach <name> <home> <bus> <tag>
     [ -x "$2/.config/aimee/aimee-module-$1" ] || return 1
-    env HOME="$2" AIMEE_HOME="$2/.config/aimee" AIMEE_DB1_PATH="$2/.config/aimee/aimee.db" \
+    local placement="$4"
+    [ "$placement" != srv ] || placement=server
+    env AIMEE_MODULE_PLACEMENT="$placement" HOME="$2" AIMEE_HOME="$2/.config/aimee" AIMEE_DB1_PATH="$2/.config/aimee/aimee.db" \
         AIMEE_DB2_URL="$AIMEE_DB2_URL" AIMEE_STORE_URL="$AIMEE_STORE_URL" \
         AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL" \
         "$2/.config/aimee/aimee-module-$1" "$3" > "$WORKDIR/mod-$4-$1.log" 2>&1 &
@@ -110,7 +121,7 @@ attach() { # attach <name> <home> <bus> <tag>
 section "0  both services, with the modules these loops need"
 # learning carries the signal classifier the router needs; without it every
 # signal is refused and sections 3-5 below measure nothing.
-for m in config learning memory postgres; do deploy kb "$m" "$KBHOME"; done
+for m in config learning memory postgres; do deploy kb "$m" "$KBHOME" || { echo "cannot deploy KB module $m" >&2; exit 1; }; done
 KBBUS="$KBHOME/.config/aimee/kb-module-bus.sock"
 env HOME="$KBHOME" AIMEE_HOME="$KBHOME/.config/aimee" \
     "$AIMEE_ROOT/aimee-kb" --http-port="$KB_PORT" > "$WORKDIR/kb.log" 2>&1 &
@@ -133,8 +144,6 @@ deploy server postgres "$SRVHOME"
 # same executable's outbound session-family reads; both grants must name the
 # one launched binary.
 deploy server aimee "$SRVHOME"
-deploy server aimee-db1 "$SRVHOME" aimee
-deploy server aimee-postgres "$SRVHOME" aimee
 deploy server learning "$SRVHOME"
 export AIMEE_KB_API_URL="$KB_URL"
 SRVBUS="$SRVHOME/.config/aimee/server-module-bus.sock"

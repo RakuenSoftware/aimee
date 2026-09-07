@@ -1,0 +1,9 @@
+{
+  "after_plain_qualification": true,
+  "device_mapper_major": "254",
+  "drivers": [
+    "loop",
+    "dm_mod",
+    "dm_crypt"
+  ]
+}

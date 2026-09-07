@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
@@ -89,7 +89,7 @@ func runExactShippedWorkflow(t *testing.T, workflowName, wantState, wantPause st
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func runExactShippedWorkflow(t *testing.T, workflowName, wantState, wantPause st
 	if workflowName == "build" || workflowName == "build-triggered" {
 		sourcePath = "docs/proposals/pending/" + workflowName + ".md"
 	}
-	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+	if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 		ID: id, Repo: repo, ProposalPath: "proposal:" + workflowName,
 		WorkflowName: workflowName, WorkflowVersion: definition.Version,
 		StartStage: definition.Start, SourcePath: sourcePath,
@@ -136,7 +136,7 @@ func runExactShippedWorkflow(t *testing.T, workflowName, wantState, wantPause st
 	defer func() { cancel(); <-done }()
 
 	deadline := time.Now().Add(25 * time.Second)
-	var item db1.WorkItem
+	var item workflowstore.WorkItem
 	for time.Now().Before(deadline) {
 		item, err = store.WorkItem(t.Context(), id)
 		if err != nil {
@@ -224,7 +224,7 @@ func shippedRoundtableStore(t *testing.T) *roundtablecfg.Store {
 	return store
 }
 
-func assertShippedStagesVisited(t *testing.T, store *db1.Store, id string, definition wfe.Definition) {
+func assertShippedStagesVisited(t *testing.T, store *workflowstore.Store, id string, definition wfe.Definition) {
 	t.Helper()
 	events, err := store.Events(t.Context(), id, 0, 1000)
 	if err != nil {

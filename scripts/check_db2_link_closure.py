@@ -88,10 +88,6 @@ REVIEWED_SOURCE_UPDATES = {
         "src/modules/db2/c/entity_edges.c",
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/learning.c",
-        "src/modules/db2/c/memory_query.c",
-        "src/modules/db2/c/memory_relations.c",
-        "src/modules/db2/c/memory_scope_query.c",
-        "src/modules/db2/c/memory_score_fields.c",
         "src/modules/db2/c/notes.c",
         "src/modules/db2/c/typed_facts.c",
     )
@@ -109,6 +105,65 @@ REVIEWED_SUPPORT_UPDATES = {
         "Runtime config snapshot refreshed after the typed-facts getter retirement.",
 }
 REVIEWED_REFRESH_BASE_REVISIONS = {"ab3cf828b3acc5b1eb3ab6b06bdd903b8d373906"}
+# Exact 0.4.2 promotion transition after Go memory migration 3d48beb23b.
+# Only the validated pre-migration contract admits these retirements/imports.
+# Future comparisons retain the ordinary ratchet, including for these symbols.
+MEMORY_MIGRATION_BASE = "bc88c720134efbd3b18a737d5c6bba252a59fcbb1568bbae1ca6bebfae8bfb75"
+MEMORY_RETIRED_UNITS = {
+    "src/modules/db2/c/memory_briefing.c",
+    "src/modules/db2/c/memory_conflicts.c",
+    "src/modules/db2/c/memory_entity_graph.c",
+    "src/modules/db2/c/memory_export.c",
+    "src/modules/db2/c/memory_health.c",
+    "src/modules/db2/c/memory_lifecycle.c",
+    "src/modules/db2/c/memory_lint.c",
+    "src/modules/db2/c/memory_payload.c",
+    "src/modules/db2/c/memory_promotion.c",
+    "src/modules/db2/c/memory_query.c",
+    "src/modules/db2/c/memory_query_bookkeeping.c",
+    "src/modules/db2/c/memory_relations.c",
+    "src/modules/db2/c/memory_row_mapper_pg.c",
+    "src/modules/db2/c/memory_scenes.c",
+    "src/modules/db2/c/memory_scope_query.c",
+    "src/modules/db2/c/memory_score_fields.c",
+    "src/modules/db2/c/memory_vectors.c",
+    "src/modules/db2/c/prospective_memories.c",
+}
+MEMORY_RETIRED_SUPPORT = {
+    "src/modules/db2/support/node_kind_text_primitives.c",
+    "src/modules/db2/support/pii_classifier_primitives.c",
+    "src/modules/db2/support/pii_inject_gate_primitives.c",
+}
+MEMORY_ADAPTER_IMPORTS = {
+    "db2_memory_provenance_by_id": [
+        "src/modules/db2/c/demotion.c"
+    ],
+    "db2_memory_scene_members": [
+        "src/modules/db2/c/kb_service_backend.c"
+    ],
+    "db2_memory_scenes_list_recent": [
+        "src/modules/db2/c/kb_service_backend.c"
+    ],
+    "db2_memory_scope_bind_current": [
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/typed_facts.c"
+    ],
+    "db2_memory_scope_context_get": [
+        "src/modules/db2/c/pgvec_transport.c"
+    ],
+    "memory_ontology_node_kind_to_text": [
+        "src/modules/db2/c/rel_types_store.c"
+    ],
+    "memory_pii_rel_sensitivity": [
+        "src/modules/db2/c/rel_types_store.c"
+    ],
+    "memory_pii_turn_requests_sensitive": [
+        "src/modules/db2/c/fact_ingest.c"
+    ],
+    "pgvec_memory_vector_search_record_type": [
+        "src/modules/db2/c/pgvec_kb_service.c"
+    ]
+}
 CJSON_DEFINES = [
     "cJSON_AddArrayToObject",
     "cJSON_AddBoolToObject",
@@ -389,9 +444,14 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/rules.c",
     ],
 }
+RETIRED_MEMORY_SOURCES = {
+    "src/modules/db2/c/memory_export.c",
+    "src/modules/db2/c/memory_payload.c",
+}
 for _references in CJSON_BASE_REFERENCES.values():
     _references[:] = [
-        path for path in _references if path not in HOST_ADAPTER_REHOMES
+        path for path in _references
+        if path not in HOST_ADAPTER_REHOMES and path not in RETIRED_MEMORY_SOURCES
     ]
 SUPPORT_UNITS: list[dict[str, object]] = [{
     "path": "src/modules/db2/support/cert_serial_primitives.c",
@@ -692,92 +752,6 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "schemes, and legacy empty-endpoint behavior. Only strcmp, strlen, and strncmp "
                 "are imported; there is no HTTP, JSON, DB, bus, provider, pgvector, DB3, "
                 "allocation, configuration, I/O, or logging dependency.",
-}, {
-    "path": "src/modules/db2/support/node_kind_text_primitives.c",
-    "source_sha256": "0b733803311e92c8baad98e3a14f8d43eac0819f82f83ab3a08a7b52eaa08116",
-    "header": "src/modules/db2/support/db2_node_kind_text.h",
-    "header_sha256": "890b4eb247c73135cb0df53fc67f520d16d2d032429f397e2665522ce6898668",
-    "defines": ["memory_ontology_node_kind_to_text"],
-    "resolves": ["memory_ontology_node_kind_to_text"],
-    "resolution_disposition": "injected-module-contract",
-    "allowed_includes": ["db2_node_kind_text.h"],
-    "allowed_header_includes": [],
-    "allowed_undefined": [],
-    "base_references": {
-        "memory_ontology_node_kind_to_text": ["src/modules/db2/c/rel_types_store.c"],
-    },
-    "provenance": "Definition promoted from the DB-free node-kind table in "
-                  "src/modules/memory/memory_episodes.c; the sole DB2 call is pinned to "
-                  "src/modules/db2/c/rel_types_store.c.",
-    "evidence": "A deterministic integer-to-text switch with descriptor-owned numeric ABI and "
-                "no imports, shared ontology header, allocation, I/O, DB, event-bus, provider, "
-                "platform, pgvector, DB3, configuration, or logging dependency. Normal and "
-                "sanitizer parity cover the complete signed 16-bit partition plus int boundaries.",
-}, {
-    "path": "src/modules/db2/support/pii_classifier_primitives.c",
-    "source_sha256": "b910e5470f542b43d463b89d172769e47675af228abd419b61a9d5267b1ff9bd",
-    "header": "src/modules/db2/support/db2_pii_classifier.h",
-    "header_sha256": "26bdb1c2abf6e8647a572ea4a49652ebdd373c3d2393afb198f801bd9899c078",
-    "defines": [
-        "memory_pii_register_sensitivity_batch", "memory_pii_register_turn_classifier",
-        "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
-        "memory_pii_turn_requests_sensitive",
-    ],
-    "resolves": [
-        "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
-        "memory_pii_turn_requests_sensitive",
-    ],
-    "resolution_disposition": "injected-module-contract",
-    "allowed_includes": [
-        "db2_pii_classifier.h", "db2_rel_seed.h", "db2_rel_type_helpers.h", "ctype.h",
-        "string.h",
-    ],
-    "allowed_header_includes": [],
-    "allowed_undefined": [
-        "__ctype_tolower_loc", "rel_type_normalize", "rel_types_seed_lookup", "strlen",
-    ],
-    "base_references": {
-        "memory_pii_rel_sensitivity": ["src/modules/db2/c/rel_types_store.c"],
-        "memory_pii_rel_sensitivity_batch": ["src/modules/db2/c/fact_recall.c"],
-        "memory_pii_turn_requests_sensitive": ["src/modules/db2/c/fact_ingest.c"],
-    },
-    "provenance": "The remaining PII turn, relation, and batch classifiers plus both provider "
-                  "registration seams are promoted from src/modules/memory/memory_pii_gate.c; "
-                  "all three DB2 calls are pinned to their sole translation units.",
-    "evidence": "The descriptor owns local cue scanning, unknown sensitive-name heuristics, "
-                "seed sensitivity lookup, whole-batch classification, and authoritative provider "
-                "failure semantics. Registered failures remain fail closed and never fall back "
-                "silently. Normal and sanitizer parity cover NULL, every non-NUL byte, all seed "
-                "relations, case and length boundaries, local and provider paths, non-Boolean "
-                "provider values, provider failures after writes, invalid batches, and output "
-                "canaries. Only the adjacent admitted relationship support, ctype, and strlen "
-                "are imported; there is no DB, bus transport, provider implementation, pgvector, "
-                "DB3, allocation, I/O, configuration, or logging edge.",
-}, {
-    "path": "src/modules/db2/support/pii_inject_gate_primitives.c",
-    "source_sha256": "41096c30f976075f8f4b97a7a1825bbb53e340f5d112eb704a4a31ff4be1fef6",
-    "header": "src/modules/db2/support/db2_pii_inject_gate.h",
-    "header_sha256": "e1f544b3bd70ed8d4d012f34845f99922f219896bce0329efb9f2b687d1bd9af",
-    "defines": ["memory_pii_should_inject"],
-    "resolves": ["memory_pii_should_inject"],
-    "resolution_disposition": "injected-module-contract",
-    "allowed_includes": ["db2_pii_inject_gate.h"],
-    "allowed_header_includes": [],
-    "allowed_undefined": [],
-    "base_references": {
-        "memory_pii_should_inject": ["src/modules/db2/c/fact_recall.c"],
-    },
-    "provenance": "The allocation-free recall decision is promoted from "
-                  "src/modules/memory/memory_pii_gate.c; the sole DB2 call is pinned to "
-                  "src/modules/db2/c/fact_recall.c.",
-    "evidence": "The descriptor owns the three-value sensitivity ABI, confidence floor, "
-                "truth-value handling, and fail-closed treatment of NaN, low confidence, "
-                "credentials, and unknown sensitivity values. The support object has no "
-                "imports or memory classifier state and no allocation, I/O, DB, event-bus, "
-                "provider, platform, pgvector, DB3, configuration, or logging edge. Normal "
-                "and sanitizer parity cover the complete signed 16-bit sensitivity partition, "
-                "int boundaries, finite confidence boundaries, infinities, NaN, and full-width "
-                "turn-request truth values.",
 }, {
     "path": "src/modules/db2/support/random_primitives.c",
     "source_sha256": "392f9f3f2a3f42fafe3e5277765ed1a8d79201f136089df00b06d90df13c8fc8",
@@ -1355,7 +1329,7 @@ def classify(symbol: str) -> tuple[str, str]:
             "Implemented by src/vendor/cJSON.c; the standalone DB2 bundle must package the pinned "
             "vendored source rather than inherit a monolithic-core object.",
         )
-    if symbol.startswith(INJECTED_PREFIXES):
+    if symbol in MEMORY_ADAPTER_IMPORTS or symbol.startswith(INJECTED_PREFIXES):
         return (
             "injected-module-contract",
             "The symbol belongs to a KB or sibling-module surface; replace the direct call with an "
@@ -1797,6 +1771,11 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
         root, previous, check_files=False
     )
     current_units, current_support, current_rows = validate_contract(root, current)
+    memory_migration = (
+        isinstance(previous, dict) and previous.get("fingerprint") == MEMORY_MIGRATION_BASE
+    )
+    retired_units = MEMORY_RETIRED_UNITS if memory_migration else set()
+    retired_support = MEMORY_RETIRED_SUPPORT if memory_migration else set()
     refresh_allowed = (
         isinstance(previous, dict) and
         previous.get("source_revision") in REVIEWED_REFRESH_BASE_REVISIONS
@@ -1810,21 +1789,21 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
         fail("previous-source-growth", f"new DB2 translation units are forbidden: {rejected_units}")
     admitted_units = set(added_units)
     removed_units = sorted(set(previous_units) - set(current_units))
-    unexpected_removals = sorted(set(removed_units) - set(HOST_ADAPTER_REHOMES))
+    unexpected_removals = sorted(set(removed_units) - set(HOST_ADAPTER_REHOMES) - retired_units)
     if unexpected_removals:
         fail("previous-source-removal", "legacy DB2 translation units disappeared without a "
-             f"reviewed host-adapter rehome: {unexpected_removals}")
-    for old_path in removed_units:
+             f"reviewed host-adapter rehome or memory retirement: {unexpected_removals}")
+    for old_path in set(removed_units) & set(HOST_ADAPTER_REHOMES):
         new_path = HOST_ADAPTER_REHOMES[old_path]
         _safe_file(root, new_path, Path("src/kb/db2_adapters"))
     previous_support_by_path = {str(unit["path"]): unit for unit in previous_support}
     current_support_by_path = {str(unit["path"]): unit for unit in current_support}
     removed_support = sorted(set(previous_support_by_path) - set(current_support_by_path))
-    if removed_support:
-        fail("previous-support-removal", f"descriptor support units disappeared: {removed_support}")
-    # A host-adapter rehome can only shrink a support unit's frozen base-call
-    # provenance. HOST_ADAPTER_REHOMES is the explicit reviewed admission list;
-    # a removed unit not named there already fails above. Preserve mapping and
+    rejected_support = sorted(set(removed_support) - retired_support)
+    if rejected_support:
+        fail("previous-support-removal", f"descriptor support units disappeared: {rejected_support}")
+    # Reviewed rehomes and memory retirements can only shrink a support unit's
+    # frozen base-call provenance. Unreviewed source removals already fail above. Preserve mapping and
     # list order while filtering those exact paths so reordering remains drift.
     def without_moved_references(unit: dict[str, object]) -> dict[str, object]:
         normalized = copy.deepcopy(unit)
@@ -1835,6 +1814,7 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
                     references[symbol] = [
                         path for path in paths
                         if path not in HOST_ADAPTER_REHOMES and path not in admitted_units
+                        and path not in retired_units
                     ]
         return normalized
 
@@ -1886,6 +1866,10 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
     for symbol in added_symbols:
         row = current_rows[symbol]
         references = set(row["references"])
+        if (memory_migration and symbol in MEMORY_ADAPTER_IMPORTS and
+                row["references"] == MEMORY_ADAPTER_IMPORTS[symbol] and
+                row["disposition"] == "injected-module-contract"):
+            continue
         if (probe_mode_migrated and symbol == "getpid" and
                 references == {"src/modules/db2/c/db2_init.c"} and
                 row["disposition"] == "system-link"):
@@ -1904,6 +1888,11 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
         before = set(previous_rows[symbol]["references"])
         after = set(current_rows[symbol]["references"])
         growth = after - before
+        if (memory_migration and symbol == "memchr" and
+                growth == {"src/modules/db2/c/fact_recall.c"} and
+                previous_rows[symbol]["disposition"] == "system-link" and
+                current_rows[symbol]["disposition"] == "system-link"):
+            continue
         if (probe_mode_migrated and symbol == "getenv" and
                 growth == {"src/modules/db2/c/db2_init.c"} and
                 current_rows[symbol]["disposition"] == "system-link"):

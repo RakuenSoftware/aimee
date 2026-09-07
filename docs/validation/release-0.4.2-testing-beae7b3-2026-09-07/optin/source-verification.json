@@ -1,0 +1,61 @@
+{
+  "parent_commit": "beae7b3f8d377aeef05530dd2fafbbbe8c56b935",
+  "production_sources_sha256": [
+    {
+      "sha256": "033f34b5ef3dba7235330160b9d4f67e5c76aca52785898f2cb9b62b6ba97ea2",
+      "path": "Dockerfile.postgres"
+    },
+    {
+      "sha256": "56c0179fb6365a0b6b3d5126349661e05ef8ca2888c8f6f35a38148622a0bf68",
+      "path": "server-go/go.mod"
+    },
+    {
+      "sha256": "a041059e5a51794f30a9d88c35a8c267f1579353d46d953ff2b709bc517ac851",
+      "path": "server-go/go.sum"
+    },
+    {
+      "sha256": "efa97dc3e0b2daa68a63be586d148636a682bd2d19d7c04e4589ab49f9c0cb72",
+      "path": "scripts/postgres-secure-entrypoint.sh"
+    },
+    {
+      "sha256": "e1191b12d343a1e7f5505ff8c6edcacc474e95a58f48d6828c8425df30adb237",
+      "path": "scripts/postgres-store-init.sh"
+    },
+    {
+      "sha256": "74334fdac62cad0ea46957974cab36b57766988136dc804d0c59b5015be445e0",
+      "path": "server-go/modules/postgres/storage/cmd/aimee-postgres-storage/main.go"
+    },
+    {
+      "sha256": "04561aaee596054a37f0794ff893e2bdb6229c845dc3dee98210b37eb4d705d4",
+      "path": "server-go/modules/postgres/storage/loop_linux.go"
+    },
+    {
+      "sha256": "1aef691411ce87b585f6ef4f6ebb14696be61facf7220cf4930cd6446237e9f6",
+      "path": "server-go/modules/postgres/storage/migration_linux.go"
+    },
+    {
+      "sha256": "84901256df026304229d2a1cd5949314182f8395dafea66adf132d292a01ae1c",
+      "path": "server-go/modules/postgres/storage/plain_linux.go"
+    },
+    {
+      "sha256": "fc2e7308ff62871139a7df1784088e7381883100c7210d4c41abf852d03f69d5",
+      "path": "server-go/modules/postgres/storage/secret_linux.go"
+    },
+    {
+      "sha256": "ad10e796778e4d08693722dd2ceb4779c880e9e1941ab40311154fd0f7f4e8bb",
+      "path": "server-go/modules/postgres/storage/unlock_linux.go"
+    },
+    {
+      "sha256": "bf53d4eeac75b9b530c110a5a257dd676c9c13c59bfe831dc4423d1c4e55c8e8",
+      "path": "server-go/modules/postgres/storage/unlock_other.go"
+    },
+    {
+      "sha256": "6d6dd797a02eb5ed155bfb26b44eef96dd29318c802183dd419a9c41fae6db1e",
+      "path": "server-go/modules/postgres/storage/volume_linux.go"
+    }
+  ],
+  "verification": {
+    "checked_files": 13,
+    "mismatches": []
+  }
+}

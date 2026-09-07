@@ -41,7 +41,7 @@
 optional_modules_for_placement() {
     case "$1" in
         server) echo "governance roundtable benchmarks runtime-web economizer" ;;
-        kb)     echo "kb-synthesis control-web benchmarks postgres" ;;
+        kb)     echo "kb-synthesis control-web benchmarks" ;;
         *)      echo "" ;;
     esac
 }
@@ -105,16 +105,9 @@ apply_optional_modules() {
     for _om_id in $(optional_modules_for_placement "$_om_placement"); do
         _om_intent="$(_module_intent "$_om_id")"
 
-        # runtime-web's browser UI has its own long-standing switch. If the
-        # operator turned the UI off and said nothing about the module, the
-        # module has nothing to serve, so follow the UI switch rather than
-        # leaving an idle process attached to the bus.
-        if [ "$_om_id" = "runtime-web" ] && [ -z "$_om_intent" ]; then
-            case "$(printf '%s' "${AIMEE_RUNTIME_WEB_ENABLED:-}" | tr '[:upper:]' '[:lower:]')" in
-                0|false|off|no) _om_intent=off ;;
-            esac
-        fi
-
+        # AIMEE_RUNTIME_WEB_ENABLED controls the browser process separately.
+        # The runtime-web module also classifies HTTP errors for API-only servers;
+        # retain it unless the operator explicitly disables that module.
         [ -n "$_om_intent" ] || continue
 
         _om_present=0

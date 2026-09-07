@@ -90,6 +90,8 @@ static void test_apikey_ref_not_serialized(void)
  * (e.g. `agent add $VAR`) holds the unexpanded reference in api_key. */
 static void test_apikey_ref_fallback_save(void)
 {
+   /* This case creates a new roster, independent of the previous test. */
+   unlink(agent_config_path());
    agent_config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.agent_count = 1;

@@ -398,7 +398,7 @@ func wfeBudgetTotals(ctx context.Context, q store.Queryer, f []string) (uint32, 
 		return 0, nil, err
 	}
 	return store.StatusOK, []string{
-		rootID, store.Ftoa(maxUSD), store.Ftoa(spent),
+		rootID, store.Ftoa(spent), store.Ftoa(maxUSD),
 	}, nil
 }
 

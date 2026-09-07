@@ -38,6 +38,7 @@
 #include <aimee/tools/module_api.h>
 #include <aimee/workspace/module_api.h>
 #include <aimee/workflows/module_api.h>
+#include "cJSON.h"
 
 #include <limits.h>
 #include <stdatomic.h>
@@ -47,6 +48,8 @@
 #include <time.h>
 
 #define MODULE_STAGE_DEADLINE_NS (500ULL * 1000000ULL)
+/* Match KB and the shared memory adapter: data stages perform database I/O. */
+#define MODULE_MEMORY_DATA_DEADLINE_NS (5ULL * 1000000000ULL)
 
 static atomic_uint_fast64_t next_trace = 1;
 
@@ -58,19 +61,70 @@ static uint64_t monotonic_ns(void)
    return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
 }
 
-static int call_module(uint32_t event_kind, uint32_t stage_id, const void *request,
-                       uint32_t request_len, void *response, uint32_t response_capacity,
-                       uint32_t *response_len)
+static int call_module_with_budget(uint32_t event_kind, uint32_t stage_id, const void *request,
+                                   uint32_t request_len, void *response, uint32_t response_capacity,
+                                   uint32_t *response_len, uint64_t budget_ns)
 {
    uint64_t now = monotonic_ns();
-   if (!now)
+   if (!now || budget_ns > UINT64_MAX - now)
       return -1;
    uint64_t trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
    if (trace == 0)
       trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
-   return (int)obs_bus_module_call(event_kind, stage_id, trace, now + MODULE_STAGE_DEADLINE_NS,
-                                   request, request_len, response, response_capacity, response_len,
-                                   NULL, NULL);
+   return (int)obs_bus_module_call(event_kind, stage_id, trace, now + budget_ns, request,
+                                   request_len, response, response_capacity, response_len, NULL,
+                                   NULL);
+}
+
+static int call_module(uint32_t event_kind, uint32_t stage_id, const void *request,
+                       uint32_t request_len, void *response, uint32_t response_capacity,
+                       uint32_t *response_len)
+{
+   return call_module_with_budget(event_kind, stage_id, request, request_len, response,
+                                  response_capacity, response_len, MODULE_STAGE_DEADLINE_NS);
+}
+
+cJSON *server_module_memory_data(const cJSON *request)
+{
+   if (!cJSON_IsObject(request))
+      return NULL;
+   cJSON *wire = cJSON_Duplicate(request, 1);
+   cJSON *scope = cJSON_CreateObject();
+   if (!wire || !scope)
+   {
+      cJSON_Delete(wire);
+      cJSON_Delete(scope);
+      return NULL;
+   }
+   cJSON_AddStringToObject(scope, "type", "user");
+   cJSON_DeleteItemFromObjectCaseSensitive(wire, "scope");
+   cJSON_AddItemToObject(wire, "scope", scope);
+   char *encoded = cJSON_PrintUnformatted(wire);
+   cJSON_Delete(wire);
+   if (!encoded)
+      return NULL;
+   size_t request_len = strlen(encoded);
+   if (request_len == 0 || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
+   {
+      free(encoded);
+      return NULL;
+   }
+   uint8_t *response = malloc(AIMEE_MODULE_MESSAGE_MAX_BODY);
+   uint32_t response_len = 0;
+   if (!response)
+   {
+      free(encoded);
+      return NULL;
+   }
+   int rc = call_module_with_budget(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, encoded,
+                                    (uint32_t)request_len, response, AIMEE_MODULE_MESSAGE_MAX_BODY,
+                                    &response_len, MODULE_MEMORY_DATA_DEADLINE_NS);
+   free(encoded);
+   cJSON *decoded = NULL;
+   if (rc == 0 && response_len > 0)
+      decoded = cJSON_ParseWithLength((const char *)response, response_len);
+   free(response);
+   return decoded;
 }
 
 static int memory_confidence(double score, const char **confidence)
@@ -250,6 +304,33 @@ static int memory_pii_sensitivity(const char *const *rel_types, int count, rel_s
    free(request);
    free(response);
    free(tiers);
+   return rc;
+}
+
+static int memory_pii_inject(int sensitivity, double confidence, int turn_requests_sensitive,
+                             int *allowed)
+{
+   if (!allowed)
+      return -1;
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return -1;
+   cJSON_AddStringToObject(request, "operation", "pii-inject");
+   cJSON_AddNumberToObject(request, "sensitivity", (double)sensitivity);
+   cJSON_AddNumberToObject(request, "confidence", confidence);
+   cJSON_AddBoolToObject(request, "turn_requests_sensitive", turn_requests_sensitive != 0);
+   cJSON *response = server_module_memory_data(request);
+   cJSON_Delete(request);
+   if (!response)
+      return -1;
+   cJSON *value = cJSON_GetObjectItemCaseSensitive(response, "allowed");
+   int rc = -1;
+   if (cJSON_IsBool(value))
+   {
+      *allowed = cJSON_IsTrue(value) ? 1 : 0;
+      rc = 0;
+   }
+   cJSON_Delete(response);
    return rc;
 }
 
@@ -1206,6 +1287,7 @@ void server_module_stage_adapters_configure(void)
    memory_extract_register_turn_scanner(memory_scan_turn);
    memory_pii_register_turn_classifier(memory_pii_turn);
    memory_pii_register_sensitivity_batch(memory_pii_sensitivity);
+   memory_pii_register_inject_classifier(memory_pii_inject);
    learning_router_register_signal_classifier(learning_classify);
    delegate_role_register_canonicalizer(delegate_canonicalize);
    delegate_routing_register_capability_provider(delegate_infer_caps);

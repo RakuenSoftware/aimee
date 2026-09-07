@@ -1,0 +1,37 @@
+[
+  {
+    "name": "plain-T3",
+    "passed": true,
+    "elapsed_seconds": 192.1
+  },
+  {
+    "name": "plain-T1",
+    "passed": true,
+    "elapsed_seconds": 35.0
+  },
+  {
+    "name": "plain-T2",
+    "passed": true,
+    "elapsed_seconds": 315.2
+  },
+  {
+    "name": "plain-upgrade041",
+    "passed": true,
+    "elapsed_seconds": 90.8
+  },
+  {
+    "name": "luks-T2",
+    "passed": true,
+    "elapsed_seconds": 348.9
+  },
+  {
+    "name": "luks-fresh",
+    "passed": true,
+    "elapsed_seconds": 38.3
+  },
+  {
+    "name": "luks-upgrade",
+    "passed": true,
+    "elapsed_seconds": 37.8
+  }
+]

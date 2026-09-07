@@ -1,0 +1,18 @@
+[
+  {
+    "name": "aimee-server healthy and matches published image",
+    "passed": true
+  },
+  {
+    "name": "aimee-store-db healthy and matches published image",
+    "passed": true
+  },
+  {
+    "name": "aimee-embedder healthy and matches published image",
+    "passed": true
+  },
+  {
+    "name": "aimee-llm healthy and matches published image",
+    "passed": true
+  }
+]

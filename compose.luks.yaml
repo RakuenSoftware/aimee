@@ -1,0 +1,25 @@
+# Explicit opt-in: layer over compose.yaml (or the managed Server composition).
+# Device paths and major number refer to the Docker daemon's Linux host.
+services:
+  aimee-store-db:
+    cap_add: [SYS_ADMIN]
+    security_opt: [apparmor:unconfined]
+    devices: [/dev/mapper/control:/dev/mapper/control, /dev/loop-control:/dev/loop-control]
+    device_cgroup_rules:
+      - 'b 7:* rwm'
+      - 'b ${AIMEE_DEVICE_MAPPER_MAJOR:?Set the Docker host device-mapper major for LUKS}:* rwm'
+    ulimits:
+      memlock: 1073741824
+      core: 0
+    environment:
+      AIMEE_POSTGRES_STORAGE: luks
+      AIMEE_POSTGRES_VOLUME_MIB: ${AIMEE_POSTGRES_VOLUME_MIB:-32768}
+    volumes:
+      - aimee-postgres-control:/run/aimee-postgres
+  aimee-server:
+    environment:
+      AIMEE_POSTGRES_STORAGE_SOCKET: /run/aimee-postgres/storage.sock
+    volumes:
+      - aimee-postgres-control:/run/aimee-postgres:ro
+volumes:
+  aimee-postgres-control:

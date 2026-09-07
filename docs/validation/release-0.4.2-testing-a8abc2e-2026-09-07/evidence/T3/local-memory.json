@@ -1,0 +1,206 @@
+[
+  {
+    "name": "KB-free local store",
+    "passed": true
+  },
+  {
+    "name": "KB-free recall {}",
+    "passed": true
+  },
+  {
+    "name": "recall returns personal text and scoped handle {}",
+    "passed": true
+  },
+  {
+    "name": "KB-free recall {'store': 'user'}",
+    "passed": true
+  },
+  {
+    "name": "recall returns personal text and scoped handle {'store': 'user'}",
+    "passed": true
+  },
+  {
+    "name": "personal recall tolerates brief database contention",
+    "passed": true
+  },
+  {
+    "name": "delayed recall preserves personal text and scoped handle",
+    "passed": true
+  },
+  {
+    "name": "KB-free session recall without hint",
+    "passed": true
+  },
+  {
+    "name": "KB-free CLI recall",
+    "passed": true
+  },
+  {
+    "name": "KB-free MCP recall",
+    "passed": true
+  },
+  {
+    "name": "recall rejects invalid store",
+    "passed": true
+  },
+  {
+    "name": "KB-free recall survives restart",
+    "passed": true
+  },
+  {
+    "name": "KB-free recall reports unavailable local store",
+    "passed": true
+  },
+  {
+    "name": "KB-free recall recovers",
+    "passed": true
+  },
+  {
+    "name": "KB-free local retirement",
+    "passed": true
+  },
+  {
+    "name": "KB-free recall after retirement",
+    "passed": true
+  },
+  {
+    "name": "retired personal record excluded from recall",
+    "passed": true
+  },
+  {
+    "name": "user HTTP rejects confidence -1",
+    "passed": true
+  },
+  {
+    "name": "user MCP store rejects confidence -1",
+    "passed": true
+  },
+  {
+    "name": "user MCP update rejects confidence -1",
+    "passed": true
+  },
+  {
+    "name": "user MCP supersede rejects confidence -1",
+    "passed": true
+  },
+  {
+    "name": "user HTTP rejects confidence 1.01",
+    "passed": true
+  },
+  {
+    "name": "user MCP store rejects confidence 1.01",
+    "passed": true
+  },
+  {
+    "name": "user MCP update rejects confidence 1.01",
+    "passed": true
+  },
+  {
+    "name": "user MCP supersede rejects confidence 1.01",
+    "passed": true
+  },
+  {
+    "name": "user HTTP rejects confidence False",
+    "passed": true
+  },
+  {
+    "name": "user MCP store rejects confidence False",
+    "passed": true
+  },
+  {
+    "name": "user MCP update rejects confidence False",
+    "passed": true
+  },
+  {
+    "name": "user MCP supersede rejects confidence False",
+    "passed": true
+  },
+  {
+    "name": "user HTTP rejects confidence None",
+    "passed": true
+  },
+  {
+    "name": "user MCP store rejects confidence None",
+    "passed": true
+  },
+  {
+    "name": "user MCP update rejects confidence None",
+    "passed": true
+  },
+  {
+    "name": "user MCP supersede rejects confidence None",
+    "passed": true
+  },
+  {
+    "name": "user HTTP rejects confidence 'invalid'",
+    "passed": true
+  },
+  {
+    "name": "user MCP store rejects confidence 'invalid'",
+    "passed": true
+  },
+  {
+    "name": "user MCP update rejects confidence 'invalid'",
+    "passed": true
+  },
+  {
+    "name": "user MCP supersede rejects confidence 'invalid'",
+    "passed": true
+  },
+  {
+    "name": "user HTTP rejects confidence []",
+    "passed": true
+  },
+  {
+    "name": "user MCP store rejects confidence []",
+    "passed": true
+  },
+  {
+    "name": "user MCP update rejects confidence []",
+    "passed": true
+  },
+  {
+    "name": "user MCP supersede rejects confidence []",
+    "passed": true
+  },
+  {
+    "name": "user HTTP rejects confidence {}",
+    "passed": true
+  },
+  {
+    "name": "user MCP store rejects confidence {}",
+    "passed": true
+  },
+  {
+    "name": "user MCP update rejects confidence {}",
+    "passed": true
+  },
+  {
+    "name": "user MCP supersede rejects confidence {}",
+    "passed": true
+  },
+  {
+    "name": "user stores confidence 0",
+    "passed": true
+  },
+  {
+    "name": "user preserves confidence 0",
+    "passed": true
+  },
+  {
+    "name": "user stores confidence 0.25",
+    "passed": true
+  },
+  {
+    "name": "user preserves confidence 0.25",
+    "passed": true
+  },
+  {
+    "name": "user stores confidence 1",
+    "passed": true
+  },
+  {
+    "name": "user preserves confidence 1",
+    "passed": true
+  }
+]

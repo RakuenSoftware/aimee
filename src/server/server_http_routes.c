@@ -1882,6 +1882,13 @@ const http_route_t g_v1_routes[] = {
     {"GET", "/v1/episode/list", NULL, RM_EXACT, "episode.list", 0, rh_dispatch_op},
 
     /* provider.* / model.* / api.* (op-parity wave 3). */
+    {"POST", "/v1/provider/connection_models", NULL, RM_EXACT, "provider.connection_models", 0,
+     rh_dispatch_op},
+    {"GET", "/v1/provider/connections", NULL, RM_EXACT, "provider.connections", 0, rh_dispatch_op},
+    {"POST", "/v1/provider/save_connection", NULL, RM_EXACT, "provider.save_connection", 0,
+     rh_dispatch_op},
+    {"POST", "/v1/provider/remove_connection", NULL, RM_EXACT, "provider.remove_connection", 0,
+     rh_dispatch_op},
     {"GET", "/v1/provider/list", NULL, RM_EXACT, "provider.list", 0, rh_dispatch_op},
     {"GET", "/v1/provider/models", NULL, RM_EXACT, "provider.models", 0, rh_dispatch_op},
     {"POST", "/v1/provider/get", NULL, RM_EXACT, "provider.get", 0, rh_dispatch_op},

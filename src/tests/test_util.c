@@ -1,6 +1,7 @@
 #include <assert.h>
 #ifndef AIMEE_WINDOWS
 #include <regex.h>
+#include <pthread.h>
 #endif
 #include <stdio.h>
 #include <string.h>
@@ -281,6 +282,46 @@ static void test_is_contradiction(void)
 }
 
 #ifndef AIMEE_WINDOWS
+static char *remote_probe(void *ctx, const char *cmd, int *ec)
+{
+   assert(strcmp(cmd, "printf local") == 0);
+   assert(strcmp(run_cmd_get_cwd(), "/client/only") == 0);
+   *ec = *(int *)ctx;
+   return *ec ? NULL : strdup("remote");
+}
+
+static void *unbound_probe_thread(void *ctx)
+{
+   (void)ctx;
+   int ec;
+   assert(run_cmd_get_cwd() == NULL);
+   char *out = run_cmd("printf local", &ec);
+   assert(out && strcmp(out, "local") == 0 && ec == 0);
+   free(out);
+   return NULL;
+}
+
+static void test_run_cmd_scoped_executor(void)
+{
+   int status = 0, ec = -1;
+   run_cmd_set_cwd("/client/only");
+   run_cmd_executor_t old = run_cmd_exchange_executor((run_cmd_executor_t){remote_probe, &status});
+   char *out = run_cmd("printf local", &ec);
+   assert(out && strcmp(out, "remote") == 0 && ec == 0);
+   free(out);
+   pthread_t other;
+   assert(pthread_create(&other, NULL, unbound_probe_thread, NULL) == 0);
+   assert(pthread_join(other, NULL) == 0);
+   status = -1;
+   out = run_cmd("printf local", &ec);
+   assert(out == NULL && ec == -1); /* unavailable runner must not execute locally */
+   run_cmd_exchange_executor(old);
+   run_cmd_set_cwd(NULL);
+   out = run_cmd("printf local", &ec);
+   assert(out && strcmp(out, "local") == 0 && ec == 0);
+   free(out);
+}
+
 static void test_run_cmd(void)
 {
    int ec = -1;
@@ -555,6 +596,7 @@ int main(void)
    test_strip_ai_attribution();
 #ifndef AIMEE_WINDOWS
    test_run_cmd();
+   test_run_cmd_scoped_executor();
    test_run_cmd_env();
    test_regex_match();
 #endif

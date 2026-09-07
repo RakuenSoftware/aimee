@@ -13,7 +13,7 @@
   "ownership_complete": true,
   "go_sources": [
     "server-go/modules/aimee/cmd/peerprobe/main.go",
-    "server-go/modules/aimee/db1directory.go",
+    "server-go/modules/aimee/session_directory.go",
     "server-go/modules/aimee/families/agent_work.go",
     "server-go/modules/aimee/families/agent_work_coord.go",
     "server-go/modules/aimee/families/agent_work_cron.go",
@@ -68,16 +68,16 @@
     "server-go/modules/aimee/peer_capability.go",
     "server-go/modules/aimee/peerwire/wire.go",
     "server-go/modules/aimee/serve.go",
-    "server-go/modules/aimee/store_client.go",
-    "server-go/modules/aimee/store_wire.go",
+    "server-go/modules/aimee/db_contract.go",
     "server-go/modules/aimee/wire.go"
   ],
   "go_tests": [
+    "server-go/modules/aimee/db_contract_test.go",
     "server-go/modules/aimee/aimee_test.go",
     "server-go/modules/aimee/arity_test.go",
     "server-go/modules/aimee/cmd/peerprobe/main_test.go",
     "server-go/modules/aimee/cmd/peerprobe/record_test.go",
-    "server-go/modules/aimee/db1directory_test.go",
+    "server-go/modules/aimee/session_directory_test.go",
     "server-go/modules/aimee/families/all_test.go",
     "server-go/modules/aimee/families/catalog_test.go",
     "server-go/modules/aimee/families/checkpoints_test.go",
@@ -113,11 +113,6 @@
     "server-go/modules/aimee/peer/peer_test.go",
     "server-go/modules/aimee/peerwire/cwire_test.go",
     "server-go/modules/aimee/peerwire/wire_test.go",
-    "server-go/modules/aimee/store_bytes_test.go",
-    "server-go/modules/aimee/store_client_test.go",
-    "server-go/modules/aimee/store_contract_test.go",
-    "server-go/modules/aimee/store_opcodes_test.go",
-    "server-go/modules/aimee/store_tx_test.go",
     "server-go/modules/aimee/unavailable_test.go"
   ],
   "docs": [

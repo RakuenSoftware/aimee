@@ -81,8 +81,14 @@ static int config_source_path(char *out, size_t n)
 
 static int source_stat_equal(const struct stat *a, const struct stat *b)
 {
+#ifdef __APPLE__
+   return a->st_dev == b->st_dev && a->st_ino == b->st_ino && a->st_size == b->st_size &&
+          a->st_mtimespec.tv_sec == b->st_mtimespec.tv_sec &&
+          a->st_mtimespec.tv_nsec == b->st_mtimespec.tv_nsec;
+#else
    return a->st_dev == b->st_dev && a->st_ino == b->st_ino && a->st_size == b->st_size &&
           a->st_mtim.tv_sec == b->st_mtim.tv_sec && a->st_mtim.tv_nsec == b->st_mtim.tv_nsec;
+#endif
 }
 
 /* Refresh from the external module's own Go store when a legacy native test

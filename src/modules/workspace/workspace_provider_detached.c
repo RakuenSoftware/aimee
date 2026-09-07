@@ -321,7 +321,8 @@ static int detached_exec(const workspace_provider_t *p, const char *const argv[]
  * string + the optional thread-local cwd rather than an argv array). Parses the
  * same {rc, output(base64)} response shape. Returns the decoded combined output
  * (caller frees; may be NULL) and sets *exit_code to the command's status. */
-static char *detached_exec_shell(const workspace_provider_t *p, const char *cmd, int *exit_code)
+static char *detached_exec_shell_with_timeout(const workspace_provider_t *p, const char *cmd,
+                                              int timeout_ms, int *exit_code)
 {
    if (exit_code)
       *exit_code = -1;
@@ -332,6 +333,8 @@ static char *detached_exec_shell(const workspace_provider_t *p, const char *cmd,
    if (!req)
       return NULL;
    cJSON_AddStringToObject(req, "cmd", cmd);
+   if (timeout_ms > 0)
+      cJSON_AddNumberToObject(req, "timeout_ms", timeout_ms);
    const char *cwd = run_cmd_get_cwd();
    if (cwd && cwd[0])
       cJSON_AddStringToObject(req, "cwd", cwd);
@@ -354,6 +357,17 @@ static char *detached_exec_shell(const workspace_provider_t *p, const char *cmd,
    }
    cJSON_Delete(resp);
    return out;
+}
+
+static char *detached_exec_shell(const workspace_provider_t *p, const char *cmd, int *exit_code)
+{
+   return detached_exec_shell_with_timeout(p, cmd, 0, exit_code);
+}
+
+static char *detached_exec_shell_timeout(const workspace_provider_t *p, const char *cmd,
+                                         int timeout_ms, int *exit_code)
+{
+   return detached_exec_shell_with_timeout(p, cmd, timeout_ms, exit_code);
 }
 
 /* Bridge a streaming transport's partial responses (cJSON {"chunk":<b64>}) to
@@ -434,6 +448,7 @@ void ws_detached_provider_init_ex(ws_detached_provider_t *out, ws_detached_trans
    out->base.list = detached_list;
    out->base.exec = detached_exec;
    out->base.exec_shell = detached_exec_shell;
+   out->base.exec_shell_timeout = detached_exec_shell_timeout;
    /* Only expose exec_stream when a streaming transport is bound, so callers can
     * test `ws->exec_stream != NULL` to decide whether to route a CLI agent to
     * the client (a mock/unary-only provider leaves it off → local fork/exec). */
@@ -668,6 +683,8 @@ cJSON *ws_detached_runner_handle(const cJSON *request)
    {
       const char *cmd = req_str(request, "cmd");
       const char *cwd = req_str(request, "cwd");
+      const cJSON *jtimeout = cJSON_GetObjectItemCaseSensitive(request, "timeout_ms");
+      int timeout_ms = cJSON_IsNumber(jtimeout) ? (int)jtimeout->valuedouble : 0;
       if (!cmd)
       {
          cJSON_AddNumberToObject(resp, "rc", -1);
@@ -680,7 +697,9 @@ cJSON *ws_detached_runner_handle(const cJSON *request)
          char *saved = prev_cwd ? strdup(prev_cwd) : NULL;
          run_cmd_set_cwd(cwd);
          int rc = -1;
-         char *out = ws->exec_shell(ws, cmd, &rc);
+         char *out = timeout_ms > 0 && ws->exec_shell_timeout
+                         ? ws->exec_shell_timeout(ws, cmd, timeout_ms, &rc)
+                         : ws->exec_shell(ws, cmd, &rc);
          run_cmd_set_cwd(saved);
          free(saved);
          cJSON_AddNumberToObject(resp, "rc", rc);

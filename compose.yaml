@@ -1,112 +1,123 @@
+# Start with scripts/compose-local.sh so first-boot SQL credentials enter Vault.
+# Standard single-user deployment. KB is an optional remote connection.
+# One application image contains both immutable role compositions; this stack
+# establishes Server identity on first boot. See compose.kb.yaml to host a KB.
 services:
-  aimee-kb:
+  aimee-store-db:
     restart: unless-stopped
-    # Published image (pushed to ghcr on every merge to main); override
-    # AIMEE_KB_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-a25m:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
-      dockerfile: Dockerfile
-    # The kb's drain/ingest/watch/query worker threads need a 64 MB stack; the
-    # 8 MB container default overflows and SIGSEGVs (exit 139) on real memory/kb
-    # queries. Matches systemd's LimitSTACK=67108864 and the cli fork-exec ulimit.
+      dockerfile: Dockerfile.postgres
+    image: ${AIMEE_POSTGRES_IMAGE:-ghcr.io/rakuensoftware/aimee-postgres:${AIMEE_IMAGE_TAG:-latest}}
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${AIMEE_STORE_ADMIN_PASSWORD:?AIMEE_STORE_ADMIN_PASSWORD is required}
+      POSTGRES_DB: aimee_store
+      AIMEE_STORE_MIGRATOR_PASSWORD: ${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required}
+      AIMEE_STORE_RUNTIME_PASSWORD: ${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required}
+    networks: [store]
+    volumes:
+      - aimee-postgres-encrypted:/var/lib/aimee-postgres
+      - aimee-store-tls:/run/aimee-store-tls
+    healthcheck:
+      test: [CMD-SHELL, 'PGSSLMODE=require PGPASSWORD="$${AIMEE_STORE_RUNTIME_PASSWORD}" psql -h 127.0.0.1 -U aimee_store_runtime -d aimee_store -Atqc "SELECT 1" | grep -qx 1']
+      interval: 5s
+      timeout: 3s
+      start_period: 120s
+      retries: 20
+    stop_grace_period: 60s
+
+  aimee-server:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    image: ${AIMEE_APPLICATION_IMAGE:-ghcr.io/rakuensoftware/aimee:${AIMEE_IMAGE_TAG:-latest}}
+    # service_started also permits the optional Vault-backed LUKS startup.
+    depends_on:
+      aimee-store-db:
+        condition: service_started
     ulimits:
       stack: 67108864
+      memlock: 1073741824
+      core: 0
     environment:
       AIMEE_HOME: /var/lib/aimee
-      # External DB2 credentials are streamed into the KB Vault by the
-      # disposable Compose helper; never persist them in Config.Env.
-      # SYNTH ONLY (curator Tier-A & B, at {url}/v1) and deliberately defaulted
-      # empty: the aimee-llm container is retired, so any default would point
-      # every deploy at a dead host. Embedding does not read this — set
-      # EMBEDDER_URL to embed against an external endpoint instead of
-      # the bundled in-container model.
-      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
-      # The bundled synthesis model, on a *-llm image variant: the entrypoint
-      # starts llama-server for it and points SYNTHESIS_ENDPOINT at loopback.
-      # Empty on a non-llm image, or when synthesis is remote/off.
-      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
-      # The wizard's embedder choice, and the endpoint for an external one. The kb
-      # MUST receive both: `aimee config deploy-env` emits them, and without them
-      # reaching the container the entrypoint sees no selection, starts nothing, and
-      # the builtin serves forever — the wizard's embedder silently never runs.
-      # Keep the selection paired with the default bundled-image variant. The
-      # entrypoint intentionally refuses to guess a vector space, so an empty
-      # value makes the default image restart forever despite carrying A25M.
+      AIMEE_INSTANCE_ROLE: server
+      AIMEE_MODEL_SERVICES_ENABLED: '1'
+      AIMEE_MODULE_ROUNDTABLE: ${AIMEE_MODULE_ROUNDTABLE:-1}
+      AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
+      AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
       EMBEDDER_MODEL: ${EMBEDDER_MODEL:-bekko-a25m}
-      EMBEDDER_URL: ${EMBEDDER_URL:-}
-      # Embedding dim — empty = config default 384 (bundled bekko-a25m). Only set
-      # it for an external embedder of a different width; changing it against a
-      # populated kb forces a re-embed, and the dim guard will refuse until you do.
-      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
-    # aimee-kb serves /v1 over HTTP only; the legacy --socket transport was retired (#2747).
-    command: ["--http-port=8741"]
+      EMBEDDER_URL: ${EMBEDDER_URL:-https://aimee-embedder:8762}
+      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-384}
+      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
+      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
     ports:
-      - "127.0.0.1:8741:8741"
+      - '${AIMEE_API_PORT:-8743}:8743'
+      - '${AIMEE_WEB_PORT:-8443}:8443'
+    networks: [default, store, models]
+    volumes:
+      - aimee-server-home:/var/lib/aimee
+      - aimee-server-workspaces:/var/lib/aimee-workspaces
+      - aimee-store-tls:/run/aimee-store-tls:ro
+      - aimee-model-tls:/run/aimee-model-tls
+      - aimee-embedding-tls:/run/aimee-model-tls/embedding/server
+      - aimee-synthesis-tls:/run/aimee-model-tls/synthesis/server
     healthcheck:
-      test: ["CMD-SHELL", "body=$$(curl -fsS http://127.0.0.1:8741/v1/health) && printf '%s' \"$$body\" | grep -q '\"status\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"db2_ok\":true' && printf '%s' \"$$body\" | grep -q '\"db2_kb_tables_ok\":true'"]
+      test: [CMD-SHELL, 'body=$$(curl -sS --max-time 4 --unix-socket /var/lib/aimee/aimee-http.sock http://localhost/v1/ready) && printf "%s" "$$body" | grep -q ''"ready":true''']
       interval: 10s
       timeout: 5s
-      retries: 5
-      # First boot runs postgres initdb and, on the embedder-bearing images, loads
-      # the weights before /v1/health answers -- longer than retries*interval, so
-      # without this the kb reads as unhealthy while it is still starting normally.
-      # See deploy/container/aimee-managed.compose.yaml for what that broke.
-      start_period: 300s
-    volumes:
-      - aimee-kb-home:/var/lib/aimee
-      - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
+      start_period: 120s
+      retries: 10
 
-  # aimee-control-web: the Control Plane web console (dashboard / accounts / governance).
-  # Optional module `control-web` — ships ENABLED. Turn it off for a fully scripted
-  # deployment with AIMEE_CONTROL_WEB_ENABLED=0 (the container then idles without a
-  # listener). Bound to localhost on the host. It fronts the kb /v1 with a scoped
-  # console-admin credential the operator provisions (see docs/KB_CONSOLE.md):
-  #   1. mint a scope:console-admin enrollment on the kb, install it as
-  #      ./control-web-secrets/console.cred (uid/gid 10001, mode 0600), and
-  #   2. optionally configure OIDC via the console UI. Without the credential the
-  #   container idles healthy with a clear log rather than crash-looping.
-  aimee-control-web:
+  aimee-embedder:
     restart: unless-stopped
-    image: ${AIMEE_CONTROL_WEB_IMAGE:-ghcr.io/rakuensoftware/aimee-control-web:${AIMEE_IMAGE_TAG:-latest}}
-    build:
-      context: .
-      dockerfile: Dockerfile.control-web
-    command: ["-addr", "0.0.0.0:8744", "-kb", "http://aimee-kb:8741"]
-    environment:
-      # Ships on; set to 0 for a fully scripted / headless deployment.
-      AIMEE_CONTROL_WEB_ENABLED: ${AIMEE_CONTROL_WEB_ENABLED:-1}
-      CONTROL_WEB_CRED_FILE: /run/control-web/console.cred
-      CONTROL_WEB_HOME: /var/lib/control-web
-    ports:
-      # Localhost-only on the host — the console is a trusted-LAN admin surface.
-      - "127.0.0.1:8744:8744"
+    image: ${AIMEE_EMBEDDER_IMAGE:-ghcr.io/rakuensoftware/aimee-embedder-${AIMEE_EMBEDDER_VARIANT:-a25m}:${AIMEE_IMAGE_TAG:-latest}}
+    user: '1000:1000'
     depends_on:
-      aimee-kb:
-        condition: service_healthy
-    healthcheck:
-      # No credential is a supported first-boot state: control-web deliberately
-      # idles without a listener until the operator provisions one. Treat that
-      # state (and an explicitly disabled console) as healthy; once a credential
-      # file exists, require the real TLS listener and SPA to answer.
-      test:
-        - CMD-SHELL
-        - >-
-          enabled=$$(printf '%s' "$${AIMEE_CONTROL_WEB_ENABLED:-1}" | tr '[:upper:]' '[:lower:]');
-          case "$$enabled" in 0|false|no|off) exit 0;; esac;
-          if [ ! -f "$${CONTROL_WEB_CRED_FILE}" ]; then exit 0; fi;
-          curl -fsSk https://127.0.0.1:8744/
-      interval: 15s
-      timeout: 5s
-      retries: 5
+      aimee-server:
+        condition: service_started
+    environment:
+      AIMEE_EMBEDDER_IDENTITY_DIR: /run/aimee-model-tls/embedding/server
+      EMBEDDER_THREADS: ${EMBEDDER_THREADS:-2}
+    networks: [models]
     volumes:
-      - control-web-home:/var/lib/control-web
-      # Mount the parent directory so a credential absent on first boot creates
-      # a usable directory, not an unreplaceable directory named console.cred.
-      # The non-root container reads console.cred as uid/gid 10001, mode 0600.
-      - ${CONTROL_WEB_CRED_DIR:-./control-web-secrets}:/run/control-web:ro
+      - aimee-embedding-tls:/run/aimee-model-tls/embedding/server:ro
+
+  aimee-llm:
+    profiles: [synthesis]
+    restart: unless-stopped
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm-${AIMEE_LLM_VARIANT:-e2b}:${AIMEE_IMAGE_TAG:-latest}}
+    user: '1000:1000'
+    depends_on:
+      aimee-server:
+        condition: service_started
+    environment:
+      AIMEE_LLM_IDENTITY_DIR: /run/aimee-model-tls/synthesis/server
+    networks: [models]
+    volumes:
+      - aimee-synthesis-tls:/run/aimee-model-tls/synthesis/server:ro
 
 volumes:
-  aimee-kb-home:
+  # Retain the historical name so existing encrypted stores cannot be hidden.
+  aimee-postgres-encrypted:
+  aimee-store-tls:
+  aimee-server-home:
   aimee-server-workspaces:
-  control-web-home:
+  aimee-model-tls:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1048576,uid=1000,gid=1000,mode=0700
+  aimee-embedding-tls:
+    driver_opts: {type: tmpfs, device: tmpfs, o: 'size=1048576,uid=1000,gid=1000,mode=0700'}
+  aimee-synthesis-tls:
+    driver_opts: {type: tmpfs, device: tmpfs, o: 'size=1048576,uid=1000,gid=1000,mode=0700'}
+
+networks:
+  default:
+  store:
+    internal: true
+  models:
+    internal: true

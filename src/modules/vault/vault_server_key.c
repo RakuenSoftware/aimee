@@ -100,7 +100,7 @@ static void fsync_parent_dir(const char *path)
 
 /* Atomically create the master-key file with `key` at 0600 (tmp + rename +
  * fsync). 0 on success, -1 on error. */
-static int master_key_write(const char *path, const uint8_t key[VAULT_ROOT_KEY_LEN])
+static int master_key_write(const char *path, const uint8_t key[VAULT_ROOT_KEY_LEN], int replace)
 {
    char dir[1024], tmp[1280];
    const char *base = config_default_dir();
@@ -121,10 +121,11 @@ static int master_key_write(const char *path, const uint8_t key[VAULT_ROOT_KEY_L
       if (w == (ssize_t)VAULT_ROOT_KEY_LEN && fsync(fd) == 0)
          rc = 0;
       close(fd);
-      if (rc == 0 && rename(tmp, path) != 0)
+      /* Publish without replacing another process's first-boot key. The temp
+       * file is already synced; link is atomic and fails with EEXIST. */
+      if (rc == 0 && (replace ? rename(tmp, path) : link(tmp, path)) != 0)
          rc = -1;
-      if (rc != 0)
-         unlink(tmp);
+      unlink(tmp);
    }
    if (rc == 0)
       fsync_parent_dir(path); /* make the rename durable across a crash */
@@ -150,7 +151,7 @@ static int derive_and_cache(void)
        * file (which must now be readable, else fail closed). */
       if (vault_crypto_random(master, sizeof(master)) != 0)
          return -1;
-      if (master_key_write(path, master) != 0)
+      if (master_key_write(path, master, 0) != 0)
       {
          OPENSSL_cleanse(master, sizeof(master));
          if (master_key_read(path, master) != MK_READ_OK)
@@ -398,7 +399,7 @@ static int file_rotate(void *ctx, const char *server_principal, int *out_princip
 
    /* Commit: swap in the new master key atomically. Only now is the on-disk
     * master consistent with the freshly re-wrapped server wraps. */
-   if (master_key_write(path, new_master) != 0)
+   if (master_key_write(path, new_master, 1) != 0)
       ROT_FAIL("re-wrap succeeded but persisting the new master key failed — vault restored");
 
    /* New master is live: mark committed FIRST (so a signal here cannot trigger a

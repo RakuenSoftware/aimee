@@ -23,7 +23,7 @@ operation name appearing in Go outside the module that serves it.
 WHAT IT FOUND, AND WHY THE ANSWER IS "NONE": two of 463 came back uncalled,
 state_load and state_save, and both are false negatives. They are the
 economizer's keyed-blob pair, the only operations that do not speak
-db1-fields-v2, and their caller is server-go/db1's LoadState/SaveState using
+db1-fields-v2, and their caller is server-go/aimee's LoadState/SaveState using
 NUMERIC ops on a separate wire rather than the catalog's names. Nothing this
 survey searches for appears at that call site.
 

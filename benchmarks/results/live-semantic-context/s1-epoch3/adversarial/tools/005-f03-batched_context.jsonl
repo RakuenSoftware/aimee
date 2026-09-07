@@ -1,0 +1,1 @@
+{"arguments":{"anchors":[{"column":5,"file":"benchmarks/code-agent-effectiveness/checkpoint_runner.py","line":106}],"max_source_bytes":8000,"operation":"definition"},"completed_at_monotonic_ms":11052,"result":{"observed_at_monotonic_ms":11052,"reason":"checked failure injection: request_timeout","status":"unavailable"},"started_at_monotonic_ms":11052,"tool":"lsp_context"}

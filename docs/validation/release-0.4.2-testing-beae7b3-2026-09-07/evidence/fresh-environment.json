@@ -1,0 +1,12 @@
+{
+  "vm_id": 9436,
+  "hypervisor": "192.168.1.253",
+  "hostname": "aimee-testing-beae7b3-042",
+  "ip_addresses": "192.168.0.244 172.17.0.1",
+  "memory_mib": 16384,
+  "docker_images_before_pull": "",
+  "docker_containers_before_deploy": "",
+  "docker_volumes_before_deploy": "",
+  "docker_version": "Docker version 26.1.5+dfsg1, build a72d7cd",
+  "compose_version": "Docker Compose version 2.26.1-4"
+}

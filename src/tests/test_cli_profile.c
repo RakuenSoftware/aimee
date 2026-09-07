@@ -115,6 +115,22 @@ static void test_invalid_inputs(void)
    printf("  PASS: test_invalid_inputs\n");
 }
 
+static void test_client_profile_after_terminator_is_preserved(void)
+{
+   const char *flags[] = {"-p", "--profile", "--profile=codex-profile"};
+   for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); i++)
+   {
+      char *argv[] = {"aimee", "launch",         "--gateway",     "--",
+                      "codex", (char *)flags[i], "codex-profile", NULL};
+      int argc = 7;
+      char out[64] = "untouched";
+      assert(cli_extract_profile(&argc, argv, out, sizeof(out)) == 0);
+      assert(argc == 7 && strcmp(out, "untouched") == 0);
+      assert(strcmp(argv[5], flags[i]) == 0);
+   }
+   printf("  PASS: client profiles after -- are preserved\n");
+}
+
 int main(void)
 {
    printf("cli_profile:\n");
@@ -126,6 +142,7 @@ int main(void)
    test_short_flag_no_value_returns_zero();
    test_empty_value_rejected();
    test_invalid_inputs();
+   test_client_profile_after_terminator_is_preserved();
    printf("ok\n");
    return 0;
 }

@@ -32,14 +32,13 @@ int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *secrets = cJSON_CreateObject();
    if (!obj)
       return server_send_error(conn, "config: could not read configuration", NULL);
-   for (cJSON *item = obj->child, *next = NULL; item; item = next)
+   for (size_t i = 0; config_client_secret_key(i); i++)
    {
-      next = item->next;
-      if (config_client_key_is_secret(item->string))
-      {
-         cJSON_AddBoolToObject(secrets, item->string, 1);
-         cJSON_ReplaceItemInObjectCaseSensitive(obj, item->string, cJSON_CreateBool(0));
-      }
+      const char *key = config_client_secret_key(i);
+      const char *name = config_client_secret_name(key);
+      cJSON_AddBoolToObject(secrets, key, 1);
+      cJSON_DeleteItemFromObjectCaseSensitive(obj, key);
+      cJSON_AddBoolToObject(obj, key, name && runtime_secret_has(name));
    }
 
    cJSON *resp = jo_ok();
@@ -200,6 +199,8 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (config_client_key_is_secret(key))
    {
+      if (!cJSON_IsString(jval))
+         return server_send_error(conn, "config: credential must be a string", NULL);
       const char *secret_name = config_client_secret_name(key);
       int configured = value[0] ? 1 : 0;
       int stored = config_secret_store(secret_name, value);
@@ -211,8 +212,9 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddStringToObject(resp, "key", key);
       cJSON_AddBoolToObject(resp, "value", configured);
       cJSON_AddBoolToObject(resp, "secret", 1);
-      cJSON_AddStringToObject(resp, "reload", "hot");
-      cJSON_AddBoolToObject(resp, "applied_live", 1);
+      int restart = strcmp(key, "kb_connection_string") == 0;
+      cJSON_AddStringToObject(resp, "reload", restart ? "restart" : "hot");
+      cJSON_AddBoolToObject(resp, "applied_live", !restart);
       return server_send_ok(conn, resp);
    }
 

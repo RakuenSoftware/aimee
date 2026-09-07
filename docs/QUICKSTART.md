@@ -1,370 +1,113 @@
 # Quickstart
 
-Run the services on one machine. Install only the thin client where you write code.
+A single user needs Server, its PostgreSQL store, and an embedding service. A shared KB is optional.
+Server and KB use the same application image, with the role established permanently on first boot.
+Each deployment has its own Vault and standardized PostgreSQL container.
 
-Using a hosted knowledge base such as aimee cloud? The path is the same, with two differences: start
-from `compose.server-standalone.yaml` instead of the managed profile in Section 1, and at
-[Step 3](#step-3-choose-the-knowledge-base) paste your setup code instead of deploying a local
-knowledge base. Sections 2 and 3, installing and enrolling the client, are unchanged.
+## 1. Start a local server
 
-## 1. Start the managed server
-
-You need Docker with Compose v2. The managed server mounts the Docker socket so its browser wizard
-can start the KB container.
+Use Docker with Linux containers and Compose v2.24.4 or newer. PostgreSQL uses an ordinary
+Docker volume by default; no loop devices, device-mapper, or storage administration capability
+is required. LUKS encryption is an [explicit opt-in](DEPLOYMENT.md#optional-luks-encryption).
+The thin client can run on Linux, macOS, or Windows.
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
-cp -n .env.example .env
-for v in ADMIN MIGRATOR RUNTIME; do
-  echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
-done
-docker compose -f compose.server-managed.yaml up -d
-docker compose -f compose.server-managed.yaml logs aimee-server
+umask 077
+# Run credential generation once on a new installation; preserve an existing .env.
+if [ ! -e .env ]; then
+  cp .env.example .env
+  for v in ADMIN MIGRATOR RUNTIME; do
+    echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
+  done
+fi
+scripts/compose-local.sh -f compose.yaml up -d
+scripts/compose-local.sh -f compose.yaml logs aimee-server
 ```
 
-The store runs three separate PostgreSQL roles (an admin, a migrator and a runtime), and every
-Compose profile that starts `aimee-store-db` requires a password for each. There is deliberately no
-default, so no deployment can inherit a password that ships in the repository; without them Compose
-stops before it creates anything:
+The helper seals database credentials into the application Vault before starting services.
+It uses the selected Docker context without inspecting the client's kernel or devices.
+The examples use a POSIX shell. From PowerShell, after creating the private `.env`, run
+`python scripts/compose-vault-init.py -f compose.yaml up` followed by
+`docker compose -f compose.yaml up -d`.
 
-```text
-error while interpolating services.aimee-store-db.environment.POSTGRES_PASSWORD:
-required variable AIMEE_STORE_ADMIN_PASSWORD is missing a value
-```
+The three database passwords configure separate administrator, migrator, and runtime roles. Keep
+`.env` private and preserve its values: changing them later does not change existing database roles.
+SQL connections still require TLS and scoped credentials in the default storage mode.
 
-Compose reads `.env` on its own, so generating them once as above is all that is needed. Keep the
-file: those are the credentials for the data directory that now exists, and changing one later does
-not re-run `initdb`.
+This starts one application container, one PostgreSQL container, and one local embedder. It does
+not start a KB or synthesis model. `compose.server.yaml`, `compose.server-standalone.yaml`, and
+`deploy/compose/aimee.yaml` are aliases of this standard deployment.
 
-When you do not supply a dashboard login, the server generates one on first boot and prints it once
-in that log. The values below show the format. Your values will be different:
+### Browser-managed models
 
-```text
-[webchat] FIRST-BOOT DASHBOARD LOGIN (shown once — copy it now)
-[webchat]     username: aimee-0a901de6e2c3
-[webchat]     password: <64 hex characters>
-```
+Use `compose.server-managed.yaml` in place of `compose.yaml` in the commands above if the browser
+should install or change local model containers. This grants the application access to the host
+Docker socket. The wizard manages only embedding and optional synthesis; it never installs a KB.
 
-Copy the generated password before the log rotates. The plaintext cannot be read back. The data
-volume keeps the username and a root-only password verifier so the PAM account survives a container
-replacement. If you lose the plaintext, reset that account's password inside the container or start
-again from an empty volume. To choose the credential yourself instead, seal it before the first
-`up`. Nothing is then generated or printed:
+The first-boot log prints a generated dashboard username and password once. Open
+<https://localhost:8443>, sign in, and replace the temporary account in the wizard. To choose your
+initial login instead, seal it before the first `up`:
 
 ```bash
-export AIMEE_WEBCHAT_USER=admin
-read -rsp 'Initial webchat password: ' AIMEE_WEBCHAT_PASSWORD && echo
+export AIMEE_WEBCHAT_USER=operator
+read -rsp 'Initial dashboard password: ' AIMEE_WEBCHAT_PASSWORD && echo
 export AIMEE_WEBCHAT_PASSWORD
 scripts/aimee-compose-vault-bootstrap.sh -f compose.server-managed.yaml server
 unset AIMEE_WEBCHAT_PASSWORD
-docker compose -f compose.server-managed.yaml up -d
+scripts/compose-local.sh -f compose.server-managed.yaml up -d
 ```
 
-The first-boot path accepts a name that is also a group in the image because it creates the account
-with `aimee-webchat` as its primary group. The wizard's replacement-account step refuses that
-collision and tells you to choose another name.
+The helper streams credentials through stdin into Vault. The browser uses the resulting local PAM
+account. Its private password verifier survives application container replacement; a generated
+plaintext password cannot be recovered after the first-boot log is gone.
 
-Run the bootstrap script; do not simply export the variables and `up`. `compose.server-managed.yaml`
-deliberately keeps these two out of the server's `environment:` block, because anything listed there
-persists in the container's `Config.Env` for the life of the deployment and is readable from
-`docker inspect`. The script streams them into Vault through a one-shot container instead, so
-`docker compose up` on its own never sees them and would leave you with a generated login.
+### Complete local setup
 
-aimee also needs a git identity, sealed the same way. Without it every commit aimee makes has no
-author and git refuses it, so `aimee git commit`, delegate commits and workflow commits all fail:
+The wizard covers the account, primary provider, **Local memory models**, Git commit identity,
+optional Git-host connection, and workspaces. Completed steps may be hidden when you reopen it.
+There is no KB-installation or database-selection step.
+
+The default embedder is local Bekko A25M with 384 dimensions. A configured external embedding endpoint
+is also supported. Personal memories and their vectors stay in the Server's PostgreSQL store;
+connecting a KB does not move them. If you choose a remote embedding provider, that provider receives
+the text sent for embedding, so use the local model when that text must stay on your machine.
+
+Synthesis may be off, local, or external. It is not required for personal memory storage and recall.
+In managed deployments, save the model choices and apply them from the summary. For a manually
+managed deployment, start the optional local synthesis service with:
 
 ```bash
-export AIMEE_GIT_AUTHOR_NAME='Your Name'
-export AIMEE_GIT_AUTHOR_EMAIL='you@example.com'
-scripts/aimee-compose-vault-bootstrap.sh -f compose.server-managed.yaml server
+scripts/compose-local.sh -f compose.yaml --profile synthesis up -d
 ```
 
-There is deliberately no default. aimee points `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` at
-`/dev/null` so a commit cannot silently inherit the machine's identity, and it will not invent a bot
-author: a commit that cannot say who made it is not made.
+Register its endpoint `https://aimee-llm:8761` in Providers and discover its served model ID. Model
+services use identities issued by their owning Server or KB and require mutual TLS. They do not
+need a KB to run. Changing embedding models changes the vector space: personal memory vectors are
+recomputed, while an existing shared KB corpus requires the guarded
+[embedder migration](runbooks/change-embedder.md).
 
-Those variables are first-boot transport, not runtime configuration. On first boot the entrypoint
-reads the sealed pair and provisions a real local PAM account. The appliance authenticates against
-PAM from the first login onward. The data volume keeps a root-only shadow verifier so the account
-survives an image replacement; it does not keep the plaintext password. An operator-supplied
-password is not logged. A generated password appears only in the first-boot log shown above.
+For external embedding without a local embedder, set `EMBEDDER_URL`, `EMBEDDER_MODEL`, and
+`EMBEDDER_DIMS`, then start only `aimee-server` (its PostgreSQL dependency starts automatically).
 
-Open <https://localhost:8443> and sign in.
+### Optional shared knowledge
 
-![The aimee sign-in page](images/login.png)
+Open **Settings → Knowledge base** to connect an existing KB by setup code or connection details.
+For an enrolled `aimee://` connection, supply the connection string and the KB administrator's
+bearer and service-identity credentials. Secret fields show only whether a value is stored; leaving
+a field blank preserves it. A changed connection string requires an application restart.
 
-Signing in lands you in the chat view with **Set up this instance** open at **Secure your account**.
-It is a dialog, not a separate page. A fresh local setup currently has seven steps. A remote KB
-hides the two local-infrastructure steps, and reopening the wizard hides work you already completed,
-so the displayed total can be smaller. Closing the dialog does not lose saved work: the **Setup**
-button in the header reopens it and shows how many required steps remain.
-
-### Step 1: replace the temporary login
-
-![Step 1 of the setup wizard, secure your account](images/wizard-1-account.png)
-
-The generated login is temporary. This step creates the account you will keep, as a real local PAM
-account, and removes the plaintext of the temporary one. A deployment that sealed its own
-`AIMEE_WEBCHAT_USER` pair before first boot skips this step.
-
-The replacement account uses Aimee's managed login group as its primary group, so common names such
-as `operator`, `backup`, or `staff` remain valid even when a same-named system group already exists.
-The account is still scoped to the managed group and cannot expose unrelated host users.
-
-### Step 2: choose the primary provider
-
-![Step 2 of the setup wizard, primary provider](images/wizard-2-provider.png)
-
-An API key for Anthropic or OpenAI, or a Claude or Codex subscription seat signed in through the
-browser. The key is sealed into the server vault; its plaintext is not written to the data volume.
-You can change the primary later on the Agents tab.
-
-### Step 3: choose the knowledge base
-
-![Step 3 of the setup wizard, knowledge base](images/wizard-3-knowledge-base.png)
-
-Three choices:
-
-- **Deploy a local knowledge base.** The default, and it needs nothing else installed.
-- **Paste a setup code** from a hosted `aimee-kb`, such as aimee cloud. The code is exchanged for
-  that knowledge base's address and key, so this is the third option with the typing removed.
-- **Connect to an existing `aimee-kb` by hand**, with its URL and bearer token.
-
-The last two both save `kb_mode=remote` and deploy nothing here, so the deploy-topology and
-shared-store steps are skipped for either.
-
-A setup code is single-use and short-lived, so the wizard only redeems it when you press the button,
-never as you type. If it is refused the code stays in the box, because the usual cause is a typo
-rather than a dead code, and re-typing should not cost you a fresh one. Nothing is written until an
-exchange succeeds.
-
-If you are attaching to a hosted knowledge base, start from `compose.server-standalone.yaml` rather
-than the managed profile in [Section 1](#1-start-the-managed-server): it runs `aimee-server` with no
-`aimee-kb` and no PostgreSQL, which is what you want when the knowledge base is somewhere else.
-
-For a local KB, the remaining steps place its embedder and optional synthesizer, choose the bundled
-or external shared store, connect an optional Git host, and add workspaces. The embedder runs inside
-the KB container; synthesis runs in its own sidecar or at a remote endpoint. A Git connection can be
-skipped because public repositories do not require one. You can continue without a
-workspace, but setup remains incomplete until at least one project exists.
-
-After the numbered steps, the summary shows a **Deploy the local stack** panel. Its **Deploy** action
-starts one `aimee-kb`, including private PostgreSQL 18, pgvector, and pgvectorscale.
-
-**The embedder runs inside that container. Synthesis does not.** Embedding is served from weights
-baked into the KB image, so it needs no second container. If you selected a local synthesis model,
-Deploy also starts an `aimee-llm` sidecar beside the KB, and the KB reaches it over mutual TLS on the
-Compose network. Choose an external endpoint instead and no sidecar is deployed at all; choose neither
-and synthesis is simply off, which is a supported state. See
-[Choosing an embedder](#choosing-an-embedder), [Local synthesis](#local-synthesis) and
-[KB model backends](KB_LLM_BACKENDS.md).
-
-For a local managed KB, Deploy also runs two explicit one-shot jobs before it
-reports success:
-
-- an isolated authority bootstrap provisions the management-token and manifest
-  roots, publishes the signed generation-1 JWKS, and writes only the public
-  trust bundle into a root-owned volume mounted read-only by the server; and
-- the KB enrolls distinct server client/management certificates and writes the
-  resulting workload identity directly into the server's private volume.
-
-The offline provisioner and publisher are shipped in a separate image; they are
-not linked into or installed in the ordinary KB/server images. The default
-single-host authority is software-backed and appropriate to the local managed
-installation. Deployments requiring hardware custody should keep using an
-operator-managed authority/KMS and supply the explicit identity packet.
-The one-shot locks its address space when the runtime permits it. On an
-unprivileged container host that cannot raise `RLIMIT_MEMLOCK`, it proceeds only
-after verifying through `/proc/swaps` that the host has no active swap; otherwise
-Deploy fails closed.
-
-The Deploy action also claims the signed-in browser account as the first remote owner. It displays one
-`aimee remote set ...` command that provisions that user's bearer, mTLS certificate, and explicit
-`full` write grant. Keep that page open until you finish [Section 3](#3-enroll-the-client).
-
-Complete the account step before exposing the host. A deployment that seals both
-`AIMEE_WEBCHAT_USER` and `AIMEE_WEBCHAT_PASSWORD` before the first `up` uses that pair and skips
-account replacement.
-Supply both or neither: a partial pair is treated as absent, and the server generates and logs a
-credential instead.
-
-The browser login is a **local PAM account**, not an aimee credential. First boot provisions the
-supplied (or generated) pair as a real system account in the `aimee-webchat` group and authenticates
-it through the `aimee` PAM service, the same stack SmoothNAS uses and the same one a KB means when
-`/v1/identity/auth-mode` reports `pam`. The plaintext first-boot value is removed once that account
-exists. Only accounts in that group are dashboard logins: the container's own system users are never
-accepted, and the dashboard cannot see or modify them.
-
-The Vault holds aimee's own secrets: the session key, TLS material, provider credentials. A host
-password is not one of those and is never sealed into it.
-
-When the appliance is connected to a KB that reports `oidc`, the identity provider owns accounts and
-the wizard's account step disappears; local account creation is refused. Dashboard login itself
-remains PAM in this release. Do not configure OIDC-only identity until the browser login flow is
-available.
-
-### Choosing an embedder
-
-The wizard's **Deploy topology** step records which embedder the KB uses. Choose one before Deploy.
-
-Which embedder a KB can run is a property of the image you pulled, because the weights are baked in:
-
-| image | embedder | size |
-| --- | --- | --- |
-| `aimee-kb-a25m` | `bekko-a25m`, 384-dimension | 1.95 GB |
-| `aimee-kb-nomic` | `nomic-embed-text-v2-moe`, 768-dimension | 3.34 GB |
-| `aimee-kb` | none baked; for an external `EMBEDDER_URL` | 373 MB |
-
-**An embedder is not optional.** Retrieval does not work without one, so the choice is
-between a bundled model and an external endpoint, never "neither". `aimee-kb` exists
-for the external case: it omits PyTorch and the weights rather than shipping code it
-will never run. It is not a way to run without an embedder.
-
-Synthesis is different and genuinely optional: local, external, or off. Off is a
-supported state because embedding, search, recall and indexing never call it.
-
-A bundled embedder needs no download and no second container.
-
-**This choice does not survive a change of mind.** DB2 records the vector-column width and refuses to
-start when it drifts, so moving between 384 and 768 means re-embedding the whole corpus. Choose before
-you ingest anything.
-
-Nothing is selected on a fresh install, and **a KB with no embedder refuses to start**. It says so
-and exits:
-
-```text
-aimee-kb: no embedder selected, and there is no fallback. Retrieval needs one.
-aimee-kb:   pick a bundled model:  aimee config set embedder_model bekko-a25m
-aimee-kb:   or point at your own:  EMBEDDER_URL=http://<host>:<port>
-aimee-kb: then re-run Deploy. Refusing to start.
-```
-
-There used to be a lexical fallback here, so an unconfigured KB came up healthy and answered every
-search with keyword matching. A deployment could run for weeks believing it had vector retrieval. It
-is gone. If you skipped the step, set it from the server and re-run Deploy:
-
-```bash
-aimee config set embedder_model bekko-a25m
-```
-
-Once anything has been embedded, changing the embedder is a corpus migration rather than a setting,
-and the KB refuses the switch rather than mixing two vector spaces. See
-[Change the KB embedder](runbooks/change-embedder.md). Choosing in the wizard, before the first
-Deploy, avoids the question entirely.
-
-Confirm the model actually loaded rather than assuming it did:
-
-```bash
-docker compose -p aimee logs aimee-kb | grep -i embedder
-aimee kb status
-```
-
-Address the managed services by project (`-p aimee`), not by the file you started the server with.
-`compose.server-managed.yaml` declares only `aimee-server`; the server brings `aimee-kb` and
-`aimee-llm` up from its own baked manifest into the same `aimee` project, so
-`-f compose.server-managed.yaml logs aimee-kb` fails with `no such service`.
-
-A loaded embedder logs its dimension and serving identity:
-
-```text
-aimee-kb: starting bundled embedder (bekko-a25m) on :8760
-embedder-server: loaded hotchpotch/bekko-embedding-v1-a25m dim=384 threads=8 quant=fp32
-```
-
-Decide before you ingest. The wizard warns when a later choice changes the vector space, but saving
-the choice does not perform the migration. A different dimension needs the guarded vector-schema
-reset; a same-dimension model, pooling, or prefix change needs a fresh DB2 and source re-ingestion
-because the current reset command deliberately no-ops when the dimensions match. Follow
-[Change the KB embedder](runbooks/change-embedder.md) before changing an active corpus.
-
-### Local synthesis
-
-Synthesis writes curation and summaries from its own image, `aimee-llm-e2b` or
-`aimee-llm-e4b`. The wizard deploys it beside the KB when the user selects a local model. Which
-model it carries is a property of the tag because the weights are baked in.
-
-| image | model | weights |
-| --- | --- | --- |
-| `aimee-llm-e2b` | gemma-4-E2B-it | 2.62 GB (qat-UD-Q4_K_XL) |
-| `aimee-llm-e4b` | gemma-4-E4B-it | 7.46 GB (UD-Q6_K_XL) |
-
-E4B has the higher measured extraction score; E2B uses roughly half the resident memory and runs
-about twice as fast on the measured CPU lane. See
-[Choosing a synthesis model](SYNTHESIS_MODELS.md) for the measurements behind that.
-
-Three states are all supported, and `off` is not an error: embedding, search, recall and indexing
-never call synthesis.
-
-- **local**: an `aimee-llm-*` sidecar, reached over mutual TLS
-- **external**: `SYNTHESIS_ENDPOINT` at any OpenAI-compatible endpoint
-- **off**: no synthesis
-
-**Unlike the embedder, this is not a one-way door.** The sidecar holds no data, so switching between
-E2B and E4B, adding synthesis to a running deployment, or removing it is a container swap with the KB
-left running.
-
-Confirm the sidecar actually came up, rather than assuming Deploy succeeded:
-
-```bash
-docker compose -p aimee logs aimee-llm | grep -iE 'synthesis|terminator'
-```
-
-A working sidecar logs both halves:
-
-```text
-aimee-llm: starting synthesis (gemma-4-E2B-it) on 127.0.0.1:8760
-aimee-llm: starting mTLS terminator on :8761 (client certificate required)
-```
-
-The mTLS identity is issued by the KB at startup, which is why the KB is deployed first. The sidecar
-refuses to start without it rather than serving unauthenticated, so "no identity" fails loudly at
-deploy instead of quietly at the first curation call.
+A KB is a separate shared deployment, described in [Deployment](DEPLOYMENT.md). It uses the same
+application and PostgreSQL images as Server and its own Vault and model identities. Never point a
+KB container at an existing Server home or try to change the identity file.
 
 ### Choosing an image channel
 
-The stack runs the released `:latest` images by default. To run a tested-but-unreleased build, set
-`AIMEE_IMAGE_TAG` once. It moves every image in the topology together, including the server, KB,
-and browser console:
-
-```bash
-AIMEE_IMAGE_TAG=testing docker compose -f compose.server-managed.yaml up -d
-```
-
-Set it for the summary's **Deploy** action too, not just the server: the server re-runs Compose for the
-managed services, so the tag has to be in its environment or the KB falls back to `:latest` while the
-server runs `:testing`. The line above already does this. Mixing versions this way is a real failure
-mode, not a theoretical one. A KB and a server from different builds can disagree about the
-contract between them and leave the KB permanently unhealthy.
-
-A single service can still be pinned individually (`AIMEE_KB_IMAGE=…`), and an explicit pin always
-wins over `AIMEE_IMAGE_TAG`.
-
-Check the containers:
-
-```bash
-docker compose -f compose.server-managed.yaml ps
-docker compose -f compose.server-managed.yaml logs --tail=100 aimee-server
-```
-
-If the server must not control Docker, use the split stack instead:
-
-```bash
-cp -n .env.example .env
-for v in ADMIN MIGRATOR RUNTIME; do
-  echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
-done
-export AIMEE_KB_API_BEARER_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
-export AIMEE_KB_SERVICE_IDENTITY_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
-scripts/aimee-compose-vault-bootstrap.sh -f deploy/compose/aimee.yaml all
-unset AIMEE_KB_API_BEARER_TOKEN AIMEE_KB_SERVICE_IDENTITY_TOKEN
-docker compose --env-file .env -f deploy/compose/aimee.yaml up -d
-```
-
-This profile installs a dedicated server-to-KB client certificate and uses mTLS; it does not expose
-the KB's plain HTTP listener. See [Deployment](DEPLOYMENT.md#split-stack) for the trust boundaries.
-
-The old combined image is gone.
+Set `AIMEE_IMAGE_TAG=testing` to select the testing channel, or pin a release tag. For managed
+installs, the application forwards that channel to model deployments. Explicit
+`AIMEE_APPLICATION_IMAGE`, `AIMEE_POSTGRES_IMAGE`, `AIMEE_EMBEDDER_IMAGE`, and `AIMEE_LLM_IMAGE`
+overrides take precedence. Use a client from the same release channel.
 
 ## 2. Install the client
 
@@ -536,7 +279,7 @@ AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE=/run/aimee/management/jwks-trust-bundle.json
 AIMEE_KB_CONN=aimee://THE_ONE_TIME_ENROLLMENT_STRING
 EOF
 
-docker compose -f compose.server-managed.yaml up -d --force-recreate aimee-server
+scripts/compose-local.sh -f compose.server-managed.yaml up -d --force-recreate aimee-server
 ```
 
 The bundle is public verification material. In the shipped container it must be root-owned and
@@ -667,23 +410,18 @@ policy.
 
 ## 8. Back up before changing topology
 
-The embedded KB database lives in the KB home volume. Export it before moving to external
-PostgreSQL or replacing compose files:
-
-```bash
-./deploy/container/aimee-kb-db-export.sh --help
-```
-
-Also back up `~/.config/aimee/` from the server volume. Never run `docker compose down -v` while a
+Back up the application home (including Vault), PostgreSQL volume, and workspace
+artifacts. Use PostgreSQL-native consistent dumps or stop writes before taking matched volume
+snapshots. See [Deployment](DEPLOYMENT.md#volumes-and-backup) for restore requirements. Never run `docker compose down -v` while a
 named volume is your only copy.
 
 ## Service commands
 
 ```bash
-docker compose -f compose.server-managed.yaml ps
-docker compose -f compose.server-managed.yaml logs -f
-docker compose -f compose.server-managed.yaml restart
-docker compose -f compose.server-managed.yaml down
+scripts/compose-local.sh -f compose.server-managed.yaml ps
+scripts/compose-local.sh -f compose.server-managed.yaml logs -f
+scripts/compose-local.sh -f compose.server-managed.yaml restart
+scripts/compose-local.sh -f compose.server-managed.yaml down
 ```
 
 `down` keeps named volumes. `down -v` deletes them.

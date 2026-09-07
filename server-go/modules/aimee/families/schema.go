@@ -35,8 +35,8 @@ type SchemaMigrator interface {
 	Migrate(ctx context.Context, m store.MigrationRequest) error
 }
 
-// ApplySchema brings aimee's schema up to date, and does nothing at all when it
-// already is -- which is every start after the first.
+// ApplySchema verifies aimee's installed history and applies missing versions.
+// Already installed versions are checksum-checked without executing their DDL.
 //
 // It does NOT run DDL as ordinary statements. The store applies each version
 // under its own lock and records that it ran, so this is idempotent by
@@ -48,11 +48,18 @@ func ApplySchema(ctx context.Context, m SchemaMigrator) error {
 	if err != nil {
 		return fmt.Errorf("read the applied schema version: %w", err)
 	}
-	pending, err := PendingMigrations(applied)
+	_, err = PendingMigrations(applied)
 	if err != nil {
 		return err
 	}
-	for _, migration := range pending {
+	// Submitting only pending versions would never check changed or missing
+	// history rows on a current database. The provider's replay path validates
+	// every recorded checksum under the migration lock without re-running SQL.
+	history, err := Migrations()
+	if err != nil {
+		return err
+	}
+	for _, migration := range history {
 		err := m.Migrate(ctx, store.MigrationRequest{
 			Owner:      migration.Owner,
 			Version:    migration.Version,

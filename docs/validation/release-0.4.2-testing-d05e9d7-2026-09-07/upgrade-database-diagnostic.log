@@ -1,0 +1,8 @@
+waiting for server to start.... done
+server started
+postgres
+aimee_shared
+aimee
+waiting for server to shut down.... done
+server stopped
+psql: error: connection to server on socket "/tmp/.s.PGSQL.5432" failed: FATAL:  database "aimee_store" does not exist

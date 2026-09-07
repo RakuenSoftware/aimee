@@ -10,6 +10,7 @@
 #include "../modules/db2/c/db2_test_shim.h"
 #include "../headers/kb_identity.h"
 #include "modules/memory/memory_extract_patterns.h"
+#include "support/memory_policy_stub.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -57,15 +58,6 @@ static int semantic_count(const char *entity)
    return db2_entity_edges_semantic_by_entity(entity, e, 64);
 }
 
-static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
-{
-   if (!verdict)
-      return -1;
-   *verdict = (int)memory_fact_gate_check((memory_node_kind_t)head_kind, rel_type,
-                                          (memory_node_kind_t)tail_kind, NULL);
-   return 0;
-}
-
 _Static_assert(sizeof(((db2_fact_candidate_t *)0)->subject) ==
                    sizeof(((pattern_triple_t *)0)->subject),
                "test extractor subject capacity must match DB2");
@@ -75,6 +67,53 @@ _Static_assert(sizeof(((db2_fact_candidate_t *)0)->rel_type) ==
 _Static_assert(sizeof(((db2_fact_candidate_t *)0)->object) ==
                    sizeof(((pattern_triple_t *)0)->object),
                "test extractor object capacity must match DB2");
+
+static int module_extract_patterns(const char *text, pattern_triple_t *out, int max, int *count)
+{
+   if (!text || !out || max <= 0 || !count)
+      return -1;
+   int n = 0;
+   const char *cursor = text;
+   while (n < max)
+   {
+      const char *prefix = strstr(cursor, "my ");
+      if (!prefix)
+         break;
+      const char *separator = strstr(prefix + 3, " is ");
+      if (!separator)
+         break;
+      const char *end = strchr(separator + 4, '.');
+      if (!end)
+         end = text + strlen(text);
+      snprintf(out[n].subject, sizeof(out[n].subject), "user");
+      snprintf(out[n].rel_type, sizeof(out[n].rel_type), "%.*s", (int)(separator - prefix - 3),
+               prefix + 3);
+      snprintf(out[n].object, sizeof(out[n].object), "%.*s", (int)(end - separator - 4),
+               separator + 4);
+      out[n].subject_kind = NODE_PERSON;
+      out[n].object_kind = NODE_OTHER;
+      ++n;
+      cursor = *end ? end + 1 : end;
+   }
+   *count = n;
+   return 0;
+}
+
+static int module_scan_turn(const char *text, memory_pattern_turn_t *out)
+{
+   if (!text || !out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->is_retraction = strstr(text, "forget") != NULL;
+   const char *attribute = strstr(text, "my ");
+   if (attribute)
+   {
+      attribute += 3;
+      out->has_attr = 1;
+      snprintf(out->attr, sizeof(out->attr), "%s", attribute);
+   }
+   return 0;
+}
 
 static int extract_facts(const char *text, db2_fact_candidate_t *out, int max, int *count)
 {
@@ -160,7 +199,9 @@ static int scan_retract_works_for(const char *text, int *is_retraction, int *has
 int main(void)
 {
    db2_test_shim_open();
-   aimee_db2_register_fact_gate_provider(check_fact_gate);
+   test_memory_policy_register();
+   memory_extract_register_extractor(module_extract_patterns);
+   memory_extract_register_turn_scanner(module_scan_turn);
    assert(db2_rel_types_ensure_seed() == 0);
 
    /* Extraction is authoritative: absence, failure, or an invalid count cannot

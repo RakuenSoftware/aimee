@@ -1,0 +1,165 @@
+{
+  "analysis": {
+    "agent_turn_endpoint_eligible": false,
+    "agent_turn_note": "codex exec records one user turn per cell; tool calls are the frozen agentic round-trip endpoint",
+    "bootstrap_replicates": 5000,
+    "bootstrap_seed": 91173,
+    "method": "paired nonparametric percentile bootstrap over task-level deltas"
+  },
+  "arm_metrics": {
+    "batched_context": {
+      "authority_citation_rate": 1.0,
+      "cells": 45,
+      "eligible_cells": 45,
+      "exact_target_denominator": 45,
+      "exact_target_rate": 1.0,
+      "false_empty_count": 0,
+      "false_ok_empty_count": 0,
+      "median_agent_turns": 1,
+      "median_input_tokens": 32201,
+      "median_output_tokens": 346,
+      "median_preparation_bytes": 4823,
+      "median_tool_calls": 1,
+      "median_tool_input_bytes": 128,
+      "median_tool_output_bytes": 1259,
+      "median_wall_seconds": 13.651365883997642,
+      "stale_result_count": 0,
+      "task_success_rate": 1.0
+    },
+    "location_only": {
+      "authority_citation_rate": 1.0,
+      "cells": 45,
+      "eligible_cells": 45,
+      "exact_target_denominator": 45,
+      "exact_target_rate": 0.4888888888888889,
+      "false_empty_count": 19,
+      "false_ok_empty_count": 0,
+      "median_agent_turns": 1,
+      "median_input_tokens": 34977,
+      "median_output_tokens": 349,
+      "median_preparation_bytes": 4955,
+      "median_tool_calls": 1,
+      "median_tool_input_bytes": 174,
+      "median_tool_output_bytes": 253,
+      "median_wall_seconds": 15.07188730899361,
+      "stale_result_count": 0,
+      "task_success_rate": 0.4888888888888889
+    },
+    "production": {
+      "authority_citation_rate": 1.0,
+      "cells": 45,
+      "eligible_cells": 45,
+      "exact_target_denominator": 45,
+      "exact_target_rate": 0.9777777777777777,
+      "false_empty_count": 0,
+      "false_ok_empty_count": 0,
+      "median_agent_turns": 1,
+      "median_input_tokens": 58423,
+      "median_output_tokens": 503,
+      "median_preparation_bytes": 4174,
+      "median_tool_calls": 2,
+      "median_tool_input_bytes": 143,
+      "median_tool_output_bytes": 3937,
+      "median_wall_seconds": 20.24338321000687,
+      "stale_result_count": 0,
+      "task_success_rate": 0.9777777777777777
+    }
+  },
+  "candidate_adoption": {
+    "denominator": 30,
+    "rate": 0.9666666666666667
+  },
+  "claim_status": "complete",
+  "material_value_gate": {
+    "choice_a_task_success": false,
+    "choice_b_round_trips_and_wall_time": true,
+    "passes_either_choice": true
+  },
+  "paired": {
+    "all": {
+      "complete_pairs": 45,
+      "median_input_token_reduction": {
+        "estimate": 0.44701963897421737,
+        "lower_95": 0.42435424354243545,
+        "upper_95": 0.5490358994928802
+      },
+      "median_tool_call_reduction": {
+        "estimate": 0.5,
+        "lower_95": 0.5,
+        "upper_95": 0.6666666666666666
+      },
+      "median_wall_time_reduction": {
+        "estimate": 0.31751648366925794,
+        "lower_95": 0.157580775974932,
+        "upper_95": 0.369045485025183
+      },
+      "task_success_absolute_delta": {
+        "estimate": 0.022222222222222223,
+        "lower_95": 0.0,
+        "upper_95": 0.06666666666666667
+      }
+    },
+    "control": {
+      "complete_pairs": 15,
+      "median_input_token_reduction": {
+        "estimate": -0.020855600317904024,
+        "lower_95": -0.09936894229898245,
+        "upper_95": 0.0021002484440232564
+      },
+      "median_tool_call_reduction": {
+        "estimate": 0.0,
+        "lower_95": 0.0,
+        "upper_95": 0.0
+      },
+      "median_wall_time_reduction": {
+        "estimate": 0.014494364968649009,
+        "lower_95": -0.11699773925752065,
+        "upper_95": 0.0838584082849584
+      },
+      "task_success_absolute_delta": {
+        "estimate": 0,
+        "lower_95": 0.0,
+        "upper_95": 0.0
+      }
+    },
+    "semantic": {
+      "complete_pairs": 30,
+      "median_input_token_reduction": {
+        "estimate": 0.5511641488495003,
+        "lower_95": 0.46324682509150583,
+        "upper_95": 0.5710956126151797
+      },
+      "median_tool_call_reduction": {
+        "estimate": 0.6666666666666666,
+        "lower_95": 0.5,
+        "upper_95": 0.6666666666666666
+      },
+      "median_wall_time_reduction": {
+        "estimate": 0.38692257345739045,
+        "lower_95": 0.33274383968999854,
+        "upper_95": 0.4179772219208002
+      },
+      "task_success_absolute_delta": {
+        "estimate": 0.03333333333333333,
+        "lower_95": 0.0,
+        "upper_95": 0.1
+      }
+    }
+  },
+  "promotion_decision": "incomplete",
+  "run_id": "live-semantic-s1-1d7148b02e744355",
+  "safety": {
+    "authority_citation_failures": 0,
+    "false_current_results": 0,
+    "false_ok_empty_count": 0,
+    "typed_failure_denominator": 0,
+    "typed_failure_preservation_rate": null
+  },
+  "schema_version": 1,
+  "study_kind": "paired_value",
+  "unresolved_promotion_evidence": [
+    "separate 12-cell adversarial failure artifact",
+    "20 clean cold starts per provider and claimed platform",
+    "checked fixture reference-quality aggregate"
+  ]
+}

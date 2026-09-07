@@ -13,79 +13,6 @@ import (
 // carries no deadline of its own.
 const DefaultTimeout = 2 * time.Second
 
-// ErrNoRows is what a read that matched nothing returns. aimee's own sentinel
-// rather than the driver's: the families compare against it in seventy-odd
-// places, and every one of those would otherwise be a line of aimee that knows
-// which database library is on the other side of the bus.
-var ErrNoRows = errors.New("aimee: no rows in result set")
-
-// ErrTxClosed is what committing or rolling back an already-finished
-// transaction reports.
-var ErrTxClosed = errors.New("aimee: transaction is closed")
-
-// Row is one result row, if there was one. Scan reports ErrNoRows when there
-// was not.
-type Row interface {
-	Scan(dest ...any) error
-}
-
-// Rows is a result set. The contract is the usual one -- Next until it returns
-// false, then check Err -- and Close must run whatever the outcome.
-type Rows interface {
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-	Close()
-}
-
-// Tag is what a write reports about itself. Only the row count is used, and
-// only ever to tell "changed something" from "matched nothing".
-type Tag interface {
-	RowsAffected() int64
-}
-
-// RowsAffected is a Tag carrying just the count, which is all a Tag is for.
-// Exported because a fake store has to answer "this write changed n rows"
-// without reaching for a driver's tag type to say it.
-type RowsAffected int64
-
-func (n RowsAffected) RowsAffected() int64 { return int64(n) }
-
-// Queryer is the storage capability a family's SQL needs, in aimee's own types.
-//
-// Deliberately not written in a driver's vocabulary. aimee stores its data by
-// calling the postgres module over the bus, so the thing satisfying this is a
-// bus client, not a library in this process -- and an interface returning
-// pgx.Rows could never be satisfied by one. Both the store and a transaction
-// satisfy it, which is what lets an operation be written once and run either
-// way depending on whether it declares a transaction.
-type Queryer interface {
-	Exec(ctx context.Context, sql string, args ...any) (Tag, error)
-	Query(ctx context.Context, sql string, args ...any) (Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) Row
-}
-
-// IsNoRows reports whether a scan found nothing.
-//
-// Every family asks this, and asking it through the driver's own error meant
-// each one imported pgx to compare against one sentinel. Naming it here keeps
-// "there was no row" a question about the store rather than about the driver.
-func IsNoRows(err error) bool { return errors.Is(err, ErrNoRows) }
-
-// Tx is a Queryer that can be committed or rolled back.
-type Tx interface {
-	Queryer
-	Commit(ctx context.Context) error
-	Rollback(ctx context.Context) error
-}
-
-// DB is the database a family runs against, as an interface so a family's
-// dispatch and arity behaviour is testable without a server.
-type DB interface {
-	Queryer
-	Begin(ctx context.Context) (Tx, error)
-}
-
 // OpFunc runs one operation. It returns the status the caller sees plus the
 // reply fields. A returned error is the module's own failure -- a broken query,
 // a lost connection -- and becomes StatusFailed; a refusal the caller should
@@ -142,6 +69,10 @@ type Family struct {
 	Event uint32
 	Stage uint32
 	Ops   map[uint32]Op
+	// TransactionLockSQL, when set, runs before any operation's transactional
+	// reads. It also wraps RunDB transactions, so independently hosted callers
+	// obey the same domain invariant. Read-only operations remain concurrent.
+	TransactionLockSQL string
 }
 
 // Handler builds the bus handler for this family against a database.
@@ -249,6 +180,9 @@ func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint3
 	if tagger, ok := db.(statementTagger); ok && spec.Name != "" {
 		db = tagger.WithStatementID(spec.Name)
 	}
+	if f.TransactionLockSQL != "" {
+		db = transactionLockDB{DB: db, sql: f.TransactionLockSQL}
+	}
 	if spec.RunDB != nil {
 		return spec.RunDB(ctx, db, fields)
 	}
@@ -287,8 +221,27 @@ func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint3
 	return status, reply, nil
 }
 
+type transactionLockDB struct {
+	DB
+	sql string
+}
+
+func (d transactionLockDB) Begin(ctx context.Context) (Tx, error) {
+	tx, err := d.DB.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, d.sql); err != nil {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanup)
+		return nil, err
+	}
+	return tx, nil
+}
+
 // The connection is NOT aimee's. Opening a database here would make aimee a second
 // process holding the store, which is exactly what moving it behind a module
 // removed. The postgres module owns the pool, the DSN and the pooling policy;
-// aimee asks it over the bus. store_client.go is that client, and it is the only
-// file in this module that knows how the request is framed.
+// aimee asks it over the bus through the shared server-go/db client, also used
+// by KB and server memory. This module contains no database wire implementation.

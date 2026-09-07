@@ -30,7 +30,7 @@ SRC = ROOT / "src"
 # each must be registered by a kb source.
 DB2_CONSUMED_SEAMS = {
     "memory_pii_register_turn_classifier": "memory_pii_turn_requests_sensitive",
-    "memory_pii_register_sensitivity_batch": "memory_pii_rel_sensitivity_batch",
+    "memory_pii_register_sensitivity_batch": "memory_pii_rel_sensitivity",
 }
 
 KB = SRC / "kb"

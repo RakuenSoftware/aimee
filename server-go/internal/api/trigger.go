@@ -16,8 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 )
 
 // ScanTriggers evaluates the live UI/config trigger registry and graph-native
@@ -444,7 +444,7 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 		return "", "", err
 	}
 	proposalHash := wfe.Hash(content)
-	identity := db1.GitProposalIdentity(proposalHash, request.Pipeline, request.Mode)
+	identity := workflowstore.GitProposalIdentity(proposalHash, request.Pipeline, request.Mode)
 	if existing, findErr := s.db.WorkItemByGitProposal(ctx, workspace, proposalHash, request.Pipeline, request.Mode); findErr == nil {
 		return "", "", fmt.Errorf("proposal already filed as %s", existing.ID)
 	} else if !errors.Is(findErr, sql.ErrNoRows) {
@@ -470,9 +470,9 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 	// Honour that here rather than silently removing the limit.
 	if cap == 0 {
 		_ = s.artifacts.DeleteWorkItem(workItemID)
-		return "", "", fmt.Errorf("%w (admission paused: trigger.max_concurrent is 0)", db1.ErrAdmissionFull)
+		return "", "", fmt.Errorf("%w (admission paused: trigger.max_concurrent is 0)", workflowstore.ErrAdmissionFull)
 	}
-	if err := s.db.AdmitRoot(ctx, db1.CreateWorkItem{
+	if err := s.db.AdmitRoot(ctx, workflowstore.CreateWorkItem{
 		ID: workItemID, Repo: workspace, ProposalPath: identity, WorkflowName: definition.Name,
 		WorkflowVersion: definition.Version, StartStage: start, Mode: request.Mode,
 		SourcePath: proposalPath, MaxCostUSD: request.MaxSpend,

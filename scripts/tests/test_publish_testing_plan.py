@@ -75,7 +75,7 @@ def main() -> None:
         kb,
         "KB runtime C source",
     )
-    failures += expect(["src/cli_argspec.c"], set(), "thin-client-only C source")
+    failures += expect(["src/cli_argspec.c"], set(planner.SERVER), "unified image includes the CLI")
     failures += expect(
         [
             "api/openapi-server-v1.yaml",
@@ -91,7 +91,7 @@ def main() -> None:
         "server leaf linked into KB",
     )
     failures += expect(
-        ["src/modules/memory/memory_core_search_c.c"],
+        ["src/modules/memory/memory_data_bus.c"],
         set(planner.SERVER | planner.KB),
         "shared server and KB C source",
     )

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 )
 
-func regressionCandidate(signature, state, suite, originRef, task string) db1.EvalCandidate {
-	return db1.EvalCandidate{
+func regressionCandidate(signature, state, suite, originRef, task string) workflowstore.EvalCandidate {
+	return workflowstore.EvalCandidate{
 		Signature: signature,
 		State:     state,
 		Suite:     suite,
@@ -24,7 +24,7 @@ func regressionCandidate(signature, state, suite, originRef, task string) db1.Ev
 
 func TestSelectAdmittedRegressionsUsesOnlyExactDeterministicEvidence(t *testing.T) {
 	changed := []string{"src/zeta.c", "src/alpha.c"}
-	candidates := []db1.EvalCandidate{
+	candidates := []workflowstore.EvalCandidate{
 		regressionCandidate(strings.Repeat("d", 32), "admitted", "suite", "", `{"prompt":"inspect src/alpha.cxx"}`),
 		regressionCandidate(strings.Repeat("c", 32), "rejected", "suite", "src/alpha.c", `{"prompt":"ignored"}`),
 		regressionCandidate(strings.Repeat("b", 32), "admitted", "suite", "src/zeta.c:widget", `{"prompt":"origin match"}`),
@@ -73,25 +73,25 @@ func TestCommandVerifierRunsOnlyLedgerIdenticalAdmittedTask(t *testing.T) {
 		RegressionCommand: []string{"sh", "-c",
 			`count=$(find "$1" -type f -name '*.json' | wc -l); printf '{"status":"ok","passes":%s,"total":%s}\n' "$count" "$count"`, "runner"},
 	}
-	if err := verifier.VerifyAdmitted(context.Background(), root, []db1.EvalCandidate{candidate}); err != nil {
+	if err := verifier.VerifyAdmitted(context.Background(), root, []workflowstore.EvalCandidate{candidate}); err != nil {
 		t.Fatalf("VerifyAdmitted: %v", err)
 	}
 	if err := os.WriteFile(admittedPath, []byte(`{"prompt":"replacement"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifier.VerifyAdmitted(context.Background(), root, []db1.EvalCandidate{candidate}); err == nil || !strings.Contains(err.Error(), "no longer matches its ledger bytes") {
+	if err := verifier.VerifyAdmitted(context.Background(), root, []workflowstore.EvalCandidate{candidate}); err == nil || !strings.Contains(err.Error(), "no longer matches its ledger bytes") {
 		t.Fatalf("tamper error = %v", err)
 	}
 }
 
 func TestCommandVerifierRejectsNonAdmittedAndUnsafeCandidates(t *testing.T) {
 	verifier := CommandVerifier{LockFile: filepath.Join(t.TempDir(), "verify.lock")}
-	for _, candidate := range []db1.EvalCandidate{
+	for _, candidate := range []workflowstore.EvalCandidate{
 		regressionCandidate(strings.Repeat("a", 32), "rejected", "suite", "", `{}`),
 		regressionCandidate(strings.Repeat("a", 32), "admitted", "../suite", "", `{}`),
 		regressionCandidate("not-a-signature", "admitted", "suite", "", `{}`),
 	} {
-		if err := verifier.VerifyAdmitted(context.Background(), t.TempDir(), []db1.EvalCandidate{candidate}); err == nil {
+		if err := verifier.VerifyAdmitted(context.Background(), t.TempDir(), []workflowstore.EvalCandidate{candidate}); err == nil {
 			t.Fatalf("unsafe candidate unexpectedly accepted: %#v", candidate)
 		}
 	}

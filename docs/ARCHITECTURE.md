@@ -38,26 +38,26 @@ flowchart LR
     W -->|authenticated /v1| S
     W -->|workflow API| F
     F -->|typed resource calls| S
-    S -->|typed /v1| K
+    S -.->|optional typed /v1| K
     S -->|provider API| P[model providers]
     K -->|local sidecar or remote synthesis endpoint| X[synthesis model]
-    PG --> D1[(DB1 PostgreSQL)]
-    K --> D2[(DB2 PostgreSQL + pgvector)]
+    PG --> D1[(PostgreSQL + personal vectors)]
+    KM --> KPG[postgres module]
+    KPG --> D2[(PostgreSQL + vectors)]
 ```
 
-The table below describes the **current** topology, which is mid-migration. It is not the
-target. aimee is moving off the C mono-application onto Go modules, and the ownership it
-records, such as `aimee-server` holding provider calls and `aimee-runtime-web` serving its own HTTP,
-It is what exists today, not what is being built toward. Read [the module
-doctrine](#module-doctrine) for the target before using this table to decide where code
-belongs.
+Both containers use the same application image. A Go `server` or `kb` composition module
+establishes the immutable first-boot identity and supervises the standard module processes.
+Core's event bus rejects duplicate or conflicting roles. Both compositions have the same
+PostgreSQL and memory modules, a local Vault, and independent model identities. The existing
+C resource hosts remain during the transition of their domain handlers into Go modules.
 
 | Process | Owns | Does not own |
 | --- | --- | --- |
 | `aimee` | CLI parsing, local hooks, MCP/ACP stdio, client filesystem access | databases, server policy, provider credentials |
 | `aimee-server` | sessions, DB1, agents, tools, policy, vault, provider calls, `/v1` resource plane | DB2, workflow lifecycle |
 | `aimee-wfe` | workflow definitions, scheduling, artifacts, retries, gates, worktrees, forge lifecycle | agent credentials, KB data, general chat |
-| `aimee-kb` | DB2, memory, documents, code graph, retrieval, curation, and its internal or remote model-role placements | DB1, workflow state, another KB's corpus |
+| `aimee-kb` | shared DB2 knowledge, documents, code graph, retrieval, curation, and local or external model services | Server personal memory, workflow state, another KB's corpus |
 | `aimee-runtime-web` | browser auth, session proxying, UI delivery | product databases and workflow decisions |
 
 `aimee-server` and `aimee-wfe` run as supervised peers in the server image. If either exits, the
@@ -67,8 +67,8 @@ routes; there is one workflow writer.
 The browser, KB console, and optional ambient gateway are clients. They do not bypass the service
 that owns the data they display.
 
-The diagram shows the current one-KB profile. The target topology has several KB containers. The
-server selects one by corpus, authority, and capability before any embedding or synthesis role runs.
+The diagram shows an optional KB connection. A standalone Server uses its own embedding and
+optional synthesis services with no KB. Routing among several KBs remains a target topology.
 See [KB fleet and model placement](KB_FLEET.md).
 
 ## Two transports
@@ -172,7 +172,7 @@ There are two product data tiers and separate WORM evidence stores.
 | Store | Owner | Contents |
 | --- | --- | --- |
 | DB1, PostgreSQL | `aimee` domain module through `postgres` | sessions, working memory, local state, agent jobs, policy and audit state, caches, workflow definitions and lifecycle rows |
-| DB2, PostgreSQL + pgvector | `aimee-kb` | durable memories, documents, facts, evidence, code graph, embeddings, curation state |
+| DB2, PostgreSQL + pgvector | `aimee-kb` | shared memories, documents, facts, evidence, code graph, embeddings, curation state |
 | Server WORM, SQLite | `aimee-server` | append-only evidence chain, keyed checkpoints, sealed snapshots |
 | KB WORM, SQLite | `aimee-kb-worm` | append-only KB evidence chain, keyed checkpoints, sealed snapshots |
 
@@ -189,8 +189,10 @@ engine-specific approximations. Their files, keys, and process compartments are
 separate. PostgreSQL DB2 retains only the immutable producer outbox and delivery
 ledger needed for atomic KB mutation intent and idempotent delivery.
 
-New KB containers run a private PostgreSQL 18 cluster when no external `AIMEE_DB2_URL` is set. It is
-still DB2, still owned by the KB, and still independently exportable.
+Both compositions use a separate standard PostgreSQL 18 container with ordinary storage by
+default and opt-in LUKS2 encryption. When LUKS is enabled, the local Vault unlocks the store
+before SQL initialization; the encryption passphrase persists only in Vault. Personal memory and
+its vectors stay in Server storage, even when a shared KB is connected.
 
 See [Storage tiers](STORAGE_TIERS.md).
 
@@ -271,14 +273,15 @@ See [Security](SECURITY.md).
 
 | Shape | Use | Tradeoff |
 | --- | --- | --- |
-| Managed server | One server container launches one KB profile from the browser | Needs the host Docker socket |
-| Split stack | Separate server and one KB profile | More explicit; no server Docker control required |
+| Standard local Server | Single-user operation with local PostgreSQL and embedding | No KB or Docker-socket access required |
+| Managed Server | Browser-managed local embedding and optional synthesis | Requires host Docker-socket access |
+| Shared KB | Separate optional knowledge deployment using the same application image | Separate role, Vault, PostgreSQL, and access authority |
 | KB fleet | Several capability-declaring KB containers | Target routing path; not integrated in this checkout |
-| External DB2 | KB uses managed PostgreSQL | Operator owns backup, TLS, extensions, and latency |
 | Local source install | Development and debugging | Host owns dependencies and services |
-| Thin client | Normal developer machine | Needs a reachable server; keeps state off the client |
+| Thin client | Developer machine | Needs a reachable Server |
 
-The old combined appliance image is gone.
+The unified application image selects one role on first boot and cannot run both roles at once.
+PostgreSQL and models remain separate service containers.
 
 ## Code boundaries
 

@@ -8,14 +8,14 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 type freezeHarness struct {
 	engine    *Engine
-	store     *db1.Store
+	store     *workflowstore.Store
 	worktrees map[string]string
 }
 
@@ -70,7 +70,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ nodes:
 		t.Fatal(err)
 	}
 	ctx := t.Context()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent", Repo: repo,
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_parent", Repo: repo,
 		ProposalPath: "parent", WorkflowName: "slice", WorkflowVersion: parsed.Version,
 		StartStage: "source"}); err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ nodes:
 	}
 	worktrees := make(map[string]string)
 	for _, id := range []string{"wi_slice_a", "wi_slice_b"} {
-		if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: id, Repo: repo,
+		if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: id, Repo: repo,
 			ProposalPath: id, WorkflowName: "slice", WorkflowVersion: parsed.Version,
 			StartStage: "freeze", ParentID: "wi_parent"}); err != nil {
 			t.Fatal(err)

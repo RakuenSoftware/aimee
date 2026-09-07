@@ -17,6 +17,10 @@
 #include "headers/util.h"
 #include "cJSON.h"
 
+/* Provider-aware Git runner: unlike run_cmd(), this reaches a detached
+ * workspace through its registered client-side runner. */
+extern char *mcp_git_run(const char *cmd, int *exit_code);
+
 /* --- Helpers --- */
 
 static cJSON *mcp_text(const char *text)
@@ -32,7 +36,7 @@ static cJSON *mcp_text(const char *text)
 static int get_current_branch(char *buf, size_t len)
 {
    int rc;
-   char *out = run_cmd("git rev-parse --abbrev-ref HEAD 2>/dev/null", &rc);
+   char *out = mcp_git_run("git rev-parse --abbrev-ref HEAD 2>/dev/null", &rc);
    if (rc != 0 || !out)
    {
       free(out);
@@ -57,7 +61,7 @@ int get_repo_path(char *buf, size_t len)
    /* Try --git-common-dir first: in a worktree this returns the absolute path
     * to the main repo's .git dir (e.g. "/root/dev/aimee/.git").
     * In a regular checkout it returns ".git" (relative). */
-   char *common = run_cmd("git rev-parse --git-common-dir 2>/dev/null", &rc);
+   char *common = mcp_git_run("git rev-parse --git-common-dir 2>/dev/null", &rc);
    if (rc == 0 && common)
    {
       char *nl = strchr(common, '\n');
@@ -85,7 +89,7 @@ int get_repo_path(char *buf, size_t len)
    }
 
    /* Fallback: regular checkout — use --show-toplevel */
-   char *out = run_cmd("git rev-parse --show-toplevel 2>/dev/null", &rc);
+   char *out = mcp_git_run("git rev-parse --show-toplevel 2>/dev/null", &rc);
    if (rc != 0 || !out)
    {
       free(out);

@@ -18,8 +18,7 @@
 #include "modules/db2/c/decision_log.h"
 #include "memory.h"
 #include "modules/db2/c/memory_export.h"
-#include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
-#include "modules/db2/c/lifecycle.h"        /* db2_conn */
+#include <aimee/memory/module_api.h> /* memory_content_dup / memory_valid_at */
 #include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/memory_scope_query.h"
@@ -69,31 +68,6 @@ static cJSON *kbs_memory_row_to_json(const memory_t *m)
  * Fetch content separately so this one JSON path does not inherit the
  * memory_t.content[2048] cap. The same scope predicate as db2_memory_get keeps
  * the second query from widening visibility. */
-static char *kbs_memory_content_dup(int64_t memory_id)
-{
-   void *conn = db2_conn();
-   if (!conn || memory_id <= 0)
-      return NULL;
-
-   char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn, "SELECT content FROM memories WHERE id=?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id"),
-       err, sizeof(err));
-   if (!st)
-      return NULL;
-   aimee_pg_bind_int64(st, "?1", memory_id);
-   db2_memory_scope_bind_current(st);
-
-   char *content = NULL;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *value = aimee_pg_column_text(st, 0);
-      content = strdup(value ? value : "");
-   }
-   aimee_pg_finalize(st);
-   return content;
-}
-
 cJSON *db2_kb_service_memory_find_facts_json(const char *query, int limit)
 {
    if (limit < 1)
@@ -150,10 +124,16 @@ cJSON *db2_kb_service_memory_list_json(const char *tier, const char *kind, int l
       cJSON_Delete(resp);
       return NULL;
    }
-   cJSON_AddStringToObject(resp, "status", "ok");
-
    memory_t rows[64];
    int n = memory_list(tier, kind, limit, rows, 64);
+   if (n < 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "kind", "unavailable");
+      cJSON_AddStringToObject(resp, "message", "memory module unavailable");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
    for (int i = 0; i < n; i++)
    {
       cJSON *obj = kbs_memory_row_to_json(&rows[i]);
@@ -1253,10 +1233,13 @@ cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of)
       return NULL;
 
    memory_t m;
-   if (memory_get(id, &m) != 0)
+   int get_rc = memory_get_as_of_result(id, as_of, &m);
+   if (get_rc != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "memory not found");
+      cJSON_AddStringToObject(resp, "message",
+                              get_rc > 0 ? "memory not found" : "memory module unavailable");
+      cJSON_AddStringToObject(resp, "kind", get_rc > 0 ? "not_found" : "unavailable");
       return resp;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
@@ -1276,7 +1259,7 @@ cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of)
     * answers, and conflating them is how a bitemporal query lies. */
    if (as_of && as_of[0])
    {
-      int in_force = db2_memory_valid_at(id, as_of);
+      int in_force = memory_valid_at(id, as_of);
       cJSON_AddStringToObject(resp, "as_of", as_of);
       if (in_force < 0)
          cJSON_AddStringToObject(resp, "valid_at", "unknown");
@@ -1289,7 +1272,7 @@ cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of)
       cJSON_Delete(resp);
       return NULL;
    }
-   char *full_content = kbs_memory_content_dup(m.id);
+   char *full_content = memory_content_as_of_dup(m.id, as_of);
    cJSON *content_json = full_content ? cJSON_CreateString(full_content) : NULL;
    free(full_content);
    if (!content_json || !cJSON_ReplaceItemInObjectCaseSensitive(obj, "content", content_json))

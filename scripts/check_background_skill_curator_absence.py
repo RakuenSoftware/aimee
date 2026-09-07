@@ -72,9 +72,11 @@ def validate(root: Path) -> None:
         # retired object/source forms rather than making enforcement self-failing.
         require("skill_curator.o" not in text, "retired-build-object", rel)
 
-    memory = read(root / "src/modules/memory/memory_maintenance.c")
-    require("db1_maintenance_state_load" in memory, "memory-maintenance-preserved", "load anchor")
-    require("db1_maintenance_state_save" in memory, "memory-maintenance-preserved", "save anchor")
+    memory = read(root / "server-go/modules/memory/data.go")
+    require("func (s *postgresDataStore) Maintenance" in memory,
+            "memory-maintenance-preserved", "Go maintenance implementation")
+    require('case "maintenance":' in memory,
+            "memory-maintenance-preserved", "Go maintenance dispatch")
     # The store's side of maintenance state. It was src/modules/db1/maintenance.c
     # until the store became a Go module; the anchor is the ops themselves, so
     # this keeps checking that retiring the skill curator did not take
@@ -106,7 +108,7 @@ def validate(root: Path) -> None:
             "disposition", "inert database row")
     require(compatibility.get("schema_or_data_migration") is False, "disposition", "migration boundary")
     preserved = disposition.get("preserved", {})
-    require(preserved.get("generic_memory_maintenance") == "src/modules/memory/memory_maintenance.c",
+    require(preserved.get("generic_memory_maintenance") == "server-go/modules/memory/data.go",
             "disposition", "memory boundary")
     require(preserved.get("kb_synthesis_curator") == "src/modules/kb-synthesis/kb_curator_pipeline.c",
             "disposition", "KB boundary")

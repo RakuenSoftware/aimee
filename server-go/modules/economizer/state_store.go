@@ -8,7 +8,7 @@ import "context"
 // state has to know the module has state at all, which is the coupling the
 // module boundary exists to remove.
 //
-// server-go/db1.Client satisfies this over the bus. It is an interface here so
+// server-go/aimee.Client satisfies this over the bus. It is an interface here so
 // the module depends on the capability rather than on DB1.
 type StateStore interface {
 	// LoadState returns the stored blob and whether one was found. A miss is

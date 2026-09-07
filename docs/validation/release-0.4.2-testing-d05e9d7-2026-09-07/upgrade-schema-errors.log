@@ -1,0 +1,1 @@
+aimee: db2_init: schema apply failed: ERROR:  must be owner of function pg_now_text

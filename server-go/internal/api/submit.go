@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 )
 
 func (s *Server) devSubmit(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +107,7 @@ func (s *Server) devSubmit(w http.ResponseWriter, r *http.Request) {
 	if start == "" {
 		start = definition.Nodes[0].ID
 	}
-	if err := s.db.AdmitRoot(r.Context(), db1.CreateWorkItem{ID: id, Repo: repo,
+	if err := s.db.AdmitRoot(r.Context(), workflowstore.CreateWorkItem{ID: id, Repo: repo,
 		ProposalPath: identity, WorkflowName: definition.Name, WorkflowVersion: definition.Version,
 		StartStage: start, Mode: "autonomous", Submitter: workflowPrincipal(r), SourcePath: sourcePath}, cap); err != nil {
 		_ = s.artifacts.DeleteWorkItem(id)

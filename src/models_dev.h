@@ -14,19 +14,11 @@ int models_dev_refresh(void);
 
 /*
  * Look up per-model capability metadata from the models.dev registry.
- * For now this is a stub: returns 0 (not found) for all inputs.
- * Full ingestion from models_dev_refresh() cache is future work.
+ * Served by the Go providers module.
  *
  * Returns 1 if metadata was found, 0 otherwise.
  */
 int models_dev_capability_get(const char *provider, const char *model_id, model_capability_t *out);
-
-/* Path to the bundled offline snapshot (installed with the package). */
-const char *models_dev_snapshot_path(void);
-
-/* Path to the operator capability overrides file (~/.config/aimee/model_overrides.json).
- * Returns NULL if HOME is not set. */
-const char *models_dev_overrides_path(void);
 
 /*
  * Look up capability metadata from the operator overrides file only.

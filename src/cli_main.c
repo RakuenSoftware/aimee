@@ -13,6 +13,7 @@
 #include "cli_code_audit.h"
 #include "cli_css.h"
 #include "cli_mcp_serve.h"
+#include "cli_proxy.h"
 #include "aimee/protocols/acp/acp_server.h"
 #include "cli_profile.h"
 #include "client_constants.h"
@@ -28,7 +29,6 @@
 #include "platform_path.h" /* platform_getppid */
 #include "platform_process.h"
 #include "cJSON.h"
-#include "memory_redirect.h"
 #include <ctype.h>
 #include <signal.h>
 #include <stdio.h>
@@ -154,6 +154,9 @@ typedef struct
  * it is. Every entry here is a thing that can rot, so the list stays this short
  * on purpose. */
 static const client_help_t client_bootstrap_help[] = {
+    {"proxy", "Serve model APIs through an authenticated local proxy", CLIENT_TIER_CORE, 0,
+     "  [--port N]  Listen on 127.0.0.1 (default 8911); requires AIMEE_PROXY_TOKEN\n"
+     "  Automatic client setup: aimee launch --gateway -- codex\n"},
     {"remote", "Point the thin client at a remote aimee-server", CLIENT_TIER_CORE, 0,
      "  set <url> [token]  Persist a remote server target\n"
      "  enroll            Rotate the bearer and enroll this client certificate\n"
@@ -1928,6 +1931,14 @@ int main(int argc, char **argv)
    /* Fall back to <aimee_home>/remote.conf when no flag/env override. */
    cli_remote_load_persisted();
 
+   /* Model-proxy use does not register tool integrations or query the command
+    * catalogue. In particular, do not re-enable the CLI plugin before launch. */
+   if (cmd_start < argc && strcmp(argv[cmd_start], "proxy") == 0)
+      return cli_proxy_cmd(argc - cmd_start - 1, argv + cmd_start + 1);
+   if (cmd_start + 1 < argc && strcmp(argv[cmd_start], "launch") == 0 &&
+       strcmp(argv[cmd_start + 1], "--gateway") == 0)
+      return client_launch_exec(argc - cmd_start - 1, argv + cmd_start + 1);
+
    /* Installer/update seam: materialize detected client adapters without
     * starting a server, probing delegates, or dispatching a user command. */
    const char *integrations_only = getenv("AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY");
@@ -2322,8 +2333,21 @@ int main(int argc, char **argv)
                return 1;
             }
          }
+         int git_runner = 0;
+         if (strcmp(cmd, "git") == 0 && cli_v1_remote_endpoint_is_network())
+         {
+            git_runner = cli_workspace_git_runner_start();
+            if (git_runner < 0)
+            {
+               fprintf(stderr, "aimee: could not start the detached workspace runner for this Git "
+                               "command; no request was sent\n");
+               return 1;
+            }
+         }
          int rc = cli_v1_forward(sock, &route, json_output, json_fields, response_profile, sub_argc,
                                  sub_argv);
+         if (git_runner > 0)
+            cli_workspace_git_runner_stop();
          if (rc >= 0)
             return rc;
          fprintf(stderr, "aimee: server /v1 request failed for '%s'\n", cmd);

@@ -22,6 +22,9 @@ int cli_extract_profile(int *argc, char **argv, char *out, size_t outsz)
       const char *a = argv[i];
       if (!a)
          continue;
+      /* Everything after the option terminator belongs to the launched client. */
+      if (strcmp(a, "--") == 0)
+         break;
 
       const char *value = NULL;
       int consume = 0;

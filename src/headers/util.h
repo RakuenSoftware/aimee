@@ -276,6 +276,18 @@ int opt_get_flag(const opt_parsed_t *opts, const char *name);
  * Respects the thread-local CWD set by run_cmd_set_cwd(). */
 char *run_cmd(const char *cmd, int *exit_code);
 
+/* Scoped execution location for trusted filesystem probes (for example remote
+ * hooks). The adapter receives the original command and reads run_cmd_get_cwd;
+ * it must not call run_cmd recursively. Errors never fall back to local exec.
+ * Swap back the returned value before leaving the scope. Explicit-environment
+ * credential execution is deliberately not redirected by this adapter. */
+typedef struct
+{
+   char *(*exec)(void *ctx, const char *cmd, int *exit_code);
+   void *ctx;
+} run_cmd_executor_t;
+run_cmd_executor_t run_cmd_exchange_executor(run_cmd_executor_t executor);
+
 /* Like run_cmd(), but runs the command via `/bin/sh -c` under execve() with an
  * explicit environment `envp` (NULL = inherit), capturing combined
  * stdout+stderr. The environment — including any secret it carries, e.g.

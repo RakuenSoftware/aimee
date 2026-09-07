@@ -7,19 +7,14 @@ import { fetchAppliance, fetchGitIdentityReady, fetchHostCount, fetchProjectCoun
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
 import CreateAccount from '../setup/CreateAccount';
 import PrimaryChooser from '../setup/PrimaryChooser';
-import KnowledgeBase from '../setup/KnowledgeBase';
 import DeployTopology from '../setup/DeployTopology';
-import SharedStore from '../setup/SharedStore';
 import DeployPanel from '../setup/DeployPanel';
 import ConnectHosts from '../setup/ConnectHosts';
 import ConnectWorkspace from '../setup/ConnectWorkspace';
 import GitIdentity from '../setup/GitIdentity';
-import type { KbMode } from '../setup/deployTopology';
 
 /* First-run setup wizard. A modal over the app that walks the operator through the
- * minimum path to a working turn. It forks at the Knowledge-base step: a remote KB
- * hides the deploy-topology + shared-store steps (visibleSteps() reflects the live
- * kb_mode). Every value is written through the existing POST /api/config/set
+ * minimum path to a working local turn, with optional shared knowledge. Every value is written through the existing POST /api/config/set
  * allowlist and the /api/git/* routes (no new config backend). Non-blocking:
  * closable at any time via ×, Esc, the backdrop, or "Later".
  *
@@ -60,7 +55,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   const [projectCount, setProjectCount] = useState(0);
   const [accountReady, setAccountReady] = useState(false);
   const [gitIdentityReady, setGitIdentityReady] = useState(false);
-  // The all-in-one appliance bakes the KB + LLM + store, so its wizard drops the
+  // Appliance packaging is separate from the optional shared KB connection.
   // infra steps. Detected from a webchat signal (AIMEE_WIZARD_APPLIANCE).
   const [appliance, setAppliance] = useState(false);
   // Steps already completed when the wizard opened — hidden this run. Frozen at
@@ -70,13 +65,13 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   // the body so the list doesn't flash-then-shrink.
   const [booted, setBooted] = useState(false);
 
-  const kbMode: WizardKbMode = String(cfg.kb_mode) === 'remote' ? 'remote' : 'local';
+  const kbMode: WizardKbMode = String(cfg.kb_mode) === 'remote' ? 'remote' : 'none';
   const steps = useMemo(
     () => visibleSteps(kbMode, appliance).filter((s) => !doneAtOpen.has(s.id)),
     [kbMode, appliance, doneAtOpen],
   );
   const total = steps.length;
-  // Clamp the cursor: switching to a remote KB shrinks the visible list.
+  // Clamp the cursor as completed steps leave the visible list.
   const safeIdx = Math.min(idx, total - 1);
   // Undefined when every step was already complete at open — the summary shows.
   const step = steps[safeIdx] as (typeof steps)[number] | undefined;
@@ -101,7 +96,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
       setGitIdentityReady(identity);
       setAppliance(appl);
       const d: Record<string, string> = {};
-      for (const s of visibleSteps(String(c.kb_mode) === 'remote' ? 'remote' : 'local')) {
+      for (const s of visibleSteps(String(c.kb_mode) === 'remote' ? 'remote' : 'none')) {
         for (const k of s.keys) {
           const v = c[k];
           d[k] = v == null ? '' : String(v);
@@ -164,30 +159,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     advance();
   }
 
-  // The knowledge-base step records the local/remote choice (+ remote url/token).
-  // Reload config so visibleSteps reflects the new kb_mode (remote hides the
-  // deploy + DB2 steps), track restart-pending, advance.
-  async function handleKbSaved(restartKeys: string[], _mode: KbMode) {
-    const c = await loadConfig();
-    setCfg(c);
-    setPendingRestart((prev) => Array.from(new Set([...prev, ...restartKeys])));
-    notifySetupUpdated();
-    advance();
-  }
-
   // The deploy-topology page writes its own config keys (per-role llm_*). It
   // reports the restart-class keys it changed; refresh cfg, track restart, advance.
   async function handleDeploySaved(restartKeys: string[]) {
-    const c = await loadConfig();
-    setCfg(c);
-    setPendingRestart((prev) => Array.from(new Set([...prev, ...restartKeys])));
-    notifySetupUpdated();
-    advance();
-  }
-
-  // The shared-store (DB2) step writes db2_url ('' for the bundled Postgres, or an
-  // existing-database URL). Refresh cfg, track restart-pending, advance.
-  async function handleDb2Saved(restartKeys: string[]) {
     const c = await loadConfig();
     setCfg(c);
     setPendingRestart((prev) => Array.from(new Set([...prev, ...restartKeys])));
@@ -280,10 +254,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 ⏳ Restart required for: {pendingRestart.map(humanize).join(', ')} — these take effect after the server restarts.
               </div>
             )}
-            {/* Local KB: offer to bring up the managed services (kb + llm + postgres)
-                straight from here when the server can orchestrate Docker. The
-                appliance already runs everything in-container, so skip it there. */}
-            {!appliance && <DeployPanel kbMode={kbMode} />}
+            {/* Model setup applies to every Server. DeployPanel reports whether
+                this deployment permits browser-managed containers. */}
+            <DeployPanel />
             <div style={{ display: 'flex', justifyContent: total > 0 ? 'space-between' : 'flex-end' }}>
               {total > 0 && (
                 <Button variant="default" onClick={() => { setShowSummary(false); setIdx(0); }}>Back</Button>
@@ -302,12 +275,8 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               <CreateAccount onCreated={handleAccountCreated} />
             ) : step.kind === 'chooser' ? (
               <PrimaryChooser onConfigured={handlePrimaryConfigured} />
-            ) : step.kind === 'kb' ? (
-              <KnowledgeBase onSaved={handleKbSaved} />
             ) : step.kind === 'deploy' ? (
               <DeployTopology onSaved={handleDeploySaved} />
-            ) : step.kind === 'db2' ? (
-              <SharedStore onSaved={handleDb2Saved} />
             ) : step.kind === 'git_identity' ? (
               <GitIdentity onSaved={() => { setGitIdentityReady(true); notifySetupUpdated(); advance(); }} onSkip={advance} />
             ) : step.kind === 'connection' ? (

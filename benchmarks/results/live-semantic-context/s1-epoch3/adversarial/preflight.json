@@ -1,0 +1,66 @@
+{
+  "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+  "ast_grep_version": "ast-grep 0.45.0",
+  "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+  "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+  "cell_count": 12,
+  "cells": [
+    {
+      "arm": "location_only",
+      "task_id": "f01"
+    },
+    {
+      "arm": "batched_context",
+      "task_id": "f01"
+    },
+    {
+      "arm": "batched_context",
+      "task_id": "f02"
+    },
+    {
+      "arm": "location_only",
+      "task_id": "f02"
+    },
+    {
+      "arm": "batched_context",
+      "task_id": "f03"
+    },
+    {
+      "arm": "location_only",
+      "task_id": "f03"
+    },
+    {
+      "arm": "batched_context",
+      "task_id": "f04"
+    },
+    {
+      "arm": "location_only",
+      "task_id": "f04"
+    },
+    {
+      "arm": "batched_context",
+      "task_id": "f05"
+    },
+    {
+      "arm": "location_only",
+      "task_id": "f05"
+    },
+    {
+      "arm": "batched_context",
+      "task_id": "f06"
+    },
+    {
+      "arm": "location_only",
+      "task_id": "f06"
+    }
+  ],
+  "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+  "codex_version": "codex-cli 0.151.0",
+  "created_at": "2026-09-01T18:03:12.002633+00:00",
+  "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+  "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+  "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+  "schema_version": 1,
+  "seed": 41904,
+  "study_kind": "adversarial_failure"
+}

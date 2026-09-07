@@ -15,9 +15,9 @@ import (
 	"time"
 
 	appconfig "github.com/JBailes/aimee/server-go/config"
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
@@ -473,7 +473,7 @@ func TestDocumentPromptIsScopedToOriginalRequestAndAcceptedDiff(t *testing.T) {
 	gitRun(t, repo, "commit", "-m", "accepted implementation")
 
 	request := StepRequest{
-		WorkItem: db1.WorkItem{Repo: repo},
+		WorkItem: workflowstore.WorkItem{Repo: repo},
 		Proposal: "Document only the self-update limitation.",
 	}
 	prompt, err := documentDelegatePrompt(t.Context(), request, repo)
@@ -795,7 +795,7 @@ func TestStructuredCorrectiveSynthesisIncludesCompleteInvalidResponse(t *testing
 	agents := &recordingAgents{draftResponses: []string{invalid, valid}}
 	runner := withPanel(&NativeRunner{agents: agents}, configuredTestRoundtable(t))
 	result, err := runner.structured(context.Background(), StepRequest{
-		WorkItem: db1.WorkItem{Repo: "/repo"},
+		WorkItem: workflowstore.WorkItem{Repo: "/repo"},
 		Node:     wfe.Node{ID: "scope"},
 		Proposal: "document recovery",
 	}, "intent")
@@ -835,7 +835,7 @@ func TestNativeRoundtableFailsClosedOnOriginalRequestDriftOrOmission(t *testing.
 			reviewed := wfe.Artifact{Type: "plan", Content: []byte("unrelated direction: builds a dashboard nobody asked for")}
 			reviewed.Hash = wfe.Hash(reviewed.Content)
 			result, err := runner.roundtable(context.Background(), StepRequest{
-				WorkItem: db1.WorkItem{Repo: "/repo", Worktree: "/worktree"},
+				WorkItem: workflowstore.WorkItem{Repo: "/repo", Worktree: "/worktree"},
 				Node:     node, Proposal: "fix the scheduler", Inputs: map[string]wfe.Artifact{"src": reviewed},
 			})
 			if err != nil {
@@ -867,7 +867,7 @@ func TestNativeRoundtableRejectsUnsupportedArtifactStage(t *testing.T) {
 		runner := withPanel(&NativeRunner{agents: agents}, configuredTestRoundtable(t))
 		reviewed := wfe.Artifact{Type: stage, Content: []byte("content of the artifact under review, long enough to be reviewable")}
 		_, err := runner.roundtable(context.Background(), StepRequest{
-			WorkItem: db1.WorkItem{Repo: "/repo", Worktree: "/worktree"},
+			WorkItem: workflowstore.WorkItem{Repo: "/repo", Worktree: "/worktree"},
 			Node:     wfe.Node{Params: map[string]any{"roundtable": "default", "panel": map[string]any{"required": []any{"qa"}}}},
 			Proposal: "request", Inputs: map[string]wfe.Artifact{"src": reviewed},
 		})
@@ -906,7 +906,7 @@ func TestConfiguredRoundtableHonorsMinimumWhenASeatIsUnavailable(t *testing.T) {
 			reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete implementation plan")}
 			reviewed.Hash = wfe.Hash(reviewed.Content)
 			result, err := runner.roundtable(context.Background(), StepRequest{
-				WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
+				WorkItem: workflowstore.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
 				Node:     wfe.Node{ID: "gate", Block: "gate.roundtable", Params: map[string]any{"roundtable": "default"}},
 				Proposal: "implement the requested change", Inputs: map[string]wfe.Artifact{"src": reviewed},
 			})
@@ -946,7 +946,7 @@ func TestConfiguredRoundtableUsesOverallDeadlineWithoutCancellingSlowHealthySeat
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	started := time.Now()
 	result, err := runner.roundtable(context.Background(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Block: "gate.roundtable", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "implement the requested change", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
@@ -978,7 +978,7 @@ func TestConfiguredRoundtableHonorsDiscussionQuorumAtPhaseDeadline(t *testing.T)
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete implementation plan")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	result, err := runner.roundtable(context.Background(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Block: "gate.roundtable", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "implement the requested change", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
@@ -1032,7 +1032,7 @@ func TestConfiguredRoundtableReportsEveryPhaseDeadline(t *testing.T) {
 			reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete implementation plan")}
 			reviewed.Hash = wfe.Hash(reviewed.Content)
 			result, err := runner.roundtable(context.Background(), StepRequest{
-				WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
+				WorkItem: workflowstore.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
 				Node:     wfe.Node{ID: "gate", Block: "gate.roundtable", Params: map[string]any{"roundtable": "default"}},
 				Proposal: "implement the requested change", Inputs: map[string]wfe.Artifact{"src": reviewed},
 			})
@@ -1060,7 +1060,7 @@ func TestConfiguredRoundtableChairmanFailureIsVisiblyDegraded(t *testing.T) {
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete implementation plan")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	result, err := runner.roundtable(context.Background(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Block: "gate.roundtable", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "implement the requested change", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
@@ -1099,7 +1099,7 @@ func TestRoundtableDoesNotLaunchChairmanAfterCostExhaustion(t *testing.T) {
 	runner := withPanel(&NativeRunner{agents: agents}, store)
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete plan: add the endpoint, wire it, and cover it with a test")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
-	result, err := runner.roundtable(t.Context(), StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate", Block: "gate.roundtable", Params: map[string]any{"roundtable": "default"}}, Proposal: "implement it", Inputs: map[string]wfe.Artifact{"src": reviewed}, CostLimitUSD: 1})
+	result, err := runner.roundtable(t.Context(), StepRequest{WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate", Block: "gate.roundtable", Params: map[string]any{"roundtable": "default"}}, Proposal: "implement it", Inputs: map[string]wfe.Artifact{"src": reviewed}, CostLimitUSD: 1})
 	if err != nil || result.Status != StepPending || result.PauseReason != "roundtable_chairman" || agents.chairmanCalls != 0 {
 		t.Fatalf("result=%+v chairman_calls=%d err=%v", result, agents.chairmanCalls, err)
 	}
@@ -1153,7 +1153,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	withPanel(runner, configuredTestRoundtable(t))
 	proposal := strings.Repeat("proposal 漢字\n", 200_000) + "PROPOSAL_END"
 	proposalArtifact := wfe.Artifact{Type: "proposal", Content: []byte(proposal), Hash: wfe.Hash([]byte(proposal))}
-	planResult, err := runner.author(context.Background(), StepRequest{WorkItem: db1.WorkItem{Repo: "/repo"}, Node: wfe.Node{Params: map[string]any{"roundtable": "default"}}, Proposal: proposal, Inputs: map[string]wfe.Artifact{"proposal": proposalArtifact}}, "plan")
+	planResult, err := runner.author(context.Background(), StepRequest{WorkItem: workflowstore.WorkItem{Repo: "/repo"}, Node: wfe.Node{Params: map[string]any{"roundtable": "default"}}, Proposal: proposal, Inputs: map[string]wfe.Artifact{"proposal": proposalArtifact}}, "plan")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1165,7 +1165,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 		t.Fatalf("planner did not frame its source as the original request: %+v", agents.requests)
 	}
 	customBlock := wfe.BlockDefinition{Name: "custom", Custom: true, Produces: "report", Prompt: "Do the work."}
-	_, err = runner.custom(context.Background(), StepRequest{WorkItem: db1.WorkItem{Repo: "/repo"}, Proposal: proposal}, customBlock)
+	_, err = runner.custom(context.Background(), StepRequest{WorkItem: workflowstore.WorkItem{Repo: "/repo"}, Proposal: proposal}, customBlock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1178,7 +1178,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	}}}
 	reviewed := wfe.Artifact{Type: "frozen_diff", Content: []byte(strings.Repeat("diff\n", 300_000) + "DIFF_END")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
-	result, err := runner.roundtable(context.Background(), StepRequest{WorkItem: db1.WorkItem{Repo: "/repo", Worktree: "/worktree"}, Node: node, Proposal: proposal, Inputs: map[string]wfe.Artifact{"src": reviewed}})
+	result, err := runner.roundtable(context.Background(), StepRequest{WorkItem: workflowstore.WorkItem{Repo: "/repo", Worktree: "/worktree"}, Node: node, Proposal: proposal, Inputs: map[string]wfe.Artifact{"src": reviewed}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1224,7 +1224,7 @@ func TestNativeRunnerSplitAcceptsManagedChangeIntentBinding(t *testing.T) {
 	runner := &NativeRunner{agents: fixedResponseAgents{response: `{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement feature","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["feature exists"]}]}`}}
 	intent := []byte(`{"schema_version":1,"status":"unconfirmed","summary":"implement feature","rationale":"proposal","acceptance_criteria":["feature exists"]}`)
 	result, err := runner.structured(context.Background(), StepRequest{
-		WorkItem: db1.WorkItem{Repo: "/repo"},
+		WorkItem: workflowstore.WorkItem{Repo: "/repo"},
 		Inputs:   map[string]wfe.Artifact{"intent": {Type: "intent", Content: intent, Hash: wfe.Hash(intent)}},
 	}, "packets")
 	if err != nil {
@@ -1240,7 +1240,7 @@ func TestNativeRunnerSplitHonorsExplicitSingleSliceWithoutDelegating(t *testing.
 	proposal := "# Proposal: run CI on slice sub-PRs\n\n- **State:** pending — single slice.\n\n## Recommendation\n\nAdd `aimee/feat/**` to the existing trigger."
 	runner := &NativeRunner{agents: noRosterAgents{}}
 	result, err := runner.structured(context.Background(), StepRequest{
-		WorkItem: db1.WorkItem{Repo: "/repo"},
+		WorkItem: workflowstore.WorkItem{Repo: "/repo"},
 		Proposal: proposal,
 		Inputs: map[string]wfe.Artifact{"plan": {
 			Type: "plan", Content: []byte(plan), Hash: wfe.Hash([]byte(plan)),
@@ -1278,7 +1278,7 @@ func TestNativeRunnerSplitPromptCarriesOriginalRequestAndRejectsFollowUpPackets(
 	runner := &NativeRunner{agents: agents}
 	plan := []byte("# Plan\n\nImplement the requested change.")
 	_, err := runner.structured(context.Background(), StepRequest{
-		WorkItem: db1.WorkItem{Repo: "/repo"},
+		WorkItem: workflowstore.WorkItem{Repo: "/repo"},
 		Proposal: "# Proposal\n\nImplement only the requested change.",
 		Inputs: map[string]wfe.Artifact{"plan": {
 			Type: "plan", Content: plan, Hash: wfe.Hash(plan),
@@ -1309,7 +1309,7 @@ func TestRoundtableRunIDIsJSONEscapedInTrustedPromptPreamble(t *testing.T) {
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	_, err := runner.roundtable(context.Background(), StepRequest{
-		WorkItem: db1.WorkItem{ID: maliciousID, Worktree: "/worktree"}, Node: wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
+		WorkItem: workflowstore.WorkItem{ID: maliciousID, Worktree: "/worktree"}, Node: wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
 	if err != nil {
@@ -1334,7 +1334,7 @@ func TestRoundtablesAreNotSerializedByProcessWideAdmission(t *testing.T) {
 		id := id
 		go func() {
 			result, err := runner.roundtable(context.Background(), StepRequest{
-				WorkItem: db1.WorkItem{ID: id, Worktree: "/worktree"},
+				WorkItem: workflowstore.WorkItem{ID: id, Worktree: "/worktree"},
 				Node:     node, Proposal: "fix the scheduler", Inputs: map[string]wfe.Artifact{"src": artifact},
 			})
 			if err == nil && result.Status != StepAdvanced {
@@ -1523,7 +1523,7 @@ func TestRoundtableSkipsReviewWhenArtifactIsUnchanged(t *testing.T) {
 		ID: "f1", Persona: "qa", Severity: "blocking", Summary: "still broken", Recommendation: "fix it",
 	}}}
 	result, err := runner.roundtable(context.Background(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi_unchanged", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi_unchanged", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Block: "gate.roundtable", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "fix the scheduler",
 		Inputs:   map[string]wfe.Artifact{"src": artifact},
@@ -1565,7 +1565,7 @@ func TestForeachRespawnsIdenticalPacketsInALaterGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1578,7 +1578,7 @@ func TestForeachRespawnsIdenticalPacketsInALaterGeneration(t *testing.T) {
 	if err := artifacts.PutProposal(parentID, []byte("build the feature")); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+	if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 		ID: parentID, Repo: "repo", ProposalPath: "proposal.md", WorkflowName: "build-e2e",
 		StartStage: "slices", Mode: "autonomous",
 	}); err != nil {
@@ -1638,7 +1638,7 @@ func TestForeachRespawnsIdenticalPacketsInALaterGeneration(t *testing.T) {
 	}
 }
 
-func childIDs(t *testing.T, store *db1.Store, parentID string) []string {
+func childIDs(t *testing.T, store *workflowstore.Store, parentID string) []string {
 	t.Helper()
 	children, err := store.Children(t.Context(), parentID)
 	if err != nil {
@@ -1660,7 +1660,7 @@ func TestRoundtableWithoutAConfiguredStoreParksInsteadOfConveningAPanel(t *testi
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	result, err := runner.roundtable(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "implementation"}},
 		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
@@ -1683,7 +1683,7 @@ func TestRoundtableNamingAnAbsentPresetParks(t *testing.T) {
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	result, err := runner.roundtable(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "not-saved"}},
 		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
@@ -1737,7 +1737,7 @@ func TestContradictorySeatAbstainsAfterRepairInsteadOfVetoingThePanel(t *testing
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	result, err := runner.roundtable(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
@@ -1779,7 +1779,7 @@ func TestPanelAdvancesWhenAbstentionStillLeavesTheConfiguredMinimum(t *testing.T
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	result, err := runner.roundtable(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
@@ -1832,7 +1832,7 @@ func TestChairmanRepairsItsFirstUnstructuredReply(t *testing.T) {
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	result, err := runner.roundtable(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
@@ -1856,7 +1856,7 @@ func TestChairmanParkDetailCarriesTheUnusableResponse(t *testing.T) {
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	result, err := runner.roundtable(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
@@ -1908,7 +1908,7 @@ func TestPanelWithLostReplayReturnsTheErrorInsteadOfParking(t *testing.T) {
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	result, err := runner.roundtable(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
 		ReplayOnly: true,
@@ -1927,7 +1927,7 @@ func TestPanelWithAnUnreachableSeatStillParks(t *testing.T) {
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	result, err := runner.roundtable(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "review the plan", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	})
@@ -1948,7 +1948,7 @@ func TestPlannerIsAskedForTheSmallestPlanThatSatisfiesTheRequest(t *testing.T) {
 	agents := &recordingAgents{draftResponses: []string{"# Plan\n\nDo exactly what was asked."}}
 	runner := &NativeRunner{agents: agents}
 	_, err := runner.author(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Repo: "/repo"},
 		Node:     wfe.Node{ID: "plan"},
 		Inputs:   map[string]wfe.Artifact{"proposal": {Type: "proposal", Content: []byte("add a CONTRIBUTING.md section")}},
 	}, "plan")
@@ -1973,7 +1973,7 @@ func TestPlannerIsToldNotToBuildFoundationsForWorkItDefers(t *testing.T) {
 	agents := &recordingAgents{draftResponses: []string{"# Plan\n\nDo exactly what was asked."}}
 	runner := &NativeRunner{agents: agents}
 	_, err := runner.author(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Repo: "/repo"},
 		Node:     wfe.Node{ID: "plan"},
 		Inputs:   map[string]wfe.Artifact{"proposal": {Type: "proposal", Content: []byte("add a CONTRIBUTING.md section")}},
 	}, "plan")
@@ -1999,7 +1999,7 @@ func TestPanelTreatsUnrequestedAdditionAsDriftWithoutExcusingDefects(t *testing.
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	if _, err := runner.roundtable(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "add a CONTRIBUTING.md section", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	}); err != nil {
@@ -2032,7 +2032,7 @@ func TestReviewersAreToldBlockedIsAboutTheRequestNotTheArtifact(t *testing.T) {
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("a complete plan artifact for review")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	if _, err := runner.roundtable(t.Context(), StepRequest{
-		WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"},
+		WorkItem: workflowstore.WorkItem{ID: "wi", Worktree: "/worktree"},
 		Node:     wfe.Node{ID: "gate", Params: map[string]any{"roundtable": "default"}},
 		Proposal: "add a CONTRIBUTING.md section", Inputs: map[string]wfe.Artifact{"src": reviewed},
 	}); err != nil {
@@ -2078,13 +2078,13 @@ func (raceForge) Merge(context.Context, string, string, string) error {
 // engine authority to merge into the repository base.
 func TestMergeStepRejectsRootFinalPR(t *testing.T) {
 	root := t.TempDir()
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_root", Repo: root,
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_root", Repo: root,
 		ProposalPath: "p", WorkflowName: "build-e2e", WorkflowVersion: "v",
 		StartStage: "merge"}); err != nil {
 		t.Fatal(err)
@@ -2140,17 +2140,17 @@ func TestMergeStepFailsTerminallyOnConflictButStillPendsOnLostRace(t *testing.T)
 			// merge() resolves the slice worktree from its parent feature branch.
 			git(repo, "branch", "aimee/feat/wi_parent")
 
-			store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+			store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer store.Close()
 			ctx := context.Background()
-			if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent", Repo: repo,
+			if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_parent", Repo: repo,
 				ProposalPath: "p", WorkflowName: "build-e2e", WorkflowVersion: "v", StartStage: "slices"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent.s0", Repo: repo,
+			if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_parent.s0", Repo: repo,
 				ProposalPath: "p/slice", WorkflowName: "slice", WorkflowVersion: "v",
 				StartStage: "merge", ParentID: "wi_parent"}); err != nil {
 				t.Fatal(err)

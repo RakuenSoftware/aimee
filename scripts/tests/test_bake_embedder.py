@@ -54,6 +54,17 @@ def test_transient_is_retried():
     print("  transient 429 retried, then succeeds")
 
 
+def test_wrapped_connection_reset_is_retried():
+    m = load()
+    wrapped = RuntimeError("snapshot not found in local cache")
+    wrapped.__cause__ = ConnectionError("connection reset by peer")
+    hub = FakeHub([wrapped, None])
+    m.snapshot_download = hub
+    assert m.fetch("hotchpotch/bekko-embedding-v1-a25m")
+    assert hub.calls == 2 and m.sleeps == [15]
+    print("  wrapped Hub connection reset retried without changing the revision")
+
+
 def test_permanent_is_not_retried():
     m = load()
     hub = FakeHub([Exception("RepositoryNotFoundError: 401 Client Error. Repository not found")])
@@ -182,6 +193,7 @@ def test_external_code_fetch_uses_registry_revision():
 
 if __name__ == "__main__":
     test_transient_is_retried()
+    test_wrapped_connection_reset_is_retried()
     test_permanent_is_not_retried()
     test_exhaustion_is_bounded()
     test_unknown_embedder_is_a_build_failure()

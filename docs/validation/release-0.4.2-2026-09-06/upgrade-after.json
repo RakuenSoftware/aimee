@@ -1,0 +1,54 @@
+{
+  "checks": [
+    {
+      "name": "old row by ID release042-upgrade-global",
+      "passed": false,
+      "response": [
+        200,
+        {
+          "status": "error",
+          "message": "memory not found",
+          "kind": "not_found"
+        }
+      ]
+    },
+    {
+      "name": "old row by ID release042-upgrade-project",
+      "passed": false,
+      "response": [
+        200,
+        {
+          "status": "error",
+          "message": "memory not found",
+          "kind": "not_found"
+        }
+      ]
+    },
+    {
+      "name": "old row discoverable by list release042-upgrade-global",
+      "passed": false,
+      "response": [
+        200,
+        {
+          "status": "ok",
+          "memories": [],
+          "active_context_missing": false
+        }
+      ]
+    },
+    {
+      "name": "old row discoverable by list release042-upgrade-project",
+      "passed": false,
+      "response": [
+        200,
+        {
+          "status": "ok",
+          "memories": [],
+          "active_context_missing": false
+        }
+      ]
+    }
+  ],
+  "passed": 0,
+  "failed": 4
+}

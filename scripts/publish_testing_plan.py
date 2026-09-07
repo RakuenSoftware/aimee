@@ -30,22 +30,16 @@ class Image:
 
 
 IMAGES = (
-    Image("aimee-server", "Dockerfile.server"),
+    Image("aimee", "Dockerfile.server"),
+    Image("aimee-postgres", "Dockerfile.postgres"),
     Image("aimee-control-web", "Dockerfile.control-web"),
-    Image("aimee-kb", "Dockerfile", "AIMEE_EMBEDDER=none"),
-    Image("aimee-kb-a25m", "Dockerfile", "AIMEE_EMBEDDER=bekko-a25m"),
-    Image(
-        "aimee-kb-nomic",
-        "Dockerfile",
-        "AIMEE_EMBEDDER=nomic-embed-text-v2-moe",
-    ),
     Image("aimee-authority-bootstrap", "Dockerfile.authority-bootstrap"),
 )
 
 ALL = frozenset(image.name for image in IMAGES)
-SERVER = frozenset(("aimee-server",))
+SERVER = KB = frozenset(("aimee",))
+POSTGRES = frozenset(("aimee-postgres",))
 CONTROL = frozenset(("aimee-control-web",))
-KB = frozenset(("aimee-kb", "aimee-kb-a25m", "aimee-kb-nomic"))
 AUTHORITY = frozenset(("aimee-authority-bootstrap",))
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -82,10 +76,7 @@ def _shipping_object_closures() -> dict[str, frozenset[str]] | None:
             rules.setdefault(target, set()).update(prerequisites)
 
     roots = {
-        "aimee-server": ("../aimee-server",),
-        "aimee-kb": ("../aimee-kb", "../aimee-kb-worm"),
-        "aimee-kb-a25m": ("../aimee-kb", "../aimee-kb-worm"),
-        "aimee-kb-nomic": ("../aimee-kb", "../aimee-kb-worm"),
+        "aimee": ("../aimee-server", "../aimee-kb", "../aimee-kb-worm", "../aimee"),
         "aimee-authority-bootstrap": (
             "../aimee-kb-token-roots-provision",
             "../aimee-kb-jwks-publish",
@@ -206,6 +197,7 @@ KB_CONTAINER_FILES = frozenset(
     (
         "deploy/container/aimee.yaml",
         "deploy/container/aimee-kb-entrypoint.sh",
+        "deploy/container/kb-role-runtime.sh",
         "deploy/container/optional-modules-lib.sh",
         "deploy/container/module-supervisor.sh",
         "deploy/container/aimee-kb-db-export.sh",
@@ -225,6 +217,8 @@ SERVER_CONTAINER_FILES = frozenset(
         "deploy/container/aimee-server.yaml",
     )
 )
+
+KB_CONTAINER_FILES = SERVER_CONTAINER_FILES = KB_CONTAINER_FILES | SERVER_CONTAINER_FILES
 
 AUTHORITY_CONTAINER_FILES = frozenset(
     ("deploy/container/aimee-managed-authority-bootstrap.sh",)
@@ -247,6 +241,12 @@ def consumers(path: str) -> frozenset[str]:
         return ALL
     if path == "Dockerfile":
         return KB
+    if path == "Dockerfile.postgres" or path in (
+        "scripts/postgres-secure-entrypoint.sh", "scripts/postgres-store-init.sh"
+    ):
+        return POSTGRES
+    if path.startswith("server-go/modules/postgres/storage/"):
+        return SERVER | POSTGRES
     if path == "Dockerfile.server":
         return SERVER
     if path == "Dockerfile.control-web":
@@ -273,7 +273,7 @@ def consumers(path: str) -> frozenset[str]:
         return frozenset()
 
     if path.startswith("server-go/"):
-        out = SERVER | KB  # both images build the module multicall runtime
+        out = SERVER | POSTGRES  # both images build the module multicall runtime
         if path in ("server-go/go.mod", "server-go/go.sum") or path.startswith(
             "server-go/modules/control-web/policy/"
         ):

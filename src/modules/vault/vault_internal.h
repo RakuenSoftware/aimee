@@ -127,6 +127,11 @@ typedef struct
  * with no binder call at all (behavior-preserving). Not thread-safe against
  * concurrent facade calls — bind at construction/startup, not mid-flight. */
 void vault_store_set_backend(const vault_store_backend_t *backend);
+/* Keep the reserved instance principal in local Vault for BOTH roles. Import
+ * legacy instance credentials before binding the tenant store; fail closed on
+ * conflicts, corrupt ciphertext, or incomplete migration. Startup only. */
+int vault_store_bind_tenant_backend(const vault_store_backend_t *backend,
+                                    const uint8_t instance_kek[VAULT_KEK_LEN]);
 void vault_custody_set_provider(const vault_custody_provider_t *provider);
 
 #endif /* DEC_VAULT_INTERNAL_H */

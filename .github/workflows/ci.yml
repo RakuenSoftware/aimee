@@ -37,21 +37,66 @@ permissions:
   contents: read
 
 jobs:
-  secure-development-gates:
-    name: Static analysis and secret scanning
+  cppcheck-shards:
+    name: Cppcheck (${{ matrix.shard }}/8)
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install cppcheck dependencies
+        run: sudo apt-get update && sudo apt-get install -y cppcheck build-essential pkg-config libpq-dev libssl-dev libpam0g-dev zlib1g-dev libzstd-dev libp11-kit-dev python3-yaml
+      - name: Analyze source batch
+        working-directory: src
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: make cppcheck STATIC_ANALYSIS_STRICT=1 CPPCHECK_ARGS="--shard-index $SHARD --shard-count 8 --report build/cppcheck/cppcheck-$SHARD.xml"
+      - name: Retain diagnostics for the combined ratchet
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: cppcheck-${{ matrix.shard }}
+          path: src/build/cppcheck/cppcheck-${{ matrix.shard }}.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  clang-tidy-shards:
+    name: Clang-tidy (${{ matrix.shard }}/8)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install clang-tidy dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy build-essential pkg-config libpq-dev libssl-dev libpam0g-dev zlib1g-dev libzstd-dev libp11-kit-dev python3-yaml
+      - name: Analyze source batch
+        working-directory: src
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: make clang-tidy STATIC_ANALYSIS_STRICT=1 CLANG_TIDY_ARGS="--shard-index $SHARD --shard-count 8"
+      - name: Retain analyzer diagnostics
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: clang-tidy-${{ matrix.shard }}
+          path: src/build/clang-tidy.log
+          if-no-files-found: error
+          retention-days: 7
+
+  secret-scanning:
+    name: Secret scanning
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # Gitleaks scans commit history, so a one-commit checkout is not enough.
           fetch-depth: 0
-      - name: Install native analyzers
-        run: sudo apt-get update && sudo apt-get install -y cppcheck clang-tidy
-      - name: Run mandatory native static analysis
-        working-directory: src
-        run: make static-analysis STATIC_ANALYSIS_STRICT=1
       - name: Scan the complete Git history for secrets
         env:
           GITLEAKS_VERSION: 8.30.1
@@ -65,6 +110,51 @@ jobs:
           printf '%s  %s\n' "$GITLEAKS_SHA256" "$archive" | sha256sum --check --strict
           tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" git --no-banner --redact --verbose --log-opts=HEAD .
+
+  # Keep the existing required-check name; every analyzer batch and the full
+  # history scan must pass. Apply the debt ceiling to the SUM of all cppcheck
+  # reports, never an independent allowance for each shard.
+  secure-development-gates:
+    name: Static analysis and secret scanning
+    needs: [cppcheck-shards, clang-tidy-shards, secret-scanning]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Confirm every analyzer and secret scan passed
+        env:
+          CPPCHECK_RESULT: ${{ needs.cppcheck-shards.result }}
+          CLANG_TIDY_RESULT: ${{ needs.clang-tidy-shards.result }}
+          SECRET_SCAN_RESULT: ${{ needs.secret-scanning.result }}
+        run: |
+          for result in "$CPPCHECK_RESULT" "$CLANG_TIDY_RESULT" "$SECRET_SCAN_RESULT"; do
+            [ "$result" = success ] || { echo "Security gate dependency: $result" >&2; exit 1; }
+          done
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Collect every cppcheck report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: cppcheck-*
+          path: src/build/cppcheck
+          merge-multiple: true
+      - name: Enforce the combined diagnostic baseline
+        working-directory: src
+        run: python3 -I -S ../scripts/run-cppcheck-ratchet.py --reports-dir build/cppcheck --shard-count 8
+
+  script-tests:
+    name: Complete script regression suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Install script test dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential pkg-config libssl-dev zlib1g-dev python3-yaml openssh-client
+      - name: Build the thin client required by proxy regression tests
+        run: make -C src -j2 ../aimee
+      - name: Run every discovered script regression test
+        run: make -C src script-tests
 
   sanitizer-gate:
     name: Address and undefined-behavior sanitizers
@@ -394,6 +484,8 @@ jobs:
             done
           done
           GOPROXY='https://proxy.golang.org|direct' make -C src go-unit-tests
+      - name: Routing live-gate contract
+        run: python3 -I scripts/tests/test_live_routing.py
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
       - name: Reject reachable Go vulnerabilities
@@ -427,7 +519,10 @@ jobs:
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev curl
       - name: Build
-        run: cd src && make -j$(nproc) all server build/obj/aimee-module-config
+        run: |
+          cd src && make -j$(nproc) all server build/obj/aimee-module-config
+          # First boot binds identity through the shared Go composition runtime.
+          cd ../server-go && CGO_ENABLED=0 go build -o ../src/build/obj/aimee-module ./cmd/aimee-module
       - name: Verify binary hardening
         run: cd src && make hardening-check
       - name: Skill lint
@@ -440,7 +535,7 @@ jobs:
           sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-config|" \
             src/build/obj/module-bundle/grants/server/config.grant \
             >"$app_home/modules.d/server/config.grant"
-          AIMEE_HOME="$app_home" AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" \
+          AIMEE_HOME="$app_home" AIMEE_MODULE_RUNTIME_BIN="$PWD/src/build/obj/aimee-module" AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" \
             ./aimee-server --socket="$sock" &
           pid=$!
           module_pid=
@@ -494,6 +589,15 @@ jobs:
       # invokes — without this step the guarantee is unenforced in CI.
       - name: Thin-client remote exclusivity
         run: python3 scripts/test-thin-client-remote-exclusive.py ./aimee
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install pinned Codex for proxy compatibility
+        run: npm install --global @openai/codex@0.153.4
+      - name: Thin-client proxy regression suite (including real Codex config parser)
+        env:
+          AIMEE_TEST_REQUIRE_CODEX: '1'
+        run: python3 scripts/tests/test_thin_client_proxy.py -v
 
   build-integrity:
     needs: change-scope
@@ -766,6 +870,13 @@ jobs:
             UNIT_TEST_SKIP_P1=1 \
             unit-tests-pg
           ccache --show-stats
+      - name: Live workflow database and API tests
+        if: matrix.shard_index == 0
+        env:
+          AIMEE_TEST_STORE_URL: postgres://aimee:aimee@localhost:5432/aimee
+        run: |
+          make -C src -j"$(nproc)" CC="ccache gcc" \
+            GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 workflow-db-e2e
       - name: Postgres logs on failure
         if: failure()
         run: docker logs --tail 200 aimee-pg-tpl || true
@@ -818,12 +929,118 @@ jobs:
           test "$(psql -XAt "$AIMEE_DB2_URL" -c "select value from kb_meta where key='schema_embedding_dim'")" = "384"
           test "$(psql -XAt "$AIMEE_DB2_URL" -c "select count(*) from information_schema.tables where table_schema=current_schema() and table_name in ('memories','kb_documents','kb_async_jobs')")" = "3"
 
+  # This is part of the protected unit-test aggregate below. The fake LSP peer
+  # proves framing; these pinned providers prove what the shipping client can
+  # and cannot do with real protocol implementations before a PR reaches main.
+  lsp-real-providers:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: linux
+          - os: macos-latest
+            artifact: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20.19.2
+      - name: Install native build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          timeout 240 sudo apt-get update -q
+          timeout 240 sudo apt-get install -y -q gcc make libsqlite3-dev \
+            libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev
+      - name: Install native build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libpq openssl@3 zstd
+      - name: Install pinned real language servers
+        env:
+          GOBIN: ${{ runner.temp }}/lsp-tools/go/bin
+          GOCACHE: ${{ runner.temp }}/lsp-tools/go/cache
+          GOMODCACHE: ${{ runner.temp }}/lsp-tools/go/mod
+        run: |
+          mkdir -p "$GOBIN" "$GOCACHE" "$GOMODCACHE" "${RUNNER_TEMP}/lsp-tools/npm"
+          go install golang.org/x/tools/gopls@v0.20.0
+          npm install --prefix "${RUNNER_TEMP}/lsp-tools/npm" --no-audit --no-fund \
+            pyright@1.1.413
+      - name: Build the LSP probe
+        run: |
+          jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 3)"
+          if [ "$RUNNER_OS" = macOS ]; then
+            libpq="$(brew --prefix libpq)"
+            openssl="$(brew --prefix openssl@3)"
+            zstd="$(brew --prefix zstd)"
+            export PKG_CONFIG_PATH="$libpq/lib/pkgconfig:$openssl/lib/pkgconfig:$zstd/lib/pkgconfig"
+            make -C src -j"$jobs" CC=clang GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+              EXTRA_C_FLAGS="-Wno-unused-command-line-argument -Wno-deprecated-declarations -I$libpq/include -I$openssl/include -I$zstd/include" \
+              EXTRA_L_FLAGS="-L$libpq/lib -L$openssl/lib -L$zstd/lib" \
+              TEST_L_FLAGS='-Os -flto -ffunction-sections -fdata-sections -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd -lz -lssl -lcrypto $(PAM_LIBS) -framework Security -framework CoreFoundation $(EXTRA_L_FLAGS)' \
+              build/obj/tests/unit-test-lsp
+          else
+            make -C src -j"$jobs" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+              build/obj/tests/unit-test-lsp
+          fi
+      - name: Assert the pinned S0 real-provider baseline
+        run: |
+          python3 benchmarks/live-semantic-context/run_s0_baseline.py \
+            --lsp-test src/build/obj/tests/unit-test-lsp \
+            --gopls "${RUNNER_TEMP}/lsp-tools/go/bin/gopls" \
+            --pyright-langserver "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright-langserver" \
+            --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \
+            --output "${RUNNER_TEMP}/lsp-s0-${{ matrix.artifact }}-baseline.json" \
+            --assert-baseline
+      - name: Assert the pinned S1 saved-file synchronization path
+        run: |
+          python3 benchmarks/live-semantic-context/run_s1_candidate_probe.py \
+            --lsp-test src/build/obj/tests/unit-test-lsp \
+            --gopls "${RUNNER_TEMP}/lsp-tools/go/bin/gopls" \
+            --pyright-langserver "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright-langserver" \
+            --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \
+            --candidate-commit 474bd69954237fca249eb44e942caeab4270ad5e \
+            --candidate-src-tree e6ba59ceba5a40323b006e834ac28ef39a2abc46 \
+            --cold-starts 20 \
+            --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json"
+          python3 benchmarks/live-semantic-context/validate_s1_release_candidate.py \
+            --probe-report "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json" \
+            --candidate-commit 474bd69954237fca249eb44e942caeab4270ad5e \
+            --candidate-src-tree e6ba59ceba5a40323b006e834ac28ef39a2abc46 \
+            --cold-starts 20 \
+            --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-release-validation.json" \
+            --assert-release-candidate
+      - name: Retain the provider observation
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lsp-s0-real-provider-${{ matrix.artifact }}-baseline
+          path: ${{ runner.temp }}/lsp-s0-${{ matrix.artifact }}-baseline.json
+          if-no-files-found: warn
+      - name: Retain the candidate provider observation
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lsp-s1-real-provider-${{ matrix.artifact }}-candidate
+          path: ${{ runner.temp }}/lsp-s1-${{ matrix.artifact }}-*.json
+          if-no-files-found: warn
+
   # Stable protected context for the sharded suite. It remains named
   # `unit-tests`, so branch protection needs no transition window, and it also
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate, go-unit-tests]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate, go-unit-tests, lsp-real-providers]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -837,6 +1054,7 @@ jobs:
           DB2_REPLAY_RESULT: ${{ needs.db2-process-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
           GO_RESULT: ${{ needs.go-unit-tests.result }}
+          LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}
         run: |
           if [ "$CHANGE_SCOPE_RESULT" = success ] && [ "$DOCS_ONLY" = true ]; then
             echo "Documentation-only change: unit shards (sqlite and Postgres) and P1 gate skipped."
@@ -866,7 +1084,11 @@ jobs:
             echo "Go unit-test result: $GO_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, the P1 RLS gate, and the Go unit tests passed."
+          [ "$LSP_REAL_RESULT" = success ] || {
+            echo "Real-provider LSP result: $LSP_REAL_RESULT" >&2
+            exit 1
+          }
+          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, the P1 RLS gate, the Go unit tests, and the real-provider LSP baseline passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
@@ -1759,8 +1981,25 @@ jobs:
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: aimee
+          POSTGRES_PASSWORD: aimee
+          POSTGRES_DB: memory_eval
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aimee -d memory_eval"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -1778,125 +2017,111 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
+          for attempt in 1 2 3; do
+            if timeout 240 sudo apt-get install -y -q gcc make \
+              libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+              libpq-dev; then
+              break
+            fi
+            test "$attempt" -lt 3 || exit 1
+            echo "apt-get install retry $attempt (transient mirror timeout)"
+            sleep $((attempt * 5))
+          done
       - name: Memory retrieval eval (corpus + regression check)
         run: cd src && make -j$(nproc) memory-retrieval-eval-check
 
-  # End-to-end deploy matrix: build the images and prove every Docker topology
-  # (kb-only, server+kb split, server standalone) boots and serves a usable /v1
-  # surface. See
-  # docs/proposals/pending/aimee-e2e-deploy-matrix.md. GitHub's ubuntu runners
-  # ship Docker + compose, so no port offset is needed (8740/8741 are free).
+  # Every role uses the candidate application and standardized encrypted store.
   e2e-docker:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    # One runner per topology so the deploy matrix runs in PARALLEL instead of
-    # serially on one runner (T1+T2+T3 back-to-back was the long pole of CI).
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
-    env:
-      # Test-only credentials required while Compose is parsed by Bake, before
-      # the topology smoke scripts have a chance to establish their environment.
-      AIMEE_STORE_ADMIN_PASSWORD: ci-e2e-admin-password-2878
-      AIMEE_STORE_MIGRATOR_PASSWORD: ci-e2e-migrator-password-2878
-      AIMEE_STORE_RUNTIME_PASSWORD: ci-e2e-runtime-password-2878
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Bake targets built by each compose file. The cache scope is keyed by
-          # IMAGE, not by topology: T1 and T2 build aimee-kb from the same
-          # Dockerfile, and T2 and T3 build aimee-server from the same
-          # Dockerfile.server. Per-topology scopes stored those identical layers
-          # twice and denied each shard the other's work.
-          - topology: T1
-            compose_file: compose.yaml
-            images: aimee-kb aimee-control-web
-          - topology: T2
-            compose_file: compose.server.yaml
-            images: aimee-kb aimee-server
-          - topology: T3
-            compose_file: compose.server-standalone.yaml
-            images: aimee-server
-    name: e2e-docker (${{ matrix.topology }})
+          - {topology: T1, storage: plain, suffix: ''}
+          - {topology: T2, storage: plain, suffix: ''}
+          - {topology: T3, storage: plain, suffix: ''}
+          - {topology: T2, storage: luks, suffix: '-luks'}
+    name: e2e-docker (${{ matrix.topology }}${{ matrix.suffix }})
+    env:
+      AIMEE_APPLICATION_IMAGE: aimee:e2e
+      AIMEE_POSTGRES_IMAGE: aimee-postgres:e2e
+      AIMEE_POSTGRES_STORAGE: ${{ matrix.storage }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
-      - name: Runner diagnostics
-        run: |
-          docker version --format '{{.Server.Version}}'
-          docker compose version
-          docker buildx version
-          df -h / | tail -1
-      # A GitHub Actions cache is readable only by the ref that wrote it and by
-      # that ref's base branch. Cache written from a PR run therefore lands under
-      # refs/pull/N/merge, where NO other run can ever read it — while still
-      # counting against the repo's 10 GB quota and evicting the shared
-      # refs/heads/testing entries by LRU. That is what happened here: 9.5 GB of
-      # unreadable PR blobs pushed the repo to 14 GB, every e2e image build
-      # missed cache completely, and each shard rebuilt postgres, rust, the
-      # python venv and the C tree from scratch (12-18 min a shard).
-      #
-      # So: every run READS the shared per-image scope, only pushes to the
-      # default branch WRITE it. That also drops the mode=max export (~7 min a
-      # shard) from the PR path entirely.
-      - name: Resolve bake cache flags
-        id: cache_flags
-        env:
-          IMAGES: ${{ matrix.images }}
-          WRITE_CACHE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' }}
-        run: |
-          {
-            echo 'set<<CACHE_FLAGS_EOF'
-            for img in $IMAGES; do
-              echo "${img}.cache-from=type=gha,scope=e2e-${img}"
-              if [ "$WRITE_CACHE" = "true" ]; then
-                echo "${img}.cache-to=type=gha,scope=e2e-${img},mode=max"
-              fi
-            done
-            echo CACHE_FLAGS_EOF
-          } >> "$GITHUB_OUTPUT"
-      - name: Build topology images with persistent cache
-        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
+      - name: Build the unified application
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
-          source: .
-          files: ${{ matrix.compose_file }}
+          context: .
+          file: Dockerfile.server
+          tags: aimee:e2e
+          build-args: WITH_VSCODE=0
           load: true
-          set: ${{ steps.cache_flags.outputs.set }}
-      # The server topologies stand up a stock PostgreSQL for the store. Bake
-      # only loads the images the compose file BUILDS, so this one is pulled --
-      # and `up -d --no-build` would pull it inline with no retry, which is the
-      # transient-Docker-Hub failure every other pull in this file guards
-      # against. T1 is kb-only and runs no server, so it needs no store.
-      - name: Pre-pull the store database image with retry
-        if: matrix.topology != 'T1'
+          cache-from: type=gha,scope=e2e-aimee
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' && 'type=gha,scope=e2e-aimee,mode=max' || '' }}
+      - name: Build standardized PostgreSQL
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: Dockerfile.postgres
+          tags: aimee-postgres:e2e
+          load: true
+          cache-from: type=gha,scope=e2e-aimee-postgres
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' && 'type=gha,scope=e2e-aimee-postgres,mode=max' || '' }}
+      # Reuse the published model image. PRs validate the candidate application;
+      # the model publisher builds and tests changed model inputs after merge.
+      - name: Pull the published embedder
         run: |
-          img=postgres:18
-          for attempt in 1 2 3 4 5; do
-            docker pull "$img" && break
-            echo "docker pull $img failed (attempt $attempt/5); backing off"
-            sleep $((attempt * 10))
-          done
-      - name: Run Docker deploy topology ${{ matrix.topology }}
-        # The aimee-server image builds webchat's SPA from its vendored
-        # @rakuensoftware/smoothgui dependency — no npm token needed.
-        env:
-          # The Bake step loaded exactly the images named by the compose file.
-          # Keep the smoke scripts' local default intact while avoiding a second
-          # uncached `docker compose build` in CI.
-          AIMEE_E2E_SKIP_BUILD: "1"
-        run: scripts/e2e-matrix.sh --only ${{ matrix.topology }}
-      - name: Stack logs on failure
-        if: failure()
+          image=$(cat tests/e2e/embedder-image.txt)
+          docker pull "$image"
+          echo "AIMEE_EMBEDDER_IMAGE=$image" >> "$GITHUB_ENV"
+      - name: Prepare optional Linux encrypted storage
+        if: matrix.storage == 'luks'
         run: |
-          for f in compose.yaml compose.server.yaml compose.server-standalone.yaml; do
-            echo "::group::$f"; docker compose -f "$f" logs --tail=80 2>/dev/null || true; echo "::endgroup::"
+          sudo modprobe loop
+          sudo modprobe dm_mod
+          sudo modprobe dm_crypt
+          sudo apt-get update
+          sudo apt-get install -y cryptsetup-bin
+          test -c /dev/mapper/control
+          test -c /dev/loop-control
+      - name: Configure optional encrypted storage
+        if: matrix.storage == 'luks'
+        run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
+      - name: Run the shipped deployment and regression gates
+        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} --output /tmp/aimee-e2e-evidence
+      - name: Ordinary PostgreSQL persistence and storage mode boundaries
+        if: matrix.topology == 'T3'
+        run: |
+          sudo python3 tests/e2e/postgres-plain-e2e.py --postgres-image aimee-postgres:e2e \
+            --evidence /tmp/aimee-e2e-evidence/plain-storage.json
+      - name: LUKS recovery and legacy PostgreSQL migration
+        if: matrix.storage == 'luks'
+        run: |
+          for mode in fresh upgrade; do
+            extra=()
+            if [ "$mode" = upgrade ]; then extra+=(--legacy-upgrade); fi
+            sudo python3 tests/e2e/postgres-luks-e2e.py \
+              --server-image aimee:e2e --postgres-image aimee-postgres:e2e \
+              --evidence "/tmp/aimee-e2e-evidence/luks-${mode}.json" "${extra[@]}"
           done
+      - name: Upgrade and roll back the published 0.4.1 KB
+        if: matrix.topology == 'T1' || matrix.storage == 'luks'
+        run: |
+          sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \
+            python3 tests/e2e/kb-upgrade-e2e.py --storage ${{ matrix.storage }} --output /tmp/aimee-e2e-evidence
+      - name: Upload regression verdicts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: deploy-${{ matrix.topology }}${{ matrix.suffix }}-verdicts
+          path: /tmp/aimee-e2e-evidence/*.json
+          if-no-files-found: error
 
   e2e-adoption:
     needs: change-scope

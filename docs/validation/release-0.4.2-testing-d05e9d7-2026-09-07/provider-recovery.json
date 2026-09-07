@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "check": "Providers recover through packaged supervision after an unresponsive module is killed"
+}

@@ -5,6 +5,13 @@ topic synthesis) through one endpoint, `SYNTHESIS_ENDPOINT`. It is empty by defa
 generic gateway is retired. A managed local profile supplies its model-specific sidecar endpoint;
 otherwise configure a remote OpenAI-compatible endpoint. This page is about what you put behind it.
 
+The active `aimee-llm-e2b` and `aimee-llm-e4b` images contain llama.cpp and one
+baked synthesis model each. They are separate from the retired generic
+`aimee-llm` gateway. The synthesis-image workflow builds them only when their
+image inputs change on merge to `testing`; release promotion reuses the published
+images. Embedding images follow the same rule, and deployment CI pulls a pinned
+published embedder instead of rebuilding it for each application change.
+
 There used to be two answers to that question, a cheap model for the mechanical
 stages and a capable one for the reasoning stages. Measurement did not support
 the split, so there is now one synthesis role and one model behind it. If you

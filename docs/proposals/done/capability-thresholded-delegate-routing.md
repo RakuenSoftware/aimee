@@ -5,8 +5,8 @@
 > behaviour see `docs/`, or the code.
 
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
-> specification for work already delivered. Remaining work is tracked in
-> [`capability-thresholded-delegate-routing-residual.md`](../pending/capability-thresholded-delegate-routing-residual.md).
+> specification for work already delivered. The subsequent routing implementation is recorded in
+> [`capability-thresholded-delegate-routing-residual.md`](capability-thresholded-delegate-routing-residual.md), completed 2026-09-06.
 
 - **State:** DONE. Delivered scope archived 2026-07-26.
 - **Author:** JBailes

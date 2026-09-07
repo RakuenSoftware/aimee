@@ -21,7 +21,7 @@
 set -u
 CONF=/root
 SOCK=/root/server-module-bus.sock
-BIN=/usr/local/libexec/aimee-modules/aimee-module-db1
+BIN=/usr/local/libexec/aimee-modules/aimee-module-aimee
 # Same guard as the postgres module, and for the same reason: parse_grant_file
 # resolves `executable` with realpath(), so a grant naming a binary that is not
 # there is INVALID, and one invalid grant fails the whole module endpoint --
@@ -39,7 +39,7 @@ BIN=/usr/local/libexec/aimee-modules/aimee-module-db1
 
 mkdir -p "$CONF/modules.d/server"
 
-cat > "$CONF/modules.d/server/db1.grant" <<EOF
+cat > "$CONF/modules.d/server/aimee.grant" <<EOF
 version=1
 principal_class=1
 principal_ref=30
@@ -48,7 +48,19 @@ executable=$BIN
 publish=
 subscribe=
 request=
-serve=11777,11778,11779,11780,11781,11782,11783,11784,11785,11786,11787,11788,11789,11790,11791,11792,11793,11794,11795
+serve=11777,11778,11779,11780,11781,11782,11783,11784,11785,11786,11787,11788,11789,11790,11791,11792,11793,11794,11795,11796,11797,11798,11799
+EOF
+
+cat > "$CONF/modules.d/server/aimee-postgres.grant" <<EOF
+version=1
+principal_class=1
+principal_ref=69
+uid=self
+executable=$BIN
+publish=
+subscribe=
+request=11266
+serve=
 EOF
 echo "db1 grant installed (19 stages)"
 
@@ -60,7 +72,7 @@ for _ in $(seq 1 30); do [ -S "$SOCK" ] && break; sleep 1; done
 [ -S "$SOCK" ] || { echo "db1: server module bus socket missing" >&2; exit 1; }
 
 # Scoped to this socket, like every other module here: the container is shared.
-pkill -f "aimee-module-db1 $SOCK" 2>/dev/null
+pkill -f "aimee-module-aimee $SOCK" 2>/dev/null
 sleep 1
 cd /root
 # Its own process, so its own environment -- the same trap the postgres module
@@ -75,9 +87,11 @@ cd /root
 # $AIMEE_HOME/aimee.db and says the same thing.
 AIMEE_HOME=/root \
 AIMEE_DB1_PATH="${AIMEE_DB1_PATH:-/root/aimee.db}" \
+  AIMEE_STORE_URL="${AIMEE_STORE_URL:-postgresql://aimee:aimee-e2e@127.0.0.1:5432/aimee_shared}" \
+  AIMEE_STORE_MIGRATION_URL="${AIMEE_STORE_MIGRATION_URL:-postgresql://aimee_migrator:aimee-migrate-e2e@127.0.0.1:5432/aimee_shared}" \
   nohup "$BIN" "$SOCK" >/root/db1-module.log 2>&1 &
 sleep 3
-if pgrep -f "aimee-module-db1 $SOCK" >/dev/null; then
+if pgrep -f "aimee-module-aimee $SOCK" >/dev/null; then
   echo "db1: RUNNING"
 else
   echo "db1: EXITED"

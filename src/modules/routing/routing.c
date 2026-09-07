@@ -5,10 +5,9 @@
  * load/save and auth resolution stay behind, everything under the "Routing"
  * banner moved here verbatim. Pure code motion — no behaviour change.
  *
- * This is the cheapest-seat-with-capability router: agent_route() picks the
- * lowest cost_tier that serves the role, and the agent_route_with_caps*()
- * family gates that choice on capability requirements before cost is
- * considered.
+ * Capability, competence, scope and health filter the roster before selection.
+ * The shipping server ranks qualified delegates through the Go cost-selection
+ * stage. Builds without that provider retain the legacy cost-tier balancer.
  */
 #include "aimee.h"
 #include "util.h"
@@ -27,8 +26,37 @@
 
 /* --- Routing --- */
 
+static agent_route_cost_fn g_route_cost_provider;
+
+void agent_set_route_cost_provider(agent_route_cost_fn provider)
+{
+   g_route_cost_provider = provider;
+}
+
+int agent_role_competence(const agent_t *agent, const char *role)
+{
+   if (!agent || !role)
+      return 0;
+   for (int i = 0; i < agent->routing_competence_count; i++)
+      if (strcmp(agent->routing_competence[i].role, role) == 0)
+         return agent->routing_competence[i].score;
+   return 0;
+}
+
+int agent_role_meets_competence(const agent_t *agent, const char *role)
+{
+   if (!agent || !role)
+      return 0;
+   for (int i = 0; i < agent->routing_competence_count; i++)
+      if (strcmp(agent->routing_competence[i].role, role) == 0)
+         return agent->routing_competence[i].eligible;
+   return 1; /* no contract: retain operator-declared role eligibility */
+}
+
 int agent_has_role(const agent_t *agent, const char *role)
 {
+   if (!agent_role_meets_competence(agent, role))
+      return 0;
    for (int i = 0; i < agent->role_count; i++)
    {
       /* "all" is a wildcard: the agent serves every role (routing only — tool
@@ -663,6 +691,28 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
          return preferred;
    }
 
+   if (g_route_cost_provider && !agent_routing_primary_turn())
+   {
+      agent_t *qualified[MAX_AGENTS];
+      int count = 0;
+      for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
+      {
+         agent_t *ag = &cfg->agents[i];
+         if (ag->enabled && agent_supports_role(ag, role) && agent_is_available_for_routing(ag))
+            qualified[count++] = ag;
+      }
+      if (!count)
+         return NULL;
+      int selected = g_route_cost_provider(cfg, role, qualified, count, 0);
+      if (selected < 0 || selected >= count)
+      {
+         route_selection_faulted();
+         return NULL;
+      }
+      route_selection_succeeded();
+      return qualified[selected];
+   }
+
    /* First pass: find the minimum tier; note if any tmux agent is there
     * (tmux sessions are stateful and always preferred over HTTP peers). */
    int min_tier = -1;
@@ -945,6 +995,30 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       }
    }
 
+   if (g_route_cost_provider && !agent_routing_primary_turn())
+   {
+      agent_t *qualified[MAX_AGENTS];
+      int count = 0;
+      for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
+      {
+         agent_t *ag = &cfg->agents[i];
+         if (!agent_route_candidate_eligible(ag, role, required_caps, min_context, scope) ||
+             (locals_only && !agent_is_local(ag)) || (healthy_only && degraded_snapshot[i]))
+            continue;
+         qualified[count++] = ag;
+      }
+      if (!count)
+         return NULL;
+      int selected = g_route_cost_provider(cfg, role, qualified, count, min_context);
+      if (selected < 0 || selected >= count)
+      {
+         route_selection_faulted();
+         return NULL;
+      }
+      route_selection_succeeded();
+      return qualified[selected];
+   }
+
    int min_tier = -1;
    int has_tmux = 0;
    for (int i = 0; i < cfg->agent_count; i++)
@@ -1165,6 +1239,8 @@ agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
                                       int min_context, agent_scope_t scope)
 {
    agent_t *r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps, min_context, scope);
+   if (!r && agent_route_last_was_module_fault())
+      return NULL;
    /* Modality caps (vision/pdf/audio) are inferred from prompt text and are
     * best-effort: if no model satisfies them, relax them and route on the hard
     * caps (tools) + min_context rather than returning no route at all. Mirrors
@@ -1172,6 +1248,8 @@ agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
    if (!r && sys_cfg && sys_cfg->capability_routing && (required_caps & MODEL_CAP_MODALITY_SOFT))
       r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps & ~MODEL_CAP_MODALITY_SOFT,
                                       min_context, scope);
+   if (!r && agent_route_last_was_module_fault())
+      return NULL;
    /* Still nothing: escalate rather than report no route. Only reachable with
     * capability routing ON, so plain cost-tier routing is unaffected. */
    if (!r && sys_cfg && sys_cfg->capability_routing)

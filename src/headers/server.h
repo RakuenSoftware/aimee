@@ -441,6 +441,7 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Resolve request-local project/workspace memory identity and activate it for
  * subsequent kb_client memory calls on this worker thread. Returns 1 when the
  * active identity is missing; caller must clear the client context. */
+int server_memory_store_selection(const cJSON *req);
 int server_memory_scope_begin(cJSON *req);
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* The same command in the shape the core command table routes: takes arguments,
@@ -450,6 +451,7 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Takes the write's authority for the same reason: it is persisted as the new
  * row's provenance and governs what the typed-fact drain may later mine from it
  * (memory.h). handle_memory_store derives it from the connection's attestation. */
+char *server_user_memory_recall_json(const char *hint, int limit_tokens, int session_start);
 cJSON *memory_store_command(const cJSON *req, memory_authority_t authority);
 cJSON *memory_list_command(const cJSON *req);
 cJSON *memory_get_command(cJSON *req);
@@ -638,6 +640,10 @@ cJSON *server_compute_async_json(server_ctx_t *ctx);
 
 /* Agent management handlers (server_agent.c) */
 int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_provider_connection_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_provider_connections(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_provider_save_connection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_provider_remove_connection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

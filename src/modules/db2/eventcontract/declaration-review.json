@@ -1208,34 +1208,6 @@
       "reason": "A caller-controlled rollback is process-local transaction cleanup; failed or cancelled maintenance operations roll back inside DB2 before returning transport status."
     },
     {
-      "symbol": "db2_memory_conflict_get_pair",
-      "signature_sha256": "fafe72ad1e37fb1a5a9c7189dfbb0c5bc8f3f9305738f2f30c575decac8beeb8",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Fetching conflict member IDs is a private read inside the future memory.conflict_resolve transaction; the pair must remain stable through conflict update, audit logging, and directive closure."
-    },
-    {
-      "symbol": "db2_memory_conflict_record",
-      "signature_sha256": "3bd891b026c6470570fe4e24c292ada8d962b708e0ccf957a42f775eae2d4bdd",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Creating the conflict row is one private step of the future memory.conflict_record transaction, which must also create its audit, relationship, and directive evidence before replying."
-    },
-    {
-      "symbol": "db2_memory_conflict_resolve",
-      "signature_sha256": "b74db619b0f8844fe8fd1c60daf982f9c877965acaf2de564250b3d01be8894b",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Updating a conflict row is a private step of the future memory.conflict_resolve transaction; exposing it alone would allow the audit log and contradiction directive to disagree with canonical conflict state."
-    },
-    {
-      "symbol": "db2_memory_contradiction_log",
-      "signature_sha256": "2f228e53e1db07542ececa5b198b0e6896b4c73c973a08ffe6f1f6cd035ea0ae",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Contradiction audit insertion is private evidence written by complete conflict record and resolve operations; a standalone best-effort wire mutation could diverge from the conflict row it documents."
-    },
-    {
       "symbol": "db2_memory_count",
       "signature_sha256": "9ba16dc645d42d96744285c4ebf5a81ba93d16af8c77d60c1f03d9109d358b19",
       "disposition": "wire-operation",
@@ -1278,13 +1250,6 @@
       "reason": "Counting version suffixes is private read-modify-write state for the future composite memory.supersede operation; exposing the count separately would race concurrent supersedes and split one logical DB2 mutation."
     },
     {
-      "symbol": "db2_memory_export_row_free",
-      "signature_sha256": "ba729127864e108afffe9baf8c825923f9f857206dabcdac43769c09d121f0e1",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Releasing process-owned export buffers is local lifetime management; the memory export operation encodes bounded rows into its reply and frees every allocation before returning."
-    },
-    {
       "symbol": "db2_memory_find_id_by_key_kind",
       "signature_sha256": "702e7ac3ac2ee62f32188dc2b85e8e9df635f51cdf51b8e699e56d1948269804",
       "disposition": "wire-operation",
@@ -1297,20 +1262,6 @@
       "disposition": "wire-operation",
       "family": "memory",
       "reason": "The typed memory.effectiveness_update operation carries the positive memory identifier and explicit clear state while DB2 owns the canonical nullable column update."
-    },
-    {
-      "symbol": "db2_memory_health_count_memories",
-      "signature_sha256": "1cdbda7edb35f3f13d108fc1a047fd561995e710c21c130f7fa878650543192d",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Counting canonical rows for a health-cycle insert is private DB2 bookkeeping; the complete health-record operation owns this pre-step, while independent callers use the existing typed memory.total_count operation."
-    },
-    {
-      "symbol": "db2_memory_health_count_recent_conflicts",
-      "signature_sha256": "c7bbd802aaf4e425c53511eaabd80027e38834ea131fcbae2cae372c8e14cdf8",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Counting recent canonical conflicts is a private input to the complete memory health-record operation; its day window and insert remain owned by one DB2 action."
     },
     {
       "symbol": "db2_memory_health_delete_by_sensitivity",
@@ -1432,18 +1383,11 @@
       "reason": "The typed memory.demote operation applies each kind's own confidence floor and resistance-scaled idle window from the private lifecycle thresholds, so the per-kind demotion is never reachable with a caller-chosen threshold or window."
     },
     {
-      "symbol": "db2_memory_promotion_list_kinds_in_tier",
-      "signature_sha256": "8c8d53bd4b7fd1a3b266e4973f3bb77d83c5e9e93df2ce6922a825a94d16d312",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Enumerating the kinds present in a tier is a private pre-step of the tier-cycle operations; each one iterates the kinds it finds inside a single DB2 action rather than exposing a snapshot that can go stale between calls."
-    },
-    {
       "symbol": "db2_memory_promotion_promote_stable_l2_to_l3",
       "signature_sha256": "7774ad32c2c5d27c72f22ce7ebdcf2608add0a25daddc4b23f5bdec5d52f5e4f",
       "disposition": "wire-operation",
       "family": "memory",
-      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy \u2014 tier, kinds, confidence floor, use count, and settling window \u2014 so callers cannot promote rows into the slow-changing tier on terms of their own."
+      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy — tier, kinds, confidence floor, use count, and settling window — so callers cannot promote rows into the slow-changing tier on terms of their own."
     },
     {
       "symbol": "db2_memory_promotion_reclassify_directives",
@@ -1465,13 +1409,6 @@
       "disposition": "private-db2",
       "family": "memory",
       "reason": "Provenance cleanup is an internal compatibility step of the complete memory.delete operation; it must commit with canonical row, vector, relation, and derived-state deletion rather than cross the bus independently."
-    },
-    {
-      "symbol": "db2_memory_provenance_insert",
-      "signature_sha256": "7967d5f15c77b186c19625be958017cf1de5c7c2cab13ced0dfcd9d9fa1e23fa",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Provenance append is private bookkeeping inside complete insert, merge, consolidate, and supersede operations; no generic caller-controlled provenance mutation crosses the bus."
     },
     {
       "symbol": "db2_memory_row_insert_ex",

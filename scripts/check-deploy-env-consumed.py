@@ -71,13 +71,13 @@ def emitted_keys(root: Path) -> list[str]:
 # image tag is chosen by Compose interpolation; there is no process to read it.
 # Everything else needs a reader in code, see code_consumers().
 COMPOSE_ONLY_KEYS = {
-    "AIMEE_KB_VARIANT": "selects the aimee-kb image tag; consumed by Compose interpolation.",
+    "AIMEE_EMBEDDER_VARIANT": "selects the local embedder image tag; consumed by Compose interpolation.",
     "AIMEE_LLM_VARIANT": "selects the aimee-llm image tag; consumed by Compose interpolation.",
 }
 
 # Extensions that hold something that RUNS. A Compose file is plumbing: it can hand a
 # variable to a container and prove nothing about anybody reading it.
-CODE_GLOBS = ("*.c", "*.h", "*.sh", "*.py")
+CODE_GLOBS = ("*.c", "*.h", "*.sh", "*.py", "*.go")
 
 
 def code_consumers(root: Path, key: str) -> list[str]:
@@ -109,12 +109,12 @@ def consumers(root: Path, key: str) -> list[str]:
     are deliberately NOT matched: the whole point is that emitting a value is not the
     same as anything using it.
     """
-    return _search(root, key, ("*.c", "*.h", "*.sh", "*.py", "*.yaml", "*.yml"))
+    return _search(root, key, ("*.c", "*.h", "*.sh", "*.py", "*.go", "*.yaml", "*.yml"))
 
 
 def _search(root: Path, key: str, globs: tuple[str, ...]) -> list[str]:
     reads = [
-        re.compile(r'getenv\s*\(\s*"%s"' % re.escape(key)),
+        re.compile(r'(?:getenv|os\.Getenv)\s*\(\s*"%s"' % re.escape(key)),
         re.compile(r'runtime_secret_get\s*\(\s*"%s"' % re.escape(key)),
         re.compile(r"\$\{%s[:\-}]" % re.escape(key)),
         re.compile(r"\$%s\b" % re.escape(key)),
@@ -145,82 +145,21 @@ def _search(root: Path, key: str, globs: tuple[str, ...]) -> list[str]:
     return hits
 
 
-# Files that run INSIDE the aimee-kb container and read the deployed environment.
-# A key both emitted by the deploy layer and read here must actually be handed to the
-# aimee-kb service, or it never reaches the process that reads it.
-KB_RUNTIME_READERS = ("deploy/container/aimee-kb-entrypoint.sh",)
-
-# Every Compose file that defines an aimee-kb service the deploy layer can start.
-KB_COMPOSE_FILES = (
-    "compose.yaml",
-    "compose.server.yaml",
-    "deploy/compose/aimee.yaml",
-    "deploy/smoothnas/aimee.compose.yaml",
-    "deploy/container/aimee-managed.compose.yaml",
-)
-
-
-def kb_read_keys(root: Path, emitted: list[str]) -> list[str]:
-    """Emitted keys that something inside the kb container reads."""
-    text = ""
-    for rel in KB_RUNTIME_READERS:
-        try:
-            text += (root / rel).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-    out = []
-    for key in emitted:
-        if re.search(r"\$\{?%s\b" % re.escape(key), text):
-            out.append(key)
-    return out
-
-
-def kb_env_failures(root: Path, emitted: list[str]) -> list[str]:
-    """The rule that catches an emitted-but-unplumbed key.
-
-    "Consumed somewhere in the tree" is too weak: EMBEDDER_MODEL was read by the kb
-    entrypoint AND by the legacy embedder service's own environment, so a
-    tree-wide search found it while the aimee-kb service never received it. The kb
-    entrypoint read a variable Compose never passed in, saw no selection, and started
-    nothing. So check the specific thing: the service that runs the reader must be
-    given the key.
-    """
+# Models run alongside their owner. Config changes arrive over the module bus;
+# these environment defaults support native/Compose deployments without a wizard.
+def owner_env_failures(root: Path, emitted: list[str]) -> list[str]:
     if yaml is None:
-        return ["PyYAML is required to validate the aimee-kb service environment"]
-
-    failures: list[str] = []
-    needed = kb_read_keys(root, emitted)
-    for rel in KB_COMPOSE_FILES:
-        path = root / rel
-        if not path.exists():
-            failures.append(f"{rel} is missing — it defines a deployable aimee-kb")
-            continue
-        try:
-            model = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except yaml.YAMLError as exc:
-            failures.append(f"{rel}: invalid YAML ({exc.__class__.__name__})")
-            continue
-        services = (model or {}).get("services") or {}
-        kb = services.get("aimee-kb")
-        if not isinstance(kb, dict):
-            failures.append(f"{rel}: no aimee-kb service")
-            continue
-        env = kb.get("environment")
-        keys = set(env.keys()) if isinstance(env, dict) else set()
-        for key in needed:
-            if key not in keys:
-                failures.append(
-                    f"{rel}: aimee-kb never receives {key}, but the deploy layer emits "
-                    f"it and something inside the container reads it — the setting "
-                    f"cannot reach the process that needs it"
-                )
-    return failures
+        return ["PyYAML is required"]
+    model = yaml.safe_load((root / "compose.yaml").read_text())
+    env = model["services"]["aimee-server"]["environment"]
+    required = {"EMBEDDER_MODEL", "EMBEDDER_URL", "EMBEDDER_DIMS", "SYNTHESIS_MODEL", "SYNTHESIS_ENDPOINT"}
+    return [f"compose.yaml: local owner never receives {key}" for key in sorted(required & set(emitted)) if key not in env]
 
 
 # The Compose file that starts aimee-server itself, and the service within it. The
 # server re-runs Compose for the managed siblings and copies its own environ, so
 # anything set here is inherited by that child.
-SERVER_COMPOSE = "compose.server-managed.yaml"
+SERVER_COMPOSES = ("compose.yaml", "deploy/container/managed.override.yaml")
 SERVER_SERVICE = "aimee-server"
 
 
@@ -250,40 +189,41 @@ def server_env_shadow_failures(root: Path, emitted: list[str]) -> list[str]:
     """
     if yaml is None:
         return ["PyYAML is required to validate the aimee-server service environment"]
-    path = root / SERVER_COMPOSE
-    if not path.exists():
-        return [f"{SERVER_COMPOSE} is missing — it starts the server that re-runs Compose"]
-    try:
-        model = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        return [f"{SERVER_COMPOSE}: invalid YAML ({exc.__class__.__name__})"]
-    service = ((model or {}).get("services") or {}).get(SERVER_SERVICE)
-    if not isinstance(service, dict):
-        return [f"{SERVER_COMPOSE}: no {SERVER_SERVICE} service"]
-    env = service.get("environment")
-    if not isinstance(env, dict):
-        return [f"{SERVER_COMPOSE}: {SERVER_SERVICE} has no mapping-form environment"]
-
     failures: list[str] = []
-    for name, value in env.items():
-        if not isinstance(value, str):
-            continue
-        # Only the DEFAULT half can shadow: `${NAME:-<default>}`. A bare `${NAME}`
-        # forwards whatever the operator set and resolves nothing on its own.
-        default = re.match(r"^\$\{%s:-(.*)\}$" % re.escape(str(name)), value.strip())
-        if not default:
-            continue
-        for key in emitted:
-            if key == name:
+    for compose_file in SERVER_COMPOSES:
+        path = root / compose_file
+        if not path.exists():
+            return [f"{compose_file} is missing — it starts the server that re-runs Compose"]
+        try:
+            model = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            return [f"{compose_file}: invalid YAML ({exc.__class__.__name__})"]
+        service = ((model or {}).get("services") or {}).get(SERVER_SERVICE)
+        if not isinstance(service, dict):
+            return [f"{compose_file}: no {SERVER_SERVICE} service"]
+        env = service.get("environment")
+        if not isinstance(env, dict):
+            return [f"{compose_file}: {SERVER_SERVICE} has no mapping-form environment"]
+
+        for name, value in env.items():
+            if not isinstance(value, str):
                 continue
-            if re.search(r"\$\{?%s\b" % re.escape(key), default.group(1)):
-                failures.append(
-                    f"{SERVER_COMPOSE}: {SERVER_SERVICE} resolves a default for {name} "
-                    f"that reads {key}, which config_emit_deploy_env decides inside the "
-                    f"server and which is unset here — the default collapses and then "
-                    f"overrides the value the server computes. Forward it as "
-                    f"${{{name}:-}} and let the managed Compose file resolve it"
-                )
+            # Only the DEFAULT half can shadow: `${NAME:-<default>}`. A bare `${NAME}`
+            # forwards whatever the operator set and resolves nothing on its own.
+            default = re.match(r"^\$\{%s:-(.*)\}$" % re.escape(str(name)), value.strip())
+            if not default:
+                continue
+            for key in emitted:
+                if key == name:
+                    continue
+                if re.search(r"\$\{?%s\b" % re.escape(key), default.group(1)):
+                    failures.append(
+                        f"{compose_file}: {SERVER_SERVICE} resolves a default for {name} "
+                        f"that reads {key}, which config_emit_deploy_env decides inside the "
+                        f"server and which is unset here — the default collapses and then "
+                        f"overrides the value the server computes. Forward it as "
+                        f"${{{name}:-}} and let the managed Compose file resolve it"
+                    )
     return failures
 
 
@@ -292,7 +232,7 @@ def check(root: Path) -> list[str]:
     keys = emitted_keys(root)
     if not keys:
         return ["found no EMITF keys — has the emitter moved?"]
-    failures.extend(kb_env_failures(root, keys))
+    failures.extend(owner_env_failures(root, keys))
     failures.extend(server_env_shadow_failures(root, keys))
     for key in keys:
         if key in PENDING_CONSUMERS or key in COMPOSE_ONLY_KEYS:

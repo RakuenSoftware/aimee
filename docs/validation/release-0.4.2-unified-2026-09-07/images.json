@@ -1,0 +1,8 @@
+{
+  "aimee:unified042-v28": "sha256:9a8b4e5135127fd5b0aac66d87bad0479692d0e3bc81be4587003eb440868e58",
+  "aimee:unified042-v12": "sha256:acfb3eb1027b24efdcb8aa5e3bcdcb4998186156dcb2ac55865d8a0a1648ea25",
+  "aimee:unified042-v11": "sha256:6fbd052f260981184c973a8549e9e1601600f67d5a90eebfe46559e33da72c37",
+  "aimee-postgres:unified042": "sha256:c18671a8159ea87f01a036ea13f68bc25f9bfcb9e1c3864f1a5c55294ac55f94",
+  "aimee-embedder:unified042": "sha256:b74409c4dc28dfdfe3484f6928aa8d58e06c27ec46a5ba810a9c4d2ce24d2424",
+  "aimee-llm:unified042": "sha256:8a8b2acc5ee7c6126f151d27aecca937b500771ec9a699a6897cb52ddffcf579"
+}

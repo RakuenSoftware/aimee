@@ -12,6 +12,9 @@
 #define AIMEE_ROUTING_RESPONSE_LEN   8u
 #define AIMEE_ROUTING_EVENT_KIND     6401u
 #define AIMEE_ROUTING_STAGE_SELECT   1u
+/* Versioned JSON facts; see server-go/modules/routing/plan.go. */
+#define AIMEE_ROUTING_EVENT_PLAN     6402u
+#define AIMEE_ROUTING_STAGE_PLAN     2u
 
 typedef enum
 {

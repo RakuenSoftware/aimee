@@ -25,7 +25,7 @@
 
 static void test_collection_names(void)
 {
-   const char *mem = pgvec_memory_vector_collection_name();
+   const char *mem = PGVEC_MEMORY_TABLE;
    const char *kb = pgvec_kb_vector_collection_name();
    assert(mem && mem[0]);
    assert(kb && kb[0]);
@@ -219,30 +219,6 @@ static void test_scroll_graceful_on_no_db(void)
    printf("pgvec: scroll graceful on no-vector-db OK\n");
 }
 
-static void test_scope_hints(void)
-{
-   pgvec_memory_vector_scope_hint_set("ws1", "proj1");
-   /* Just verify it doesn't crash and sets state */
-   pgvec_memory_vector_scope_hint_clear();
-
-   pgvec_memory_vector_scope_hint_set(NULL, "myproj");
-   pgvec_memory_vector_scope_hint_clear();
-
-   printf("pgvec: scope hint set/clear OK\n");
-}
-
-static void test_memory_scope_sql_uses_canonical_owner_scope(void)
-{
-   const char *filter = PGVEC_MEMORY_RECALL_FILTER_SQL;
-   const char *rank = PGVEC_MEMORY_SCOPE_RANK_SQL;
-   assert(strstr(filter, "memories") != NULL);
-   assert(strstr(filter, "lifecycle_state='active'") != NULL);
-   assert(strstr(filter, "scope_type") != NULL);
-   assert(strstr(filter, "e.point_id - 1000000000000") != NULL);
-   assert(strstr(rank, "scope_value") != NULL);
-   printf("pgvec: canonical memory owner scope SQL OK\n");
-}
-
 static void test_latency_snapshot(void)
 {
    int64_t total, count, maxv;
@@ -253,19 +229,8 @@ static void test_latency_snapshot(void)
 
 static void test_public_api_symbols(void)
 {
-   /* Verify all public header symbols resolve at link time. */
-   (void)pgvec_memory_vector_collection_exists;
-   (void)pgvec_memory_vector_collection_recreate;
-   (void)pgvec_memory_vector_ensure_payload_indexes;
-   (void)pgvec_memory_vector_collection_name;
-   (void)pgvec_memory_vector_upsert_memory;
-   (void)pgvec_memory_vector_upsert_unit;
-   (void)pgvec_memory_vector_delete_point;
-   (void)pgvec_memory_vector_search_record_type;
-   (void)pgvec_memory_vector_search_with_kinds;
-   (void)pgvec_memory_vector_scope_hint_set;
-   (void)pgvec_memory_vector_scope_hint_clear;
-
+   /* Verify the DB2-owned KB vector API resolves at link time. Memory-vector
+    * ownership and its ABI contract are covered by server-go/modules/memory. */
    (void)pgvec_kb_vector_collection_name;
    (void)pgvec_kb_vector_upsert_document;
    (void)pgvec_kb_vector_upsert_document_batch;
@@ -348,8 +313,6 @@ int main(void)
    test_upsert_graceful_on_no_db();
    test_search_graceful_on_no_db();
    test_scroll_graceful_on_no_db();
-   test_scope_hints();
-   test_memory_scope_sql_uses_canonical_owner_scope();
    test_latency_snapshot();
    test_public_api_symbols();
    test_corpus_index_type_defaults_to_diskann();

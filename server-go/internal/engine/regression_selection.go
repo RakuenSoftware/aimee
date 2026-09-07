@@ -16,8 +16,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 )
 
 const (
@@ -51,7 +51,7 @@ type admittedRegressionTask struct {
 }
 
 type admittedRegressionVerifier interface {
-	VerifyAdmitted(context.Context, string, []db1.EvalCandidate) error
+	VerifyAdmitted(context.Context, string, []workflowstore.EvalCandidate) error
 }
 
 func normalizeRepositoryPath(raw string) (string, bool) {
@@ -96,7 +96,7 @@ func containsExactPath(text, path string) bool {
 	return false
 }
 
-func candidatePathMatch(candidate db1.EvalCandidate, changed []string) (reason, matched string) {
+func candidatePathMatch(candidate workflowstore.EvalCandidate, changed []string) (reason, matched string) {
 	var task admittedRegressionTask
 	if json.Unmarshal([]byte(candidate.TaskJSON), &task) != nil {
 		return "", ""
@@ -125,7 +125,7 @@ func candidatePathMatch(candidate db1.EvalCandidate, changed []string) (reason, 
 	return "", ""
 }
 
-func selectAdmittedRegressions(changed []string, candidates []db1.EvalCandidate) (admittedRegressionManifest, []db1.EvalCandidate) {
+func selectAdmittedRegressions(changed []string, candidates []workflowstore.EvalCandidate) (admittedRegressionManifest, []workflowstore.EvalCandidate) {
 	manifest := admittedRegressionManifest{
 		SelectorVersion:     admittedRegressionSelectorVersion,
 		GraphSnapshotDigest: "unavailable",
@@ -134,7 +134,7 @@ func selectAdmittedRegressions(changed []string, candidates []db1.EvalCandidate)
 		IncompleteReasons:   []string{"code_graph_selection_unavailable"},
 	}
 	sort.Strings(changed)
-	selected := make([]db1.EvalCandidate, 0)
+	selected := make([]workflowstore.EvalCandidate, 0)
 	for _, candidate := range candidates {
 		if candidate.State != "admitted" {
 			manifest.Excluded["state_not_admitted"]++
@@ -158,7 +158,7 @@ func selectAdmittedRegressions(changed []string, candidates []db1.EvalCandidate)
 	return manifest, selected
 }
 
-func frozenChangedPaths(ctx context.Context, item db1.WorkItem, workdir string) ([]string, string, string, error) {
+func frozenChangedPaths(ctx context.Context, item workflowstore.WorkItem, workdir string) ([]string, string, string, error) {
 	base, err := frozenWorktreeBase(ctx, item, workdir)
 	if err != nil {
 		return nil, "", "", err
@@ -262,7 +262,7 @@ func safeSuiteName(raw string) (string, bool) {
 
 // VerifyAdmitted runs only task bytes that still match their admitted ledger
 // row. A stale or replaced suite file cannot inherit an earlier admission.
-func (v CommandVerifier) VerifyAdmitted(ctx context.Context, workdir string, candidates []db1.EvalCandidate) error {
+func (v CommandVerifier) VerifyAdmitted(ctx context.Context, workdir string, candidates []workflowstore.EvalCandidate) error {
 	release, err := v.acquire(ctx)
 	if err != nil {
 		return err
@@ -273,7 +273,7 @@ func (v CommandVerifier) VerifyAdmitted(ctx context.Context, workdir string, can
 		return err
 	}
 	defer os.RemoveAll(parent)
-	groups := make(map[string][]db1.EvalCandidate)
+	groups := make(map[string][]workflowstore.EvalCandidate)
 	for _, candidate := range candidates {
 		if candidate.State != "admitted" {
 			return fmt.Errorf("candidate %s is no longer admitted", candidate.Signature)

@@ -1,0 +1,23 @@
+{
+  "application_image": "aimee:unified042-v28",
+  "source_commit": "122cc89bf8bca55e9905c744a9d51bb7fe937a41",
+  "checks": [
+    {
+      "name": "Server boots without a KB connection",
+      "passed": true
+    },
+    {
+      "name": "Server application metadata contains no database or enrollment credential",
+      "passed": true
+    },
+    {
+      "name": "KB-free personal memory regression gate",
+      "passed": true
+    },
+    {
+      "name": "Real local semantic recall, outage recovery and retirement gate",
+      "passed": true
+    }
+  ],
+  "source_sha256": "1e63788388d4abc291bf26ce6fceb7aafab276e763a612ad8abbf92b36f44201"
+}

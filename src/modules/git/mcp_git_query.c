@@ -27,14 +27,24 @@ extern char **environ;
 #include <ctype.h>
 #include <unistd.h>
 
-#define GIT_BUF_SIZE 65536
-#define SUMMARY_MAX  4096
+#define GIT_BUF_SIZE       65536
+#define SUMMARY_MAX        4096
+#define MCP_GIT_TIMEOUT_MS GIT_NET_TIMEOUT_MS
 
 /* Track whether the current MCP git operation is running in a worktree.
  * Thread-local so concurrent sessions don't clobber each other. */
 static __thread int s_in_worktree = 0;
 
 static void trim_trailing_newline(char *s);
+
+static char *mcp_git_timeout_result(char *out, int rc)
+{
+   if (rc != SAFE_EXEC_TIMEOUT)
+      return out;
+   free(out);
+   LOG_WARN("git", "git command exceeded the %d ms request deadline", MCP_GIT_TIMEOUT_MS);
+   return strdup("error: git command timed out after 30 seconds\n");
+}
 
 void mcp_git_set_worktree(int val)
 {
@@ -342,18 +352,29 @@ char *mcp_git_run(const char *cmd, int *exit_code)
          if (envp)
          {
             /* FD mode: the token rides an inherited memfd, never the environ. */
-            char *out = run_cmd_env_fd(cmd, envp, exit_code, token_fd,
-                                       token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+            const char *const argv[] = {"/bin/sh", "-c", cmd, NULL};
+            char *out = NULL;
+            int rc = safe_exec_capture_cwd_env_fd_timeout(
+                argv, run_cmd_get_cwd(), envp, &out, GIT_BUF_SIZE, MCP_GIT_TIMEOUT_MS, token_fd,
+                token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+            if (exit_code)
+               *exit_code = rc;
             git_cred_inject_free_env(envp);
             if (token_fd >= 0)
                close(token_fd);
-            return out;
+            return mcp_git_timeout_result(out, rc);
          }
          if (token_fd >= 0)
             close(token_fd);
       }
    }
-   return exec_ws->exec_shell(exec_ws, cmd, exit_code);
+   int rc = -1;
+   char *out = exec_ws->exec_shell_timeout
+                   ? exec_ws->exec_shell_timeout(exec_ws, cmd, MCP_GIT_TIMEOUT_MS, &rc)
+                   : exec_ws->exec_shell(exec_ws, cmd, &rc);
+   if (exit_code)
+      *exit_code = rc;
+   return mcp_git_timeout_result(out, rc);
 }
 
 /* Refuse an operation whose result would land somewhere the caller can never see.

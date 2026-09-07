@@ -179,10 +179,14 @@ static int shared_list(const workspace_provider_t *p, const char *dir, const cha
 /* safe_exec_capture (posix/util.c): fork/exec argv, capture combined output.
  * Forward-declared to keep this TU free of the heavyweight aimee.h include. */
 extern int safe_exec_capture(const char *const argv[], char **out_buf, size_t max_out);
+extern int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd,
+                                             char *const envp[], char **out_buf, size_t max_out,
+                                             int timeout_ms);
 
 /* run_cmd (posix/util.c): run a shell command string, capturing output.
  * Forward-declared so exec_shell can delegate to it. */
 extern char *run_cmd(const char *cmd, int *exit_code);
+extern const char *run_cmd_get_cwd(void);
 
 static int shared_exec(const workspace_provider_t *p, const char *const argv[], char **out,
                        size_t max_out)
@@ -195,6 +199,23 @@ static char *shared_exec_shell(const workspace_provider_t *p, const char *cmd, i
 {
    (void)p;
    return run_cmd(cmd, exit_code);
+}
+
+static char *shared_exec_shell_timeout(const workspace_provider_t *p, const char *cmd,
+                                       int timeout_ms, int *exit_code)
+{
+   (void)p;
+   if (exit_code)
+      *exit_code = -1;
+   if (!cmd)
+      return NULL;
+   const char *const argv[] = {"/bin/sh", "-c", cmd, NULL};
+   char *out = NULL;
+   int rc =
+       safe_exec_capture_cwd_env_timeout(argv, run_cmd_get_cwd(), NULL, &out, 65536, timeout_ms);
+   if (exit_code)
+      *exit_code = rc;
+   return out;
 }
 
 static int set_nonblock(int fd)
@@ -365,6 +386,7 @@ static const workspace_provider_t g_shared_provider = {
     .list = shared_list,
     .exec = shared_exec,
     .exec_shell = shared_exec_shell,
+    .exec_shell_timeout = shared_exec_shell_timeout,
     .exec_stream = shared_exec_stream,
 };
 

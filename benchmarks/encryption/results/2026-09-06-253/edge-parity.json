@@ -1,0 +1,689 @@
+{
+  "rows": 202,
+  "cases": [
+    {
+      "operator": "LIKE",
+      "pattern": "",
+      "matches": 3,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%",
+      "matches": 202,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "_",
+      "matches": 4,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%a%",
+      "matches": 154,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%ab%",
+      "matches": 27,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%abc%",
+      "matches": 3,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%crypt%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%foo.bar%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%foo_bar%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%foo\\_bar%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%a\\%b%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%a\\_b%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%a\\\\b%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%a_b%",
+      "matches": 23,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%abc%xyz%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%\u00e9cl%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%\u00c9CL%",
+      "matches": 0,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%\u6771\u4eac%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%code%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%100\\%%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "abc",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "abc%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%abc",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": true
+    },
+    {
+      "operator": "LIKE",
+      "pattern": "%qq%",
+      "matches": 0,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "",
+      "matches": 3,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%",
+      "matches": 202,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "_",
+      "matches": 4,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%a%",
+      "matches": 154,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%ab%",
+      "matches": 27,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%abc%",
+      "matches": 3,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%crypt%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%foo.bar%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%foo_bar%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%foo\\_bar%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%a\\%b%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%a\\_b%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%a\\\\b%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%a_b%",
+      "matches": 23,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%abc%xyz%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%\u00e9cl%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%\u00c9CL%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%\u6771\u4eac%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%code%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%100\\%%",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "abc",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "abc%",
+      "matches": 2,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%abc",
+      "matches": 1,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "ILIKE",
+      "pattern": "%qq%",
+      "matches": 0,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "",
+      "matches": 199,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%",
+      "matches": 0,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "_",
+      "matches": 198,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%a%",
+      "matches": 48,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%ab%",
+      "matches": 175,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%abc%",
+      "matches": 199,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%crypt%",
+      "matches": 200,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%foo.bar%",
+      "matches": 201,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%foo_bar%",
+      "matches": 200,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%foo\\_bar%",
+      "matches": 201,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%a\\%b%",
+      "matches": 200,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%a\\_b%",
+      "matches": 200,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%a\\\\b%",
+      "matches": 201,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%a_b%",
+      "matches": 179,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%abc%xyz%",
+      "matches": 201,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%\u00e9cl%",
+      "matches": 200,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%\u00c9CL%",
+      "matches": 202,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%\u6771\u4eac%",
+      "matches": 201,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%code%",
+      "matches": 201,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%100\\%%",
+      "matches": 201,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "abc",
+      "matches": 201,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "abc%",
+      "matches": 200,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%abc",
+      "matches": 201,
+      "passed": true,
+      "candidate_filter": false
+    },
+    {
+      "operator": "NOT LIKE",
+      "pattern": "%qq%",
+      "matches": 202,
+      "passed": true,
+      "candidate_filter": false
+    }
+  ],
+  "short_fragment_cases": [
+    {
+      "pattern": "",
+      "passed": true,
+      "required": []
+    },
+    {
+      "pattern": "%",
+      "passed": true,
+      "required": []
+    },
+    {
+      "pattern": "_",
+      "passed": true,
+      "required": []
+    },
+    {
+      "pattern": "%a%",
+      "passed": true,
+      "required": [
+        "a"
+      ]
+    },
+    {
+      "pattern": "%ab%",
+      "passed": true,
+      "required": [
+        "ab"
+      ]
+    },
+    {
+      "pattern": "%abc%",
+      "passed": true,
+      "required": [
+        "abc"
+      ]
+    },
+    {
+      "pattern": "%crypt%",
+      "passed": true,
+      "required": [
+        "cry",
+        "ryp",
+        "ypt"
+      ]
+    },
+    {
+      "pattern": "%foo.bar%",
+      "passed": true,
+      "required": [
+        ".ba",
+        "bar",
+        "foo",
+        "o.b",
+        "oo."
+      ]
+    },
+    {
+      "pattern": "%foo_bar%",
+      "passed": true,
+      "required": [
+        "bar",
+        "foo"
+      ]
+    },
+    {
+      "pattern": "%foo\\_bar%",
+      "passed": true,
+      "required": [
+        "_ba",
+        "bar",
+        "foo",
+        "o_b",
+        "oo_"
+      ]
+    },
+    {
+      "pattern": "%a\\%b%",
+      "passed": true,
+      "required": [
+        "a%b"
+      ]
+    },
+    {
+      "pattern": "%a\\_b%",
+      "passed": true,
+      "required": [
+        "a_b"
+      ]
+    },
+    {
+      "pattern": "%a\\\\b%",
+      "passed": true,
+      "required": [
+        "a\\b"
+      ]
+    },
+    {
+      "pattern": "%a_b%",
+      "passed": true,
+      "required": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "pattern": "%abc%xyz%",
+      "passed": true,
+      "required": [
+        "abc",
+        "xyz"
+      ]
+    },
+    {
+      "pattern": "%\u00e9cl%",
+      "passed": true,
+      "required": [
+        "\u00e9cl"
+      ]
+    },
+    {
+      "pattern": "%\u00c9CL%",
+      "passed": true,
+      "required": [
+        "\u00c9CL"
+      ]
+    },
+    {
+      "pattern": "%\u6771\u4eac%",
+      "passed": true,
+      "required": [
+        "\u6771\u4eac"
+      ]
+    },
+    {
+      "pattern": "%code%",
+      "passed": true,
+      "required": [
+        "cod",
+        "ode"
+      ]
+    },
+    {
+      "pattern": "%100\\%%",
+      "passed": true,
+      "required": [
+        "00%",
+        "100"
+      ]
+    },
+    {
+      "pattern": "abc",
+      "passed": true,
+      "required": [
+        "abc"
+      ]
+    },
+    {
+      "pattern": "abc%",
+      "passed": true,
+      "required": [
+        "abc"
+      ]
+    },
+    {
+      "pattern": "%abc",
+      "passed": true,
+      "required": [
+        "abc"
+      ]
+    },
+    {
+      "pattern": "%qq%",
+      "passed": true,
+      "required": [
+        "qq"
+      ]
+    }
+  ],
+  "wrong_key_and_context_rejected": true
+}

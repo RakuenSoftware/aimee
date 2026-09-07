@@ -1,13 +1,12 @@
 // Package postgres is the PostgreSQL store module.
 //
-// One module, serving both daemons. aimee-server and aimee-kb each run it
-// against their own PostgreSQL, which is why nothing here is named for a
-// particular daemon and why the DSN is AIMEE_STORE_URL rather than anything
-// per-process: the module is the same, the database it points at is not.
+// One provider, used by both daemons through the shared server-go/db contract.
+// Pool, transaction and migration behavior does not depend on whether the
+// consumer is KB or server. Deployment configuration selects the database;
+// domain ownership is not a separate physical database tier.
 //
-// This file is the health stage. The served families live in ./families, and
-// the wire, dispatch and transaction discipline they share live alongside it in
-// wire.go and family.go.
+// This file serves health; sql.go serves the database transport. Domain
+// operations and their schemas remain with their owning modules.
 //
 // A different database is a different module. Swapping PostgreSQL out for
 // another engine means installing that engine's module, not configuring this
@@ -20,7 +19,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"log"
-	"os"
 	"sync"
 	"time"
 
@@ -87,8 +85,8 @@ func (state *defaultProbeState) getPool() (*pgxpool.Pool, error) {
 	if state.pool != nil {
 		return state.pool, nil
 	}
-	dsn := os.Getenv("AIMEE_STORE_URL")
-	if dsn == "" {
+	dsn, credentialErr := storeDSN(context.Background(), "AIMEE_STORE_URL")
+	if credentialErr != nil || dsn == "" {
 		return nil, errors.New("postgres: AIMEE_STORE_URL is unset")
 	}
 	config, err := pgxpool.ParseConfig(dsn)

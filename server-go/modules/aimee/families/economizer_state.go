@@ -10,7 +10,7 @@
 // rather than what it defers to.
 //
 // The wire is unchanged, because the wire is the contract. Callers speak
-// server-go/db1's frames today and must keep speaking exactly those bytes
+// server-go/aimee's frames today and must keep speaking exactly those bytes
 // across the swap -- kind 11777 is bound to ONE serving slot per bus host, so
 // this module and the C one are never both answering it, and the cutover is a
 // question of which process holds the slot.
@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	// EventState and StageState mirror server-go/db1: kind 30 carved as
+	// EventState and StageState mirror server-go/aimee: kind 30 carved as
 	// 4096 + ref*256 + stage. The client side is the peer of these bytes.
 	EventState uint32 = 11777
 	StageState uint32 = 1

@@ -18,7 +18,7 @@
 #include "modules/db2/c/decision_log.h"
 #include "modules/db2/c/memory_conflicts.h"
 #include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/prospective_memories.h"
+#include <aimee/memory/module_api.h>
 #include "dashboard.h"
 #include "lifecycle.h"
 #include "headers/memory.h"
@@ -309,7 +309,7 @@ char *api_dashboard_reminders(void)
     * that answers "are there pending reminders?" without a second query. */
    cJSON *counts = cJSON_AddObjectToObject(obj, "counts");
    int armed = 0, triggered = 0, completed = 0, expired = 0;
-   db2_prospective_count_by_state(&armed, &triggered, &completed, &expired);
+   (void)memory_prospective_count_by_state(&armed, &triggered, &completed, &expired);
    cJSON_AddNumberToObject(counts, "armed", armed);
    cJSON_AddNumberToObject(counts, "triggered", triggered);
    cJSON_AddNumberToObject(counts, "completed", completed);

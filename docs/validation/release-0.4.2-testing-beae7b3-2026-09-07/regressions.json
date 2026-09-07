@@ -1,0 +1,16 @@
+{
+  "frontend": {
+    "tests_passed": 191,
+    "test_files_passed": 23,
+    "production_build_passed": true
+  },
+  "published_thin_client": {
+    "tests_passed": 26,
+    "installed_codex_required": true,
+    "skipped": 0,
+    "codex_version": "0.153.4"
+  },
+  "native_mtls_unit": {
+    "passed": true
+  }
+}

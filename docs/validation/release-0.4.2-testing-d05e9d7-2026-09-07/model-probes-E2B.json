@@ -1,0 +1,18 @@
+[
+  {
+    "name": "E2B host and Nehalem CPU probes",
+    "passed": true
+  },
+  {
+    "name": "E2B real native managed mTLS discovery and inference",
+    "passed": true
+  },
+  {
+    "name": "E2B anonymous client refused with no response body",
+    "passed": true
+  },
+  {
+    "name": "E2B model remains running after rejected client",
+    "passed": true
+  }
+]

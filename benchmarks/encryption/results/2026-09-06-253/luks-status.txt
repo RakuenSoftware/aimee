@@ -1,0 +1,11 @@
+/dev/mapper/aimee-bench-luks is active and is in use.
+  type:    LUKS2
+  cipher:  aes-xts-plain64
+  keysize: 512 bits
+  key location: keyring
+  device:  /dev/loop1
+  loop:    /opt/aimee-encryption-bench/storage/luks.img
+  sector size:  512
+  offset:  32768 sectors
+  size:    25133056 sectors
+  mode:    read/write

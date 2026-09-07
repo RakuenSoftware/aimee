@@ -338,6 +338,27 @@ int delegate_add_inline_acp_agent(agent_config_t *cfg, const char *command, cons
    return 0;
 }
 
+static void delegate_route_failure_detail(agent_config_t *cfg, const char *role, char *errbuf,
+                                          size_t errbuf_sz)
+{
+   if (errbuf && errbuf_sz > 0)
+   {
+      agent_route_failure_message(role, errbuf, errbuf_sz);
+      if (!agent_route_last_was_module_fault())
+         for (int i = 0; i < cfg->agent_count; i++)
+         {
+            const agent_t *ag = &cfg->agents[i];
+            if (!ag->enabled || agent_role_meets_competence(ag, role))
+               continue;
+            snprintf(errbuf, errbuf_sz,
+                     "no eligible model meets the competence contract for role '%s'; "
+                     "model '%s' has score %d (see model list routing_competence for thresholds)",
+                     role, ag->name, agent_role_competence(ag, role));
+            break;
+         }
+   }
+}
+
 int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const char *via_name,
                                    int tier_override, const char *provider_override,
                                    const char *model_override, char *errbuf, size_t errbuf_sz)
@@ -482,12 +503,24 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
    agent_t *target = agent_route(cfg, role);
    if (!target)
    {
-      if (errbuf && errbuf_sz > 0)
-         agent_route_failure_message(role, errbuf, errbuf_sz);
+      delegate_route_failure_detail(cfg, role, errbuf, errbuf_sz);
       return -1;
    }
    if (target && model_override && model_override[0])
+   {
+      if (strcmp(target->model, model_override) != 0)
+         for (int i = 0; i < target->routing_competence_count; i++)
+            if (role && strcmp(target->routing_competence[i].role, role) == 0 &&
+                target->routing_competence[i].minimum > 0)
+            {
+               route_err(errbuf, errbuf_sz,
+                         "model override '%s' has no competence assessment for role '%s'; "
+                         "register it and select its own target",
+                         model_override, role);
+               return -1;
+            }
       snprintf(target->model, sizeof(target->model), "%s", model_override);
+   }
    return 0;
 }
 
@@ -502,8 +535,7 @@ int delegate_route_preflight(agent_config_t *cfg, const char *role, char *errbuf
    }
    if (!agent_route(cfg, role))
    {
-      if (errbuf && errbuf_sz > 0)
-         agent_route_failure_message(role, errbuf, errbuf_sz);
+      delegate_route_failure_detail(cfg, role, errbuf, errbuf_sz);
       return -1;
    }
    return 0;

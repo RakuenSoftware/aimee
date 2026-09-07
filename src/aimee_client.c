@@ -286,6 +286,65 @@ static long io_read(int fd, aimee_tls_t *tls, void *buf, size_t len)
    return aimee_core_socket_read(fd, buf, len);
 }
 
+int aimee_client_proxy_request(const char *method, const char *path, const char *headers,
+                               const void *body, unsigned long body_len, const char *session_id,
+                               int (*write_response)(const void *, unsigned long, void *),
+                               void (*on_socket)(int, void *), void *context)
+{
+   char url[512], token[256], auth_token[512], authorization[528];
+   aimee_core_endpoint_t endpoint;
+   if (!write_response || !resolve_remote(url, sizeof(url), token, sizeof(token)) ||
+       aimee_core_endpoint_parse(url, &endpoint) != 0 ||
+       aimee_client_would_leak_cleartext(endpoint.secure, endpoint.host, token))
+      return -1;
+#ifndef WITH_TLS
+   if (endpoint.secure)
+      return -1;
+#endif
+   snprintf(auth_token, sizeof(auth_token), "%s%s%s", token[0] ? token : "aimee-local",
+            session_id && *session_id ? ".aimee-session." : "",
+            session_id && *session_id ? session_id : "");
+   if (aimee_core_bearer_value(authorization, sizeof(authorization), auth_token) != 0)
+      return -1;
+   int fd = aimee_core_socket_connect(endpoint.host, endpoint.port, 10000);
+   if (fd < 0)
+      return -1;
+   if (on_socket)
+      on_socket(fd, context);
+   aimee_core_socket_set_timeouts(fd, 300000, 30000);
+   aimee_tls_t *tls = NULL;
+   int rc = -1;
+#ifdef WITH_TLS
+   if (endpoint.secure && !(tls = aimee_tls_connect(fd, endpoint.host)))
+      goto done;
+#endif
+   char head[16384];
+   int hlen = snprintf(head, sizeof(head),
+                       "%s %s HTTP/1.1\r\nHost: %s%s%s:%s\r\nAuthorization: %s\r\n"
+                       "Content-Length: %lu\r\nConnection: close\r\n%s\r\n",
+                       method, path, strchr(endpoint.host, ':') ? "[" : "", endpoint.host,
+                       strchr(endpoint.host, ':') ? "]" : "", endpoint.port, authorization,
+                       body_len, headers ? headers : "");
+   if (hlen <= 0 || hlen >= (int)sizeof(head) || io_write_all(fd, tls, head, (size_t)hlen) != 0 ||
+       (body_len && io_write_all(fd, tls, body, body_len) != 0))
+      goto done;
+   char buffer[16384];
+   long count;
+   while ((count = io_read(fd, tls, buffer, sizeof(buffer))) > 0)
+      if (write_response(buffer, (unsigned long)count, context) != 0)
+         goto done;
+   rc = count == 0 ? 0 : -1;
+done:
+   if (on_socket)
+      on_socket(-1, context);
+#ifdef WITH_TLS
+   if (tls)
+      aimee_tls_free(tls);
+#endif
+   aimee_core_socket_close(fd);
+   return rc;
+}
+
 typedef struct
 {
    int fd;

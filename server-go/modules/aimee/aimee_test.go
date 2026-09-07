@@ -3,11 +3,12 @@ package aimee
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	wire "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
-	wire "github.com/JBailes/aimee/server-go/db1"
 )
 
 // --- fake database -----------------------------------------------------------
@@ -16,10 +17,65 @@ type fakeTx struct {
 	committed  bool
 	rolledBack bool
 	commitErr  error
+	execErr    error
+	statements []string
 }
 
-func (t *fakeTx) Exec(context.Context, string, ...any) (Tag, error) {
-	return RowsAffected(0), nil
+func (t *fakeTx) Exec(_ context.Context, sql string, _ ...any) (Tag, error) {
+	t.statements = append(t.statements, sql)
+	return RowsAffected(0), t.execErr
+}
+
+func TestDomainTransactionLockCoversAutomaticAndOwnedTransactions(t *testing.T) {
+	for _, owned := range []bool{false, true} {
+		t.Run(fmt.Sprint(owned), func(t *testing.T) {
+			tx := &fakeTx{}
+			database := &fakeDB{tx: tx}
+			body := func(context.Context, Queryer, []string) (uint32, []string, error) {
+				if len(tx.statements) != 1 || tx.statements[0] != "domain-lock" {
+					t.Fatal("operation ran before its transaction lock")
+				}
+				return StatusOK, nil, nil
+			}
+			op := Op{Tx: true, Run: body}
+			if owned {
+				op = Op{RunDB: func(ctx context.Context, db DB, fields []string) (uint32, []string, error) {
+					transaction, err := db.Begin(ctx)
+					if err != nil {
+						return 0, nil, err
+					}
+					status, reply, err := body(ctx, transaction, fields)
+					if err != nil {
+						return status, reply, err
+					}
+					return status, reply, transaction.Commit(ctx)
+				}}
+			}
+			family := Family{TransactionLockSQL: "domain-lock"}
+			if _, _, err := family.run(context.Background(), database, op, nil); err != nil {
+				t.Fatal(err)
+			}
+			if !tx.committed {
+				t.Fatal("operation did not commit")
+			}
+		})
+	}
+}
+
+func TestDomainTransactionLockFailureRollsBackBeforeBody(t *testing.T) {
+	want := errors.New("lock unavailable")
+	tx := &fakeTx{execErr: want}
+	family := Family{TransactionLockSQL: "domain-lock"}
+	op := Op{Tx: true, Run: func(context.Context, Queryer, []string) (uint32, []string, error) {
+		t.Fatal("body ran without acquiring its lock")
+		return 0, nil, nil
+	}}
+	if _, _, err := family.run(context.Background(), &fakeDB{tx: tx}, op, nil); !errors.Is(err, want) {
+		t.Fatalf("lock error: %v", err)
+	}
+	if !tx.rolledBack || tx.committed {
+		t.Fatal("failed lock retained or committed its transaction")
+	}
 }
 func (t *fakeTx) Query(context.Context, string, ...any) (Rows, error) { return nil, nil }
 func (t *fakeTx) QueryRow(context.Context, string, ...any) Row        { return nil }
@@ -59,7 +115,7 @@ func invoke(t *testing.T, f Family, db DB, frame []byte) ([]byte, bus.ModuleStat
 
 // --- codec -------------------------------------------------------------------
 
-// The caller-side codec in server-go/db1 and this one are mirrors. Testing them
+// The caller-side codec in server-go/aimee and this one are mirrors. Testing them
 // against each other is the only check that actually matters: each is correct
 // exactly insofar as the other can read it.
 func TestCodecMirrorsTheCallerSide(t *testing.T) {

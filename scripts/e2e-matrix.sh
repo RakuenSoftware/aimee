@@ -7,9 +7,9 @@
 # (ssh root@192.168.1.253 -> pct exec 101).
 #
 # Topologies:
-#   T1  Docker kb-only                 (compose.yaml)
-#   T2  Docker server + kb split       (compose.server.yaml)
-#   T3  Docker server standalone       (compose.server-standalone.yaml)
+#   T1  Docker kb-only                 (compose.kb.yaml)
+#   T2  Docker server + optional KB    (two isolated compositions)
+#   T3  Docker server standalone       (compose.yaml)
 #   T5  Local full stack               (scratch server + local kb)    [Linux only]
 #   T6  Local server + Docker kb hybrid (scratch server -> :8741)     [Linux only]
 #   PC  Thin-client smoke              (against the T2 server URL)
@@ -54,23 +54,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# The kb embeds IN-CONTAINER now: bekko-a25m's weights are baked into the aimee-kb
-# image, so there is no service to start and nothing to download at runtime. That
-# removes the reason the old stub embedder existed — CI runs the real model.
-#
-# Select it explicitly. The shipped image pre-selects nothing (first boot leaves the
-# choice to the wizard and the builtin lexical embedder serves until then), so
-# without this the topologies would come up with no HTTP embedder and the round-trip
-# check would have nothing to probe.
-export EMBEDDER_MODEL="${EMBEDDER_MODEL:-bekko-a25m}"
-# EMBEDDER_DIMS is deliberately NOT set: the config default (384) must match
-# what the selected model returns. Pinning a width here is how you get a schema
-# sized for one embedder and vectors from another — the dim guard would refuse
-# every insert, and CI would be testing a topology no user can deploy.
-unset EMBEDDER_DIMS
-
-# There are no optional Compose profiles left. Empty also overrides anything in
-# the committed .env.
+# Docker topologies use the real local model in its own container. Each fixture
+# owns isolated networks and requests unused host ports automatically.
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
 # These topology smokes exercise the machine APIs, not browser authentication.
 # Disable webchat instead of inventing a credential fixture outside Vault.
@@ -117,34 +102,42 @@ write_override() {
 declare -a ROWS=()
 record() { ROWS+=("$1|$2|$3"); }   # id | result | detail
 
+docker_images_built=0
 run_docker_topology() {
-  # run_docker_topology <id> <desc> <script> <compose-file> [svc=hostport:ctport...]
-  local id="$1" desc="$2" script="$3" compose="$4"; shift 4
+  local id="$1" desc="$2"
   selected "$id" || return 0
   if ! have_docker; then
-    bold "== $id ($desc): SKIP — no usable Docker on this host"
-    record "$id" "SKIP" "no docker — run inside CT 101"
+    record "$id" FAIL "Docker is required for the selected topology"
     return 0
   fi
-  local compose_files="$compose"
-  if [[ "$PORT_OFFSET" != 0 && $# -gt 0 ]]; then
-    compose_files="$compose $(write_override "$@")"
+  export AIMEE_APPLICATION_IMAGE="${AIMEE_APPLICATION_IMAGE:-aimee:e2e}"
+  export AIMEE_POSTGRES_IMAGE="${AIMEE_POSTGRES_IMAGE:-aimee-postgres:e2e}"
+  export AIMEE_EMBEDDER_IMAGE="${AIMEE_EMBEDDER_IMAGE:-$(cat tests/e2e/embedder-image.txt)}"
+  if [[ "${AIMEE_E2E_SKIP_BUILD:-0}" != 1 && "$docker_images_built" == 0 ]]; then
+    if ! docker build --build-arg WITH_VSCODE=0 -f Dockerfile.server -t "$AIMEE_APPLICATION_IMAGE" . ||
+       ! docker build -f Dockerfile.postgres -t "$AIMEE_POSTGRES_IMAGE" . ||
+       ! (docker image inspect "$AIMEE_EMBEDDER_IMAGE" >/dev/null 2>&1 ||
+          docker pull "$AIMEE_EMBEDDER_IMAGE"); then
+      record "$id" FAIL "candidate image build failed"
+      return 0
+    fi
+    docker_images_built=1
   fi
-  bold "== $id ($desc) =="
-  if COMPOSE_FILE="$compose_files" SERVER_URL="$SERVER_URL" KB_URL="$KB_URL" \
-       "$SCRIPTS/$script" --up $DOWN; then
-    record "$id" "PASS" "$desc"
+  local evidence
+  evidence=$(mktemp -d "/tmp/aimee-${id}-evidence-XXXXXX")
+  local flags=()
+  [[ -n "$DOWN" ]] || flags+=(--keep)
+  bold "== $id ($desc); evidence: $evidence =="
+  if python3 tests/e2e/deployment-matrix.py --topology "$id" --output "$evidence" "${flags[@]}"; then
+    record "$id" PASS "$desc"
   else
-    record "$id" "FAIL" "$desc"
+    record "$id" FAIL "$desc; see $evidence"
   fi
 }
 
-# --- Docker topologies ----------------------------------------------------
-# Trailing svc=host:ctr specs name which published ports to remap by
-# PORT_OFFSET; ignored when --port-offset is 0.
-run_docker_topology T1 "Docker kb-only"            aimee-kb-docker-smoke.sh                compose.yaml                     "aimee-kb=${KB_PORT}:8741"
-run_docker_topology T2 "Docker server+kb split"    aimee-server-docker-smoke.sh            compose.server.yaml              "aimee-server=${SERVER_PORT}:8743" "aimee-kb=${KB_PORT}:8741"
-run_docker_topology T3 "Docker server standalone"  aimee-server-standalone-docker-smoke.sh compose.server-standalone.yaml   "aimee-server=${SERVER_PORT}:8743"
+run_docker_topology T1 "Docker shared KB with PostgreSQL"
+run_docker_topology T2 "Independent Server enrolled into optional KB"
+run_docker_topology T3 "KB-free Server with local semantic memory"
 
 # --- Local topologies (Linux only) ----------------------------------------
 if selected T5; then

@@ -56,7 +56,7 @@ x 'cd /usr/local/bin && tar xzf /tmp/bins.tgz && chmod +x aimee aimee-server aim
 # whole module endpoint and stops aimee-kb starting. Creating it lazily inside
 # install-postgres-module.sh was enough on a container that had run before and
 # not enough on a fresh one.
-x 'cd /usr/local/libexec/aimee-modules && tar xzf /tmp/mm.tgz && chmod +x aimee-module-memory aimee-module-config aimee-module-db1 2>/dev/null; \
+x 'cd /usr/local/libexec/aimee-modules && tar xzf /tmp/mm.tgz && chmod +x aimee-module-memory aimee-module-config aimee-module-aimee aimee-module-db1 2>/dev/null; \
    [ -x aimee-module-postgres ] || cp -f aimee-module-memory aimee-module-postgres; \
    chmod +x aimee-module-postgres 2>/dev/null; true'
 
@@ -80,6 +80,10 @@ fi
 
 # The memory module binary and the capture proxy, when staged.
 [ -f /tmp/logging-proxy.py ] && p /tmp/logging-proxy.py /root/logging-proxy.py
+[ -f /tmp/aimee-memory-bus-probe ] && {
+  p /tmp/aimee-memory-bus-probe /root/aimee-memory-bus-probe
+  x 'chmod +x /root/aimee-memory-bus-probe'
+}
 
 p /tmp/kb-aimee.yaml     /root/.config/aimee/aimee.yaml
 p /tmp/server-aimee.yaml /root/aimee.yaml
@@ -124,16 +128,23 @@ x 'bash /root/provision.sh' 2>&1 | tail -2
 # Config grants before either daemon: both refuse to start without the config
 # module, and a grant written after startup is not seen.
 x 'bash /root/install-config-module.sh grants'
+[ -x /root/aimee-memory-bus-probe ] && x 'bash /root/install-memory-probe-grants.sh'
 
 # BOTH grants before EITHER daemon. A daemon reads modules.d once at startup, so
 # a grant written afterwards is not seen and the module's attach is denied --
 # which reads as a broken module rather than a stale policy.
 x 'bash /root/install-memory-module.sh'        >/dev/null 2>&1
 x 'bash /root/install-memory-module-server.sh' >/dev/null 2>&1
+x 'bash /root/install-postgres-module.sh grants'        >/dev/null 2>&1
+x 'bash /root/install-postgres-module-server.sh grants' >/dev/null 2>&1
+x 'bash /root/install-db1-module.sh grants'             >/dev/null 2>&1
 
 x 'bash /root/start-kb.sh'                   2>&1 | tail -1
+x 'bash /root/install-postgres-module.sh'    2>&1 | grep -E 'state:'
 x 'bash /root/start-memory-module.sh'        2>&1 | grep -E 'state:'
 x 'bash /root/start-server.sh'               2>&1 | tail -1
+x 'pgrep -f "aimee-module-postgres /root/server-module-bus.sock" >/dev/null && echo "state: RUNNING" || { cat /root/postgres-start-server.log; exit 1; }'
+x 'pgrep -f "aimee-module-aimee /root/server-module-bus.sock" >/dev/null && echo "state: RUNNING" || { cat /root/db1-start.log; exit 1; }'
 x 'bash /root/install-memory-module-server.sh' 2>&1 | grep -E 'state:'
 echo
 x 'echo "daemons: kb=$(pgrep -cf aimee-kb) server=$(pgrep -cf aimee-server) modules=$(pgrep -cf aimee-module-memory)"'

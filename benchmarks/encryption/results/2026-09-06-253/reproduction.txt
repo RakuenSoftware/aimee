@@ -1,0 +1,26 @@
+2026-09-06T15:44:09+00:00
+Python 3.13.5
+gcc (Debian 14.2.0-19) 14.2.0
+Copyright (C) 2024 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+NAME                          PROPERTY     VALUE           SOURCE
+rpool/aimee-encryption-bench  encryption   off             default
+rpool/aimee-encryption-bench  compression  off             local
+rpool/aimee-encryption-bench  recordsize   128K            default
+b1a3061a1b4250225a5ec2b8526a1bb3277814ce13111492e9fbb4f02ef07e0f  measure.py
+f8838bb231d1f03891ffb7ac85be0eadfc2b357218f6b73a05a1b8cc5b41e7c9  schema.sql
+a1a496b9a815fa01584f20b881a327d814e866219f77743dc5a748c9a1235a25  verify-edges.py
+41918173a19a5aaba7359cd9a15085012016388c6d3838ef7e6cf88c69b9553a  ordered-page.py
+f1190362d9d8248ab648b23762a3bda9a7fb27a1e852270bfb88077e3cfc373b  short-fragments.py
+88c442a627201de9b9273af6ded738f47319be4f6b7582cf9f934d8607ccb2d2  direct-io.py
+af1dfa39ab208cc8c5acf50099fb29b08bb308afa53278b323876c1094e9125c  scope-wrap.c
+eb1144d4b0fbecd6a3dc6efa83da549cc48d35b27581308e16fd2dcc71c5ae3d  vault_crypto.c
+255a0eded09ebf7dea3451feaf6be3c824d287017e0a631496585dfa0dd03d13  vault_crypto.h
+0284c9ff57aa21b0224f32b58a51ee620060a2d0c844915954b30683fbe358e6  storage-setup.sh
+a703b9dbdc44a44b0ed588663019c76858a11b8c9235d41f762f3a4e9a63829a  apparmor.profile
+ea90cfd12e1eeb12aa1c971741adb8bd4ed88e2a574eaac13f5029a1dbc6300d  tools/docker.tgz
+f66d72ca8073b1920eded724fe1ae94b8464aae0b08ea8980eb838292eecf70e  short-probe.py
+NAME                          PROPERTY  VALUE          SOURCE
+rpool/aimee-encryption-bench  dedup     off            default

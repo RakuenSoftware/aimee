@@ -1,0 +1,16 @@
+{
+  "go_postgres_tests": true,
+  "go_storage_race": true,
+  "go_storage_vet": true,
+  "compose_bootstrap_tests": 7,
+  "compose_models": 6,
+  "repository_lint_checks_exercised": 77,
+  "initial_failure": "schema-sync: new storage file not yet registered in existing PostgreSQL descriptor",
+  "affected_checks_passed_after_registration": [
+    "schema-sync-check",
+    "module-inventory-check",
+    "go-package-ownership-check"
+  ],
+  "actionlint": true,
+  "secret_scan": true
+}

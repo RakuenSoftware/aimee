@@ -47,7 +47,6 @@
 #include "model_registry.h"
 #include "model_provider.h"
 #include "db1_client/db1.h"
-#include "db1_client/user_memory.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -896,7 +895,6 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    session_state_t state;
    session_state_load(&state, sid);
-   hooks_ensure_cwd_worktree(&state, sid, cwd);
 
    /* Memory interception: redirect an agent's local memory-file write into the
     * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
@@ -920,8 +918,38 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* Run guardrail check */
    char msg[1024] = "";
+   /* A hook describes the CLIENT's filesystem. Bind the same registered runner
+    * as tool execution, including the legacy run_cmd probes used by worktree,
+    * branch and verify guards. Binding only the file-tool provider leaves those
+    * probes on the server and makes every remote push unresolvable.
+    * Worktree creation/routing belongs to the thin client for detached roots. */
+   cJSON *input = cJSON_Parse(tool_input);
+   const char *target_cwd = cwd;
+   static const char *cwd_keys[] = {"workdir", "cwd", "working_dir", "working_directory", NULL};
+   for (int i = 0; cwd_keys[i]; i++)
+   {
+      const char *value =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, cwd_keys[i]));
+      if (value && value[0])
+      {
+         target_cwd = value;
+         break;
+      }
+   }
+   char saved_cwd[MAX_PATH_LEN];
+   snprintf(saved_cwd, sizeof(saved_cwd), "%s", run_cmd_get_cwd() ? run_cmd_get_cwd() : "");
+   int bound = workspace_turn_bind_active(target_cwd);
+   const workspace_provider_t *provider = workspace_provider_active();
+   int detached = bound && provider->kind == WS_PROVIDER_DETACHED;
+   if (detached)
+      run_cmd_set_cwd(target_cwd);
+   else
+      hooks_ensure_cwd_worktree(&state, sid, cwd);
    int rc = pre_tool_check(tool_name, tool_input, &state, config_guardrail_mode(), cwd, msg,
                            sizeof(msg));
+   run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
+   workspace_turn_unbind_active();
+   cJSON_Delete(input);
 
    session_state_save(&state, sid);
 
@@ -1310,10 +1338,9 @@ static int handle_session_brief_assemble(server_ctx_t *ctx, server_conn_t *conn,
    return rc;
 }
 
-/* memory.user_capture: upsert a per-user memory into db1 (Proposal 2 Phase 1
- * S2 — the write path behind `aimee memory identity/prefer`). db1 is per-user
- * by construction (aimee-server is 1:1 per user); this is how a thin client
- * populates the identity/preferences the session brief recalls. Params:
+/* memory.user_capture: upsert a per-user memory through the shared Go memory
+ * module.  The server placement is per-user and its module-bus adapter pins
+ * every request to user scope. Params:
  * {kind, key, content, tier?}. CAP_MEMORY_WRITE. */
 static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1331,9 +1358,24 @@ static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJ
    if (!content || !content[0])
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "content is required",
                                     request_id);
-   if (db1_user_memory_upsert(kind, tier, key, content, 1.0, sid) != 0)
+   cJSON *store = cJSON_CreateObject();
+   if (store)
+   {
+      cJSON_AddStringToObject(store, "operation", "store");
+      cJSON_AddStringToObject(store, "kind", kind);
+      cJSON_AddStringToObject(store, "tier", (tier && tier[0]) ? tier : "L2");
+      cJSON_AddStringToObject(store, "key", key);
+      cJSON_AddStringToObject(store, "content", content);
+      cJSON_AddNumberToObject(store, "confidence", 1.0);
+      if (sid && sid[0])
+         cJSON_AddStringToObject(store, "session_id", sid);
+   }
+   cJSON *stored = store ? server_module_memory_data(store) : NULL;
+   cJSON_Delete(store);
+   if (!stored)
       return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE, "failed to store user memory",
                                     request_id);
+   cJSON_Delete(stored);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "kind", kind);

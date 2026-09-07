@@ -1,0 +1,129 @@
+{
+  "rows": [
+    {
+      "request": {
+        "key": "release042-upgrade-global",
+        "content": "Persist across 0.4.1 upgrade 🦊 global",
+        "kind": "fact"
+      },
+      "result": [
+        200,
+        {
+          "status": "ok",
+          "id": 2
+        }
+      ],
+      "read_before": [
+        200,
+        {
+          "status": "ok",
+          "id": 2,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "release042-upgrade-global",
+          "headline": "persist across 0.4.1 upgrade 🦊 global",
+          "content": "Persist across 0.4.1 upgrade 🦊 global",
+          "use_cases": "",
+          "confidence": 1,
+          "use_count": 1,
+          "last_used_at": "2026-09-06T18:21:48Z",
+          "created_at": "2026-09-06T18:21:48Z",
+          "updated_at": "2026-09-06T18:21:48Z",
+          "source_session": "",
+          "provenance_category": "user_stated",
+          "retrieval_score": 0,
+          "hybrid_rank": 0
+        }
+      ]
+    },
+    {
+      "request": {
+        "key": "release042-upgrade-project",
+        "content": "Persist across 0.4.1 upgrade 🦊 project",
+        "kind": "fact",
+        "project": "release042-upgrade-project"
+      },
+      "result": [
+        200,
+        {
+          "status": "ok",
+          "id": 3
+        }
+      ],
+      "read_before": [
+        200,
+        {
+          "status": "ok",
+          "id": 3,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "release042-upgrade-project",
+          "headline": "persist across 0.4.1 upgrade 🦊 project",
+          "content": "Persist across 0.4.1 upgrade 🦊 project",
+          "use_cases": "",
+          "confidence": 1,
+          "use_count": 1,
+          "last_used_at": "2026-09-06T18:21:51Z",
+          "created_at": "2026-09-06T18:21:51Z",
+          "updated_at": "2026-09-06T18:21:51Z",
+          "source_session": "",
+          "provenance_category": "user_stated",
+          "retrieval_score": 0,
+          "hybrid_rank": 0
+        }
+      ]
+    }
+  ],
+  "source": "0.4.1",
+  "list_before": [
+    200,
+    {
+      "status": "ok",
+      "memories": [
+        {
+          "id": 3,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "release042-upgrade-project",
+          "content": "Persist across 0.4.1 upgrade 🦊 project",
+          "confidence": 1,
+          "use_count": 1,
+          "last_used_at": "2026-09-06T18:21:51Z",
+          "created_at": "2026-09-06T18:21:51Z",
+          "updated_at": "2026-09-06T18:21:51Z",
+          "source_session": "",
+          "provenance_category": ""
+        },
+        {
+          "id": 2,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "release042-upgrade-global",
+          "content": "Persist across 0.4.1 upgrade 🦊 global",
+          "confidence": 1,
+          "use_count": 1,
+          "last_used_at": "2026-09-06T18:21:48Z",
+          "created_at": "2026-09-06T18:21:48Z",
+          "updated_at": "2026-09-06T18:21:48Z",
+          "source_session": "",
+          "provenance_category": ""
+        },
+        {
+          "id": 1,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "e2e-as-of",
+          "content": "as-of smoke value",
+          "confidence": 0.8,
+          "use_count": 1,
+          "last_used_at": "2026-09-06T18:20:40Z",
+          "created_at": "2026-09-06T18:20:40Z",
+          "updated_at": "2026-09-06T18:20:40Z",
+          "source_session": "",
+          "provenance_category": ""
+        }
+      ],
+      "active_context_missing": false
+    }
+  ]
+}

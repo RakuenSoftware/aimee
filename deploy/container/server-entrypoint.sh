@@ -21,6 +21,11 @@ done
 
 AIMEE_HOME="${AIMEE_HOME:-/var/lib/aimee}"
 export AIMEE_HOME
+# Old images had no identity latch. Reusing an existing Vault without selecting
+# its migration role must never silently turn a historical KB into a Server.
+_had_instance_vault=0
+[ ! -d "$AIMEE_HOME/.vault" ] || _had_instance_vault=1
+
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
 wfe_pid=""
@@ -64,6 +69,34 @@ for _secret_name in $_secret_names; do
 done
 unset _secret_was_set
 
+# Identity is chosen once by the Go role module and checked on every boot.
+# A command override still cannot mutate an existing deployment's role.
+mkdir -p "$AIMEE_HOME"
+chown aimee:aimee "$AIMEE_HOME"
+_identity_reader=/usr/local/libexec/aimee-modules/aimee-module-server
+_identity_status=0
+_instance_role=$(runuser -u aimee -- "$_identity_reader" __aimee_instance_read "$AIMEE_HOME") || _identity_status=$?
+case "$_identity_status" in
+    0) ;;
+    2)
+        if [ "$_had_instance_vault" -eq 1 ] && [ -z "${AIMEE_INSTANCE_ROLE:-}" ]; then
+            printf '[entrypoint] fatal: existing unlabeled instance requires an explicit Server or KB migration role\n' >&2
+            exit 1
+        fi
+        _instance_role=${AIMEE_INSTANCE_ROLE:-server}
+        ;;
+    *) printf '[entrypoint] fatal: invalid first-boot identity\n' >&2; exit 1 ;;
+esac
+if [ -n "${AIMEE_INSTANCE_ROLE:-}" ] && [ "$AIMEE_INSTANCE_ROLE" != "$_instance_role" ]; then
+    printf '[entrypoint] fatal: changing this instance from %s to %s is forbidden\n' "$_instance_role" "$AIMEE_INSTANCE_ROLE" >&2
+    exit 1
+fi
+case "$_instance_role" in server|kb) ;; *) printf '[entrypoint] fatal: unknown role\n' >&2; exit 1 ;; esac
+runuser -u aimee -- "/usr/local/libexec/aimee-modules/aimee-module-$_instance_role" \
+    __aimee_instance_bootstrap "$AIMEE_HOME" >/dev/null
+export AIMEE_INSTANCE_ROLE="$_instance_role"
+unset _identity_reader _identity_status _instance_role _had_instance_vault
+
 # Legacy credential files are a migration source, never runtime storage. Seal
 # and erase them even for a Docker command override; an internal restart marker
 # supplied by an external caller must not be able to bypass this boundary.
@@ -106,8 +139,28 @@ if [ "$vault_bootstrapped" -eq 0 ] || [ "$had_credential_env" -eq 1 ]; then
     # consults thereafter. Force a clean process image whenever this invocation
     # inherited credentials, even if an external caller supplied the internal
     # marker.
-    webchat_prepare
+    if [ "$AIMEE_INSTANCE_ROLE" = server ]; then
+        webchat_prepare
+    fi
     exec /usr/bin/tini -- aimee-server-entrypoint --aimee-internal-vault-bootstrapped
+fi
+
+# Storage unlock is owned by the PostgreSQL Go module. Core's Vault resource
+# is available before SQL, config migrations, HTTP or the normal module graph.
+if [ -n "${AIMEE_POSTGRES_STORAGE_SOCKET:-}" ]; then
+    runuser -u aimee -- /usr/local/libexec/aimee-modules/aimee-module-postgres \
+        __aimee_postgres_unlock "$AIMEE_POSTGRES_STORAGE_SOCKET"
+fi
+
+if [ "${AIMEE_MODEL_SERVICES_ENABLED:-0}" = 1 ]; then
+    mkdir -p /run/aimee-model-tls
+    chown -R aimee:aimee /run/aimee-model-tls
+    find /run/aimee-model-tls -type d -exec chmod 0700 {} \;
+    runuser -u aimee -- /usr/local/libexec/aimee-modules/aimee-module-providers __aimee_model_services
+fi
+
+if [ "$AIMEE_INSTANCE_ROLE" = kb ]; then
+    exec runuser -u aimee -- /usr/local/bin/aimee-kb-role-runtime
 fi
 
 export AIMEE_WFE_ENGINE="${AIMEE_WFE_ENGINE:-go}"
@@ -283,13 +336,14 @@ grant_untouched_since_seed() {
 grant_known_historical_default() { # <persisted> <shipped>
     _persisted=$1
     _shipped=$2
+    [ ! -e "$(grant_seed_record "$_persisted")" ] || return 1
     # These modules originally shipped with one stage and later gained a second.
     # Match the entire remaining policy so an operator change to identity,
     # executable, or any other capability is never mistaken for an old image
     # default.
     _historical="$(basename "$_persisted"):$(grep '^serve=' "$_persisted" 2>/dev/null || true)"
     case "$_historical" in
-        git.grant:serve=7425|skills.grant:serve=7681|roundtable.grant:serve=9473|benchmarks.grant:serve=10497) ;;
+        git.grant:serve=7425|skills.grant:serve=7681|roundtable.grant:serve=9473|benchmarks.grant:serve=10497|memory.grant:serve=5889,5890,5891,5892,5893,5894) ;;
         *) return 1 ;;
     esac
     [ "$(sed '/^serve=/d' "$_persisted")" = "$(sed '/^serve=/d' "$_shipped")" ]
@@ -316,7 +370,7 @@ for module_grant in "$AIMEE_MODULE_GRANT_SRC"/*.grant; do
     fi
     shipped_serve=$(grep '^serve=' "$module_grant" 2>/dev/null || true)
     persisted_serve=$(grep '^serve=' "$grant_target" 2>/dev/null || true)
-    if [ "$shipped_serve" != "$persisted_serve" ]; then
+    if ! cmp -s "$module_grant" "$grant_target"; then
         # log() is not defined this early in the script, so match its format.
         if grant_untouched_since_seed "$grant_target" ||
            grant_known_historical_default "$grant_target" "$module_grant"; then

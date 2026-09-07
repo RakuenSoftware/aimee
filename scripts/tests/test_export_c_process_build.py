@@ -24,6 +24,22 @@ SPEC.loader.exec_module(exporter)
 
 
 class CProcessBuildTests(unittest.TestCase):
+    def test_shared_database_and_domain_contracts_follow_consumers(self) -> None:
+        for module in ("aimee", "memory"):
+            with self.subTest(module=module):
+                sources = exporter.go_process_shared_sources(module)
+                for filename in ("db.go", "store_client.go", "store_wire.go"):
+                    self.assertIn(f"server-go/db/{filename}", sources)
+                self.assertFalse(any(path.endswith("_test.go") for path in sources))
+                self.assertTrue(all((REPO_ROOT / path).is_file() for path in sources))
+        for module in ("aimee", "economizer"):
+            with self.subTest(module=module):
+                sources = exporter.go_process_shared_sources(module)
+                self.assertIn("server-go/aimee/client.go", sources)
+                self.assertFalse(any(path.startswith("server-go/db1/") for path in sources))
+        self.assertEqual(exporter.go_process_shared_sources("postgres"), [])
+        self.assertIn("server-go/modules/egress/egress.go", exporter.go_process_shared_sources("memory"))
+
     def descriptor(self) -> dict[str, object]:
         return {
             "sources": [
@@ -163,7 +179,9 @@ class CProcessBuildTests(unittest.TestCase):
             )
             (module / "src/modules/db2/store.c").write_text(
                 '#include "schema_data.h"\n'
-                "int embedded_value(void) { return AIMEE_DB2_SCHEMA_SQL[0] == 's' ? 0 : 1; }\n",
+                "int embedded_value(void) { return AIMEE_DB2_SCHEMA_SQL[0] == 's' ? 0 : 1; }\n"
+                "extern int retired_other_module(void);\n"
+                "int unused_legacy_surface(void) { return retired_other_module(); }\n",
                 encoding="utf-8",
             )
             (module / "src/modules/db2/schema.sql").write_text(
@@ -205,6 +223,30 @@ class CProcessBuildTests(unittest.TestCase):
             self.assertFalse((module / "schema_data.h").exists())
             ran = subprocess.run([str(build / "aimee-module-db2")], check=False)
             self.assertEqual(ran.returncode, 0)
+            # Garbage collection must not mask a missing implementation that
+            # the process actually calls. Make the live entry depend on it.
+            # Locate the owned translation unit independently of fixture naming.
+            source = next(path for path in (module / "src").rglob("*.c")
+                          if "int embedded_value(void) {" in path.read_text())
+            source.write_text(source.read_text().replace(
+                "return AIMEE_DB2_SCHEMA_SQL[0] == 's' ? 0 : 1;",
+                "return unused_legacy_surface();").replace(
+                    '#include "schema_data.h"',
+                    '#include "schema_data.h"\nint unused_legacy_surface(void);'))
+            broken = subprocess.run(["cmake", "--build", str(build)],
+                                    text=True, capture_output=True, check=False)
+            self.assertNotEqual(broken.returncode, 0)
+            self.assertIn("retired_other_module", broken.stderr)
+
+    def test_exported_roles_and_infrastructure_preserve_bootstrap_modes(self) -> None:
+        for role in ("server", "kb"):
+            main = exporter.go_module_main(role, 34, [])
+            self.assertIn("identity.Bootstrap(os.Args)", main)
+            self.assertIn('handler.NewHandler(os.Getenv("AIMEE_HOME"))', main)
+            self.assertIn("handler.Supervise(ctx", main)
+            self.assertNotIn("handler.Handle", main)
+        self.assertIn("storage.Bootstrap(os.Args)", exporter.go_module_main("postgres", 26, []))
+        self.assertIn("handler.ModelServicesBootstrap(os.Args)", exporter.go_module_main("providers", 17, []))
 
     def test_cmake_compiles_every_owned_source_once(self) -> None:
         cmake = exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", self.descriptor())

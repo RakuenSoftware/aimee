@@ -8,7 +8,7 @@ set -euo pipefail
 : "${PGDATA:?PGDATA is required}"
 : "${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required}"
 : "${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required}"
-secure_dir=/var/lib/postgresql/secure
+secure_dir=${AIMEE_STORE_SECURE_DIR:-/var/lib/postgresql/secure}
 # The server mounts this volume read-only and must traverse the directory to
 # read server.crt as its TLS trust root.  The certificate is public (0644);
 # the private key and pg_hba.conf remain postgres-only (0600), so traversal
@@ -29,6 +29,13 @@ if [[ ! -s "$secure_dir/server.key" || ! -s "$secure_dir/server.crt" ]]; then
   mv "$tmp_dir/server.crt" "$secure_dir/server.crt"
   rmdir "$tmp_dir"
   trap - EXIT
+fi
+
+# Encrypted deployments publish only the public trust certificate outside the
+# mounted filesystem. The private key and reconciliation logs remain inside it.
+if [[ -n "${AIMEE_STORE_PUBLIC_TLS_DIR:-}" ]]; then
+  install -d -m 0755 "$AIMEE_STORE_PUBLIC_TLS_DIR"
+  install -m 0644 "$secure_dir/server.crt" "$AIMEE_STORE_PUBLIC_TLS_DIR/server.crt"
 fi
 
 cat >"$secure_dir/pg_hba.conf" <<'EOF'
@@ -74,7 +81,7 @@ if [[ -s "$PGDATA/PG_VERSION" ]]; then
   existing_admin=""
   for candidate in postgres aimee; do
     if gosu postgres psql --host "$migration_socket" --username "$candidate" \
-         --dbname "$POSTGRES_DB" --tuples-only --no-align \
+         --dbname postgres --tuples-only --no-align \
          --command "SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper" \
          2>/dev/null | grep -qx 1; then
       existing_admin="$candidate"
@@ -85,6 +92,27 @@ if [[ -s "$PGDATA/PG_VERSION" ]]; then
     echo "aimee store: existing cluster has no supported administrative role (postgres or aimee)" >&2
     exit 1
   fi
+
+  # Rename only the adopted copy of the embedded KB store, before opening
+  # TCP. Refuse ambiguous stores and preserve the read-only rollback source.
+  gosu postgres psql --host "$migration_socket" --username "$existing_admin" \
+    --dbname postgres --set=ON_ERROR_STOP=1 --set=store_db="$POSTGRES_DB" <<'SQL'
+SELECT set_config('aimee.store_db', :'store_db', false);
+DO $database$
+BEGIN
+  IF current_setting('aimee.store_db') = 'aimee_store'
+     AND EXISTS (SELECT 1 FROM pg_database WHERE datname = 'aimee_shared') THEN
+    IF EXISTS (SELECT 1 FROM pg_database WHERE datname = 'aimee_store') THEN
+      RAISE EXCEPTION 'both aimee_shared and aimee_store exist; select the intended store before upgrading';
+    END IF;
+    ALTER DATABASE aimee_shared RENAME TO aimee_store;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = current_setting('aimee.store_db')) THEN
+    RAISE EXCEPTION 'expected store database is absent; restore or select the intended store before upgrading';
+  END IF;
+END
+$database$;
+SQL
 
   AIMEE_STORE_ADMIN_USER="$existing_admin" PGHOST="$migration_socket" \
     /docker-entrypoint-initdb.d/10-aimee-store-roles.sh
@@ -111,6 +139,7 @@ SQL
 fi
 
 exec /usr/local/bin/docker-entrypoint.sh postgres \
+  -c listen_addresses='*' \
   -c ssl=on \
   -c ssl_cert_file="$secure_dir/server.crt" \
   -c ssl_key_file="$secure_dir/server.key" \

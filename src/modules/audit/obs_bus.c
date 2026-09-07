@@ -217,6 +217,7 @@ static struct
    void *durable_ctx;
    obs_bus_sink_idle_fn sink_idle;
    void *sink_idle_ctx;
+   bus_instance_role_t instance_role;
    char module_socket[108];
    char module_policy_dir[4096];
    char capture_fault[24]; /* deterministic unit-test seam; empty in production */
@@ -1153,7 +1154,8 @@ static int start_locked(void)
                                           .backlog = 32,
                                           .stale_after_ns = 30ULL * 1000000000ULL,
                                           .grants = grants,
-                                          .grant_count = grant_count};
+                                          .grant_count = grant_count,
+                                          .instance_role = sinks.instance_role};
       g.runtime = bus_runtime_start(&g.host, &g.host_lock, &runtime_cfg);
       if (!g.runtime)
       {
@@ -1303,8 +1305,10 @@ static const struct
     {5890u, "memory.memory-write"},
     {5892u, "memory.candidate-retrieval"},
     {5893u, "memory.reranking"},
+    {5895u, "memory.memory-data"},
     {6145u, "learning.learning-observation"},
     {6401u, "routing.route-selection"},
+    {6402u, "routing.cost-selection"},
     {6657u, "delegates.delegate-invocation"},
     {6658u, "delegates.delegate-capability-inference"},
     {6659u, "delegates.delegate-chain-depth"},
@@ -1389,6 +1393,9 @@ static const struct
     {12293u, "egress.module-egress-sse-receive"},
     {12294u, "egress.module-egress-sse-close"},
     {12295u, "egress.module-egress-credential-key"},
+    {12545u, "providers.provider-resolve"},
+    {12546u, "providers.provider-validate"},
+    {12547u, "providers.provider-management"},
 };
 
 /* Sampled declarations use integer parts-per-million so the checked contract
@@ -1439,7 +1446,7 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
     * caller, stage, trace, lengths and status are recorded below in WORM; raw
     * payload capture is deliberately suppressed. The forge request still
     * carries its legacy token until credential-handle migration completes. */
-   int sensitive_transport = frame->event_kind == 7428u ||
+   int sensitive_transport = frame->event_kind == 7428u || frame->event_kind == 12547u ||
                              (frame->event_kind >= 12290u && frame->event_kind <= 12294u);
    if (!sensitive_transport &&
        atomic_load_explicit(&g.capture_state, memory_order_acquire) == CAPTURE_OK &&
@@ -1758,7 +1765,19 @@ int obs_bus_configure_daemon_module_runtime(const char *daemon_name, const char 
    if (socket_length <= 0 || (size_t)socket_length >= sizeof(socket_path) || policy_length <= 0 ||
        (size_t)policy_length >= sizeof(policy_dir))
       return -1;
-   return obs_bus_configure_module_runtime(socket_path, policy_dir);
+   int rc = obs_bus_configure_module_runtime(socket_path, policy_dir);
+   if (rc == 0)
+   {
+      pthread_mutex_lock(&start_lock);
+      if (g.started)
+         rc = -1;
+      else
+         sinks.instance_role = strcmp(daemon_name, "server") == 0 ? BUS_INSTANCE_SERVER
+                               : strcmp(daemon_name, "kb") == 0   ? BUS_INSTANCE_KB
+                                                                  : BUS_INSTANCE_UNSET;
+      pthread_mutex_unlock(&start_lock);
+   }
+   return rc;
 }
 
 /* Lazy start on first emit, so obs_bus_emit is a drop-in for the old direct

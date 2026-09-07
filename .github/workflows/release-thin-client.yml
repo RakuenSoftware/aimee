@@ -243,6 +243,20 @@ jobs:
         shell: powershell
         run: .\${{ matrix.asset }} version
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: matrix.kind == 'linux'
+        with:
+          node-version: '22'
+      - name: Install pinned Codex for artifact compatibility
+        if: matrix.kind == 'linux'
+        run: npm install --global @openai/codex@0.153.4
+      - name: Gate Linux release artifact on the complete local proxy suite
+        if: matrix.kind == 'linux'
+        env:
+          AIMEE_TEST_REQUIRE_CODEX: '1'
+          AIMEE_TEST_PROXY_BINARY: ${{ github.workspace }}/${{ matrix.asset }}
+        run: python3 scripts/tests/test_thin_client_proxy.py -v
+
       - name: Upload build artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

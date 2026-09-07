@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 // gitRun runs a git command in dir, failing the test on error.
@@ -125,13 +125,13 @@ func TestFreezeUsesMergedRemoteFeatureTip(t *testing.T) {
 	gitRun(t, repo, "branch", feature)
 	gitRun(t, repo, "push", "origin", feature)
 
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := t.Context()
-	for _, in := range []db1.CreateWorkItem{
+	for _, in := range []workflowstore.CreateWorkItem{
 		{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"},
 		{ID: "wi_child", Repo: repo, ProposalPath: "c", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
 	} {
@@ -323,13 +323,13 @@ func TestReviewResumeRefreezesHumanRepairWithoutMeaninglessDelegateEdit(t *testi
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
 	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := t.Context()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_root", Repo: repo,
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_root", Repo: repo,
 		ProposalPath: "p", WorkflowName: "build", StartStage: "document"}); err != nil {
 		t.Fatal(err)
 	}
@@ -465,13 +465,13 @@ func TestPartialImplementWithNoCommitDoesNotAdvance(t *testing.T) {
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
 	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := t.Context()
-	for _, in := range []db1.CreateWorkItem{
+	for _, in := range []workflowstore.CreateWorkItem{
 		{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"},
 		{ID: "wi_child", Repo: repo, ProposalPath: "c", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_parent"},
 	} {
@@ -603,13 +603,13 @@ func TestDocumentPartialNoChangeAdvancesUnchangedHead(t *testing.T) {
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
 	gitRun(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
 
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := t.Context()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_root", Repo: repo,
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_root", Repo: repo,
 		ProposalPath: "p", WorkflowName: "build", StartStage: "document"}); err != nil {
 		t.Fatal(err)
 	}

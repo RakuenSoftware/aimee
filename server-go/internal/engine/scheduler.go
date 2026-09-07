@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 )
 
 type Scheduler struct {
-	db                *db1.Store
+	db                *workflowstore.Store
 	engine            *Engine
 	concurrency       int
 	concurrencySource func() int
@@ -22,7 +22,7 @@ type Scheduler struct {
 	pollEvery         time.Duration
 	transientPauses   []transientPause
 	cancelTerminal    func(context.Context) (int, error)
-	cleanupTerminal   func(context.Context, db1.WorkItem) error
+	cleanupTerminal   func(context.Context, workflowstore.WorkItem) error
 	log               *slog.Logger
 
 	mu      sync.Mutex
@@ -95,7 +95,7 @@ func (s *Scheduler) SetTerminalCancellation(cancel func(context.Context) (int, e
 // SetTerminalCleanup installs the managed-worktree cleanup boundary. Terminal
 // rows remain as workflow history, but their checkouts must not accumulate
 // forever after the final transition.
-func (s *Scheduler) SetTerminalCleanup(cleanup func(context.Context, db1.WorkItem) error) {
+func (s *Scheduler) SetTerminalCleanup(cleanup func(context.Context, workflowstore.WorkItem) error) {
 	s.mu.Lock()
 	s.cleanupTerminal = cleanup
 	s.mu.Unlock()
@@ -110,7 +110,7 @@ type RunPolicy struct {
 	StaleAbandon   time.Duration
 }
 
-func NewScheduler(db *db1.Store, engine *Engine, concurrency int, logger *slog.Logger) *Scheduler {
+func NewScheduler(db *workflowstore.Store, engine *Engine, concurrency int, logger *slog.Logger) *Scheduler {
 	if concurrency < 1 {
 		concurrency = 1
 	}

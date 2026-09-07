@@ -1,0 +1,1 @@
+ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:b03199bee881bf632f7194f472de7bc370e66d16b7215bb6aa506fb2b1510209

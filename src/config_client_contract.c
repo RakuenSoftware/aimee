@@ -177,7 +177,13 @@ const char *config_ocr_endpoint(void)
 const char *config_embedder_command_current(const char *requested)
 {
    static _Thread_local char value[CONFIG_COPY_MAX];
-   const char *selected = requested && requested[0] ? requested : getenv("EMBEDDER_URL");
+   const char *selected = requested;
+   if (!selected || !selected[0])
+      selected = config_embedder_url();
+   if ((!selected || !selected[0]) && config_embedder_model()[0])
+      selected = "https://aimee-embedder:8762";
+   if (!selected || !selected[0])
+      selected = getenv("EMBEDDER_URL");
    if (!selected || !selected[0])
       selected = config_embedder_command_field();
    snprintf(value, sizeof(value), "%s", selected ? selected : "");
@@ -843,9 +849,11 @@ int config_synth_chat_endpoint_current(char *out, size_t n)
 {
    if (!out || n == 0)
       return 0;
-   const char *endpoint = getenv("SYNTHESIS_ENDPOINT");
+   const char *endpoint = config_synthesis_endpoint();
+   if ((!endpoint || !endpoint[0]) && config_synthesis_model()[0])
+      endpoint = "https://aimee-llm:8761/v1";
    if (!endpoint || !endpoint[0])
-      endpoint = config_synthesis_endpoint();
+      endpoint = getenv("SYNTHESIS_ENDPOINT");
    if (!endpoint || !endpoint[0])
    {
       out[0] = 0;
@@ -882,27 +890,21 @@ void config_emit_deploy_env_current(char *buf, size_t n)
          pos += (size_t)snprintf(buf + pos, n - pos, __VA_ARGS__);                                 \
    } while (0)
 
-   const char *kb_mode = config_kb_mode();
-   const char *kb_url = config_kb_client_url();
    const char *embedder_model = config_embedder_model();
    const char *embedder_url = config_embedder_url();
    const char *synthesis_model = config_synthesis_model();
    const char *synthesis_endpoint = config_synthesis_endpoint();
-   int remote_kb = !strcmp(kb_mode, "remote");
-   int local_synthesis = !remote_kb && synthesis_model[0] && !synthesis_endpoint[0];
-
-   EMITF("COMPOSE_PROFILES=%s\n", remote_kb ? "" : (local_synthesis ? "kb,llm" : "kb"));
-   if (remote_kb)
+   int local_embedding = embedder_model[0] && !embedder_url[0];
+   int local_synthesis = synthesis_model[0] && !synthesis_endpoint[0];
+   EMITF("COMPOSE_PROFILES=%s\n", local_embedding
+                                      ? (local_synthesis ? "embedding,llm" : "embedding")
+                                      : (local_synthesis ? "llm" : ""));
+   if (local_embedding)
    {
-      if (kb_url[0])
-         EMITF("AIMEE_KB_API_URL=%s\n", kb_url);
-      return;
+      EMITF("AIMEE_EMBEDDER_VARIANT=%s\n",
+            !strcmp(embedder_model, "nomic-embed-text-v2-moe") ? "nomic" : "a25m");
+      EMITF("EMBEDDER_URL=https://aimee-embedder:8762\n");
    }
-
-   const char *kb_variant =
-       embedder_url[0] ? ""
-                       : (!strcmp(embedder_model, "nomic-embed-text-v2-moe") ? "nomic" : "a25m");
-   EMITF("AIMEE_KB_VARIANT=%s\n", kb_variant);
    if (embedder_model[0])
       EMITF("EMBEDDER_MODEL=%s\n", embedder_model);
    if (embedder_url[0])
@@ -916,9 +918,9 @@ void config_emit_deploy_env_current(char *buf, size_t n)
       EMITF("AIMEE_LLM_VARIANT=%s\n", strstr(synthesis_model, "E2B") ? "e2b" : "e4b");
       EMITF("AIMEE_LLM_HOST=aimee-llm\n");
       EMITF("SYNTHESIS_ENDPOINT=https://aimee-llm:8761/v1\n");
-      EMITF("SYNTHESIS_CA_FILE=/var/lib/aimee/synthesis-tls/ca.pem\n");
-      EMITF("SYNTHESIS_CERT_FILE=/var/lib/aimee/synthesis-tls/client.pem\n");
-      EMITF("SYNTHESIS_KEY_FILE=/var/lib/aimee/synthesis-tls/client.key\n");
+      EMITF("SYNTHESIS_CA_FILE=/run/aimee-model-tls/synthesis/client/ca.pem\n");
+      EMITF("SYNTHESIS_CERT_FILE=/run/aimee-model-tls/synthesis/client/client.pem\n");
+      EMITF("SYNTHESIS_KEY_FILE=/run/aimee-model-tls/synthesis/client/client.key\n");
    }
    if (config_embedder_dims_pinned_current() && config_embedder_dims_current() > 0)
       EMITF("EMBEDDER_DIMS=%d\n", config_embedder_dims_current());

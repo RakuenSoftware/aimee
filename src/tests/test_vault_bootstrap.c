@@ -13,6 +13,7 @@
 #include "oauth_flow.h"
 #include "vault_service.h"
 #include "vault_store.h"
+#include "vault_server_key.h"
 #include "vault_kek_cache.h"
 #include "vault_env_bootstrap.h"
 #include "runtime_secret.h"
@@ -169,12 +170,16 @@ static void test_forge_stdin_seal(void)
 static void test_generic_env_source(void)
 {
    setenv("AIMEE_DB2_URL", "postgresql://user:db-password@db/aimee", 1);
+   setenv("AIMEE_STORE_URL", "postgresql://runtime:fixture-runtime@db/aimee", 1);
+   setenv("AIMEE_STORE_MIGRATION_URL", "postgresql://migrator:fixture-migrator@db/aimee", 1);
    setenv("AIMEE_VAULT_PKCS11_PIN", "vaulted-hsm-pin", 1);
    setenv("AIMEE_KB_CLIENT_PAM_USERNAME", "aimee-server", 1);
    assert(vault_env_has_credential_environment() == 1);
-   assert(vault_env_bootstrap_init() == 3);
+   assert(vault_env_bootstrap_init() == 5);
    assert(vault_env_has_credential_environment() == 0);
    assert(getenv("AIMEE_DB2_URL") == NULL);
+   assert(getenv("AIMEE_STORE_URL") == NULL);
+   assert(getenv("AIMEE_STORE_MIGRATION_URL") == NULL);
    assert(getenv("AIMEE_VAULT_PKCS11_PIN") == NULL);
    char value[128];
    assert(runtime_secret_get("AIMEE_DB2_URL", value, sizeof(value)) == 1);
@@ -185,6 +190,13 @@ static void test_generic_env_source(void)
    runtime_secret_wipe(value, sizeof(value));
    assert(runtime_secret_get("AIMEE_KB_CLIENT_PAM_USERNAME", value, sizeof(value)) == 1);
    assert(strcmp(value, "aimee-server") == 0);
+   runtime_secret_wipe(value, sizeof(value));
+   assert(runtime_secret_get("AIMEE_STORE_URL", value, sizeof(value)) == 1);
+   assert(strcmp(value, "postgresql://runtime:fixture-runtime@db/aimee") == 0);
+   assert(!plaintext_under_home("fixture-runtime"));
+   assert(runtime_secret_get("AIMEE_STORE_MIGRATION_URL", value, sizeof(value)) == 1);
+   assert(strcmp(value, "postgresql://migrator:fixture-migrator@db/aimee") == 0);
+   assert(!plaintext_under_home("fixture-migrator"));
    runtime_secret_wipe(value, sizeof(value));
    printf("  PASS: test_generic_env_source\n");
 }
@@ -466,6 +478,75 @@ static void scrub_inherited_credential_env(void)
       unsetenv(names[i]);
 }
 
+static void test_postgres_luks_vault_only(void)
+{
+   const char *volume = "1108ba28-9dc6-46f9-a0ae-cb8f510e9ec6";
+   const char *other = "9a1ff112-173c-4450-aef4-188d21c7b79a";
+   unsigned char key[32], again[32];
+   assert(vault_postgres_key(volume, 0, key) == -1);
+   assert(vault_postgres_key("../unsafe", 1, key) == -1);
+   assert(vault_postgres_key(volume, 1, key) == 0);
+   assert(vault_postgres_key(volume, 0, again) == 0);
+   assert(memcmp(key, again, sizeof(key)) == 0);
+   assert(vault_postgres_key(volume, 1, again) == 0);
+   assert(memcmp(key, again, sizeof(key)) == 0);
+   assert(vault_postgres_key(other, 0, again) == -1);
+   assert(vault_postgres_key(other, 1, again) == -1);
+   for (size_t i = 0; i < sizeof(again); i++)
+      assert(again[i] == 0);
+   char hex[65];
+   for (size_t i = 0; i < sizeof(key); i++)
+      snprintf(hex + i * 2, 3, "%02x", key[i]);
+   assert(!plaintext_under_home(hex));
+   char stored[128];
+   assert(vault_service_get_server_principal("postgres", "luks", stored, sizeof(stored)) ==
+          VAULT_OK);
+   assert(strncmp(stored, volume, 36) == 0 && strcmp(stored + 37, hex) == 0);
+   char backup[1280], error[256];
+   assert(vault_server_key_rotate(VAULT_SERVER_PRINCIPAL, NULL, NULL, backup, sizeof(backup), error,
+                                  sizeof(error)) == 0);
+   assert(vault_postgres_key(volume, 0, again) == 0);
+   assert(memcmp(key, again, sizeof(key)) == 0);
+   assert(vault_service_set_server("postgres", "luks", "corrupt") == VAULT_OK);
+   assert(vault_postgres_key(volume, 1, again) == -1);
+   assert(vault_service_get_server_principal("postgres", "luks", stored, sizeof(stored)) ==
+          VAULT_OK);
+   assert(strcmp(stored, "corrupt") == 0);
+   OPENSSL_cleanse(key, sizeof(key));
+   OPENSSL_cleanse(hex, sizeof(hex));
+   OPENSSL_cleanse(stored, sizeof(stored));
+   printf("  PASS: LUKS credential stays in Vault and is bound to one volume\n");
+}
+
+/* An offline store move replaces only SQL connections, never enrollment. */
+static void test_scoped_store_migration(void)
+{
+   const char *names[] = {"AIMEE_STORE_URL", "AIMEE_STORE_MIGRATION_URL", "AIMEE_DB2_URL",
+                          "AIMEE_KB_API_BEARER_TOKEN", "AIMEE_PROVIDER_API_KEY"};
+   char value[128];
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+      assert(vault_service_set_server("environment", names[i], "original-value") == VAULT_OK);
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+      setenv(names[i], "replacement-value", 1);
+   assert(vault_env_bootstrap_init() == 0);
+   setenv("AIMEE_VAULT_STORE_MIGRATION", "1", 1);
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+      setenv(names[i], "replacement-value", 1);
+   assert(vault_env_bootstrap_init() == 3);
+   unsetenv("AIMEE_VAULT_STORE_MIGRATION");
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+   {
+      assert(vault_service_get_server_principal("environment", names[i], value, sizeof(value)) ==
+             VAULT_OK);
+      assert(strcmp(value, i < 3 ? "replacement-value" : "original-value") == 0);
+      assert(getenv(names[i]) == NULL);
+      setenv(names[i], "subsequent-start", 1);
+   }
+   assert(vault_env_bootstrap_init() == 0);
+   assert(!plaintext_under_home("replacement-value"));
+   printf("  PASS: scoped store migration preserves non-SQL credentials and ordinary startup\n");
+}
+
 int main(void)
 {
    scrub_inherited_credential_env();
@@ -474,6 +555,7 @@ int main(void)
        "/usr/local/libexec/aimee-modules/aimee-module-egress-evil"));
    assert(!vault_env_egress_parent_path_ok("/tmp/aimee-module-egress"));
    assert(vault_env_egress_parent_attest() != 0);
+   assert(vault_env_postgres_resource() != 0);
    assert(vault_env_print_egress_credential("AIMEE_MCP_712_TOKEN") != 0);
 
    snprintf(g_root, sizeof(g_root), "%s/aimee-vaultboot-test-%d", platform_tmpdir(), (int)getpid());
@@ -500,6 +582,8 @@ int main(void)
    test_legacy_db1_oauth_migration();
    test_no_source_noop();
    test_no_plaintext_at_rest();
+   test_postgres_luks_vault_only();
+   test_scoped_store_migration();
 
    vault_kek_cache_clear();
    runtime_secret_clear();

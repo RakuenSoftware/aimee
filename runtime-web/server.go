@@ -134,6 +134,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Memory Center uses the canonical /v1 spellings. These are browser-session
 	// routes, not the public bearer API: forward the authenticated webuser over
 	// the kernel-attested UDS boundary for scoping and audit attribution.
+	mux.HandleFunc("/v1/memory/delete", s.requireAuth(s.memoryProxyHandler("/v1/memory/delete")))
 	mux.HandleFunc("/v1/memory/review", s.requireAuth(s.memoryProxyHandler("/v1/memory/review")))
 	mux.HandleFunc("/v1/memory/reject", s.requireAuth(s.memoryProxyHandler("/v1/memory/reject")))
 	mux.HandleFunc("/v1/memory/restore", s.requireAuth(s.memoryProxyHandler("/v1/memory/restore")))
@@ -271,11 +272,12 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// spelling, still served so an older GUI build keeps working.
 	s.registerModelRoutes(mux, "/api/models")
 	s.registerModelRoutes(mux, "/api/agents")
-	// Provider registry: the menu of providers and the models each one offers,
-	// backing the Providers tab. Read-only -- configuring a model still goes
-	// through agent.add/agent.set above.
-	mux.HandleFunc("GET /api/providers", s.requireAuth(s.handleProviderList))
-	mux.HandleFunc("POST /api/providers/models", s.requireAuth(s.handleProviderModels))
+	// Saved provider connections are independent of their model roster.
+	mux.HandleFunc("GET /api/providers", s.requireAuth(s.handleProviderConnections))
+	mux.HandleFunc("POST /api/providers/save", s.requireAuth(s.handleProviderSaveConnection))
+	mux.HandleFunc("POST /api/providers/remove", s.requireAuth(s.handleProviderRemoveConnection))
+	mux.HandleFunc("GET /api/providers/catalog", s.requireAuth(s.handleProviderList))
+	mux.HandleFunc("POST /api/providers/models", s.requireAuth(s.handleProviderConnectionModels))
 	// Role registry (the shared vocabulary matched between personas and agents).
 	mux.HandleFunc("/api/roles", s.requireAuth(s.handleRoles))
 	mux.HandleFunc("/api/roles/", s.requireAuth(s.handleRoleItem))

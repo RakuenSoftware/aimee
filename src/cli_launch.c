@@ -1,5 +1,6 @@
 /* cli_launch.c: parse __LAUNCH__ metadata from server output */
 #include "cli_client.h"
+#include "cli_proxy.h"
 #include "aimee_client.h"
 #include "cJSON.h"
 #include "client_session_worktree.h"
@@ -91,60 +92,6 @@ static int launch_session_id(char out[33])
    return 0;
 }
 
-/* Route launched provider clients through the same conversation gateway. This
- * is expressed with standard API environments, not client hooks or persona-
- * shaped arguments: adapters choose a wire protocol while shared IR ingress
- * owns persona placement for all of them. */
-static int launch_route_conversation_gateway(const char *session_id)
-{
-   char remote[512];
-   if (!aimee_client_remote_active(remote, sizeof remote))
-   {
-      fprintf(stderr,
-              "aimee: launch requires a model-capable HTTP Aimee server; configure one with "
-              "`aimee remote set` (the local Unix socket cannot carry provider traffic)\n");
-      return -1;
-   }
-
-   const char *resolved = aimee_client_transport_label();
-   if (!resolved || !strstr(resolved, "://"))
-   {
-      fprintf(stderr, "aimee: configured Aimee server is not an HTTP conversation gateway\n");
-      return -1;
-   }
-
-   char origin[512];
-   snprintf(origin, sizeof origin, "%s", resolved);
-   size_t n = strlen(origin);
-   while (n > 0 && origin[n - 1] == '/')
-      origin[--n] = '\0';
-   if (n >= 3 && strcmp(origin + n - 3, "/v1") == 0)
-   {
-      n -= 3;
-      origin[n] = '\0';
-   }
-
-   char openai_base[520];
-   snprintf(openai_base, sizeof openai_base, "%s/v1", origin);
-   char token[512];
-   if (!aimee_client_remote_token(token, sizeof token))
-      token[0] = '\0';
-   const char *base_auth = token[0] ? token : "aimee-local";
-   char auth[640];
-   snprintf(auth, sizeof auth, "%s.aimee-session.%s", base_auth, session_id);
-
-   if (platform_setenv("AIMEE_CONVERSATION_GATEWAY", openai_base) != 0 ||
-       platform_setenv("OPENAI_BASE_URL", openai_base) != 0 ||
-       platform_setenv("OPENAI_API_KEY", auth) != 0 ||
-       platform_setenv("ANTHROPIC_BASE_URL", origin) != 0 ||
-       platform_setenv("ANTHROPIC_AUTH_TOKEN", auth) != 0)
-   {
-      fprintf(stderr, "aimee: could not route the launched client through Aimee ingress\n");
-      return -1;
-   }
-   return 1;
-}
-
 int client_launch_exec(int argc, char **argv)
 {
    int route_gateway = 0;
@@ -181,8 +128,11 @@ int client_launch_exec(int argc, char **argv)
    /* Workspace ownership is universal; provider routing is optional. A local
     * client may use OAuth, its own API key, or any non-Aimee endpoint and still
     * needs the same pre-exec isolation boundary. */
-   if (route_gateway && launch_route_conversation_gateway(sid) < 0)
+   if (route_gateway && !aimee_client_has_remote())
+   {
+      fprintf(stderr, "aimee: gateway launch requires a configured Aimee remote\n");
       return 1;
+   }
 
    char worktree[4096];
    int wt = client_session_worktree_ensure(sid, worktree, sizeof(worktree));
@@ -195,6 +145,8 @@ int client_launch_exec(int argc, char **argv)
       return 1;
    }
 
+   if (route_gateway)
+      return cli_proxy_launch(argv, sid);
    launch_execvp(argv[0], argv);
    fprintf(stderr, "aimee: could not launch %s: %s\n", argv[0], strerror(errno));
    return 127;

@@ -1,0 +1,1 @@
+{"arguments":{"column":12,"file":"/tmp/aimee-s1-f06-location_only-o52sjs7s/work/benchmarks/code-agent-effectiveness/checkpoint_runner.py","line":88,"workspace":"/tmp/aimee-s1-f06-location_only-o52sjs7s/work"},"completed_at_monotonic_ms":12973,"result":{"locations":[],"observed_at_monotonic_ms":12973,"status":"empty"},"started_at_monotonic_ms":12788,"tool":"lsp_definition"}

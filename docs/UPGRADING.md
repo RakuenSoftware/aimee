@@ -1,4 +1,83 @@
-# Upgrading from v0.2.192
+# Upgrading
+
+## Moving to 0.4.2's unified deployment
+
+Back up the application home, Vault, PostgreSQL, workspaces, and audit material before changing
+Compose projects or volume mappings. The new image establishes a permanent Server or KB identity
+on first boot. An existing Vault with no identity latch requires an explicit migration role;
+image-only upgrades cannot silently default an old KB to Server. Preserve the correct role and home; changing `AIMEE_INSTANCE_ROLE` later fails.
+Server and KB share one application image but must have separate instances, Vaults, and stores.
+
+The default `compose.yaml` now installs Server, PostgreSQL on an ordinary volume, and local
+embedding. It does not install a KB. An existing shared KB remains optional and connects through Settings; host a new
+KB explicitly with `compose.kb.yaml`. Preserve its existing enrollment material and authority.
+The browser wizard no longer provisions a KB or selects its database.
+
+LUKS is now opt-in. Existing encrypted deployments must add the matching
+[LUKS overlay](DEPLOYMENT.md#optional-luks-encryption) to every Compose command below.
+Omitting it fails startup against the existing encrypted volume; it does not decrypt or replace
+the database. New migrations default to ordinary storage, or can explicitly select LUKS.
+
+Both roles now use the standard `aimee-postgres` container. Do not mount an old plaintext PostgreSQL
+volume at `/var/lib/aimee-postgres` and expect it to be adopted: that path contains the selected
+storage mode and its manifest. For an offline PostgreSQL 18 cluster, mount the old cluster directory
+**read-only** at `/mnt/aimee-postgres-legacy` in the new PostgreSQL container. Stop the old database
+first. The module validates its version and files, copies into staging in the selected storage
+mode, verifies content and metadata, and only then promotes the copy. Interrupted copies resume safely. Live clusters,
+symlinks, unknown formats, and unsupported major versions are refused. For older PostgreSQL major
+versions, use a database-native logical dump and restore into the new cluster.
+
+For the published 0.4.1 KB, the cluster is `$AIMEE_HOME/postgres` (with `PG_VERSION`
+directly inside it). A parent volume containing `pgdata/PG_VERSION` is also supported.
+If both layouts contain a cluster, migration refuses to choose. The new PostgreSQL
+container renames the adopted `aimee_shared` database to `aimee_store`, reconciles
+application table and routine ownership, and enables TLS connections from the application
+network. An existing cluster containing both database names requires operator resolution.
+
+Copy the stopped application's home to a **new** home for 0.4.2 and assign that copy to
+UID/GID 1000:1000 (the published 0.4.1 KB used 999:999). Mount the copy at
+`/var/lib/aimee` in the application service, and mount the **original** stopped cluster
+read-only in the PostgreSQL service as above. Do not change ownership of the rollback home.
+Keep the existing KB bearer and identity values in your private Compose bootstrap settings.
+The image refreshes the exact historical memory grant to include the read stage; modified
+operator grants remain intact and must explicitly allow the capabilities you intend to use.
+With the new application stopped, explicitly migrate its Vault's SQL connections once:
+
+```sh
+python3 scripts/compose-vault-init.py --migrate-store-connections \
+  -p upgraded-kb -f compose.kb.yaml -f upgrade.override.yaml up
+scripts/compose-local.sh -p upgraded-kb -f compose.kb.yaml -f upgrade.override.yaml up -d
+```
+
+Use the same project, environment file, and overrides for both commands. The first command
+seals the new runtime, migration, and KB DSNs from Compose into the copied Vault; it does
+not start the services. Its one-shot `AIMEE_VAULT_STORE_MIGRATION=1` control replaces only
+`AIMEE_STORE_URL`, `AIMEE_STORE_MIGRATION_URL`, and `AIMEE_DB2_URL`. Enrollment, provider
+credentials, and the encryption key retain their existing values. Ordinary startup continues
+to preserve existing credentials. Do not persist either this migration control or the broader
+`AIMEE_VAULT_ENV_OVERWRITE` control in the application environment.
+
+Retain the old plaintext volume as rollback until the new copy passes restore and data
+checks. Migration does not erase that source. Once retention is no longer required, the operator
+must remove or sanitize it according to the storage medium; encryption of the new copy does not
+encrypt old backups, snapshots, or discarded storage blocks.
+
+When LUKS is enabled, the local Vault must survive with the encrypted database: it is the sole
+persistent store of the LUKS passphrase. There is no TPM or external-key recovery path. Preserve database-role passwords
+when reusing the old cluster. Avoid starting old and new applications against the same writable
+store. Check the new application, database, model health, personal recall, and optional KB connection
+before retiring the old deployment.
+
+Instance-level KB credentials previously stored under the reserved `server` principal in the KB
+PostgreSQL Vault migrate into the local instance Vault before the tenant backend binds. Migration
+verifies an existing local value, writes durably before deleting the old current record, and refuses
+conflicting or corrupt data. Tenant credentials retain their existing backend and scope.
+
+Historical upgrade instructions below describe the earlier 0.4.0 transition, including its former
+embedded-KB topology. For a current installation, use the topology and storage procedure above.
+
+## Historical upgrade from v0.2.192 to 0.4.0
+
 
 There is no route back. 0.4.0 rewrites storage, credentials, and remote identity, and a 0.2 server
 will not read what it leaves behind. Your backup is the rollback plan; there is no downgrade

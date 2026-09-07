@@ -16,6 +16,7 @@
 #include "db1_client/session_state.h" /* db1_session_state_delete -- teardown only */
 #include "session_worktree_key.h"
 #include "modules/workspace/workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
+#include "modules/workspace/workspace_provider.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "modules/git/git_verify.h"
@@ -61,6 +62,41 @@ static void guardrails_tmp_sid(char *buf, size_t buf_size, const char *tag)
 }
 
 static const char *guardrails_test_worktree_cwd = "/tmp/.aimee/worktrees/test/main";
+
+static int remote_git_unavailable, remote_git_probes, remote_git_main_branch;
+static const char *remote_git_root = "/client-only/.aimee/worktrees/remote/main";
+static char *remote_git_probe(const workspace_provider_t *ctx, const char *cmd, int *ec)
+{
+   (void)ctx;
+   remote_git_probes++;
+   *ec = remote_git_unavailable ? -1 : 0;
+   if (remote_git_unavailable)
+      return NULL;
+   /* Unlike the client checkout, a directory literally named "--" does not
+    * exist. The old cd parser accidentally probed exactly that target. */
+   if (strstr(cmd, "git -C '--'"))
+   {
+      *ec = 128;
+      return strdup("");
+   }
+   if (strstr(cmd, "worktree list --porcelain"))
+      return strdup("worktree /client-only/.aimee/worktrees/remote/main\n"
+                    "branch refs/heads/feature\n\n");
+   if (strstr(cmd, "--git-dir --git-common-dir"))
+      return strdup("/client-only/.git/worktrees/remote\n/client-only/.git\n");
+   if (strstr(cmd, "--git-common-dir"))
+      return strdup("/client-only/.git\n");
+   if (strstr(cmd, "--show-toplevel"))
+      return strdup("/client-only/.aimee/worktrees/remote/main\n");
+   if (strstr(cmd, "--abbrev-ref"))
+      return strdup(remote_git_main_branch ? "main\n" : "feature\n");
+   if (strstr(cmd, "rev-parse"))
+      return strdup("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+   if (strstr(cmd, "gh pr list"))
+      return strdup("[]\n");
+   *ec = 1;
+   return strdup("");
+}
 
 static void vy_set_global_yaml(const char *project_dir, const char *yaml)
 {
@@ -3044,6 +3080,64 @@ static void test_verify_gate_blocks_bash_gh_pr_create(void)
    vy_clear_home();
 }
 
+static void test_remote_push_probes_and_verify_gate(void)
+{
+   guardrails_open_test_sqlite();
+   session_state_t state = {0};
+   strcpy(state.session_mode, MODE_IMPLEMENT);
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+   const char *tools[] = {"Bash", "exec_command", "functions.exec_command"};
+   const workspace_provider_t remote = {.kind = WS_PROVIDER_DETACHED,
+                                        .exec_shell = remote_git_probe};
+   workspace_provider_set_active(&remote);
+   for (size_t i = 0; i < 2 * sizeof(tools) / sizeof(tools[0]); i++)
+   {
+      char input[1024], msg[1024];
+      size_t t = i / 2;
+      char command[512];
+      if (i % 2)
+         snprintf(command, sizeof(command), "cd -- '%s' && git push origin feature",
+                  remote_git_root);
+      else
+         snprintf(command, sizeof(command), "git push origin feature");
+      snprintf(input, sizeof(input), "{\"%s\":\"%s\",\"workdir\":\"%s\"}", t ? "cmd" : "command",
+               command, remote_git_root);
+      vy_set_global_yaml("/client-only", "verify:\n  enforce: false\n  steps:\n"
+                                         "    - name: build\n      run: echo ok\n");
+      remote_git_unavailable = 0;
+      remote_git_probes = 0;
+      int rc = pre_tool_check(tools[t], input, &state, MODE_APPROVE, "/launcher", msg, sizeof(msg));
+      assert(rc == 0);
+      assert(remote_git_probes > 0);
+      remote_git_main_branch = 1;
+      rc = pre_tool_check(tools[t], input, &state, MODE_APPROVE, "/launcher", msg, sizeof(msg));
+      assert(rc == 2 && strstr(msg, "main branch"));
+      remote_git_main_branch = 0;
+      vy_set_global_yaml("/client-only", "verify:\n  enforce: true\n  steps:\n"
+                                         "    - name: build\n      run: echo ok\n");
+      rc = pre_tool_check(tools[t], input, &state, MODE_APPROVE, "/launcher", msg, sizeof(msg));
+      assert(rc == 2 && strstr(msg, "Run 'aimee git verify' first"));
+      remote_git_unavailable = 1;
+      rc = pre_tool_check(tools[t], input, &state, MODE_APPROVE, "/launcher", msg, sizeof(msg));
+      assert(rc == 2 && strstr(msg, "cannot resolve target worktree"));
+      /* A provider without a shell capability is unavailable too: do not
+       * dereference a missing callback or run the probe on the server. */
+      const workspace_provider_t no_shell = {.kind = WS_PROVIDER_DETACHED};
+      workspace_provider_set_active(&no_shell);
+      rc = pre_tool_check(tools[t], input, &state, MODE_APPROVE, "/launcher", msg, sizeof(msg));
+      assert(rc == 2 && strstr(msg, "cannot resolve target worktree"));
+      workspace_provider_set_active(&remote);
+   }
+   workspace_provider_clear_active();
+   int ec;
+   char *out = run_cmd("printf restored", &ec);
+   assert(ec == 0 && out && strcmp(out, "restored") == 0);
+   free(out);
+   remote_git_unavailable = 0;
+   vy_clear_home();
+   guardrails_close_test_sqlite();
+}
+
 static void test_verify_gate_pr_create_uses_head_commit_not_worktree(void)
 {
    /* Regression (#gh-pr-create verify gate): `gh pr create --head <branch>` must
@@ -3986,6 +4080,7 @@ int main(void)
    test_file_content_hash_deterministic();
    test_read_tracking_state_roundtrip();
    test_verify_gate_blocks_bash_git_push();
+   test_remote_push_probes_and_verify_gate();
    test_verify_gate_blocks_bash_gh_pr_create();
    test_verify_gate_pr_create_uses_head_commit_not_worktree();
    test_verify_gate_not_enforced_without_enforce_flag();

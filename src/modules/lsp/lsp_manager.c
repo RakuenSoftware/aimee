@@ -65,6 +65,20 @@ int lsp_manager_references(const char *workspace, const char *file, int line, in
    return lsp_manager_unsupported(errbuf, errbuf_size);
 }
 
+int lsp_manager_sync_document(const char *workspace, const char *file, const char *text,
+                              int *version_out, unsigned long *generation_out, char *errbuf,
+                              size_t errbuf_size)
+{
+   (void)workspace;
+   (void)file;
+   (void)text;
+   if (version_out)
+      *version_out = 0;
+   if (generation_out)
+      *generation_out = 0;
+   return lsp_manager_unsupported(errbuf, errbuf_size);
+}
+
 int lsp_manager_rename(const char *workspace, const char *file, int line, int col,
                        const char *new_name, char *out, size_t out_size, char *errbuf,
                        size_t errbuf_size)
@@ -97,6 +111,7 @@ void lsp_manager_diag_summary(int *errors, int *warnings, int *active_servers)
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -111,6 +126,9 @@ void lsp_manager_diag_summary(int *errors, int *warnings, int *active_servers)
 #define LSP_MAX_FILES          128
 #define LSP_REQUEST_TIMEOUT_MS 5000
 #define LSP_STARTUP_TIMEOUT_MS 10000
+#define LSP_RESPONSE_BUF_SIZE  (512 * 1024)
+#define LSP_READER_BUF_SIZE    (1024 * 1024)
+#define LSP_MAX_SYNCED_DOCS    128
 
 /* -----------------------------------------------------------------------
  * Types
@@ -123,6 +141,12 @@ typedef struct
    lsp_diag_t diags[LSP_MAX_DIAGS_PER_FILE];
    int ndiags;
 } lsp_file_diags_t;
+
+typedef struct
+{
+   char *path;
+   int version;
+} lsp_synced_doc_t;
 
 /* A single active LSP server connection */
 typedef struct
@@ -143,6 +167,9 @@ typedef struct
    pthread_mutex_t diag_lock;
    pthread_mutex_t io_lock;
    int reader_started;
+   unsigned long generation;
+   lsp_synced_doc_t synced_docs[LSP_MAX_SYNCED_DOCS];
+   int nsynced_docs;
 } lsp_server_t;
 
 /* -----------------------------------------------------------------------
@@ -152,6 +179,7 @@ typedef struct
 static lsp_server_t g_servers[LSP_MAX_SERVERS];
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_initialized = 0;
+static unsigned long g_next_generation = 1;
 
 static void dispatch_message(lsp_server_t *srv, cJSON *msg, const char *raw_json);
 static cJSON *read_response_locked(lsp_server_t *srv, int req_id, int timeout_ms);
@@ -258,7 +286,9 @@ static void dispatch_message(lsp_server_t *srv, cJSON *msg, const char *raw_json
 
 static cJSON *read_response_locked(lsp_server_t *srv, int req_id, int timeout_ms)
 {
-   char buf[512 * 1024];
+   char *buf = malloc(LSP_RESPONSE_BUF_SIZE);
+   if (!buf)
+      return NULL;
    struct timespec start;
    if (clock_gettime(CLOCK_MONOTONIC, &start) != 0)
       memset(&start, 0, sizeof(start));
@@ -290,7 +320,7 @@ static cJSON *read_response_locked(lsp_server_t *srv, int req_id, int timeout_ms
          break;
       }
 
-      int n = lsp_frame_read(srv->stdout_fd, buf, sizeof(buf));
+      int n = lsp_frame_read(srv->stdout_fd, buf, LSP_RESPONSE_BUF_SIZE);
       if (n < 0)
       {
          if (errno == EINTR)
@@ -306,19 +336,27 @@ static cJSON *read_response_locked(lsp_server_t *srv, int req_id, int timeout_ms
 
       cJSON *mid = cJSON_GetObjectItemCaseSensitive(msg, "id");
       if (cJSON_IsNumber(mid) && (int)mid->valuedouble == req_id)
+      {
+         free(buf);
          return msg;
+      }
 
       dispatch_message(srv, msg, buf);
       cJSON_Delete(msg);
    }
 
+   free(buf);
    return NULL;
 }
 
 static void *reader_thread(void *arg)
 {
    lsp_server_t *srv = (lsp_server_t *)arg;
-   char buf[1024 * 1024]; /* 1MB read buffer — sufficient for most LSP messages */
+   /* macOS pthread stacks can be only 512 KiB, so protocol buffers must not
+    * live on the reader stack. */
+   char *buf = malloc(LSP_READER_BUF_SIZE);
+   if (!buf)
+      return NULL;
 
    while (srv->active && srv->stdout_fd >= 0)
    {
@@ -342,7 +380,7 @@ static void *reader_thread(void *arg)
          pthread_mutex_unlock(&srv->io_lock);
          break;
       }
-      int n = lsp_frame_read(srv->stdout_fd, buf, sizeof(buf));
+      int n = lsp_frame_read(srv->stdout_fd, buf, LSP_READER_BUF_SIZE);
       pthread_mutex_unlock(&srv->io_lock);
       if (n < 0)
          break; /* EOF or error — server likely exited */
@@ -357,6 +395,7 @@ static void *reader_thread(void *arg)
       cJSON_Delete(msg);
    }
 
+   free(buf);
    return NULL;
 }
 
@@ -526,6 +565,7 @@ static lsp_server_t *spawn_server(const config_lsp_server_t *cfg, const char *wo
    }
 
    srv->initialized = 1;
+   srv->generation = g_next_generation++;
    srv->active = 1;
 
    /* Start background reader thread */
@@ -749,6 +789,14 @@ void lsp_manager_shutdown_all(void)
          srv->reader_started = 0;
       }
 
+      for (int di = 0; di < srv->nsynced_docs; di++)
+      {
+         free(srv->synced_docs[di].path);
+         srv->synced_docs[di].path = NULL;
+         srv->synced_docs[di].version = 0;
+      }
+      srv->nsynced_docs = 0;
+
       pthread_mutex_destroy(&srv->io_lock);
       pthread_mutex_destroy(&srv->diag_lock);
    }
@@ -783,6 +831,108 @@ int lsp_manager_diagnostics(const char *workspace, const char *file, lsp_diag_t 
    pthread_mutex_unlock(&g_lock);
 
    return count;
+}
+
+static const char *language_id_for_file(const char *file)
+{
+   const char *ext = extension_of(file);
+   if (!strcmp(ext, ".go"))
+      return "go";
+   if (!strcmp(ext, ".py"))
+      return "python";
+   if (!strcmp(ext, ".js") || !strcmp(ext, ".jsx"))
+      return "javascript";
+   if (!strcmp(ext, ".ts") || !strcmp(ext, ".tsx"))
+      return "typescript";
+   return "plaintext";
+}
+
+int lsp_manager_sync_document(const char *workspace, const char *file, const char *text,
+                              int *version_out, unsigned long *generation_out, char *errbuf,
+                              size_t errbuf_size)
+{
+   if (version_out)
+      *version_out = 0;
+   if (generation_out)
+      *generation_out = 0;
+   if (!workspace || !file || !text)
+      return -1;
+
+   pthread_mutex_lock(&g_lock);
+   lsp_server_t *srv = get_or_spawn(workspace, extension_of(file));
+   pthread_mutex_unlock(&g_lock);
+   if (!srv)
+   {
+      if (errbuf)
+         snprintf(errbuf, errbuf_size, "no LSP server configured for extension '%s'",
+                  extension_of(file));
+      return -1;
+   }
+
+   pthread_mutex_lock(&srv->io_lock);
+   int index = -1;
+   for (int i = 0; i < srv->nsynced_docs; i++)
+      if (srv->synced_docs[i].path && !strcmp(srv->synced_docs[i].path, file))
+      {
+         index = i;
+         break;
+      }
+   if (index < 0 && srv->nsynced_docs < LSP_MAX_SYNCED_DOCS)
+   {
+      char *path = strdup(file);
+      if (path)
+      {
+         index = srv->nsynced_docs++;
+         srv->synced_docs[index].path = path;
+      }
+   }
+   if (index < 0)
+   {
+      pthread_mutex_unlock(&srv->io_lock);
+      if (errbuf)
+         snprintf(errbuf, errbuf_size, "provider document limit reached");
+      return -1;
+   }
+
+   int version = srv->synced_docs[index].version + 1;
+   char uri[LSP_PATH_MAX + 8];
+   path_to_uri(file, uri, sizeof(uri));
+   cJSON *params = cJSON_CreateObject();
+   if (srv->synced_docs[index].version == 0)
+   {
+      cJSON *doc = cJSON_AddObjectToObject(params, "textDocument");
+      cJSON_AddStringToObject(doc, "uri", uri);
+      cJSON_AddStringToObject(doc, "languageId", language_id_for_file(file));
+      cJSON_AddNumberToObject(doc, "version", version);
+      cJSON_AddStringToObject(doc, "text", text);
+   }
+   else
+   {
+      cJSON *doc = cJSON_AddObjectToObject(params, "textDocument");
+      cJSON_AddStringToObject(doc, "uri", uri);
+      cJSON_AddNumberToObject(doc, "version", version);
+      cJSON *changes = cJSON_AddArrayToObject(params, "contentChanges");
+      cJSON *change = cJSON_CreateObject();
+      cJSON_AddStringToObject(change, "text", text);
+      cJSON_AddItemToArray(changes, change);
+   }
+   char *json = build_notification(srv->synced_docs[index].version == 0 ? "textDocument/didOpen"
+                                                                        : "textDocument/didChange",
+                                   params);
+   int rc = json ? lsp_frame_write(srv->stdin_fd, json) : -1;
+   free(json);
+   if (rc == 0)
+   {
+      srv->synced_docs[index].version = version;
+      if (version_out)
+         *version_out = version;
+      if (generation_out)
+         *generation_out = srv->generation;
+   }
+   pthread_mutex_unlock(&srv->io_lock);
+   if (rc != 0 && errbuf)
+      snprintf(errbuf, errbuf_size, "could not synchronize saved document");
+   return rc;
 }
 
 int lsp_manager_definition(const char *workspace, const char *file, int line, int col,

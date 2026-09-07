@@ -1,0 +1,8 @@
+# Applied to either immutable role; the encrypted disk and Vault need backups.
+volumes:
+  aimee-postgres-encrypted:
+    x-smoothnas: {tier: aimee-data}
+  aimee-server-home:
+    x-smoothnas: {tier: aimee-data}
+  aimee-server-workspaces:
+    x-smoothnas: {tier: aimee-data}

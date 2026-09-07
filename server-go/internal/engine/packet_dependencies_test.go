@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 func TestValidateStructuredRejectsInvalidPacketDependencies(t *testing.T) {
@@ -48,7 +48,7 @@ func TestValidateStructuredRejectsInvalidPacketDependencies(t *testing.T) {
 }
 
 func TestPacketDependencyGateWaitsForAcceptedPredecessors(t *testing.T) {
-	store, err := db1test.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestPacketDependencyGateWaitsForAcceptedPredecessors(t *testing.T) {
 		t.Fatal(err)
 	}
 	const parentID = "wi_parent"
-	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+	if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 		ID: parentID, Repo: "repo", ProposalPath: "parent", WorkflowName: "build", StartStage: "slices",
 	}); err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestPacketDependencyGateWaitsForAcceptedPredecessors(t *testing.T) {
 	if err := artifacts.PutProposal(priorID, []byte(`{"packet_id":"p1","dependencies":[]}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+	if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 		ID: priorID, Repo: "repo", ProposalPath: priorID, WorkflowName: "slice",
 		StartStage: "scope", ParentID: parentID,
 	}); err != nil {
@@ -89,7 +89,7 @@ func TestPacketDependencyGateWaitsForAcceptedPredecessors(t *testing.T) {
 		if err := artifacts.PutProposal(input.id, []byte(input.proposal)); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+		if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 			ID: input.id, Repo: "repo", ProposalPath: input.id, WorkflowName: "slice",
 			StartStage: "scope", ParentID: parentID,
 		}); err != nil {
@@ -127,7 +127,7 @@ func TestPacketDependencyGateWaitsForAcceptedPredecessors(t *testing.T) {
 }
 
 func TestPacketDependencyGateFailsClosedOnRejectedPredecessor(t *testing.T) {
-	store, err := db1test.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestPacketDependencyGateFailsClosedOnRejectedPredecessor(t *testing.T) {
 		t.Fatal(err)
 	}
 	const parentID = "wi_parent"
-	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+	if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 		ID: parentID, Repo: "repo", ProposalPath: "parent", WorkflowName: "build", StartStage: "slices",
 	}); err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestPacketDependencyGateFailsClosedOnRejectedPredecessor(t *testing.T) {
 		if err := artifacts.PutProposal(id, []byte(proposal)); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+		if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 			ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "slice",
 			StartStage: "scope", ParentID: parentID,
 		}); err != nil {

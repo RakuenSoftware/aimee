@@ -1,0 +1,1 @@
+{"arguments":{"column":16,"file":"/tmp/aimee-s1-r03-location_only-tyoly_rr/work/server-go/bus/testdata/module_helper/main.go","line":44,"workspace":"/tmp/aimee-s1-r03-location_only-tyoly_rr/work"},"completed_at_monotonic_ms":14342,"result":{"locations":[],"observed_at_monotonic_ms":14342,"status":"empty"},"started_at_monotonic_ms":14221,"tool":"lsp_definition"}

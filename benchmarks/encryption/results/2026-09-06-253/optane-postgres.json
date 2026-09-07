@@ -1,0 +1,1186 @@
+{
+  "sql": "SELECT count(*),sum(length(md5(ciphertext))) FROM encrypted WHERE id <= 100000",
+  "cache_reset": "container stop; inner ext4 unmount/mount; PostgreSQL start",
+  "outer_cache": "primarycache=metadata, secondarycache=none, direct=always",
+  "samples": [
+    {
+      "trial": 0,
+      "mode": "ordinary",
+      "cache": "cold",
+      "milliseconds": 1146.4234949999081,
+      "device_read_bytes": 1087643648,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.76 10.90 9.59 6/2360 3236598"
+    },
+    {
+      "trial": 0,
+      "mode": "ordinary",
+      "cache": "warm",
+      "milliseconds": 796.3282849996176,
+      "device_read_bytes": 409600,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.76 10.90 9.59 6/2360 3236691"
+    },
+    {
+      "trial": 0,
+      "mode": "no_queues",
+      "cache": "cold",
+      "milliseconds": 1232.9705369993462,
+      "device_read_bytes": 1082040320,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.38 10.83 9.58 8/2368 3237108"
+    },
+    {
+      "trial": 0,
+      "mode": "no_queues",
+      "cache": "warm",
+      "milliseconds": 856.6530829994008,
+      "device_read_bytes": 8192,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.38 10.83 9.58 6/2372 3237171"
+    },
+    {
+      "trial": 0,
+      "mode": "default",
+      "cache": "cold",
+      "milliseconds": 1113.0283769998641,
+      "device_read_bytes": 1080119296,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.19 10.80 9.58 6/2368 3237607"
+    },
+    {
+      "trial": 0,
+      "mode": "default",
+      "cache": "warm",
+      "milliseconds": 759.7494789988559,
+      "device_read_bytes": 0,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.19 10.80 9.58 5/2368 3237674"
+    },
+    {
+      "trial": 1,
+      "mode": "ordinary",
+      "cache": "cold",
+      "milliseconds": 1002.2209689996089,
+      "device_read_bytes": 1081090048,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.19 10.80 9.58 7/2362 3238092"
+    },
+    {
+      "trial": 1,
+      "mode": "ordinary",
+      "cache": "warm",
+      "milliseconds": 753.6258299987821,
+      "device_read_bytes": 1310720,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.19 10.80 9.58 6/2360 3238135"
+    },
+    {
+      "trial": 1,
+      "mode": "no_queues",
+      "cache": "cold",
+      "milliseconds": 1082.1029750004527,
+      "device_read_bytes": 1079902208,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.18 10.81 9.58 6/2365 3238448"
+    },
+    {
+      "trial": 1,
+      "mode": "no_queues",
+      "cache": "warm",
+      "milliseconds": 759.2875490008737,
+      "device_read_bytes": 0,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.18 10.81 9.58 5/2365 3238496"
+    },
+    {
+      "trial": 1,
+      "mode": "default",
+      "cache": "cold",
+      "milliseconds": 1043.0515900006867,
+      "device_read_bytes": 1079992320,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.18 10.81 9.58 6/2368 3238803"
+    },
+    {
+      "trial": 1,
+      "mode": "default",
+      "cache": "warm",
+      "milliseconds": 758.507042999554,
+      "device_read_bytes": 1372160,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.18 10.81 9.58 8/2373 3238887"
+    },
+    {
+      "trial": 2,
+      "mode": "default",
+      "cache": "cold",
+      "milliseconds": 1040.3150450001704,
+      "device_read_bytes": 1079640064,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.00 10.78 9.58 6/2370 3239245"
+    },
+    {
+      "trial": 2,
+      "mode": "default",
+      "cache": "warm",
+      "milliseconds": 767.5697099984973,
+      "device_read_bytes": 0,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.00 10.78 9.58 9/2369 3239316"
+    },
+    {
+      "trial": 2,
+      "mode": "no_queues",
+      "cache": "cold",
+      "milliseconds": 1024.79423800105,
+      "device_read_bytes": 1079771136,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.00 10.78 9.58 7/2370 3239654"
+    },
+    {
+      "trial": 2,
+      "mode": "no_queues",
+      "cache": "warm",
+      "milliseconds": 768.2189680017473,
+      "device_read_bytes": 40960,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "11.00 10.78 9.58 6/2367 3239750"
+    },
+    {
+      "trial": 2,
+      "mode": "ordinary",
+      "cache": "cold",
+      "milliseconds": 969.1623170001549,
+      "device_read_bytes": 1081057280,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "10.68 10.71 9.57 7/2374 3239966"
+    },
+    {
+      "trial": 2,
+      "mode": "ordinary",
+      "cache": "warm",
+      "milliseconds": 788.0067580008472,
+      "device_read_bytes": 0,
+      "result": [
+        [
+          100000,
+          3200000
+        ]
+      ],
+      "host_loadavg": "10.68 10.71 9.57 6/2374 3240040"
+    }
+  ],
+  "containers": [
+    {
+      "Id": "466e10ac19db0a90b4fe71ae3dbca66f38c38c4db42b1cca58668c0489e60ac1",
+      "Created": "2026-09-06T15:13:29.435791042Z",
+      "Path": "docker-entrypoint.sh",
+      "Args": [
+        "postgres",
+        "-c",
+        "shared_buffers=512MB",
+        "-c",
+        "work_mem=64MB",
+        "-c",
+        "maintenance_work_mem=512MB",
+        "-c",
+        "jit=off",
+        "-c",
+        "max_parallel_workers_per_gather=0",
+        "-c",
+        "max_wal_size=4GB",
+        "-c",
+        "checkpoint_timeout=30min",
+        "-c",
+        "track_io_timing=on",
+        "-c",
+        "log_statement=none",
+        "-c",
+        "log_parameter_max_length=0",
+        "-c",
+        "log_parameter_max_length_on_error=0",
+        "-c",
+        "autovacuum=off"
+      ],
+      "State": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-09-06T15:13:30.002581673Z",
+        "FinishedAt": "2026-09-06T15:59:21.043205773Z"
+      },
+      "Image": "sha256:a6638641707cdf047e5d5c2781f437e2e809323cab22c70b280be8389fbb7878",
+      "ResolvConfPath": "/opt/aimee-encryption-bench/docker-data/containers/466e10ac19db0a90b4fe71ae3dbca66f38c38c4db42b1cca58668c0489e60ac1/resolv.conf",
+      "HostnamePath": "/opt/aimee-encryption-bench/docker-data/containers/466e10ac19db0a90b4fe71ae3dbca66f38c38c4db42b1cca58668c0489e60ac1/hostname",
+      "HostsPath": "/opt/aimee-encryption-bench/docker-data/containers/466e10ac19db0a90b4fe71ae3dbca66f38c38c4db42b1cca58668c0489e60ac1/hosts",
+      "LogPath": "/opt/aimee-encryption-bench/docker-data/containers/466e10ac19db0a90b4fe71ae3dbca66f38c38c4db42b1cca58668c0489e60ac1/466e10ac19db0a90b4fe71ae3dbca66f38c38c4db42b1cca58668c0489e60ac1-json.log",
+      "Name": "/aimee-encryption-ordinary",
+      "RestartCount": 0,
+      "Driver": "vfs",
+      "Platform": "linux",
+      "MountLabel": "",
+      "ProcessLabel": "",
+      "AppArmorProfile": "aimee-encryption-benchmark",
+      "ExecIDs": null,
+      "HostConfig": {
+        "Binds": null,
+        "ContainerIDFile": "",
+        "LogConfig": {
+          "Type": "json-file",
+          "Config": {}
+        },
+        "NetworkMode": "none",
+        "PortBindings": {},
+        "RestartPolicy": {
+          "Name": "no",
+          "MaximumRetryCount": 0
+        },
+        "AutoRemove": false,
+        "VolumeDriver": "",
+        "VolumesFrom": null,
+        "ConsoleSize": [
+          0,
+          0
+        ],
+        "CapAdd": null,
+        "CapDrop": null,
+        "CgroupnsMode": "private",
+        "Dns": [],
+        "DnsOptions": [],
+        "DnsSearch": [],
+        "ExtraHosts": null,
+        "GroupAdd": null,
+        "IpcMode": "private",
+        "Cgroup": "",
+        "Links": null,
+        "OomScoreAdj": 0,
+        "PidMode": "",
+        "Privileged": false,
+        "PublishAllPorts": false,
+        "ReadonlyRootfs": false,
+        "SecurityOpt": [
+          "apparmor=aimee-encryption-benchmark"
+        ],
+        "UTSMode": "",
+        "UsernsMode": "",
+        "ShmSize": 1073741824,
+        "Runtime": "runc",
+        "Isolation": "",
+        "CpuShares": 0,
+        "Memory": 6442450944,
+        "NanoCpus": 4000000000,
+        "CgroupParent": "",
+        "BlkioWeight": 0,
+        "BlkioWeightDevice": [],
+        "BlkioDeviceReadBps": [],
+        "BlkioDeviceWriteBps": [],
+        "BlkioDeviceReadIOps": [],
+        "BlkioDeviceWriteIOps": [],
+        "CpuPeriod": 0,
+        "CpuQuota": 0,
+        "CpuRealtimePeriod": 0,
+        "CpuRealtimeRuntime": 0,
+        "CpusetCpus": "",
+        "CpusetMems": "",
+        "Devices": [],
+        "DeviceCgroupRules": null,
+        "DeviceRequests": null,
+        "MemoryReservation": 0,
+        "MemorySwap": 6442450944,
+        "MemorySwappiness": null,
+        "OomKillDisable": null,
+        "PidsLimit": null,
+        "Ulimits": [],
+        "CpuCount": 0,
+        "CpuPercent": 0,
+        "IOMaximumIOps": 0,
+        "IOMaximumBandwidth": 0,
+        "Mounts": [
+          {
+            "Type": "bind",
+            "Source": "/opt/aimee-encryption-bench/mounts/ordinary",
+            "Target": "/var/lib/postgresql"
+          },
+          {
+            "Type": "bind",
+            "Source": "/opt/aimee-encryption-bench/sockets/ordinary",
+            "Target": "/var/run/postgresql"
+          }
+        ],
+        "MaskedPaths": [
+          "/proc/asound",
+          "/proc/acpi",
+          "/proc/interrupts",
+          "/proc/kcore",
+          "/proc/keys",
+          "/proc/latency_stats",
+          "/proc/timer_list",
+          "/proc/timer_stats",
+          "/proc/sched_debug",
+          "/proc/scsi",
+          "/sys/firmware",
+          "/sys/devices/virtual/powercap",
+          "/sys/devices/system/cpu/cpu0/thermal_throttle",
+          "/sys/devices/system/cpu/cpu1/thermal_throttle",
+          "/sys/devices/system/cpu/cpu2/thermal_throttle",
+          "/sys/devices/system/cpu/cpu3/thermal_throttle",
+          "/sys/devices/system/cpu/cpu4/thermal_throttle",
+          "/sys/devices/system/cpu/cpu5/thermal_throttle",
+          "/sys/devices/system/cpu/cpu6/thermal_throttle",
+          "/sys/devices/system/cpu/cpu7/thermal_throttle",
+          "/sys/devices/system/cpu/cpu8/thermal_throttle",
+          "/sys/devices/system/cpu/cpu9/thermal_throttle",
+          "/sys/devices/system/cpu/cpu10/thermal_throttle",
+          "/sys/devices/system/cpu/cpu11/thermal_throttle",
+          "/sys/devices/system/cpu/cpu12/thermal_throttle",
+          "/sys/devices/system/cpu/cpu13/thermal_throttle",
+          "/sys/devices/system/cpu/cpu14/thermal_throttle",
+          "/sys/devices/system/cpu/cpu15/thermal_throttle",
+          "/sys/devices/system/cpu/cpu16/thermal_throttle",
+          "/sys/devices/system/cpu/cpu17/thermal_throttle",
+          "/sys/devices/system/cpu/cpu18/thermal_throttle",
+          "/sys/devices/system/cpu/cpu19/thermal_throttle",
+          "/sys/devices/system/cpu/cpu20/thermal_throttle",
+          "/sys/devices/system/cpu/cpu21/thermal_throttle",
+          "/sys/devices/system/cpu/cpu22/thermal_throttle",
+          "/sys/devices/system/cpu/cpu23/thermal_throttle",
+          "/sys/devices/system/cpu/cpu24/thermal_throttle",
+          "/sys/devices/system/cpu/cpu25/thermal_throttle",
+          "/sys/devices/system/cpu/cpu26/thermal_throttle",
+          "/sys/devices/system/cpu/cpu27/thermal_throttle"
+        ],
+        "ReadonlyPaths": [
+          "/proc/bus",
+          "/proc/fs",
+          "/proc/irq",
+          "/proc/sys",
+          "/proc/sysrq-trigger"
+        ]
+      },
+      "GraphDriver": {
+        "Data": {
+          "ID": "466e10ac19db0a90b4fe71ae3dbca66f38c38c4db42b1cca58668c0489e60ac1"
+        },
+        "Name": "vfs"
+      },
+      "Mounts": [
+        {
+          "Type": "bind",
+          "Source": "/opt/aimee-encryption-bench/mounts/ordinary",
+          "Destination": "/var/lib/postgresql",
+          "Mode": "",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/opt/aimee-encryption-bench/sockets/ordinary",
+          "Destination": "/var/run/postgresql",
+          "Mode": "",
+          "RW": true,
+          "Propagation": "rprivate"
+        }
+      ],
+      "Config": {
+        "Hostname": "466e10ac19db",
+        "Domainname": "",
+        "User": "",
+        "AttachStdin": false,
+        "AttachStdout": false,
+        "AttachStderr": false,
+        "ExposedPorts": {
+          "5432/tcp": {}
+        },
+        "Tty": false,
+        "OpenStdin": false,
+        "StdinOnce": false,
+        "Env": [
+          "POSTGRES_DB=bench",
+          "POSTGRES_INITDB_ARGS=--locale=C.UTF-8 --encoding=UTF8 --data-checksums",
+          "POSTGRES_HOST_AUTH_METHOD=trust",
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/18/bin",
+          "GOSU_VERSION=1.19",
+          "LANG=en_US.utf8",
+          "PG_MAJOR=18",
+          "PG_VERSION=18.6-1.pgdg13+2",
+          "PGDATA=/var/lib/postgresql/18/docker"
+        ],
+        "Cmd": [
+          "postgres",
+          "-c",
+          "shared_buffers=512MB",
+          "-c",
+          "work_mem=64MB",
+          "-c",
+          "maintenance_work_mem=512MB",
+          "-c",
+          "jit=off",
+          "-c",
+          "max_parallel_workers_per_gather=0",
+          "-c",
+          "max_wal_size=4GB",
+          "-c",
+          "checkpoint_timeout=30min",
+          "-c",
+          "track_io_timing=on",
+          "-c",
+          "log_statement=none",
+          "-c",
+          "log_parameter_max_length=0",
+          "-c",
+          "log_parameter_max_length_on_error=0",
+          "-c",
+          "autovacuum=off"
+        ],
+        "Image": "postgres:18",
+        "Volumes": {
+          "/var/lib/postgresql": {}
+        },
+        "WorkingDir": "",
+        "Entrypoint": [
+          "docker-entrypoint.sh"
+        ],
+        "OnBuild": null,
+        "Labels": {},
+        "StopSignal": "SIGINT"
+      },
+      "NetworkSettings": {
+        "Bridge": "",
+        "SandboxID": "",
+        "SandboxKey": "",
+        "Ports": {},
+        "HairpinMode": false,
+        "LinkLocalIPv6Address": "",
+        "LinkLocalIPv6PrefixLen": 0,
+        "SecondaryIPAddresses": null,
+        "SecondaryIPv6Addresses": null,
+        "EndpointID": "",
+        "Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "IPAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "MacAddress": "",
+        "Networks": {
+          "none": {
+            "IPAMConfig": null,
+            "Links": null,
+            "Aliases": null,
+            "MacAddress": "",
+            "DriverOpts": null,
+            "GwPriority": 0,
+            "NetworkID": "f948ddc8cec21d059f5d261fcf9687f06d246ed2b45f89cd11a620bb8b00bcb2",
+            "EndpointID": "",
+            "Gateway": "",
+            "IPAddress": "",
+            "IPPrefixLen": 0,
+            "IPv6Gateway": "",
+            "GlobalIPv6Address": "",
+            "GlobalIPv6PrefixLen": 0,
+            "DNSNames": null
+          }
+        }
+      }
+    },
+    {
+      "Id": "475b2652c3a61ab11480b1915c43fe85b402ee55fa7585542f171498be43fa10",
+      "Created": "2026-09-06T15:13:30.075404647Z",
+      "Path": "docker-entrypoint.sh",
+      "Args": [
+        "postgres",
+        "-c",
+        "shared_buffers=512MB",
+        "-c",
+        "work_mem=64MB",
+        "-c",
+        "maintenance_work_mem=512MB",
+        "-c",
+        "jit=off",
+        "-c",
+        "max_parallel_workers_per_gather=0",
+        "-c",
+        "max_wal_size=4GB",
+        "-c",
+        "checkpoint_timeout=30min",
+        "-c",
+        "track_io_timing=on",
+        "-c",
+        "log_statement=none",
+        "-c",
+        "log_parameter_max_length=0",
+        "-c",
+        "log_parameter_max_length_on_error=0",
+        "-c",
+        "autovacuum=off"
+      ],
+      "State": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-09-06T15:59:20.464889359Z",
+        "FinishedAt": "2026-09-06T15:59:21.004006749Z"
+      },
+      "Image": "sha256:a6638641707cdf047e5d5c2781f437e2e809323cab22c70b280be8389fbb7878",
+      "ResolvConfPath": "/opt/aimee-encryption-bench/docker-data/containers/475b2652c3a61ab11480b1915c43fe85b402ee55fa7585542f171498be43fa10/resolv.conf",
+      "HostnamePath": "/opt/aimee-encryption-bench/docker-data/containers/475b2652c3a61ab11480b1915c43fe85b402ee55fa7585542f171498be43fa10/hostname",
+      "HostsPath": "/opt/aimee-encryption-bench/docker-data/containers/475b2652c3a61ab11480b1915c43fe85b402ee55fa7585542f171498be43fa10/hosts",
+      "LogPath": "/opt/aimee-encryption-bench/docker-data/containers/475b2652c3a61ab11480b1915c43fe85b402ee55fa7585542f171498be43fa10/475b2652c3a61ab11480b1915c43fe85b402ee55fa7585542f171498be43fa10-json.log",
+      "Name": "/aimee-encryption-luks",
+      "RestartCount": 0,
+      "Driver": "vfs",
+      "Platform": "linux",
+      "MountLabel": "",
+      "ProcessLabel": "",
+      "AppArmorProfile": "aimee-encryption-benchmark",
+      "ExecIDs": null,
+      "HostConfig": {
+        "Binds": null,
+        "ContainerIDFile": "",
+        "LogConfig": {
+          "Type": "json-file",
+          "Config": {}
+        },
+        "NetworkMode": "none",
+        "PortBindings": {},
+        "RestartPolicy": {
+          "Name": "no",
+          "MaximumRetryCount": 0
+        },
+        "AutoRemove": false,
+        "VolumeDriver": "",
+        "VolumesFrom": null,
+        "ConsoleSize": [
+          0,
+          0
+        ],
+        "CapAdd": null,
+        "CapDrop": null,
+        "CgroupnsMode": "private",
+        "Dns": [],
+        "DnsOptions": [],
+        "DnsSearch": [],
+        "ExtraHosts": null,
+        "GroupAdd": null,
+        "IpcMode": "private",
+        "Cgroup": "",
+        "Links": null,
+        "OomScoreAdj": 0,
+        "PidMode": "",
+        "Privileged": false,
+        "PublishAllPorts": false,
+        "ReadonlyRootfs": false,
+        "SecurityOpt": [
+          "apparmor=aimee-encryption-benchmark"
+        ],
+        "UTSMode": "",
+        "UsernsMode": "",
+        "ShmSize": 1073741824,
+        "Runtime": "runc",
+        "Isolation": "",
+        "CpuShares": 0,
+        "Memory": 6442450944,
+        "NanoCpus": 4000000000,
+        "CgroupParent": "",
+        "BlkioWeight": 0,
+        "BlkioWeightDevice": [],
+        "BlkioDeviceReadBps": [],
+        "BlkioDeviceWriteBps": [],
+        "BlkioDeviceReadIOps": [],
+        "BlkioDeviceWriteIOps": [],
+        "CpuPeriod": 0,
+        "CpuQuota": 0,
+        "CpuRealtimePeriod": 0,
+        "CpuRealtimeRuntime": 0,
+        "CpusetCpus": "",
+        "CpusetMems": "",
+        "Devices": [],
+        "DeviceCgroupRules": null,
+        "DeviceRequests": null,
+        "MemoryReservation": 0,
+        "MemorySwap": 6442450944,
+        "MemorySwappiness": null,
+        "OomKillDisable": null,
+        "PidsLimit": null,
+        "Ulimits": [],
+        "CpuCount": 0,
+        "CpuPercent": 0,
+        "IOMaximumIOps": 0,
+        "IOMaximumBandwidth": 0,
+        "Mounts": [
+          {
+            "Type": "bind",
+            "Source": "/opt/aimee-encryption-bench/mounts/luks",
+            "Target": "/var/lib/postgresql"
+          },
+          {
+            "Type": "bind",
+            "Source": "/opt/aimee-encryption-bench/sockets/luks",
+            "Target": "/var/run/postgresql"
+          }
+        ],
+        "MaskedPaths": [
+          "/proc/asound",
+          "/proc/acpi",
+          "/proc/interrupts",
+          "/proc/kcore",
+          "/proc/keys",
+          "/proc/latency_stats",
+          "/proc/timer_list",
+          "/proc/timer_stats",
+          "/proc/sched_debug",
+          "/proc/scsi",
+          "/sys/firmware",
+          "/sys/devices/virtual/powercap",
+          "/sys/devices/system/cpu/cpu0/thermal_throttle",
+          "/sys/devices/system/cpu/cpu1/thermal_throttle",
+          "/sys/devices/system/cpu/cpu2/thermal_throttle",
+          "/sys/devices/system/cpu/cpu3/thermal_throttle",
+          "/sys/devices/system/cpu/cpu4/thermal_throttle",
+          "/sys/devices/system/cpu/cpu5/thermal_throttle",
+          "/sys/devices/system/cpu/cpu6/thermal_throttle",
+          "/sys/devices/system/cpu/cpu7/thermal_throttle",
+          "/sys/devices/system/cpu/cpu8/thermal_throttle",
+          "/sys/devices/system/cpu/cpu9/thermal_throttle",
+          "/sys/devices/system/cpu/cpu10/thermal_throttle",
+          "/sys/devices/system/cpu/cpu11/thermal_throttle",
+          "/sys/devices/system/cpu/cpu12/thermal_throttle",
+          "/sys/devices/system/cpu/cpu13/thermal_throttle",
+          "/sys/devices/system/cpu/cpu14/thermal_throttle",
+          "/sys/devices/system/cpu/cpu15/thermal_throttle",
+          "/sys/devices/system/cpu/cpu16/thermal_throttle",
+          "/sys/devices/system/cpu/cpu17/thermal_throttle",
+          "/sys/devices/system/cpu/cpu18/thermal_throttle",
+          "/sys/devices/system/cpu/cpu19/thermal_throttle",
+          "/sys/devices/system/cpu/cpu20/thermal_throttle",
+          "/sys/devices/system/cpu/cpu21/thermal_throttle",
+          "/sys/devices/system/cpu/cpu22/thermal_throttle",
+          "/sys/devices/system/cpu/cpu23/thermal_throttle",
+          "/sys/devices/system/cpu/cpu24/thermal_throttle",
+          "/sys/devices/system/cpu/cpu25/thermal_throttle",
+          "/sys/devices/system/cpu/cpu26/thermal_throttle",
+          "/sys/devices/system/cpu/cpu27/thermal_throttle"
+        ],
+        "ReadonlyPaths": [
+          "/proc/bus",
+          "/proc/fs",
+          "/proc/irq",
+          "/proc/sys",
+          "/proc/sysrq-trigger"
+        ]
+      },
+      "GraphDriver": {
+        "Data": {
+          "ID": "475b2652c3a61ab11480b1915c43fe85b402ee55fa7585542f171498be43fa10"
+        },
+        "Name": "vfs"
+      },
+      "Mounts": [
+        {
+          "Type": "bind",
+          "Source": "/opt/aimee-encryption-bench/mounts/luks",
+          "Destination": "/var/lib/postgresql",
+          "Mode": "",
+          "RW": true,
+          "Propagation": "rprivate"
+        },
+        {
+          "Type": "bind",
+          "Source": "/opt/aimee-encryption-bench/sockets/luks",
+          "Destination": "/var/run/postgresql",
+          "Mode": "",
+          "RW": true,
+          "Propagation": "rprivate"
+        }
+      ],
+      "Config": {
+        "Hostname": "475b2652c3a6",
+        "Domainname": "",
+        "User": "",
+        "AttachStdin": false,
+        "AttachStdout": false,
+        "AttachStderr": false,
+        "ExposedPorts": {
+          "5432/tcp": {}
+        },
+        "Tty": false,
+        "OpenStdin": false,
+        "StdinOnce": false,
+        "Env": [
+          "POSTGRES_HOST_AUTH_METHOD=trust",
+          "POSTGRES_DB=bench",
+          "POSTGRES_INITDB_ARGS=--locale=C.UTF-8 --encoding=UTF8 --data-checksums",
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/18/bin",
+          "GOSU_VERSION=1.19",
+          "LANG=en_US.utf8",
+          "PG_MAJOR=18",
+          "PG_VERSION=18.6-1.pgdg13+2",
+          "PGDATA=/var/lib/postgresql/18/docker"
+        ],
+        "Cmd": [
+          "postgres",
+          "-c",
+          "shared_buffers=512MB",
+          "-c",
+          "work_mem=64MB",
+          "-c",
+          "maintenance_work_mem=512MB",
+          "-c",
+          "jit=off",
+          "-c",
+          "max_parallel_workers_per_gather=0",
+          "-c",
+          "max_wal_size=4GB",
+          "-c",
+          "checkpoint_timeout=30min",
+          "-c",
+          "track_io_timing=on",
+          "-c",
+          "log_statement=none",
+          "-c",
+          "log_parameter_max_length=0",
+          "-c",
+          "log_parameter_max_length_on_error=0",
+          "-c",
+          "autovacuum=off"
+        ],
+        "Image": "postgres:18",
+        "Volumes": {
+          "/var/lib/postgresql": {}
+        },
+        "WorkingDir": "",
+        "Entrypoint": [
+          "docker-entrypoint.sh"
+        ],
+        "OnBuild": null,
+        "Labels": {},
+        "StopSignal": "SIGINT"
+      },
+      "NetworkSettings": {
+        "Bridge": "",
+        "SandboxID": "",
+        "SandboxKey": "",
+        "Ports": {},
+        "HairpinMode": false,
+        "LinkLocalIPv6Address": "",
+        "LinkLocalIPv6PrefixLen": 0,
+        "SecondaryIPAddresses": null,
+        "SecondaryIPv6Addresses": null,
+        "EndpointID": "",
+        "Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "IPAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "MacAddress": "",
+        "Networks": {
+          "none": {
+            "IPAMConfig": null,
+            "Links": null,
+            "Aliases": null,
+            "MacAddress": "",
+            "DriverOpts": null,
+            "GwPriority": 0,
+            "NetworkID": "f948ddc8cec21d059f5d261fcf9687f06d246ed2b45f89cd11a620bb8b00bcb2",
+            "EndpointID": "",
+            "Gateway": "",
+            "IPAddress": "",
+            "IPPrefixLen": 0,
+            "IPv6Gateway": "",
+            "GlobalIPv6Address": "",
+            "GlobalIPv6PrefixLen": 0,
+            "DNSNames": null
+          }
+        }
+      }
+    }
+  ],
+  "plans": {
+    "ordinary": [
+      {
+        "Plan": {
+          "Node Type": "Aggregate",
+          "Strategy": "Plain",
+          "Partial Mode": "Simple",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 27359.35,
+          "Total Cost": 27359.36,
+          "Plan Rows": 1,
+          "Plan Width": 16,
+          "Actual Startup Time": 756.838,
+          "Actual Total Time": 756.838,
+          "Actual Rows": 1.0,
+          "Actual Loops": 1,
+          "Disabled": false,
+          "Shared Hit Blocks": 300000,
+          "Shared Read Blocks": 125100,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Shared I/O Read Time": 144.665,
+          "Shared I/O Write Time": 0.0,
+          "Local I/O Read Time": 0.0,
+          "Local I/O Write Time": 0.0,
+          "Temp I/O Read Time": 0.0,
+          "Temp I/O Write Time": 0.0,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "encrypted",
+              "Alias": "encrypted",
+              "Startup Cost": 0.0,
+              "Total Cost": 26357.26,
+              "Plan Rows": 100209,
+              "Plan Width": 18,
+              "Actual Startup Time": 0.03,
+              "Actual Total Time": 20.855,
+              "Actual Rows": 100000.0,
+              "Actual Loops": 1,
+              "Disabled": false,
+              "Filter": "(id <= 100000)",
+              "Rows Removed by Filter": 600,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 25100,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Shared I/O Read Time": 0.395,
+              "Shared I/O Write Time": 0.0,
+              "Local I/O Read Time": 0.0,
+              "Local I/O Write Time": 0.0,
+              "Temp I/O Read Time": 0.0,
+              "Temp I/O Write Time": 0.0
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 1,
+          "Shared Read Blocks": 2,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Shared I/O Read Time": 0.003,
+          "Shared I/O Write Time": 0.0,
+          "Local I/O Read Time": 0.0,
+          "Local I/O Write Time": 0.0,
+          "Temp I/O Read Time": 0.0,
+          "Temp I/O Write Time": 0.0
+        },
+        "Planning Time": 0.063,
+        "Triggers": [],
+        "Execution Time": 756.852
+      }
+    ],
+    "no_queues": [
+      {
+        "Plan": {
+          "Node Type": "Aggregate",
+          "Strategy": "Plain",
+          "Partial Mode": "Simple",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 27359.25,
+          "Total Cost": 27359.26,
+          "Plan Rows": 1,
+          "Plan Width": 16,
+          "Actual Startup Time": 763.033,
+          "Actual Total Time": 763.033,
+          "Actual Rows": 1.0,
+          "Actual Loops": 1,
+          "Disabled": false,
+          "Shared Hit Blocks": 300000,
+          "Shared Read Blocks": 125100,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Shared I/O Read Time": 145.523,
+          "Shared I/O Write Time": 0.0,
+          "Local I/O Read Time": 0.0,
+          "Local I/O Write Time": 0.0,
+          "Temp I/O Read Time": 0.0,
+          "Temp I/O Write Time": 0.0,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "encrypted",
+              "Alias": "encrypted",
+              "Startup Cost": 0.0,
+              "Total Cost": 26357.26,
+              "Plan Rows": 100199,
+              "Plan Width": 18,
+              "Actual Startup Time": 0.113,
+              "Actual Total Time": 21.494,
+              "Actual Rows": 100000.0,
+              "Actual Loops": 1,
+              "Disabled": false,
+              "Filter": "(id <= 100000)",
+              "Rows Removed by Filter": 600,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 25100,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Shared I/O Read Time": 0.457,
+              "Shared I/O Write Time": 0.0,
+              "Local I/O Read Time": 0.0,
+              "Local I/O Write Time": 0.0,
+              "Temp I/O Read Time": 0.0,
+              "Temp I/O Write Time": 0.0
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 1,
+          "Shared Read Blocks": 2,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Shared I/O Read Time": 0.004,
+          "Shared I/O Write Time": 0.0,
+          "Local I/O Read Time": 0.0,
+          "Local I/O Write Time": 0.0,
+          "Temp I/O Read Time": 0.0,
+          "Temp I/O Write Time": 0.0
+        },
+        "Planning Time": 0.056,
+        "Triggers": [],
+        "Execution Time": 763.046
+      }
+    ],
+    "default": [
+      {
+        "Plan": {
+          "Node Type": "Aggregate",
+          "Strategy": "Plain",
+          "Partial Mode": "Simple",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 27359.25,
+          "Total Cost": 27359.26,
+          "Plan Rows": 1,
+          "Plan Width": 16,
+          "Actual Startup Time": 759.669,
+          "Actual Total Time": 759.67,
+          "Actual Rows": 1.0,
+          "Actual Loops": 1,
+          "Disabled": false,
+          "Shared Hit Blocks": 300000,
+          "Shared Read Blocks": 125100,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Shared I/O Read Time": 145.861,
+          "Shared I/O Write Time": 0.0,
+          "Local I/O Read Time": 0.0,
+          "Local I/O Write Time": 0.0,
+          "Temp I/O Read Time": 0.0,
+          "Temp I/O Write Time": 0.0,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "encrypted",
+              "Alias": "encrypted",
+              "Startup Cost": 0.0,
+              "Total Cost": 26357.26,
+              "Plan Rows": 100199,
+              "Plan Width": 18,
+              "Actual Startup Time": 0.029,
+              "Actual Total Time": 18.816,
+              "Actual Rows": 100000.0,
+              "Actual Loops": 1,
+              "Disabled": false,
+              "Filter": "(id <= 100000)",
+              "Rows Removed by Filter": 600,
+              "Shared Hit Blocks": 0,
+              "Shared Read Blocks": 25100,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Shared I/O Read Time": 0.359,
+              "Shared I/O Write Time": 0.0,
+              "Local I/O Read Time": 0.0,
+              "Local I/O Write Time": 0.0,
+              "Temp I/O Read Time": 0.0,
+              "Temp I/O Write Time": 0.0
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 1,
+          "Shared Read Blocks": 2,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Shared I/O Read Time": 0.004,
+          "Shared I/O Write Time": 0.0,
+          "Local I/O Read Time": 0.0,
+          "Local I/O Write Time": 0.0,
+          "Temp I/O Read Time": 0.0,
+          "Temp I/O Write Time": 0.0
+        },
+        "Planning Time": 0.058,
+        "Triggers": [],
+        "Execution Time": 759.684
+      }
+    ]
+  },
+  "cpu_flags": {
+    "ordinary": "flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf tsc_known_freq pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid rdseed adx smap clflushopt clwb intel_pt sha_ni xsaveopt xsavec xgetbv1 xsaves split_lock_detect user_shstk avx_vnni dtherm ida arat pln pts hwp hwp_notify hwp_act_window hwp_epp hwp_pkg_req hfi vnmi umip pku ospke waitpkg gfni vaes vpclmulqdq rdpid movdiri movdir64b fsrm md_clear serialize pconfig arch_lbr ibt flush_l1d arch_capabilities",
+    "no_queues": "flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf tsc_known_freq pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid rdseed adx smap clflushopt clwb intel_pt sha_ni xsaveopt xsavec xgetbv1 xsaves split_lock_detect user_shstk avx_vnni dtherm ida arat pln pts hwp hwp_notify hwp_act_window hwp_epp hwp_pkg_req hfi vnmi umip pku ospke waitpkg gfni vaes vpclmulqdq rdpid movdiri movdir64b fsrm md_clear serialize pconfig arch_lbr ibt flush_l1d arch_capabilities",
+    "default": "flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf tsc_known_freq pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid rdseed adx smap clflushopt clwb intel_pt sha_ni xsaveopt xsavec xgetbv1 xsaves split_lock_detect user_shstk avx_vnni dtherm ida arat pln pts hwp hwp_notify hwp_act_window hwp_epp hwp_pkg_req hfi vnmi umip pku ospke waitpkg gfni vaes vpclmulqdq rdpid movdiri movdir64b fsrm md_clear serialize pconfig arch_lbr ibt flush_l1d arch_capabilities"
+  }
+}

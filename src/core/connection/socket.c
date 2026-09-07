@@ -665,3 +665,88 @@ void aimee_core_socket_close(int fd)
       close(fd);
 }
 #endif
+
+int aimee_core_socket_listen_loopback(unsigned port, unsigned *bound_port)
+{
+   if (port > 65535 || !bound_port)
+      return -1;
+#ifdef _WIN32
+   if (ensure_winsock() != 0)
+      return -1;
+#endif
+   int fd = (int)socket(AF_INET, SOCK_STREAM, 0);
+   if (fd < 0)
+      return -1;
+   struct sockaddr_in addr;
+   memset(&addr, 0, sizeof(addr));
+   addr.sin_family = AF_INET;
+   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+   addr.sin_port = htons((unsigned short)port);
+#ifdef _WIN32
+   int length = sizeof(addr);
+   u_long nonblocking = 1;
+   int exclusive = 1;
+   if (setsockopt(fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&exclusive,
+                  sizeof(exclusive)) != 0 ||
+       !SetHandleInformation((HANDLE)(uintptr_t)fd, HANDLE_FLAG_INHERIT, 0) ||
+       ioctlsocket(fd, FIONBIO, &nonblocking) != 0)
+#else
+   socklen_t length = sizeof(addr);
+   if (fcntl(fd, F_SETFD, FD_CLOEXEC) != 0 || fcntl(fd, F_SETFL, O_NONBLOCK) != 0)
+#endif
+      goto fail;
+   if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(fd, 32) != 0 ||
+       getsockname(fd, (struct sockaddr *)&addr, &length) != 0)
+      goto fail;
+   *bound_port = ntohs(addr.sin_port);
+   return fd;
+fail:
+   aimee_core_socket_close(fd);
+   return -1;
+}
+
+int aimee_core_socket_accept(int listener)
+{
+   int fd = (int)accept(listener, NULL, NULL);
+   if (fd < 0)
+      return -1;
+#ifdef _WIN32
+   u_long nonblocking = 0;
+   if (!SetHandleInformation((HANDLE)(uintptr_t)fd, HANDLE_FLAG_INHERIT, 0) ||
+       ioctlsocket(fd, FIONBIO, &nonblocking) != 0)
+#else
+   if (fcntl(fd, F_SETFD, FD_CLOEXEC) != 0 || fcntl(fd, F_SETFL, 0) != 0)
+#endif
+   {
+      aimee_core_socket_close(fd);
+      return -1;
+   }
+   return fd;
+}
+
+void aimee_core_socket_shutdown(int fd)
+{
+   if (fd >= 0)
+#ifdef _WIN32
+      shutdown(fd, SD_BOTH);
+#else
+      shutdown(fd, SHUT_RDWR);
+#endif
+}
+
+int aimee_core_socket_peer_closed(int fd)
+{
+   int ready = aimee_core_socket_wait_readable(fd, 0);
+   if (ready == 0)
+      return 0;
+   if (ready < 0)
+      return 1;
+   char byte;
+#ifdef _WIN32
+   int n = recv(fd, &byte, 1, MSG_PEEK);
+   return n == 0 || (n < 0 && WSAGetLastError() != WSAEWOULDBLOCK);
+#else
+   ssize_t n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
+   return n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR);
+#endif
+}

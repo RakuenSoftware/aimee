@@ -1481,6 +1481,7 @@ static const struct
     {"memory.recall", marshal_memory_recall},
     {"memory.search", marshal_memory_search},
     {"memory.store", marshal_memory_store},
+    {"memory.stats", marshal_memory_stats},
     {"catalog.list", marshal_model_list},
     {"catalog.show", marshal_model_show},
     {"notes.search", marshal_notes_search},

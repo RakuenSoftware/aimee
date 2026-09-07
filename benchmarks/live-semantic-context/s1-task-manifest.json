@@ -1,0 +1,1907 @@
+{
+  "schema_version": 1,
+  "name": "live-semantic-context-s1-checked-corpus",
+  "repository": {
+    "url": "https://github.com/RakuenSoftware/aimee.git",
+    "commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+    "license": "AGPL-3.0-only",
+    "redistribution": "repository source and task metadata are checked in under the project license"
+  },
+  "coordinate_system": "one-based UTF-8 source line and byte column",
+  "task_prompt_contract": "Each task prompt is stored once here and supplied byte-identically to all arms.",
+  "counts": {
+    "total": 45,
+    "semantic_eligible": 30,
+    "controls": 15
+  },
+  "tasks": [
+    {
+      "id": "s01",
+      "family": "semantic_disambiguation",
+      "tags": [
+        "semantic_disambiguation"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for Attach. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/conformance_test.go",
+          "line": 76,
+          "column": 12,
+          "symbol": "Attach"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/client.go",
+            "line": 103,
+            "symbol": "Attach"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s02",
+      "family": "semantic_disambiguation",
+      "tags": [
+        "semantic_disambiguation"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for AttachAs. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/client.go",
+          "line": 104,
+          "column": 9,
+          "symbol": "AttachAs"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/client.go",
+            "line": 110,
+            "symbol": "AttachAs"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s03",
+      "family": "semantic_disambiguation",
+      "tags": [
+        "semantic_disambiguation"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for ConnectClient. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/cmd/aimee-module/main.go",
+          "line": 108,
+          "column": 24,
+          "symbol": "ConnectClient"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/client_connect.go",
+            "line": 21,
+            "symbol": "ConnectClient"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s04",
+      "family": "semantic_disambiguation",
+      "tags": [
+        "semantic_disambiguation"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for NewConcurrentModuleCaller. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/cmd/aimee-module/main.go",
+          "line": 116,
+          "column": 21,
+          "symbol": "NewConcurrentModuleCaller"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/concurrent_module_caller.go",
+            "line": 48,
+            "symbol": "NewConcurrentModuleCaller"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s05",
+      "family": "semantic_disambiguation",
+      "tags": [
+        "semantic_disambiguation"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for AttachControl. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/client.go",
+          "line": 181,
+          "column": 22,
+          "symbol": "AttachControl"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/region.go",
+            "line": 52,
+            "symbol": "AttachControl"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s06",
+      "family": "semantic_disambiguation",
+      "tags": [
+        "semantic_disambiguation"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for AttachQueuePair. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/client.go",
+          "line": 185,
+          "column": 17,
+          "symbol": "AttachQueuePair"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/region.go",
+            "line": 92,
+            "symbol": "AttachQueuePair"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s07",
+      "family": "semantic_disambiguation",
+      "tags": [
+        "semantic_disambiguation"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for AttachRing. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/region.go",
+          "line": 104,
+          "column": 18,
+          "symbol": "AttachRing"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/ring.go",
+            "line": 46,
+            "symbol": "AttachRing"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s08",
+      "family": "semantic_disambiguation",
+      "tags": [
+        "semantic_disambiguation"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for DecodeModuleMessage. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/concurrent_module_caller.go",
+          "line": 124,
+          "column": 19,
+          "symbol": "DecodeModuleMessage"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/module_protocol.go",
+            "line": 76,
+            "symbol": "DecodeModuleMessage"
+          }
+        ]
+      }
+    },
+    {
+      "id": "r01",
+      "family": "reference_backed_change",
+      "tags": [
+        "reference_backed_change"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for validateModuleConfig. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/module_runtime.go",
+          "line": 207,
+          "column": 17,
+          "symbol": "validateModuleConfig"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 156,
+            "symbol": "validateModuleConfig"
+          }
+        ]
+      }
+    },
+    {
+      "id": "r02",
+      "family": "reference_backed_change",
+      "tags": [
+        "reference_backed_change"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for connectModule. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/module_runtime.go",
+          "line": 214,
+          "column": 17,
+          "symbol": "connectModule"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 174,
+            "symbol": "connectModule"
+          }
+        ]
+      }
+    },
+    {
+      "id": "r03",
+      "family": "reference_backed_change",
+      "tags": [
+        "reference_backed_change"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for RunModuleProcess. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/testdata/module_helper/main.go",
+          "line": 44,
+          "column": 16,
+          "symbol": "RunModuleProcess"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 206,
+            "symbol": "RunModuleProcess"
+          }
+        ]
+      }
+    },
+    {
+      "id": "r04",
+      "family": "reference_backed_change",
+      "tags": [
+        "reference_backed_change"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for replyModuleResult. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/module_runtime.go",
+          "line": 332,
+          "column": 9,
+          "symbol": "replyModuleResult"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 273,
+            "symbol": "replyModuleResult"
+          }
+        ]
+      }
+    },
+    {
+      "id": "r05",
+      "family": "reference_backed_change",
+      "tags": [
+        "reference_backed_change"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for invalidModuleRequest. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/module_runtime.go",
+          "line": 426,
+          "column": 14,
+          "symbol": "invalidModuleRequest"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 327,
+            "symbol": "invalidModuleRequest"
+          }
+        ]
+      }
+    },
+    {
+      "id": "r06",
+      "family": "reference_backed_change",
+      "tags": [
+        "reference_backed_change"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for _parse_edits. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_aider_polyglot.py",
+          "line": 168,
+          "column": 13,
+          "symbol": "_parse_edits"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_aider_polyglot.py",
+            "line": 43,
+            "symbol": "_parse_edits"
+          }
+        ]
+      }
+    },
+    {
+      "id": "r07",
+      "family": "reference_backed_change",
+      "tags": [
+        "reference_backed_change"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for _extract_code. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_bigcodebench.py",
+          "line": 151,
+          "column": 25,
+          "symbol": "_extract_code"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_bigcodebench.py",
+            "line": 39,
+            "symbol": "_extract_code"
+          }
+        ]
+      }
+    },
+    {
+      "id": "r08",
+      "family": "reference_backed_change",
+      "tags": [
+        "reference_backed_change"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for _extract_code. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_humaneval.py",
+          "line": 151,
+          "column": 25,
+          "symbol": "_extract_code"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_humaneval.py",
+            "line": 39,
+            "symbol": "_extract_code"
+          }
+        ]
+      }
+    },
+    {
+      "id": "f01",
+      "family": "fresh_saved_edit",
+      "tags": [
+        "fresh_saved_edit",
+        "failure_injection"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for canonical. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 39,
+          "column": 22,
+          "symbol": "canonical"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 19,
+            "symbol": "canonical"
+          }
+        ]
+      },
+      "setup": {
+        "saved_file_mutation": {
+          "path": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "operation": "insert_before",
+          "line": 1,
+          "text": "# S1 saved-file freshness mutation\n"
+        },
+        "post_edit_anchors": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 40,
+            "column": 22,
+            "symbol": "canonical"
+          }
+        ],
+        "post_edit_targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 20,
+            "symbol": "canonical"
+          }
+        ]
+      },
+      "failure_overlay": {
+        "injection": "missing_binary",
+        "expected_status": "unavailable"
+      }
+    },
+    {
+      "id": "f02",
+      "family": "fresh_saved_edit",
+      "tags": [
+        "fresh_saved_edit",
+        "failure_injection"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for fsync_dir. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 33,
+          "column": 5,
+          "symbol": "fsync_dir"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 23,
+            "symbol": "fsync_dir"
+          }
+        ]
+      },
+      "setup": {
+        "saved_file_mutation": {
+          "path": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "operation": "insert_before",
+          "line": 1,
+          "text": "# S1 saved-file freshness mutation\n"
+        },
+        "post_edit_anchors": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 34,
+            "column": 5,
+            "symbol": "fsync_dir"
+          }
+        ],
+        "post_edit_targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 24,
+            "symbol": "fsync_dir"
+          }
+        ]
+      },
+      "failure_overlay": {
+        "injection": "unsupported_method",
+        "expected_status": "unsupported"
+      }
+    },
+    {
+      "id": "f03",
+      "family": "fresh_saved_edit",
+      "tags": [
+        "fresh_saved_edit",
+        "failure_injection"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for durable_mkdir. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 105,
+          "column": 5,
+          "symbol": "durable_mkdir"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 31,
+            "symbol": "durable_mkdir"
+          }
+        ]
+      },
+      "setup": {
+        "saved_file_mutation": {
+          "path": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "operation": "insert_before",
+          "line": 1,
+          "text": "# S1 saved-file freshness mutation\n"
+        },
+        "post_edit_anchors": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 106,
+            "column": 5,
+            "symbol": "durable_mkdir"
+          }
+        ],
+        "post_edit_targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 32,
+            "symbol": "durable_mkdir"
+          }
+        ]
+      },
+      "failure_overlay": {
+        "injection": "request_timeout",
+        "expected_status": "unavailable"
+      }
+    },
+    {
+      "id": "f04",
+      "family": "fresh_saved_edit",
+      "tags": [
+        "fresh_saved_edit",
+        "failure_injection"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for write_new. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 120,
+          "column": 5,
+          "symbol": "write_new"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 37,
+            "symbol": "write_new"
+          }
+        ]
+      },
+      "setup": {
+        "saved_file_mutation": {
+          "path": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "operation": "insert_before",
+          "line": 1,
+          "text": "# S1 saved-file freshness mutation\n"
+        },
+        "post_edit_anchors": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 121,
+            "column": 5,
+            "symbol": "write_new"
+          }
+        ],
+        "post_edit_targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 38,
+            "symbol": "write_new"
+          }
+        ]
+      },
+      "failure_overlay": {
+        "injection": "provider_crash",
+        "expected_status": "unavailable"
+      }
+    },
+    {
+      "id": "f05",
+      "family": "fresh_saved_edit",
+      "tags": [
+        "fresh_saved_edit",
+        "failure_injection"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for replace. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 264,
+          "column": 9,
+          "symbol": "replace"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 45,
+            "symbol": "replace"
+          }
+        ]
+      },
+      "setup": {
+        "saved_file_mutation": {
+          "path": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "operation": "insert_before",
+          "line": 1,
+          "text": "# S1 saved-file freshness mutation\n"
+        },
+        "post_edit_anchors": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 265,
+            "column": 9,
+            "symbol": "replace"
+          }
+        ],
+        "post_edit_targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 46,
+            "symbol": "replace"
+          }
+        ]
+      },
+      "failure_overlay": {
+        "injection": "stale_document",
+        "expected_status": "stale"
+      }
+    },
+    {
+      "id": "f06",
+      "family": "fresh_saved_edit",
+      "tags": [
+        "fresh_saved_edit",
+        "failure_injection"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for load. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 87,
+          "column": 12,
+          "symbol": "load"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 57,
+            "symbol": "load"
+          }
+        ]
+      },
+      "setup": {
+        "saved_file_mutation": {
+          "path": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "operation": "insert_before",
+          "line": 1,
+          "text": "# S1 saved-file freshness mutation\n"
+        },
+        "post_edit_anchors": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 88,
+            "column": 12,
+            "symbol": "load"
+          }
+        ],
+        "post_edit_targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 58,
+            "symbol": "load"
+          }
+        ]
+      },
+      "failure_overlay": {
+        "injection": "returned_path_escape",
+        "expected_status": "unauthorized"
+      }
+    },
+    {
+      "id": "f07",
+      "family": "fresh_saved_edit",
+      "tags": [
+        "fresh_saved_edit"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchor, identify the canonical workspace definition for file_sha256. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 168,
+          "column": 59,
+          "symbol": "file_sha256"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 61,
+            "symbol": "file_sha256"
+          }
+        ]
+      },
+      "setup": {
+        "saved_file_mutation": {
+          "path": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "operation": "insert_before",
+          "line": 1,
+          "text": "# S1 saved-file freshness mutation\n"
+        },
+        "post_edit_anchors": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 169,
+            "column": 59,
+            "symbol": "file_sha256"
+          }
+        ],
+        "post_edit_targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 62,
+            "symbol": "file_sha256"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b01",
+      "family": "batched_anchors",
+      "tags": [
+        "batched_anchors"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchors, identify the canonical workspace definitions for monotonicNowNS, nextModuleIdle. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/client_connect.go",
+          "line": 76,
+          "column": 15,
+          "symbol": "monotonicNowNS"
+        },
+        {
+          "file": "server-go/bus/module_runtime.go",
+          "line": 396,
+          "column": 16,
+          "symbol": "nextModuleIdle"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 2,
+        "targets": [
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 148,
+            "symbol": "monotonicNowNS"
+          },
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 25,
+            "symbol": "nextModuleIdle"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b02",
+      "family": "batched_anchors",
+      "tags": [
+        "batched_anchors"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchors, identify the canonical workspace definitions for validModuleStatus, moduleDetail. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/module_runtime.go",
+          "line": 248,
+          "column": 6,
+          "symbol": "validModuleStatus"
+        },
+        {
+          "file": "server-go/bus/module_runtime.go",
+          "line": 257,
+          "column": 53,
+          "symbol": "moduleDetail"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 2,
+        "targets": [
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 231,
+            "symbol": "validModuleStatus"
+          },
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 235,
+            "symbol": "moduleDetail"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b03",
+      "family": "batched_anchors",
+      "tags": [
+        "batched_anchors"
+      ],
+      "semantic_eligible": true,
+      "language": "go",
+      "provider": "gopls",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchors, identify the canonical workspace definitions for runHandler, replyModuleResult. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "server-go/bus/module_runtime.go",
+          "line": 486,
+          "column": 6,
+          "symbol": "runHandler"
+        },
+        {
+          "file": "server-go/bus/module_runtime.go",
+          "line": 332,
+          "column": 9,
+          "symbol": "replyModuleResult"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 2,
+        "targets": [
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 246,
+            "symbol": "runHandler"
+          },
+          {
+            "file": "server-go/bus/module_runtime.go",
+            "line": 273,
+            "symbol": "replyModuleResult"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b04",
+      "family": "batched_anchors",
+      "tags": [
+        "batched_anchors"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchors, identify the canonical workspace definitions for packet_for, parse_stream. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+          "line": 152,
+          "column": 41,
+          "symbol": "packet_for"
+        },
+        {
+          "file": "benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+          "line": 180,
+          "column": 27,
+          "symbol": "parse_stream"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 2,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+            "line": 55,
+            "symbol": "packet_for"
+          },
+          {
+            "file": "benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+            "line": 89,
+            "symbol": "parse_stream"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b05",
+      "family": "batched_anchors",
+      "tags": [
+        "batched_anchors"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchors, identify the canonical workspace definitions for _parse_edits, _apply_edit. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_aider_polyglot.py",
+          "line": 168,
+          "column": 13,
+          "symbol": "_parse_edits"
+        },
+        {
+          "file": "benchmarks/coding/bench_aider_polyglot.py",
+          "line": 88,
+          "column": 19,
+          "symbol": "_apply_edit"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 2,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_aider_polyglot.py",
+            "line": 43,
+            "symbol": "_parse_edits"
+          },
+          {
+            "file": "benchmarks/coding/bench_aider_polyglot.py",
+            "line": 65,
+            "symbol": "_apply_edit"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b06",
+      "family": "batched_anchors",
+      "tags": [
+        "batched_anchors"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchors, identify the canonical workspace definitions for _build_record, _grade_exercise. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_aider_polyglot.py",
+          "line": 273,
+          "column": 22,
+          "symbol": "_build_record"
+        },
+        {
+          "file": "benchmarks/coding/bench_aider_polyglot.py",
+          "line": 265,
+          "column": 60,
+          "symbol": "_grade_exercise"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 2,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_aider_polyglot.py",
+            "line": 117,
+            "symbol": "_build_record"
+          },
+          {
+            "file": "benchmarks/coding/bench_aider_polyglot.py",
+            "line": 139,
+            "symbol": "_grade_exercise"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b07",
+      "family": "batched_anchors",
+      "tags": [
+        "batched_anchors"
+      ],
+      "semantic_eligible": true,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Starting from the supplied real use-site anchors, identify the canonical workspace definitions for score, wilson_lower. Return only the checked definition targets and cite the local checkout authority.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/e6_evaluate.py",
+          "line": 165,
+          "column": 14,
+          "symbol": "score"
+        },
+        {
+          "file": "benchmarks/code-agent-effectiveness/e6_evaluate.py",
+          "line": 118,
+          "column": 30,
+          "symbol": "wilson_lower"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 2,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/e6_evaluate.py",
+            "line": 43,
+            "symbol": "score"
+          },
+          {
+            "file": "benchmarks/code-agent-effectiveness/e6_evaluate.py",
+            "line": 26,
+            "symbol": "wilson_lower"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c01",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of safe_name. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 65,
+          "column": 5,
+          "symbol": "safe_name"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 65,
+            "symbol": "safe_name"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c02",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of require_plain_path. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 71,
+          "column": 5,
+          "symbol": "require_plain_path"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 71,
+            "symbol": "require_plain_path"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c03",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of start. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 85,
+          "column": 5,
+          "symbol": "start"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 85,
+            "symbol": "start"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c04",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of resume. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+          "line": 130,
+          "column": 5,
+          "symbol": "resume"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            "line": 130,
+            "symbol": "resume"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c05",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of is_finite_nonnegative. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/e6_evaluate.py",
+          "line": 22,
+          "column": 5,
+          "symbol": "is_finite_nonnegative"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/e6_evaluate.py",
+            "line": 22,
+            "symbol": "is_finite_nonnegative"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c06",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of percentile. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/e6_evaluate.py",
+          "line": 36,
+          "column": 5,
+          "symbol": "percentile"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/e6_evaluate.py",
+            "line": 36,
+            "symbol": "percentile"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c07",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of ticket_map. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+          "line": 46,
+          "column": 5,
+          "symbol": "ticket_map"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+            "line": 46,
+            "symbol": "ticket_map"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c08",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of hidden_test. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+          "line": 116,
+          "column": 5,
+          "symbol": "hidden_test"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/code-agent-effectiveness/e6_provider_cell.py",
+            "line": 116,
+            "symbol": "hidden_test"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c09",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of _load_exercises. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_aider_polyglot.py",
+          "line": 95,
+          "column": 5,
+          "symbol": "_load_exercises"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_aider_polyglot.py",
+            "line": 95,
+            "symbol": "_load_exercises"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c10",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of _run_tests. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_bigcodebench.py",
+          "line": 50,
+          "column": 5,
+          "symbol": "_run_tests"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_bigcodebench.py",
+            "line": 50,
+            "symbol": "_run_tests"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c11",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of _load_dataset. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_bigcodebench.py",
+          "line": 74,
+          "column": 5,
+          "symbol": "_load_dataset"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_bigcodebench.py",
+            "line": 74,
+            "symbol": "_load_dataset"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c12",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of _all_pass. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_livecodebench.py",
+          "line": 77,
+          "column": 5,
+          "symbol": "_all_pass"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_livecodebench.py",
+            "line": 77,
+            "symbol": "_all_pass"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c13",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of _load_dataset. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_livecodebench.py",
+          "line": 81,
+          "column": 5,
+          "symbol": "_load_dataset"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_livecodebench.py",
+            "line": 81,
+            "symbol": "_load_dataset"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c14",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of _check_expected. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/bench_terminalbench.py",
+          "line": 73,
+          "column": 5,
+          "symbol": "_check_expected"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/coding/bench_terminalbench.py",
+            "line": 73,
+            "symbol": "_check_expected"
+          }
+        ]
+      }
+    },
+    {
+      "id": "c15",
+      "family": "control_literal_or_short_file",
+      "tags": [
+        "control_literal_or_short_file"
+      ],
+      "semantic_eligible": false,
+      "language": "python",
+      "provider": "pyright",
+      "repository_commit": "54e6d9093946100fed7f9ed214060a729ba6a0fa",
+      "authority": {
+        "kind": "local_checkout",
+        "workspace_root": ".",
+        "detached": false
+      },
+      "prompt": "Inspect the named short file directly and identify the definition of pct_reduction. Semantic startup is unnecessary; return its checked workspace-relative target.",
+      "anchors": [
+        {
+          "file": "benchmarks/coding/supervised_report.py",
+          "line": 52,
+          "column": 5,
+          "symbol": "pct_reduction"
+        }
+      ],
+      "oracle": {
+        "status": "ok",
+        "exact_target_count": 1,
+        "targets": [
+          {
+            "file": "benchmarks/coding/supervised_report.py",
+            "line": 52,
+            "symbol": "pct_reduction"
+          }
+        ]
+      }
+    }
+  ]
+}

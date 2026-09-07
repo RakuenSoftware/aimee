@@ -216,6 +216,8 @@ const method_policy_t method_registry[] = {
     {"cron.history", CAP_SESSION_READ, "cron job history"},
     {"cron.*", CAP_TOOL_EXECUTE, "cron job mutation"},
     /* Providers / models: catalogs read; configuration mutations are admin. */
+    {"provider.connection_models", CAP_SESSION_READ, "list connection models"},
+    {"provider.connections", CAP_SESSION_READ, "list configured providers"},
     {"provider.list", CAP_SESSION_READ, "list providers"},
     {"provider.get", CAP_SESSION_READ, "get provider"},
     {"provider.show", CAP_SESSION_READ, "show provider"},

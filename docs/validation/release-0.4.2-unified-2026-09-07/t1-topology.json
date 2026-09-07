@@ -1,0 +1,27 @@
+{
+  "application_image": "aimee:unified042-v28",
+  "source_commit": "122cc89bf8bca55e9905c744a9d51bb7fe937a41",
+  "checks": [
+    {
+      "name": "KB application metadata contains no database or enrollment credential",
+      "passed": true
+    },
+    {
+      "name": "KB boots with standardized PostgreSQL and local embedding",
+      "passed": true
+    },
+    {
+      "name": "KB shared memory module stores a record",
+      "passed": true
+    },
+    {
+      "name": "KB ranked search uses its local embedding service",
+      "passed": true
+    },
+    {
+      "name": "KB graph and memory retrieval survives the deepest worker path",
+      "passed": true
+    }
+  ],
+  "source_sha256": "2a79bf4da58cd115b160cc5d29a6e8e9053c03dd552b7d7b74df6e06390aaf65"
+}

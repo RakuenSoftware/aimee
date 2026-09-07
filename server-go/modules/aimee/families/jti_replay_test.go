@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	wire "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
-	wire "github.com/JBailes/aimee/server-go/db1"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
 

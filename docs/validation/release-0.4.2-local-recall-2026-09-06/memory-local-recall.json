@@ -1,0 +1,120 @@
+[
+  {
+    "name": "KB-free local store",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free recall {}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "recall returns personal text and scoped handle {}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free recall {'store': 'user'}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "recall returns personal text and scoped handle {'store': 'user'}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free session recall without hint",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free CLI recall",
+    "passed": true,
+    "detail": {
+      "store": "user",
+      "recall": {
+        "identity": [],
+        "preferences": [],
+        "active_context": [
+          {
+            "id": 2,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-f1883d74f1",
+            "content": "Personal local-only fixture person@local.invalid 🦊",
+            "confidence": 1,
+            "memory_id": 2,
+            "text": "Personal local-only fixture person@local.invalid 🦊",
+            "store": "user",
+            "handle": "user:memory:2"
+          }
+        ],
+        "open_commitments": [],
+        "reminders": [],
+        "directives": [],
+        "limit_tokens": 1024,
+        "used_tokens": 26,
+        "session_start": false,
+        "explain": []
+      }
+    }
+  },
+  {
+    "name": "KB-free MCP recall",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "recall rejects invalid store",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory store must be user or kb"
+      }
+    ]
+  },
+  {
+    "name": "KB-free recall survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free recall reports unavailable local store",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "user memory module unavailable"
+      }
+    ]
+  },
+  {
+    "name": "KB-free recall recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free local retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB-free recall after retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "retired personal record excluded from recall",
+    "passed": true,
+    "detail": null
+  }
+]

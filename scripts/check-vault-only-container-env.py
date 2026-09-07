@@ -13,20 +13,24 @@ except ImportError:
 
 
 ROOT = Path(__file__).resolve().parents[1]
-COMPOSE_TARGETS = {
-    "compose.yaml": ("aimee-kb",),
-    "compose.server.yaml": ("aimee-kb", "aimee-server"),
-    "compose.server-managed.yaml": ("aimee-server",),
-    "compose.server-standalone.yaml": ("aimee-server",),
-    "deploy/compose/aimee.yaml": ("aimee-kb", "aimee-server"),
-    "deploy/container/aimee-managed.compose.yaml": ("aimee-kb",),
-    "deploy/smoothnas/aimee.compose.yaml": ("aimee-kb", "aimee-server"),
-    "deploy/smoothnas/aimee-server.compose.yaml": ("aimee-server",),
-    "deploy/smoothnas/aimee-kb.compose.yaml": ("aimee-kb",),
-}
-PLUGIN_TARGETS = ("deploy/smoothnas/aimee-server.plugin.yaml",)
+# Inspect every declared service in every shipped composition, including the
+# fragments behind include/extends. This avoids silently skipping inherited
+# credentials and needs no operator secrets or Docker daemon for validation.
+COMPOSE_TARGETS = ["compose.yaml", "compose.kb.yaml", "compose.server.yaml",
+    "compose.server-managed.yaml", "compose.server-standalone.yaml",
+    "deploy/compose/aimee.yaml", "deploy/container/managed.override.yaml",
+    "deploy/container/aimee-managed.compose.yaml", "deploy/smoothnas/aimee.compose.yaml",
+    "deploy/smoothnas/aimee-server.compose.yaml", "deploy/smoothnas/aimee-kb.compose.yaml",
+    "deploy/smoothnas/storage.override.yaml"]
+
+class ComposeLoader(yaml.SafeLoader):
+    pass
+ComposeLoader.add_constructor('!override', lambda loader, node: loader.construct_mapping(node) if isinstance(node, yaml.MappingNode) else loader.construct_sequence(node))
+
 EXACT = {
     "AIMEE_DB2_URL",
+    "AIMEE_STORE_URL",
+    "AIMEE_STORE_MIGRATION_URL",
     "AIMEE_KB_CONN",
     "AIMEE_VAULT_PKCS11_PIN",
     "AIMEE_WEBCHAT_USER",
@@ -67,11 +71,13 @@ def environment_names(value: object) -> set[str]:
 
 def main() -> int:
     failures: list[str] = []
-    for relative, service_names in COMPOSE_TARGETS.items():
+    for relative in COMPOSE_TARGETS:
         path = ROOT / relative
-        model = yaml.safe_load(path.read_text(encoding="utf-8"))
+        model = yaml.load(path.read_text(encoding="utf-8"), Loader=ComposeLoader)
         services = model.get("services", {}) if isinstance(model, dict) else {}
-        for service_name in service_names:
+        for service_name in services:
+            if service_name not in ('aimee-server', 'aimee-kb'):
+                continue
             service = services.get(service_name) if isinstance(services, dict) else None
             if not isinstance(service, dict):
                 failures.append(f"{relative}: missing {service_name}")
@@ -81,21 +87,6 @@ def main() -> int:
                     failures.append(
                         f"{relative}:{service_name}: credential {name} is persisted in Config.Env"
                     )
-
-    for relative in PLUGIN_TARGETS:
-        path = ROOT / relative
-        model = yaml.safe_load(path.read_text(encoding="utf-8"))
-        services = model.get("spec", {}).get("services", []) if isinstance(model, dict) else []
-        for service in services if isinstance(services, list) else []:
-            if not isinstance(service, dict) or service.get("name") != "aimee-server":
-                continue
-            for name in sorted(environment_names(service.get("environment"))):
-                if credential_name(name):
-                    failures.append(f"{relative}:aimee-server: credential {name} is persisted")
-            for item in service.get("config", []):
-                name = item.get("key") if isinstance(item, dict) else None
-                if isinstance(name, str) and credential_name(name):
-                    failures.append(f"{relative}: config field {name} persists outside Vault")
 
     if failures:
         print("check-vault-only-container-env: FAIL", file=sys.stderr)

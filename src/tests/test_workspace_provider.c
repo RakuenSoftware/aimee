@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+#include "util.h"               /* SAFE_EXEC_TIMEOUT */
 
 /* run_cmd cwd control (util.c): exec_shell honors this thread-local, mirroring
  * how the mcp_git tools set their working directory before shelling out. */
@@ -225,6 +226,14 @@ int main(void)
       assert(rc == 0);
       /* match on the unique mkdtemp basename token (robust to a /tmp symlink) */
       assert(out && strstr(out, "ws_provider_test.") != NULL);
+      free(out);
+
+      /* Bounded callers (notably aimee git) must not fall back to the shared
+       * provider's historical unbounded run_cmd path. */
+      assert(ws->exec_shell_timeout != NULL);
+      rc = 0;
+      out = ws->exec_shell_timeout(ws, "sleep 2", 20, &rc);
+      assert(rc == SAFE_EXEC_TIMEOUT);
       free(out);
    }
 

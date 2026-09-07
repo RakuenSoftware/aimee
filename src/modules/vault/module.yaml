@@ -86,5 +86,6 @@
   ],
   "docs": [
     "docs/modules/vault.md"
-  ]
+  ],
+  "go_sources": []
 }

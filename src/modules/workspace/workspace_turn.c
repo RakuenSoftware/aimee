@@ -101,20 +101,24 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
    {
       /* FD mode: the token rides an inherited memfd placed at
        * GIT_CRED_TOKEN_TARGET_FD, so it never lands in the child's environ. */
-      rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, envp, &cap, out_cap ? out_cap : 4096, 0,
-                                                token_fd,
+      rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, envp, &cap, out_cap ? out_cap : 4096,
+                                                GIT_NET_TIMEOUT_MS, token_fd,
                                                 token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
       git_cred_inject_free_env(envp);
    }
    else
    {
-      const workspace_provider_t *sh = workspace_provider_shared();
-      rc = sh->exec(sh, argv, &cap, out_cap ? out_cap : 4096);
+      /* Ambient credentials are allowed for a co-located development server,
+       * but ambient prompting is not.  Reuse the hardened network runner so a
+       * missing token, SSH passphrase, or unreachable forge cannot pin an HTTP
+       * worker indefinitely while it materializes a mirror. */
+      rc = git_net_exec(NULL, args, &cap, out_cap ? out_cap : 4096);
    }
    if (token_fd >= 0)
       close(token_fd);
    if (out && out_cap)
-      snprintf(out, out_cap, "%s", cap ? cap : "");
+      snprintf(out, out_cap, "%s%s", cap ? cap : "",
+               rc == SAFE_EXEC_TIMEOUT ? "git command timed out after 30 seconds\n" : "");
    free(cap);
    return rc;
 }

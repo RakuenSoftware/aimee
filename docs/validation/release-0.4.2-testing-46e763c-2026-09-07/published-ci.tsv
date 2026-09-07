@@ -1,0 +1,36 @@
+Static analysis and secret scanning	success
+change-scope	success
+Address and undefined-behavior sanitizers	success
+Complete script regression suite	success
+no-coauthor-trailers	skipped
+identity-mint-e2e	success
+build	success
+lsp-real-providers (ubuntu-24.04, linux)	success
+lsp-real-providers (macos-latest, macos)	success
+go-unit-tests	success
+build-integrity	success
+unit-tests-pg (1/3)	success
+db2-process-replay	success
+macos-build	success
+unit-tests-pg (2/3)	success
+unit-tests-pg (3/3)	success
+unit-tests (1/2)	success
+write-tier-enforce-live	success
+unit-tests (2/2)	success
+e2e-adoption	success
+pam-login-live	success
+integration-tests	success
+e2e-docker (T2)	success
+oidc-login-live	success
+vault-pkcs11-token	success
+p1-rls-gate	success
+windows-cmake	success
+init-migrate-service-test	success
+treesitter	success
+authz-residual-live	success
+memory-retrieval-eval	success
+windows-build	success
+e2e-docker (T3)	success
+lint	success
+e2e-docker (T1)	success
+unit-tests	success

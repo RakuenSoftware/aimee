@@ -78,8 +78,6 @@ extern "C"
                            failover_reason_t *out);
    };
 
-   /* Register a provider profile (idempotent on duplicate names). */
-   void model_provider_register(model_provider_t *p);
 
    /* Look up by name. NULL if not found. Triggers lazy built-in init. */
    model_provider_t *model_provider_get(const char *name);

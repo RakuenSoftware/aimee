@@ -119,6 +119,10 @@ jobs:
         run: python3 -I -S scripts/check_module_bus_boundary.py
       - name: Test module bus-boundary failure modes
         run: python3 -I scripts/tests/test_check_module_bus_boundary.py -v
+      - name: Enforce memory C boundary
+        run: python3 -I -S scripts/check_memory_c_boundary.py
+      - name: Test memory C-boundary failure modes
+        run: python3 -I scripts/tests/test_check_memory_c_boundary.py -v
       - name: Enforce panel contract boundary
         run: python3 -I -S scripts/check_panel_contract_boundary.py
       - name: Test panel contract boundary failure modes

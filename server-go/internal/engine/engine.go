@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
@@ -31,8 +31,8 @@ const (
 )
 
 type StepRequest struct {
-	WorkItem db1.WorkItem `json:"work_item"`
-	Node     wfe.Node     `json:"node"`
+	WorkItem workflowstore.WorkItem `json:"work_item"`
+	Node     wfe.Node               `json:"node"`
 	// Proposal is the immutable originating request. The historical field name
 	// is retained on the wire, but review prompts expose it as ORIGINAL REQUEST.
 	Proposal string                  `json:"proposal"`
@@ -84,7 +84,7 @@ const maxRunnerFailuresWithoutProgress = 8
 const maxCapacityWaitsWithoutProgress = 240
 
 type Engine struct {
-	db            *db1.Store
+	db            *workflowstore.Store
 	artifacts     *wfe.ArtifactStore
 	workflows     *wfe.Registry
 	runner        Runner
@@ -94,7 +94,7 @@ type Engine struct {
 	invocationSeq uint64
 }
 
-func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir string, runner Runner) (*Engine, error) {
+func New(db *workflowstore.Store, artifacts *wfe.ArtifactStore, workflowDir string, runner Runner) (*Engine, error) {
 	if db == nil || artifacts == nil || workflowDir == "" || runner == nil {
 		return nil, errors.New("DB1, artifacts, workflow directory, and runner are required")
 	}
@@ -477,11 +477,11 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	}
 }
 
-func (e *Engine) parkOnError(ctx context.Context, item db1.WorkItem, reason string, cause error) error {
+func (e *Engine) parkOnError(ctx context.Context, item workflowstore.WorkItem, reason string, cause error) error {
 	return e.parkAfterSpend(ctx, item, reason, cause, 0)
 }
 
-func (e *Engine) parkAfterSpend(ctx context.Context, item db1.WorkItem, reason string, cause error, costUSD float64) error {
+func (e *Engine) parkAfterSpend(ctx context.Context, item workflowstore.WorkItem, reason string, cause error, costUSD float64) error {
 	detail := reason
 	if cause != nil {
 		detail += ": " + safeDiagnostic(cause.Error())

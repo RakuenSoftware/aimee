@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+#include "util.h"               /* SAFE_EXEC_TIMEOUT */
 
 /* base64 of known payloads (precomputed so the test needs no codec):
  *   "a\0b" (3 bytes) -> "YQBi"      "x\0y" (3 bytes) -> "eAB5"
@@ -244,6 +245,14 @@ int main(void)
       char *sbad = r->exec_shell(r, "exit 5", &src);
       assert(src != 0);
       free(sbad);
+
+      /* The deadline crosses both halves of the detached protocol and is
+       * enforced by the local shared runner, not merely documented in the
+       * server-side provider vtable. */
+      assert(r->exec_shell_timeout != NULL);
+      char *stimeout = r->exec_shell_timeout(r, "sleep 2", 20, &src);
+      assert(src == SAFE_EXEC_TIMEOUT);
+      free(stimeout);
 
       unlink(fpath);
       rmdir(dir);

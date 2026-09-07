@@ -61,6 +61,45 @@ else
 fi
 if kb_is_serving team; then bad "'team' must not count as serving"; else ok "team -> one-shot"; fi
 
+# Exercise the persisted 0.4.1 -> 0.4.2 authorization transition without Docker.
+grants_tmp=$(mktemp -d)
+mkdir -p "$grants_tmp/image" "$grants_tmp/home"
+cat > "$grants_tmp/image/memory.grant" <<'GRANT'
+version=1
+principal_class=1
+principal_ref=7
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-memory
+publish=
+subscribe=
+request=
+serve=5889,5890,5891,5892,5893,5894,5895
+GRANT
+sed 's/,5895$//' "$grants_tmp/image/memory.grant" > "$grants_tmp/home/memory.grant"
+seed_kb_module_grants "$grants_tmp/image" "$grants_tmp/home"
+if cmp -s "$grants_tmp/image/memory.grant" "$grants_tmp/home/memory.grant"; then
+    ok "0.4.1 KB memory grant gains the memory-data stage"
+else bad "upgrade left memory-data unauthorized"; fi
+seed_kb_module_grants "$grants_tmp/image" "$grants_tmp/home"
+if cmp -s "$grants_tmp/image/memory.grant" "$grants_tmp/home/memory.grant"; then
+    ok "grant migration is idempotent"
+else bad "repeat grant migration changed policy"; fi
+# A narrower policy with a seed record must never be overwritten.
+sed 's/serve=.*/serve=5889/' "$grants_tmp/image/memory.grant" > "$grants_tmp/home/memory.grant"
+seed_kb_module_grants "$grants_tmp/image" "$grants_tmp/home"
+if [ "$(grep '^serve=' "$grants_tmp/home/memory.grant")" = 'serve=5889' ]; then
+    ok "operator-modified grant remains narrow"
+else bad "operator grant was overwritten"; fi
+# Nor may a pre-record policy edit masquerade as a historical image default.
+rm "$grants_tmp/home/.seeded/memory.grant"
+sed -e 's/,5895$//' -e 's/principal_ref=7/principal_ref=999/' \
+    "$grants_tmp/image/memory.grant" > "$grants_tmp/home/memory.grant"
+seed_kb_module_grants "$grants_tmp/image" "$grants_tmp/home"
+if grep -q '^principal_ref=999$' "$grants_tmp/home/memory.grant"; then
+    ok "historical recognition preserves edited identity"
+else bad "edited historical policy was overwritten"; fi
+rm -rf "$grants_tmp"
+
 echo
 echo "start_embedder: refuses only when it is actually serving"
 # read_cfg_embedding_model shells out to the aimee-kb binary; stub it to "nothing set".

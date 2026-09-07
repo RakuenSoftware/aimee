@@ -32,7 +32,7 @@
  * to record, unreachable is a reason to retry -- so anything that must
  * distinguish them needs the status word, not this return code.
  *
- * The Go caller-side does NOT have this problem: server-go/db1's DecodeFields
+ * The Go caller-side does NOT have this problem: server-go/aimee's DecodeFields
  * returns the status alongside the fields, so a Go consumer sees MISSING
  * distinctly. This is a property of the C client, not of the wire.
  *

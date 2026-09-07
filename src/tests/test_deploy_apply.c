@@ -4,10 +4,8 @@
  *   1. the deploy never passes --remove-orphans (the managed compose shares
  *      COMPOSE_PROJECT_NAME with compose.server-managed.yaml, so an orphan sweep
  *      stops and removes aimee-server itself — the container running the deploy);
- *   2. KB and LLM have separate --no-deps start commands, allowing the worker to
- *      start KB first without waiting for LLM model readiness;
- *   3. the legacy pre-baked aimee-llm-cpu container is retired, so it cannot keep
- *      answering to the `aimee-llm` network name alongside the one LLM service.
+ *   2. embedding and synthesis have separate --no-deps start commands;
+ *   3. switching to external models retires only the unselected local services.
  *
  * deploy_apply.c is included directly to reach its static helpers; the two config
  * symbols it calls are stubbed so the test needs no database. */
@@ -32,7 +30,7 @@
 
 /* --- stubs for the config surface deploy_apply.c pulls in --- */
 
-static char g_stub_profiles[64] = "kb,llm";
+static char g_stub_profiles[64] = "embedding,llm";
 static char g_stub_random_hex = 'a';
 
 const char *aimee_home(void)
@@ -141,58 +139,6 @@ static void test_capture_keeps_terminal_output(void)
    printf("  deploy diagnostics retain the terminal output across stages ok\n");
 }
 
-static void test_managed_kb_bearer_is_vault_persistent(void)
-{
-   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
-   char first[DEPLOY_KB_TOKEN_MAX + 1], second[DEPLOY_KB_TOKEN_MAX + 1];
-   g_stub_random_hex = 'b';
-   assert(deploy_kb_token(first, sizeof(first)) == 0);
-   assert(strncmp(first, DEPLOY_KB_SERVICE_SCOPE, sizeof(DEPLOY_KB_SERVICE_SCOPE) - 1) == 0);
-   assert(strlen(first) == DEPLOY_KB_TOKEN_MAX);
-   g_stub_random_hex = 'c';
-   assert(deploy_kb_token(second, sizeof(second)) == 0);
-   assert(strcmp(first, second) == 0);
-
-   /* Upgrade an owner-strength legacy value in place instead of retaining its
-    * administrative authority or needlessly rotating its secret. */
-   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
-   assert(runtime_secret_store(
-              "AIMEE_KB_API_BEARER_TOKEN",
-              "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd") == 0);
-   assert(deploy_kb_token(first, sizeof(first)) == 0);
-   assert(strcmp(first, "scope:service:aimee-server:"
-                        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd") == 0);
-   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
-   printf("  managed KB bearer is scoped, upgraded, and retained in Vault ok\n");
-}
-
-static void test_managed_kb_application_identity_is_independent(void)
-{
-   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
-   runtime_secret_remove("AIMEE_KB_SERVICE_IDENTITY_TOKEN");
-   char bearer[DEPLOY_KB_TOKEN_MAX + 1], identity[DEPLOY_KB_TOKEN_MAX + 1];
-   g_stub_random_hex = 'e';
-   assert(deploy_kb_token(bearer, sizeof(bearer)) == 0);
-   g_stub_random_hex = 'f';
-   assert(deploy_kb_service_identity_token(identity, sizeof(identity)) == 0);
-   assert(deploy_kb_scoped_token_valid(bearer));
-   assert(deploy_kb_scoped_token_valid(identity));
-   assert(strcmp(bearer, identity) != 0);
-   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
-   runtime_secret_remove("AIMEE_KB_SERVICE_IDENTITY_TOKEN");
-   printf("  managed KB application identity is independently rotated and scoped ok\n");
-}
-
-static void test_managed_identity_activation_resets_live_client(void)
-{
-   g_stub_mtls_resets = 0;
-   g_stub_dependency_resets = 0;
-   deploy_managed_identity_activated();
-   assert(g_stub_mtls_resets == 1);
-   assert(g_stub_dependency_resets == 1);
-   printf("  managed identity activates immediately in the live KB client ok\n");
-}
-
 static void test_managed_llm_service_credential(void)
 {
    char tmp[256];
@@ -203,19 +149,16 @@ static void test_managed_llm_service_credential(void)
    runtime_secret_remove("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
    unsetenv("SYNTHESIS_API_KEY");
    unsetenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
-   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb,llm");
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "embedding,llm");
 
    g_stub_random_hex = 'a';
    int managed_llm = 0;
-   int managed_kb = 0;
-   int managed_identity = 0;
-   char **envp = build_deploy_envp(NULL, 0, &managed_llm, &managed_kb, &managed_identity);
+   int managed_embedding = 0;
+   char **envp = build_deploy_envp(NULL, 0, &managed_llm, &managed_embedding);
    assert(envp != NULL);
    assert(managed_llm == 1);
-   assert(managed_kb == 1);
-   assert(managed_identity == 1);
-   assert(strcmp(envp_value(envp, "AIMEE_MANAGED_KB_MEMBER"), "release-operator") == 0);
-   assert(envp_key_count(envp, "AIMEE_MANAGED_KB_MEMBER") == 1);
+   assert(managed_embedding == 1);
+   assert(envp_value(envp, "AIMEE_MANAGED_KB_MEMBER") == NULL);
    const char *token = envp_value(envp, "SYNTHESIS_API_KEY");
    assert(token != NULL && strlen(token) == 64);
    for (size_t i = 0; i < 64; i++)
@@ -225,8 +168,8 @@ static void test_managed_llm_service_credential(void)
    assert(envp_key_count(envp, "SYNTHESIS_AUTH_REQUIRED") == 1);
    assert(setenv("COMPOSE_PROFILES", "attacker-profile", 1) == 0);
    free_envp(envp);
-   envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
-   assert(strcmp(envp_value(envp, "COMPOSE_PROFILES"), "kb,llm") == 0);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL);
+   assert(strcmp(envp_value(envp, "COMPOSE_PROFILES"), "embedding,llm") == 0);
    assert(envp_key_count(envp, "COMPOSE_PROFILES") == 1);
    free_envp(envp);
 
@@ -237,7 +180,7 @@ static void test_managed_llm_service_credential(void)
 
    /* Re-apply reads the vaulted identity instead of silently rotating it. */
    g_stub_random_hex = 'b';
-   envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL);
    token = envp_value(envp, "SYNTHESIS_API_KEY");
    assert(token != NULL && token[0] == 'a');
    free_envp(envp);
@@ -245,7 +188,7 @@ static void test_managed_llm_service_credential(void)
    /* Inherited empty OR non-empty child state cannot shadow the managed file. */
    assert(setenv("SYNTHESIS_API_KEY", "stale-inherited-service-token-1234", 1) == 0);
    assert(setenv("SYNTHESIS_AUTH_REQUIRED", "0", 1) == 0);
-   envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL);
    assert(envp_key_count(envp, "SYNTHESIS_API_KEY") == 1);
    token = envp_value(envp, "SYNTHESIS_API_KEY");
    assert(token != NULL && token[0] == 'a');
@@ -257,7 +200,7 @@ static void test_managed_llm_service_credential(void)
     * applying it seals the child credential and makes it authoritative. */
    assert(runtime_secret_store("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
                                "operator-managed-service-token-1234") == 0);
-   envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL);
    assert(strcmp(envp_value(envp, "SYNTHESIS_API_KEY"), "operator-managed-service-token-1234") ==
           0);
    assert(envp_key_count(envp, "SYNTHESIS_API_KEY") == 1);
@@ -265,7 +208,7 @@ static void test_managed_llm_service_credential(void)
    runtime_secret_remove("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
    assert(runtime_secret_store("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE",
                                "invalid token with spaces") == 0);
-   assert(build_deploy_envp(NULL, 0, NULL, NULL, NULL) == NULL);
+   assert(build_deploy_envp(NULL, 0, NULL, NULL) == NULL);
    runtime_secret_remove("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
 
    /* A historical pre-Vault file is accepted only as one-shot migration input:
@@ -278,16 +221,16 @@ static void test_managed_llm_service_credential(void)
    assert(write(legacy_fd, legacy, strlen(legacy)) == (ssize_t)strlen(legacy));
    assert(close(legacy_fd) == 0);
    assert(chmod(path, 0644) == 0);
-   assert(build_deploy_envp(NULL, 0, NULL, NULL, NULL) == NULL);
+   assert(build_deploy_envp(NULL, 0, NULL, NULL) == NULL);
    assert(chmod(path, 0600) == 0);
    char real_path[PATH_MAX];
    snprintf(real_path, sizeof(real_path), "%s.real", path);
    assert(rename(path, real_path) == 0);
    assert(symlink(real_path, path) == 0);
-   assert(build_deploy_envp(NULL, 0, NULL, NULL, NULL) == NULL);
+   assert(build_deploy_envp(NULL, 0, NULL, NULL) == NULL);
    assert(unlink(path) == 0);
    assert(rename(real_path, path) == 0);
-   envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL);
    assert(envp != NULL);
    assert(strcmp(envp_value(envp, "SYNTHESIS_API_KEY"), legacy) == 0);
    free_envp(envp);
@@ -296,27 +239,23 @@ static void test_managed_llm_service_credential(void)
    /* No local LLM means no credential is invented or passed. */
    unsetenv("SYNTHESIS_API_KEY");
    unsetenv("SYNTHESIS_AUTH_REQUIRED");
-   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb");
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "embedding");
    managed_llm = 1;
-   managed_identity = 0;
-   envp = build_deploy_envp(NULL, 0, &managed_llm, &managed_kb, &managed_identity);
+   envp = build_deploy_envp(NULL, 0, &managed_llm, &managed_embedding);
    assert(envp != NULL && envp_value(envp, "SYNTHESIS_API_KEY") == NULL);
    assert(envp_value(envp, "SYNTHESIS_AUTH_REQUIRED") == NULL);
    assert(managed_llm == 0);
-   assert(managed_kb == 1);
-   assert(managed_identity == 1);
+   assert(managed_embedding == 1);
    free_envp(envp);
 
-   /* A complete explicit packet wins; a partial packet is never mixed with a
-    * wizard-generated identity. */
+   /* KB connection credentials are independent of model provisioning. A
+    * partial legacy enrollment packet cannot block local embedding. */
    assert(runtime_secret_store("AIMEE_KB_CONN", "aimee://kb:8745?ca=sha256:x&enroll=x") == 0);
    assert(setenv("AIMEE_SERVER_ID", "operator-server", 1) == 0);
-   assert(setenv("AIMEE_SERVER_TEAM_ID", "7", 1) == 0);
-   envp = build_deploy_envp(NULL, 0, NULL, NULL, &managed_identity);
-   assert(envp != NULL && managed_identity == 0);
+   envp = build_deploy_envp(NULL, 0, NULL, NULL);
+   assert(envp != NULL);
    free_envp(envp);
-   unsetenv("AIMEE_SERVER_TEAM_ID");
-   assert(build_deploy_envp(NULL, 0, NULL, NULL, NULL) == NULL);
+   unsetenv("AIMEE_SERVER_ID");
    runtime_secret_remove("AIMEE_KB_CONN");
    unsetenv("AIMEE_SERVER_ID");
 
@@ -327,7 +266,7 @@ static void test_managed_llm_service_credential(void)
    unsetenv("COMPOSE_PROFILES");
    unsetenv("AIMEE_MANAGED_LLM_AUTH_TOKEN_OVERRIDE");
    unsetenv("AIMEE_SERVER_TEAM_ID");
-   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb,llm");
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "embedding,llm");
    printf("  managed kb -> llm credential is stable, private, and scoped ok\n");
 }
 
@@ -335,16 +274,16 @@ static void test_managed_llm_service_credential(void)
  * fallback embedder left to come up with instead: the container would print why it
  * cannot serve retrieval and exit, so the deploy fails either way. It fails here
  * because this is where the wizard shows the reason, rather than a container log. */
-static void test_managed_kb_without_an_embedder_is_refused(void)
+static void test_managed_embedding_without_an_embedder_is_refused(void)
 {
    char err[256];
    char **envp;
-   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb");
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "embedding");
    g_stub_embedder_model = "";
    g_stub_embedder_url = "";
 
    err[0] = '\0';
-   assert(build_deploy_envp(err, sizeof(err), NULL, NULL, NULL) == NULL);
+   assert(build_deploy_envp(err, sizeof(err), NULL, NULL) == NULL);
    assert(strstr(err, "no embedder selected") != NULL);
    /* The message has to name a way out, not just the problem. */
    assert(strstr(err, "embedder_model") != NULL);
@@ -352,26 +291,24 @@ static void test_managed_kb_without_an_embedder_is_refused(void)
 
    /* A bundled model satisfies it. */
    g_stub_embedder_model = "bekko-a25m";
-   envp = build_deploy_envp(err, sizeof(err), NULL, NULL, NULL);
+   envp = build_deploy_envp(err, sizeof(err), NULL, NULL);
    assert(envp != NULL);
    free_envp(envp);
 
    /* So does an external endpoint, on its own. */
    g_stub_embedder_model = "";
    g_stub_embedder_url = "http://embedder.example:8760";
-   envp = build_deploy_envp(err, sizeof(err), NULL, NULL, NULL);
+   envp = build_deploy_envp(err, sizeof(err), NULL, NULL);
    assert(envp != NULL);
    free_envp(envp);
 
-   /* A remote kb deploys no container, so the check does not apply to it. */
+   /* A connected KB cannot substitute for the user's embedding service. */
    g_stub_profiles[0] = '\0';
    g_stub_embedder_model = "";
    g_stub_embedder_url = "";
-   envp = build_deploy_envp(err, sizeof(err), NULL, NULL, NULL);
-   assert(envp != NULL);
-   free_envp(envp);
+   assert(build_deploy_envp(err, sizeof(err), NULL, NULL) == NULL);
 
-   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "kb,llm");
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "embedding,llm");
    g_stub_embedder_model = "bekko-a25m";
    g_stub_embedder_url = "";
    printf("  managed kb with no embedder is refused, with a way out named ok\n");
@@ -385,7 +322,7 @@ static void test_deploy_argv_is_orderable_and_has_no_remove_orphans(void)
    deploy_apply_compose_file(file, sizeof(file));
 
    const char *argv[10];
-   int n = deploy_up_service_argv(file, "aimee-kb", 1, argv, sizeof(argv) / sizeof(argv[0]));
+   int n = deploy_up_service_argv(file, "aimee-embedder", 1, argv, sizeof(argv) / sizeof(argv[0]));
    assert(n == 9);
    assert(argv[n] == NULL);
 
@@ -402,7 +339,7 @@ static void test_deploy_argv_is_orderable_and_has_no_remove_orphans(void)
    assert(strcmp(argv[5], "-d") == 0);
    assert(strcmp(argv[6], "--no-deps") == 0);
    assert(strcmp(argv[7], "--force-recreate") == 0);
-   assert(strcmp(argv[8], "aimee-kb") == 0);
+   assert(strcmp(argv[8], "aimee-embedder") == 0);
 
    n = deploy_up_service_argv(file, "aimee-llm", 0, argv, sizeof(argv) / sizeof(argv[0]));
    assert(n == 8 && strcmp(argv[7], "aimee-llm") == 0);
@@ -414,112 +351,66 @@ static void test_deploy_argv_is_orderable_and_has_no_remove_orphans(void)
    assert(deploy_up_service_argv(file, "aimee-kb", 1, tight, 8) == -1);
    assert(deploy_up_service_argv(file, "aimee-kb", 1, NULL, 10) == -1);
    assert(deploy_up_service_argv(file, "", 1, argv, 10) == -1);
-   printf("  deploy argv supports explicit KB-then-LLM ordering without orphan removal ok\n");
+   printf("  deploy argv supports explicit embedder-then-LLM ordering without orphan removal ok\n");
 }
 
-static void test_managed_kb_credential_bootstrap_is_stdin_only(void)
+/* Execute the worker against a recording Docker double: transitions must stop
+ * unselected models, leave the owner/store alone, and surface stop failures. */
+static void test_model_transitions(void)
 {
-   const char *argv[16];
-   int n = deploy_kb_vault_bootstrap_argv("/managed.yaml", argv, sizeof(argv) / sizeof(argv[0]));
-   assert(n > 0 && argv[n] == NULL);
-   assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
-   assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "run") == 0);
-   int saw_rm = 0, saw_stdin_bootstrap = 0, saw_kb = 0, saw_overwrite = 0;
-   for (int i = 0; i < n; i++)
-   {
-      assert(strstr(argv[i], "SYNTHESIS_API_KEY=") == NULL);
-      assert(strstr(argv[i], "Bearer ") == NULL);
-      if (strcmp(argv[i], "--rm") == 0)
-         saw_rm = 1;
-      if (strcmp(argv[i], "--bootstrap-vault-stdin") == 0)
-         saw_stdin_bootstrap = 1;
-      if (strcmp(argv[i], "aimee-kb") == 0)
-         saw_kb = 1;
-      if (strcmp(argv[i], "AIMEE_VAULT_ENV_OVERWRITE=1") == 0)
-         saw_overwrite = 1;
-   }
-   assert(saw_rm && saw_stdin_bootstrap && saw_kb && saw_overwrite);
-   assert(deploy_kb_vault_bootstrap_argv("/managed.yaml", argv, (size_t)n) == -1);
-   printf("  managed KB service credential crosses only a disposable stdin bootstrap ok\n");
-}
-
-/* --- wizard-managed server workload identity --- */
-
-static void test_managed_identity_bootstrap_runs_inside_kb_without_secret_argv(void)
-{
-   const char *argv[16];
-   int n = deploy_identity_bootstrap_argv("/managed.yaml", argv, sizeof(argv) / sizeof(argv[0]));
-   assert(n > 0 && argv[n] == NULL);
-   assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
-   assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "run") == 0);
-
-   int saw_bootstrap = 0;
-   for (int i = 0; i < n; i++)
-   {
-      assert(strstr(argv[i], "enroll=") == NULL);
-      assert(strstr(argv[i], "PRIVATE KEY") == NULL);
-      assert(strcmp(argv[i], "--no-deps") != 0);
-      if (strcmp(argv[i], "aimee-server-identity") == 0)
-         saw_bootstrap = 1;
-   }
-   assert(saw_bootstrap);
-   assert(deploy_identity_bootstrap_argv("/managed.yaml", argv, (size_t)n) == -1);
-   printf("  deploy invokes the KB-owned managed identity bootstrap without host secret argv ok\n");
-}
-
-static void test_managed_authority_bootstrap_is_isolated_and_secret_free(void)
-{
-   const char *argv[16];
-   int n = deploy_authority_bootstrap_argv("/managed.yaml", argv, sizeof(argv) / sizeof(argv[0]));
-   assert(n > 0 && argv[n] == NULL);
-   assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
-   assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "run") == 0);
-
-   int saw_bootstrap = 0;
-   for (int i = 0; i < n; i++)
-   {
-      assert(strstr(argv[i], "PRIVATE KEY") == NULL);
-      assert(strstr(argv[i], "KMS_KEY") == NULL);
-      assert(strstr(argv[i], "postgresql://") == NULL);
-      assert(strcmp(argv[i], "--no-deps") != 0);
-      if (strcmp(argv[i], "aimee-authority-bootstrap") == 0)
-         saw_bootstrap = 1;
-   }
-   assert(saw_bootstrap);
-   assert(deploy_authority_bootstrap_argv("/managed.yaml", argv, (size_t)n) == -1);
-   printf("  deploy invokes isolated authority bootstrap without host secret argv ok\n");
-}
-
-/* --- the legacy CPU container is retired by name --- */
-
-static void test_retire_targets_legacy_cpu_container(void)
-{
-   /* aimee-llm-cpu is no longer a service of the managed compose file, so `up`
-    * cannot touch it and `docker compose rm <service>` would not find it. It has
-    * to be removed by CONTAINER name, or it keeps holding the `aimee-llm` network
-    * alias next to the real LLM service and the kb can reach the stale one.
-    *
-    * Assert the command, not the effect of running it: the retirement execs
-    * docker, and whether a docker exists differs between a dev box and CI. */
-   const char *argv[8];
-   int n = deploy_retire_argv(argv, sizeof(argv) / sizeof(argv[0]));
-   assert(n == 4);
-   assert(argv[n] == NULL);
-   assert(strcmp(argv[0], "docker") == 0);
-   assert(strcmp(argv[1], "rm") == 0);
-   assert(strcmp(argv[2], "-f") == 0);
-   /* the container name, NOT the compose service name */
-   assert(strcmp(argv[3], "aimee-aimee-llm-cpu-1") == 0);
-
-   /* `docker compose rm` would be wrong here — the service no longer exists. */
-   for (int i = 0; i < n; i++)
-      assert(strcmp(argv[i], "compose") != 0);
-
-   /* a buffer with no room for the NULL terminator is refused, not overrun */
-   const char *tight[4];
-   assert(deploy_retire_argv(tight, 4) == -1);
-   assert(deploy_retire_argv(NULL, 8) == -1);
-   printf("  legacy cpu retirement targets the container by name ok\n");
+   char dir[PATH_MAX], docker[PATH_MAX], log[PATH_MAX];
+   snprintf(dir, sizeof(dir), "%s/aimee-deploy-switch-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(dir));
+   assert(snprintf(docker, sizeof(docker), "%s/docker", dir) < (int)sizeof(docker));
+   assert(snprintf(log, sizeof(log), "%s/commands", dir) < (int)sizeof(log));
+   FILE *f = fopen(docker, "w");
+   assert(f);
+   fputs("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DEPLOY_TEST_LOG\"\n"
+         "[ \"${DEPLOY_TEST_FAIL:-0}\" = 0 ]\n",
+         f);
+   assert(fclose(f) == 0 && chmod(docker, 0700) == 0);
+   char *old_path = strdup(getenv("PATH"));
+   assert(old_path);
+   setenv("PATH", dir, 1);
+   setenv("DEPLOY_TEST_LOG", log, 1);
+   setenv("AIMEE_DEPLOY_COMPOSE_FILE", "/models.yaml", 1);
+   g_stub_embedder_url = "https://external.example/embed";
+   g_stub_profiles[0] = '\0';
+   deploy_worker(NULL);
+   assert(g_last_exit == 0);
+   char commands[2048] = {0};
+   f = fopen(log, "r");
+   assert(f && fread(commands, 1, sizeof(commands) - 1, f) > 0);
+   fclose(f);
+   assert(strstr(commands, "--stop --force aimee-embedder\n"));
+   assert(strstr(commands, "--stop --force aimee-llm\n"));
+   assert(!strstr(commands, "up "));
+   assert(!strstr(commands, "aimee-server") && !strstr(commands, "aimee-store-db"));
+   assert(unlink(log) == 0);
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "embedding");
+   deploy_worker(NULL);
+   assert(g_last_exit == 0);
+   memset(commands, 0, sizeof(commands));
+   f = fopen(log, "r");
+   assert(f && fread(commands, 1, sizeof(commands) - 1, f) > 0);
+   fclose(f);
+   assert(strstr(commands, "--stop --force aimee-llm\n"));
+   assert(strstr(commands, "up -d --no-deps aimee-embedder\n"));
+   assert(!strstr(commands, "--stop --force aimee-embedder"));
+   setenv("DEPLOY_TEST_FAIL", "1", 1);
+   deploy_worker(NULL);
+   assert(g_last_exit != 0);
+   unsetenv("DEPLOY_TEST_FAIL");
+   unsetenv("DEPLOY_TEST_LOG");
+   unsetenv("AIMEE_DEPLOY_COMPOSE_FILE");
+   setenv("PATH", old_path, 1);
+   free(old_path);
+   unlink(log);
+   unlink(docker);
+   rmdir(dir);
+   g_stub_embedder_url = "";
+   snprintf(g_stub_profiles, sizeof(g_stub_profiles), "embedding,llm");
+   printf("  model switches stop only unselected siblings and propagate errors ok\n");
 }
 
 /* --- compose file resolution --- */
@@ -541,11 +432,13 @@ static void test_compose_file_default(void)
  * orchestrator in the list made a never-deployed box offer "Re-deploy". Labels
  * are abbreviated to the one key the filter reads. */
 #define PS_SERVER_ENTRY                                                                            \
-   "{\"Name\":\"aimee-aimee-server-1\",\"State\":\"running\",\"Labels\":\"com.docker.compose."     \
+   "{\"Service\":\"aimee-server\",\"Name\":\"aimee-aimee-server-1\",\"State\":\"running\","        \
+   "\"Labels\":\"com.docker.compose."                                                              \
    "project=aimee,com.docker.compose.project.config_files=/opt/aimee-src/compose.server-managed."  \
    "yaml\"}"
-#define PS_KB_ENTRY                                                                                \
-   "{\"Name\":\"aimee-aimee-kb-1\",\"State\":\"running\",\"Labels\":\"com.docker.compose."         \
+#define PS_MODEL_ENTRY                                                                             \
+   "{\"Service\":\"aimee-embedder\",\"Name\":\"aimee-aimee-embedder-1\",\"State\":\"running\","    \
+   "\"Labels\":\"com.docker.compose."                                                              \
    "project=aimee,com.docker.compose.project.config_files=/opt/aimee/deploy/"                      \
    "aimee-managed.compose."                                                                        \
    "yaml\"}"
@@ -556,15 +449,15 @@ static void test_ps_drops_the_orchestrator_from_the_service_list(void)
 {
    /* NDJSON shape (newer compose). */
    char ps[4096];
-   snprintf(ps, sizeof(ps), "%s\n%s\n", PS_KB_ENTRY, PS_SERVER_ENTRY);
+   snprintf(ps, sizeof(ps), "%s\n%s\n", PS_MODEL_ENTRY, PS_SERVER_ENTRY);
    deploy_filter_managed_ps(ps, sizeof(ps), k_managed);
-   assert(strstr(ps, "aimee-aimee-kb-1") != NULL);
+   assert(strstr(ps, "aimee-aimee-embedder-1") != NULL);
    assert(strstr(ps, "aimee-aimee-server-1") == NULL);
 
    /* JSON array shape (older compose). */
-   snprintf(ps, sizeof(ps), "[%s,%s]", PS_SERVER_ENTRY, PS_KB_ENTRY);
+   snprintf(ps, sizeof(ps), "[%s,%s]", PS_SERVER_ENTRY, PS_MODEL_ENTRY);
    deploy_filter_managed_ps(ps, sizeof(ps), k_managed);
-   assert(strstr(ps, "aimee-aimee-kb-1") != NULL);
+   assert(strstr(ps, "aimee-aimee-embedder-1") != NULL);
    assert(strstr(ps, "aimee-aimee-server-1") == NULL);
    printf("  ps drops the orchestrator from the managed service list ok\n");
 }
@@ -602,16 +495,10 @@ int main(void)
 {
    printf("test_deploy_apply\n");
    test_capture_keeps_terminal_output();
-   test_managed_kb_bearer_is_vault_persistent();
-   test_managed_kb_application_identity_is_independent();
-   test_managed_identity_activation_resets_live_client();
    test_managed_llm_service_credential();
-   test_managed_kb_without_an_embedder_is_refused();
+   test_managed_embedding_without_an_embedder_is_refused();
    test_deploy_argv_is_orderable_and_has_no_remove_orphans();
-   test_managed_kb_credential_bootstrap_is_stdin_only();
-   test_managed_identity_bootstrap_runs_inside_kb_without_secret_argv();
-   test_managed_authority_bootstrap_is_isolated_and_secret_free();
-   test_retire_targets_legacy_cpu_container();
+   test_model_transitions();
    test_compose_file_default();
    test_ps_drops_the_orchestrator_from_the_service_list();
    test_ps_is_empty_before_the_first_deploy();

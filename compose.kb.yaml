@@ -1,0 +1,45 @@
+# Explicit shared-knowledge deployment; uses the same application and PostgreSQL
+# images as the local Server. Never layer this over an existing Server home.
+services:
+  aimee-store-db:
+    extends: {file: compose.yaml, service: aimee-store-db}
+  aimee-kb:
+    extends: {file: compose.yaml, service: aimee-server}
+    environment:
+      AIMEE_INSTANCE_ROLE: kb
+      AIMEE_RUNTIME_WEB_ENABLED: '0'
+      AIMEE_KB_MTLS_PORT: '8745'
+      AIMEE_KB_MTLS_HOST: ${AIMEE_KB_HOST:-localhost}
+    ports: !override
+      - '127.0.0.1:${AIMEE_KB_HEALTH_PORT:-8741}:8741'
+      - '${AIMEE_KB_PORT:-8745}:8745'
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS --max-time 4 http://127.0.0.1:8741/v1/health >/dev/null']
+  aimee-embedder:
+    extends: {file: compose.yaml, service: aimee-embedder}
+    depends_on: !override
+      aimee-kb: {condition: service_started}
+  aimee-llm:
+    extends: {file: compose.yaml, service: aimee-llm}
+    depends_on: !override
+      aimee-kb: {condition: service_started}
+volumes:
+  aimee-postgres-encrypted:
+  aimee-store-tls:
+  aimee-server-home:
+  aimee-server-workspaces:
+  aimee-model-tls:
+    driver_opts: {type: tmpfs, device: tmpfs, o: 'size=1048576,uid=1000,gid=1000,mode=0700'}
+  aimee-embedding-tls:
+    driver_opts: {type: tmpfs, device: tmpfs, o: 'size=1048576,uid=1000,gid=1000,mode=0700'}
+  aimee-synthesis-tls:
+    driver_opts: {type: tmpfs, device: tmpfs, o: 'size=1048576,uid=1000,gid=1000,mode=0700'}
+networks:
+  default:
+  store: {internal: true}
+  models: {internal: true}
+
+# Resolved only by the host-side stdin bootstrap; never container metadata.
+x-aimee-vault:
+  AIMEE_KB_API_BEARER_TOKEN: ${AIMEE_KB_API_BEARER_TOKEN:?AIMEE_KB_API_BEARER_TOKEN is required for KB authority}
+  AIMEE_KB_SERVICE_IDENTITY_TOKEN: ${AIMEE_KB_SERVICE_IDENTITY_TOKEN:-}

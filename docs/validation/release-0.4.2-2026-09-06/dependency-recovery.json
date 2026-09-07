@@ -1,0 +1,47 @@
+[
+  {
+    "dependency": "release042-split-aimee-kb-1",
+    "before_http_status": 200,
+    "during": [
+      502,
+      {
+        "error": "rules backend unavailable"
+      },
+      0.0046
+    ],
+    "server_control": [
+      200,
+      {
+        "status": "ok",
+        "service": "aimee-server"
+      },
+      0.0002
+    ],
+    "dependency_healthy_after_start": true,
+    "after_http_status": 200,
+    "recovered": true
+  },
+  {
+    "dependency": "release042-split-aimee-store-db-1",
+    "before_http_status": 200,
+    "during": [
+      200,
+      {
+        "status": "error",
+        "message": "user memory module unavailable"
+      },
+      0.5017
+    ],
+    "server_control": [
+      200,
+      {
+        "status": "ok",
+        "service": "aimee-server"
+      },
+      0.0004
+    ],
+    "dependency_healthy_after_start": true,
+    "after_http_status": 200,
+    "recovered": true
+  }
+]

@@ -112,8 +112,8 @@ static int service_request_headers(char *out, size_t cap)
                ? snprintf(out, cap, "Authorization: %s\r\n", value)
                : -1;
    int have_oidc = runtime_secret_get("AIMEE_KB_CLIENT_OIDC_TOKEN", oidc, sizeof(oidc));
-   int have_service = runtime_secret_get("AIMEE_KB_SERVICE_IDENTITY_TOKEN", service_token,
-                                         sizeof(service_token));
+   int have_service =
+       runtime_secret_get("AIMEE_KB_SERVICE_IDENTITY_TOKEN", service_token, sizeof(service_token));
    int have_pam_user =
        runtime_secret_get("AIMEE_KB_CLIENT_PAM_USERNAME", pam_user, sizeof(pam_user));
    int have_pam_pass =
@@ -128,8 +128,8 @@ static int service_request_headers(char *out, size_t cap)
    else if (n > 0 && (size_t)n < cap && have_service &&
             aimee_core_bearer_value(service_value, sizeof(service_value), service_token) == 0)
    {
-      int added = snprintf(out + n, cap - (size_t)n,
-                           "X-Aimee-Service-Authorization: %s\r\n", service_value);
+      int added = snprintf(out + n, cap - (size_t)n, "X-Aimee-Service-Authorization: %s\r\n",
+                           service_value);
       n = added > 0 && (size_t)added < cap - (size_t)n ? n + added : -1;
    }
    else if (n > 0 && (size_t)n < cap && have_pam_user && have_pam_pass)
@@ -364,9 +364,10 @@ static int identity_load(const kb_enroll_conn_t *connection, char *ca, size_t ca
                cJSON_IsNumber(team_id) && team_id->valuedouble >= 1 &&
                team_id->valuedouble <= 9007199254740991.0 &&
                floor(team_id->valuedouble) == team_id->valuedouble;
-   int endpoint_ok = is_v1 ? connection != NULL
-                           : (!connection || (strcmp(connection->host, host->valuestring) == 0 &&
-                                              connection->port == (int)port->valuedouble));
+   int endpoint_ok =
+       is_v1 ? connection != NULL
+             : (is_v2 && (!connection || (strcmp(connection->host, host->valuestring) == 0 &&
+                                          connection->port == (int)port->valuedouble)));
    int ok = (is_v1 || is_v2) && endpoint_ok && cJSON_IsString(jca) && cJSON_IsString(jcert) &&
             cJSON_IsString(jkey) && strlen(jca->valuestring) < ca_cap &&
             strlen(jcert->valuestring) < cert_cap && strlen(jkey->valuestring) < key_cap &&
@@ -807,8 +808,8 @@ static void warn_unusable_identity_once(void)
 
    const cJSON *version = cJSON_GetObjectItemCaseSensitive(j, "version");
    const cJSON *state = cJSON_GetObjectItemCaseSensitive(j, "state");
-   const char *state_text = cJSON_IsString(state) && state->valuestring[0] ? state->valuestring
-                                                                          : "unset";
+   const char *state_text =
+       cJSON_IsString(state) && state->valuestring[0] ? state->valuestring : "unset";
    LOG_WARN("kb_client",
             "%s exists but is not usable (version=%d state=%s), so this server has no mTLS "
             "identity for the kb and will fall back to the plain endpoint. Managed server "
@@ -820,6 +821,10 @@ static void warn_unusable_identity_once(void)
 
 int kb_client_mtls_configured(void)
 {
+   /* An explicit disconnect takes precedence over a legacy managed identity,
+    * whose endpoint can otherwise remain usable without a connection string. */
+   if (strcmp(config_kb_mode(), "none") == 0)
+      return 0;
    char connection[4096];
    int have_connection = runtime_secret_get("AIMEE_KB_CONN", connection, sizeof(connection));
    OPENSSL_cleanse(connection, sizeof(connection));
@@ -843,6 +848,8 @@ int kb_client_mtls_managed_metadata(char *server_id_out, size_t server_id_cap,
       server_id_out[0] = '\0';
    if (team_id_out)
       *team_id_out = 0;
+   if (strcmp(config_kb_mode(), "none") == 0)
+      return 0;
    char ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
    identity_metadata_t metadata;
    int ok =
@@ -863,6 +870,8 @@ int kb_client_mtls_managed_metadata(char *server_id_out, size_t server_id_cap,
  * from the operator-supplied value. */
 static int ensure_enrolled(void)
 {
+   if (strcmp(config_kb_mode(), "none") == 0)
+      return -1;
    int rc = -1;
    pthread_mutex_lock(&g_lock);
    if (g_enrolled)

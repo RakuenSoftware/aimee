@@ -337,8 +337,10 @@ typedef struct
 
 provider_err_class_t provider_classify_error(int http_status);
 const char *provider_error_message(provider_err_class_t cls);
-void provider_health_update(const char *provider_name, int http_status);
-const provider_health_t *provider_health_get(const char *provider_name);
+/* Key is the stored provider registration, or the agent name for legacy rows.
+ * get returns a thread-local snapshot, valid until the next get on this thread. */
+void provider_health_update(const char *registration, int http_status);
+const provider_health_t *provider_health_get(const char *registration);
 
 /* HTTP */
 

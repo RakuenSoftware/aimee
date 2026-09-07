@@ -1,0 +1,22 @@
+{
+  "vm_id": 9437,
+  "hypervisor": "192.168.1.253",
+  "hostname": "aimee-testing-a8abc2e-042",
+  "ip_addresses": [
+    "192.168.0.220",
+    "172.17.0.1"
+  ],
+  "memory_mib": 16384,
+  "docker_images_before_pull": "",
+  "docker_containers_before_deploy": "",
+  "docker_volumes_before_deploy": "",
+  "initial_kernel_drivers": {
+    "loop": false,
+    "dm_mod": false,
+    "dm_crypt": false
+  },
+  "initial_device_nodes": {
+    "/dev/mapper/control": true,
+    "/dev/loop-control": true
+  }
+}

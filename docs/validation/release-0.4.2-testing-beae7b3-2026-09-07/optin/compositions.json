@@ -1,0 +1,47 @@
+[
+  {
+    "compose_files": [
+      "compose.yaml"
+    ],
+    "storage": "plain",
+    "passed": true
+  },
+  {
+    "compose_files": [
+      "compose.kb.yaml"
+    ],
+    "storage": "plain",
+    "passed": true
+  },
+  {
+    "compose_files": [
+      "compose.server-managed.yaml"
+    ],
+    "storage": "plain",
+    "passed": true
+  },
+  {
+    "compose_files": [
+      "compose.yaml",
+      "compose.luks.yaml"
+    ],
+    "storage": "luks",
+    "passed": true
+  },
+  {
+    "compose_files": [
+      "compose.kb.yaml",
+      "compose.kb.luks.yaml"
+    ],
+    "storage": "luks",
+    "passed": true
+  },
+  {
+    "compose_files": [
+      "compose.server-managed.yaml",
+      "compose.luks.yaml"
+    ],
+    "storage": "luks",
+    "passed": true
+  }
+]

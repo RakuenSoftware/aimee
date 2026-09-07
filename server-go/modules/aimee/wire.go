@@ -3,13 +3,13 @@
 //
 // 461 of the module's 463 operations use db1-fields-v2 and all of them answer
 // with the same five statuses, so the framing is written once here rather than
-// 19 times. server-go/db1/fields.go is the caller-side peer of these exact
+// 19 times. server-go/aimee/fields.go is the caller-side peer of these exact
 // bytes; the two files are mirrors and a change to either is a change to both.
 //
 // THE MODULE WAS RENAMED. THE WIRE WAS NOT. This package was `db1`, and became
 // `aimee` when the module absorbed everything specific to aimee-server. The
 // dialect it speaks is still called db1-fields-v2, the caller-side package is
-// still server-go/db1, and the event kinds its C clients compile against are
+// still server-go/aimee, and the event kinds its C clients compile against are
 // still AIMEE_DB1_EVENT_*. Those are names in a contract with parties that did
 // not move -- 461 call sites and a peer module -- so renaming them would be a
 // wire break dressed up as tidiness. A name in a contract belongs to the

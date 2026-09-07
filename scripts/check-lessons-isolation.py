@@ -18,16 +18,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Memory-fact recall + decay/prune surfaces. A `lessons_` reference in any of
 # these means the ledger has leaked into normal recall or the prune schedule.
 GUARDED = [
-    "src/modules/db2/c/memory_query.c",            # db2_memory_find_facts_like + fact recall
-    "src/modules/db2/c/memory_query_bookkeeping.c",
+    "server-go/modules/memory/data.go",            # shared scoped memory CRUD + recall
+    "server-go/modules/db2/memory_pg.go",
+    "server-go/modules/db2/memory_lifecycle.go",
+    "server-go/modules/db2/memory_sweeps.go",
+    "server-go/modules/db2/memory_aggregates.go",
     "src/modules/db2/c/fact_recall.c",
-    "src/modules/db2/c/memory_scope_query.c",
     "src/modules/db2/c/kb_maintenance.c",          # decay / prune sweep
-    "src/modules/db2/c/memory_lifecycle.c",
     "src/modules/db2/c/fact_lifecycle.c",
     "src/modules/db2/c/demotion.c",
-    "src/modules/db2/c/memory_health.c",
-    "src/modules/db2/c/memory_promotion.c",
 ]
 
 # A `lessons_` token that denotes a table reference (SQL identifier), not an

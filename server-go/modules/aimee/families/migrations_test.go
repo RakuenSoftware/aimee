@@ -101,6 +101,11 @@ func TestPendingSkipsWhatTheStoreHasApplied(t *testing.T) {
 		t.Fatalf("Migrations: %v", err)
 	}
 	last := all[len(all)-1].Version
+	for _, invalid := range []int64{-1, last + 1} {
+		if _, err := PendingMigrations(invalid); err == nil {
+			t.Errorf("unsupported installed version %d accepted", invalid)
+		}
+	}
 
 	// The ordinary case on every start after the first: nothing to do.
 	pending, err := PendingMigrations(last)

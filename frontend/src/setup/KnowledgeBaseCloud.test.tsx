@@ -26,13 +26,13 @@ type Call = { url: string; body: unknown };
 
 /** A fetch stub that answers /api/config, /api/config/set and the redeem
  *  endpoint, and records everything it was asked. */
-function stubFetch(redeem: { status: number; body: unknown }) {
+function stubFetch(redeem: { status: number; body: unknown }, config: Record<string, unknown> = {}) {
   const calls: Call[] = [];
   const impl = (async (url: string, init?: RequestInit) => {
     const body = init?.body != null ? JSON.parse(String(init.body)) : undefined;
     calls.push({ url: String(url), body });
     if (String(url).endsWith('/api/config')) {
-      return { ok: true, json: async () => ({ config: {} }) } as unknown as Response;
+      return { ok: true, json: async () => ({ config }) } as unknown as Response;
     }
     if (String(url).endsWith('/api/config/set')) {
       return { ok: true, status: 200, json: async () => ({ value: body?.value }) } as unknown as Response;
@@ -68,14 +68,14 @@ afterEach(() => {
 });
 
 describe('aimee cloud setup code', () => {
-  it('offers aimee cloud without displacing the local default', async () => {
+  it('offers shared knowledge without replacing personal-only default', async () => {
     const stub = stubFetch(OK_REDEEM);
     render(<KnowledgeBase onSaved={vi.fn()} fetchImpl={stub.impl} />);
     expect(await screen.findByText(/aimee cloud/i)).toBeTruthy();
     // aimee is self-hostable and local stays the recommended default; the
     // installer of an AGPL project should not steer people at a paid service.
-    expect(screen.getByText(/Deploy a local knowledge base \(recommended\)/i)).toBeTruthy();
-    const local = screen.getByLabelText(/Deploy a local knowledge base/i, { selector: 'input' }) as HTMLInputElement;
+    expect(screen.getByText(/Personal memory only/i)).toBeTruthy();
+    const local = screen.getByLabelText(/Personal memory only/i, { selector: 'input' }) as HTMLInputElement;
     expect(local.checked).toBe(true);
   });
 
@@ -113,7 +113,7 @@ describe('aimee cloud setup code', () => {
     // Trimmed, so a pasted code with stray whitespace still works.
     expect((redeem?.body as { code: string }).code).toBe('aimee-abcd-abcd-abcd-abcd-abcd');
 
-    fireEvent.click(screen.getByRole('button', { name: /Save & continue/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Save connection/i }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
 
     const saved = new Map(
@@ -124,6 +124,7 @@ describe('aimee cloud setup code', () => {
     expect(saved.get('kb_mode')).toBe('remote');
     expect(saved.get('kb_client_url')).toBe('https://api.aimee.rakuensoftware.com');
     expect(saved.get('kb_client_bearer_token')).toBe('aik_abc_def');
+    expect([...saved.keys()].every(key => key.startsWith('kb_'))).toBe(true);
     // Cloud persists exactly what the manual remote path would.
     expect(onSaved.mock.calls[0][1]).toBe('remote');
   });
@@ -131,7 +132,7 @@ describe('aimee cloud setup code', () => {
   it('cannot be saved before a code has been exchanged', async () => {
     const stub = stubFetch(OK_REDEEM);
     await openCloud(stub);
-    const save = screen.getByRole('button', { name: /Save & continue/i }) as HTMLButtonElement;
+    const save = screen.getByRole('button', { name: /Save connection/i }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
   });
 
@@ -162,5 +163,40 @@ describe('aimee cloud setup code', () => {
     fireEvent.click(screen.getByRole('button', { name: /Redeem code/i }));
     await screen.findByText(/did not return a usable knowledge base/i);
     expect(stub.calls.some((c) => c.url.endsWith('/api/config/set'))).toBe(false);
+  });
+});
+
+
+describe('existing KB enrollment', () => {
+  it('stores the connection and both credentials through Vault-only fields', async () => {
+    const stub = stubFetch(OK_REDEEM);
+    const onSaved = vi.fn();
+    render(<KnowledgeBase onSaved={onSaved} fetchImpl={stub.impl} />);
+    await screen.findByText(/Connect to an existing aimee-kb by hand/);
+    fireEvent.click(screen.getByLabelText(/Connect to an existing aimee-kb by hand/, { selector: 'input' }));
+    const connection = 'aimee://kb.example:8745?ca=sha256:fixture&enroll=fixture';
+    fireEvent.change(screen.getByLabelText('KB address or enrollment connection string'), { target: { value: connection } });
+    fireEvent.change(screen.getByLabelText('Bearer token'), { target: { value: 'synthetic-bearer' } });
+    fireEvent.change(screen.getByLabelText(/Service identity token/), { target: { value: 'synthetic-service-identity' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save connection/ }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    const writes = stub.calls.filter(c => c.url.endsWith('/api/config/set')).map(c => c.body as {key: string; value: unknown});
+    expect(writes.find(c => c.key === 'kb_connection_string')?.value).toBe(connection);
+    expect(writes.find(c => c.key === 'kb_service_identity_token')?.value).toBe('synthetic-service-identity');
+    expect(writes.find(c => c.key === 'kb_client_bearer_token')?.value).toBe('synthetic-bearer');
+    expect(writes.some(c => c.key === 'kb_client_url' && c.value === connection)).toBe(false);
+    expect(onSaved.mock.calls[0][0]).toContain('kb_connection_string');
+    expect((screen.getByLabelText('Bearer token') as HTMLInputElement).value).toBe('');
+  });
+
+  it('preserves stored secrets when the operator leaves the inputs empty', async () => {
+    const stub = stubFetch(OK_REDEEM, {kb_mode: 'remote', kb_connection_string: true, kb_client_bearer_token: true, kb_service_identity_token: true});
+    const onSaved = vi.fn();
+    render(<KnowledgeBase onSaved={onSaved} fetchImpl={stub.impl} />);
+    await screen.findByLabelText('Bearer token');
+    expect((screen.getByLabelText('Bearer token') as HTMLInputElement).value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: /Save connection/ }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(stub.calls.filter(c => c.url.endsWith('/api/config/set'))).toEqual([]);
   });
 });
