@@ -1,0 +1,29 @@
+{
+  "checks": [
+    {
+      "name": "server persists its first-boot identity",
+      "passed": true
+    },
+    {
+      "name": "server rejects a role change without modifying its identity",
+      "passed": true
+    },
+    {
+      "name": "server accepts the same image and role on restart",
+      "passed": true
+    },
+    {
+      "name": "kb persists its first-boot identity",
+      "passed": true
+    },
+    {
+      "name": "kb rejects a role change without modifying its identity",
+      "passed": true
+    },
+    {
+      "name": "kb accepts the same image and role on restart",
+      "passed": true
+    }
+  ],
+  "source_sha256": "63b74bee72e63c63461276b0d043cdcda93effe8054ea2617445753a234740c3"
+}

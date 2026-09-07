@@ -38,6 +38,7 @@ class CProcessBuildTests(unittest.TestCase):
                 self.assertIn("server-go/aimee/client.go", sources)
                 self.assertFalse(any(path.startswith("server-go/db1/") for path in sources))
         self.assertEqual(exporter.go_process_shared_sources("postgres"), [])
+        self.assertIn("server-go/modules/egress/egress.go", exporter.go_process_shared_sources("memory"))
 
     def descriptor(self) -> dict[str, object]:
         return {
@@ -236,6 +237,16 @@ class CProcessBuildTests(unittest.TestCase):
                                     text=True, capture_output=True, check=False)
             self.assertNotEqual(broken.returncode, 0)
             self.assertIn("retired_other_module", broken.stderr)
+
+    def test_exported_roles_and_infrastructure_preserve_bootstrap_modes(self) -> None:
+        for role in ("server", "kb"):
+            main = exporter.go_module_main(role, 34, [])
+            self.assertIn("identity.Bootstrap(os.Args)", main)
+            self.assertIn('handler.NewHandler(os.Getenv("AIMEE_HOME"))', main)
+            self.assertIn("handler.Supervise(ctx", main)
+            self.assertNotIn("handler.Handle", main)
+        self.assertIn("storage.Bootstrap(os.Args)", exporter.go_module_main("postgres", 26, []))
+        self.assertIn("handler.ModelServicesBootstrap(os.Args)", exporter.go_module_main("providers", 17, []))
 
     def test_cmake_compiles_every_owned_source_once(self) -> None:
         cmake = exporter.c_process_cmake("db2", "aimee-module-db2", "1.2.3", self.descriptor())

@@ -1,18 +1,19 @@
 name: c-repository-pins
 
 on:
-  # main ONLY, on both triggers. The pins describe a RELEASE, so they are a
-  # main-branch question and nothing else: pushes to main, and pull requests
-  # INTO main. Nothing here runs for a branch or a PR targeting testing.
+  # Standalone exports must build on integration changes as well as releases.
+  # Exact published repository pins remain a main-only release gate below.
   push:
     branches:
       - main
+      - testing
     paths:
       - "dependencies/aimee-repositories.lock.json"
       - "src/core/**"
       - "src/modules/**"
       - "src/tests/**"
       - "docs/modules/**"
+      - "scripts/tests/test_export_c_process_build.py"
       - "scripts/export_c_repositories.py"
       - "scripts/build_c_module_runtime_bundle.py"
       - "scripts/generate_c_embedded_header.py"
@@ -28,12 +29,14 @@ on:
   pull_request:
     branches:
       - main
+      - testing
     paths:
       - "dependencies/aimee-repositories.lock.json"
       - "src/core/**"
       - "src/modules/**"
       - "src/tests/**"
       - "docs/modules/**"
+      - "scripts/tests/test_export_c_process_build.py"
       - "scripts/export_c_repositories.py"
       - "scripts/build_c_module_runtime_bundle.py"
       - "scripts/generate_c_embedded_header.py"
@@ -92,6 +95,14 @@ jobs:
           cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-module-db2" -B "$RUNNER_TEMP/db2-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
           cmake --build "$RUNNER_TEMP/db2-build" --parallel 2
           test -x "$RUNNER_TEMP/db2-build/aimee-module-db2"
+      - name: Build isolated role, memory, PostgreSQL and provider repositories
+        run: |
+          set -euo pipefail
+          for module in server kb postgres memory providers; do
+            cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-module-$module" -B "$RUNNER_TEMP/build-$module" -DCMAKE_BUILD_TYPE=Release
+            cmake --build "$RUNNER_TEMP/build-$module" --parallel 2
+            test -x "$RUNNER_TEMP/build-$module/aimee-module-$module"
+          done
       # The exact commit/digest pins in dependencies/aimee-repositories.lock.json
       # describe a RELEASE: which external core/module repository commit each
       # vendored mirror was cut from. `testing` is the integration tip, where the

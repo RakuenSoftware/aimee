@@ -38,7 +38,9 @@ published `:testing` image has already been upgraded.
 | All Go packages with race detector | Passed |
 | Frontend tests and production build | 191 tests passed; build passed |
 | Lint and build integrity | All 77 lint checks and build integrity passed |
-| Full Git history secret scan | 5,346 commits scanned; no leaks at pre-commit HEAD |
+| Shipped Compose variants | Eight normalized compositions passed |
+| Standalone exports | Core, DB2, Server, KB, PostgreSQL, memory and providers built independently |
+| Git history and new commit secret scans | 5,346 historical commits plus the implementation commit scanned; no leaks |
 | Real PostgreSQL LUKS fresh volume | 11 checks passed |
 | PostgreSQL 18 offline plaintext migration | 13 checks passed, record preserved through restart |
 | Fresh browser setup | Login, API-keyless local primary, model selection/deployment, completion and optional KB Settings passed |
@@ -46,8 +48,22 @@ published `:testing` image has already been upgraded.
 | Connected deployment | Personal/shared scope isolation, enrollment, restart and outage tests passed |
 | KB-free deployment | Personal memory and real local semantic recall, expiry, mutation and outage recovery passed |
 
-Final-image topology verdicts, model lifecycle and analyzer results are added to
-this report as their final runs complete. Earlier results are preserved in the
+The final application image is `aimee:unified042-v12`, digest
+`sha256:acfb3eb1027b24efdcb8aa5e3bcdcb4998186156dcb2ac55865d8a0a1648ea25`.
+[T1](release-0.4.2-unified-2026-09-07/t1-topology.json),
+[T2](release-0.4.2-unified-2026-09-07/t2-topology.json), and
+[T3](release-0.4.2-unified-2026-09-07/t3-topology.json) passed. Their component
+gates contain 70 connected-memory, 15 local-memory per Server topology,
+15 semantic-memory and six immutable-identity checks. Browser setup and model
+retirement/reinstallation passed on v11, whose runtime differs only in subsequent
+legacy identity migration and malformed enrollment-record guards. Exact image
+[digests](release-0.4.2-unified-2026-09-07/images.json) are recorded separately.
+The native application build used the source core version default; release
+publishing supplies `AIMEE_VERSION` explicitly.
+
+The final [analyzer run](release-0.4.2-unified-2026-09-07/static-analysis.json)
+processed 981 sources with 3,352 advisory warnings and zero process failures.
+This is not a warning-free claim. Earlier results are preserved in the
 [storage report](release-0.4.2-postgres-luks-2026-09-06.md) and
 [local recall report](release-0.4.2-local-recall-2026-09-06.md).
 
@@ -79,3 +95,11 @@ its credentials file and screenshots must remain private.
   pins must come from published repositories. Local export commits are validation
   artifacts, not evidence of remote publication. The draft PR does not bypass
   main-merge approval or release gates.
+
+The independent export test found and repaired three packaging regressions: CMake
+linker settings differed from the runtime bundle, role entry points referenced a
+nonexistent generic handler, and the memory export omitted its egress contract.
+The regression compiles an unused legacy reference successfully, then makes that
+reference live and requires the linker to reject it. Integration CI now builds
+the exported roles and common modules, with published-pin validation still
+restricted to release integration.

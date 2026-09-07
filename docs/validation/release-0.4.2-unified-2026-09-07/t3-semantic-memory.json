@@ -1,0 +1,65 @@
+{
+  "checks": [
+    {
+      "name": "store personal semantic fixture",
+      "passed": true
+    },
+    {
+      "name": "real local vector persisted",
+      "passed": true
+    },
+    {
+      "name": "semantic recall succeeds",
+      "passed": true
+    },
+    {
+      "name": "semantic recall finds the nonlexical personal fixture",
+      "passed": true
+    },
+    {
+      "name": "CLI semantic recall finds the personal fixture",
+      "passed": true
+    },
+    {
+      "name": "recall recovers after Server restart",
+      "passed": true
+    },
+    {
+      "name": "semantic recall survives Server restart",
+      "passed": true
+    },
+    {
+      "name": "local lexical recall survives embedder outage",
+      "passed": true
+    },
+    {
+      "name": "outage retains personal record",
+      "passed": true
+    },
+    {
+      "name": "semantic recall recovers when local embedder returns",
+      "passed": true
+    },
+    {
+      "name": "recall after expiry",
+      "passed": true
+    },
+    {
+      "name": "expired vector cannot resurrect personal memory",
+      "passed": true
+    },
+    {
+      "name": "retire personal fixture",
+      "passed": true
+    },
+    {
+      "name": "recall after retirement",
+      "passed": true
+    },
+    {
+      "name": "retired vector cannot resurrect personal memory",
+      "passed": true
+    }
+  ],
+  "source_sha256": "549df36aedb02fe6ce30bbc34715b59c354e633a307259af8b8891b08d62704e"
+}

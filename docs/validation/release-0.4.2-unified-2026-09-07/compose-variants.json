@@ -1,0 +1,34 @@
+[
+  {
+    "file": "compose.yaml",
+    "passed": true
+  },
+  {
+    "file": "compose.kb.yaml",
+    "passed": true
+  },
+  {
+    "file": "compose.server-managed.yaml",
+    "passed": true
+  },
+  {
+    "file": "compose.server-standalone.yaml",
+    "passed": true
+  },
+  {
+    "file": "deploy/compose/aimee.yaml",
+    "passed": true
+  },
+  {
+    "file": "deploy/smoothnas/aimee.compose.yaml",
+    "passed": true
+  },
+  {
+    "file": "deploy/smoothnas/aimee-server.compose.yaml",
+    "passed": true
+  },
+  {
+    "file": "deploy/smoothnas/aimee-kb.compose.yaml",
+    "passed": true
+  }
+]

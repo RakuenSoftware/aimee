@@ -1,0 +1,40 @@
+{
+  "checks": [
+    {
+      "name": "C core build and install",
+      "passed": true
+    },
+    {
+      "name": "DB2 isolated build",
+      "passed": true
+    },
+    {
+      "name": "Server isolated build",
+      "passed": true
+    },
+    {
+      "name": "KB isolated build",
+      "passed": true
+    },
+    {
+      "name": "PostgreSQL isolated build",
+      "passed": true
+    },
+    {
+      "name": "Memory isolated build",
+      "passed": true
+    },
+    {
+      "name": "Providers isolated build",
+      "passed": true
+    },
+    {
+      "name": "exported role bootstrap, read and conflicting identity rejection",
+      "passed": true
+    },
+    {
+      "name": "unused legacy linkage accepted and live missing implementation rejected",
+      "passed": true
+    }
+  ]
+}

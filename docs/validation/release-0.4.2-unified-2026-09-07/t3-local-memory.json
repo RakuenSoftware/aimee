@@ -1,0 +1,65 @@
+{
+  "checks": [
+    {
+      "name": "KB-free local store",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall {}",
+      "passed": true
+    },
+    {
+      "name": "recall returns personal text and scoped handle {}",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall {'store': 'user'}",
+      "passed": true
+    },
+    {
+      "name": "recall returns personal text and scoped handle {'store': 'user'}",
+      "passed": true
+    },
+    {
+      "name": "KB-free session recall without hint",
+      "passed": true
+    },
+    {
+      "name": "KB-free CLI recall",
+      "passed": true
+    },
+    {
+      "name": "KB-free MCP recall",
+      "passed": true
+    },
+    {
+      "name": "recall rejects invalid store",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall survives restart",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall reports unavailable local store",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall recovers",
+      "passed": true
+    },
+    {
+      "name": "KB-free local retirement",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall after retirement",
+      "passed": true
+    },
+    {
+      "name": "retired personal record excluded from recall",
+      "passed": true
+    }
+  ],
+  "source_sha256": "17b9a7a0d9f5af6e13fc8db6c3c416bb6663be8aa4209b3e494b14e6e6316e52"
+}
