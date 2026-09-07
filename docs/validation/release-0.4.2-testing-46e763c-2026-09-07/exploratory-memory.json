@@ -1,0 +1,194 @@
+[
+  {
+    "name": "confidence 0",
+    "passed": true,
+    "detail": [
+      200,
+      [
+        200,
+        {
+          "status": "ok",
+          "memory": {
+            "id": 1,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-85b72111120",
+            "content": "synthetic confidence test",
+            "confidence": 0
+          },
+          "store": "user"
+        }
+      ]
+    ]
+  },
+  {
+    "name": "confidence 0.25",
+    "passed": true,
+    "detail": [
+      200,
+      [
+        200,
+        {
+          "status": "ok",
+          "memory": {
+            "id": 2,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-85b72111120.25",
+            "content": "synthetic confidence test",
+            "confidence": 0.25
+          },
+          "store": "user"
+        }
+      ]
+    ]
+  },
+  {
+    "name": "confidence 1",
+    "passed": true,
+    "detail": [
+      200,
+      [
+        200,
+        {
+          "status": "ok",
+          "memory": {
+            "id": 3,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-85b72111121",
+            "content": "synthetic confidence test",
+            "confidence": 1
+          },
+          "store": "user"
+        }
+      ]
+    ]
+  },
+  {
+    "name": "confidence rejection -1",
+    "passed": false,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "confidence rejection 2",
+    "passed": false,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "confidence 'invalid'",
+    "passed": false,
+    "detail": [
+      200,
+      [
+        200,
+        {
+          "status": "ok",
+          "memory": {
+            "id": 4,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-85b7211112invalid",
+            "content": "synthetic confidence test",
+            "confidence": 1
+          },
+          "store": "user"
+        }
+      ]
+    ]
+  },
+  {
+    "name": "confidence False",
+    "passed": false,
+    "detail": [
+      200,
+      [
+        200,
+        {
+          "status": "ok",
+          "memory": {
+            "id": 5,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-85b7211112False",
+            "content": "synthetic confidence test",
+            "confidence": 1
+          },
+          "store": "user"
+        }
+      ]
+    ]
+  },
+  {
+    "name": "confidence None",
+    "passed": false,
+    "detail": [
+      200,
+      [
+        200,
+        {
+          "status": "ok",
+          "memory": {
+            "id": 6,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-85b7211112None",
+            "content": "synthetic confidence test",
+            "confidence": 1
+          },
+          "store": "user"
+        }
+      ]
+    ]
+  },
+  {
+    "name": "24 simultaneous stores return distinct IDs",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "24 concurrent contents read back exactly",
+    "passed": true,
+    "detail": null
+  }
+]

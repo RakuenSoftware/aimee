@@ -1,0 +1,42 @@
+[
+  {
+    "name": "KB application metadata contains no database or enrollment credential",
+    "passed": true
+  },
+  {
+    "name": "KB boots with standardized PostgreSQL and local embedding",
+    "passed": true
+  },
+  {
+    "name": "KB shared memory module stores a record",
+    "passed": true
+  },
+  {
+    "name": "KB ranked search uses its local embedding service",
+    "passed": true
+  },
+  {
+    "name": "KB graph and memory retrieval survives the deepest worker path",
+    "passed": true
+  },
+  {
+    "name": "Server boots without a KB connection",
+    "passed": true
+  },
+  {
+    "name": "Server application metadata contains no database or enrollment credential",
+    "passed": true
+  },
+  {
+    "name": "KB-free personal memory regression gate",
+    "passed": true
+  },
+  {
+    "name": "Enrolled optional KB, scope isolation, restart and outage regressions",
+    "passed": true
+  },
+  {
+    "name": "One application image and immutable first-boot identities",
+    "passed": true
+  }
+]

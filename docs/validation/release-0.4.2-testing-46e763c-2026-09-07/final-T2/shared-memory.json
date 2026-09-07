@@ -1,0 +1,1264 @@
+[
+  {
+    "name": "local store",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local store leaves KB unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "get returns exact local content for colliding ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit KB get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit KB get selects the other record",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP store defaults to user",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP personal content stays local",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP update uses local ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP forget retires local ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI default get selects user",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI explicit get selects KB",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI store identifies local scope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI supersede updates local record",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI mutations leave KB unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local stats",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid store rejected 'both'",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid store rejected ''",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid store rejected 1",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid selectors leave KB unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local list",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "list returns local fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local review",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "review returns local fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local search",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "search returns local fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP get preserves selected store {'id': 37}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP get preserves selected store {'handle': 'memory:37', 'scope': 'all'}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local preference fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit shared recall",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit shared recall excludes personal preferences",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local supersede",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local mutation leaves colliding KB record unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "get corrected local memory",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local replacement content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local memory survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "restart preserves corrected value",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local dependency outage fails list",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails get",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails recall",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "user memory module unavailable"
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails store",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails supersede",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails delete",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "local outage never writes KB",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local dependency recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local get works with KB offline",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local recall works with KB offline",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local recall retains scoped ID and prompt text",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local session recall needs no hint or KB",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI recall works with KB offline",
+    "passed": true,
+    "detail": {
+      "store": "user",
+      "recall": {
+        "identity": [],
+        "preferences": [
+          {
+            "id": 40,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "preference",
+            "key": "preference-placement-e2e-c9679101a1",
+            "content": "Private preference person@local.invalid",
+            "confidence": 1,
+            "memory_id": 40,
+            "text": "Private preference person@local.invalid",
+            "store": "user",
+            "handle": "user:memory:40"
+          }
+        ],
+        "active_context": [
+          {
+            "id": 37,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-c9679101a1",
+            "content": "corrected local fixture",
+            "confidence": 1,
+            "memory_id": 37,
+            "text": "corrected local fixture",
+            "store": "user",
+            "handle": "user:memory:37"
+          },
+          {
+            "id": 40,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "preference",
+            "key": "preference-placement-e2e-c9679101a1",
+            "content": "Private preference person@local.invalid",
+            "confidence": 1,
+            "memory_id": 40,
+            "text": "Private preference person@local.invalid",
+            "store": "user",
+            "handle": "user:memory:40"
+          },
+          {
+            "id": 36,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-51c4920507-confidence-1",
+            "content": "Synthetic confidence boundary fixture",
+            "confidence": 1,
+            "memory_id": 36,
+            "text": "Synthetic confidence boundary fixture",
+            "store": "user",
+            "handle": "user:memory:36"
+          },
+          {
+            "id": 35,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-51c4920507-confidence-0.25",
+            "content": "Synthetic confidence boundary fixture",
+            "confidence": 0.25,
+            "memory_id": 35,
+            "text": "Synthetic confidence boundary fixture",
+            "store": "user",
+            "handle": "user:memory:35"
+          },
+          {
+            "id": 34,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-51c4920507-confidence-0",
+            "content": "Synthetic confidence boundary fixture",
+            "confidence": 0,
+            "memory_id": 34,
+            "text": "Synthetic confidence boundary fixture",
+            "store": "user",
+            "handle": "user:memory:34"
+          }
+        ],
+        "open_commitments": [],
+        "reminders": [],
+        "directives": [],
+        "limit_tokens": 1024,
+        "used_tokens": 141,
+        "session_start": false,
+        "explain": []
+      }
+    }
+  },
+  {
+    "name": "MCP recall works with KB offline",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local store works with KB offline",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit KB outage is an HTTP failure",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "KB memory unavailable",
+        "kind": "unavailable",
+        "http_status": 503,
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "KB recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB memory process outage fails list",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "KB memory unavailable",
+        "kind": "unavailable",
+        "http_status": 503,
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "KB memory process outage fails get",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "KB memory unavailable",
+        "kind": "unavailable",
+        "http_status": 503,
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "user store works during KB memory process outage",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB memory process recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "retired local ID never resolves to KB collision",
+    "passed": true,
+    "detail": [
+      404,
+      {
+        "status": "error",
+        "message": "user memory not found",
+        "kind": "not_found",
+        "http_status": 404
+      }
+    ]
+  },
+  {
+    "name": "local retirement leaves KB content unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit long KB store",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit long KB get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB get preserves full long Unicode content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "ordinary KB get hides retired record",
+    "passed": true,
+    "detail": [
+      404,
+      {
+        "status": "error",
+        "message": "memory not found",
+        "kind": "not_found",
+        "http_status": 404,
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "historical retired KB get 2026-03-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "historical KB get preserves content and validity 2026-03-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "historical retired KB get 2026-07-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "historical KB get preserves content and validity 2026-07-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal email canaries absent from all KB tables",
+    "passed": true,
+    "detail": {
+      "table_count": 239,
+      "matching_tables": []
+    }
+  },
+  {
+    "name": "user HTTP rejects confidence -1",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence False",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence None",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence []",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence {}",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user stores confidence 0",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user preserves confidence 0",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "status": "ok",
+        "memory": {
+          "id": 68,
+          "scope": {
+            "type": "user",
+            "value": "_user"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "placement-e2e-c9679101a1-confidence-0",
+          "content": "Synthetic confidence boundary fixture",
+          "confidence": 0
+        },
+        "store": "user"
+      }
+    ]
+  },
+  {
+    "name": "user stores confidence 0.25",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user preserves confidence 0.25",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "status": "ok",
+        "memory": {
+          "id": 69,
+          "scope": {
+            "type": "user",
+            "value": "_user"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "placement-e2e-c9679101a1-confidence-0.25",
+          "content": "Synthetic confidence boundary fixture",
+          "confidence": 0.25
+        },
+        "store": "user"
+      }
+    ]
+  },
+  {
+    "name": "user stores confidence 1",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user preserves confidence 1",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "status": "ok",
+        "memory": {
+          "id": 70,
+          "scope": {
+            "type": "user",
+            "value": "_user"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "placement-e2e-c9679101a1-confidence-1",
+          "content": "Synthetic confidence boundary fixture",
+          "confidence": 1
+        },
+        "store": "user"
+      }
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence -1",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence False",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence None",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence []",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence {}",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "status": "error",
+        "message": "memory.store confidence must be between 0 and 1",
+        "kind": "invalid_argument",
+        "http_status": 400
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb stores confidence 0",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb preserves confidence 0",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "status": "ok",
+        "memory": {
+          "id": 39,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "placement-e2e-c9679101a1-confidence-0",
+          "headline": "",
+          "content": "Synthetic confidence boundary fixture",
+          "use_cases": "",
+          "confidence": 0,
+          "use_count": 0,
+          "last_used_at": "",
+          "created_at": "",
+          "updated_at": "",
+          "source_session": "",
+          "provenance_category": "",
+          "retrieval_score": 0,
+          "hybrid_rank": 0
+        },
+        "active_context_missing": true,
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "kb stores confidence 0.25",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb preserves confidence 0.25",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "status": "ok",
+        "memory": {
+          "id": 40,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "placement-e2e-c9679101a1-confidence-0.25",
+          "headline": "",
+          "content": "Synthetic confidence boundary fixture",
+          "use_cases": "",
+          "confidence": 0.25,
+          "use_count": 0,
+          "last_used_at": "",
+          "created_at": "",
+          "updated_at": "",
+          "source_session": "",
+          "provenance_category": "",
+          "retrieval_score": 0,
+          "hybrid_rank": 0
+        },
+        "active_context_missing": true,
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "kb stores confidence 1",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb preserves confidence 1",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "status": "ok",
+        "memory": {
+          "id": 41,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "placement-e2e-c9679101a1-confidence-1",
+          "headline": "",
+          "content": "Synthetic confidence boundary fixture",
+          "use_cases": "",
+          "confidence": 1,
+          "use_count": 0,
+          "last_used_at": "",
+          "created_at": "",
+          "updated_at": "",
+          "source_session": "",
+          "provenance_category": "",
+          "retrieval_score": 0,
+          "hybrid_rank": 0
+        },
+        "active_context_missing": true,
+        "store": "kb"
+      }
+    ]
+  }
+]

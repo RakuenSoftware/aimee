@@ -1,0 +1,25 @@
+{
+  "checks": [
+    {
+      "name": "real login and healthy standalone browser without a KB warning",
+      "passed": true
+    },
+    {
+      "name": "wizard accepts a local primary model without an API key",
+      "passed": true
+    },
+    {
+      "name": "wizard reaches local-model deployment with no KB installation or database step",
+      "passed": true
+    },
+    {
+      "name": "browser deploy starts the selected model services",
+      "passed": true
+    },
+    {
+      "name": "optional KB Settings remains reachable and mobile UI has no JavaScript errors",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

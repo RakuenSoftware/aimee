@@ -1,0 +1,5 @@
+["ghcr.io/rakuensoftware/aimee@sha256:c30cfb5584b8a6f3c108112fdb02c1c5c5cd05d2d6de44031a443619f9a7aea3"]
+["ghcr.io/rakuensoftware/aimee-postgres@sha256:b40f8fdcaf0923718459252e8780042fd55655bc68dd64b755506253140d4606"]
+["ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:36f313ffc32f6b7df63b2c810cab6c9c9b056ec25b04a0b0ec9606075ef7bb99"]
+["ghcr.io/rakuensoftware/aimee-llm-e2b@sha256:00a3b743f6827e04e4aef6600fd8e58eabb3411412fb9e40ee5731d3a6f25ec9"]
+["ghcr.io/rakuensoftware/aimee-llm-e4b@sha256:741b703caa49d4cd727457c6ed3c2813d03aaa7bb6f28a8d84f07fd5ceda7697"]
