@@ -1,0 +1,12 @@
+[
+  {
+    "name": "original 0.4.1 global memory remains readable after failed migration",
+    "passed": true,
+    "http": 200
+  },
+  {
+    "name": "original 0.4.1 project memory remains readable after failed migration",
+    "passed": true,
+    "http": 200
+  }
+]

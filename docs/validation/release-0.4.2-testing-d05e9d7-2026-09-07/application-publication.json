@@ -1,0 +1,43 @@
+{
+  "headSha": "d05e9d71c258f6ca53b89ba8e1752bf910678dae",
+  "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34108283225",
+  "status": "completed",
+  "conclusion": "success",
+  "jobs": [
+    {
+      "name": "plan",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "thin-client (ubuntu-24.04-arm, aimee-linux-arm64)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "thin-client (ubuntu-latest, aimee-linux-x86_64)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "aimee-control-web (build)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "aimee-postgres (build)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "aimee-authority-bootstrap (build)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "aimee (build)",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ]
+}

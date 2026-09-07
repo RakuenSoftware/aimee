@@ -1,0 +1,2 @@
+PASS: native client discovers and generates with the real local synthesis model over managed mTLS
+2026-09-07T10:21:22Z INFO  synthesis_mtls: client identity loaded for aimee-llm:8761

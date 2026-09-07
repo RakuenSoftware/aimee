@@ -1,0 +1,22 @@
+{
+  "frontend": {
+    "test_files": 23,
+    "tests": 191,
+    "passed": true,
+    "production_build_passed": true,
+    "log_sha256": "0dee77302250ad183c4ff00f37f370dbe548cf404b6d89c1de38f832c0808920"
+  },
+  "published_thin_client": {
+    "tests": 26,
+    "skipped": 0,
+    "passed": true,
+    "codex_required": true,
+    "codex_version": "0.153.4",
+    "binary_sha256": "f3a2ffc5a51375e2aadcfa790cf85cab0fe6bdc5442725a0925f8c40e15fdfee",
+    "log_sha256": "ce7e6c8fa5cd42566d1de285235c2e3ab7cfc81c193be447890dfd5d58222318"
+  },
+  "native_mtls_unit": {
+    "passed": true,
+    "log_sha256": "21566b2fe4e8fcd9f66fea36f3b8bbc01f8231d29882f5ebafca53af7fce4c26"
+  }
+}
