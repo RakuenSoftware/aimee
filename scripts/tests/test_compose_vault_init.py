@@ -1,4 +1,7 @@
 import importlib.util
+import os
+import subprocess
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -15,6 +18,24 @@ def fixture(role='server'):
 
 
 class ComposeVaultTests(unittest.TestCase):
+    def test_launcher_uses_docker_context_without_client_kernel_discovery(self):
+        # A Windows/remote Docker client cannot identify the daemon's devices by
+        # reading its own kernel. Simulate a non-Linux invoking machine.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name, body in {'uname': 'echo Windows_NT', 'python3': 'exit 0',
+                               'docker': 'printf "%s\\n" "$@" > "$LAUNCHER_ARGUMENTS"'}.items():
+                executable = root / name
+                executable.write_text('#!/bin/sh\n' + body + '\n')
+                executable.chmod(0o755)
+            output = root / 'arguments'
+            script = Path(__file__).resolve().parents[1] / 'compose-local.sh'
+            result = subprocess.run(['sh', str(script), '-f', 'compose.yaml', 'config'],
+                                    env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
+                                             LAUNCHER_ARGUMENTS=str(output)), capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertEqual(output.read_text().splitlines(), ['compose', '-f', 'compose.yaml', 'config'])
+
     def test_only_real_up_mutates(self):
         self.assertEqual(module.up_prefix(['-p', 'up', '-f', 'instance.yaml', 'up', '-d']), ['-p','up','-f','instance.yaml'])
         for args in (['config'], ['--dry-run', 'up'], ['-p', 'x', 'down'], ['-f'], ['logs']):

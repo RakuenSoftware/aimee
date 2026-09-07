@@ -62,8 +62,9 @@ class Stack:
             'services:\n  aimee-' + role + ':\n    ports: !reset []\n')
 
     def compose_args(self):
+        encryption = ('-f', 'compose.kb.luks.yaml' if self.role == 'kb' else 'compose.luks.yaml') if self.env.get('AIMEE_POSTGRES_STORAGE') == 'luks' else ()
         return ('--env-file', '/dev/null', '-p', self.project, '-f', self.file,
-                '-f', str(self.network_override))
+                *encryption, '-f', str(self.network_override))
 
     def compose(self, *args):
         return command('docker', 'compose', *self.compose_args(), *args, env=self.env)
@@ -76,6 +77,10 @@ class Stack:
                                       '{{json .HostConfig.PortBindings}}', self.application))
         if bindings:
             raise RuntimeError('isolated topology unexpectedly published a host port')
+        host = json.loads(command('docker', 'inspect', '--format', '{{json .HostConfig}}', self.postgres))
+        if self.env.get('AIMEE_POSTGRES_STORAGE', 'plain') == 'plain':
+            if any(host.get(key) for key in ('Privileged', 'CapAdd', 'Devices', 'DeviceCgroupRules')):
+                raise RuntimeError('ordinary PostgreSQL unexpectedly requires extra host privileges or devices')
         deadline = time.monotonic() + 240
         while time.monotonic() < deadline:
             status = command('docker', 'inspect', '--format', '{{.State.Health.Status}}', self.application)
@@ -114,8 +119,6 @@ def main():
     env = dict(os.environ, AIMEE_RUNTIME_WEB_ENABLED='0', AIMEE_POSTGRES_VOLUME_MIB='512',
                COMPOSE_PROFILES='', EMBEDDER_MODEL='bekko-a25m',
                EMBEDDER_URL='https://aimee-embedder:8762', EMBEDDER_DIMS='384')
-    env['AIMEE_DEVICE_MAPPER_MAJOR'] = next(line.split()[0] for line in Path('/proc/devices').read_text().splitlines()
-                                           if line.split()[-1:] == ['device-mapper'])
     for name in ('AIMEE_APPLICATION_IMAGE', 'AIMEE_POSTGRES_IMAGE', 'AIMEE_EMBEDDER_IMAGE'):
         if not env.get(name):
             parser.error(name + ' must name the candidate image')

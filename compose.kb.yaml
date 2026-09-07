@@ -25,7 +25,6 @@ services:
       aimee-kb: {condition: service_started}
 volumes:
   aimee-postgres-encrypted:
-  aimee-postgres-control:
   aimee-store-tls:
   aimee-server-home:
   aimee-server-workspaces:

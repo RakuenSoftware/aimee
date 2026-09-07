@@ -8,17 +8,22 @@ on first boot. An existing Vault with no identity latch requires an explicit mig
 image-only upgrades cannot silently default an old KB to Server. Preserve the correct role and home; changing `AIMEE_INSTANCE_ROLE` later fails.
 Server and KB share one application image but must have separate instances, Vaults, and stores.
 
-The default `compose.yaml` now installs Server, encrypted PostgreSQL, and local embedding. It does
-not install a KB. An existing shared KB remains optional and connects through Settings; host a new
+The default `compose.yaml` now installs Server, PostgreSQL on an ordinary volume, and local
+embedding. It does not install a KB. An existing shared KB remains optional and connects through Settings; host a new
 KB explicitly with `compose.kb.yaml`. Preserve its existing enrollment material and authority.
 The browser wizard no longer provisions a KB or selects its database.
 
+LUKS is now opt-in. Existing encrypted deployments must add the matching
+[LUKS overlay](DEPLOYMENT.md#optional-luks-encryption) to every Compose command below.
+Omitting it fails startup against the existing encrypted volume; it does not decrypt or replace
+the database. New migrations default to ordinary storage, or can explicitly select LUKS.
+
 Both roles now use the standard `aimee-postgres` container. Do not mount an old plaintext PostgreSQL
-volume at `/var/lib/aimee-postgres` and expect it to be adopted: that path contains the encrypted
-volume and its manifest. For an offline PostgreSQL 18 cluster, mount the old cluster directory
+volume at `/var/lib/aimee-postgres` and expect it to be adopted: that path contains the selected
+storage mode and its manifest. For an offline PostgreSQL 18 cluster, mount the old cluster directory
 **read-only** at `/mnt/aimee-postgres-legacy` in the new PostgreSQL container. Stop the old database
-first. The module validates its version and files, copies into encrypted staging, verifies content
-and metadata, and only then promotes the copy. Interrupted copies resume safely. Live clusters,
+first. The module validates its version and files, copies into staging in the selected storage
+mode, verifies content and metadata, and only then promotes the copy. Interrupted copies resume safely. Live clusters,
 symlinks, unknown formats, and unsupported major versions are refused. For older PostgreSQL major
 versions, use a database-native logical dump and restore into the new cluster.
 
@@ -52,13 +57,13 @@ credentials, and the encryption key retain their existing values. Ordinary start
 to preserve existing credentials. Do not persist either this migration control or the broader
 `AIMEE_VAULT_ENV_OVERWRITE` control in the application environment.
 
-Retain the old plaintext volume as rollback until the encrypted copy passes restore and data
+Retain the old plaintext volume as rollback until the new copy passes restore and data
 checks. Migration does not erase that source. Once retention is no longer required, the operator
 must remove or sanitize it according to the storage medium; encryption of the new copy does not
 encrypt old backups, snapshots, or discarded storage blocks.
 
-The local Vault must survive with the encrypted database: it is the sole persistent store of the
-LUKS passphrase. There is no TPM or external-key recovery path. Preserve database-role passwords
+When LUKS is enabled, the local Vault must survive with the encrypted database: it is the sole
+persistent store of the LUKS passphrase. There is no TPM or external-key recovery path. Preserve database-role passwords
 when reusing the old cluster. Avoid starting old and new applications against the same writable
 store. Check the new application, database, model health, personal recall, and optional KB connection
 before retiring the old deployment.

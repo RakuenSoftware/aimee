@@ -1,0 +1,11 @@
+# Explicit opt-in: layer over compose.kb.yaml for an encrypted KB store.
+services:
+  aimee-store-db:
+    extends: {file: compose.luks.yaml, service: aimee-store-db}
+  aimee-kb:
+    environment:
+      AIMEE_POSTGRES_STORAGE_SOCKET: /run/aimee-postgres/storage.sock
+    volumes:
+      - aimee-postgres-control:/run/aimee-postgres:ro
+volumes:
+  aimee-postgres-control:

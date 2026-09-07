@@ -17,6 +17,7 @@
     "server-go/modules/postgres/storage/cmd/aimee-postgres-storage/main.go",
     "server-go/modules/postgres/storage/loop_linux.go",
     "server-go/modules/postgres/storage/migration_linux.go",
+    "server-go/modules/postgres/storage/plain_linux.go",
     "server-go/modules/postgres/storage/secret_linux.go",
     "server-go/modules/postgres/storage/unlock_linux.go",
     "server-go/modules/postgres/storage/unlock_other.go",
@@ -31,6 +32,7 @@
     "server-go/modules/postgres/shared_workflow_test.go",
     "server-go/modules/postgres/sql_security_test.go",
     "server-go/modules/postgres/storage/migration_linux_test.go",
+    "server-go/modules/postgres/storage/plain_linux_test.go",
     "server-go/modules/postgres/storage/storage_linux_test.go",
     "server-go/modules/postgres/credentials_test.go"
   ],

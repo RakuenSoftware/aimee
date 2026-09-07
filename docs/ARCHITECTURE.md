@@ -41,9 +41,9 @@ flowchart LR
     S -.->|optional typed /v1| K
     S -->|provider API| P[model providers]
     K -->|local sidecar or remote synthesis endpoint| X[synthesis model]
-    PG --> D1[(LUKS PostgreSQL + personal vectors)]
+    PG --> D1[(PostgreSQL + personal vectors)]
     KM --> KPG[postgres module]
-    KPG --> D2[(LUKS PostgreSQL + vectors)]
+    KPG --> D2[(PostgreSQL + vectors)]
 ```
 
 Both containers use the same application image. A Go `server` or `kb` composition module
@@ -189,9 +189,10 @@ engine-specific approximations. Their files, keys, and process compartments are
 separate. PostgreSQL DB2 retains only the immutable producer outbox and delivery
 ledger needed for atomic KB mutation intent and idempotent delivery.
 
-Both compositions use a separate standard PostgreSQL 18 container with LUKS2 storage. The local
-Vault unlocks that store before SQL initialization; the encryption passphrase persists only in
-Vault. Personal memory and its vectors stay in Server storage, even when a shared KB is connected.
+Both compositions use a separate standard PostgreSQL 18 container with ordinary storage by
+default and opt-in LUKS2 encryption. When LUKS is enabled, the local Vault unlocks the store
+before SQL initialization; the encryption passphrase persists only in Vault. Personal memory and
+its vectors stay in Server storage, even when a shared KB is connected.
 
 See [Storage tiers](STORAGE_TIERS.md).
 

@@ -5,7 +5,7 @@
 `compose.yaml` starts a KB-free Server, standardized PostgreSQL, and a local embedder.
 `compose.server-managed.yaml` adds Docker-socket access so the browser can manage model containers.
 Both use the same application image and PostgreSQL module. Follow the [Quickstart](QUICKSTART.md)
-for first-boot credentials and Linux host preparation.
+for first-boot credentials. Ordinary storage needs no LUKS host preparation.
 
 ```bash
 scripts/compose-local.sh -f compose.yaml up -d
@@ -19,13 +19,13 @@ Later attempts to change role fail. The event-bus host also refuses a second or 
 This is one application image; PostgreSQL and model services remain separate containers.
 
 The standard PostgreSQL image is `ghcr.io/rakuensoftware/aimee-postgres`, with PostgreSQL 18,
-pgvector, pgvectorscale, and the module's LUKS2 storage lifecycle. Both roles use it. Server personal
+pgvector, pgvectorscale, and optional LUKS2 storage. Both roles use it. Server personal
 memory uses local tables and vectors; the optional KB holds shared knowledge behind its own API.
 
 ## Optional shared KB
 
 Install a KB separately using `compose.kb.yaml` and a distinct Compose project. It has its own
-Vault, encrypted PostgreSQL store, embedder, and optional synthesis. Never reuse a Server home or
+Vault, PostgreSQL store, embedder, and optional synthesis. Never reuse a Server home or
 PostgreSQL volume for a KB. The base Server compose and web wizard do not install this deployment.
 
 A KB requires database role passwords and an authority bearer. Server-to-KB access also requires an
@@ -38,7 +38,6 @@ will actually reach before first boot; that name is included in the service cert
 # Use a separate private environment file containing the KB's three SQL passwords
 # and AIMEE_KB_API_BEARER_TOKEN. The service identity is first-boot Vault input.
 export AIMEE_KB_SERVICE_IDENTITY_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
-export AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)
 scripts/aimee-compose-vault-bootstrap.sh -p team-kb -e kb.env -f compose.kb.yaml kb
 unset AIMEE_KB_SERVICE_IDENTITY_TOKEN
 scripts/compose-local.sh --env-file kb.env -p team-kb -f compose.kb.yaml up -d
@@ -61,28 +60,62 @@ managed model setup. Both roles can use external model endpoints instead. Remote
 input text to the configured provider; local embedding keeps it on the deployment host. The native
 and Go clients validate the managed model services through fixed mutual-TLS profiles.
 
-## Encrypted PostgreSQL and volumes
+## PostgreSQL storage and volumes
 
 Each composition owns these durable volumes:
 
 | Volume suffix | Contents |
 | --- | --- |
 | `aimee-server-home` | Instance identity, local Vault, configuration, audit and application artifacts; the shared name also applies to KB |
-| `aimee-postgres-encrypted` | LUKS2 container, volume UUID, and nonsecret initialization manifest |
+| `aimee-postgres-encrypted` | Ordinary database directory by default; LUKS2 container and manifest when explicitly enabled. Historical volume name retained for safe upgrades |
 | `aimee-server-workspaces` | Workspace files |
 | `aimee-store-tls` | PostgreSQL public certificate for clients |
-| `aimee-postgres-control` | Local unlock control socket; no persistent key |
+| `aimee-postgres-control` (LUKS only) | Local unlock control socket; no persistent key |
 
-The three model TLS volumes are tmpfs. PostgreSQL data, its private TLS key, and database logs live
-inside the encrypted filesystem. The 32-byte LUKS passphrase persists **only in the owning Vault**.
-No TPM, external KMS, keyfile, or environment variable supplies it. Protected transient memory and
-private pipes carry it during unlock. The Vault must be available before database startup, so the
-application waits for the PostgreSQL container to start, not for it to become healthy.
+The default `plain` storage mode keeps PostgreSQL data and its private TLS key under
+`/var/lib/aimee-postgres/plain` on the ordinary volume. It does not provide database encryption
+at rest. SQL TLS, scoped database roles, and application Vault credentials remain enabled.
+The three model TLS volumes remain private tmpfs volumes.
 
-The Linux host must allow loop and device-mapper operations. The PostgreSQL container receives
-`SYS_ADMIN`, the control devices, bounded device rules, and a locked-memory limit. It fails closed
-if these are unavailable. `AIMEE_POSTGRES_VOLUME_MIB` defaults to 32768 MiB; choose the size before
-first boot. Changing it on an existing volume is refused. Online resizing is not implemented.
+### Optional LUKS encryption
+
+Add the matching overlay to explicitly enable LUKS: `compose.luks.yaml` for Server or
+`compose.kb.luks.yaml` for KB. The overlay sets `AIMEE_POSTGRES_STORAGE=luks`, attaches the
+Vault unlock socket, and grants PostgreSQL the required device access. Direct image users may
+set that variable themselves, but must also arrange the devices, capabilities, and owning
+application's unlock connection. An unknown storage mode is rejected.
+
+The operator is responsible for LUKS support on the **Docker daemon's Linux host**, including
+loop and dm-crypt/device-mapper support, control devices, `SYS_ADMIN`, and memory locking.
+Docker Desktop users who opt in must provide those features inside its Linux backend;
+they are not prerequisites for the default deployment. The launcher does not inspect a
+Windows client or mistake it for a remote Docker daemon's host.
+
+For a local Linux Docker host:
+
+```bash
+sudo modprobe loop
+sudo modprobe dm_mod
+sudo modprobe dm_crypt
+export AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)
+scripts/compose-local.sh -f compose.yaml -f compose.luks.yaml up -d
+# Separate KB project:
+# scripts/compose-local.sh --env-file kb.env -p team-kb -f compose.kb.yaml -f compose.kb.luks.yaml up -d
+```
+
+Keep the same overlays for subsequent Compose commands. For browser-managed Server models,
+use `-f compose.server-managed.yaml -f compose.luks.yaml`.
+
+In LUKS mode, PostgreSQL data, private TLS keys, and database logs stay inside the encrypted
+filesystem. Its 32-byte passphrase persists only in the owning Vault; private pipes and
+protected memory carry it during unlock. There is no plaintext fallback if unlock or host
+support fails. `AIMEE_POSTGRES_VOLUME_MIB` defaults to 32768 MiB and applies only to LUKS;
+changing the size of an existing encrypted store is refused.
+
+Both modes use the same persistent volume identity. Plain mode refuses an existing LUKS
+store; LUKS refuses an existing plain store. Enabling or disabling an overlay does not convert
+existing data. Use an explicit backup/restore into a separate store when changing modes.
+Existing encrypted deployments must retain the LUKS overlay when upgrading.
 
 SQL role passwords are separate PostgreSQL bootstrap credentials. The PostgreSQL container
 receives them for role initialization. Before creating the application, `scripts/compose-local.sh`
@@ -93,7 +126,7 @@ Vault resource. These credentials are distinct from the LUKS passphrase.
 
 ## Volumes and backup
 
-Back up the application home and encrypted PostgreSQL volume as a matched instance. Losing the
+Back up the application home and PostgreSQL volume as a matched instance. In LUKS mode, losing the
 Vault loses the LUKS key. Losing the application's own Vault root key also makes that Vault
 unreadable. Never regenerate either as a recovery shortcut.
 

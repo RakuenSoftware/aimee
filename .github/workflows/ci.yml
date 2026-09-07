@@ -2041,22 +2041,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        topology: [T1, T2, T3]
-    name: e2e-docker (${{ matrix.topology }})
+        include:
+          - {topology: T1, storage: plain, suffix: ''}
+          - {topology: T2, storage: plain, suffix: ''}
+          - {topology: T3, storage: plain, suffix: ''}
+          - {topology: T2, storage: luks, suffix: '-luks'}
+    name: e2e-docker (${{ matrix.topology }}${{ matrix.suffix }})
     env:
       AIMEE_APPLICATION_IMAGE: aimee:e2e
       AIMEE_POSTGRES_IMAGE: aimee-postgres:e2e
+      AIMEE_POSTGRES_STORAGE: ${{ matrix.storage }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
-      - name: Prepare Linux encrypted storage
-        run: |
-          sudo modprobe loop
-          sudo modprobe dm_mod
-          sudo apt-get update
-          sudo apt-get install -y cryptsetup-bin
-          test -c /dev/mapper/control
-          test -c /dev/loop-control
       - name: Build the unified application
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
@@ -2083,10 +2080,28 @@ jobs:
           image=$(cat tests/e2e/embedder-image.txt)
           docker pull "$image"
           echo "AIMEE_EMBEDDER_IMAGE=$image" >> "$GITHUB_ENV"
+      - name: Prepare optional Linux encrypted storage
+        if: matrix.storage == 'luks'
+        run: |
+          sudo modprobe loop
+          sudo modprobe dm_mod
+          sudo modprobe dm_crypt
+          sudo apt-get update
+          sudo apt-get install -y cryptsetup-bin
+          test -c /dev/mapper/control
+          test -c /dev/loop-control
+      - name: Configure optional encrypted storage
+        if: matrix.storage == 'luks'
+        run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
       - name: Run the shipped deployment and regression gates
         run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} --output /tmp/aimee-e2e-evidence
-      - name: LUKS recovery and legacy PostgreSQL migration
+      - name: Ordinary PostgreSQL persistence and storage mode boundaries
         if: matrix.topology == 'T3'
+        run: |
+          sudo python3 tests/e2e/postgres-plain-e2e.py --postgres-image aimee-postgres:e2e \
+            --evidence /tmp/aimee-e2e-evidence/plain-storage.json
+      - name: LUKS recovery and legacy PostgreSQL migration
+        if: matrix.storage == 'luks'
         run: |
           for mode in fresh upgrade; do
             extra=()
@@ -2096,15 +2111,15 @@ jobs:
               --evidence "/tmp/aimee-e2e-evidence/luks-${mode}.json" "${extra[@]}"
           done
       - name: Upgrade and roll back the published 0.4.1 KB
-        if: matrix.topology == 'T1'
+        if: matrix.topology == 'T1' || matrix.storage == 'luks'
         run: |
           sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \
-            python3 tests/e2e/kb-upgrade-e2e.py --output /tmp/aimee-e2e-evidence
+            python3 tests/e2e/kb-upgrade-e2e.py --storage ${{ matrix.storage }} --output /tmp/aimee-e2e-evidence
       - name: Upload regression verdicts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: deploy-${{ matrix.topology }}-verdicts
+          name: deploy-${{ matrix.topology }}${{ matrix.suffix }}-verdicts
           path: /tmp/aimee-e2e-evidence/*.json
           if-no-files-found: error
 

@@ -418,6 +418,14 @@ func (v *Volume) Run(ctx context.Context, command []string) (runErr error) {
 	if err := v.migrateLegacy(ctx); err != nil {
 		return err
 	}
+	return runDatabase(ctx, command, func() {
+		v.mu.Lock()
+		v.ready = true
+		v.mu.Unlock()
+	})
+}
+
+func runDatabase(ctx context.Context, command []string, started func()) error {
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Env = os.Environ()
 	cmd.Stdout = os.Stdout
@@ -426,9 +434,9 @@ func (v *Volume) Run(ctx context.Context, command []string) (runErr error) {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	v.mu.Lock()
-	v.ready = true
-	v.mu.Unlock()
+	if started != nil {
+		started()
+	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {

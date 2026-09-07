@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce the unified application, optional KB and encrypted store packaging."""
+"""Enforce the unified application, optional KB and opt-in encrypted store packaging."""
 from __future__ import annotations
 import argparse
 import copy
@@ -165,25 +165,27 @@ def composition_failures(base: dict, kb: dict, managed: dict) -> list[str]:
     if app.get('build', {}).get('dockerfile') != 'Dockerfile.server':
         failures.append('application must use the unified Dockerfile')
     if pg.get('build', {}).get('dockerfile') != 'Dockerfile.postgres':
-        failures.append('PostgreSQL must use the standardized encrypted image')
+        failures.append('PostgreSQL must use the standardized image')
     if pg.get('ports') or pg.get('privileged') or pg.get('network_mode'):
         failures.append('PostgreSQL must stay on its private network with explicit device capabilities')
     if pg.get('networks') != ['store'] or base.get('networks', {}).get('store', {}).get('internal') is not True:
         failures.append('PostgreSQL network must be internal')
     if app.get('depends_on', {}).get('aimee-store-db', {}).get('condition') != 'service_started':
         failures.append('application must unlock PostgreSQL before waiting for SQL health')
-    if env.get('AIMEE_POSTGRES_STORAGE_SOCKET') != '/run/aimee-postgres/storage.sock':
-        failures.append('application must attach the PostgreSQL unlock resource')
+    if env.get('AIMEE_POSTGRES_STORAGE_SOCKET') or pg.get('environment', {}).get('AIMEE_POSTGRES_STORAGE', 'plain') != 'plain':
+        failures.append('standard composition must default to plain storage')
+    if any(pg.get(key) for key in ('cap_add', 'devices', 'device_cgroup_rules', 'security_opt')):
+        failures.append('standard PostgreSQL must require no extra device privileges')
     for name in ('AIMEE_STORE_URL', 'AIMEE_STORE_MIGRATION_URL'):
         if name in env:
             failures.append(name + ' must be supplied through the owning Vault, not Config.Env')
-    for required in ('aimee-server-home:/var/lib/aimee', 'aimee-store-tls:/run/aimee-store-tls:ro', 'aimee-postgres-control:/run/aimee-postgres:ro'):
+    for required in ('aimee-server-home:/var/lib/aimee', 'aimee-store-tls:/run/aimee-store-tls:ro'):
         if required not in app.get('volumes', []):
             failures.append('application missing required private resource mount ' + required)
     if 'aimee-postgres-encrypted:/var/lib/aimee-postgres' not in pg.get('volumes', []):
-        failures.append('PostgreSQL must persist its encrypted image')
+        failures.append('PostgreSQL must preserve its existing persistent volume identity')
     if any('/var/lib/postgresql/data' in str(v) for v in pg.get('volumes', [])):
-        failures.append('plaintext PostgreSQL data must never be a persistent volume')
+        failures.append('a second data mount would bypass storage mode protection')
     for name in ('aimee-model-tls', 'aimee-embedding-tls', 'aimee-synthesis-tls'):
         options = base.get('volumes', {}).get(name, {}).get('driver_opts', {})
         if options.get('type') != 'tmpfs' or 'mode=0700' not in str(options.get('o', '')):
@@ -230,6 +232,18 @@ def check(root: Path) -> list[str]:
     try:
         base, kb, managed = [parse(read(root / p)) for p in ('compose.yaml', 'compose.kb.yaml', 'deploy/container/aimee-managed.compose.yaml')]
         failures.extend(composition_failures(base, kb, managed))
+        luks, kb_luks = [parse(read(root / p)) for p in ('compose.luks.yaml', 'compose.kb.luks.yaml')]
+        encrypted = luks.get('services', {}).get('aimee-store-db', {})
+        if encrypted.get('environment', {}).get('AIMEE_POSTGRES_STORAGE') != 'luks' or encrypted.get('cap_add') != ['SYS_ADMIN']:
+            failures.append('LUKS opt-in must explicitly select encrypted storage and its capability')
+        if set(encrypted.get('devices', [])) != {'/dev/mapper/control:/dev/mapper/control', '/dev/loop-control:/dev/loop-control'}:
+            failures.append('LUKS opt-in must attach the required control devices')
+        if kb_luks.get('services', {}).get('aimee-store-db', {}).get('extends') != {'file': 'compose.luks.yaml', 'service': 'aimee-store-db'}:
+            failures.append('KB LUKS must inherit the same storage settings')
+        for role, model in (('server', luks), ('kb', kb_luks)):
+            owner = model.get('services', {}).get('aimee-' + role, {})
+            if owner.get('environment', {}).get('AIMEE_POSTGRES_STORAGE_SOCKET') != '/run/aimee-postgres/storage.sock' or 'aimee-postgres-control:/run/aimee-postgres:ro' not in owner.get('volumes', []):
+                failures.append(role + ' LUKS must attach its Vault unlock socket')
         for path in sorted(root.glob('compose*.yaml')):
             model = parse(read(path))
             for name, service in model.get('services', {}).items():
@@ -266,7 +280,9 @@ def plant_test(root: Path) -> int:
     base, kb, managed = [parse(read(root / p)) for p in ('compose.yaml', 'compose.kb.yaml', 'deploy/container/aimee-managed.compose.yaml')]
     plants = [
         ('base installs KB', lambda b,k,m: b['services'].update({'aimee-kb': {}})),
-        ('plaintext PG volume', lambda b,k,m: b['services']['aimee-store-db']['volumes'].append('plaintext:/var/lib/postgresql/data')),
+        ('bypassed storage protection', lambda b,k,m: b['services']['aimee-store-db']['volumes'].append('plaintext:/var/lib/postgresql/data')),
+        ('default requires LUKS devices', lambda b,k,m: b['services']['aimee-store-db'].update(devices=['/dev/loop-control'])),
+        ('default requires LUKS unlock', lambda b,k,m: b['services']['aimee-server']['environment'].update(AIMEE_POSTGRES_STORAGE_SOCKET='/run/aimee-postgres/storage.sock')),
         ('wrong role', lambda b,k,m: k['services']['aimee-kb']['environment'].update(AIMEE_INSTANCE_ROLE='server')),
         ('PG health deadlock', lambda b,k,m: b['services']['aimee-server']['depends_on']['aimee-store-db'].update(condition='service_healthy')),
         ('disabled database TLS', lambda b,k,m: b['services']['aimee-server']['environment'].update(AIMEE_STORE_URL='host=pg password=leaked sslmode=disable')),
@@ -307,5 +323,5 @@ if __name__ == '__main__':
     for failure in failures:
         print('container-packaging: ' + failure, file=sys.stderr)
     if not failures:
-        print('container-packaging: unified application and encrypted store checks passed')
+        print('container-packaging: unified application and optional encrypted store checks passed')
     raise SystemExit(bool(failures))
