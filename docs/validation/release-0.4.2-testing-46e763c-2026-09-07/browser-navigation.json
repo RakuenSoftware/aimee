@@ -1,0 +1,107 @@
+[
+  {
+    "route": "/chat",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 947,
+    "errors": []
+  },
+  {
+    "route": "/dashboard",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 1117,
+    "errors": []
+  },
+  {
+    "route": "/logs",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 601,
+    "errors": []
+  },
+  {
+    "route": "/edit-workflows",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 1152,
+    "errors": []
+  },
+  {
+    "route": "/workflow-actions",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 907,
+    "errors": []
+  },
+  {
+    "route": "/providers",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 703,
+    "errors": []
+  },
+  {
+    "route": "/models",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 1084,
+    "errors": []
+  },
+  {
+    "route": "/personas",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 747,
+    "errors": []
+  },
+  {
+    "route": "/roles",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 791,
+    "errors": []
+  },
+  {
+    "route": "/roundtable",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 1624,
+    "errors": []
+  },
+  {
+    "route": "/projects",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 651,
+    "errors": []
+  },
+  {
+    "route": "/graph",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 568,
+    "errors": []
+  },
+  {
+    "route": "/editor",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 556,
+    "errors": []
+  },
+  {
+    "route": "/memory",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 983,
+    "errors": []
+  },
+  {
+    "route": "/settings",
+    "status": 200,
+    "title": "aimee",
+    "bodyChars": 40221,
+    "errors": []
+  }
+]

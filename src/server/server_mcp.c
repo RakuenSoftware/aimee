@@ -405,6 +405,14 @@ cJSON *tool_memory_mutate(cJSON *args)
       return text_content("error: missing 'verb' parameter");
    const char *verb = jv->valuestring;
 
+   const cJSON *input_confidence = cJSON_GetObjectItemCaseSensitive(args, "confidence");
+   if ((strcmp(verb, "store") == 0 || strcmp(verb, "update") == 0 ||
+        strcmp(verb, "supersede") == 0) &&
+       input_confidence &&
+       (!cJSON_IsNumber(input_confidence) ||
+        !(input_confidence->valuedouble >= 0.0 && input_confidence->valuedouble <= 1.0)))
+      return text_content("error: memory confidence must be between 0 and 1");
+
    int selection = server_memory_store_selection(args);
    if (selection < 0)
       return text_content("error: memory store must be user or kb");

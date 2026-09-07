@@ -144,6 +144,13 @@ def main():
             code, body = kb.kb_request('/v1/actions/memory.store', dict(key='shared-e2e-' + uuid.uuid4().hex,
                 content='Synthetic shared deployment fixture'))
             check('KB shared memory module stores a record', code == 200 and body.get('status') == 'ok')
+            for confidence in (-1, 1.01, False, None, 'invalid', [], {}):
+                code, body = kb.kb_request('/v1/actions/memory.store', dict(
+                    key='invalid-confidence-e2e', content='Synthetic shared fixture',
+                    confidence=confidence))
+                check('Direct KB store rejects confidence ' + repr(confidence),
+                      body.get('status') == 'error' and
+                      'confidence must be between 0 and 1' in body.get('message', ''))
             code, body = kb.kb_request('/v1/search', dict(query='shared deployment fixture', scope='all', max_results=3))
             check('KB ranked search uses its local embedding service', code == 200 and isinstance(body.get('hits'), list))
             code, body = kb.kb_request('/v1/actions/memory.find_facts', dict(query='shared deployment fixture', limit=3, graph_code_fusion_state='on'))

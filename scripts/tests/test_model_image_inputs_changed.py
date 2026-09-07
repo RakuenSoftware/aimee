@@ -22,8 +22,8 @@ class ModelInputTests(unittest.TestCase):
         self.git('init', '-q')
         self.git('config', 'user.name', 'Fixture')
         self.git('config', 'user.email', 'fixture@example.invalid')
-        self.commit({'Dockerfile.llm': 'FROM base@sha256:old\n',
-                     'Dockerfile.embedder': 'FROM base@sha256:old\n'})
+        self.commit({'Dockerfile.llm': 'FROM base@sha256:old\nARG LLAMACPP_VERSION=b100\n',
+                     'Dockerfile.embedder': 'FROM base@sha256:old\nARG LLAMACPP_VERSION=b100\n'})
         self.base = self.git('rev-parse', 'HEAD')
 
     def git(self, *args):
@@ -45,8 +45,8 @@ class ModelInputTests(unittest.TestCase):
         return result.stdout.strip()
 
     def test_application_update_does_not_repeat_earlier_model_build(self):
-        image_change = self.commit({'Dockerfile.llm': 'FROM base@sha256:new\n',
-                                    'Dockerfile.embedder': 'FROM base@sha256:new\n'})
+        image_change = self.commit({'Dockerfile.llm': 'FROM base@sha256:new\nARG LLAMACPP_VERSION=b101\n',
+                                    'Dockerfile.embedder': 'FROM base@sha256:new\nARG LLAMACPP_VERSION=b101\n'})
         self.commit({'tests/e2e/recall.py': 'new readiness check\n',
                      'src/application.c': 'new application code\n'})
         for kind in module.INPUTS:
@@ -59,10 +59,35 @@ class ModelInputTests(unittest.TestCase):
             for path in paths:
                 with self.subTest(kind=kind, path=path):
                     before = self.git('rev-parse', 'HEAD')
-                    self.commit({path: 'updated image input\n'})
-                    self.assertEqual(self.classify(kind, before), 'changed=true')
+                    self.commit({path: 'updated image input\n' if path != 'Dockerfile.llm' else
+                                 'FROM base\nARG LLAMACPP_VERSION=b102\n'})
+                    expected = 'true' if kind == 'embedder' or path == 'Dockerfile.llm' else 'false'
+                    self.assertEqual(self.classify(kind, before), 'changed=' + expected)
                     other = 'embedder' if kind == 'llm' else 'llm'
                     self.assertEqual(self.classify(other, before), 'changed=false')
+
+    def test_wrapper_and_weight_changes_wait_for_new_runtime_release(self):
+        self.commit({'Dockerfile.llm': 'FROM updated-base\nARG LLAMACPP_VERSION=b100\n',
+                     'deploy/container/aimee-llm-entrypoint.sh': 'new wrapper\n',
+                     'scripts/synthesis-model-table.sh': 'new weights\n'})
+        self.assertEqual(self.classify('llm', self.base), 'changed=false')
+        self.commit({'Dockerfile.llm': 'FROM updated-base\nARG LLAMACPP_VERSION=b101\n'})
+        self.assertEqual(self.classify('llm', self.base), 'changed=true')
+
+    def test_runtime_downgrade_does_not_build(self):
+        before = self.commit({'Dockerfile.llm': 'ARG LLAMACPP_VERSION=b101\n'})
+        self.commit({'Dockerfile.llm': 'ARG LLAMACPP_VERSION=b100\n'})
+        self.assertEqual(self.classify('llm', before), 'changed=false')
+
+    def test_unpinned_and_duplicate_runtime_versions_fail_closed(self):
+        for source in ('FROM base\n', 'ARG LLAMACPP_VERSION=latest\n',
+                       'ARG LLAMACPP_VERSION=b101\nARG LLAMACPP_VERSION=b102\n',
+                       'ARG LLAMACPP_VERSION=b101\nARG LLAMACPP_VERSION=latest\n'):
+            self.commit({'Dockerfile.llm': source})
+            result = subprocess.run(['python3', '-I', str(SCRIPT), 'llm', self.base, 'HEAD'],
+                                    cwd=self.repo, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn('changed=true', result.stdout)
 
     def test_workflow_edits_and_unused_model_dockerfile_do_not_rebuild(self):
         self.commit({'.github/workflows/publish-llm.yml': 'updated workflow\n',
@@ -80,7 +105,7 @@ class ModelInputTests(unittest.TestCase):
 
     def test_reverted_inputs_do_not_rebuild(self):
         self.commit({'Dockerfile.llm': 'temporary change\n'})
-        self.commit({'Dockerfile.llm': 'FROM base@sha256:old\n'})
+        self.commit({'Dockerfile.llm': 'FROM base@sha256:old\nARG LLAMACPP_VERSION=b100\n'})
         self.assertEqual(self.classify('llm', self.base), 'changed=false')
 
     def test_workflows_gate_builds_before_registry_or_builder_setup(self):

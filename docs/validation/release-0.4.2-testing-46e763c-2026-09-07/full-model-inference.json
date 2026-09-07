@@ -1,0 +1,26 @@
+[
+  {
+    "name": "e2b native discovery and inference over managed mTLS",
+    "passed": true
+  },
+  {
+    "name": "e2b refuses anonymous TLS clients",
+    "passed": true
+  },
+  {
+    "name": "e2b stays healthy after inference",
+    "passed": true
+  },
+  {
+    "name": "e4b native discovery and inference over managed mTLS",
+    "passed": true
+  },
+  {
+    "name": "e4b refuses anonymous TLS clients",
+    "passed": true
+  },
+  {
+    "name": "e4b stays healthy after inference",
+    "passed": true
+  }
+]
