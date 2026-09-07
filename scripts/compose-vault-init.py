@@ -78,8 +78,15 @@ def run(argv, **kwargs):
 
 
 def main(args):
+    # Explicit offline upgrade only. Ordinary compose-local up retains its
+    # first-boot-only behavior, including KB enrollment and provider secrets.
+    migrate_store = args[:1] == ['--migrate-store-connections']
+    if migrate_store:
+        args = args[1:]
     prefix = up_prefix(args)
     if prefix is None:
+        if migrate_store:
+            raise ValueError('store migration requires Compose options followed by up')
         return 0
     compose = ['docker', 'compose', *prefix]
     model = json.loads(run([*compose, 'config', '--format', 'json']))
@@ -87,7 +94,8 @@ def main(args):
     # in Config.Env. They preserve Compose's env-file interpolation semantics.
     for owner, data in payloads(model):
         binary = 'aimee-kb' if owner == 'aimee-kb' else 'aimee-server'
-        run([*compose, 'run', '--rm', '--no-deps', '-T', '--entrypoint',
+        migration_options = ['-e', 'AIMEE_VAULT_STORE_MIGRATION=1'] if migrate_store else []
+        run([*compose, 'run', '--rm', '--no-deps', '-T', *migration_options, '--entrypoint',
              '/usr/sbin/runuser', owner, '-u', 'aimee', '--', binary, '--bootstrap-vault-stdin'],
             input=data.encode())
     return 0

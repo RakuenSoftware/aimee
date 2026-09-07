@@ -158,7 +158,8 @@ for transition in \
     "git 13 7425 7425,7426" \
     "skills 14 7681 7681,7682" \
     "roundtable 21 9473 9473,9474" \
-    "benchmarks 25 10497 10497,10498"
+    "benchmarks 25 10497 10497,10498" \
+    "memory 7 5889,5890,5891,5892,5893,5894 5889,5890,5891,5892,5893,5894,5895"
 do
     set -- $transition
     setup
@@ -202,5 +203,33 @@ cp "$tmp/operator-grant" "$target"
 run_seeding
 if grep -q '^request=11266$' "$target"; then ok "operator restriction preserved"
 else bad "request capability expanded over operator policy"; fi
+
+echo "10. KB legacy memory grants migrate without changing operator policy"
+sed -n '/^# >>> kb-module-grant-seeding/,/^# <<< kb-module-grant-seeding/p' \
+    "$root/deploy/container/kb-role-runtime.sh" > "$tmp/kb-seeding.sh"
+for role in server kb; do
+    setup
+    mkdir -p "$AIMEE_HOME/modules.d/$role"
+    target="$AIMEE_HOME/modules.d/$role/memory.grant"
+    shipped="$AIMEE_MODULE_GRANT_SRC/memory.grant"
+    old=5889,5890,5891,5892,5893,5894
+    new=$old,5895
+    write_module_grant "$shipped" 7 "$real_exe" "$new"
+    write_module_grant "$target" 7 "$real_exe" "$old"
+    role_block=$block
+    [ "$role" = server ] || role_block="$tmp/kb-seeding.sh"
+    sh "$role_block" 2>"$tmp/grant-warning"
+    [ "$(serve_of "$target")" = "$new" ] && ok "$role legacy read grant migrated" || bad "$role read grant stale"
+    # An operator deliberately narrows a recorded grant to the old stage set.
+    write_module_grant "$target" 7 "$real_exe" "$old"
+    sh "$role_block" 2>"$tmp/grant-warning"
+    [ "$(serve_of "$target")" = "$old" ] && ok "$role recorded restriction retained" || bad "$role operator policy expanded"
+    # A pre-record policy that differs in another capability must also survive.
+    rm -f "$AIMEE_HOME/modules.d/$role/.seeded/"*
+    sed 's/^request=$/request=11266/' "$target" > "$tmp/edited-grant"
+    cp "$tmp/edited-grant" "$target"
+    sh "$role_block" 2>"$tmp/grant-warning"
+    cmp -s "$target" "$tmp/edited-grant" && ok "$role pre-record edit retained" || bad "$role pre-record edit overwritten"
+done
 
 exit "$fail"

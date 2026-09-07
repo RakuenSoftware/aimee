@@ -78,6 +78,16 @@ func (v *Volume) migrateLegacy(ctx context.Context) error {
 		return errors.New("postgres storage: absolute legacy storage path required")
 	}
 	source := filepath.Join(v.Legacy, "pgdata")
+	// Embedded KBs put PG_VERSION directly in AIMEE_HOME/postgres; split
+	// stores used a parent containing pgdata. Never choose between two clusters.
+	if _, err := os.Lstat(filepath.Join(v.Legacy, "PG_VERSION")); err == nil {
+		if _, nestedErr := os.Lstat(filepath.Join(source, "PG_VERSION")); !errors.Is(nestedErr, os.ErrNotExist) {
+			return errors.New("postgres storage: ambiguous legacy clusters")
+		}
+		source = v.Legacy
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	version, err := os.ReadFile(filepath.Join(source, "PG_VERSION"))
 	if errors.Is(err, os.ErrNotExist) {
 		entries, readErr := os.ReadDir(v.Legacy)

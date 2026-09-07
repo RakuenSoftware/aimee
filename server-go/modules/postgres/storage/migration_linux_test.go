@@ -33,39 +33,58 @@ func migrationFixture(t *testing.T) *Volume {
 	return v
 }
 func TestLegacyCopyVerifiedBeforeAdoptionAndNotReplayed(t *testing.T) {
-	v := migrationFixture(t)
-	ctx := context.Background()
-	original, err := clusterDigest(ctx, filepath.Join(v.Legacy, "pgdata"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := v.migrateLegacy(ctx); err != nil {
-		t.Fatal(err)
-	}
-	target := filepath.Join(v.Mount, "pgdata")
-	copied, err := clusterDigest(ctx, target)
-	if err != nil || copied != original || !v.state.Migrated {
-		t.Fatal("copy not verified and committed", err)
-	}
-	unchanged, _ := clusterDigest(ctx, filepath.Join(v.Legacy, "pgdata"))
-	if unchanged != original {
-		t.Fatal("original cluster mutated")
-	}
-	if err := os.WriteFile(filepath.Join(target, "global", "new-data"), []byte("post-migration write"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := v.migrateLegacy(ctx); err != nil {
-		t.Fatal("completed migration replayed", err)
+	for _, direct := range []bool{false, true} {
+		t.Run(map[bool]string{false: "parent", true: "embedded"}[direct], func(t *testing.T) {
+			v := migrationFixture(t)
+			source := filepath.Join(v.Legacy, "pgdata")
+			if direct {
+				v.Legacy = source
+			}
+
+			ctx := context.Background()
+			original, err := clusterDigest(ctx, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := v.migrateLegacy(ctx); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(v.Mount, "pgdata")
+			copied, err := clusterDigest(ctx, target)
+			if err != nil || copied != original || !v.state.Migrated {
+				t.Fatal("copy not verified and committed", err)
+			}
+			unchanged, _ := clusterDigest(ctx, source)
+			if unchanged != original {
+				t.Fatal("original cluster mutated")
+			}
+			if err := os.WriteFile(filepath.Join(target, "global", "new-data"), []byte("post-migration write"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := v.migrateLegacy(ctx); err != nil {
+				t.Fatal("completed migration replayed", err)
+			}
+		})
 	}
 }
 func TestLegacyMigrationRefusesUnsafeSources(t *testing.T) {
-	for _, variant := range []string{"running", "symlink", "old-major", "missing-version", "canceled"} {
+	for _, variant := range []string{"running", "symlink", "old-major", "missing-version", "canceled", "ambiguous", "root-link"} {
 		t.Run(variant, func(t *testing.T) {
 			v := migrationFixture(t)
 			source := filepath.Join(v.Legacy, "pgdata")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			switch variant {
+			case "ambiguous":
+				if err := os.WriteFile(filepath.Join(v.Legacy, "PG_VERSION"), []byte("18\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "root-link":
+				link := filepath.Join(t.TempDir(), "cluster")
+				if err := os.Symlink(source, link); err != nil {
+					t.Fatal(err)
+				}
+				v.Legacy = link
 			case "running":
 				if err := os.WriteFile(filepath.Join(source, "postmaster.pid"), []byte("42"), 0600); err != nil {
 					t.Fatal(err)

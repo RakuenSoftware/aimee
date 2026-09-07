@@ -336,13 +336,14 @@ grant_untouched_since_seed() {
 grant_known_historical_default() { # <persisted> <shipped>
     _persisted=$1
     _shipped=$2
+    [ ! -e "$(grant_seed_record "$_persisted")" ] || return 1
     # These modules originally shipped with one stage and later gained a second.
     # Match the entire remaining policy so an operator change to identity,
     # executable, or any other capability is never mistaken for an old image
     # default.
     _historical="$(basename "$_persisted"):$(grep '^serve=' "$_persisted" 2>/dev/null || true)"
     case "$_historical" in
-        git.grant:serve=7425|skills.grant:serve=7681|roundtable.grant:serve=9473|benchmarks.grant:serve=10497) ;;
+        git.grant:serve=7425|skills.grant:serve=7681|roundtable.grant:serve=9473|benchmarks.grant:serve=10497|memory.grant:serve=5889,5890,5891,5892,5893,5894) ;;
         *) return 1 ;;
     esac
     [ "$(sed '/^serve=/d' "$_persisted")" = "$(sed '/^serve=/d' "$_shipped")" ]

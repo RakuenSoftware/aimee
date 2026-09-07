@@ -47,6 +47,20 @@ class ComposeVaultTests(unittest.TestCase):
         model = fixture(); model['services']['aimee-kb'] = {}
         with self.assertRaises(ValueError): module.payloads(model)
 
+    def test_explicit_migration_is_scoped_and_not_persistent(self):
+        calls = []
+        def run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return module.json.dumps(fixture('kb')).encode() if 'config' in argv else b''
+        with patch.object(module, 'run', run):
+            module.main(['--migrate-store-connections', '-p', 'upgrade', 'up'])
+        args, options = calls[-1]
+        self.assertIn('AIMEE_VAULT_STORE_MIGRATION=1', args)
+        self.assertNotIn('AIMEE_VAULT_ENV_OVERWRITE=1', args)
+        self.assertIn(b'AIMEE_DB2_URL=', options['input'])
+        with self.assertRaises(ValueError):
+            module.main(['--migrate-store-connections', 'config'])
+
     def test_secret_packet_is_stdin_only(self):
         calls = []
         def run(argv, **kwargs):
@@ -57,6 +71,7 @@ class ComposeVaultTests(unittest.TestCase):
         args, options = calls[-1]
         self.assertIn('--bootstrap-vault-stdin', args)
         self.assertIn('--rm', args)
+        self.assertNotIn('AIMEE_VAULT_STORE_MIGRATION=1', args)
         self.assertNotIn('fixture-migrator', ' '.join(args))
         self.assertIn(b'fixture-migrator', options['input'])
 

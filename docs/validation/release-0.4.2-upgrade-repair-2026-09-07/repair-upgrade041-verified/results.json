@@ -1,0 +1,50 @@
+[
+  {
+    "name": "published 0.4.1 writes global canary",
+    "passed": true
+  },
+  {
+    "name": "published 0.4.1 writes project canary",
+    "passed": true
+  },
+  {
+    "name": "published cluster uses documented direct layout",
+    "passed": true
+  },
+  {
+    "name": "shipped upgrade procedure reaches healthy KB",
+    "passed": true
+  },
+  {
+    "name": "long-lived application metadata contains no credentials",
+    "passed": true
+  },
+  {
+    "name": "upgrade retains global canary and original authority",
+    "passed": true
+  },
+  {
+    "name": "upgrade retains project canary and original authority",
+    "passed": true
+  },
+  {
+    "name": "upgraded KB accepts new writes",
+    "passed": true
+  },
+  {
+    "name": "container recreation preserves post-upgrade writes",
+    "passed": true
+  },
+  {
+    "name": "migration and recreation leave original cluster byte-for-byte intact",
+    "passed": true
+  },
+  {
+    "name": "original 0.4.1 rollback reads global canary",
+    "passed": true
+  },
+  {
+    "name": "original 0.4.1 rollback reads project canary",
+    "passed": true
+  }
+]
