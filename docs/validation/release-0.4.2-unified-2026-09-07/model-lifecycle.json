@@ -1,10 +1,13 @@
-[
-  {
-    "name": "switching to external embedding and disabling synthesis removes owned local model containers",
-    "passed": true
-  },
-  {
-    "name": "switching back recreates selected local models",
-    "passed": true
-  }
-]
+{
+  "checks": [
+    {
+      "name": "switching to external embedding and disabling synthesis removes owned local model containers",
+      "passed": true
+    },
+    {
+      "name": "switching back recreates selected local models",
+      "passed": true
+    }
+  ],
+  "application_image": "aimee:unified042-v28"
+}

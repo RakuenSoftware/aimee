@@ -37,7 +37,7 @@ published `:testing` image has already been upgraded.
 | Full native unit suite | Passed; negative-path diagnostic logs are expected |
 | All Go packages with race detector | Passed |
 | Live PostgreSQL workflow store, API and engine | Passed with race detector and required real store fixtures |
-| Complete script regression suite | All 51 discovered suites passed; now included in CI |
+| Complete script regression suite | All 51 existing suites plus the new export-pin preservation regression passed; all discovered suites now run in CI |
 | Frontend tests and production build | 191 tests passed; build passed |
 | Lint and build integrity | All 77 lint checks and build integrity passed |
 | Shipped Compose variants | Eight normalized compositions passed |
@@ -50,21 +50,27 @@ published `:testing` image has already been upgraded.
 | Connected deployment | Personal/shared scope isolation, enrollment, restart and outage tests passed |
 | KB-free deployment | Personal memory and real local semantic recall, expiry, mutation and outage recovery passed |
 
-The final application image is `aimee:unified042-v12`, digest
-`sha256:acfb3eb1027b24efdcb8aa5e3bcdcb4998186156dcb2ac55865d8a0a1648ea25`.
+The final application image is `aimee:unified042-v28`, digest
+`sha256:9a8b4e5135127fd5b0aac66d87bad0479692d0e3bc81be4587003eb440868e58`,
+built from commit `122cc89bf8bca55e9905c744a9d51bb7fe937a41`. It reports
+`aimee v0.4.2`.
 [T1](release-0.4.2-unified-2026-09-07/t1-topology.json),
 [T2](release-0.4.2-unified-2026-09-07/t2-topology.json), and
 [T3](release-0.4.2-unified-2026-09-07/t3-topology.json) passed. Their component
 gates contain 70 connected-memory, 15 local-memory per Server topology,
-15 semantic-memory and six immutable-identity checks. Browser setup and model
-retirement/reinstallation passed on v11, whose runtime differs only in subsequent
-legacy identity migration and malformed enrollment-record guards. Exact image
+15 semantic-memory and six immutable-identity checks. Fresh browser setup passed
+on v11. The same managed browser deployment then upgraded to v28 and passed real
+login, model retirement and reinstallation. The native HTTP regression separately
+verifies that selecting No KB disables an old managed identity, including cached
+connections and restart, and that selecting remote reconnects. Exact image
 [digests](release-0.4.2-unified-2026-09-07/images.json) are recorded separately.
-The native application build used the source core version default; release
-publishing supplies `AIMEE_VERSION` explicitly.
 
-The final [analyzer run](release-0.4.2-unified-2026-09-07/static-analysis.json)
+The full [analyzer run](release-0.4.2-unified-2026-09-07/static-analysis.json)
 processed 981 sources with 3,352 advisory warnings and zero process failures.
+The later mTLS change was analyzed with seven advisory warnings and zero process
+failures. Cppcheck 2.13.0 checked all 32 changed production C files with four known
+diagnostics and no increase over the reviewed baseline. These are recorded in
+[follow-up analysis](release-0.4.2-unified-2026-09-07/static-analysis-followup.json).
 This is not a warning-free claim. Earlier results are preserved in the
 [storage report](release-0.4.2-postgres-luks-2026-09-06.md) and
 [local recall report](release-0.4.2-local-recall-2026-09-06.md).

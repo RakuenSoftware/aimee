@@ -75,7 +75,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install script test dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake build-essential python3-yaml openssh-client
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential pkg-config libssl-dev zlib1g-dev python3-yaml openssh-client
+      - name: Build the thin client required by proxy regression tests
+        run: make -C src -j2 ../aimee
       - name: Run every discovered script regression test
         run: make -C src script-tests
 

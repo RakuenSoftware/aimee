@@ -1,4 +1,6 @@
 {
+  "application_image": "aimee:unified042-v28",
+  "source_commit": "122cc89bf8bca55e9905c744a9d51bb7fe937a41",
   "checks": [
     {
       "name": "no initdb or database files before Vault unlock",
@@ -44,5 +46,6 @@
       "name": "corrupt Vault fails closed without replacing credentials or formatting storage",
       "passed": true
     }
-  ]
+  ],
+  "source_sha256": "a67d694e61886d19b2a1024bc2aa577647e1b292e55314a34d150fcd31e7b747"
 }

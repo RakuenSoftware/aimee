@@ -1,0 +1,14 @@
+{
+  "source_commit": "122cc89bf8bca55e9905c744a9d51bb7fe937a41",
+  "clang_tidy": {
+    "sources": 1,
+    "warnings": 7,
+    "process_failures": 0
+  },
+  "cppcheck": {
+    "version": "2.13.0",
+    "changed_production_sources": 32,
+    "known_diagnostics": 4,
+    "baseline_increase": false
+  }
+}

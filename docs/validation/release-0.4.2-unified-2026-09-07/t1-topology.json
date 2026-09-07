@@ -1,4 +1,6 @@
 {
+  "application_image": "aimee:unified042-v28",
+  "source_commit": "122cc89bf8bca55e9905c744a9d51bb7fe937a41",
   "checks": [
     {
       "name": "KB application metadata contains no database or enrollment credential",

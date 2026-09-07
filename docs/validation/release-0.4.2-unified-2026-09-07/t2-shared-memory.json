@@ -1,4 +1,6 @@
 {
+  "application_image": "aimee:unified042-v28",
+  "source_commit": "122cc89bf8bca55e9905c744a9d51bb7fe937a41",
   "checks": [
     {
       "name": "local store",
@@ -281,5 +283,5 @@
       "passed": true
     }
   ],
-  "source_sha256": "349f27c6b1e0da783d77e7cc7716211a089def4fa6ae72c87849069ea30ca5a9"
+  "source_sha256": "b8035ad68b7acd9010db3967858152db0ed10e68dd9159501d265e54a6022ad1"
 }
