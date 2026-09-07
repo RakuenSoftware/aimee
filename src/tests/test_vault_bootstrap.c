@@ -518,6 +518,35 @@ static void test_postgres_luks_vault_only(void)
    printf("  PASS: LUKS credential stays in Vault and is bound to one volume\n");
 }
 
+/* An offline store move replaces only SQL connections, never enrollment. */
+static void test_scoped_store_migration(void)
+{
+   const char *names[] = {"AIMEE_STORE_URL", "AIMEE_STORE_MIGRATION_URL", "AIMEE_DB2_URL",
+                          "AIMEE_KB_API_BEARER_TOKEN", "AIMEE_PROVIDER_API_KEY"};
+   char value[128];
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+      assert(vault_service_set_server("environment", names[i], "original-value") == VAULT_OK);
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+      setenv(names[i], "replacement-value", 1);
+   assert(vault_env_bootstrap_init() == 0);
+   setenv("AIMEE_VAULT_STORE_MIGRATION", "1", 1);
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+      setenv(names[i], "replacement-value", 1);
+   assert(vault_env_bootstrap_init() == 3);
+   unsetenv("AIMEE_VAULT_STORE_MIGRATION");
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+   {
+      assert(vault_service_get_server_principal("environment", names[i], value, sizeof(value)) ==
+             VAULT_OK);
+      assert(strcmp(value, i < 3 ? "replacement-value" : "original-value") == 0);
+      assert(getenv(names[i]) == NULL);
+      setenv(names[i], "subsequent-start", 1);
+   }
+   assert(vault_env_bootstrap_init() == 0);
+   assert(!plaintext_under_home("replacement-value"));
+   printf("  PASS: scoped store migration preserves non-SQL credentials and ordinary startup\n");
+}
+
 int main(void)
 {
    scrub_inherited_credential_env();
@@ -554,6 +583,7 @@ int main(void)
    test_no_source_noop();
    test_no_plaintext_at_rest();
    test_postgres_luks_vault_only();
+   test_scoped_store_migration();
 
    vault_kek_cache_clear();
    runtime_secret_clear();

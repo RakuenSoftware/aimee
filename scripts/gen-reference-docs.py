@@ -673,6 +673,7 @@ ENV_DYNAMIC = {
     "AIMEE_WEBCHAT_PASSWORD",
     "AIMEE_WEBCHAT_USERS",
     "AIMEE_VAULT_ENV_OVERWRITE",
+    "AIMEE_VAULT_STORE_MIGRATION",
 }
 
 # group order controls section order in the doc
@@ -1005,6 +1006,7 @@ ENV_DESC = {
     "AIMEE_WEBCHAT_PASSWORD": ("Server runtime", "Optional first-boot webchat password paired with AIMEE_WEBCHAT_USER. The bootstrap record is sealed into Vault and removed from the environment before runtime-web starts."),
     "AIMEE_WEBCHAT_USERS": ("Server runtime", "Optional first-boot webchat account registry. It is sealed into Vault and removed from the environment before runtime-web starts."),
     "AIMEE_VAULT_ENV_OVERWRITE": ("Server runtime", "First-boot control flag allowing supplied credential values to replace existing Vault records. It is not itself a credential."),
+    "AIMEE_VAULT_STORE_MIGRATION": ("Server runtime", "Explicit offline Compose upgrade control. Replaces only the store runtime, store migration, and KB database DSNs; other existing credentials remain unchanged. Do not persist in the runtime environment."),
     "AIMEE_AUTONOMY_BASE": ("Workflow engine", "Legacy C workflow integration-branch fallback. The Go WFE uses the branch checked out when it admits the repository."),
     "AIMEE_PR_BASE_MODE": ("Workflow engine", "What a pr.open with no explicit base targets: the run's feature branch (default) or, when set to default_branch, the autonomous base. The server exports the configured pr_base_mode into this variable at startup, so `aimee config set pr_base_mode` stays the one operator knob; the workflow engine reads it from the environment because that module is deliberately config-free."),
     "AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL": ("Workflow engine", "Maximum active autonomous work items for one authenticated principal."),

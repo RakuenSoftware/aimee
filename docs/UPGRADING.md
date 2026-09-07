@@ -22,6 +22,36 @@ and metadata, and only then promotes the copy. Interrupted copies resume safely.
 symlinks, unknown formats, and unsupported major versions are refused. For older PostgreSQL major
 versions, use a database-native logical dump and restore into the new cluster.
 
+For the published 0.4.1 KB, the cluster is `$AIMEE_HOME/postgres` (with `PG_VERSION`
+directly inside it). A parent volume containing `pgdata/PG_VERSION` is also supported.
+If both layouts contain a cluster, migration refuses to choose. The new PostgreSQL
+container renames the adopted `aimee_shared` database to `aimee_store`, reconciles
+application table and routine ownership, and enables TLS connections from the application
+network. An existing cluster containing both database names requires operator resolution.
+
+Copy the stopped application's home to a **new** home for 0.4.2 and assign that copy to
+UID/GID 1000:1000 (the published 0.4.1 KB used 999:999). Mount the copy at
+`/var/lib/aimee` in the application service, and mount the **original** stopped cluster
+read-only in the PostgreSQL service as above. Do not change ownership of the rollback home.
+Keep the existing KB bearer and identity values in your private Compose bootstrap settings.
+The image refreshes the exact historical memory grant to include the read stage; modified
+operator grants remain intact and must explicitly allow the capabilities you intend to use.
+With the new application stopped, explicitly migrate its Vault's SQL connections once:
+
+```sh
+python3 scripts/compose-vault-init.py --migrate-store-connections \
+  -p upgraded-kb -f compose.kb.yaml -f upgrade.override.yaml up
+scripts/compose-local.sh -p upgraded-kb -f compose.kb.yaml -f upgrade.override.yaml up -d
+```
+
+Use the same project, environment file, and overrides for both commands. The first command
+seals the new runtime, migration, and KB DSNs from Compose into the copied Vault; it does
+not start the services. Its one-shot `AIMEE_VAULT_STORE_MIGRATION=1` control replaces only
+`AIMEE_STORE_URL`, `AIMEE_STORE_MIGRATION_URL`, and `AIMEE_DB2_URL`. Enrollment, provider
+credentials, and the encryption key retain their existing values. Ordinary startup continues
+to preserve existing credentials. Do not persist either this migration control or the broader
+`AIMEE_VAULT_ENV_OVERWRITE` control in the application environment.
+
 Retain the old plaintext volume as rollback until the encrypted copy passes restore and data
 checks. Migration does not erase that source. Once retention is no longer required, the operator
 must remove or sanitize it according to the storage medium; encryption of the new copy does not

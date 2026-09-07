@@ -2020,6 +2020,11 @@ jobs:
               --server-image aimee:e2e --postgres-image aimee-postgres:e2e \
               --evidence "/tmp/aimee-e2e-evidence/luks-${mode}.json" "${extra[@]}"
           done
+      - name: Upgrade and roll back the published 0.4.1 KB
+        if: matrix.topology == 'T1'
+        run: |
+          sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \
+            python3 tests/e2e/kb-upgrade-e2e.py --output /tmp/aimee-e2e-evidence
       - name: Upload regression verdicts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

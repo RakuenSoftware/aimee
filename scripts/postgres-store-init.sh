@@ -45,12 +45,23 @@ DECLARE
   object record;
   object_kind text;
 BEGIN
+  -- These two private KB API schemas are part of the legacy application.
+  -- Move their migration authority without granting runtime schema access.
+  FOR object IN
+    SELECT nspname FROM pg_namespace
+     WHERE nspname IN ('aimee_kb_vault_orchestrator_api', 'aimee_kb_worm_api')
+       AND pg_get_userbyid(nspowner) IN ('aimee', 'postgres', 'aimee_store_migrator')
+  LOOP
+    EXECUTE format('ALTER SCHEMA %I OWNER TO aimee_store_migrator', object.nspname);
+  END LOOP;
   FOR object IN
     SELECT c.relkind, n.nspname, c.relname
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = 'public'
        AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+       AND NOT EXISTS (SELECT 1 FROM pg_depend d
+         WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
        -- ALTER TABLE transfers its SERIAL/IDENTITY sequences atomically. A
        -- second ALTER SEQUENCE is rejected because an owned sequence may not
        -- have a different owner from its table; only standalone sequences
@@ -70,6 +81,19 @@ BEGIN
     END;
     EXECUTE format('ALTER %s %I.%I OWNER TO aimee_store_migrator',
                    object_kind, object.nspname, object.relname);
+  END LOOP;
+  -- Schema replay replaces legacy helpers, including overloaded pg_now_text.
+  -- Transfer by signature, preserving bodies and ACLs. Extension members stay
+  -- under their administrative owner rather than the domain migration role.
+  FOR object IN
+    SELECT p.oid::regprocedure AS signature
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname IN ('public', 'aimee_kb_vault_orchestrator_api', 'aimee_kb_worm_api')
+       AND pg_get_userbyid(p.proowner) IN ('aimee', 'postgres', 'aimee_store_migrator')
+       AND NOT EXISTS (SELECT 1 FROM pg_depend d
+         WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+  LOOP
+    EXECUTE format('ALTER ROUTINE %s OWNER TO aimee_store_migrator', object.signature);
   END LOOP;
 END
 $reconcile$;

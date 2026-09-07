@@ -1,0 +1,49 @@
+{
+  "checks": [
+    {
+      "check": "no initdb or database files before Vault unlock",
+      "passed": true
+    },
+    {
+      "check": "first boot unlocks from Vault and starts PostgreSQL",
+      "passed": true
+    },
+    {
+      "check": "LUKS2 header has one keyslot and no TPM or enrollment tokens",
+      "passed": true
+    },
+    {
+      "check": "database reads work and raw storage contains no plaintext canary",
+      "passed": true
+    },
+    {
+      "check": "application restart reuses the already unlocked database",
+      "passed": true
+    },
+    {
+      "check": "concurrent container cannot take ownership of the same storage",
+      "passed": true
+    },
+    {
+      "check": "clean restart preserves the encrypted database and Vault key",
+      "passed": true
+    },
+    {
+      "check": "missing Vault key leaves existing ciphertext untouched and PostgreSQL locked",
+      "passed": true
+    },
+    {
+      "check": "restoring Vault recovers the original encrypted database",
+      "passed": true
+    },
+    {
+      "check": "container crash recovers the encrypted mapping and PostgreSQL WAL",
+      "passed": true
+    },
+    {
+      "check": "corrupt Vault fails closed without replacing credentials or formatting storage",
+      "passed": true
+    }
+  ],
+  "workspace": "/tmp/aimee-luks-e2e-s3827bak"
+}

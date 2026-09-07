@@ -552,6 +552,7 @@ static int vault_env_bootstrap_init_mode(int include_delegate)
 {
    extern char **environ;
    int overwrite = env_flag(ENV_OVERWRITE_CONTROL);
+   int migrate_store = env_flag("AIMEE_VAULT_STORE_MIGRATION");
    int provisioned = 0;
    int failed = 0;
    int processed = 0;
@@ -588,7 +589,11 @@ static int vault_env_bootstrap_init_mode(int include_delegate)
       const char *cred = NULL;
       slot_for_env(name, &agent, &cred);
       if (value && value[0] &&
-          (overwrite || !vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, cred)))
+          (overwrite ||
+           (migrate_store && (strcmp(name, "AIMEE_STORE_URL") == 0 ||
+                              strcmp(name, "AIMEE_STORE_MIGRATION_URL") == 0 ||
+                              strcmp(name, "AIMEE_DB2_URL") == 0)) ||
+           !vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, cred)))
       {
          if (vault_service_set_server(agent, cred, value) == VAULT_OK)
             provisioned++;
