@@ -2,9 +2,9 @@
 
 The application upgrade blockers found in [the published d05e9d7 qualification](release-0.4.2-testing-d05e9d7-2026-09-07.md)
 are repaired and the real published 0.4.1 KB upgrade passes on VM 9434, hosted by
-192.168.1.253. Release approval remains pending: nine canonical source repositories do not
-exist, and GitHub rejected their creation with the available personal access token.
-The repair lock contains their prepared commit IDs; those nine pins are not yet published.
+192.168.1.253. This qualification covers the application upgrade repair. Module repository
+creation, source publications, and source-package version changes are outside this task.
+The repository lock and core package version remain at the existing testing baseline.
 
 ## Changes
 
@@ -51,6 +51,11 @@ The PostgreSQL regression passes both historical database names, routine/schema 
 TLS network access, wrong-password rejection, runtime ownership denial, extension preservation,
 private schema isolation, repeat startup, and refusal of ambiguous databases.
 
+All final deployment matrices pass: T1 has 12 topology checks; T2 has 17 topology,
+49 personal-memory, 138 shared-memory, and six identity checks; T3 has four topology,
+49 personal-memory, and 15 semantic-memory checks. These cover optional KB enrollment,
+scope isolation, restart, outage recovery, retirement, and immutable identities.
+
 [Browser navigation](release-0.4.2-upgrade-repair-2026-09-07/navigation.json) passes all 15 pages
 on the repaired application with the retained permanent account.
 [Real local-model inference](release-0.4.2-upgrade-repair-2026-09-07/live-model-browser.json)
@@ -62,28 +67,12 @@ custody), Go PostgreSQL/storage and memory tests, six Compose bootstrap tests, a
 entrypoint grant-seeding regressions for both roles, standalone export contracts, and the
 26-Go/1-C runtime-bundle checker. Generated documentation and C formatting are synchronized.
 
-## Source publication status
+## CI scope correction
 
-The source package version advances to 0.4.2; existing tags were not replaced.
-All 35 prepared repository trees were compared byte-for-byte with current exports. The
-external config module retains its independent existing pin. The vendored lock checker passes.
-
-26 repositories have published `release/0.4.2-source-pins` branches and `v0.4.2` tags; both
-remote refs were checked against the lock commits. Nine still require repository creation:
-
-- `aimee-module-aimee`
-- `aimee-module-db2`
-- `aimee-module-economizer`
-- `aimee-module-egress`
-- `aimee-module-kb`
-- `aimee-module-observability`
-- `aimee-module-providers`
-- `aimee-module-sandbox`
-- `aimee-module-server`
-
-GitHub returned `Resource not accessible by personal access token (createRepository)`.
-Their complete Git bundles and a non-forcing publication script are retained in the session
-artifact `aimee-release042-pending-sources.tar.gz`. Exact commits and per-repository status
-are recorded in [source-publication.json](release-0.4.2-upgrade-repair-2026-09-07/source-publication.json).
-The main application release is not approved until these refs exist, repair CI passes,
-and the newly published `:testing` image is qualified.
+The initial repair branch incorrectly bumped the independent core package version and
+changed repository pins. That caused the installed-consumer checks on Linux, macOS, and
+Windows to reject the 0.4.2 package because their contract requires core 0.3.0. Those
+unrelated changes were reverted; this PR keeps the existing core/package contract.
+Repair CI and qualification of the subsequent published application remain required before
+application release approval. Creating or publishing module repositories is not a step in
+this upgrade repair.

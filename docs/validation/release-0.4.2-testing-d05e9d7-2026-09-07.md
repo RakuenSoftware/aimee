@@ -1,6 +1,6 @@
 # Published testing d05e9d7 qualification for 0.4.2 — NO GO
 
-Follow-up: [upgrade repair and source-publication status](release-0.4.2-upgrade-repair-2026-09-07.md). This report remains the verdict for the original published digest.
+Follow-up: [upgrade repair evidence](release-0.4.2-upgrade-repair-2026-09-07.md). This report remains the verdict for the original published digest.
 
 The published `testing-d05e9d7` candidate passes fresh deployment and synthesis
 qualification, but **must not be promoted to 0.4.2 yet**. A real published 0.4.1 KB
