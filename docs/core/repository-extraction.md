@@ -44,15 +44,31 @@ mirror drifts from its external repository pin. The vendored mirrors remain in
 the main repository during behavioral migration so existing builds do not
 silently switch implementations.
 
-The pins bind on `main` only. They describe a release: which published
-repository commit each vendored mirror was cut from. So the check runs in the
-`c-repository-pins` workflow for pushes to `main` and for pull requests into
-`main`, and nowhere else. `testing` and the branches feeding it are the
-integration tip: their vendored source is expected to run ahead of any published
-repository commit, and enforcing the lock there would only demand a refresh
-after every edit under `src/core/**` or `src/modules/**`. For that reason
-`repository-lock-check` is not part of `make lint` or `make verify-local`; run
-`make repository-lock-check` when you want it. Refresh the pins with
-`python3 scripts/export_c_repositories.py --refresh-lock-root <repository-set>`
-as part of cutting a release, before opening the `testing` → `main` pull
-request.
+Application releases build the bundled core and modules from the Aimee checkout.
+They do not publish independent module repositories or require those repositories
+to have matching releases. `dependencies/aimee-application-sources.lock.json`
+records the bundled source digests, classifications, execution/placement contracts,
+and process identities/grants. Its checker uses the same descriptor-owned files
+and declared header dependencies as the exporter. Modules with `external_source`
+(currently config) still have to match their existing repository pins and Go
+dependency version; freezing the application snapshot cannot bypass that check.
+
+The `c-repository-pins` workflow enforces this application snapshot on `main`
+and PRs into `main`, and continues to build standalone exports locally on both
+integration and release changes. Those fixture exports are never published.
+At application promotion, review the source and public-surface diffs, then run:
+
+```sh
+python3 -I scripts/check_application_source_lock.py freeze
+python3 -I -S scripts/refactor_baselines.py freeze --accept-dirty
+python3 -I scripts/check_application_source_lock.py
+python3 -I -S scripts/refactor_baselines.py
+```
+
+Commit both snapshots with the release preparation. They may go stale during
+integration; CI does not automatically refresh them. The historical
+`aimee-repositories.lock.json` and `src/core/VERSION` remain unchanged by an
+application release. `make repository-lock-check` still verifies all independent
+repository mirrors when preparing a separately requested module release.
+`export_c_repositories.py --refresh-lock-root <repository-set>` belongs to that
+separate workflow and is not an application-release prerequisite.

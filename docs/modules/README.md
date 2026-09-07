@@ -14,6 +14,7 @@ A module document should cover:
 
 Current contracts:
 
+- [Server composition](server.md), [KB composition](kb.md), and [providers](providers.md);
 - [audit](audit.md), [event bus](../../src/core/README.md), [config](config.md), and
   [module runtime](module-runtime.md);
 - [memory](memory.md), [learning](learning.md), [KB synthesis](kb-synthesis.md), and

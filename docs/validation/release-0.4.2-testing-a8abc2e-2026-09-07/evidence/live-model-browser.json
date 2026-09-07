@@ -1,0 +1,7 @@
+[
+  {
+    "name": "published browser/server/provider worker completes real local-model inference",
+    "passed": true,
+    "model": "openai"
+  }
+]

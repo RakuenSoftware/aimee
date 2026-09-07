@@ -31,6 +31,7 @@ module, a routing sibling, calls the same `agent_config.h` role predicates). Adv
 
 ## Dependencies and consumers
 
+- `providers`: supplies declared model competence, prices, and provider registration identity.
 - `config`: supplies agent rosters, tiers, provider choices, limits, and routing policy.
 - `ir`: supplies typed request facts and capability requirements used during selection.
 - `learning`: supplies bounded outcome evidence that can improve future selection.
@@ -87,35 +88,7 @@ health and policy, applies explicit bounded overrides or automatic tier/cost/qua
 decision, and hands one eligible target to execution. On typed failure, failover re-enters the same policy
 boundary rather than calling an arbitrary provider directly.
 
-## Tests and failure behavior
-
-`src/tests/test_agent.c`, delegate routing/driver, failover, provider, and route-policy tests cover core
-selection and exclusions. Workflow router tests cover their separate owner, not this module. No eligible route must return a concrete preflight
-error; a blocked override fails closed; health or credential failure may choose a policy-allowed fallback
-but must never silently cross a tier, tenant, capability, or egress boundary.
-
-## Operational diagnostics
-
-Use `delegate_route_preflight` detail and `aimee agent list`, plus health and policy exclusion reasons, selected
-provider/model/tier, failover events, latency/cost metrics, and outcome records. Operators should be able
-to distinguish no configured candidate, capability mismatch, policy denial, provider outage, budget
-exhaustion, and translation failure without reconstructing selection from generic HTTP errors.
-
-## Compatibility
-
-Role names, tier meanings, override precedence, candidate filtering, selected-route audit fields, and
-failover semantics are compatibility contracts. Moving `agent_config` and delegate selection into the
-module cannot change which agent wins for a fixed fixture unless an approved policy/version change also
-updates baselines and explains migration of learning evidence.
-
-## Extension and removal
-
-New routing strategies must plug into one candidate/filter/decision pipeline and emit comparable reasons
-and outcomes. Do not relocate HTTP route tables, workflow-internal routers, or delivery routing merely
-because their filenames contain `route`; consolidate only duplicated agent/provider selection. Core
-routing cannot be optional because gateway and delegates cannot execute without an eligible target.
-
-## Competence contracts and cost selection (policy v2)
+### Competence contracts and cost selection (policy v2)
 
 The provider store owns model assessments and task-role contracts in `models.json`.
 Roles remain the existing task names (`code`, `review`, `summarize`, `format`, etc.),
@@ -203,7 +176,14 @@ prefix. Credential/subscription failures propagate to siblings of that registrat
 model-specific failures remain local. Another registration using the same vendor and
 endpoint stays eligible. Legacy HTTP health diagnostics also use registration keys.
 
-## Validation commands
+## Tests and failure behavior
+
+`src/tests/test_agent.c`, delegate routing/driver, failover, provider, and route-policy tests cover core
+selection and exclusions. Workflow router tests cover their separate owner, not this module. No eligible route must return a concrete preflight
+error; a blocked override fails closed; health or credential failure may choose a policy-allowed fallback
+but must never silently cross a tier, tenant, capability, or egress boundary.
+
+### Validation commands
 
 ```sh
 make -C src go-unit-tests
@@ -219,3 +199,24 @@ routing tests cover threshold enforcement, persistence, override and escalation 
 provider catalog tests cover registration isolation. These execute in the existing CI
 unit shards and Go aggregate. PostgreSQL-specific gates require their CI services.
 For real model calls see [the live routing gate](../../scripts/validation/providers/README.md).
+
+## Operational diagnostics
+
+Use `delegate_route_preflight` detail and `aimee agent list`, plus health and policy exclusion reasons, selected
+provider/model/tier, failover events, latency/cost metrics, and outcome records. Operators should be able
+to distinguish no configured candidate, capability mismatch, policy denial, provider outage, budget
+exhaustion, and translation failure without reconstructing selection from generic HTTP errors.
+
+## Compatibility
+
+Role names, tier meanings, override precedence, candidate filtering, selected-route audit fields, and
+failover semantics are compatibility contracts. Moving `agent_config` and delegate selection into the
+module cannot change which agent wins for a fixed fixture unless an approved policy/version change also
+updates baselines and explains migration of learning evidence.
+
+## Extension and removal
+
+New routing strategies must plug into one candidate/filter/decision pipeline and emit comparable reasons
+and outcomes. Do not relocate HTTP route tables, workflow-internal routers, or delivery routing merely
+because their filenames contain `route`; consolidate only duplicated agent/provider selection. Core
+routing cannot be optional because gateway and delegates cannot execute without an eligible target.

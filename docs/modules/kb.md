@@ -1,26 +1,104 @@
-# KB composition module
+# kb module
 
-The Go `kb` module attaches to the core event bus as principal 35. It
-uses the same PostgreSQL, Vault, configuration and memory modules as the other
-composition. The `kb` placement includes this role alone.
+## Purpose and non-goals
 
-First boot publishes a synced, read-only `instance-identity.json` in the instance
-home. Subsequent boots must match its role and UUID; there is no config or API
-operation that changes identity. Preserve the complete instance home in backups.
-This is a startup contract, not protection against an administrator replacing
-files on disk. Corrupt or writable identity records fail startup.
+The Go `kb` module composes the shared-knowledge KB role from standardized
+modules. It owns role identity and process composition; the native protocol and
+resource hosts still supply their existing C adapters. Composition does not
+reimplement memory policy, PostgreSQL storage, or Vault in the role handler.
 
-The core rejects a conflicting role even when a grant authorizes that principal.
-A second live process for the same role is also rejected. Event
-`13057` accepts only `{"operation":"identity"}` and returns the persisted
-identity. KB connection settings are independent of the Server's identity.
+## Public contracts
 
-The role also owns process composition through the shared Go module supervisor.
-It validates the full manifest before launching anything, requires configuration,
-PostgreSQL and memory, rejects the opposite role and duplicate entries, and waits
-for the owning bus before attaching modules. Failed modules restart independently;
-shutdown terminates their process groups within a bounded grace period.
+`src/modules/kb/include/aimee/kb/module_api.h` declares identity event
+`13057`, stage `1`, for principal `35`. The request is exactly
+`{"operation":"identity"}`; the response contains version, role, and UUID.
+Unknown fields, extra JSON values, unsupported stages, and mutation operations
+return an invalid-request status. `server-go/modules/kb/role.go` implements
+this contract and delegates process lifetime to the shared supervisor.
 
-The image still carries the native protocol/resource hosts for existing C
-adapters. Their module selection and lifecycle are supplied by the Go composition;
-this change does not rewrite those adapters in Go.
+## Dependencies and consumers
+
+The descriptor declares the following dependencies. The native role host and
+`server-go/cmd/aimee-module` consume the role implementation and its identity.
+
+- `config`: shared configuration service required by the composition manifest.
+- `memory`: shared Go implementation serving the placement's memory operations.
+- `module-runtime`: event-bus attachment, immutable identity, and process supervision.
+- `postgres`: PostgreSQL provider required before dependent storage operations succeed.
+- `vault`: resource-host bootstrap and credential storage used by the composition.
+
+## Providers and readiness
+
+`supervisor.Read` validates the entire manifest before launching any child. It
+requires this role, config, PostgreSQL, and memory, rejects duplicate entries and
+the opposite role, and verifies executable paths. Workers wait for the owning
+bus socket before attachment. Manifest validation alone does not prove each
+module's downstream service is ready; service health must also be checked.
+
+## Configuration and activation
+
+- `runtime_toggle.supported`: `false`; the role is selected by the immutable instance identity.
+
+`AIMEE_HOME` identifies the instance home. The deployment supplies the bus socket
+and generated placement manifest to `Supervise`. A composition must match the
+persisted role; changing KB connection settings cannot switch that role. The
+Server and KB role modules never attach together to one composition.
+
+## Surfaces
+
+The role's public surface is the identity event `13057` and the generated
+process manifest consumed by its supervisor. User-facing HTTP, CLI, and browser
+surfaces remain implemented by the application adapters and their owning
+modules; the identity handler exposes no role-editing endpoint.
+
+## Data and migrations
+
+First boot writes a synced, read-only `instance-identity.json` in the instance
+home. Subsequent boots must match its role and UUID. Preserve the complete home
+in backups and restore it with the corresponding storage and Vault state.
+Storage schema changes belong to PostgreSQL and memory; this module provides
+no automatic conversion between a Server home and a KB home.
+
+## Security and privacy
+
+The core bus remains authoritative for executable identity and grants. It
+rejects a conflicting role even if a grant names that principal and refuses a
+second live process for the same role. Corrupt or writable
+`instance-identity.json` records fail startup. This startup contract does not
+protect against an administrator replacing files on disk.
+
+## Supported journeys
+
+A standalone KB hosts shared knowledge through the same Go memory and PostgreSQL modules. A separate Server may connect for shared-memory access while retaining its own identity and personal store. Ordinary Docker storage is the default; the explicit LUKS
+Compose overlay is a PostgreSQL deployment option, independent of `kb`
+identity. See `docs/DEPLOYMENT.md` for the deployment topology and storage choices.
+
+## Tests and failure behavior
+
+`server-go/modules/kb/role_test.go` checks identity responses, malformed or
+mutating requests, and conflicting roles. The shared identity and supervisor
+suites cover persisted identity and composition failure. A failed manifest
+never partially activates; failed module processes restart independently.
+The deployment matrix exercises role identity with real published containers.
+
+## Operational diagnostics
+
+Supervisor logs use `composition:kb` and identify each child start, exit,
+and restart. Inspect those logs alongside bus-attachment and module health
+errors. Check the identity file and manifest before investigating dependent
+services when startup reports an identity mismatch or a missing required module.
+
+## Compatibility
+
+The native protocol/resource hosts remain packaged for existing C adapters;
+the Go `kb` module supplies selection and lifetime. Existing module event
+identities and the identity response schema remain stable. Recreating a
+container with the same persistent instance home must retain its UUID and role.
+
+## Extension and removal
+
+Extend composition through descriptor-declared modules and the validated
+manifest, retaining the bus grant checks. Do not add an identity mutation to
+`NewHandler` or enable both roles in one manifest. Removing this role from its
+own composition fails the required-module check; retire its principal identity
+rather than reusing the number for another module.

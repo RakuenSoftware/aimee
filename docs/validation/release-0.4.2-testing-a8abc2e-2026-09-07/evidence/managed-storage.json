@@ -1,0 +1,8 @@
+{
+  "storage_mode": "plain",
+  "healthy": true,
+  "privileged": false,
+  "added_capabilities": null,
+  "devices": null,
+  "device_rules": null
+}

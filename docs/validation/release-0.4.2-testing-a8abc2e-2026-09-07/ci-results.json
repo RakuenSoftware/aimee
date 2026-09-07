@@ -1,0 +1,14 @@
+{
+  "publication": {
+    "id": 34155974982,
+    "conclusion": "success"
+  },
+  "push-ci": {
+    "id": 34155974921,
+    "conclusion": "success"
+  },
+  "promotion-ci": {
+    "id": 34155977718,
+    "conclusion": "success"
+  }
+}

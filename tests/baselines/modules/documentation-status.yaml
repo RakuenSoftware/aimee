@@ -32,7 +32,10 @@
     "db2",
     "aimee",
     "egress",
-    "observability"
+    "observability",
+    "kb",
+    "providers",
+    "server"
   ],
   "debt": []
 }

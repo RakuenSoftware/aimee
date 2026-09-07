@@ -2,13 +2,16 @@ name: c-repository-pins
 
 on:
   # Standalone exports must build on integration changes as well as releases.
-  # Exact published repository pins remain a main-only release gate below.
+  # Bundled source snapshots and external dependency pins gate application releases.
   push:
     branches:
       - main
       - testing
     paths:
       - "dependencies/aimee-repositories.lock.json"
+      - "dependencies/aimee-application-sources.lock.json"
+      - "scripts/check_application_source_lock.py"
+      - "scripts/tests/test_check_application_source_lock.py"
       - "src/core/**"
       - "src/modules/**"
       - "src/tests/**"
@@ -32,6 +35,9 @@ on:
       - testing
     paths:
       - "dependencies/aimee-repositories.lock.json"
+      - "dependencies/aimee-application-sources.lock.json"
+      - "scripts/check_application_source_lock.py"
+      - "scripts/tests/test_check_application_source_lock.py"
       - "src/core/**"
       - "src/modules/**"
       - "src/tests/**"
@@ -110,17 +116,13 @@ jobs:
             cmake --build "$RUNNER_TEMP/build-$module" --parallel 2
             test -x "$RUNNER_TEMP/build-$module/aimee-module-$module"
           done
-      # The exact commit/digest pins in dependencies/aimee-repositories.lock.json
-      # describe a RELEASE: which external core/module repository commit each
-      # vendored mirror was cut from. `testing` is the integration tip, where the
-      # vendored source is meant to run ahead of any published repository commit,
-      # so enforcing the lock there only demands a lock refresh after every edit
-      # under src/core|modules/** — noise that says nothing about the change.
-      # `main` (and every PR into it) is where the pins must hold, because that is
-      # what ships and what the main deployments run. Refresh with
-      # `export_c_repositories.py --refresh-lock-root` when a release is cut; see
-      # docs/core/repository-extraction.md.
-      - name: Repository pins (main only)
+      # Application images build bundled source from this checkout. Publishing
+      # independent repositories is a separate, explicitly initiated operation.
+      # Keep real external dependencies pinned and freeze bundled inputs for the
+      # release without replacing historical external repository provenance.
+      - name: Application sources and external pins (main only)
         if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
-        run: python3 -I scripts/check_c_repository_lock.py
+        run: python3 -I scripts/check_application_source_lock.py
+      - name: Test application source-lock failure modes
+        run: python3 -I scripts/tests/test_check_application_source_lock.py -v
       - run: sh src/tests/test_module_supervisor.sh

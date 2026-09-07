@@ -17,6 +17,7 @@ typed status and bounded rows. Raw connection strings and credentials never cros
 
 - `config`: supplies validated store and migration connection settings without exposing them to callers.
 - `module-runtime`: grants principal `28`, supervises the process, and publishes stage readiness.
+- `vault`: supplies persisted credentials and the volume-bound key for explicitly enabled LUKS storage.
 
 The `aimee` and `memory` domain modules consume the shared database contract. Registered owners use the generic
 transport only through reviewed catalogs; server routes and thin clients never call it directly.
@@ -29,7 +30,7 @@ server with the wrong schema or failed migration is degraded or unavailable, not
 
 ## Configuration and activation
 
-- `runtime_toggle.supported`: `true`; the shipped image enables the process, while an explicit deployment override may omit it only when no consumer needs PostgreSQL.
+- `runtime_toggle.supported`: `false`; both role compositions require the PostgreSQL process.
 
 `AIMEE_STORE_URL` supplies runtime access and `AIMEE_STORE_MIGRATION_URL` supplies migration authority. Use
 least-privilege roles and secret injection; filesystem DB paths and SQLite compatibility settings are ignored.
@@ -47,6 +48,32 @@ executes registered statements inside bounded transactions. Ledger creation and
 migration/replay use the same transaction advisory lock as the native knowledge
 bootstrap, including on an empty database. Runtime tables, including workflow rows, belong
 to `aimee`; backups and restores use PostgreSQL-native `pg_dump` and `pg_restore` procedures.
+
+### Container storage in 0.4.2
+
+The module's `storage` package defaults to ordinary persistent Docker storage
+(`AIMEE_POSTGRES_STORAGE=plain`, also the default when unset). It requires no
+LUKS device access or storage administration capabilities. Host and volume-provider
+encryption work transparently. LUKS2 is an explicit opt-in through
+`compose.luks.yaml` for Server or `compose.kb.luks.yaml` for KB; each sets
+`AIMEE_POSTGRES_STORAGE=luks` and supplies the required device and control-socket
+configuration for the PostgreSQL container. Core's existing Vault is the only persistent key custodian;
+its database-independent bootstrap must be available before PostgreSQL starts.
+`AIMEE_POSTGRES_STORAGE_SOCKET` identifies the local control socket, not a key
+source. The owner requests only its fixed, volume-bound Vault credential.
+
+The optional LUKS bootstrap requires a Linux Docker host with device-mapper and loop
+support. The deployment must supply the actual device-mapper block major and
+allow the required storage administration operations; it must never fall back to
+an unencrypted data directory. Key transport uses protected transient memory and
+pipes. `AIMEE_POSTGRES_VOLUME_MIB` sizes a new encrypted volume; changing it on an
+existing volume is refused until an explicit storage migration handles resizing.
+
+An existing plain or encrypted store is never implicitly converted to the other
+mode; selecting the wrong mode fails before serving it. Real-container regression
+harnesses are `tests/e2e/postgres-plain-e2e.py` and `tests/e2e/postgres-luks-e2e.py`.
+Implementation and release evidence are tracked in
+[the storage validation report](../validation/release-0.4.2-postgres-luks-2026-09-06.md).
 
 ## Security and privacy
 
@@ -83,22 +110,3 @@ contract, `AIMEE_DB1_PATH`, and direct domain SQL access have no 0.4.0 compatibi
 Extend `postgres` by adding a versioned generic operation and cross-language fixtures, then register a
 domain-owned catalog and tests. Do not add domain conditions to this module. Removal requires migrating
 every declared consumer and preserving recorded owner/version/checksum history for audit and restore.
-
-## Encrypted container storage (0.4.2 implementation)
-
-The module's `storage` package owns LUKS2 mount lifecycle for the standardized
-PostgreSQL container. Core's existing Vault is the only persistent key custodian;
-its database-independent bootstrap must be available before PostgreSQL starts.
-`AIMEE_POSTGRES_STORAGE_SOCKET` identifies the local control socket, not a key
-source. The owner requests only its fixed, volume-bound Vault credential.
-
-Storage bootstrap requires a Linux Docker host with device-mapper and loop
-support. The deployment must supply the actual device-mapper block major and
-allow the required storage administration operations; it must never fall back to
-an unencrypted data directory. Key transport uses protected transient memory and
-pipes. `AIMEE_POSTGRES_VOLUME_MIB` sizes a new encrypted volume; changing it on an
-existing volume is refused until an explicit storage migration handles resizing.
-
-The real-container regression harness is `tests/e2e/postgres-luks-e2e.py`.
-Implementation and release evidence are tracked in
-[the storage validation report](../validation/release-0.4.2-postgres-luks-2026-09-06.md).

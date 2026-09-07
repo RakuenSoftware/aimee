@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "bd8172936c95b578288cd4c48ce33586cf9c3f1c",
+  "source_revision": "a8abc2e10d56ceb22a5fcdcad5ba426f0208d15e",
   "source_fingerprint": "1d83b8ea386cb528f6ca4ca083c4e896dff92739dac1f1e4a32f015125d9adb3",
   "probe": {
     "compile_driver": "src/Makefile",
@@ -1974,24 +1974,24 @@
       "references": [
         "src/modules/db2/c/demotion.c"
       ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
       "symbol": "db2_memory_scene_members",
       "references": [
         "src/modules/db2/c/kb_service_backend.c"
       ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
       "symbol": "db2_memory_scenes_list_recent",
       "references": [
         "src/modules/db2/c/kb_service_backend.c"
       ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
       "symbol": "db2_memory_scope_bind_current",
@@ -1999,16 +1999,16 @@
         "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/typed_facts.c"
       ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
       "symbol": "db2_memory_scope_context_get",
       "references": [
         "src/modules/db2/c/pgvec_transport.c"
       ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
       "symbol": "difftime",
@@ -2318,8 +2318,8 @@
       "references": [
         "src/modules/db2/c/pgvec_kb_service.c"
       ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
       "symbol": "poll",
@@ -3116,12 +3116,12 @@
     "unresolved_symbols": 149,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 3,
-      "portable-core-promotion": 6,
+      "injected-module-contract": 9,
+      "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 140
     }
   },
-  "fingerprint": "510970c240046f2b87acb91a77813cca0e599c2716b7f749b2649d0bf3ac4877"
+  "fingerprint": "ee445f8cb4473d33730c42697efc1efeb1c29bd3cd461f494fcb1d796d0b76c3"
 }

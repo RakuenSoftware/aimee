@@ -763,10 +763,10 @@ class LinkClosureTest(unittest.TestCase):
         )
         self.assertEqual(contract["summary"]["dispositions"]["system-link"], 140)
         self.assertEqual(
-            contract["summary"]["dispositions"]["portable-core-promotion"], 6
+            contract["summary"]["dispositions"]["portable-core-promotion"], 0
         )
         self.assertEqual(
-            contract["summary"]["dispositions"]["injected-module-contract"], 3
+            contract["summary"]["dispositions"]["injected-module-contract"], 9
         )
         self.assertFalse(any(
             row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
@@ -897,6 +897,90 @@ class LinkClosureTest(unittest.TestCase):
             code_audit_support["path"],
             json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
         )
+
+
+class MemoryMigrationComparisonTest(unittest.TestCase):
+    """Exercise the exact release admission independently of schema/probe tests."""
+
+    def setUp(self):
+        self.current = json.loads((REPO / checker.CONTRACT).read_text())
+        self.previous = copy.deepcopy(self.current)
+        self.previous["fingerprint"] = checker.MEMORY_MIGRATION_BASE
+        self.previous["translation_units"] += sorted(checker.MEMORY_RETIRED_UNITS)
+        self.previous["descriptor_support_units"] += [
+            {"path": path} for path in sorted(checker.MEMORY_RETIRED_SUPPORT)
+        ]
+        self.previous["unresolved"] = [
+            row for row in self.previous["unresolved"]
+            if row["symbol"] not in checker.MEMORY_ADAPTER_IMPORTS
+        ]
+        for row in self.previous["unresolved"]:
+            if row["symbol"] == "memchr":
+                row["references"].remove("src/modules/db2/c/fact_recall.c")
+
+    def compare(self):
+        # Structural validation has its own failure-mode suite above. This
+        # isolates the policy comparison so every mutation reaches that policy.
+        def validated(root, contract, **kwargs):
+            return (contract["translation_units"], contract["descriptor_support_units"],
+                    {row["symbol"]: row for row in contract["unresolved"]})
+        with mock.patch.object(checker, "validate_contract", side_effect=validated):
+            checker.compare_contracts(REPO, self.previous, self.current)
+
+    def test_exact_migration_passes(self):
+        self.compare()
+
+    def test_another_base_cannot_use_migration_admissions(self):
+        self.previous["fingerprint"] = "0" * 64
+        with self.assertRaisesRegex(checker.ClosureError, "previous-source-removal"):
+            self.compare()
+
+    def test_unreviewed_source_retirement_fails(self):
+        self.previous["translation_units"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-source-removal"):
+            self.compare()
+
+    def test_unreviewed_support_retirement_fails(self):
+        self.previous["descriptor_support_units"].append(
+            {"path": "src/modules/db2/support/unreviewed.c"}
+        )
+        with self.assertRaisesRegex(checker.ClosureError, "previous-support-removal"):
+            self.compare()
+
+    def test_additional_adapter_consumer_fails(self):
+        row = next(r for r in self.current["unresolved"] if r["symbol"] in checker.MEMORY_ADAPTER_IMPORTS)
+        row["references"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-symbol-growth"):
+            self.compare()
+
+    def test_adapter_cannot_be_reclassified_as_system_or_core(self):
+        row = next(r for r in self.current["unresolved"] if r["symbol"] in checker.MEMORY_ADAPTER_IMPORTS)
+        for disposition in ("system-link", "portable-core-promotion"):
+            with self.subTest(disposition=disposition):
+                row["disposition"] = disposition
+                with self.assertRaisesRegex(checker.ClosureError, "previous-symbol-growth"):
+                    self.compare()
+
+    def test_unreviewed_symbol_fails(self):
+        self.current["unresolved"].append({
+            "symbol": "unreviewed_import", "references": ["src/modules/db2/c/fact_recall.c"],
+            "disposition": "injected-module-contract",
+        })
+        with self.assertRaisesRegex(checker.ClosureError, "previous-symbol-growth"):
+            self.compare()
+
+    def test_system_reference_admission_is_exact(self):
+        row = next(r for r in self.current["unresolved"] if r["symbol"] == "memchr")
+        row["references"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-reference-growth"):
+            self.compare()
+
+    def test_post_migration_base_still_rejects_adapter_growth(self):
+        self.previous = copy.deepcopy(self.current)
+        row = next(r for r in self.current["unresolved"] if r["symbol"] in checker.MEMORY_ADAPTER_IMPORTS)
+        row["references"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-reference-growth"):
+            self.compare()
 
 
 if __name__ == "__main__":
