@@ -99,7 +99,8 @@ live_env_init() {
 
    LIVE_WORK=$(mktemp -d "/tmp/aimee-${LIVE_NAME}-XXXXXX")
    export AIMEE_HOME="$LIVE_WORK/home"
-   mkdir -p "$AIMEE_HOME"
+   LIVE_KB_HOME="$LIVE_WORK/kb-home"
+   mkdir -p "$AIMEE_HOME" "$LIVE_KB_HOME"
    LIVE_KB_LOG="$LIVE_WORK/kb.log"
    # aimee-server does NOT write its log to stdout/stderr: it writes
    # $AIMEE_HOME/server.log, and the shell redirect below captures an empty file.
@@ -476,6 +477,8 @@ YAML
 }
 
 live_env_start_kb() {
+   local AIMEE_HOME="$LIVE_KB_HOME"
+   export AIMEE_HOME
    step "Starting aimee-kb"
    live_env_write_config
    # EVERY OIDC variable must be unset. kb treats a configured OIDC profile as
@@ -512,6 +515,8 @@ live_env_start_kb() {
 }
 
 live_env_restart_kb() {
+   local AIMEE_HOME="$LIVE_KB_HOME"
+   export AIMEE_HOME
    live_env_stop_kb_modules
    kill "$LIVE_KB_PID" 2>/dev/null
    sleep 1
@@ -543,6 +548,7 @@ live_env_restart_kb() {
 live_env_prepare_modules() {
    local config_module="src/build/obj/aimee-module-config"
    local multicall="src/build/obj/aimee-module"
+   export AIMEE_TEST_MODULE_BIN="$PWD/$multicall"
    [ -x "$config_module" ] || make -C src build/obj/aimee-module-config >/dev/null 2>&1 || true
    [ -x "$multicall" ] || make -C src build/obj/aimee-module >/dev/null 2>&1 || true
    [ -x "$config_module" ] && [ -x "$multicall" ] || {
@@ -587,6 +593,8 @@ live_env_arm_module() { # executable bus-socket log-file pid-variable [env assig
 }
 
 live_env_start_kb_modules() {
+   local AIMEE_HOME="$LIVE_KB_HOME"
+   export AIMEE_HOME
    live_env_stop_kb_modules
    live_env_prepare_modules
    local bus="$AIMEE_HOME/kb-module-bus.sock"
@@ -629,6 +637,7 @@ live_env_stop_kb_modules() {
 }
 
 live_env_start_module() {
+   live_env_write_config
    live_env_stop_module
    live_env_prepare_modules
    # The store is the multicall binary under its own name; the grant pins the

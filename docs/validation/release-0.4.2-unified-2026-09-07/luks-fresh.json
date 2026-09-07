@@ -1,0 +1,48 @@
+{
+  "checks": [
+    {
+      "name": "no initdb or database files before Vault unlock",
+      "passed": true
+    },
+    {
+      "name": "first boot unlocks from Vault and starts PostgreSQL",
+      "passed": true
+    },
+    {
+      "name": "LUKS2 header has one keyslot and no TPM or enrollment tokens",
+      "passed": true
+    },
+    {
+      "name": "database reads work and raw storage contains no plaintext canary",
+      "passed": true
+    },
+    {
+      "name": "application restart reuses the already unlocked database",
+      "passed": true
+    },
+    {
+      "name": "concurrent container cannot take ownership of the same storage",
+      "passed": true
+    },
+    {
+      "name": "clean restart preserves the encrypted database and Vault key",
+      "passed": true
+    },
+    {
+      "name": "missing Vault key leaves existing ciphertext untouched and PostgreSQL locked",
+      "passed": true
+    },
+    {
+      "name": "restoring Vault recovers the original encrypted database",
+      "passed": true
+    },
+    {
+      "name": "container crash recovers the encrypted mapping and PostgreSQL WAL",
+      "passed": true
+    },
+    {
+      "name": "corrupt Vault fails closed without replacing credentials or formatting storage",
+      "passed": true
+    }
+  ]
+}

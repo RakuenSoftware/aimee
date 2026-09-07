@@ -1324,12 +1324,12 @@ endif
 # the module is a prerequisite: without it every migrated operation answers
 # "capability absent" and the failure reads as a broken store.
 integration-tests: $(BINARY) $(SERVER) $(OBJDIR)/aimee-module $(CONFIG_MODULE)
-	./tests/test_integration.sh
+	AIMEE_TEST_MODULE_BIN="$(abspath $(OBJDIR)/aimee-module)" ./tests/test_integration.sh
 	python3 ../scripts/test-thin-client-remote-exclusive.py $(BINARY)
 	python3 ../scripts/test-served-argspec-e2e.py $(BINARY)
 
-init-migrate-service-test: $(BINARY) $(SERVER) $(CONFIG_MODULE)
-	./tests/test_init_migrate_service.sh
+init-migrate-service-test: $(BINARY) $(SERVER) $(OBJDIR)/aimee-module $(CONFIG_MODULE)
+	AIMEE_TEST_MODULE_BIN="$(abspath $(OBJDIR)/aimee-module)" ./tests/test_init_migrate_service.sh
 
 postgres-store-upgrade-test:
 	../scripts/tests/test_postgres_store_upgrade.sh
