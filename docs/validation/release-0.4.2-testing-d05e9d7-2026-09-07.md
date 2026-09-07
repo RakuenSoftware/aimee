@@ -4,8 +4,9 @@ Follow-up: [upgrade repair evidence](release-0.4.2-upgrade-repair-2026-09-07.md)
 
 The published `testing-d05e9d7` candidate passes fresh deployment and synthesis
 qualification, but **must not be promoted to 0.4.2 yet**. A real published 0.4.1 KB
-cannot complete the documented upgrade into the unified deployment. The release
-repository lock also remains stale. Green candidate CI does not clear either gate.
+cannot complete the documented upgrade into the unified deployment. Green
+candidate CI does not clear that upgrade failure. The separate baseline source-lock
+finding below is outside this application-upgrade repair.
 
 Candidate: `d05e9d71c258f6ca53b89ba8e1752bf910678dae`, the merge of PR #2964.
 [Application publication](https://github.com/RakuenSoftware/aimee/actions/runs/34108283225),
@@ -130,14 +131,16 @@ coverage using the actual legacy KB layout, names, Vault state and schema object
 The passing synthetic PostgreSQL migration fixture does not cover that contract.
 No workaround above is presented as a completed or supported migration.
 
-## Release blocker: repository provenance
+## Separate baseline finding: repository provenance
 
 `python3 scripts/check_c_repository_lock.py` still fails with
 `core vendored mirror differs from its repository pin`.
 [Recorded result](release-0.4.2-testing-d05e9d7-2026-09-07/repository-pins.log).
-The release lock needs legitimate published repository commits matching the
-vendored sources. Testing-branch CI passing does not satisfy the main/release-only
-provenance requirement. No lock values or release tags were changed here.
+This records the existing candidate baseline and its main/release-only provenance
+check; it is not a module-publication requirement for this repair. Repository
+creation, module publications, package-version changes, and lock updates are
+outside the authorized task. The application repair retains the original core
+version and repository pins.
 
 ## Test qualifications and reproduction
 
