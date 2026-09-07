@@ -74,12 +74,14 @@ class Gate:
         self.check(name, passed, None if passed else response)
         return body
 
-    def wait(self, op, body=None):
-        deadline = time.monotonic() + 150
+    def wait(self, op, body=None, *, predicate=None, timeout=150):
+        """Wait for a successful response and, optionally, the required result."""
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
                 response = self.call(op, body)
-                if response[0] == 200 and response[1].get('status') == 'ok':
+                if (response[0] == 200 and response[1].get('status') == 'ok'
+                        and (predicate is None or predicate(response[1]))):
                     return response
             except (subprocess.SubprocessError, ValueError):
                 pass

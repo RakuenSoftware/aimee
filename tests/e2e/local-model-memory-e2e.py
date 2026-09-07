@@ -38,12 +38,17 @@ def main():
                 break
             time.sleep(1)
         gate.check('real local vector persisted', int(sql(f'SELECT COALESCE(max(vector_dims(embedding)),0) FROM user_memory_vectors WHERE memory_id={mid}')) > 0)
-        body = gate.good('semantic recall succeeds', gate.call('recall', dict(query=query)))
+        body = gate.good('semantic recall succeeds',
+                         gate.wait('recall', dict(query=query), predicate=contains, timeout=90))
         gate.check('semantic recall finds the nonlexical personal fixture', contains(body))
         cli = gate.cli('recall', '--query', query, '--store', 'user')
         gate.check('CLI semantic recall finds the personal fixture', contains(cli))
         gate.docker('restart', args.server)
-        body = gate.good('recall recovers after Server restart', gate.wait('recall', dict(query=query)))
+        # Recall can return a valid lexical-only result while the personal
+        # vector index and embedding transport initialize after restart.
+        # Require the nonlexical fixture within the recovery deadline.
+        body = gate.good('recall recovers after Server restart',
+                         gate.wait('recall', dict(query=query), predicate=contains))
         gate.check('semantic recall survives Server restart', contains(body))
         gate.docker('stop', args.embedder)
         try:
@@ -51,12 +56,7 @@ def main():
             gate.check('outage retains personal record', contains(body))
         finally:
             gate.docker('start', args.embedder)
-        deadline = time.monotonic() + 90
-        while time.monotonic() < deadline:
-            body = gate.call('recall', dict(query=query))[1]
-            if contains(body):
-                break
-            time.sleep(1)
+        body = gate.wait('recall', dict(query=query), predicate=contains, timeout=90)[1]
         gate.check('semantic recall recovers when local embedder returns', contains(body))
         # Expiry is a database constraint shared by background and explicit recall.
         sql(f"UPDATE user_memories SET valid_until=now()-interval '1 second' WHERE id={mid}")
