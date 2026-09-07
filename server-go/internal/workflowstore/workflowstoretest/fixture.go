@@ -256,7 +256,10 @@ func start(t testing.TB, path string) (*fixture, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	server := exec.CommandContext(ctx, serverBin, "--foreground")
-	server.Env = append(os.Environ(), "HOME="+home, "AIMEE_HOME="+aimeeHome)
+	server.Env = append(os.Environ(), "HOME="+home, "AIMEE_HOME="+aimeeHome,
+		// The native daemon establishes its immutable role with the installed
+		// module helper. This isolated fixture uses the binary located above.
+		multicallModuleEnv+"="+multicallModuleBin)
 	serverLog, _ := os.Create(filepath.Join(home, "server.log"))
 	server.Stdout, server.Stderr = serverLog, serverLog
 	if err := server.Start(); err != nil {

@@ -84,7 +84,14 @@ jobs:
       # one has never had it.
       - run: cd server-go && CGO_ENABLED=0 go test ./bus ./modules/... ./cmd/aimee-module
       - name: Export standalone repositories
-        run: python3 scripts/export_c_repositories.py --output-root "$RUNNER_TEMP/aimee-repositories"
+        run: |
+          set -euo pipefail
+          # Export generates local fixture commits. They must never replace the
+          # checked-in published pins that the main-only gate validates below.
+          published_lock="$RUNNER_TEMP/published-repository-pins.json"
+          cp dependencies/aimee-repositories.lock.json "$published_lock"
+          trap 'cp "$published_lock" dependencies/aimee-repositories.lock.json' EXIT
+          python3 scripts/export_c_repositories.py --output-root "$RUNNER_TEMP/aimee-repositories"
       - name: Install exported C core
         run: |
           cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-core-c" -B "$RUNNER_TEMP/core-build" -DCMAKE_BUILD_TYPE=Release

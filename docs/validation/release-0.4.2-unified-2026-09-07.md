@@ -36,6 +36,8 @@ published `:testing` image has already been upgraded.
 | --- | --- |
 | Full native unit suite | Passed; negative-path diagnostic logs are expected |
 | All Go packages with race detector | Passed |
+| Live PostgreSQL workflow store, API and engine | Passed with race detector and required real store fixtures |
+| Complete script regression suite | All 51 discovered suites passed; now included in CI |
 | Frontend tests and production build | 191 tests passed; build passed |
 | Lint and build integrity | All 77 lint checks and build integrity passed |
 | Shipped Compose variants | Eight normalized compositions passed |
@@ -93,7 +95,10 @@ its credentials file and screenshots must remain private.
   release follow-up; it must not be described as unattended indefinite operation.
 - Standalone repository exports must build independently and their exact release
   pins must come from published repositories. Local export commits are validation
-  artifacts, not evidence of remote publication. The draft PR does not bypass
+  artifacts, not evidence of remote publication. The checked-in release lock
+  currently fails the source-mirror check and needs legitimate published pins.
+  Export CI now restores that lock after generating its local fixtures, so those
+  fixtures cannot mask stale release pins. The draft PR does not bypass
   main-merge approval or release gates.
 
 The independent export test found and repaired three packaging regressions: CMake

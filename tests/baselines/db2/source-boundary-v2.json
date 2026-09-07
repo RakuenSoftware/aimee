@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "source_revision": "95146b7b7b55126d2926987e0dfaf68aabf54df3",
+  "source_revision": "295dd026a811bcdde261d28b84a23f2a69276cb8",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 125,
     "headers": 142,
     "sql_files": 6,
-    "consumer_files": 287,
+    "consumer_files": 288,
     "production_consumers": 133,
-    "test_consumers": 154,
-    "include_directives": 880,
-    "outbound_dependency_rows": 167,
-    "outbound_include_directives": 167
+    "test_consumers": 155,
+    "include_directives": 871,
+    "outbound_dependency_rows": 163,
+    "outbound_include_directives": 163
   },
   "source_files": {
     "c": [
@@ -1527,22 +1527,6 @@
       "includes": [
         {
           "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db_postgres.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/fact_ingest.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/fact_lifecycle.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
           "count": 1
         },
         {
@@ -3880,31 +3864,11 @@
       "classification": "private-implementation-test",
       "includes": [
         {
-          "header": "../modules/db2/c/db2_internal.h",
+          "header": "modules/db2/c/fact_recall.h",
           "count": 1
         },
         {
-          "header": "../modules/db2/c/db2_test_shim.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/db_postgres.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/entity_registry.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/fact_lifecycle.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/fact_recall.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/rel_types_store.h",
+          "header": "modules/db2/include/aimee/db2/host_contracts.h",
           "count": 1
         }
       ]
@@ -4275,6 +4239,16 @@
       "includes": [
         {
           "header": "modules/db2/c/management_read_journal.h",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "src/tests/test_kb_memory_list.c",
+      "classification": "private-implementation-test",
+      "includes": [
+        {
+          "header": "modules/db2/c/memory_query.h",
           "count": 1
         }
       ]
@@ -5201,10 +5175,6 @@
       "includes": [
         {
           "header": "../modules/db2/c/fact_lifecycle.h",
-          "count": 1
-        },
-        {
-          "header": "../modules/db2/c/fact_recall.h",
           "count": 1
         },
         {
@@ -6226,34 +6196,6 @@
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/fact_recall.c",
-      "header": "aimee/core/event_bus/module_protocol.h",
-      "resolved": "src/core/event_bus/include/aimee/core/event_bus/module_protocol.h",
-      "classification": "portable-core-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/fact_recall.c",
-      "header": "aimee/memory/module_api.h",
-      "resolved": "src/modules/memory/include/aimee/memory/module_api.h",
-      "classification": "module-public-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/fact_recall.c",
-      "header": "cJSON.h",
-      "resolved": "src/modules/db2/support/cJSON.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/fact_recall.c",
-      "header": "headers/module_json_call.h",
-      "resolved": "src/headers/module_json_call.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
       "source": "src/modules/db2/c/feature_rows.c",
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
@@ -6709,5 +6651,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "16cc736af7405a78d0b02231235eb62d79d8ebeba72a8ac3ecd9144919d3db1c"
+  "fingerprint": "e32239f64a06f1dc9b15eeca758ee7775fe8fb5d2ae58ab9d062bb04f714171f"
 }

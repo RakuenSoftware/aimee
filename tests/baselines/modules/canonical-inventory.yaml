@@ -24,7 +24,8 @@
     "egress",
     "providers",
     "server",
-    "kb"
+    "kb",
+    "postgres"
   ],
   "optional": [
     "governance",
@@ -35,7 +36,6 @@
     "control-web",
     "benchmarks",
     "economizer",
-    "postgres",
     "db2",
     "observability"
   ],

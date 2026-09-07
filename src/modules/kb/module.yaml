@@ -2,11 +2,11 @@
   "descriptor_version": 1,
   "id": "kb",
   "dependencies": [
-    "module-runtime",
     "config",
-    "vault",
+    "memory",
+    "module-runtime",
     "postgres",
-    "memory"
+    "vault"
   ],
   "runtime_toggle": {
     "supported": false

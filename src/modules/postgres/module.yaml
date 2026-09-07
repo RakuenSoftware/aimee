@@ -6,9 +6,8 @@
     "module-runtime",
     "vault"
   ],
-  "enabled_by_default": true,
   "runtime_toggle": {
-    "supported": true
+    "supported": false
   },
   "ownership_complete": true,
   "go_sources": [

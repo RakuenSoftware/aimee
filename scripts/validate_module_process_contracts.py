@@ -29,7 +29,7 @@ PROCESS_REQUIRED = {
     # enabled_by_default false is declared and never spawned, which is how peer
     # messaging came to be green in every test and absent from server.modules.
     "aimee", "egress", "providers",
-    "execution-policy", "server", "kb",
+    "execution-policy", "server", "kb", "postgres",
 }
 GO_PROCESSES = {
     "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",

@@ -821,6 +821,10 @@ static void warn_unusable_identity_once(void)
 
 int kb_client_mtls_configured(void)
 {
+   /* An explicit disconnect takes precedence over a legacy managed identity,
+    * whose endpoint can otherwise remain usable without a connection string. */
+   if (strcmp(config_kb_mode(), "none") == 0)
+      return 0;
    char connection[4096];
    int have_connection = runtime_secret_get("AIMEE_KB_CONN", connection, sizeof(connection));
    OPENSSL_cleanse(connection, sizeof(connection));
@@ -844,6 +848,8 @@ int kb_client_mtls_managed_metadata(char *server_id_out, size_t server_id_cap,
       server_id_out[0] = '\0';
    if (team_id_out)
       *team_id_out = 0;
+   if (strcmp(config_kb_mode(), "none") == 0)
+      return 0;
    char ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
    identity_metadata_t metadata;
    int ok =
@@ -864,6 +870,8 @@ int kb_client_mtls_managed_metadata(char *server_id_out, size_t server_id_cap,
  * from the operator-supplied value. */
 static int ensure_enrolled(void)
 {
+   if (strcmp(config_kb_mode(), "none") == 0)
+      return -1;
    int rc = -1;
    pthread_mutex_lock(&g_lock);
    if (g_enrolled)

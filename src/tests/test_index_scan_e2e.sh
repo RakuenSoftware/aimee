@@ -227,6 +227,7 @@ PY
     # `env -i` strips the surrounding shell environment so the spawned
     # server can never inherit a stray HOME / AIMEE_SOCK / AIMEE_*.
     env -i HOME="$tmphome" PATH="$PATH" \
+        AIMEE_TEST_MODULE_BIN="$REPO_ROOT/src/build/obj/aimee-module" \
         AIMEE_KB_API_URL="http://127.0.0.1:$kb_port" \
         "$AIMEE_SERVER_BIN" --socket="$server_sock" --log-level=info \
         >"$server_log" 2>&1 &

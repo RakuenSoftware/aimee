@@ -369,7 +369,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
             {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
-             "contracts": 0, "docs": 1, "go_sources": 0, "go_tests": 0},
+             "contracts": 0, "docs": 1, "go_sources": 4, "go_tests": 2},
         )
 
     def test_contract_ownership_is_scoped_and_complete(self) -> None:

@@ -48,24 +48,34 @@ class Stack:
         self.env['AIMEE_KB_HOST'] = 'aimee-kb'
         for kind in ('ADMIN', 'MIGRATOR', 'RUNTIME'):
             self.env[f'AIMEE_STORE_{kind}_PASSWORD'] = secrets.token_hex(24)
-        # Port zero asks Docker to allocate an unused host port. Tests use the
-        # owning container's loopback / UDS, not host network exposure.
-        for key in ('AIMEE_API_PORT', 'AIMEE_WEB_PORT', 'AIMEE_KB_PORT', 'AIMEE_KB_HEALTH_PORT'):
-            self.env[key] = '0'
         self.file = 'compose.kb.yaml' if role == 'kb' else 'compose.yaml'
         self.application = f'{self.project}-aimee-{role}-1'
         self.postgres = f'{self.project}-aimee-store-db-1'
         self.embedder = f'{self.project}-aimee-embedder-1'
         self.output = output
+        # Tests reach applications over their private network or container
+        # loopback. Do not bind host sockets: multiple ephemeral port-zero
+        # mappings can collide on newer Docker daemons, especially mixed
+        # loopback and wildcard bindings. Keep the production service intact.
+        self.network_override = output.resolve() / (self.project + '-network.yaml')
+        self.network_override.write_text(
+            'services:\n  aimee-' + role + ':\n    ports: !reset []\n')
+
+    def compose_args(self):
+        return ('--env-file', '/dev/null', '-p', self.project, '-f', self.file,
+                '-f', str(self.network_override))
 
     def compose(self, *args):
-        return command('docker', 'compose', '--env-file', '/dev/null', '-p', self.project,
-                       '-f', self.file, *args, env=self.env)
+        return command('docker', 'compose', *self.compose_args(), *args, env=self.env)
 
     def start(self):
-        command('python3', str(ROOT / 'scripts/compose-vault-init.py'), '--env-file', '/dev/null',
-                '-p', self.project, '-f', self.file, 'up', env=self.env)
+        command('python3', str(ROOT / 'scripts/compose-vault-init.py'),
+                *self.compose_args(), 'up', env=self.env)
         self.compose('up', '-d', '--no-build', '--pull', 'never')
+        bindings = json.loads(command('docker', 'inspect', '--format',
+                                      '{{json .HostConfig.PortBindings}}', self.application))
+        if bindings:
+            raise RuntimeError('isolated topology unexpectedly published a host port')
         deadline = time.monotonic() + 240
         while time.monotonic() < deadline:
             status = command('docker', 'inspect', '--format', '{{.State.Health.Status}}', self.application)

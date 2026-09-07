@@ -126,7 +126,9 @@ check "kb: off removes control-web" "postgres" "$(ids "$out")"
 unset AIMEE_MODULE_CONTROL_WEB
 AIMEE_MODULE_POSTGRES=0; export AIMEE_MODULE_POSTGRES
 out=$(apply_optional_modules kb "$kb" "$tmp")
-check "kb: off removes postgres" "control-web" "$(ids "$out")"
+check "kb: required postgres ignores disable intent" "control-web postgres" "$(ids "$out")"
+out=$(apply_optional_modules server "$kb" "$tmp")
+check "server: required postgres ignores disable intent" "control-web postgres" "$(ids "$out")"
 unset AIMEE_MODULE_POSTGRES
 
 # 9. A caller whose log() writes to STDOUT must not corrupt the return value.
