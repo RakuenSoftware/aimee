@@ -1,0 +1,6 @@
+{
+  "image_id": "sha256:33de0ba225ba730e746b6cb444cbbdf51ad52472b7cef7d7ce786670fe7dc37d",
+  "published_base": "ghcr.io/rakuensoftware/aimee@sha256:4202eebe90f770a7cc86a129b81427493a0cf8e9322935f5815230f563a94770",
+  "changed_binary": "/usr/local/bin/aimee-server",
+  "published": false
+}

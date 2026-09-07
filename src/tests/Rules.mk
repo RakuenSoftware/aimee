@@ -3066,6 +3066,7 @@ $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
 $(OBJDIR)/tests/test_sandbox_learned_observe.o: C_FLAGS += -Icore/event_bus/include -Imodules/sandbox/include
 $(OBJDIR)/tests/test_module_json_call.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-module-json-call: $(OBJDIR)/tests/test_module_json_call.o \
+                                        $(OBJDIR)/server/module_stage_adapters.o \
                                         $(OBJDIR)/module_json_call.o \
                                         $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread

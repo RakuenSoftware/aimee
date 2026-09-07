@@ -64,6 +64,11 @@ HOST_ADAPTER_REHOMES = {
         "src/kb/db2_adapters/kb_service_backend_memory.c",
 }
 ADMITTED_SUPPORT_TEST_INCLUDES = {
+    # These private regression tests exercise bounded host-provider results and
+    # preserve unavailable-vs-empty memory responses at DB2's implementation ABI.
+    ("src/tests/test_fact_recall.c", "modules/db2/c/fact_recall.h"),
+    ("src/tests/test_fact_recall.c", "modules/db2/include/aimee/db2/host_contracts.h"),
+    ("src/tests/test_kb_memory_list.c", "modules/db2/c/memory_query.h"),
     (
         "src/tests/test_kb.c",
         "../modules/db2/c/db2_tenant.h",

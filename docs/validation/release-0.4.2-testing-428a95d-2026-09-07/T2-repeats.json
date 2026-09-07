@@ -1,0 +1,17 @@
+[
+  {
+    "name": "T2-repeat-1",
+    "passed": true,
+    "elapsed_seconds": 308.5
+  },
+  {
+    "name": "T2-repeat-2",
+    "passed": true,
+    "elapsed_seconds": 313.7
+  },
+  {
+    "name": "T2-repeat-3",
+    "passed": true,
+    "elapsed_seconds": 303.7
+  }
+]
