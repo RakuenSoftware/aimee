@@ -83,7 +83,7 @@ def main():
         'POSTGRES_PASSWORD', 'AIMEE_STORE_MIGRATOR_PASSWORD', 'AIMEE_STORE_RUNTIME_PASSWORD']}
     dm_major = next(line.split()[0] for line in Path('/proc/devices').read_text().splitlines()
                     if line.split()[-1:] == ['device-mapper'])
-    env = {'POSTGRES_USER': 'postgres', 'POSTGRES_DB': 'aimee_store',
+    env = {'POSTGRES_USER': 'postgres', 'POSTGRES_DB': 'aimee_store', 'AIMEE_POSTGRES_STORAGE': 'luks',
            'AIMEE_POSTGRES_VOLUME_MIB': '256', **passwords}
     pg_args = ['docker', 'run', '-d', '--name', pg, '--network', 'none',
                '--cap-add', 'SYS_ADMIN', '--security-opt', 'apparmor=unconfined',

@@ -135,7 +135,7 @@ run_docker_topology() {
   fi
 }
 
-run_docker_topology T1 "Docker shared KB with encrypted PostgreSQL"
+run_docker_topology T1 "Docker shared KB with PostgreSQL"
 run_docker_topology T2 "Independent Server enrolled into optional KB"
 run_docker_topology T3 "KB-free Server with local semantic memory"
 

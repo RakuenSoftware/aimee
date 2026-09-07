@@ -2,19 +2,18 @@
 
 A single user needs Server, its PostgreSQL store, and an embedding service. A shared KB is optional.
 Server and KB use the same application image, with the role established permanently on first boot.
-Each deployment has its own Vault and standardized encrypted PostgreSQL container.
+Each deployment has its own Vault and standardized PostgreSQL container.
 
 ## 1. Start a local server
 
-Use a Linux Docker host with Compose v2.24.4 or newer, loop devices, and device-mapper. The PostgreSQL
-container uses LUKS2; startup fails if encrypted storage cannot be mounted. The thin client can run
-on Linux, macOS, or Windows. A Linux VM can host the containers for a non-Linux client.
+Use Docker with Linux containers and Compose v2.24.4 or newer. PostgreSQL uses an ordinary
+Docker volume by default; no loop devices, device-mapper, or storage administration capability
+is required. LUKS encryption is an [explicit opt-in](DEPLOYMENT.md#optional-luks-encryption).
+The thin client can run on Linux, macOS, or Windows.
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
-sudo modprobe loop
-sudo modprobe dm_mod
 umask 077
 # Run credential generation once on a new installation; preserve an existing .env.
 if [ ! -e .env ]; then
@@ -27,14 +26,15 @@ scripts/compose-local.sh -f compose.yaml up -d
 scripts/compose-local.sh -f compose.yaml logs aimee-server
 ```
 
-The helper discovers the host's device-mapper major; it never creates or supplies a LUKS key.
-The application Vault creates that key and sends it over a private local bootstrap channel.
-Neither the container environment nor a plaintext keyfile holds the LUKS key. PostgreSQL cannot
-start without the owning Vault. Keep the application home and encrypted database together in backups.
+The helper seals database credentials into the application Vault before starting services.
+It uses the selected Docker context without inspecting the client's kernel or devices.
+The examples use a POSIX shell. From PowerShell, after creating the private `.env`, run
+`python scripts/compose-vault-init.py -f compose.yaml up` followed by
+`docker compose -f compose.yaml up -d`.
 
 The three database passwords configure separate administrator, migrator, and runtime roles. Keep
 `.env` private and preserve its values: changing them later does not change existing database roles.
-These SQL credentials are distinct from the LUKS key, which is stored only in Vault.
+SQL connections still require TLS and scoped credentials in the default storage mode.
 
 This starts one application container, one PostgreSQL container, and one local embedder. It does
 not start a KB or synthesis model. `compose.server.yaml`, `compose.server-standalone.yaml`, and
@@ -51,7 +51,6 @@ The first-boot log prints a generated dashboard username and password once. Open
 initial login instead, seal it before the first `up`:
 
 ```bash
-export AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)
 export AIMEE_WEBCHAT_USER=operator
 read -rsp 'Initial dashboard password: ' AIMEE_WEBCHAT_PASSWORD && echo
 export AIMEE_WEBCHAT_PASSWORD
@@ -411,7 +410,7 @@ policy.
 
 ## 8. Back up before changing topology
 
-Back up the application home (including Vault), encrypted PostgreSQL volume, and workspace
+Back up the application home (including Vault), PostgreSQL volume, and workspace
 artifacts. Use PostgreSQL-native consistent dumps or stop writes before taking matched volume
 snapshots. See [Deployment](DEPLOYMENT.md#volumes-and-backup) for restore requirements. Never run `docker compose down -v` while a
 named volume is your only copy.

@@ -1,0 +1,6 @@
+{
+  "tag": "aimee-postgres:optin-local",
+  "id": "sha256:853b05964c6cf64b47d13f694b753faf1f6be95de720f82c89f72e3a042349aa",
+  "built_from": "Dockerfile.postgres",
+  "published": false
+}

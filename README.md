@@ -13,7 +13,7 @@ One application image, with one identity established on first boot:
   curation.
 
 Server works without a KB. Both identities compose the same Go PostgreSQL and memory modules,
-with their own local Vault and encrypted PostgreSQL container. The role cannot be changed on an
+with their own local Vault and PostgreSQL container (LUKS is optional). The role cannot be changed on an
 existing instance. The `aimee` CLI is a thin client for Linux, macOS, and Windows; Go composition
 modules supervise the standard modules around the existing C resource and event-bus hosts.
 
@@ -36,7 +36,8 @@ modules supervise the standard modules around the existing C resource and event-
 ## Start
 
 Follow the [Quickstart](docs/QUICKSTART.md) to generate private database credentials and start
-`compose.yaml` on a Linux Docker host. It starts Server, encrypted PostgreSQL, and local embedding.
+`compose.yaml` with Docker Linux containers. It starts Server, PostgreSQL, and local embedding.
+Storage uses an ordinary Docker volume by default; LUKS encryption is an explicit opt-in.
 Synthesis is optional; no KB is installed.
 
 Open <https://localhost:8443> and use the generated first-boot login from the application log.

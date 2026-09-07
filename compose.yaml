@@ -9,26 +9,15 @@ services:
       context: .
       dockerfile: Dockerfile.postgres
     image: ${AIMEE_POSTGRES_IMAGE:-ghcr.io/rakuensoftware/aimee-postgres:${AIMEE_IMAGE_TAG:-latest}}
-    cap_add: [SYS_ADMIN]
-    security_opt: [apparmor:unconfined]
-    devices: [/dev/mapper/control:/dev/mapper/control, /dev/loop-control:/dev/loop-control]
-    device_cgroup_rules:
-      - 'b 7:* rwm'
-      - 'b ${AIMEE_DEVICE_MAPPER_MAJOR:?Run scripts/compose-local.sh to discover device-mapper}:* rwm'
-    ulimits:
-      memlock: 1073741824
-      core: 0
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${AIMEE_STORE_ADMIN_PASSWORD:?AIMEE_STORE_ADMIN_PASSWORD is required}
       POSTGRES_DB: aimee_store
       AIMEE_STORE_MIGRATOR_PASSWORD: ${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required}
       AIMEE_STORE_RUNTIME_PASSWORD: ${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required}
-      AIMEE_POSTGRES_VOLUME_MIB: ${AIMEE_POSTGRES_VOLUME_MIB:-32768}
     networks: [store]
     volumes:
       - aimee-postgres-encrypted:/var/lib/aimee-postgres
-      - aimee-postgres-control:/run/aimee-postgres
       - aimee-store-tls:/run/aimee-store-tls
     healthcheck:
       test: [CMD-SHELL, 'PGSSLMODE=require PGPASSWORD="$${AIMEE_STORE_RUNTIME_PASSWORD}" psql -h 127.0.0.1 -U aimee_store_runtime -d aimee_store -Atqc "SELECT 1" | grep -qx 1']
@@ -44,8 +33,7 @@ services:
       context: .
       dockerfile: Dockerfile.server
     image: ${AIMEE_APPLICATION_IMAGE:-ghcr.io/rakuensoftware/aimee:${AIMEE_IMAGE_TAG:-latest}}
-    # Vault in the application unlocks PostgreSQL before either role opens SQL.
-    # Waiting for service_healthy here would deadlock first boot.
+    # service_started also permits the optional Vault-backed LUKS startup.
     depends_on:
       aimee-store-db:
         condition: service_started
@@ -56,7 +44,6 @@ services:
     environment:
       AIMEE_HOME: /var/lib/aimee
       AIMEE_INSTANCE_ROLE: server
-      AIMEE_POSTGRES_STORAGE_SOCKET: /run/aimee-postgres/storage.sock
       AIMEE_MODEL_SERVICES_ENABLED: '1'
       AIMEE_MODULE_ROUNDTABLE: ${AIMEE_MODULE_ROUNDTABLE:-1}
       AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
@@ -73,7 +60,6 @@ services:
     volumes:
       - aimee-server-home:/var/lib/aimee
       - aimee-server-workspaces:/var/lib/aimee-workspaces
-      - aimee-postgres-control:/run/aimee-postgres:ro
       - aimee-store-tls:/run/aimee-store-tls:ro
       - aimee-model-tls:/run/aimee-model-tls
       - aimee-embedding-tls:/run/aimee-model-tls/embedding/server
@@ -114,8 +100,8 @@ services:
       - aimee-synthesis-tls:/run/aimee-model-tls/synthesis/server:ro
 
 volumes:
+  # Retain the historical name so existing encrypted stores cannot be hidden.
   aimee-postgres-encrypted:
-  aimee-postgres-control:
   aimee-store-tls:
   aimee-server-home:
   aimee-server-workspaces:

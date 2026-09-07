@@ -1,0 +1,9 @@
+{
+  "required_drivers_loaded": true,
+  "device_mapper_present": true,
+  "boot_configuration": [
+    "dm_mod",
+    "dm_crypt",
+    "loop"
+  ]
+}

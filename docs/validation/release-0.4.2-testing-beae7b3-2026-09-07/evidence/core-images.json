@@ -1,0 +1,5 @@
+{
+  "AIMEE_APPLICATION_IMAGE": "ghcr.io/rakuensoftware/aimee@sha256:f94a03263e0bfe6fb29321d676ff63b72ebeea748831e0ca27f43edd40b21331",
+  "AIMEE_POSTGRES_IMAGE": "ghcr.io/rakuensoftware/aimee-postgres@sha256:844041a84bd9aac216acc2b08d4ca1782465000aeef5906a670be771b8ff26e3",
+  "AIMEE_EMBEDDER_IMAGE": "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:36f313ffc32f6b7df63b2c810cab6c9c9b056ec25b04a0b0ec9606075ef7bb99"
+}

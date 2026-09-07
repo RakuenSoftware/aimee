@@ -61,6 +61,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--keep', action='store_true', help='retain private fixture and containers for diagnosis')
+    parser.add_argument('--storage', choices=('plain', 'luks'), default='plain')
     parser.add_argument('--legacy-image', default='ghcr.io/rakuensoftware/aimee-kb-a25m@sha256:13790bc5ec075cfdb25e9dc3c7719706e25da7445c8febbb988eb0aae5585f46')
     args = parser.parse_args()
     if os.geteuid() != 0:
@@ -107,10 +108,11 @@ def main():
         for path in (copied, *copied.rglob('*')):
             if not path.is_symlink():
                 os.chown(path, 1000, 1000)
-        env = dict(os.environ, AIMEE_RUNTIME_WEB_ENABLED='0', AIMEE_POSTGRES_VOLUME_MIB='2048',
+        env = dict(os.environ, AIMEE_POSTGRES_STORAGE=args.storage, AIMEE_RUNTIME_WEB_ENABLED='0', AIMEE_POSTGRES_VOLUME_MIB='2048',
                    COMPOSE_PROFILES='', EMBEDDER_MODEL='bekko-a25m',
                    EMBEDDER_URL='https://aimee-embedder:8762', EMBEDDER_DIMS='384')
-        env['AIMEE_DEVICE_MAPPER_MAJOR'] = next(line.split()[0] for line in Path('/proc/devices').read_text().splitlines()
+        if args.storage == 'luks':
+            env['AIMEE_DEVICE_MAPPER_MAJOR'] = next(line.split()[0] for line in Path('/proc/devices').read_text().splitlines()
                                                if line.split()[-1:] == ['device-mapper'])
         stack = matrix.Stack('kb', env, args.output)
         # Preserve the operator's existing enrollment settings as documented.
@@ -131,14 +133,14 @@ def main():
             check('upgrade retains ' + fixture['scope'] + ' canary and original authority',
                   status == 200 and body.get('memory', {}).get('content') == fixture['content'])
         status, body = request(stack.application, token, '/v1/actions/memory.store',
-                               dict(key='upgrade-new-write', content='Written after encrypted migration 🦊'))
+                               dict(key='upgrade-new-write', content='Written after storage migration 🦊'))
         check('upgraded KB accepts new writes', status == 200 and body.get('id'))
         new_id = body.get('id')
         stack.compose('down')
         stack.start()
         status, body = request(stack.application, token, '/v1/actions/memory.get', dict(id=new_id, scope='all'))
         check('container recreation preserves post-upgrade writes', status == 200 and
-              body.get('memory', {}).get('content') == 'Written after encrypted migration 🦊')
+              body.get('memory', {}).get('content') == 'Written after storage migration 🦊')
         check('migration and recreation leave original cluster byte-for-byte intact', digest_tree(home / 'postgres') == original)
         stack.compose('stop')
         matrix.command('docker', 'start', legacy)
