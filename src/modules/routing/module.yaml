@@ -23,10 +23,12 @@
     "src/modules/routing/agent_registry.h"
   ],
   "go_sources": [
-    "server-go/modules/routing/routing.go"
+    "server-go/modules/routing/routing.go",
+    "server-go/modules/routing/plan.go"
   ],
   "go_tests": [
-    "server-go/modules/routing/routing_test.go"
+    "server-go/modules/routing/routing_test.go",
+    "server-go/modules/routing/plan_test.go"
   ],
   "public_headers": [
     "src/modules/routing/include/aimee/routing/module_api.h"

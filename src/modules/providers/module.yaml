@@ -36,7 +36,8 @@
     "server-go/modules/providers/rules.go",
     "server-go/modules/providers/store.go",
     "server-go/modules/providers/testdata/nativefixture/main.go",
-    "server-go/modules/providers/vaultresource/client.go"
+    "server-go/modules/providers/vaultresource/client.go",
+    "server-go/modules/providers/competence.go"
   ],
   "go_tests": [
     "server-go/modules/providers/compatibility_test.go",
@@ -44,7 +45,8 @@
     "server-go/modules/providers/inspect_test.go",
     "server-go/modules/providers/management_test.go",
     "server-go/modules/providers/probe_worker_linux_test.go",
-    "server-go/modules/providers/rules_test.go"
+    "server-go/modules/providers/rules_test.go",
+    "server-go/modules/providers/competence_test.go"
   ],
   "tests": [],
   "docs": [

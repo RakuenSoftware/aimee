@@ -168,7 +168,13 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    if (strcmp(name, "learning") == 0)
       *kind = AIMEE_LEARNING_EVENT_OBSERVE, *principal_ref = 8;
    else if (strcmp(name, "routing") == 0)
+   {
       *kind = AIMEE_ROUTING_EVENT_KIND, *principal_ref = 9;
+      served[0] = AIMEE_ROUTING_EVENT_KIND;
+      served[1] = AIMEE_ROUTING_EVENT_PLAN;
+      *serve_count = 2;
+      return 0;
+   }
    else if (strcmp(name, "delegates") == 0)
       *kind = AIMEE_DELEGATES_EVENT_INVOKE, *principal_ref = 10;
    else if (strcmp(name, "tools") == 0)
@@ -440,6 +446,16 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_routing_response_decode(response, response_len, 3, &selected) == 0);
       assert(selected == 0);
+      static const char plan[] =
+          "{\"version\":1,\"input_tokens\":1000,\"output_tokens\":100,\"candidates\":["
+          "{\"name\":\"paid\",\"prices\":{\"input\":1,\"output\":2}},"
+          "{\"name\":\"free\",\"tier\":9,\"overrides\":{\"input\":0,\"output\":0}}]}";
+      assert(aimee_module_client_call(client, AIMEE_ROUTING_EVENT_PLAN, AIMEE_ROUTING_STAGE_PLAN,
+                                      2102, 0, (const uint8_t *)plan, sizeof(plan) - 1, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len == strlen("{\"selected\":1}"));
+      assert(memcmp(response, "{\"selected\":1}", response_len) == 0);
    }
    else if (strcmp(name, "delegates") == 0)
    {

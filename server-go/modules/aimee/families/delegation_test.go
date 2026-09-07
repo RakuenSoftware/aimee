@@ -673,3 +673,68 @@ func TestAgentJobRowWidth(t *testing.T) {
 		t.Fatalf("%d cells, want 16", len(cells))
 	}
 }
+
+// Real /v1 delegate jobs used to remain running: completion parsed result text
+// as an API-call count instead of accepting the native client field order.
+func TestJobCompletionMatchesNativeWireContract(t *testing.T) {
+	for _, tc := range []struct{ state, cursor, result, known, cost string }{
+		{"failed", "0", "no eligible model meets the competence contract", "0", "0"},
+		{"done", "3", "A useful answer", "1", "0.0025"},
+	} {
+		db := newDelDB()
+		status, _ := delCall(t, db, opAgentJobComplete, []string{"7", tc.state, tc.cursor, tc.result, tc.known, tc.cost})
+		if status != store.StatusOK {
+			t.Fatalf("completion refused native fields: %d", status)
+		}
+		if len(db.args) != 1 || db.args[0][3] != tc.result || !strings.Contains(db.executed[0], "cursor = $3") || strings.Contains(db.executed[0], "api_call_count =") {
+			t.Fatalf("completion lost result/cursor or overwrote live API-call count: %v %v", db.executed, db.args)
+		}
+	}
+}
+
+func TestJobCompletionPostgres(t *testing.T) {
+	pool := livePool(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS agent_jobs`); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migrations {
+		if m.Name != "schema_delegation.sql" {
+			continue
+		}
+		for _, stmt := range m.Statements {
+			if strings.Contains(stmt, "CREATE TABLE IF NOT EXISTS agent_jobs (") {
+				if _, err := pool.Exec(ctx, stmt); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	q := liveQueryer{pool}
+	for _, tc := range []struct{ state, result, known, cost string }{
+		{"failed", "no eligible model meets the competence contract", "0", "0"},
+		{"done", "A useful answer", "1", "0.0025"},
+	} {
+		var id int64
+		if err := pool.QueryRow(ctx, `INSERT INTO agent_jobs(status, api_call_count) VALUES ('running', 9) RETURNING id`).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		status, _, err := agentJobComplete(ctx, q, []string{fmt.Sprint(id), tc.state, "3", tc.result, tc.known, tc.cost})
+		if err != nil || status != store.StatusOK {
+			t.Fatalf("completion: status=%d err=%v", status, err)
+		}
+		var state, result, cursor string
+		var calls, known int64
+		var cost float64
+		if err := pool.QueryRow(ctx, `SELECT status, result, cursor, api_call_count, cost_known, cost_usd FROM agent_jobs WHERE id=$1`, id).Scan(&state, &result, &cursor, &calls, &known, &cost); err != nil {
+			t.Fatal(err)
+		}
+		if state != tc.state || result != tc.result || cursor != "3" || calls != 9 || fmt.Sprint(known) != tc.known || (tc.known == "1" && cost != .0025) {
+			t.Fatalf("terminal job lost its facts: %s %s %s %d %d %g", state, result, cursor, calls, known, cost)
+		}
+	}
+}

@@ -319,7 +319,9 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
       provider_catalog_record_success(ag->name);
    else
    {
-      const char *ec = agent_error_is_retryable(out->error) ? "retryable" : "error";
+      const char *ec = agent_error_is_registration_failure(out->error) ? "registration_error"
+                       : agent_error_is_retryable(out->error)          ? "retryable"
+                                                                       : "error";
       provider_catalog_record_failure(ag->name, ec);
       /* Surface WHY a delegate attempt failed. Without this the only trace of a failed
        * turn is the downstream "fallback: trying same-tier agent" line, which hides the
@@ -355,6 +357,11 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
 {
    memset(out, 0, sizeof(*out));
 
+   cfg->route_input_tokens = (int)((strlen(system_prompt ? system_prompt : "") +
+                                    strlen(user_prompt ? user_prompt : "") + 3) /
+                                   4);
+   cfg->route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
+
    int cache_enabled = delegate_role_result_cache_enabled(role);
    if (cache_enabled)
    {
@@ -386,8 +393,8 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
       }
       if (!ag)
       {
-         if (attempt == 0)
-            continue; /* no primary route -> fall through to the random picker */
+         if (attempt == 0 && !agent_route_last_was_module_fault())
+            continue; /* empty primary route -> consider remaining eligible agents */
          break;       /* no viable agent remains */
       }
 
@@ -639,6 +646,10 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       return -1;
    }
 
+   cfg->route_input_tokens = (int)((strlen(system_prompt ? system_prompt : "") +
+                                    strlen(user_prompt ? user_prompt : "") + 3) /
+                                   4);
+   cfg->route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
    agent_t *ag = agent_route(cfg, role);
    if (!ag)
    {

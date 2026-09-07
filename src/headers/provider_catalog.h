@@ -73,6 +73,7 @@ typedef struct
    char agent_name[MAX_AGENT_NAME];
    char endpoint[MAX_ENDPOINT_LEN];
    char provider[16];
+   char registration[MAX_AGENT_NAME];
    provider_locality_t locality;
    catalog_health_t health;
    time_t last_success;
@@ -98,7 +99,8 @@ void provider_catalog_record_success(const char *agent_name);
 
 /* Record that a call to agent_name failed.
  * failure_class is an opaque tag ("rate_limit", "unavailable", etc.);
- * may be NULL or empty. */
+ * may be NULL or empty. "registration_error" propagates credential/quota
+ * failure to siblings of the stored registration, never the provider family. */
 void provider_catalog_record_failure(const char *agent_name, const char *failure_class);
 
 /* Query health state for a named agent.  Returns HEALTHY for unknown agents

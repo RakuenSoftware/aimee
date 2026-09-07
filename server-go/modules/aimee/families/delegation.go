@@ -606,8 +606,8 @@ const (
 	                      WHERE id = $1`
 
 	agentJobCompleteSQL = `UPDATE agent_jobs
-	                          SET status = $2, result = $3, api_call_count = $4,
-	                              cost_usd = $5, cost_known = $6, updated_at = now()
+	                          SET status = $2, cursor = $3, result = $4,
+	                              cost_known = $5, cost_usd = $6, updated_at = now()
 	                        WHERE id = $1`
 
 	agentJobSetAgentSQL = `UPDATE agent_jobs SET agent_name = $2, updated_at = now() WHERE id = $1`
@@ -712,13 +712,15 @@ func agentJobUpdate(ctx context.Context, q store.Queryer, f []string) (uint32, [
 
 func agentJobComplete(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	id, okID := store.Atoi64(f[0])
-	apiCalls, okCalls := store.Atoi64(f[3])
-	cost, okCost := store.Atof(f[4])
-	costKnown, okKnown := store.Atoi64(f[5])
-	if !okID || id <= 0 || !okCalls || !okCost || !okKnown {
+	// Match the native db1-fields-v2 contract: id, status, cursor, result,
+	// has_cost, cost_usd. Result is arbitrary text, never an API-call count.
+	cursor, okCursor := store.Atoi64(f[2])
+	costKnown, okKnown := store.Atoi64(f[4])
+	cost, okCost := store.Atof(f[5])
+	if !okID || id <= 0 || !okCursor || cursor < 0 || !okCost || cost < 0 || !okKnown || (costKnown != 0 && costKnown != 1) {
 		return store.StatusInvalid, nil, nil
 	}
-	if _, err := q.Exec(ctx, agentJobCompleteSQL, id, f[1], f[2], apiCalls, cost, costKnown); err != nil {
+	if _, err := q.Exec(ctx, agentJobCompleteSQL, id, f[1], f[2], f[3], costKnown, cost); err != nil {
 		return 0, nil, err
 	}
 	return store.StatusOK, nil, nil

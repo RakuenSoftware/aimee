@@ -121,6 +121,20 @@ void delegate_economics_add_agent_result_json(cJSON *obj, const agent_config_t *
       cJSON_AddStringToObject(obj, "delegate_role", role);
    if (agent)
    {
+      cJSON_AddNumberToObject(obj, "routing_policy_version", 2);
+      cJSON_AddStringToObject(obj, "routing_preference",
+                              cfg && cfg->route_pinned    ? "explicit"
+                              : cfg && cfg->route_premium ? "competence"
+                                                          : "cost");
+      if (role)
+         for (int i = 0; i < agent->routing_competence_count; i++)
+            if (strcmp(agent->routing_competence[i].role, role) == 0)
+            {
+               cJSON_AddNumberToObject(obj, "routing_competence_score",
+                                       agent->routing_competence[i].score);
+               cJSON_AddNumberToObject(obj, "routing_min_competence",
+                                       agent->routing_competence[i].minimum);
+            }
       cJSON_AddNumberToObject(obj, "agent_cost_tier", agent->cost_tier);
       cJSON_AddStringToObject(obj, "delegate_cost_model",
                               agent->cost_tier == 0 ? DELEGATE_ECONOMICS_COST_MODEL
