@@ -1349,16 +1349,16 @@ module-grants-test:
 # because the strongest cases run the real emitter rather than grepping the
 # entrypoint: an unset AIMEE_KB_VARIANT resolves the kb image to the
 # embedderless aimee-kb SILENTLY, so the value itself is what must be asserted.
-deploy-compose-env-test: $(BINARY) $(SERVER) $(CONFIG_MODULE)
-	./tests/test_deploy_compose_env.sh
+deploy-compose-env-test: $(BINARY) $(SERVER) $(OBJDIR)/aimee-module $(CONFIG_MODULE)
+	AIMEE_TEST_MODULE_BIN="$(abspath $(OBJDIR)/aimee-module)" ./tests/test_deploy_compose_env.sh
 
 # `workflow show/validate` must accept the name `workflow list` prints. Needs the
 # built CLI because the resolution is what is under test, not a parser detail.
 workflow-name-resolution-test: $(BINARY)
 	./tests/test_workflow_name_resolution.sh
 
-index-scan-e2e-test: $(BINARY) $(SERVER) $(CONFIG_MODULE)
-	./tests/test_index_scan_e2e.sh
+index-scan-e2e-test: $(BINARY) $(SERVER) $(OBJDIR)/aimee-module $(CONFIG_MODULE)
+	AIMEE_TEST_MODULE_BIN="$(abspath $(OBJDIR)/aimee-module)" ./tests/test_index_scan_e2e.sh
 
 # Third-party /v1 public-API smoke test (curl + jq only). Self-skips when no
 # aimee-kb is reachable, so it is safe to run anywhere; point it at a live

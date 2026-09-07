@@ -125,7 +125,12 @@ def main():
                    '-Atqc', query, check=check)
 
     def db_ready():
-        return sql('SELECT 1', check=False).returncode == 0
+        # initdb's temporary server accepts Unix-socket SQL, then shuts down.
+        # Only the final service listens on TCP. A socket SELECT alone races
+        # initialization and can report readiness immediately before shutdown.
+        tcp = run('docker', 'exec', pg, 'pg_isready', '-h', '127.0.0.1',
+                  '-p', '5432', '-U', 'postgres', check=False)
+        return tcp.returncode == 0 and sql('SELECT 1', check=False).returncode == 0
 
     def locked():
         return run('docker', 'exec', pg, 'test', '!', '-e',

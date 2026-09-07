@@ -59,7 +59,14 @@ def fetch(repo, **kw):
         try:
             return snapshot_download(repo, **kw)
         except Exception as exc:  # noqa: BLE001 - the Hub raises several types here
-            text = f"{type(exc).__name__}: {exc}"
+            # The Hub wraps network failures in LocalEntryNotFoundError, whose
+            # own message omits the transient cause. Inspect the bounded chain.
+            chain, seen, current = [], set(), exc
+            while current is not None and id(current) not in seen and len(chain) < 8:
+                seen.add(id(current))
+                chain.append(f"{type(current).__name__}: {current}")
+                current = current.__cause__ or current.__context__
+            text = " <- ".join(chain)
             if not any(s in text for s in TRANSIENT) or attempt == 5:
                 raise
             print(f"  hub fetch of {repo} failed ({text[:120]}); "

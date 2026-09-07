@@ -25,7 +25,16 @@ def command(*argv, env=None, data=None, timeout=300):
     if result.returncode:
         # Never echo input, environment, command arguments or container logs:
         # an enrollment token or bootstrap password may be present there.
-        raise RuntimeError(f'{Path(argv[0]).name} failed with exit {result.returncode}')
+        categories = ('no space left on device', 'port is already allocated',
+                      'permission denied', 'no such image', 'failed to mount',
+                      'invalid mount', 'invalid spec', 'address already in use',
+                      'not found', 'unhealthy', 'operation not permitted')
+        reason = next((value for value in categories if value in result.stderr.lower()), 'unclassified')
+        # Command shape and fixed categories reveal the failing phase without
+        # emitting potentially credential-bearing arguments or Docker output.
+        operation = next((value for value in argv[1:]
+                          if value in ('up', 'config', 'inspect', 'exec', 'run', 'restart', 'down')), '')
+        raise RuntimeError(f'{Path(argv[0]).name} {operation} failed with exit {result.returncode} ({reason})')
     return result.stdout.strip()
 
 
