@@ -110,17 +110,9 @@ typedef struct
 int memory_graph_distribute_path_credit(double delta, const memory_graph_path_edge_t *edges,
                                         int path_length, double *out_credits);
 
-/* --- Recall-path fusion state (thread-local, set per request) ---
- *
- * The kb recall handler sets the requested graph_code_fusion_state ("off" |
- * "shadow" | "on"; NULL/unknown ⇒ off) before invoking the recall path, then
- * clears it. The recall path consults memory_fusion_state_is_on() to decide
- * whether to run the graph-vector fusion expansion, stages the expansion
- * results via memory_fusion_expansions_set(), and memory_compute_score calls
- * memory_fusion_expansions_apply() to populate each candidate's graph_score
- * (which the score blend then weights by graph_weight). State is thread-local
- * so concurrent requests on different worker threads never interfere; when no
- * state is set the apply hook is a no-op and ranking is byte-identical. */
+/* Fusion is instance-wide: AIMEE_GRAPH_FUSION=on (default) or off, independently
+ * configured on server and KB. Legacy set/clear entry points are no-ops;
+ * request fields cannot change the instance policy. */
 void memory_fusion_state_set(const char *graph_code_fusion_state);
 int memory_fusion_state_is_on(void);
 void memory_fusion_state_clear(void);
@@ -128,13 +120,8 @@ void memory_fusion_expansions_set(const memory_graph_expansion_t *expansions, in
 void memory_fusion_expansions_apply(memory_score_parts_t *parts, int64_t memory_id);
 void memory_fusion_expansions_clear(void);
 
-/* Ablation sub-gates for the fusion expansion (thread-local; default both on so
- * `graph_code_fusion_state=on` runs the full fusion unless an arm overrides):
- *   utility_scoring — utility-weight the entity-edge neighbours.
- *   code_projection — allow the expansion to enter code subgraphs at all
- *                     (combined with the per-query code-shape gate).
- * The ablation runner sets these per arm; memory_fusion_state_clear() resets
- * both to the default (on). */
+/* Legacy declarations retained for source compatibility. Runtime fusion policy
+ * is controlled only by the instance environment, never by an ablation arm. */
 void memory_fusion_gates_set(int utility_scoring, int code_projection);
 int memory_fusion_utility_scoring(void);
 int memory_fusion_code_projection(void);

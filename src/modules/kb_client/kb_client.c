@@ -21,6 +21,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -1722,9 +1723,49 @@ static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
  * "kb.reembed_on_dim_change is disabled; set it true...", and how
  * `aimee memory embed --all` exited 0 printing nothing against
  * "memory.embed all=true requires version". */
+static _Atomic(kb_client_local_code_fn) local_code_provider;
+
+void kb_client_set_local_code_provider(kb_client_local_code_fn provider)
+{
+   atomic_store(&local_code_provider, provider);
+}
+
+int kb_client_local_code_enabled(void)
+{
+   return atomic_load(&local_code_provider) && !kb_client_connection_configured();
+}
+
+static char *local_code_request(const char *path, const cJSON *body, int *status_out,
+                                int keep_error)
+{
+   int status = 503;
+   kb_client_local_code_fn provider = atomic_load(&local_code_provider);
+   char *response = provider ? provider(path, body, &status) : NULL;
+   snprintf(g_kb_last_dependency, sizeof(g_kb_last_dependency), "%s", "local_code");
+   g_kb_last_observed_generation = g_kb_last_current_generation = 0;
+   g_kb_last_observed_dimension = g_kb_last_current_dimension = 0;
+   g_kb_last_retry_after_ms = 0;
+   g_kb_last_suppressed = 0;
+   if (status_out)
+      *status_out = status;
+   int valid = 0;
+   g_kb_last_result = status >= 200 && status < 300
+                          ? kb_classify_json_result(path, response, &valid)
+                          : KB_CLIENT_RESULT_UNAVAILABLE;
+   if (status >= 400 && !keep_error)
+   {
+      free(response);
+      return NULL;
+   }
+   return response;
+}
+
 static char *kb_client_v1_post_json_impl(const char *path, cJSON *body, int timeout_ms,
                                          int *status_out, int keep_error)
 {
+   if (kb_client_local_code_enabled() && path && strncmp(path, "/v1/code/", 9) == 0)
+      return local_code_request(path, body, status_out, keep_error);
+
    if (!kb_transport_begin(path, status_out))
       return NULL;
    char *body_json = body ? cJSON_PrintUnformatted(body) : strdup("{}");
@@ -1858,6 +1899,9 @@ char *kb_client_v1_post_body_with_type(const char *path, const char *body, const
 
 char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
 {
+   if (kb_client_local_code_enabled() && path && strncmp(path, "/v1/code/", 9) == 0)
+      return local_code_request(path, NULL, status_out, 0);
+
    if (!kb_transport_begin(path, status_out))
       return NULL;
 

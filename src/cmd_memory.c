@@ -67,8 +67,7 @@ void cmd_memory_build_filter(const opt_parsed_t *opts, memory_filter_t *out)
 int cmd_memory_find_facts(const opt_parsed_t *opts, const char *query, int limit, memory_t *facts,
                           int max)
 {
-   /* Graph-code fusion is always on for recall; the scoped client carries
-    * graph_code_fusion_state="on" to the kb handler. */
+   /* The receiving instance applies its configured fusion policy. */
    int n = kb_client_memory_find_facts_scoped(query, cmd_memory_scope_type(opts),
                                               cmd_memory_scope_value(opts), limit, facts, max);
    if (n > 0 && facts)

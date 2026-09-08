@@ -29,6 +29,7 @@ const personalVectorSchema = `CREATE TABLE IF NOT EXISTS user_memory_vectors (
 )`
 
 type personalVectors struct {
+	code     *postgresDataStore
 	settings func() (string, error)
 	endpoint string
 	executor egress.Executor
@@ -49,7 +50,7 @@ func StartPersonalIndex(ctx context.Context, data DataStore, executor egress.Exe
 	if !ok {
 		return
 	}
-	p := &personalVectors{endpoint: endpoint, executor: executor, db: db, wake: make(chan struct{}, 1)}
+	p := &personalVectors{code: s, endpoint: endpoint, executor: executor, db: db, wake: make(chan struct{}, 1)}
 	if configured, ok := s.db.(interface{ EmbeddingEndpoint() (string, error) }); ok {
 		p.settings = configured.EmbeddingEndpoint
 	}
@@ -86,10 +87,10 @@ func (p *personalVectors) run(ctx context.Context) {
 	defer timer.Stop()
 	for {
 		attempt, cancel := context.WithTimeout(ctx, 60*time.Second)
-		err := p.indexBatch(attempt)
+		err := errors.Join(p.indexBatch(attempt), p.indexCodeBatch(attempt))
 		cancel()
 		if err != nil && ctx.Err() == nil {
-			log.Printf("personal memory embedding pending: %v", err)
+			log.Printf("local memory/code embedding pending: %v", err)
 		}
 		select {
 		case <-ctx.Done():

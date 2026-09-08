@@ -1,6 +1,7 @@
 /* server_main.c: aimee-server entry point -- socket lifecycle, signal handling */
 #include <aimee/core/event_bus/bus_runtime.h>
 #include "aimee.h"
+#include "server_code_index.h"
 #include <aimee/tools/agent_tools.h>
 #include "cli_client.h"
 #include "commands.h"
@@ -479,6 +480,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
    install_signal_handlers();
 
    g_ctx.running = 1;
+   server_code_index_start();
    if (server_kb_heartbeat_start() != 0)
       LOG_WARN("server.kb", "could not start the server registry heartbeat worker");
    (void)shutdown_forensics_record_unclean_exits();
@@ -486,6 +488,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
    startup_notify(notify_fd, "ok\n");
    int rc = server_run(&g_ctx);
 
+   server_code_index_stop();
    server_kb_heartbeat_stop();
    server_http_stop();
    server_shutdown(&g_ctx);

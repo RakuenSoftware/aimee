@@ -109,6 +109,29 @@ installs, the application forwards that channel to model deployments. Explicit
 `AIMEE_APPLICATION_IMAGE`, `AIMEE_POSTGRES_IMAGE`, `AIMEE_EMBEDDER_IMAGE`, and `AIMEE_LLM_IMAGE`
 overrides take precedence. Use a client from the same release channel.
 
+### Graph fusion (0.4.3)
+
+Graph fusion is enabled by default on both server and KB. It is one setting per
+instance: all clients and requests use that instance's setting. A server can
+have it enabled while its KB has it disabled.
+
+To disable it, persist `AIMEE_GRAPH_FUSION=off` in that instance's Compose `.env`
+file and recreate its service with `docker compose up -d`. Use `on` to enable it;
+an omitted value defaults to `on`. Native services use the same environment
+variable in their service configuration and require a restart. Other values,
+including `shadow`, are rejected. Client and request parameters cannot override it.
+
+Standalone servers index their published repository clones automatically. New
+clones and changed default branches are checked every minute; the first pass
+also indexes repositories cloned before upgrading. Thin clients can upload
+repository contents through the existing index ingestion API. Code, call edges,
+and embeddings remain in the server's PostgreSQL store when no KB is configured.
+Cloned source code is indexed as code, separately from personal memories.
+The private index supports symbol lookup, callers, structure, hybrid search,
+investigation, source spans, and blast radius. Organization-wide graph analytics
+remain KB services. Private semantic retrieval embeds bounded per-file excerpts;
+lexical lookup retains the collected file contents.
+
 ## 2. Install the client
 
 The client and server must use the same release channel. If step 1 used the default `:latest`

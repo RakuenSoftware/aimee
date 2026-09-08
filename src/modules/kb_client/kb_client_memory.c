@@ -248,10 +248,7 @@ int kb_client_memory_find_facts(const char *query, int limit, memory_t *out, int
    cJSON_AddStringToObject(req, "query", query);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
-   /* Graph-code fusion is always on for recall; the eval/benchmark harness is the
-    * only path that forwards a different graph_code_fusion_state (via the _ex
-    * variants) to measure on-vs-off. */
-   cJSON_AddStringToObject(req, "graph_code_fusion_state", "on");
+   /* Fusion policy belongs to the receiving instance. */
    char *json = kb_v1_action_request("memory.find_facts", req);
    if (!json)
       return -1;
@@ -295,12 +292,8 @@ int kb_client_memory_find_facts_ex(const char *query, int limit, memory_t *out, 
    cJSON_AddStringToObject(req, "query", query);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
-   /* graph_code_fusion_state ("off" | "shadow" | "on") is consumed by
-    * kb_handle_memory_find_facts, which runs the graph-code fusion rerank in the
-    * recall path when "on". Default to "off" when the caller passes NULL. */
-   cJSON_AddStringToObject(
-       req, "graph_code_fusion_state",
-       (graph_code_fusion_state && graph_code_fusion_state[0]) ? graph_code_fusion_state : "off");
+   /* The legacy fusion argument is retained for ABI compatibility only. */
+   (void)graph_code_fusion_state; /* legacy argument; instance policy always wins */
    char *json = kb_v1_action_request("memory.find_facts", req);
    if (!json)
       return -1;
@@ -647,9 +640,7 @@ int kb_client_memory_find_facts_scoped_ex(const char *query, const char *scope_t
       cJSON_AddStringToObject(req, "scope_value", scope_value);
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
-   cJSON_AddStringToObject(
-       req, "graph_code_fusion_state",
-       (graph_code_fusion_state && graph_code_fusion_state[0]) ? graph_code_fusion_state : "off");
+   (void)graph_code_fusion_state; /* legacy argument; instance policy always wins */
    char *json = kb_v1_action_request("memory.find_facts_scoped", req);
    int n = kbc_facts_array_from_envelope(json, out, max);
    free(json);
@@ -1239,9 +1230,7 @@ static char *memory_recall_json(const char *task_hint, int limit_tokens, int ses
       cJSON_AddNumberToObject(req, "limit_tokens", limit_tokens);
    if (session_start)
       cJSON_AddBoolToObject(req, "session_start", 1);
-   cJSON_AddStringToObject(
-       req, "graph_code_fusion_state",
-       (graph_code_fusion_state && graph_code_fusion_state[0]) ? graph_code_fusion_state : "off");
+   (void)graph_code_fusion_state; /* legacy argument; instance policy always wins */
    char *j = kb_v1_action_request("memory.recall", req);
    if (!j)
       return NULL;

@@ -21,6 +21,7 @@
 #include "code_collect.h"                   /* §6 live: git_resolve_default_sha + change gate */
 #include "modules/db2/c/kb_runtime_state.h" /* stored last-indexed default-branch SHA */
 #include "memory.h"
+#include "modules/memory/memory_graph_fusion.h"
 #include "kb_rrf.h"
 #include "modules/db2/c/lessons.h" /* §3 actuation: earned-trust tie-break */
 #include "kb/lessons_reflect.h"    /* reflect the ledger into per-node trust */
@@ -1130,9 +1131,10 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
     * /v1/code/callers route — canonical_index_find_callers takes its all-projects
     * SQL path on NULL, so both legs scope identically instead of one searching all
     * projects (NULL) while the other got "" (which is not the all-projects sentinel). */
+   int fusion_on = memory_fusion_state_is_on();
    int ng = 0;
    int ngraph = 0;
-   if (symbol[0])
+   if (fusion_on && symbol[0])
    {
       ng = code_callers_local_first(project, all_projects, symbol, ghits, HYBRID_PER_SIGNAL);
       if (ng < 0)
@@ -1207,7 +1209,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
     * with the symbol — a signal a regenerated code-only snapshot can never hold.
     * w_memory<=0 disables it; absent a symbol or an entity graph it is simply empty. */
    int nmem = 0;
-   if (w_memory > 0.0 && symbol[0] && project[0])
+   if (fusion_on && w_memory > 0.0 && symbol[0] && project[0])
    {
       char skey[GRAPH_ENDPOINT_MAX];
       db2_entity_edge_explain_t *eedges = calloc(HYBRID_PER_SIGNAL, sizeof(*eedges));
@@ -1330,6 +1332,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       return 500;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "graph_code_fusion_state", fusion_on ? "on" : "off");
    kb_code_vector_status_add_json(resp, &vector_status);
    cJSON_AddStringToObject(resp, "query", query);
    if (symbol[0])

@@ -30,9 +30,10 @@
 #include "dogfood.h"
 #include "commands.h"
 #include "platform_path.h"
-#include "server_http.h"    /* session_primary_set/get/clear */
-#include "agent_config.h"   /* agent_load_config / agent_find */
-#include "hardware_probe.h" /* hardware_probe_list_local/remote — host GPU inventory */
+#include "server_http_internal.h" /* cached readiness response */
+#include "server_http.h"          /* session_primary_set/get/clear */
+#include "agent_config.h"         /* agent_load_config / agent_find */
+#include "hardware_probe.h"       /* hardware_probe_list_local/remote — host GPU inventory */
 #include <errno.h>
 #include <math.h>
 #include <unistd.h>
@@ -1766,12 +1767,26 @@ static cJSON *dashboard_readiness(const cJSON *resp)
    cJSON *next = cJSON_AddArrayToObject(report, "next_actions");
    int ready = 1;
 
-   const cJSON *mem = cJSON_GetObjectItem(resp, "memory_stats");
-   const cJSON *tiers = mem ? cJSON_GetObjectItem(mem, "tier_kinds") : NULL;
-   if (json_array_len(tiers) > 0)
-      readiness_add_step(steps, "database", "ok", "memory store reachable");
-   else
-      readiness_add_step(steps, "database", "warn", "no memories recorded yet");
+   char health_json[4096];
+   int health_status = route_ready(health_json, sizeof(health_json));
+   cJSON *health = cJSON_Parse(health_json);
+   const cJSON *dependencies = cJSON_GetObjectItemCaseSensitive(health, "dependencies");
+   const cJSON *database = cJSON_GetObjectItemCaseSensitive(dependencies, "db1");
+   int database_ok = cJSON_IsString(database) && strcmp(database->valuestring, "ok") == 0;
+   ready = health_status == 200;
+   readiness_add_step(steps, "database", database_ok ? "ok" : "error",
+                      database_ok ? "local memory store reachable"
+                                  : "local database unavailable or health unknown");
+   if (!database_ok)
+      cJSON_AddItemToArray(next, cJSON_CreateString("Check the local database service"));
+   if (!ready && database_ok)
+   {
+      readiness_add_step(steps, "services", "error",
+                         "a required service is unavailable or health is stale");
+      cJSON_AddItemToArray(next,
+                           cJSON_CreateString("Check service readiness for the failed dependency"));
+   }
+   cJSON_Delete(health);
 
    int agents = json_array_len(cJSON_GetObjectItem(resp, "agents"));
    if (agents > 0)
@@ -1790,7 +1805,7 @@ static cJSON *dashboard_readiness(const cJSON *resp)
    if (json_array_len(cJSON_GetObjectItem(resp, "metrics")) > 0)
       readiness_add_step(steps, "delegations", "ok", "delegate activity recorded");
    else
-      readiness_add_step(steps, "delegations", "warn", "no delegate activity yet");
+      readiness_add_step(steps, "delegations", "skipped", "idle; no delegate activity yet");
 
    const cJSON *lsp = cJSON_GetObjectItem(resp, "lsp");
    int lsp_err = lsp ? (int)cJSON_GetNumberValue(cJSON_GetObjectItem(lsp, "errors")) : 0;
@@ -1839,21 +1854,43 @@ int handle_dashboard_onboard(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   char *json = api_dashboard_onboard();
-   cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "data", parse_or_object(json));
+   cJSON *activity = cJSON_CreateObject();
+   char *json = server_agent_list_json();
+   cJSON_AddItemToObject(activity, "agents", parse_or_array(json));
    free(json);
+   json = api_metrics();
+   cJSON_AddItemToObject(activity, "metrics", parse_or_array(json));
+   free(json);
+   cJSON *resp = jo_ok();
+   cJSON_AddItemToObject(resp, "data", dashboard_readiness(activity));
+   cJSON_Delete(activity);
    return send_and_free(conn, resp);
+}
+
+static cJSON *dashboard_local_memory_stats(void)
+{
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "stats");
+   cJSON *reply = server_module_memory_data(request);
+   cJSON_Delete(request);
+   cJSON *stats = cJSON_DetachItemFromObjectCaseSensitive(reply, "stats");
+   cJSON_Delete(reply);
+   if (!cJSON_IsObject(stats))
+   {
+      cJSON_Delete(stats);
+      stats = cJSON_CreateObject();
+      cJSON_AddStringToObject(stats, "error", "local memory statistics unavailable");
+   }
+   cJSON_AddStringToObject(stats, "store", "user");
+   return stats;
 }
 
 int handle_dashboard_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   char *json = kb_client_dashboard_memory_stats_json();
    cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "data", parse_or_object(json));
-   free(json);
+   cJSON_AddItemToObject(resp, "data", dashboard_local_memory_stats());
    return send_and_free(conn, resp);
 }
 
@@ -1890,7 +1927,9 @@ int handle_dashboard_all(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    ADD_ARRAY("agents", server_agent_list_json());
    ADD_ARRAY("token_audit", api_token_audit());
    ADD_ARRAY("decisions", dashboard_decisions_json());
-   ADD_OBJECT("memory_stats", kb_client_dashboard_memory_stats_json());
+   cJSON_AddItemToObject(resp, "memory_stats", dashboard_local_memory_stats());
+   if (kb_client_connection_configured())
+      ADD_OBJECT("kb_memory_stats", kb_client_dashboard_memory_stats_json());
 
 #undef ADD_ARRAY
 #undef ADD_OBJECT

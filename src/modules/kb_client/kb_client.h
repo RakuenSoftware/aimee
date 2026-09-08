@@ -526,11 +526,8 @@ char *kb_client_dashboard_directives_json(void);
  * direct call for this RPC without changing their downstream code. */
 int kb_client_memory_find_facts(const char *query, int limit, memory_t *out, int max);
 
-/* Like kb_client_memory_find_facts but with an explicit graph_code_fusion_state
- * field. graph_code_fusion_state: "off" | "shadow" | "on"; NULL defaults to
- * "off". Recall is always fusion-on in production (the plain
- * kb_client_memory_find_facts forwards "on"); this _ex form exists for the
- * eval/benchmark harness, which forwards "off"/"shadow" to measure on-vs-off. */
+/* ABI-compatible legacy form. graph_code_fusion_state is ignored; every
+ * request uses the receiving instance's configured fusion policy. */
 int kb_client_memory_find_facts_ex(const char *query, int limit, memory_t *out, int max,
                                    const char *graph_code_fusion_state);
 
@@ -594,9 +591,8 @@ char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int 
 /* Shared-store recall without the legacy personal-memory merge. */
 char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,
                                           int session_start);
-/* As above, with an explicit graph-code fusion state ("off"/"shadow"/"on", NULL
- * = off). Production recall always forwards "on" (via kb_client_memory_recall_json);
- * this _ex form lets the eval/benchmark harness force a different state. */
+/* ABI-compatible legacy form; the fusion argument is ignored. The receiving
+ * instance applies its own configuration. */
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
                                       const char *graph_code_fusion_state);
 
@@ -744,9 +740,8 @@ int kb_client_memory_find_facts_visible(const char *query, const char *workspace
                                         const char *project, int limit, memory_t *out, int max);
 int kb_client_memory_find_facts_scoped(const char *query, const char *scope_type,
                                        const char *scope_value, int limit, memory_t *out, int max);
-/* As above, with an explicit graph-code fusion state ("off"/"shadow"/"on", NULL
- * = off). Production scoped recall always forwards "on" (via
- * kb_client_memory_find_facts_scoped); this _ex form is for the eval harness. */
+/* ABI-compatible legacy form; the fusion argument is ignored. The receiving
+ * instance applies its own configuration. */
 int kb_client_memory_find_facts_scoped_ex(const char *query, const char *scope_type,
                                           const char *scope_value, int limit, memory_t *out,
                                           int max, const char *graph_code_fusion_state);
@@ -1337,6 +1332,11 @@ int kb_client_is_live(void);
 
 /* Configuration presence, independent of reachability or the circuit breaker. */
 int kb_client_connection_configured(void);
+/* The standalone server supplies its private code owner. Registration happens
+ * before request workers start; KB deployments retain their remote transport. */
+typedef char *(*kb_client_local_code_fn)(const char *path, const void *body, int *status);
+void kb_client_set_local_code_provider(kb_client_local_code_fn provider);
+int kb_client_local_code_enabled(void);
 
 /* Compute blast radius for a file. Returns 0 on success (out is
  * filled), -1 if kb is unreachable or the canonical lookup failed. */

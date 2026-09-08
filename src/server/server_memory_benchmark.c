@@ -219,26 +219,9 @@ static int bench_code_graph_fusion(server_conn_t *conn, cJSON *req)
 
    const char *corpus =
        jo_str(req, "corpus", "benchmarks/code-vector-graph/production-corpus.json");
-   const char *matrix = jo_str(req, "matrix", "benchmarks/code-vector-graph/ablation-matrix.json");
-   const char *arm = jo_str(req, "arm", NULL);
-   const char *fstate_override = jo_str(req, "fusion_state", NULL);
-
-   /* Resolve the arm's wired knobs from the ablation matrix. The fusion state is
-    * forwarded to aimee-kb; utility_scoring / code_projection are reported for
-    * traceability but are not yet separately plumbed through the kb RPC, so arms
-    * that differ only on those sub-gates currently score identically. */
-   char arm_state[16] = "";
-   int utility = 1, projection = 1;
-   int have_arm = (arm && mem_eval_fusion_arm_resolve(matrix, arm, arm_state, sizeof(arm_state),
-                                                      &utility, &projection) == 0);
-   const char *fstate = (fstate_override && fstate_override[0]) ? fstate_override : NULL;
-   if (!fstate)
-   {
-      if (have_arm && arm_state[0])
-         fstate = arm_state;
-      else
-         fstate = (arm && strcmp(arm, "baseline") == 0) ? "off" : "on";
-   }
+   /* A benchmark observes the configured instance. Comparing on/off requires
+    * separate instance configurations; an arm cannot change live policy. */
+   const char *fstate = NULL;
 
    enum
    {
@@ -254,11 +237,7 @@ static int bench_code_graph_fusion(server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "failed to load benchmark corpus", NULL);
    }
    cJSON *resp = jo_ok();
-   if (arm)
-      jo_add_str(resp, "arm", arm);
-   jo_add_str(resp, "fusion_state", fstate);
-   jo_add_i64(resp, "utility_scoring", utility);
-   jo_add_i64(resp, "code_projection", projection);
+   jo_add_str(resp, "fusion_state", "instance");
    const char *error = NULL;
    int rc = bench_run_live_cases(suite, cases, n_cases, fstate, resp, &error);
    free(cases);
@@ -284,6 +263,11 @@ int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
 
+   if (cJSON_HasObjectItem(req, "fusion_state") || cJSON_HasObjectItem(req, "arm"))
+      return server_send_error(conn,
+                               "fusion is configured per instance with AIMEE_GRAPH_FUSION=on|off; "
+                               "request overrides and ablation arms are not supported",
+                               NULL);
    const char *suite = jo_str(req, "suite", "code-graph-fusion");
    if (strcmp(suite, "code-graph-fusion") == 0)
       return bench_code_graph_fusion(conn, req);

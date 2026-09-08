@@ -586,6 +586,7 @@ SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalo
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
+SERVER_SRCS += server/server_code_index.c
 SERVER_SRCS += server/server_runtime_identity.c
 # The command catalogue the thin client renders (served via /v1/cli/manifest).
 SERVER_SRCS += server/cli_command_defs.c

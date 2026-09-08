@@ -1808,29 +1808,9 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       const char *corpus_path = opt_get(&opts, "corpus");
       if (!corpus_path)
          corpus_path = "benchmarks/code-vector-graph/production-corpus.json";
-      const char *arm = opt_get(&opts, "arm");
-      const char *matrix = opt_get(&opts, "ablation-matrix");
-      if (!matrix)
-         matrix = "benchmarks/code-vector-graph/ablation-matrix.json";
-
-      /* Resolve the arm's wired knobs from the ablation matrix: fusion state +
-       * the utility_scoring / code_projection sub-gates. Arms the matrix doesn't
-       * name fall back to baseline=off / else=on; --fusion-state overrides the
-       * state. (code_vectors_enabled, utility_cap, and code_structural_factor
-       * are not yet plumbed, so arms differing only on those still score
-       * identically.) */
-      char arm_state[16] = "";
-      int utility = 1, projection = 1;
-      int have_arm = (arm && mem_eval_fusion_arm_resolve(matrix, arm, arm_state, sizeof(arm_state),
-                                                         &utility, &projection) == 0);
-      const char *fstate = opt_get(&opts, "fusion-state");
-      if (!fstate)
-      {
-         if (have_arm && arm_state[0])
-            fstate = arm_state;
-         else
-            fstate = (arm && strcmp(arm, "baseline") == 0) ? "off" : "on";
-      }
+      if (opt_get(&opts, "arm") || opt_get(&opts, "fusion-state"))
+         fatal("fusion is per-instance; configure AIMEE_GRAPH_FUSION=on|off and restart");
+      const char *fstate = memory_fusion_state_is_on() ? "on" : "off";
 
       mem_eval_case_t cases[200];
       int n_cases = mem_eval_load_production_corpus(corpus_path, cases,
@@ -1842,12 +1822,9 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
          if (cases[i].n_expected > 0)
             labelled++;
 
-      memory_fusion_state_set(fstate);
-      memory_fusion_gates_set(utility, projection);
       mem_eval_scores_t scores;
       mem_eval_latency_t latency;
       mem_eval_run_with_latency(cases, n_cases, &scores, &latency);
-      memory_fusion_state_clear();
 
       if (ctx->json_output)
       {
@@ -1857,9 +1834,8 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       }
       char title[256];
       snprintf(title, sizeof(title),
-               "Code-Graph Fusion — arm=%s fusion=%s utility=%d projection=%d (%d queries, %d "
-               "labelled)",
-               arm ? arm : "(default)", fstate, utility, projection, n_cases, labelled);
+               "Code-Graph Fusion — instance fusion=%s (%d queries, %d labelled)", fstate, n_cases,
+               labelled);
       mem_print_eval_report(title, &scores, &latency);
       if (labelled < n_cases)
          printf("  note: %d/%d queries have no expected_ids yet — recall undercounts until the "

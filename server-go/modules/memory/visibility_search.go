@@ -42,5 +42,9 @@ ORDER BY CASE WHEN scope_type='project' AND scope_value=$2 THEN 1
 		}
 		records = append(records, r)
 	}
-	return records, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return s.fuseMemoryGraph(ctx, req, false, records)
 }
