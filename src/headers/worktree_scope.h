@@ -35,7 +35,7 @@ static inline int worktree_scope_path_non_git(const char *path)
       char *slash = strrchr(probe, '/');
       if (!slash)
          return 0;
-      if (slash == probe)
+      if (slash == probe || (slash == probe + 2 && probe[1] == ':'))
          slash[1] = '\0';
       else
          *slash = '\0';
@@ -52,7 +52,7 @@ static inline int worktree_scope_path_non_git(const char *path)
       char *slash = strrchr(resolved, '/');
       if (!slash)
          return 0;
-      if (slash == resolved)
+      if (slash == resolved || (slash == resolved + 2 && resolved[1] == ':'))
          slash[1] = '\0';
       else
          *slash = '\0';
@@ -69,7 +69,7 @@ static inline int worktree_scope_path_non_git(const char *path)
          return 0;
       if (!slash[1])
          return 1;
-      if (slash == resolved)
+      if (slash == resolved || (slash == resolved + 2 && resolved[1] == ':'))
          slash[1] = '\0';
       else
          *slash = '\0';
