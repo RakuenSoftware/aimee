@@ -92,7 +92,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "0fdb881313e0a59c277bd85677fae9ec23454233b8076870b470fd1caf0876b0",
+      "source_sha256": "881ad919dc63c816151d1767e2edbebc54dbd292ec049815e6e114e7edd7331b",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 7,
@@ -219,7 +219,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "dedeaea2b099881f0634c9c9a1364f9001b8eb77a2990ce276e0b41da29a8ee1",
+      "source_sha256": "e0cdf2b65acb523d6fc403c8676e9c59bcaff66243b047775b2a5cb248f436e3",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 13,
@@ -330,7 +330,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "4ef1c43128cb3bcd91a2f06c15e5a3691025f75effeacf6c6650e601ea2bdd27",
+      "source_sha256": "7cb7e0fda81bd347bcbf808ebd1113a1b7e5f067bd568cd8837eaa92ca418acc",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 30,
