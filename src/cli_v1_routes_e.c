@@ -433,7 +433,7 @@ static void marshal_add_abs_path(cJSON *req, const char *field, const char *path
 }
 
 /* Marshal `aimee memory benchmark [code-graph-fusion] [--arm NAME]
- * [--corpus PATH] [--matrix PATH] [--fusion-state off|shadow|on]` into the
+ * [--corpus PATH]` into the
  * memory.benchmark request. Asset paths default on the server to the committed
  * benchmark files; when given here they are made absolute for the server. */
 cJSON *marshal_memory_benchmark(int argc, char **argv)

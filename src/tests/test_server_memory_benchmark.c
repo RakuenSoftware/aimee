@@ -169,7 +169,6 @@ static void test_live_corpus_suite(void)
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "suite", "corpus");
-   cJSON_AddStringToObject(req, "fusion_state", "shadow");
    cJSON_AddNumberToObject(req, "max_cases", 2);
    assert(handle_memory_benchmark(&ctx, &conn, req) == 0);
    assert(g_last_error[0] == '\0');
@@ -177,7 +176,7 @@ static void test_live_corpus_suite(void)
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "suite")->valuestring, "corpus") == 0);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "corpus")->valuestring, "unit-live-corpus") ==
           0);
-   assert(strcmp(g_last_fusion_state, "shadow") == 0);
+   assert(g_last_fusion_state[0] == '\0');
    assert(cJSON_GetObjectItem(g_last_response, "queries")->valueint == 2);
    cJSON *metrics = cJSON_GetObjectItem(g_last_response, "metrics");
    assert(cJSON_GetObjectItem(metrics, "cases")->valueint == 2);
@@ -198,6 +197,19 @@ static void test_live_corpus_suite(void)
 /* A --corpus FILE passed to a live-memory suite must be REJECTED, not silently
  * dropped (which used to make the caller think they benchmarked their file when
  * they benchmarked live memory). */
+static void test_rejects_request_fusion_override(void)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "suite", "corpus");
+   cJSON_AddStringToObject(req, "fusion_state", "off");
+   assert(handle_memory_benchmark(&ctx, &conn, req) == 0);
+   assert(strstr(g_last_error, "AIMEE_GRAPH_FUSION") != NULL);
+   assert(g_last_response == NULL);
+   assert(g_scoring_calls == 0);
+   cJSON_Delete(req);
+   reset_capture();
+}
+
 static void test_live_suite_rejects_corpus_file(void)
 {
    cJSON *req = cJSON_CreateObject();
@@ -213,17 +225,25 @@ static void test_live_suite_rejects_corpus_file(void)
 
 static void test_code_graph_suite(void)
 {
+   cJSON *configured = cJSON_CreateObject();
+   cJSON_AddStringToObject(configured, "suite", "code-graph-fusion");
+   assert(handle_memory_benchmark(&ctx, &conn, configured) == 0);
+   assert(g_last_error[0] == '\0');
+   assert(strcmp(cJSON_GetObjectItem(g_last_response, "fusion_state")->valuestring, "instance") ==
+          0);
+   assert(g_scoring_calls == 4);
+   assert(g_latency_calls == 1);
+   cJSON_Delete(configured);
+   reset_capture();
+
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "suite", "code-graph-fusion");
    cJSON_AddStringToObject(req, "arm", "baseline");
    assert(handle_memory_benchmark(&ctx, &conn, req) == 0);
-   assert(strcmp(cJSON_GetObjectItem(g_last_response, "suite")->valuestring, "code-graph-fusion") ==
-          0);
-   assert(strcmp(cJSON_GetObjectItem(g_last_response, "fusion_state")->valuestring, "off") == 0);
-   assert(cJSON_GetObjectItem(g_last_response, "utility_scoring")->valueint == 0);
-   assert(cJSON_GetObjectItem(g_last_response, "code_projection")->valueint == 0);
-   assert(g_scoring_calls == 4);
-   assert(g_latency_calls == 1);
+   assert(g_last_response == NULL);
+   assert(strstr(g_last_error, "per instance") != NULL);
+   assert(g_scoring_calls == 0);
+   assert(g_latency_calls == 0);
    cJSON_Delete(req);
    reset_capture();
 }
@@ -304,6 +324,7 @@ int main(void)
 {
    printf("server_memory_benchmark: ");
    test_live_corpus_suite();
+   test_rejects_request_fusion_override();
    test_live_suite_rejects_corpus_file();
    test_code_graph_suite();
    test_scoring_module_failure_fails_once();

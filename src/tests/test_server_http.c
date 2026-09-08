@@ -445,6 +445,13 @@ int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial
    return 0;
 }
 
+/* This route-gate harness does not run the PKI service. Refuse mutations. */
+int server_revoke_client_certificate(const char *serial)
+{
+   (void)serial;
+   return -1;
+}
+
 int server_tls_peer_cert(SSL *ssl, server_tls_peer_cert_t *out)
 {
    (void)ssl;

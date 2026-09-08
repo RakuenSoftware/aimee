@@ -242,6 +242,7 @@ int rh_git_oauth_github_poll(const route_req_t *rq, char *resp, int cap);
 int rh_git_oauth_github_config(const route_req_t *rq, char *resp, int cap);
 int rh_git_oauth_github_web_start(const route_req_t *rq, char *resp, int cap);
 int rh_git_oauth_github_web_callback(const route_req_t *rq, char *resp, int cap);
+int rh_clients(const route_req_t *rq, char *resp, int cap);
 int rh_deploy_apply(const route_req_t *rq, char *resp, int cap);
 int rh_deploy_status(const route_req_t *rq, char *resp, int cap);
 int rh_server_forensics(const route_req_t *rq, char *resp, int cap);

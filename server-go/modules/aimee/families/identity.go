@@ -59,7 +59,9 @@ const (
 	grantForPrincipalSQL = `SELECT principal, bearer_sha256, coalesce(cert_serial, ''), tier
 	                          FROM remote_client_grants
 	                         WHERE principal = $1
-	                         ORDER BY (cert_serial IS NOT NULL) DESC, created_at ASC
+	                         AND revoked_at IS NULL AND (expires_at=0 OR cert_serial IS NOT NULL)
+                         AND (cert_serial IS NOT NULL OR expires_at=0 OR expires_at>$2)
+                         ORDER BY (cert_serial IS NOT NULL) DESC, created_at ASC
 	                         LIMIT 1`
 
 	grantInsertSQL = `INSERT INTO remote_client_grants
@@ -71,14 +73,16 @@ const (
 	abandonSQL = `DELETE FROM remote_client_grants
 	               WHERE bearer_sha256 = $1 AND cert_serial IS NULL`
 
-	boundSerialSQL = `SELECT coalesce(cert_serial, '') FROM remote_client_grants
+	boundSerialSQL = `SELECT CASE WHEN revoked_at IS NOT NULL OR (cert_serial IS NULL AND expires_at>0 AND expires_at<=$2)
+                     THEN '!unavailable' ELSE coalesce(cert_serial, '') END FROM remote_client_grants
 	                   WHERE bearer_sha256 = $1`
 
 	bindSQL = `UPDATE remote_client_grants
 	              SET cert_serial = $1, bound_at = $2
-	            WHERE bearer_sha256 = $3 AND cert_serial IS NULL`
+	            WHERE bearer_sha256 = $3 AND cert_serial IS NULL AND revoked_at IS NULL
+              AND (expires_at=0 OR expires_at>$2)`
 
-	tierSQL = `SELECT principal, tier FROM remote_client_grants WHERE cert_serial = $1`
+	tierSQL = `SELECT principal, CASE WHEN revoked_at IS NOT NULL THEN 'revoked' ELSE tier END FROM remote_client_grants WHERE cert_serial = $1`
 )
 
 // tierRank is the integer the wire carries for a tier name.
@@ -88,6 +92,8 @@ func tierRank(tier string) int {
 		return 2
 	case "data":
 		return 1
+	case "revoked":
+		return -1
 	default:
 		return 0
 	}
@@ -162,7 +168,7 @@ func remoteClientClaim(ctx context.Context, db store.DB, f []string) (uint32, []
 	}
 
 	var gotPrincipal, gotBearer, gotSerial, gotTier string
-	err = tx.QueryRow(ctx, grantForPrincipalSQL, principal).
+	err = tx.QueryRow(ctx, grantForPrincipalSQL, principal, now).
 		Scan(&gotPrincipal, &gotBearer, &gotSerial, &gotTier)
 	switch {
 	case err == nil:
@@ -230,7 +236,7 @@ func remoteClientBind(ctx context.Context, db store.DB, f []string) (uint32, []s
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var bound string
-	err = tx.QueryRow(ctx, boundSerialSQL, bearer).Scan(&bound)
+	err = tx.QueryRow(ctx, boundSerialSQL, bearer, now).Scan(&bound)
 	switch {
 	case store.IsNoRows(err):
 		if err := tx.Commit(ctx); err != nil {
@@ -238,6 +244,9 @@ func remoteClientBind(ctx context.Context, db store.DB, f []string) (uint32, []s
 		}
 		return bindReply(bindNoSuchGrant)
 	case err != nil:
+		return bindReply(bindFailed)
+	}
+	if bound == "!unavailable" {
 		return bindReply(bindFailed)
 	}
 	if bound != "" {
@@ -295,6 +304,7 @@ var Identity = store.Family{
 		opRemoteClientClaim:   {Name: "remote_client_claim", Cells: 5, Args: 3, RunDB: remoteClientClaim},
 		opRemoteClientAbandon: {Name: "remote_client_abandon", Args: 1, Tx: true, Run: remoteClientAbandon},
 		opRemoteClientBind:    {Name: "remote_client_bind", Args: 3, RunDB: remoteClientBind},
+		opRemoteClientManage:  {Name: "remote_client_manage", Cells: 1, Args: 5, RunDB: remoteClientManage},
 		opRemoteClientTier:    {Name: "remote_client_tier", Cells: 2, Args: 1, Run: remoteClientTier},
 	},
 }

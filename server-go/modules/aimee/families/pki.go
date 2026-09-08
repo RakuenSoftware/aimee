@@ -48,7 +48,7 @@ const (
 const (
 	pkiSerialMax  = 127
 	pkiCNMax      = 255
-	pkiListMax    = 512
+	pkiListMax    = 4096 // The published catalog and native PKI snapshot request this bound.
 	rosterHashLen = 64
 )
 

@@ -45,11 +45,21 @@ type ScopeRank struct {
 	Rank int   `json:"rank"`
 }
 
+type CodeStats struct {
+	Projects    int `json:"projects"`
+	Files       int `json:"files"`
+	Definitions int `json:"definitions"`
+	Embeddings  int `json:"embeddings"`
+}
+
 type MemoryStats struct {
-	TierCounts map[string]int `json:"tier_counts"`
-	KindCounts map[string]int `json:"kind_counts"`
-	Total      int            `json:"total"`
-	Conflicts  int            `json:"conflicts"`
+	GraphFusionEnabled bool            `json:"graph_fusion_enabled"`
+	CodeIndex          *CodeStats      `json:"code_index,omitempty"`
+	TierKinds          []TierKindCount `json:"tier_kinds"`
+	TierCounts         map[string]int  `json:"tier_counts"`
+	KindCounts         map[string]int  `json:"kind_counts"`
+	Total              int             `json:"total"`
+	Conflicts          int             `json:"conflicts"`
 }
 
 type MemoryHealth struct {
@@ -378,45 +388,46 @@ FROM memories WHERE id=ANY($1)`, ids, workspace, project, includeAll)
 }
 
 func (s *postgresDataStore) Stats(ctx context.Context) (MemoryStats, error) {
-	result := MemoryStats{TierCounts: map[string]int{}, KindCounts: map[string]int{}}
+	result := MemoryStats{GraphFusionEnabled: s.graphFusionEnabled(), TierKinds: []TierKindCount{}, TierCounts: map[string]int{}, KindCounts: map[string]int{}}
 	table := "memories"
 	if s.placement == PlacementServer {
 		table = "user_memories"
 	}
-	rows, err := s.db.Query(ctx, `SELECT tier,COUNT(*) FROM `+table+` GROUP BY tier`)
+	rows, err := s.db.Query(ctx, `SELECT tier,kind,COUNT(*) FROM `+table+` GROUP BY tier,kind ORDER BY tier,kind`)
 	if err != nil {
 		return result, err
 	}
 	for rows.Next() {
-		var name string
-		var count int
-		if err := rows.Scan(&name, &count); err != nil {
+		var item TierKindCount
+		if err := rows.Scan(&item.Tier, &item.Kind, &item.Count); err != nil {
 			rows.Close()
 			return result, err
 		}
-		result.TierCounts[name] = count
-		result.Total += count
+		result.TierKinds = append(result.TierKinds, item)
+		result.TierCounts[item.Tier] += item.Count
+		result.KindCounts[item.Kind] += item.Count
+		result.Total += item.Count
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return result, err
-	}
+	err = rows.Err()
 	rows.Close()
-	rows, err = s.db.Query(ctx, `SELECT kind,COUNT(*) FROM `+table+` GROUP BY kind`)
 	if err != nil {
 		return result, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		var count int
-		if err := rows.Scan(&name, &count); err != nil {
+
+	if s.placement == PlacementServer {
+		var present bool
+		if err := s.db.QueryRow(ctx, `SELECT to_regclass('user_code_files') IS NOT NULL`).Scan(&present); err != nil {
 			return result, err
 		}
-		result.KindCounts[name] = count
-	}
-	if err := rows.Err(); err != nil {
-		return result, err
+		code := CodeStats{}
+		result.CodeIndex = &code
+		if present {
+			err = s.db.QueryRow(ctx, `SELECT count(DISTINCT project),count(*),COALESCE(sum(jsonb_array_length(definitions)),0),
+count(*) FILTER(WHERE embedding IS NOT NULL AND embedding_fingerprint=fingerprint) FROM user_code_files`).Scan(&code.Projects, &code.Files, &code.Definitions, &code.Embeddings)
+			if err != nil {
+				return result, err
+			}
+		}
 	}
 	if s.placement == PlacementServer {
 		return result, nil

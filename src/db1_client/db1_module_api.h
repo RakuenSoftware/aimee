@@ -523,6 +523,7 @@
 #define AIMEE_DB1_OP_REMOTE_CLIENT_ABANDON 2u
 #define AIMEE_DB1_OP_REMOTE_CLIENT_BIND    3u
 #define AIMEE_DB1_OP_REMOTE_CLIENT_TIER    4u
+#define AIMEE_DB1_OP_REMOTE_CLIENT_MANAGE  5u
 
 /* Family 14: session checkpoint rows: a label, the session it belongs to and
  * the snapshot it captured. */

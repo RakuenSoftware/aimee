@@ -123,14 +123,17 @@ int main(void)
                                         .last_ingest_at = "2026-07-30T00:00:00Z"};
 
    /* A standalone Server is ready with its local store and required modules.
-    * Shared KB retrieval is explicitly disabled, not fabricated as successful. */
+    * Local retrieval requires the store and modules; shared KB stays disabled. */
    {
       server_ready_diagnostics_t local = ok;
       local.kb_disabled = 1;
-      local.retrieval_ok = 0;
+      local.retrieval_ok = 1;
       assert(server_ready_render(1, 0, &local, NOW - 5, NOW, 60, resp, sizeof(resp)) == 200);
       assert(strstr(resp, "\"kb\":\"disabled\""));
-      assert(strstr(resp, "\"retrieval\":\"disabled\""));
+      assert(strstr(resp, "\"retrieval\":\"ok\""));
+      local.retrieval_ok = 0;
+      assert(server_ready_render(1, 0, &local, NOW - 5, NOW, 60, resp, sizeof(resp)) == 503);
+      local.retrieval_ok = 1;
       assert(server_ready_render(0, 0, &local, NOW - 5, NOW, 60, resp, sizeof(resp)) == 503);
       assert(server_ready_render(1, 0, &local, NOW - 61, NOW, 60, resp, sizeof(resp)) == 503);
    }

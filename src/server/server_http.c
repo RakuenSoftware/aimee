@@ -1569,21 +1569,20 @@ void handle_conn(int fd, int is_tcp, int is_management)
       LOG_INFO("server.http", "%s %s -> 401 (mtls required) req_id=%s", method, path, request_id);
       return;
    }
-   /* Per-user remote_writes (proposal §5): the process-global no longer
-    * authorizes anything — the tier comes from the caller's own kb-signed
-    * identity token, resolved here BEFORE capabilities are derived. Verification
-    * has no side effects; the token's single-use jti is spent further down, only
-    * once the request is known to be servable. UDS never reaches the gate at all
-    * (server_http_resolve_write_tier is a no-op when !is_tcp), so the local
-    * operator keeps full capability exactly as §7 requires. */
+   /* Resolve signed caller authority before deriving capabilities. The local
+    * socket retains operator access; enrolled devices use their own grant. */
    server_identity_token_claims_t identity_claims;
    int identity_present = 0;
    int effective_remote_writes = server_http_resolve_write_tier(
        is_tcp, buf, method, path, request_id, &identity_claims, &identity_present);
    char first_user_principal[128] = "";
-   (void)server_http_first_user_apply_cert_grant(mtls_authenticated, rc_serial,
-                                                 &effective_remote_writes, first_user_principal,
-                                                 sizeof(first_user_principal));
+   if (server_http_first_user_apply_cert_grant(mtls_authenticated, rc_serial,
+                                               &effective_remote_writes, first_user_principal,
+                                               sizeof(first_user_principal)) < 0)
+   {
+      send_response(fd, 503, "{\"error\":\"client grant unavailable or revoked\"}", request_id);
+      return;
+   }
    char request_bearer[sizeof(g_bearer)];
    server_http_primary_bearer_snapshot(g_bearer, request_bearer, sizeof(request_bearer));
    uint32_t effective_caps =
@@ -1630,8 +1629,9 @@ void handle_conn(int fd, int is_tcp, int is_management)
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
       int az = management_authenticated
                    ? 0
-                   : server_http_authorize_enrolled(is_tcp, g_bearer, has_auth ? auth : NULL,
-                                                    has_api_key ? api_key : NULL, has_skey);
+                   : server_http_authorize_client_request(is_tcp, g_bearer, has_auth ? auth : NULL,
+                                                          has_api_key ? api_key : NULL, has_skey,
+                                                          mtls_authenticated, method, path);
       if (az != 0)
       {
          const char *msg = server_http_auth_error_body(az);

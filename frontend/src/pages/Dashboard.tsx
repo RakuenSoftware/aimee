@@ -140,7 +140,16 @@ interface AuditRow {
   task_id?: number;
 }
 
+interface CodeStats {
+  projects: number;
+  files: number;
+  definitions: number;
+  embeddings: number;
+}
+
 interface DashData {
+  codeIndex: CodeStats | null;
+  graphFusion: boolean | null;
   delegations: Delegation[];
   metrics: Metric[];
   traces: Trace[];
@@ -162,6 +171,8 @@ interface DashData {
  * `tier_kinds`, `onboard` may be an `{error}` stub, and `agents` is the config
  * roster. `RawDashboard` types that wire payload; `toDashData` normalizes it. */
 interface RawMemoryStats {
+  code_index?: CodeStats;
+  graph_fusion_enabled?: boolean;
   tier_kinds?: MemoryStat[];
   tiers?: unknown;
   scopes?: unknown;
@@ -249,6 +260,8 @@ export function toDashData(raw: RawDashboard | null | undefined): DashData {
     metrics: arr<Metric>(r.metrics),
     traces: arr<Trace>(r.traces),
     memory,
+    codeIndex: !Array.isArray(memRaw) ? memRaw?.code_index ?? null : null,
+    graphFusion: !Array.isArray(memRaw) ? memRaw?.graph_fusion_enabled ?? null : null,
     plans: arr<Plan>(r.plans),
     logs: arr<LogEntry>(r.logs),
     lsp: r.lsp ?? null,
@@ -349,6 +362,17 @@ const MEMORY_COLUMNS: Column<MemoryStat>[] = [
   { key: 'kind', label: 'Kind', render: r => e(r.kind) },
   { key: 'count', label: 'Count', align: 'right', render: r => r.count },
 ];
+
+function CodeIndexPanel({ data }: { data: DashData }) {
+  const stats = data.codeIndex;
+  return <Panel title="Code index">
+    <div style={{ padding: '12px', fontSize: '12px', color: 'var(--sg-text-pale)' }}>
+      {stats ? <div>{stats.projects} repositories · {stats.files} files · {stats.definitions} definitions · {stats.embeddings} embedded files</div>
+        : <div>Code index statistics unavailable.</div>}
+      <div style={{ marginTop: '8px' }}>Graph fusion: {data.graphFusion === null ? 'unavailable' : data.graphFusion ? 'on' : 'off'}</div>
+    </div>
+  </Panel>;
+}
 
 function MemoryPanel({ data }: { data: MemoryStat[] }) {
   return (
@@ -568,9 +592,11 @@ function OnboardPanel({ data }: { data: OnboardReport | null }) {
           <tbody>
             {data.steps.map((s, i) => (
               <tr key={`${s.step}-${i}`}>
-                <td style={{ color: 'var(--sg-text-faint)', padding: '2px 8px 2px 0' }}>{e(s.step)}</td>
+                <td style={{ color: 'var(--sg-text-faint)', padding: '2px 8px 2px 0' }}>{e(s.step)}
+                  {s.message && <div style={{ fontSize: '11px', marginTop: '3px' }}>{s.message}</div>}
+                </td>
                 <td style={{ color: stepColor(s.status), textAlign: 'right', fontWeight: 600 }}>
-                  {e(s.status)}
+                  {s.status === 'skipped' && s.step === 'delegations' ? 'idle' : e(s.status)}
                   {(s.warnings || s.errors) ? (
                     <span style={{ color: 'var(--sg-text-pale)', fontWeight: 400, marginLeft: '6px' }}>
                       (w={s.warnings ?? 0}, e={s.errors ?? 0})
@@ -857,6 +883,7 @@ const PANELS: PanelDef[] = [
   { id: 'failures',    title: 'Failures',         defaultOn: false, render: d => <FailuresPanel data={d.delegations} /> },
   { id: 'provider',    title: 'Provider Mix',     defaultOn: false, render: d => <ProviderMixPanel data={d.agents} /> },
   { id: 'confidence',  title: 'Confidence',       defaultOn: false, render: d => <ConfidenceByRolePanel data={d.delegations} /> },
+  { id: 'code-index', title: 'Code index', defaultOn: true, render: d => <CodeIndexPanel data={d} /> },
   { id: 'memory',      title: 'Memory',           defaultOn: false, render: d => <MemoryPanel data={d.memory} /> },
   { id: 'lsp',         title: 'LSP Health',       defaultOn: false, render: d => <LspPanel data={d.lsp ?? { errors: 0, warnings: 0, active_servers: 0 }} /> },
 ];

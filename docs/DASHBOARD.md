@@ -39,6 +39,13 @@ Users can hide and reorder panels; layout is browser preference, not server stat
 The Logs page is separate because audit rows and operational logs have different retention and
 access rules. The KB has its own internal administration surface.
 
+Database readiness uses the server's cached database probe; an empty memory
+store is healthy. An instance with no delegation history shows `idle`, with an
+explanation, rather than a warning. The Memory panel counts local personal
+memories. Repository source belongs to the code index and is not counted as
+personal facts. A real database failure or stale readiness sample still makes
+the readiness report fail.
+
 ## Settings
 
 The Settings page edits the same field descriptors as `aimee config`. It cannot expose secrets or a

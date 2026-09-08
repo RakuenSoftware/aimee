@@ -140,6 +140,13 @@ extern "C"
     * owns the appliance, or -1 on validation/storage/config failure. */
    int server_http_first_user_bootstrap(const char *principal, char *bearer, size_t bearer_cap);
 
+   int server_http_authorize_client_request(int is_tcp, const char *configured, const char *auth,
+                                            const char *api_key, int session_key, int mtls,
+                                            const char *method, const char *path);
+   int server_http_clients_manage(const char *principal, const char *action, const char *id,
+                                  const char *name, char *out, size_t cap);
+   int server_revoke_client_certificate(const char *serial);
+
    /* Complete and resolve the explicit first-user certificate grant. */
    int server_http_first_user_bind_cert(const char *bearer, const char *cert_serial);
    int server_http_first_user_cert_tier(const char *cert_serial, char *principal,

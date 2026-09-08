@@ -333,3 +333,29 @@ func TestPlacementParsingIsExplicit(t *testing.T) {
 		t.Fatalf("ParsePlacement = %q, %v", placement, err)
 	}
 }
+
+func TestFusionIsInstanceWideAndDefaultsOn(t *testing.T) {
+	for _, placement := range []Placement{PlacementServer, PlacementKB} {
+		for _, setting := range []string{"", "on", "off"} {
+			t.Setenv("AIMEE_GRAPH_FUSION", setting)
+			data, err := NewPostgresDataStore(evalQueryer{}, placement)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := NewHandler(nil, WithDataStore(placement, data))
+			for _, operation := range []string{"fusion-state-get", "fusion-state-set", "fusion-state-clear"} {
+				for _, override := range []string{"on", "off", "shadow", ""} {
+					raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{Operation: operation, State: override, GraphCodeFusionState: override}))
+					var result DataResponse
+					if status != bus.ModuleStatusOK || json.Unmarshal(raw, &result) != nil || result.Allowed == nil || *result.Allowed != (setting != "off") {
+						t.Fatalf("%s setting=%q operation=%s override=%q: %s status=%v", placement, setting, operation, override, raw, status)
+					}
+				}
+			}
+		}
+	}
+	t.Setenv("AIMEE_GRAPH_FUSION", "shadow")
+	if _, err := NewPostgresDataStore(evalQueryer{}, PlacementServer); err == nil {
+		t.Fatal("nonboolean fusion configuration accepted")
+	}
+}

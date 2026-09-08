@@ -1983,7 +1983,8 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:17
+        # Exercise the same pgvector extension used by private code retrieval.
+        image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
         env:
           POSTGRES_USER: aimee
           POSTGRES_PASSWORD: aimee

@@ -628,3 +628,18 @@ func TestRosterChangesRefreshTheStoredHash(t *testing.T) {
 		})
 	}
 }
+
+func TestNativePKISnapshotBoundMatchesPublishedContract(t *testing.T) {
+	for _, op := range []uint32{opPKICertList, opPKIRevokedSerials} {
+		db := newPKIDB()
+		db.certs = []cert{{serial: "AA", cn: "a", revoked: true}}
+		status, cells := pkiCall(t, db, op, []string{"4096"})
+		if status != store.StatusOK || len(cells) == 0 {
+			t.Fatalf("native snapshot op %d: status %d, cells %v", op, status, cells)
+		}
+		status, _ = pkiCall(t, db, op, []string{"4097"})
+		if status != store.StatusInvalid {
+			t.Fatalf("op %d accepted an oversized snapshot", op)
+		}
+	}
+}

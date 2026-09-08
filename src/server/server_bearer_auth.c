@@ -36,6 +36,7 @@ static pthread_mutex_t g_bearer_lock = PTHREAD_MUTEX_INITIALIZER;
 /* The DB claim and config publication form one cross-store transaction. Serialize
  * same-process wizard retries so an UNBOUND reader cannot mistake another
  * worker's not-yet-published claim for crash residue and abandon it. */
+static int bearer_sha256(const char *bearer, char out[65]);
 static pthread_mutex_t g_first_user_bootstrap_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void server_http_set_bearer_extra(const char *const *bearers, int n)
@@ -121,7 +122,47 @@ int server_http_authorize_enrolled_request(int is_tcp, const char *bearer_cfg,
    int result = server_http_authorize_multi(is_tcp, bearer_cfg, extra, g_bearer_extra_count,
                                             auth_header, api_key_header, has_session_key);
    pthread_mutex_unlock(&g_bearer_lock);
+   /* Device tokens are stored only as digests in the grant store. Legacy
+    * operator/wizard bearers retain their existing Vault-backed path. */
+   if (result == 401 && is_tcp)
+   {
+      const char *tokens[] = {aimee_core_bearer_token(auth_header), api_key_header};
+      for (size_t i = 0; i < 2 && result != 0; i++)
+      {
+         const char *token = tokens[i];
+         if (!token || strlen(token) != 64)
+            continue;
+         char digest[65], reply[256];
+         if (bearer_sha256(token, digest) != 0 ||
+             db1_remote_client_manage("", "authorize", digest, "", (int64_t)time(NULL), reply,
+                                      sizeof(reply)) != 0)
+            return 503;
+         cJSON *json = cJSON_Parse(reply);
+         cJSON *code = json ? cJSON_GetObjectItemCaseSensitive(json, "code") : NULL;
+         result = cJSON_IsNumber(code) && code->valueint == 200 ? 0 : 401;
+         if (result == 0 && bootstrap_only)
+            *bootstrap_only = 1;
+         cJSON_Delete(json);
+      }
+   }
    return result;
+}
+
+int server_http_authorize_client_request(int is_tcp, const char *configured, const char *auth,
+                                         const char *api_key, int session_key, int mtls,
+                                         const char *method, const char *path)
+{
+   int device_token = 0;
+   int status = server_http_authorize_enrolled_request(is_tcp, configured, auth, api_key,
+                                                       session_key, &device_token);
+   /* A device invitation cannot mint other bearers or access server data
+    * without a certificate. Allow CSR signing and the release client's health
+    * probe, which can reuse its pre-enrollment TLS connection. */
+   if (status == 0 && device_token && !mtls &&
+       !(strcmp(method, "POST") == 0 && strcmp(path, "/v1/cert/sign") == 0) &&
+       !(strcmp(method, "GET") == 0 && strcmp(path, "/v1/health") == 0))
+      return 401;
+   return status;
 }
 
 static int bearer_sha256(const char *bearer, char out[65])
@@ -382,4 +423,51 @@ int server_http_authorize_multi(int is_tcp, const char *bearer_cfg, const char *
       authorized |= server_http_bearer_matches(api_key_header, extra[i]);
    }
    return authorized ? 0 : 401;
+}
+
+/* Called only after the HTTP route has attested a browser user. The store
+ * enforces ownership as part of the transaction, including on the first call. */
+int server_http_clients_manage(const char *principal, const char *action, const char *id,
+                               const char *name, char *out, size_t cap)
+{
+   char token[65] = "", digest[65] = "";
+   int creating = strcmp(action, "create") == 0;
+   if (creating)
+   {
+      if (platform_random_hex(token, 64) != 0 || bearer_sha256(token, digest) != 0)
+         return 503;
+      id = digest;
+   }
+   int rc = db1_remote_client_manage(principal, action, id, name, (int64_t)time(NULL), out, cap);
+   if (rc != 0)
+   {
+      OPENSSL_cleanse(token, sizeof(token));
+      return 503;
+   }
+   cJSON *reply = cJSON_Parse(out);
+   cJSON *code = reply ? cJSON_GetObjectItemCaseSensitive(reply, "code") : NULL;
+   int status = cJSON_IsNumber(code) ? code->valueint : 503;
+   if (status == 200 && creating)
+   {
+      cJSON_AddStringToObject(reply, "bearer_token", token);
+      cJSON_AddNumberToObject(reply, "tls_port", config_server_api_tls_port());
+   }
+   OPENSSL_cleanse(token, sizeof(token));
+   if (status == 200 && strcmp(action, "revoke") == 0)
+   {
+      cJSON *serial = cJSON_GetObjectItemCaseSensitive(reply, "serial");
+      if (cJSON_IsString(serial) && serial->valuestring[0] &&
+          server_revoke_client_certificate(serial->valuestring) != 0)
+         status = 503;
+   }
+   if (reply)
+      cJSON_DeleteItemFromObjectCaseSensitive(reply, "code");
+   char *encoded = reply ? cJSON_PrintUnformatted(reply) : NULL;
+   if (!encoded || strlen(encoded) >= cap)
+      status = 503;
+   else
+      snprintf(out, cap, "%s", encoded);
+   free(encoded);
+   cJSON_Delete(reply);
+   return status;
 }

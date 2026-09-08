@@ -288,3 +288,17 @@ int db1_remote_client_tier(const char *cert_serial, char *principal, size_t prin
 }
 
 /* clang-format on */
+
+int db1_remote_client_manage(const char *principal, const char *action, const char *id,
+                             const char *name, int64_t now, char *out, size_t cap)
+{
+   if (!principal || !action || !id || !name || !out || !cap)
+      return -1;
+   char stamp[32];
+   snprintf(stamp, sizeof stamp, "%lld", (long long)now);
+   const char *fields[] = {principal, action, id, name, stamp};
+   char *const values[] = {out};
+   const size_t caps[] = {cap};
+   return write_result(
+       call_stage(AIMEE_DB1_OP_REMOTE_CLIENT_MANAGE, fields, 5, values, caps, 1, NULL));
+}

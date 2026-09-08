@@ -12,6 +12,7 @@
 #include "kb_client.h"             /* kb_client_health */
 #include "json_fluent.h"           /* jo_ok */
 #include "runtime_secret.h"
+#include "db1_client/remote_client_grant.h"
 #include "vault_config_bootstrap.h"
 #include "server.h"
 #include "turn_registry.h"
@@ -382,6 +383,17 @@ int handle_api_rotate_bearer(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    pthread_mutex_lock(&g_api_bearer_mutation_lock);
    char bearer[256];
+   /* Refuse before changing Vault if the device store cannot revoke its
+    * credentials. Failures later in rotation remain closed for device grants. */
+   char revoked_devices[128];
+   if (db1_remote_client_manage("", "revoke_all", "", "", (int64_t)time(NULL), revoked_devices,
+                                sizeof(revoked_devices)) != 0)
+   {
+      runtime_secret_wipe(bearer, sizeof(bearer));
+      pthread_mutex_unlock(&g_api_bearer_mutation_lock);
+      return handle_api_error(conn, "failed to revoke device credentials");
+   }
+
    if (server_api_mint_bearer(bearer, sizeof(bearer)) != 0 ||
        vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", bearer) != 0)
    {

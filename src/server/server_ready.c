@@ -211,7 +211,7 @@ void server_ready_sample_now(void)
    if (s.kb_disabled)
    {
       s.kb = DEP_DISABLED;
-      s.retrieval = DEP_DISABLED;
+      s.retrieval = DEP_UNKNOWN;
       snprintf(s.breaker_state, sizeof(s.breaker_state), "disabled");
    }
    else
@@ -270,6 +270,15 @@ void server_ready_sample_now(void)
       break;
    }
 
+   if (s.kb_disabled)
+   {
+      s.retrieval = (s.db1 == DEP_OK && s.modules == DEP_OK) ? DEP_OK : DEP_FAIL;
+      snprintf(s.failed_boundary, sizeof(s.failed_boundary), "%s",
+               s.db1 != DEP_OK       ? "local_store"
+               : s.modules != DEP_OK ? "modules"
+                                     : "");
+   }
+
    s.sampled_at = (long)time(NULL);
 
    pthread_mutex_lock(&g_ready_mtx);
@@ -304,7 +313,7 @@ int server_ready_render(int db1_ok, int kb_ok, const server_ready_diagnostics_t 
    dep_state_t modules = (modules_ok > 0) ? DEP_OK : (modules_ok == 0 ? DEP_FAIL : DEP_UNKNOWN);
 
    if (diagnostics && diagnostics->kb_disabled)
-      kb = retrieval = DEP_DISABLED;
+      kb = DEP_DISABLED;
 
    long age = (sampled_at > 0) ? (now - sampled_at) : -1;
 

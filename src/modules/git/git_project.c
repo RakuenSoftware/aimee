@@ -106,13 +106,9 @@ static int sanitize_org(const char *in, char *out, size_t cap)
    return (o > 0 && ws_scope_name_valid(out)) ? 0 : -1;
 }
 
-/* The server-local lexical index delete seam. The shipped aimee-server keeps
- * NO local lexical index: index_scan_project is compiled to a stub in this
- * binary (build/obj/server/index.o, -DAIMEE_DB2_DISABLED) and the canonical
- * code index lives in aimee-kb — so there is nothing to delete here and no db2
- * linkage in this TU. Kept as a weak seam so the delete flow's
- * abort-before-filesystem ordering stays unit-testable (the tests override it
- * to inject failures). */
+/* Optional local-index delete seam. Standalone Server supplies the PostgreSQL
+ * implementation; other compositions have no private index. The lifecycle
+ * invokes this before removing files, and tests override it to inject failure. */
 __attribute__((weak)) int gp_local_index_delete(const char *ref)
 {
    (void)ref;
