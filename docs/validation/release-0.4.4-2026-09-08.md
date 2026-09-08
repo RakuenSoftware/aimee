@@ -64,7 +64,9 @@ python3 scripts/test-private-index-live.py --client /path/to/aimee \
 ```
 
 The built-browser regressions run with `npm --prefix frontend run test:browser` after
-building the frontend and installing Playwright's pinned Chromium.
+building the frontend and installing Playwright's pinned Chromium. The recovery fixture holds
+publication until the browser observes the checking state, so overlapping inventory polls
+cannot race the status assertion. Five consecutive runs of all five scenarios passed.
 
 ## Wider validation caught the hidden-file publication failure
 

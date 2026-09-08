@@ -13,7 +13,7 @@ const fs = require('fs');
   page.on('pageerror',e=>errors.push(e.message));
   const inventory=wizard?{projects:[],details:[]}:{projects:Array.from({length:73},(_,i)=>`existing/repo-${i}`),details:[]};
   const repos=['first','second','third'].map(name=>({name,clone_url:`https://github.com/clone-check/${name}.git`}));
-  let lateReads=0, lateRepo=null;
+  let recoveryObserved=false, lateRepo=null;
   const publish=repo=>{
    inventory.projects.push('clone-check/'+repo.name);
    inventory.details.push({ref:'clone-check/'+repo.name,org:'clone-check',name:repo.name,remote:repo.clone_url});
@@ -28,7 +28,7 @@ const fs = require('fs');
    if(p==='/api/config') data={config:{provider:'test',embedder_model:'bekko-a25m'}};
    if(p==='/api/vault/credentials') data={credentials:[{agent:'git',cred:'author_name'},{agent:'git',cred:'author_email'}]};
    if(p==='/api/git/projects') {
-    if(lateRepo && ++lateReads===2) {publish(lateRepo);lateRepo=null;}
+    if(lateRepo && recoveryObserved) {publish(lateRepo);lateRepo=null;}
     data=inventory;
    }
    if(p==='/api/git/credentials') data={hosts:['github.com']};
@@ -53,6 +53,9 @@ const fs = require('fs');
   await scope.getByRole('button',{name:'List repositories',exact:true}).click();
   await scope.getByRole('button',{name:'Clone selected (3)',exact:true}).click();
   await scope.getByRole('status').filter({hasText:'Checking completed clone second (2 of 3)'}).waitFor();
+  // Inventory polling may overlap with reconciliation. Hold publication until
+  // this assertion observes the checking state, independent of runner speed.
+  recoveryObserved=true;
   await scope.getByRole('button',{name:'Clone selected (0)',exact:true}).waitFor();
   const cloned=await scope.getByText('cloned',{exact:true}).count();
   if(JSON.stringify(batches)!==JSON.stringify([['first'],['second'],['third']])||cloned!==3||errors.length) throw Error(JSON.stringify({wizard,batches,cloned,errors}));
