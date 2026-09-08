@@ -150,8 +150,14 @@ func (s *postgresDataStore) RecallBundle(ctx context.Context, query string, toke
 	if err != nil {
 		return nil, err
 	}
-	if s.personal != nil && query != "" {
+	if s.placement == PlacementServer && query != "" {
 		active, err = s.Search(ctx, Scope{Type: ScopeUser, Value: "_user"}, query, "", "", limit/2+1)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if s.placement == PlacementKB && query != "" {
+		active, err = s.fuseMemoryGraph(ctx, DataRequest{Query: query, IncludeAll: true, Limit: limit/2 + 1}, false, active)
 		if err != nil {
 			return nil, err
 		}

@@ -15,11 +15,11 @@
         },
         {
           "path": "src/kb/kb_main.c",
-          "sha256": "cd9f987b5da89f2d610c3f4f9fd173f31b2a17cd3ac591cdb1e7ef67f94e0e08"
+          "sha256": "a3afab4fd9b5a4e082bf3ba1b871d9438f4f92ae80e7da34c61bf89d23f3c0b1"
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "60ae0301d2b4ad0b1d965ba3e91ed3d76461cf3ae3a67af5745eb698b926fc3c"
+          "sha256": "386259b41a810f65e5e5da07ff8427b5afc5354b549079b97440ddc0004f63ba"
         }
       ]
     },
@@ -56,6 +56,10 @@
         {
           "path": "server-go/modules/aimee/families/schema_checkpoints.sql",
           "sha256": "6b8d2ad9c6d376350af2bc1863a5f435a786a860e740b8b508abf08ecf29aae4"
+        },
+        {
+          "path": "server-go/modules/aimee/families/schema_client_devices.sql",
+          "sha256": "100f6576614d4680f4bb3882a65cc1acf0dcb234adf77eb840dcf3510411bb69"
         },
         {
           "path": "server-go/modules/aimee/families/schema_convergence_blocker_sets.sql",
@@ -1343,7 +1347,7 @@
         },
         {
           "path": "src/headers/server_http.h",
-          "sha256": "1d83a12b7613d609f5a468d8f8d175ee6a64b9a976e099c7332338098b7d4c6d"
+          "sha256": "e9d002d802e383986ae8bbfc790a61be5a5e79ea09ad5652d1b3e1cc7ac80977"
         },
         {
           "path": "src/headers/server_http_authz.h",
@@ -1355,7 +1359,7 @@
         },
         {
           "path": "src/headers/server_http_internal.h",
-          "sha256": "6ed56efcc9895843c376509c390bbcd9d35e4884cf070d8f828f83562a4aac70"
+          "sha256": "dc8a8558cbf5242a1485b5fc0e4c17bd2b8f124a778fae989817578ee0696443"
         },
         {
           "path": "src/headers/server_identity_token.h",
@@ -1900,14 +1904,14 @@
       ]
     },
     "public-symbols": {
-      "sha256": "bd7b1e63586c75efdbd9e523d3fea9d9f3f163a588ab17f13f92b51ef0d7da24",
+      "sha256": "d6fe33e7c7b2c9806dec092d93d5d5317c48be0746529ca285b97d100124a23c",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
       "files": [
         {
           "path": "docs/gen/v1-route-descriptor.json",
-          "sha256": "9cc351a45f1354a424422e1fa9e2d7e7292868ad9f3606ded7fd2745b70994ff"
+          "sha256": "f47ae7631e8fec15c41e2503fca59371eff3d20232982fab56b49ebbdf2a50ed"
         }
       ]
     }

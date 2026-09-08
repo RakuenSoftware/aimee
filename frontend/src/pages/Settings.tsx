@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Panel, Badge, InlineStatus, Button } from "@rakuensoftware/smoothgui";
+import Clients from "./Clients";
 import KnowledgeBase from "../setup/KnowledgeBase";
 import { FIELD_HELP, SECTION_HELP, RESTART_KEYS, OWNED_ELSEWHERE } from "./settingsHelp";
 import { resetAll as resetTutorials } from "../help/tutorialState";
@@ -241,6 +242,7 @@ export default function Settings() {
         </Button>
         <InlineStatus status={status} />
       </div>
+      <Clients />
       <Panel title="Shared knowledge (optional)">
         <KnowledgeBase onSaved={() => { refresh(); }} />
       </Panel>

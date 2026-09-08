@@ -21,6 +21,11 @@
 /* Stubs                                                               */
 /* ------------------------------------------------------------------ */
 
+int kb_client_local_code_enabled(void)
+{
+   return 0;
+}
+
 static int g_remote_mode = 0; /* controls kb_client_v1_base_url return */
 static char *g_last_path = NULL;
 static char *g_last_body = NULL;

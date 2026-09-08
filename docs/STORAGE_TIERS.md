@@ -5,6 +5,7 @@ aimee has two product data tiers. They are ownership boundaries, not interchange
 | Tier | Owner | Engine | Contents |
 | --- | --- | --- | --- |
 | DB1 | `aimee` domain module through `postgres` | PostgreSQL | sessions, working memory, agent jobs, workflows, local policy/audit state, caches, same-user runtime data |
+| Server memory and code | `memory` module through `postgres` | PostgreSQL + pgvector | personal memories, private repository source, definitions, call edges, local embeddings |
 | DB2 | `aimee-kb` | PostgreSQL + pgvector | durable memories, documents, facts, evidence, code graph, embeddings, curation state |
 | Server WORM | `aimee-server` | SQLite | append-only server evidence chain and checkpoints |
 | KB WORM | `aimee-kb-worm` | SQLite | append-only KB evidence chain and checkpoints |
@@ -40,5 +41,5 @@ DB2 PostgreSQL contains an immutable KB audit outbox and delivery ledger, not th
 WORM chain. The separately deployed KB WORM worker persists that chain in its
 own SQLite volume.
 
-Dense vectors live in DB2 beside their source rows. The old Qdrant sidecar is not part of the
+Dense vectors live beside their source rows in the owning instance: local memory and code vectors on the server, shared knowledge vectors on the KB. The old Qdrant sidecar is not part of the
 current topology.

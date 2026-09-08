@@ -4988,6 +4988,27 @@ static void test_code_scope_all_keeps_active_project_first(void)
 }
 
 /* §5 hybrid retrieval: fuse lexical-code + graph-callers (RRF) + memory "why". */
+static int instance_fusion_enabled = 1;
+int memory_fusion_state_is_on(void)
+{
+   return instance_fusion_enabled;
+}
+
+static void test_code_hybrid_instance_off(void)
+{
+   char buf[65536];
+   instance_fusion_enabled = 0;
+   int status = kb_http_route_ex(
+       "GET", "/v1/code/hybrid",
+       "query=needle&symbol=target_fn&project=proj-alpha&graph_code_fusion_state=on", NULL, NULL,
+       NULL, 0, buf, sizeof(buf));
+   instance_fusion_enabled = 1;
+   assert(status == 200);
+   assert(strstr(buf, "\"graph_code_fusion_state\":\"off\""));
+   assert(!strstr(buf, "\"graph\""));
+   assert(!strstr(buf, "\"memory\""));
+}
+
 static void test_code_hybrid_ok(void)
 {
    char buf[2048];
@@ -7627,6 +7648,7 @@ int main(void)
    test_search_scope_absent_valid_and_wrong_type();
    test_code_scope_all_keeps_active_project_first();
    test_code_hybrid_ok();
+   test_code_hybrid_instance_off();
    test_code_hybrid_memory_leg();
    test_code_hybrid_keeps_same_path_projects_distinct();
    test_code_hybrid_missing_query();

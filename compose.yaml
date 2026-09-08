@@ -44,6 +44,8 @@ services:
     environment:
       AIMEE_HOME: /var/lib/aimee
       AIMEE_INSTANCE_ROLE: server
+      # Per-instance policy. Persist off here to disable graph fusion.
+      AIMEE_GRAPH_FUSION: ${AIMEE_GRAPH_FUSION:-on}
       AIMEE_MODEL_SERVICES_ENABLED: '1'
       AIMEE_MODULE_ROUNDTABLE: ${AIMEE_MODULE_ROUNDTABLE:-1}
       AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}

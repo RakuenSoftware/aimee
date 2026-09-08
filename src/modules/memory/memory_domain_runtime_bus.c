@@ -338,9 +338,11 @@ static int fusion_state_call(const char *operation, const char *state)
    return enabled;
 }
 
+/* Kept for ABI compatibility with older recall adapters. Request fields no
+ * longer change fusion: the memory owner reads the instance configuration. */
 void memory_fusion_state_set(const char *state)
 {
-   (void)fusion_state_call("fusion-state-set", state ? state : "");
+   (void)state;
 }
 
 int memory_fusion_state_is_on(void)
@@ -350,7 +352,6 @@ int memory_fusion_state_is_on(void)
 
 void memory_fusion_state_clear(void)
 {
-   (void)fusion_state_call("fusion-state-clear", NULL);
 }
 
 static cJSON *runtime_metrics_call(const char *operation)

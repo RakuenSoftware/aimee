@@ -1466,8 +1466,45 @@ static void test_bulk_and_interactive_have_separate_budgets(void)
    assert(kb_dependency_class_for_path(NULL) == KB_DEP_INTERACTIVE);
 }
 
+static int local_code_calls;
+static char *test_local_code(const char *path, const void *body, int *status)
+{
+   assert(strcmp(path, "/v1/code/find?identifier=entry") == 0);
+   assert(body == NULL);
+   local_code_calls++;
+   *status = 200;
+   return strdup("{\"hits\":[{\"project\":\"private\",\"file_path\":\"main.c\",\"line\":1}]}");
+}
+
+static void test_private_provider_only_without_kb(void)
+{
+   unsetenv("AIMEE_KB_API_URL");
+   g_mtls_enabled = 0;
+   kb_client_set_local_code_provider(test_local_code);
+   assert(kb_client_local_code_enabled());
+   int status = 0;
+   char *json = kb_client_v1_get_json("/v1/code/find?identifier=entry", 1000, &status);
+   assert(json && status == 200 && strstr(json, "private"));
+   assert(local_code_calls == 1);
+   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_OK);
+   free(json);
+
+   /* A configured KB outage must remain an outage, without mixing private data. */
+   g_mtls_enabled = 1;
+   g_mtls_status = 503;
+   g_mtls_response = "{\"error\":\"unavailable\"}";
+   assert(!kb_client_local_code_enabled());
+   json = kb_client_v1_get_json("/v1/code/find?identifier=entry", 1000, &status);
+   assert(!json && status == 503 && local_code_calls == 1);
+   kb_client_set_local_code_provider(NULL);
+   g_mtls_enabled = 0;
+   g_mtls_response = NULL;
+   kb_client_dependency_reset_for_tests();
+}
+
 int main(void)
 {
+   test_private_provider_only_without_kb();
    test_bulk_and_interactive_have_separate_budgets();
    test_timeout_is_distinguished_from_unreachable();
    test_health_uses_v1_api_when_configured();

@@ -32,7 +32,7 @@ func (r identRow) Scan(dest ...any) error {
 		}
 		*(dest[0].(*string)) = r.db.owner
 		return nil
-	case strings.Contains(r.sql, "coalesce(cert_serial, '') FROM remote_client_grants"):
+	case r.sql == boundSerialSQL:
 		if r.db.grant == nil {
 			return store.ErrNoRows
 		}

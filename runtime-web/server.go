@@ -252,6 +252,8 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/git/oauth/device/config", s.requireAuth(s.handleGitOauthDeviceConfig))
 
 	// Server-orchestrated container deploy (setup wizard → docker compose up).
+	mux.HandleFunc("/api/clients", s.requireAuth(s.handleClients))
+	mux.HandleFunc("/api/clients/revoke", s.requireAuth(s.handleClients))
 	mux.HandleFunc("/api/deploy/apply", s.requireAuth(s.handleDeployApply))
 	mux.HandleFunc("/api/deploy/status", s.requireAuth(s.handleDeployStatus))
 	mux.HandleFunc("/api/setup/appliance", s.requireAuth(s.handleSetupAppliance))

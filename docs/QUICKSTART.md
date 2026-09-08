@@ -109,6 +109,29 @@ installs, the application forwards that channel to model deployments. Explicit
 `AIMEE_APPLICATION_IMAGE`, `AIMEE_POSTGRES_IMAGE`, `AIMEE_EMBEDDER_IMAGE`, and `AIMEE_LLM_IMAGE`
 overrides take precedence. Use a client from the same release channel.
 
+### Graph fusion (0.4.3)
+
+Graph fusion is enabled by default on both server and KB. It is one setting per
+instance: all clients and requests use that instance's setting. A server can
+have it enabled while its KB has it disabled.
+
+To disable it, persist `AIMEE_GRAPH_FUSION=off` in that instance's Compose `.env`
+file and recreate its service with `docker compose up -d`. Use `on` to enable it;
+an omitted value defaults to `on`. Native services use the same environment
+variable in their service configuration and require a restart. Other values,
+including `shadow`, are rejected. Client and request parameters cannot override it.
+
+Standalone servers index their published repository clones automatically. New
+clones and changed default branches are checked every minute; the first pass
+also indexes repositories cloned before upgrading. Thin clients can upload
+repository contents through the existing index ingestion API. Code, call edges,
+and embeddings remain in the server's PostgreSQL store when no KB is configured.
+Cloned source code is indexed as code, separately from personal memories.
+The private index supports symbol lookup, callers, structure, hybrid search,
+investigation, source spans, and blast radius. Organization-wide graph analytics
+remain KB services. Private semantic retrieval embeds bounded per-file excerpts;
+lexical lookup retains the collected file contents.
+
 ## 2. Install the client
 
 The client and server must use the same release channel. If step 1 used the default `:latest`
@@ -206,6 +229,30 @@ Transport and Windows uses Schannel, but automatic CSR enrollment is not yet imp
 two clients. They can connect while mTLS is optional, but remain read-only and will not connect once
 the server's enrolled-client roster promotes mTLS to required. Do not mistake a copied bearer for a
 client identity.
+
+### Pair additional devices, or recover a missed pairing
+
+Sign in to the server dashboard as its owner and open **Settings → Clients**.
+Enter a device name, choose **Add client**, and run the displayed `aimee remote set`
+command on that Linux workstation. The invitation expires after 15 minutes and
+can enroll one device. Its token is shown only when created; if you lose it,
+revoke the pending invitation and create another.
+
+Repeat this for each workstation. Every device generates its own private key
+locally and receives its own certificate, with access to the same owner's
+memories and server data. Adding a device preserves existing connections. The
+original wizard pairing appears as **First client** after upgrading.
+
+Use **Revoke** beside a device to disconnect that device or cancel its pending
+invitation. Other devices remain connected. Pairings and revocations survive
+server restarts. There is a limit of 64 active devices and pending invitations;
+revoke an unused entry if you reach it. The explicit `api.rotate_bearer`
+operation remains a revoke-all operation.
+
+This flow also works for the first client when you skipped pairing in the
+wizard, and on manually managed Docker deployments. It does not require a KB,
+a Docker socket, or another deployment. Only the server owner can manage these
+clients. Automatic certificate enrollment currently requires the Linux client.
 
 ## 4. Verify the stack
 

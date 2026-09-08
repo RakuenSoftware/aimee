@@ -295,6 +295,7 @@ export default function DeployPanel() {
       {enrollment?.state === 'paired' && (
         <div style={{ ...pairing, marginTop: 9, color: 'var(--sg-success-dark)' }}>
           ✅ {enrollment.principal} already has an enrolled mTLS client with full write access.
+          {' '}Pair additional devices in Settings → Clients.
         </div>
       )}
 

@@ -700,53 +700,21 @@ static int kb_cmd_enroll(int argc, char **argv)
    return 0;
 }
 
-/* --fusion-probe=<query>: a DB2-linked diagnostic that runs the same recall
- * query twice — graph_code_fusion_state off then on — against the live store and
- * prints both result sets, flagging entries the fusion expansion newly surfaces
- * through the code graph. The thin CLI forwards every `memory` subcommand to the
- * server (no route), so this is the only way to exercise memory_find_facts +
- * the fusion rerank against a populated DB2 without a session. Runs after
- * db2_init and exits; does not start the service. */
+/* Read the configured instance's retrieval result. Compare separate on/off
+ * instances externally; a probe never changes live fusion policy. */
 static int kb_run_fusion_probe(const char *query)
 {
-   /* memory_find_facts takes the lexical-fallback path (which skips the fusion
-    * block) unless the pgvector memory collection exists, so ensure it. */
-   if (pgvec_memory_vector_collection_exists() <= 0)
+   memory_t results[20];
+   int count = memory_find_facts(query, 20, results, 20);
+   if (count < 0)
    {
-      int dim = config_embedder_dims() > 0 ? config_embedder_dims() : 1024;
-      (void)pgvec_memory_vector_collection_recreate(dim);
+      fprintf(stderr, "fusion probe: instance memory retrieval unavailable\n");
+      return 1;
    }
-
-   memory_t off[20];
-   memory_t on[20];
-   memory_fusion_state_clear();
-   int n_off = memory_find_facts(query, 20, off, 20);
-   memory_fusion_state_set("on");
-   int n_on = memory_find_facts(query, 20, on, 20);
-   memory_fusion_state_clear();
-
-   printf("=== fusion probe: \"%s\" ===\n", query);
-   printf("vector_ready=%d\n", pgvec_memory_vector_collection_exists() > 0 ? 1 : 0);
-   printf("--- fusion OFF (%d results) ---\n", n_off < 0 ? 0 : n_off);
-   for (int i = 0; i < n_off; i++)
-      printf("  #%-2d id=%-8lld %s\n", i + 1, (long long)off[i].id, off[i].key);
-   printf("--- fusion ON  (%d results) ---\n", n_on < 0 ? 0 : n_on);
-   int newly = 0;
-   for (int i = 0; i < n_on; i++)
-   {
-      int in_off = 0;
-      for (int j = 0; j < n_off; j++)
-         if (on[i].id == off[j].id)
-         {
-            in_off = 1;
-            break;
-         }
-      if (!in_off)
-         newly++;
-      printf("  #%-2d id=%-8lld %s%s\n", i + 1, (long long)on[i].id, on[i].key,
-             in_off ? "" : "   <-- graph-bridged (new under fusion)");
-   }
-   printf("=== fusion surfaced %d memories not in the baseline result set ===\n", newly);
+   printf("fusion=%s (instance setting), results=%d\n", memory_fusion_state_is_on() ? "on" : "off",
+          count);
+   for (int i = 0; i < count; i++)
+      printf("  #%-2d id=%-8lld %s\n", i + 1, (long long)results[i].id, results[i].key);
    return 0;
 }
 
@@ -2071,7 +2039,7 @@ int main(int argc, char **argv)
       vault_operator_runtime_opened = 1;
    }
 
-   /* Diagnostic mode: run the fusion off-vs-on recall probe and exit without
+   /* Diagnostic mode: probe instance retrieval and exit without
     * starting the service. */
    if (fusion_probe_query)
    {

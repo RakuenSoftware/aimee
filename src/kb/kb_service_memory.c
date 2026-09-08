@@ -431,17 +431,11 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
       }
    }
 
-   /* Graph-code fusion: honour the request's graph_code_fusion_state ("off" |
-    * "shadow" | "on") for the duration of this recall, then clear it. "on" runs
-    * the graph-vector fusion rerank in the recall path; anything else leaves the
-    * order unchanged. Thread-local, so concurrent kb workers don't interfere. */
-   cJSON *fusion_j = cJSON_GetObjectItemCaseSensitive(req, "graph_code_fusion_state");
-   memory_fusion_state_set(cJSON_IsString(fusion_j) ? fusion_j->valuestring : NULL);
+   /* Fusion follows this KB instance's configuration. */
    int missing = 0;
    int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_find_facts_json(query_j->valuestring, limit);
    kb_memory_scope_end(resp, scope_active, missing);
-   memory_fusion_state_clear();
 
    /* Close the bandit loop: attribute an immediate recall-sufficiency reward to
     * the sampled decision so the arm posteriors update from live traffic. */
@@ -815,13 +809,9 @@ int kb_handle_memory_find_facts_scoped(int fd, cJSON *req)
    const char *scope_type = cJSON_IsString(st) ? st->valuestring : "";
    const char *scope_value = cJSON_IsString(sv) ? sv->valuestring : "";
    int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 20;
-   /* Honour graph_code_fusion_state for the duration of this recall (see
-    * kb_handle_memory_find_facts). Thread-local; cleared after. */
-   cJSON *fusion_j = cJSON_GetObjectItemCaseSensitive(req, "graph_code_fusion_state");
-   memory_fusion_state_set(cJSON_IsString(fusion_j) ? fusion_j->valuestring : NULL);
+   /* Fusion follows this KB instance's configuration. */
    cJSON *resp =
        db2_kb_service_memory_find_facts_scoped_json(q->valuestring, scope_type, scope_value, limit);
-   memory_fusion_state_clear();
    return kb_reply_or_error(fd, resp, "failed to find scoped facts");
 }
 
@@ -1095,16 +1085,12 @@ int kb_handle_memory_recall(int fd, cJSON *req)
    memory_activation_t activation;
    const memory_activation_t *activation_ptr =
        kb_memory_activation_from_request(req, &activation) ? &activation : NULL;
-   /* Honour graph_code_fusion_state across the recall assembly (its fact
-    * sections retrieve through the fusion-aware ranking path). Thread-local. */
-   cJSON *fusion_j = cJSON_GetObjectItemCaseSensitive(req, "graph_code_fusion_state");
-   memory_fusion_state_set(cJSON_IsString(fusion_j) ? fusion_j->valuestring : NULL);
+   /* Fusion follows this KB instance's configuration. */
    int missing = 0;
    int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp =
        db2_kb_service_memory_recall_json(task_hint, limit_tokens, session_start, activation_ptr);
    kb_memory_scope_end(resp, scope_active, missing);
-   memory_fusion_state_clear();
    return kb_reply_or_error(fd, resp, "failed to render memory recall");
 }
 

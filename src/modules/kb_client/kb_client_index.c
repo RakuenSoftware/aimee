@@ -363,7 +363,8 @@ static int kb_client_index_scan_v1(const char *name, const char *root, int force
     * the host filesystem via root_path.  Enumerate and push file contents so
     * the handler can index without filesystem access — in byte-bounded batches,
     * since the kb caps request bodies at 1 MB. */
-   if (name && name[0] && root && root[0] && kb_client_v1_base_url())
+   if (name && name[0] && root && root[0] &&
+       (kb_client_v1_base_url() || kb_client_local_code_enabled()))
    {
       kb_scan_push_ctx_t s;
       memset(&s, 0, sizeof(s));

@@ -908,12 +908,12 @@ RESP=$(srv_req '{"method":"index.investigate","query":"where is the shared date 
 check_output "index.investigate refuses without a project scope" 'scope_required' echo "$RESP"
 
 # With a scope, it must distinguish an OUTAGE from an index with no evidence.
-# The integration server runs without a reachable knowledge service, so this is
+# This isolated server has neither a KB connection nor a memory module, so this is
 # exactly the condition that used to answer "no evidence" and send the agent off
 # to search the tree by hand. It is the call the session guidance tells every
 # agent to make FIRST, so a silent outage costs the whole opening move.
 RESP=$(srv_req '{"method":"index.investigate","query":"where is the shared date helper","project":"integration-scope"}') || true
-check_output "index.investigate names the dependency that failed" '"dependency":"kb"' echo "$RESP"
+check_output "index.investigate names the dependency that failed" '"dependency":"local_code"' echo "$RESP"
 check_output "index.investigate reports an outage, not empty evidence" \
     'not an index with no evidence' echo "$RESP"
 check_output "index.investigate marks the outage retryable" '"retryable":true' echo "$RESP"

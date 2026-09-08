@@ -137,7 +137,7 @@ static int handle_kb_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON
    }
 
    int active_context_missing = server_memory_scope_begin(req);
-   /* Search stored facts; graph-code fusion is always on for recall. */
+   /* The KB applies its own instance-wide fusion setting. */
    memory_t facts[32];
    int fact_count = kb_client_memory_find_facts_ex(query_buf, limit, facts, 32, "on");
    if (fact_count < 0)

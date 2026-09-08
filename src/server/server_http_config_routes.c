@@ -1314,3 +1314,37 @@ int rh_cli_manifest(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 500, "cli manifest too large");
    return 200;
 }
+
+/* Client pairing is independent of model deployment and works without a Docker
+ * socket. A browser identity is required; the DB additionally enforces owner. */
+int rh_clients(const route_req_t *rq, char *resp, int cap)
+{
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "client management requires the signed-in server owner");
+   cJSON *body = rq->body && rq->body[0] ? cJSON_Parse(rq->body) : NULL;
+   const char *action = strcmp(rq->method, "GET") == 0                ? "list"
+                        : strcmp(rq->path, "/v1/clients/revoke") == 0 ? "revoke"
+                                                                      : "create";
+   cJSON *name = body ? cJSON_GetObjectItemCaseSensitive(body, "name") : NULL;
+   cJSON *id = body ? cJSON_GetObjectItemCaseSensitive(body, "id") : NULL;
+   if ((strcmp(action, "create") == 0 && !cJSON_IsString(name)) ||
+       (strcmp(action, "revoke") == 0 && !cJSON_IsString(id)))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "a client name or ID is required");
+   }
+   int status =
+       server_http_clients_manage(principal, action, cJSON_IsString(id) ? id->valuestring : "",
+                                  cJSON_IsString(name) ? name->valuestring : "", resp, (size_t)cap);
+   cJSON_Delete(body);
+   if (status == 503)
+      return err_json(resp, cap, 503, "client authorization store unavailable");
+   if (status == 403)
+      return err_json(resp, cap, 403, "only the server owner can manage clients");
+   if (status == 400)
+      return err_json(resp, cap, 400, "invalid client name or ID");
+   if (status == 404)
+      return err_json(resp, cap, 404, "client not found");
+   return status;
+}

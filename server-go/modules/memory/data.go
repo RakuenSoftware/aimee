@@ -28,6 +28,9 @@ const (
 )
 
 type DataRequest struct {
+	CodeIndex *CodeIndexRequest `json:"code_index,omitempty"`
+	// Accepted for old callers, but never used to override instance configuration.
+	GraphCodeFusionState  string    `json:"graph_code_fusion_state,omitempty"`
 	Operation             string    `json:"operation"`
 	Scope                 Scope     `json:"scope"`
 	ID                    int64     `json:"id,omitempty"`
@@ -392,9 +395,11 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
-	personal  *personalVectors
-	db        store.Queryer
-	placement Placement
+	fusionEnabled bool
+	code          codeIndexState
+	personal      *personalVectors
+	db            store.Queryer
+	placement     Placement
 }
 
 func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, error) {
@@ -404,7 +409,11 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 	if placement != PlacementServer && placement != PlacementKB {
 		return nil, fmt.Errorf("memory: invalid placement %q", placement)
 	}
-	return &postgresDataStore{db: db, placement: placement}, nil
+	enabled, err := instanceGraphFusion()
+	if err != nil {
+		return nil, err
+	}
+	return &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled}, nil
 }
 
 func (s *postgresDataStore) Get(ctx context.Context, scope Scope, id int64) (Record, error) {
@@ -640,7 +649,7 @@ ORDER BY (lower(key)=lower($7)) DESC,
 			records = fusePersonal(records, semantic, limit)
 		}
 	}
-	return records, nil
+	return s.fuseMemoryGraph(ctx, DataRequest{Scope: scope, Query: query, Kind: kind, Tier: tier, Limit: limit}, true, records)
 }
 
 // searchPattern keeps a multi-word query useful when callers supply keyword
@@ -888,21 +897,25 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		}
 		return encoded, bus.ModuleStatusOK
 	}
-	if request.Operation == "fusion-state-set" || request.Operation == "fusion-state-clear" ||
-		request.Operation == "fusion-state-get" {
-		switch request.Operation {
-		case "fusion-state-set":
-			setGraphFusion(request.State)
-		case "fusion-state-clear":
-			clearGraphFusion()
+	if request.Operation == "fusion-state-set" || request.Operation == "fusion-state-clear" || request.Operation == "fusion-state-get" {
+		// Legacy set/clear calls are read-only. They cannot mutate instance policy.
+		var enabled bool
+		var err error
+		if configured, ok := options.data.(*postgresDataStore); ok {
+			enabled = configured.graphFusionEnabled()
+		} else {
+			enabled, err = instanceGraphFusion()
 		}
-		enabled := isGraphFusionEnabled()
-		encoded, marshalErr := json.Marshal(DataResponse{Allowed: &enabled})
-		if marshalErr != nil {
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		encoded, err := json.Marshal(DataResponse{Allowed: &enabled})
+		if err != nil {
 			return nil, bus.ModuleStatusInternal
 		}
 		return encoded, bus.ModuleStatusOK
 	}
+
 	if request.Operation == "directive-metrics" || request.Operation == "prospective-metrics" ||
 		request.Operation == "recall-metrics" {
 		var metrics RuntimeMetrics
@@ -975,6 +988,21 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	if request.Operation == "code-index" {
+		code, ok := options.data.(*postgresDataStore)
+		if !ok || request.CodeIndex == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		payload, err := code.CodeIndex(ctx, *request.CodeIndex)
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		encoded, err := json.Marshal(DataResponse{Payload: payload})
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		return encoded, bus.ModuleStatusOK
+	}
 
 	// Request scope used to live on the C connection. Pin it to the Go store
 	// transaction now, so the non-owner runtime sees precisely this request's
