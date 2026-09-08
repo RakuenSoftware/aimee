@@ -1440,7 +1440,7 @@ test-transport-artifact:
 	@python3 ../tests/test_transport_artifact.py
 
 memory-retrieval-eval-check:
-	cd ../server-go && AIMEE_MEMORY_EVAL_REQUIRED=1 go test -race -count=1 -v ./modules/memory -run '^(TestRetrievalCorpus|TestPersonalMemoryPrivacyRegression|TestContentGateEmitsCleanVerdict)$$'
+	cd ../server-go && AIMEE_MEMORY_EVAL_REQUIRED=1 go test -race -count=1 -v ./modules/memory -run '^(TestRetrievalCorpus|TestPersonalMemoryPrivacyRegression|TestContentGateEmitsCleanVerdict|TestPrivateCodeIndexPublicationAndFusion|TestKBGraphFusionUsesInstancePolicyAndVisibility|TestCodeVectorsRejectStaleContentAndModel)$$'
 
 # Virtual-context long-session benchmark gate: deterministic compression,
 # stub answerability, and baseline-vs-compacted late-turn accuracy (AC#4).
