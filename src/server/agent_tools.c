@@ -1,3 +1,4 @@
+#include "worktree_scope.h"
 /* agent_tools.c: tool execution, checkpoints, and tool definition JSON builders.
  *
  * BOUNDARY (core modularization): this is the server-side session-state slice of
@@ -245,6 +246,8 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
     * preferences. */
    char norm[MAX_PATH_LEN];
    normalize_path(path, cwd, norm, sizeof(norm));
+   if (worktree_scope_non_git(cwd, norm))
+      return 0;
    size_t root_len = agent_tools_managed_root_len(norm);
    if (root_len && cwd && cwd[0])
    {

@@ -99,7 +99,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `reasoning_cap_enabled` | bool | Cap the model's reasoning effort. |
 | `require_aimee_git` | bool | Block a delegate from running `git` or `gh` in a shell (reads included) and redirect git/forge work to aimee's `git_*` tools, which execute on aimee-server where the forge credential stays in-process; delegates are also spawned without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed SSH to any host) and neuters the global/system git config (default on). |
 | `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
-| `require_session_worktree` | bool | Fail closed on mutating ops outside this session's isolated worktree (session-isolation guard; default on). |
+| `require_session_worktree` | bool | Isolate Git work in a session worktree (default on). False disables automatic creation, routing, and worktree write restrictions. Non-Git folders do not require a worktree. |
 | `subagent_ban_enabled` | bool | Prevent provider-native sub-agent tools when an aimee delegate is available, and install the matching client guardrails (default on). |
 | `synthesis_endpoint` | string | OpenAI-compatible synthesis endpoint. Empty disables synthesis; managed local profiles supply the model-specific sidecar endpoint over mTLS. |
 | `synthesis_model` | string | Model identity requested from the synthesis endpoint. A managed local sidecar fixes the model family selected by its image. |

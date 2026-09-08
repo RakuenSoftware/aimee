@@ -1599,6 +1599,16 @@ int pre_tool_check(const char *tool_name, const char *tool_input, session_state_
    return g_hook_guard_result;
 }
 
+static int g_client_non_git_workspace;
+int pre_tool_check_client_workspace(const char *tool_name, const char *tool_input,
+                                    session_state_t *state, const char *guardrail_mode,
+                                    const char *cwd, char *msg, size_t msg_len,
+                                    int client_non_git_workspace)
+{
+   g_client_non_git_workspace = client_non_git_workspace;
+   return pre_tool_check(tool_name, tool_input, state, guardrail_mode, cwd, msg, msg_len);
+}
+
 void post_tool_update(const char *tool_name, const char *tool_input, session_state_t *state)
 {
    (void)tool_name;
@@ -2308,11 +2318,13 @@ static void test_hook_identity_session_binding(void)
    snprintf(pre, sizeof(pre),
             "{\"method\":\"hooks.pre\",\"session_id\":\"bound-session\","
             "\"harness_client\":\"claude\",\"hook_token\":\"%s\","
-            "\"tool_name\":\"Read\",\"tool_input\":{},\"cwd\":\"/tmp\"}",
+            "\"client_non_git_workspace\":true,\"tool_name\":\"Read\",\"tool_input\":{},\"cwd\":\"/"
+            "tmp\"}",
             saved);
    json = dispatch_json(ctx, conn, pre, strlen(pre));
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_identity")),
                  "trusted") == 0);
+   assert(g_client_non_git_workspace == 1);
    cJSON_Delete(json);
 
    /* The same secret cannot claim a different harness or session. */
@@ -2320,11 +2332,13 @@ static void test_hook_identity_session_binding(void)
    snprintf(mismatch, sizeof(mismatch),
             "{\"method\":\"hooks.pre\",\"session_id\":\"other-session\","
             "\"harness_client\":\"claude\",\"hook_token\":\"%s\","
-            "\"tool_name\":\"Read\",\"tool_input\":{},\"cwd\":\"/tmp\"}",
+            "\"client_non_git_workspace\":true,\"tool_name\":\"Read\",\"tool_input\":{},\"cwd\":\"/"
+            "tmp\"}",
             saved);
    json = dispatch_json(ctx, conn, mismatch, strlen(mismatch));
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_identity")),
                  "untrusted") == 0);
+   assert(g_client_non_git_workspace == 0);
    cJSON_Delete(json);
 
    hook_session_token_registry_reset();

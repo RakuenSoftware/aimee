@@ -1164,6 +1164,11 @@ static int handle_hooks(int argc, char **argv, int json_output)
    cJSON_AddStringToObject(req, "tool_name", tool_name);
    cJSON_AddStringToObject(req, "tool_input", tool_input);
    cJSON_AddStringToObject(req, "cwd", cwd);
+   if (strcmp(phase, "pre") == 0 &&
+       attn_tool_in_non_git_workspace(hook_cwd, tool_name,
+                                      local_updated ? local_updated : hook_input))
+      cJSON_AddBoolToObject(req, "client_non_git_workspace", 1);
+
    if (sid && sid[0])
       cJSON_AddStringToObject(req, "session_id", sid);
 

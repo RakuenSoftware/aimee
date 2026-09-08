@@ -360,7 +360,7 @@ export const FIELD_HELP: Record<string, string> = {
   integrity_dry_run:
     "Run the integrity gate in shadow mode — it logs but never blocks. On by default, so enabling the gate is safe to try first.",
   require_session_worktree:
-    "Refuse file-changing tools unless they run inside an aimee-managed worktree, forcing each session onto its own branch. Off by default.",
+    "Isolate Git work in a session worktree. On by default. Off disables automatic worktree creation, path routing, and worktree write restrictions. Non-Git folders do not need a worktree.",
   fidelity_check_enabled:
     "Run a judge that checks answers against their cited evidence. Off by default; needs evidence logging and context pre-injection on first.",
 

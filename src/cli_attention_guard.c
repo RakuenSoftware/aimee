@@ -1,3 +1,4 @@
+#include "worktree_scope.h"
 /* cli_attention_guard.c: see cli_attention_guard.h.
  *
  * Per-session attention log lives at $AIMEE_HOME/.cache/attention/<session>.json
@@ -1001,7 +1002,7 @@ int attn_bash_escapes_worktree(const char *bash_cmd, const char *cwd)
          path[n] = '\0';
          char norm[2048];
          attn_lexical_normalize(path, norm, sizeof(norm));
-         if (!attn_path_in_managed_worktree(norm))
+         if (!attn_path_in_managed_worktree(norm) && !worktree_scope_non_git(cwd, norm))
             return 1;
       }
    }
@@ -1031,7 +1032,8 @@ int attn_bash_escapes_worktree(const char *bash_cmd, const char *cwd)
       path[n] = '\0';
       char norm[2048];
       attn_lexical_normalize(path, norm, sizeof(norm));
-      if (!attn_path_in_managed_worktree(norm) && !attn_path_is_harness_state(norm))
+      if (!attn_path_in_managed_worktree(norm) && !attn_path_is_harness_state(norm) &&
+          !worktree_scope_non_git(cwd, norm))
          return 1;
    }
 
@@ -1068,7 +1070,7 @@ int attn_bash_escapes_worktree(const char *bash_cmd, const char *cwd)
                char norm[2048];
                attn_lexical_normalize(path, norm, sizeof(norm));
                if (strncmp(norm, "/dev/null", 9) != 0 && !attn_path_in_managed_worktree(norm) &&
-                   !attn_path_is_harness_state(norm))
+                   !attn_path_is_harness_state(norm) && !worktree_scope_non_git(cwd, norm))
                   return 1;
                a += n;
                continue;
@@ -1578,8 +1580,50 @@ int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const ch
    char norm[2048];
    attn_session_isolation_target(file_path, cwd, norm, sizeof(norm));
    if (attn_path_in_managed_worktree(norm) || attn_path_is_harness_state(norm) ||
-       attn_path_is_session_scratch(norm, session_id))
+       attn_path_is_session_scratch(norm, session_id) || worktree_scope_non_git(cwd, norm))
       return 0;
+   return 1;
+}
+
+int attn_tool_in_non_git_workspace(const char *cwd, const char *tool, const cJSON *input)
+{
+   static const char *const cwd_keys[] = {"workdir", "cwd", "working_dir", "working_directory",
+                                          NULL};
+   for (int i = 0; cwd_keys[i]; i++)
+   {
+      const char *value =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, cwd_keys[i]));
+      if (value && value[0])
+      {
+         cwd = value;
+         break;
+      }
+   }
+   if (!worktree_scope_non_git(cwd, NULL))
+      return 0;
+   static const char *const path_keys[] = {"file_path",     "filePath",  "path",
+                                           "notebook_path", "directory", NULL};
+   for (int i = 0; path_keys[i]; i++)
+   {
+      const char *path =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, path_keys[i]));
+      if (path && path[0])
+      {
+         char target[2048];
+         attn_session_isolation_target(path, cwd, target, sizeof(target));
+         if (!worktree_scope_non_git(cwd, target))
+            return 0;
+      }
+   }
+   if (attn_tool_is_shell(tool))
+   {
+      const char *command =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, "command"));
+      if (!command)
+         command = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, "cmd"));
+      if (attn_bash_escapes_worktree(command, cwd))
+         return 0;
+   }
    return 1;
 }
 

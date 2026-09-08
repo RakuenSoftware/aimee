@@ -6,6 +6,7 @@
  * Every git invocation here is shell-free (fork/execvp): session ids and repo
  * paths reach argv directly, so there is nothing to quote or inject. */
 #include "client_session_worktree.h"
+#include "client_config.h"
 #include "session_worktree_key.h"
 #include <errno.h>
 #include <signal.h>
@@ -810,6 +811,8 @@ int client_session_worktree_ensure_at(const char *sid, const char *cwd, char *ou
    if (!out || !cap)
       return -1;
    out[0] = '\0';
+   if (!client_config_bool("require_session_worktree", 1))
+      return -1; /* Explicit operator opt-out: no provisioning or cwd change. */
 
    char source[4096], top[4096];
    int already_owned = 0;
@@ -923,6 +926,9 @@ int client_session_worktree_route_path(const char *sid, const char *cwd, const c
 {
    if (!out || !cap)
       return -2;
+   if (!client_config_bool("require_session_worktree", 1))
+      return 1; /* Routing is disabled, including existing session mappings. */
+
    out[0] = '\0';
    char target[8192];
    if (csw_normalize(cwd, input, target, sizeof target) != 0)
@@ -1010,6 +1016,9 @@ int client_session_worktree_route_command(const char *sid, const char *cwd, cons
 {
    if (!command || !out || !cap)
       return -2;
+   if (!client_config_bool("require_session_worktree", 1))
+      return 1; /* Routing is disabled, including existing session mappings. */
+
    if (csw_is_foreign_worktree(command, sid))
       return -3;
    char source[4096], top[4096];
@@ -1157,6 +1166,9 @@ int client_session_worktree_route_patch(const char *sid, const char *cwd, const 
 {
    if (!patch || !out || !cap)
       return -2;
+   if (!client_config_bool("require_session_worktree", 1))
+      return 1; /* Routing is disabled, including existing session mappings. */
+
    static const char *const leaders[] = {
        "*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: ", NULL};
    size_t used = 0;
