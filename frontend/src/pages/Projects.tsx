@@ -4,6 +4,7 @@ import ConnectHosts from '../setup/ConnectHosts';
 import { useSessions } from '../SessionContext';
 import { groupProjectsByOrg, parseOwnerOnly, repoAlreadyCloned, type CloneKbAnnotations, type GitProjectsResponse, type OwnerRef, type ProjectDetail, type ProjectDeleteResponse } from '../setup/ownerUrl';
 import { notifySetupUpdated } from '../setup/setupState';
+import { cloneRepos, type CloneProgress } from '../setup/cloneRepos';
 
 /* Git projects (webchat-git WP-F2). The page is focused on managing repos: it
  * lists the user's cloned projects, connects new ones, and runs per-project git
@@ -77,6 +78,9 @@ export default function Projects() {
   const [orgSelected, setOrgSelected] = useState<Record<string, boolean>>({});
   const [orgProvider, setOrgProvider] = useState('');
   const [orgResults, setOrgResults] = useState<({ name: string; ok: boolean; error?: string | null } & CloneKbAnnotations)[]>([]);
+  const [cloneProgress, setCloneProgress] = useState<CloneProgress | null>(null);
+  const orgSelectedCount = orgRepos.filter(r => orgSelected[r.name] &&
+    !repoAlreadyCloned(r, orgRef?.owner || '', projects, details)).length;
   // Post-clone notices (org placement, kb indexing) for the single-repo form.
   const [cloneNotes, setCloneNotes] = useState<string[]>([]);
   // Delete flow: the ref pending confirmation and the typed-ref gate. The
@@ -94,8 +98,8 @@ export default function Projects() {
     } catch { /* server unavailable — leave list empty */ }
   }, []);
 
-  const loadProjects = useCallback(async () => {
-    setErr('');
+  const loadProjects = useCallback(async (clearError = true) => {
+    if (clearError) setErr('');
     try {
       const r = await api('/api/git/projects', { method: 'GET' });
       const d: GitProjectsResponse = await r.json();
@@ -104,12 +108,24 @@ export default function Projects() {
       setProjects(ps);
       setDetails(d.details || []);
       setSelected(s => (s && ps.includes(s) ? s : ps[0] || ''));
+      return d;
     } catch {
       setErr('aimee-server unavailable');
     }
   }, []);
 
   useEffect(() => { loadProjects(); loadHosts(); }, [loadProjects, loadHosts]);
+  useEffect(() => {
+    const refresh = () => { void loadProjects(false); };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'hidden') refresh();
+    }, 5000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [loadProjects]);
 
   // Close the Connect-account modal on Escape (works regardless of focus).
   useEffect(() => {
@@ -150,10 +166,15 @@ export default function Projects() {
         if (d.org_note) notes.push(d.org_note);
         if (d.kb_indexed === false) notes.push(`not indexed in the knowledge base — ${d.kb_reason || 'knowledge service unavailable'}`);
         setCloneNotes(notes);
-        await loadProjects(); await loadHosts(); setSelected(d.name || '');
-        notifySetupUpdated();
+        await loadHosts(); setSelected(d.name || '');
       }
-    } finally { setBusy(false); }
+    } catch {
+      setErr('No clone result received. It may still finish on the server. Refresh projects before retrying.');
+    } finally {
+      await loadProjects(false);
+      notifySetupUpdated();
+      setBusy(false);
+    }
   }
 
   // Enumerate an owner/org's repositories (wizard parity: /api/git/org-repos).
@@ -187,21 +208,20 @@ export default function Projects() {
 
   async function cloneOrgSelected() {
     if (!orgRef) return;
-    const chosen = orgRepos.filter(r => orgSelected[r.name]).map(r => ({ name: r.name, clone_url: r.clone_url }));
+    const chosen = orgRepos.filter(r => orgSelected[r.name] && !repoAlreadyCloned(r, orgRef.owner, projects, details))
+      .map(r => ({ name: r.name, clone_url: r.clone_url }));
     if (chosen.length === 0) { setErr('Select at least one repository.'); return; }
-    setBusy(true); setErr('');
+    setBusy(true); setErr(''); setOrgResults([]);
     try {
-      const r = await api('/api/git/clone-org', {
-        method: 'POST',
-        body: JSON.stringify({ host: orgRef.host, owner: orgRef.owner, repos: chosen }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setErr(d.error || `clone failed (${r.status})`); return; }
-      setOrgResults(d.results || []);
-      setUrl('');
-      await loadProjects();
-      notifySetupUpdated();
-    } catch { setErr('aimee-server unavailable'); } finally { setBusy(false); }
+      const error = await cloneRepos(orgRef, chosen, api,
+        (result) => setOrgResults((previous) => [...previous, result]), async () => {
+          const inventory = await loadProjects(false);
+          notifySetupUpdated();
+          return inventory;
+        }, { onProgress: setCloneProgress });
+      if (error) setErr(error);
+      else setUrl('');
+    } finally { setBusy(false); }
   }
 
   function openDelete(ref: string) {
@@ -304,12 +324,18 @@ export default function Projects() {
               </div>
               <div>
                 <Button variant="primary" size="sm"
-                  disabled={busy || orgRepos.filter(r => orgSelected[r.name]).length === 0}
+                  disabled={busy || orgSelectedCount === 0}
                   title="Clone the checked repositories as new projects."
                   onClick={cloneOrgSelected}>
-                  Clone selected ({orgRepos.filter(r => orgSelected[r.name]).length})
+                  Clone selected ({orgSelectedCount})
                 </Button>
               </div>
+            </div>
+          )}
+          {cloneProgress && (
+            <div role="status" aria-live="polite">
+              {cloneProgress.phase === 'checking' ? 'Checking completed clone' : 'Cloning'} {cloneProgress.name}
+              {' '}({cloneProgress.current} of {cloneProgress.total})
             </div>
           )}
           {orgResults.length > 0 && (

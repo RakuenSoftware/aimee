@@ -15,6 +15,13 @@
  * of pathologically long lines must not blow the envelope/recovery budget. */
 #define CODE_SPAN_MAX_BYTES (64 * 1024)
 
+static code_span_index_reader_fn index_reader;
+
+void code_span_set_index_reader(code_span_index_reader_fn reader)
+{
+   index_reader = reader;
+}
+
 static cJSON *span_err(const char *msg)
 {
    cJSON *o = cJSON_CreateObject();
@@ -54,6 +61,24 @@ cJSON *code_span_read(const char *project, const char *project_root, const char 
       return span_err("project root is not an absolute path");
    if (has_ctrl_chars(file_path))
       return span_err("file_path contains control characters");
+
+   if (index_reader)
+   {
+      const char *relative = file_path;
+      if (file_path[0] == '/')
+      {
+         if (!path_within_root(file_path, project_root))
+            return span_err("path resolves outside the project workspace");
+         relative = file_path + strlen(project_root);
+         while (*relative == '/')
+            ++relative;
+      }
+      /* Preserve sensitive-file policy; the index supplies bytes, never a
+       * filesystem path or a symlink target. Its reader validates traversal. */
+      if (classify_path_sensitivity(relative).severity >= SEV_RED)
+         return span_err("error: access to sensitive path denied");
+      return index_reader(project, relative, line_start, line_end, max_lines);
+   }
 
    if (max_lines <= 0)
       max_lines = 400;

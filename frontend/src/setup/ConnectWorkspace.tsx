@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@rakuensoftware/smoothgui';
-import { parseOwner, repoAlreadyCloned, type CloneKbAnnotations, type GitProjectsResponse, type ProjectDetail } from './ownerUrl';
+import { parseOwner, repoAlreadyCloned, type GitProjectsResponse, type ProjectDetail } from './ownerUrl';
+import { cloneRepos, type CloneProgress, type CloneResult } from './cloneRepos';
 import { notifySetupUpdated } from './setupState';
 
 /* Wizard — Workspaces & projects. A workspace is your collection of projects: the
@@ -42,13 +43,6 @@ interface Repo {
   private?: boolean;
 }
 
-interface CloneResult extends CloneKbAnnotations {
-  name: string;
-  ok: boolean;
-  project?: string | null;
-  error?: string | null;
-}
-
 export interface ConnectWorkspaceProps {
   /** Continue to the wizard summary. */
   onDone: () => void;
@@ -67,24 +61,39 @@ export default function ConnectWorkspace({ onDone, onProjectsChanged }: ConnectW
   const [details, setDetails] = useState<ProjectDetail[]>([]);
   const [listing, setListing] = useState(false);
   const [cloning, setCloning] = useState(false);
+  const [progress, setProgress] = useState<CloneProgress | null>(null);
   const [err, setErr] = useState('');
+  const [projectsError, setProjectsError] = useState('');
 
   const loadProjects = useCallback(async () => {
     try {
       const r = await api('/api/git/projects', { method: 'GET' });
       const d: GitProjectsResponse = await r.json();
       if (r.ok) {
+        setProjectsError('');
         setProjects(d.projects || []);
         setDetails(d.details || []);
         onProjectsChanged?.((d.projects || []).length);
+        return d;
+      } else {
+        setProjectsError(d.error || 'Could not refresh projects.');
       }
     } catch {
-      /* server unavailable — leave empty */
+      setProjectsError('Could not refresh projects. The last loaded list is shown.');
     }
   }, [onProjectsChanged]);
 
   useEffect(() => {
     loadProjects();
+    const refresh = () => { void loadProjects(); };
+    window.addEventListener('focus', refresh);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'hidden') refresh();
+    }, 5000);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.clearInterval(timer);
+    };
   }, [loadProjects]);
 
   async function listRepos() {
@@ -132,35 +141,30 @@ export default function ConnectWorkspace({ onDone, onProjectsChanged }: ConnectW
   async function cloneSelected() {
     const parsed = parseOwner(ownerInput);
     if (!parsed) return;
-    const chosen = repos.filter((r) => selected[r.name]).map((r) => ({ name: r.name, clone_url: r.clone_url }));
+    const chosen = repos.filter((r) => selected[r.name] && !repoAlreadyCloned(r, parsed.owner, projects, details))
+      .map((r) => ({ name: r.name, clone_url: r.clone_url }));
     if (chosen.length === 0) {
       setErr('Select at least one repository.');
       return;
     }
     setCloning(true);
     setErr('');
+    setResults([]);
     try {
-      const r = await api('/api/git/clone-org', {
-        method: 'POST',
-        body: JSON.stringify({ host: parsed.host, owner: parsed.owner, repos: chosen }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setErr(d.error || `clone failed (${r.status})`);
-        return;
-      }
-      setResults(d.results || []);
-      await loadProjects();
-      notifySetupUpdated();
-    } catch {
-      setErr('aimee-server unavailable');
+      const error = await cloneRepos(parsed, chosen, api,
+        (result) => setResults((previous) => [...previous, result]), async () => {
+          const inventory = await loadProjects();
+          notifySetupUpdated();
+          return inventory;
+        }, { onProgress: setProgress });
+      if (error) setErr(error);
     } finally {
       setCloning(false);
     }
   }
 
-  const selectedCount = repos.filter((r) => selected[r.name]).length;
   const ownerName = parseOwner(ownerInput)?.owner || '';
+  const selectedCount = repos.filter((r) => selected[r.name] && !repoAlreadyCloned(r, ownerName, projects, details)).length;
   const toggleAll = (on: boolean) => {
     const sel: Record<string, boolean> = {};
     for (const r of repos) sel[r.name] = on && !repoAlreadyCloned(r, ownerName, projects, details);
@@ -178,9 +182,9 @@ export default function ConnectWorkspace({ onDone, onProjectsChanged }: ConnectW
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <input style={{ ...input, flex: 2, minWidth: 240 }}
             placeholder="owner URL (e.g. github.com/RakuenSoftware)"
-            value={ownerInput} onChange={(e) => setOwnerInput(e.target.value)}
+            disabled={cloning} value={ownerInput} onChange={(e) => setOwnerInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && ownerInput.trim() && !listing) listRepos(); }} />
-          <Button variant="primary" disabled={listing || !ownerInput.trim()} onClick={listRepos}>
+          <Button variant="primary" disabled={cloning || listing || !ownerInput.trim()} onClick={listRepos}>
             {listing ? 'Listing…' : 'List repositories'}
           </Button>
         </div>
@@ -220,6 +224,13 @@ export default function ConnectWorkspace({ onDone, onProjectsChanged }: ConnectW
         </section>
       )}
 
+      {progress && (
+        <div role="status" aria-live="polite">
+          {progress.phase === 'checking' ? 'Checking completed clone' : 'Cloning'} {progress.name}
+          {' '}({progress.current} of {progress.total})
+        </div>
+      )}
+
       {results.length > 0 && (
         <section style={{ display: 'grid', gap: 3 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>Clone results</div>
@@ -243,9 +254,11 @@ export default function ConnectWorkspace({ onDone, onProjectsChanged }: ConnectW
       )}
 
       {err && <div style={{ fontSize: 12.5, color: 'var(--sg-danger-dark)' }}>{err}</div>}
+      {projectsError && <div style={{ fontSize: 12.5, color: 'var(--sg-danger-dark)' }}>{projectsError}</div>}
 
       <div>
-        <Button variant="primary" onClick={onDone}>
+        <Button onClick={() => { void loadProjects(); }}>Refresh projects</Button>
+        <Button variant="primary" disabled={cloning} onClick={onDone}>
           {projects.length > 0 ? 'Done' : 'Continue'}
         </Button>
       </div>

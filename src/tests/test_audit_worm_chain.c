@@ -166,6 +166,8 @@ static void test_ckpt_mac(void)
    printf("  test_ckpt_mac: ok\n");
 }
 
+#include <openssl/crypto.h>
+
 int main(void)
 {
    test_hex32();
@@ -173,6 +175,12 @@ int main(void)
    test_row_hash_field_sensitivity();
    test_v2_binds_chronology_and_attribution();
    test_ckpt_mac();
+   /* Late audit writes must retain the same hashes after provider teardown. */
+   OPENSSL_cleanup();
+   test_genesis_row_hash();
+   test_v2_binds_chronology_and_attribution();
+   test_ckpt_mac();
+   printf("audit hashes remain valid after crypto cleanup\n");
    printf("all tests passed\n");
    return 0;
 }

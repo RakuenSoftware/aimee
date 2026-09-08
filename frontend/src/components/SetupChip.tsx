@@ -9,7 +9,8 @@ import { requestOpenWizard, isDismissed, SETUP_UPDATED_EVENT } from '../setup/se
  * against the cloned project inventory, and shows how many required steps remain.
  * Hidden entirely once ready. Clicking it opens the wizard. On first load, if the
  * instance is not ready and the wizard hasn't been dismissed, it auto-opens the
- * wizard once. All heavy lifting is in the tested setup/ modules. */
+ * wizard once. Pending first-boot account setup overrides browser dismissal,
+ * which can survive reinstalling the server at the same address. */
 
 export default function SetupChip() {
   const [cfg, setCfg] = useState<ConfigMap | null>(null);
@@ -46,14 +47,14 @@ export default function SetupChip() {
     [cfg, accountReady, projectCount, hostsConnected, gitIdentityReady],
   );
 
-  // Auto-open the wizard once per page load when unconfigured and not dismissed.
+  // A browser's old Finish flag cannot complete a fresh server's account setup.
   const autoOpened = useRef(false);
   useEffect(() => {
-    if (readiness && !readiness.ready && !isDismissed() && !autoOpened.current) {
+    if (readiness && !readiness.ready && (!accountReady || !isDismissed()) && !autoOpened.current) {
       autoOpened.current = true;
       requestOpenWizard();
     }
-  }, [readiness]);
+  }, [readiness, accountReady]);
 
   if (!readiness || readiness.ready) return null;
 
