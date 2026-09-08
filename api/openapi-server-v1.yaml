@@ -6474,6 +6474,99 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /clients:
+    get:
+      summary: List the server owner's paired devices and pending invitations
+      description: >
+        Requires the authenticated browser owner over the trusted local socket.
+        Returns no pairing tokens. Capability: tool:execute.
+      responses:
+        "200":
+          description: Device roster, including pending, paired, expired and revoked entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clients:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        serial: { type: string }
+                        state: { type: string, enum: [pending, paired, expired, revoked] }
+                        created_at: { type: integer }
+                        bound_at: { type: integer }
+                        expires_at: { type: integer }
+        "403":
+          description: Caller is not the server owner
+        "503":
+          description: Grant store unavailable
+    post:
+      summary: Create an invitation for another client
+      description: >
+        Requires the authenticated browser owner. Each invitation enrolls one
+        certificate with the owner's full grant. Unbound invitations expire
+        after 15 minutes; paired grants remain until revoked. Existing clients
+        are preserved. Works independently of deployment. Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 64, description: Device label, at most 64 UTF-8 bytes }
+      responses:
+        "200":
+          description: Invitation; cleartext token is returned only at creation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  bearer_token: { type: string }
+                  tls_port: { type: integer }
+                  expires_at: { type: integer }
+        "400":
+          description: Invalid device name
+        "403":
+          description: Caller is not the server owner
+        "409":
+          description: Limit of 64 active clients and pending invitations reached
+        "503":
+          description: Grant store unavailable
+  /clients/revoke:
+    post:
+      summary: Revoke one device or cancel a pending invitation
+      description: >
+        Requires the authenticated browser owner. Revokes the selected grant and
+        its certificate, preserving other devices. Safe to retry. Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string, pattern: '^[0-9a-f]{64}$' }
+      responses:
+        "200":
+          description: Device revoked
+        "400":
+          description: Invalid device identifier
+        "403":
+          description: Caller is not the server owner
+        "404":
+          description: Unknown device
+        "503":
+          description: Revocation could not be completed; retry the request
   /deploy/apply:
     post:
       summary: Bring up the managed sibling services

@@ -205,24 +205,8 @@ int handle_cert_revoke(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "serial");
    if (!cJSON_IsString(js) || !js->valuestring[0])
       return server_send_error(conn, "cert: 'serial' is required", NULL);
-   /* Resolve the CN BEFORE revoking: the grant is keyed by cert:<CN> while
-    * revocation names only the serial, and the roster is the sole bridge. */
-   cert_cn_lookup_t lk;
-   memset(&lk, 0, sizeof(lk));
-   lk.serial = js->valuestring;
-   (void)pki_list(cert_cn_lookup_cb, &lk);
-
-   if (pki_revoke(js->valuestring) != 0)
+   if (server_revoke_client_certificate(js->valuestring) != 0)
       return server_send_error(conn, "cert: revocation failed", NULL);
-
-   /* The cert and its vault grant are issued together, so they must die together.
-    * Leaving the grant behind would let a REISSUED cert for the same CN inherit
-    * vault authority it was never granted — silently, since nothing in the reissue
-    * path would mention it. Idempotent, so a cert issued before this existed (or
-    * whose CN never sanitized) revokes cleanly with nothing to remove. */
-   char vprincipal[VAULT_PRINCIPAL_MAX];
-   if (lk.cn[0] && cert_vault_principal(lk.cn, vprincipal, sizeof(vprincipal)))
-      (void)vault_capability_revoke(vprincipal);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -273,4 +257,30 @@ int handle_cert_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "cert: failed to enumerate certificates", NULL);
    }
    return server_send_ok(conn, resp);
+}
+
+int server_revoke_client_certificate(const char *serial)
+{
+   /* Resolve the CN BEFORE revoking: the grant is keyed by cert:<CN> while
+    * revocation names only the serial, and the roster is the sole bridge. */
+   cert_cn_lookup_t lk;
+   memset(&lk, 0, sizeof(lk));
+   lk.serial = serial;
+   if (pki_list(cert_cn_lookup_cb, &lk) < 0)
+      return -1;
+
+   if (pki_revoke(serial) != 0)
+      return -1;
+
+   /* The cert and its vault grant are issued together, so they must die together.
+    * Leaving the grant behind would let a REISSUED cert for the same CN inherit
+    * vault authority it was never granted — silently, since nothing in the reissue
+    * path would mention it. Idempotent, so a cert issued before this existed (or
+    * whose CN never sanitized) revokes cleanly with nothing to remove. */
+   char vprincipal[VAULT_PRINCIPAL_MAX];
+   if (lk.cn[0] && cert_vault_principal(lk.cn, vprincipal, sizeof(vprincipal)))
+      if (vault_capability_revoke(vprincipal) != 0)
+         return -1;
+
+   return 0;
 }

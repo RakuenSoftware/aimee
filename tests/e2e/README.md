@@ -214,3 +214,33 @@ accepts SQL that Postgres rejects.
 Section 10 pins one contract that otherwise reads as a bug: `--budget 0` is not
 "do nothing". `curiosity_resolve_pass` treats any budget `<= 0` as unset and
 substitutes its default, so an operator asking for none still gets a full pass.
+
+## Independent thin-client pairing
+
+`client-pairing-e2e.py` requires a fresh, disposable `compose.yaml` stack with
+runtime-web enabled and a Compose project name beginning `aimee-pairing-e2e-`.
+It refuses other project names. Publish the API and dashboard on loopback, and
+supply the released Linux thin-client binary. It replaces the generated login,
+creates two independent devices, tests concurrent writes and shared recall,
+rejects another dashboard user's management requests, checks invitation expiry
+and replay, revokes one device, restarts the server, and exercises revoke-all.
+Remove the disposable stack and its volumes after the test.
+
+```sh
+python3 tests/e2e/client-pairing-e2e.py \
+  --server aimee-pairing-e2e-test-aimee-server-1 \
+  --store-db aimee-pairing-e2e-test-aimee-store-db-1 \
+  --client /path/to/aimee-linux-x86_64
+```
+
+For the Settings UI phase, install Playwright in a separate test directory and
+make its `node_modules` available through `NODE_PATH`. Add
+`--browser-script tests/e2e/client-pairing-browser.cjs`. Chromium defaults to
+`/usr/bin/chromium`; `CHROMIUM_PATH` can select another installation. The browser
+checks listing, invitation creation, copying the pairing command, and revocation.
+Credentials pass over stdin and are never printed.
+
+The Go test `TestClientDeviceMigrationPreservesExistingPairingLive` exercises the
+released identity schema followed by the new migration. Set `AIMEE_TEST_PG_URL`
+to a disposable PostgreSQL database and run that test in `server-go`; it uses a
+transaction-local schema that is rolled back, preserving other fixtures.

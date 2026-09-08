@@ -96,6 +96,7 @@ var schemaHistory = []struct {
 	// feedback hashes. Retain a bounded canonical set of structured blockers so
 	// cosmetic edits and blocker substitution cannot reset the progress budget.
 	{24, "schema_convergence_blocker_sets.sql"},
+	{25, "schema_client_devices.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

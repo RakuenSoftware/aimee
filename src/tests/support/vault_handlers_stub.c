@@ -114,3 +114,9 @@ int handle_cert_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)req;
    return vault_stub(conn);
 }
+
+int server_revoke_client_certificate(const char *serial)
+{
+   (void)serial;
+   return -1;
+}

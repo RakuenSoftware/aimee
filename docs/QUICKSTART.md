@@ -207,6 +207,30 @@ two clients. They can connect while mTLS is optional, but remain read-only and w
 the server's enrolled-client roster promotes mTLS to required. Do not mistake a copied bearer for a
 client identity.
 
+### Pair additional devices, or recover a missed pairing
+
+Sign in to the server dashboard as its owner and open **Settings → Clients**.
+Enter a device name, choose **Add client**, and run the displayed `aimee remote set`
+command on that Linux workstation. The invitation expires after 15 minutes and
+can enroll one device. Its token is shown only when created; if you lose it,
+revoke the pending invitation and create another.
+
+Repeat this for each workstation. Every device generates its own private key
+locally and receives its own certificate, with access to the same owner's
+memories and server data. Adding a device preserves existing connections. The
+original wizard pairing appears as **First client** after upgrading.
+
+Use **Revoke** beside a device to disconnect that device or cancel its pending
+invitation. Other devices remain connected. Pairings and revocations survive
+server restarts. There is a limit of 64 active devices and pending invitations;
+revoke an unused entry if you reach it. The explicit `api.rotate_bearer`
+operation remains a revoke-all operation.
+
+This flow also works for the first client when you skipped pairing in the
+wizard, and on manually managed Docker deployments. It does not require a KB,
+a Docker socket, or another deployment. Only the server owner can manage these
+clients. Automatic certificate enrollment currently requires the Linux client.
+
 ## 4. Verify the stack
 
 ```bash

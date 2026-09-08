@@ -72,6 +72,9 @@ extern "C"
     * 0 when no grant exists, or -1 on a storage/validation failure. */
    int db1_remote_client_tier(const char *cert_serial, char *principal, size_t principal_cap);
 
+   int db1_remote_client_manage(const char *principal, const char *action, const char *id,
+                                const char *name, int64_t now, char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif
