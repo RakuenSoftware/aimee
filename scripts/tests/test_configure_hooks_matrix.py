@@ -55,11 +55,13 @@ class ConfigureHooksMatrixTest(unittest.TestCase):
             env = os.environ.copy()
             env.update({"HOME": str(home), "OSTYPE": "linux-gnu", "TERM": "dumb"})
             command = ["bash", str(ROOT / "configure-hooks.sh")]
-            subprocess.run(command, env=env, cwd=ROOT, check=True, capture_output=True, text=True)
+            result = subprocess.run(command, env=env, cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
             managed_paths = [v for pair in adapters.values() for v in pair if v] + [vscode]
             first = {path: path.read_bytes() for path in managed_paths}
-            subprocess.run(command, env=env, cwd=ROOT, check=True, capture_output=True, text=True)
+            result = subprocess.run(command, env=env, cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             second = {path: path.read_bytes() for path in managed_paths}
             self.assertEqual(first, second, "a second installation must be byte-for-byte idempotent")
 

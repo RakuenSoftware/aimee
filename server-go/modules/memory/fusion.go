@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -36,9 +37,11 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	if !available {
 		return base, nil
 	}
-	ids := make([]int64, 0, len(base))
+	// The PostgreSQL bus accepts scalar parameters. Encode the bounded ID list
+	// as PostgreSQL array text rather than passing a Go slice across that boundary.
+	ids := make([]string, 0, len(base))
 	for _, r := range base {
-		ids = append(ids, r.ID)
+		ids = append(ids, strconv.FormatInt(r.ID, 10))
 	}
 	rows, err := s.db.Query(ctx, `WITH RECURSIVE visible AS MATERIALIZED (
  SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM memories
@@ -71,7 +74,7 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 )
 SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence
 FROM ranked r JOIN visible m ON m.id=r.memory_id ORDER BY r.score DESC,m.confidence DESC,m.id LIMIT $11`,
-		exact, req.Scope.Type, req.Scope.Value, req.IncludeAll, req.Project, req.Workspace, req.Kind, req.Tier, ids, req.Query, req.Limit)
+		exact, req.Scope.Type, req.Scope.Value, req.IncludeAll, req.Project, req.Workspace, req.Kind, req.Tier, "{"+strings.Join(ids, ",")+"}", req.Query, req.Limit)
 	if err != nil {
 		return nil, err
 	}

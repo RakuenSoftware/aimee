@@ -25616,9 +25616,7 @@
       "symbol": "pgvec_memory_upsert"
     },
     {
-      "consumers": [
-        "src/kb/kb_main.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
@@ -25655,7 +25653,6 @@
     },
     {
       "consumers": [
-        "src/kb/kb_main.c",
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
@@ -26233,7 +26230,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d8a6614e6047521fc815a94cd564e0e0b5ef5227221cd963f4b95f4b2850c039",
+  "fingerprint": "049e2ee76ab0b988f5da970fca4cd99cd4528eb3c06598a7182a9a059ce05009",
   "module": "db2",
   "schema_version": 1,
   "summary": {
