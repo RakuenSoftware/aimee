@@ -102,8 +102,12 @@ This live appliance uses standalone Server with its private PostgreSQL and embed
 no shared KB configured. Local native tests skip checks requiring a separate PostgreSQL
 store fixture, signed KMS services, tmux, or root-only fixtures. PostgreSQL memory and code
 coverage above uses an isolated disposable database, never the appliance's live database.
-Windows, macOS, full topology/container CI, and protected promotion remain release gates;
-this report does not claim those were exercised by the local Linux run.
+The final PR commit `bb3fdaa6bb` passed all 58 CI checks, including Windows and macOS builds,
+the full sanitizer and script suites, PostgreSQL/workflow gates, and all four container
+topologies with encrypted-storage recovery, upgrade, and rollback.
+[CI results](release-0.4.4-2026-09-08/ci-final.json) retain each check URL.
+PR #2975 merged that tree into `testing` at `ec4717297e`. Protected promotion and release
+approval remain; these CI results are separate from the local Linux run described above.
 
 The optional server-side `git_verify` auto-discovery cannot inspect this detached client's
 Makefile. Equivalent repository Make targets were run on the client and their results are

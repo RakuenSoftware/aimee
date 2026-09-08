@@ -223,11 +223,11 @@
         },
         {
           "path": "frontend/package-lock.json",
-          "sha256": "1ddf1843077b2514cbbc9f90fe013a0b4a926e74eb4b737a65f510b33b43d87f"
+          "sha256": "59f57fcf533abdd286d43ab09435e6a73832ae1c5812e929029fab434f1117fd"
         },
         {
           "path": "frontend/package.json",
-          "sha256": "cf23035508de05af1ec6663d888b1cd651a70362864649b26a9c14f621800067"
+          "sha256": "5c2c8b93f5587d9c1aa37267ad8b1352d4ddffa475d6b36006c44690b517cf5e"
         },
         {
           "path": "install.ps1",
@@ -567,7 +567,7 @@
         },
         {
           "path": "src/headers/code_span.h",
-          "sha256": "4308f71cd781bec8c677c6481929b90530cd8ed73966087bce3996f1913eab7f"
+          "sha256": "16937cae855af67c0bda923c2618a518d67c2bcbf0df7c2e81d0e28baafc1f96"
         },
         {
           "path": "src/headers/code_treesitter.h",
@@ -1904,7 +1904,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "d6fe33e7c7b2c9806dec092d93d5d5317c48be0746529ca285b97d100124a23c",
+      "sha256": "8141e8fb95f259008f32e5bee0edcf94d26d60f0d8486873de6bf9ef1f5ac91a",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
