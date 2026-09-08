@@ -2,9 +2,13 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	store "github.com/JBailes/aimee/server-go/db"
 	"github.com/jackc/pgx/v5"
@@ -264,4 +268,184 @@ func TestCodeVectorsRejectStaleContentAndModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	search(0)
+}
+
+func TestPrivateCodeIndexLargeGraphAndMissingFile(t *testing.T) {
+	t.Setenv("AIMEE_GRAPH_FUSION", "on")
+	ctx, s, db := codeFixture(t)
+	if err := s.ensureCodeIndex(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// A repository-sized graph: each file has several definitions and calls.
+	// A file-first join expands millions of unrelated pairs before matching names.
+	_, err := db.Exec(ctx, `INSERT INTO user_code_projects(name,root,generation) VALUES('large','/fixture/large',1);
+ INSERT INTO user_code_files(project,path,content,definitions,calls,fingerprint)
+ SELECT 'large', 'file-'||i||'.c', CASE WHEN i=1 THEN 'quasar' ELSE 'source' END,
+ (SELECT jsonb_agg(jsonb_build_object('name','symbol-'||i||'-'||d,'line',d,'line_end',d,'kind','function')) FROM generate_series(1,20) d),
+ (SELECT jsonb_agg(jsonb_build_object('callee','symbol-'||(i%1500+1)||'-'||c,'caller','entry','line',c)) FROM generate_series(1,20) c),
+ md5(i::text) FROM generate_series(1,1500) i`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	raw, err := s.CodeIndex(bounded, CodeIndexRequest{Route: "/v1/code/hybrid?project=large&query=quasar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reply struct {
+		Hits []struct {
+			Path string `json:"file_path"`
+		}
+	}
+	if err := json.Unmarshal(raw, &reply); err != nil || len(reply.Hits) != 3 {
+		t.Fatalf("graph neighbors missing: %s (%v)", raw, err)
+	}
+	for _, route := range []string{"/v1/code/structure?project=large&file_path=missing.c", "/v1/code/structure?project=missing&file_path=missing.c"} {
+		raw, err = s.CodeIndex(ctx, CodeIndexRequest{Route: route})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var structure struct {
+			Definitions []CodeDefinition `json:"definitions"`
+		}
+		if err := json.Unmarshal(raw, &structure); err != nil || structure.Definitions == nil || len(structure.Definitions) != 0 {
+			t.Fatalf("missing file: %s (%v)", raw, err)
+		}
+	}
+}
+
+func TestPrivateCodeMissingBlastRadius(t *testing.T) {
+	ctx, s, _ := codeFixture(t)
+	raw, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/blast-radius?project=missing&file_path=missing.c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reply struct {
+		Resolved   bool
+		Dependents []string
+	}
+	if err := json.Unmarshal(raw, &reply); err != nil || reply.Resolved || reply.Dependents == nil {
+		t.Fatalf("missing file: %s (%v)", raw, err)
+	}
+}
+
+func TestPrivateCodePublishedSpan(t *testing.T) {
+	ctx, s, _ := codeFixture(t)
+	_, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "detached", Root: "/unreadable/client/path", Files: []CodeFile{{Path: "main.c", Content: "one\ntwo\nthree\n"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/span", Project: "detached", FilePath: "main.c", LineStart: 2, LineEnd: 100, MaxLines: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var span struct {
+		Content   string
+		Truncated bool
+		LineCount int    `json:"line_count"`
+		Version   string `json:"source_version"`
+	}
+	if err := json.Unmarshal(raw, &span); err != nil || span.Content != "two\n" || !span.Truncated || span.LineCount != 1 || len(span.Version) != 64 {
+		t.Fatalf("span: %s (%v)", raw, err)
+	}
+	for _, path := range []string{"../main.c", "/etc/passwd", ".env", "missing.c"} {
+		raw, err = s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/span", Project: "detached", FilePath: path})
+		if err != nil || !strings.Contains(string(raw), `"error"`) {
+			t.Fatalf("path %s: %s (%v)", path, raw, err)
+		}
+	}
+}
+
+// A repository with a submodule manifest must publish atomically, while hidden
+// credential/config paths are rejected before changing the published generation.
+func TestPrivateCodeManifestPublication(t *testing.T) {
+	ctx, s, _ := codeFixture(t)
+	call := func(phase string, files []CodeFile, count int) {
+		t.Helper()
+		_, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "manifest", Root: "/fixture/manifest", ScanID: "first", Phase: phase, Files: files, ExpectedFiles: count})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	call("begin", nil, 0)
+	call("stage", []CodeFile{{Path: ".gitmodules", Content: "[submodule]"}, {Path: "nested/.gitmodules", Content: "[submodule]"}, {Path: "source.c", Content: "int visible;"}}, 0)
+	call("seal", nil, 3)
+	raw, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/project-stats?project=manifest"})
+	var stats struct{ Files int }
+	if err != nil || json.Unmarshal(raw, &stats) != nil || stats.Files != 3 {
+		t.Fatalf("publication: %s (%v)", raw, err)
+	}
+	for _, path := range []string{".mcp.json", "nested/.env.production.json", ".git/config", ".gitmodules/source.c", "nested/.gitmodules/config", "x/../.gitmodules"} {
+		_, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "manifest", Root: "/fixture/manifest", Files: []CodeFile{{Path: path, Content: "hidden"}}})
+		if err == nil {
+			t.Fatalf("hidden path accepted: %s", path)
+		}
+	}
+	raw, err = s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/span", Project: "manifest", FilePath: "source.c", LineStart: 1, LineEnd: 1})
+	if err != nil || !strings.Contains(string(raw), `"generation":1`) || !strings.Contains(string(raw), "int visible;") {
+		t.Fatalf("rejected scan changed publication: %s (%v)", raw, err)
+	}
+}
+
+func TestPrivateCodePublishedSpanBoundsAndDrift(t *testing.T) {
+	ctx, s, _ := codeFixture(t)
+	files := []CodeFile{{Path: "short.c", Content: "one\ntwo\nthree"}, {Path: "empty.c", Content: ""}, {Path: "many.c", Content: strings.Repeat("line\n", 450)}, {Path: "wide.c", Content: "ok\n" + strings.Repeat("x", 65536) + "\n"}}
+	publish := func(phase, scan string, files []CodeFile) {
+		t.Helper()
+		_, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/scan", Project: "spans", Root: "/unreadable/client", Phase: phase, ScanID: scan, Files: files, ExpectedFiles: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish("", "", files)
+	for _, tc := range []struct {
+		name, path                   string
+		start, end, max, lines, last int
+		truncated                    bool
+		content                      string
+	}{
+		{"defaults", "short.c", 0, 0, 0, 1, 1, false, "one\n"},
+		{"unterminated last line", "short.c", 2, 3, 400, 2, 3, false, "two\nthree"},
+		{"short file not truncated", "short.c", 1, 1000, 400, 3, 3, false, "one\ntwo\nthree"},
+		{"past EOF", "short.c", 90, 100, 400, 0, 0, false, ""},
+		{"empty", "empty.c", 1, 10, 400, 0, 0, false, ""},
+		{"hard line cap", "many.c", 1, 1000, 1000, 400, 400, true, strings.Repeat("line\n", 400)},
+		{"byte cap", "wide.c", 1, 2, 400, 1, 1, true, "ok\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/span", Project: "spans", FilePath: tc.path, LineStart: tc.start, LineEnd: tc.end, MaxLines: tc.max})
+			var reply struct {
+				Content    string
+				LineCount  int `json:"line_count"`
+				LineEnd    int `json:"line_end"`
+				Truncated  bool
+				Version    string `json:"source_version"`
+				Generation int
+				Freshness  string
+			}
+			if err != nil || json.Unmarshal(raw, &reply) != nil {
+				t.Fatalf("span: %s (%v)", raw, err)
+			}
+			if reply.Content != tc.content || reply.LineCount != tc.lines || reply.LineEnd != tc.last || reply.Truncated != tc.truncated || reply.Generation != 1 || reply.Freshness != "published" {
+				t.Fatalf("incorrect span: %+v", reply)
+			}
+			for _, file := range files {
+				if file.Path == tc.path && reply.Version != fmt.Sprintf("%x", sha256.Sum256([]byte(file.Content))) {
+					t.Fatal("version does not hash the whole published file")
+				}
+			}
+		})
+	}
+	publish("begin", "next", nil)
+	publish("stage", "next", []CodeFile{{Path: "short.c", Content: "changed\n"}})
+	raw, err := s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/span", Project: "spans", FilePath: "short.c", LineStart: 1, LineEnd: 1})
+	if err != nil || !strings.Contains(string(raw), `"content":"one\n"`) {
+		t.Fatalf("staged bytes escaped: %s (%v)", raw, err)
+	}
+	publish("seal", "next", nil)
+	raw, err = s.CodeIndex(ctx, CodeIndexRequest{Route: "/v1/code/span", Project: "spans", FilePath: "short.c", LineStart: 1, LineEnd: 1})
+	if err != nil || !strings.Contains(string(raw), `"content":"changed\n"`) || !strings.Contains(string(raw), `"generation":2`) {
+		t.Fatalf("new generation not visible: %s (%v)", raw, err)
+	}
 }

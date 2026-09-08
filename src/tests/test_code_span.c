@@ -55,6 +55,14 @@ static int jbool_true(cJSON *o, const char *k)
    return cJSON_IsTrue(v);
 }
 
+static cJSON *published_span(const char *project, const char *path, int start, int end, int max)
+{
+   assert(strcmp(project, "detached") == 0);
+   assert(strcmp(path, "source.c") == 0);
+   assert(start == 2 && end == 3);
+   return cJSON_Parse("{\"content\":\"published source\"}");
+}
+
 int main(void)
 {
    make_root();
@@ -173,5 +181,17 @@ int main(void)
    }
 
    printf("All code_span tests passed.\n");
+   code_span_set_index_reader(published_span);
+   cJSON *published = code_span_read("detached", "/unreadable/client", "source.c", 2, 3, 400);
+   assert(published && strcmp(jstr(published, "content"), "published source") == 0);
+   cJSON_Delete(published);
+   published = code_span_read("detached", "/unreadable/client", "/etc/passwd", 2, 3, 400);
+   assert(published && jstr(published, "error"));
+   cJSON_Delete(published);
+   published = code_span_read("detached", "/unreadable/client", ".env", 2, 3, 400);
+   assert(published && jstr(published, "error"));
+   cJSON_Delete(published);
+   code_span_set_index_reader(NULL);
+   PASS("published index reads need no client filesystem and preserve path denials");
    return 0;
 }

@@ -171,6 +171,24 @@ int main(void)
    cJSON_Delete(memory_request);
    printf("  ok    expired or unavailable memory does not fabricate success\n");
 
+   g_result = AIMEE_MODULE_CALL_OK;
+   memory_request = cJSON_CreateObject();
+   cJSON_AddStringToObject(memory_request, "operation", "code-index");
+   cJSON *index = cJSON_AddObjectToObject(memory_request, "code_index");
+   cJSON_AddStringToObject(index, "route", "/v1/code/scan");
+   g_required_budget_ms = 10000;
+   reply = server_module_memory_data(memory_request);
+   assert(reply && g_deadline < aimee_module_call_deadline_ns(121000));
+   cJSON_Delete(reply);
+   cJSON_ReplaceItemInObjectCaseSensitive(index, "route", cJSON_CreateString("/v1/code/hybrid"));
+   reply = server_module_memory_data(memory_request);
+   assert(reply && g_deadline < aimee_module_call_deadline_ns(31000));
+   cJSON_Delete(reply);
+   g_required_budget_ms = 31000;
+   assert(!server_module_memory_data(memory_request));
+   cJSON_Delete(memory_request);
+   printf("  ok    code publication and retrieval have separate bounded budgets\n");
+
    printf("module_json_call: all tests passed\n");
    return 0;
 }

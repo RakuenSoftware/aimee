@@ -2,10 +2,14 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	store "github.com/JBailes/aimee/server-go/db"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -38,6 +42,8 @@ func (s *postgresDataStore) queryCode(ctx context.Context, route *url.URL, req C
 		limit = 128
 	}
 	switch route.Path {
+	case "/v1/code/span":
+		return s.codeSpan(ctx, project, req)
 	case "/v1/code/projects":
 		return s.codeJSON(ctx, `SELECT json_build_object('projects',COALESCE(json_agg(p),'[]'::json))::text FROM
 (SELECT name,root,scanned_at,generation FROM user_code_projects WHERE generation>0 ORDER BY name LIMIT $1) p`, limit)
@@ -59,8 +65,8 @@ WHERE ($1='' OR f.project=$1) AND lower(d->>'name')=lower($2) ORDER BY f.project
 FROM user_code_files f CROSS JOIN LATERAL jsonb_array_elements(f.calls) c
 WHERE ($1='' OR f.project=$1) AND c->>'callee'=$2 ORDER BY f.project,f.path,line LIMIT $3) h`, project, q.Get("symbol"), limit)
 	case "/v1/code/structure":
-		return s.codeJSON(ctx, `SELECT json_build_object('definitions',definitions,'imports',imports,'calls',calls)::text
-FROM user_code_files WHERE project=$1 AND path=$2`, project, q.Get("file_path"))
+		return s.codeJSON(ctx, `SELECT COALESCE((SELECT json_build_object('definitions',definitions,'imports',imports,'calls',calls)
+FROM user_code_files WHERE project=$1 AND path=$2), '{"definitions":[],"imports":[],"calls":[]}'::json)::text`, project, q.Get("file_path"))
 	case "/v1/code/search", "/v1/code/hybrid", "/v1/code/context":
 		return s.searchCode(ctx, project, q.Get("query"), limit)
 	case "/v1/code/blast-radius":
@@ -73,16 +79,32 @@ FROM user_code_files WHERE project=$1 AND path=$2`, project, q.Get("file_path"))
 // The same extracted definitions and calls serve callers, blast radius and
 // retrieval expansion. Edges never join symbols across projects, and all hits
 // carry the source file rather than inventing personal memories from code.
-const codeCallEdges = `SELECT DISTINCT caller.project,caller.path AS source,callee.path AS target
-FROM user_code_files caller CROSS JOIN LATERAL jsonb_array_elements(caller.calls) c
-JOIN user_code_files callee ON callee.project=caller.project AND callee.path<>caller.path
-CROSS JOIN LATERAL jsonb_array_elements(callee.definitions) d
-WHERE c->>'callee'=d->>'name'
+// Extract each file's symbols once before joining. Joining files first expands
+// every caller against every definition in its repository on every search.
+// Only edges touching retrieval seeds (or the requested file) are materialized.
+const codeCallEdges = `WITH files AS MATERIALIZED (
+ SELECT project,path,calls,definitions,imports,module_identity FROM user_code_files
+ WHERE project IN (SELECT project FROM anchors)
+), refs AS MATERIALIZED (
+ SELECT project,path,c->>'callee' AS name,'symbol' AS kind FROM files CROSS JOIN LATERAL jsonb_array_elements(calls) c
+ UNION ALL
+ SELECT project,path,imp,'module' FROM files CROSS JOIN LATERAL jsonb_array_elements_text(imports) imp
+), targets AS MATERIALIZED (
+ SELECT project,path,d->>'name' AS name,'symbol' AS kind FROM files CROSS JOIN LATERAL jsonb_array_elements(definitions) d
+ UNION ALL
+ SELECT project,path,module_identity,'module' FROM files WHERE module_identity<>''
+ UNION ALL
+ SELECT project,path,module_identity||'.__init__','module' FROM files WHERE module_identity<>''
+)
+SELECT DISTINCT r.project,r.path AS source,t.path AS target
+FROM anchors a JOIN refs r USING(project,path)
+JOIN targets t ON t.project=r.project AND t.name=r.name AND t.kind=r.kind
+WHERE t.path<>r.path
 UNION
-SELECT caller.project,caller.path,callee.path FROM user_code_files caller
-CROSS JOIN LATERAL jsonb_array_elements_text(caller.imports) imp
-JOIN user_code_files callee ON callee.project=caller.project AND callee.path<>caller.path
-WHERE callee.module_identity<>'' AND (imp=callee.module_identity OR imp=callee.module_identity||'.__init__')`
+SELECT DISTINCT r.project,r.path,t.path
+FROM anchors a JOIN targets t USING(project,path)
+JOIN refs r ON r.project=t.project AND r.name=t.name AND r.kind=t.kind
+WHERE t.path<>r.path`
 
 func (s *postgresDataStore) searchCode(ctx context.Context, project, query string, limit int) (json.RawMessage, error) {
 	vector, serving := "", ""
@@ -105,6 +127,7 @@ func (s *postgresDataStore) searchCode(ctx context.Context, project, query strin
  THEN 1-(embedding <=> NULLIF($5,'')::vector)>0.3 ELSE false END
  ORDER BY rank DESC,project,path LIMIT 32
 ), seeds AS (SELECT * FROM lexical UNION ALL SELECT * FROM dense),
+ anchors AS MATERIALIZED (SELECT DISTINCT project,path FROM seeds WHERE $4),
  edges AS (`+codeCallEdges+`), expanded AS (
  SELECT e.project,CASE WHEN e.source=l.path THEN e.target ELSE e.source END AS path,
  max(l.rank)*0.5 AS rank FROM seeds l JOIN edges e ON e.project=l.project AND (e.source=l.path OR e.target=l.path)
@@ -127,11 +150,67 @@ func (s *postgresDataStore) searchCode(ctx context.Context, project, query strin
 }
 
 func (s *postgresDataStore) blastCode(ctx context.Context, project, file string) (json.RawMessage, error) {
-	return s.codeJSON(ctx, `WITH edges AS (`+codeCallEdges+`)
-SELECT json_build_object('file',$2::text,'project',p.name,'generation',p.generation,'freshness','current','resolved',true,
+	return s.codeJSON(ctx, `WITH anchors AS MATERIALIZED (SELECT $1::text AS project,$2::text AS path), edges AS (`+codeCallEdges+`)
+SELECT COALESCE((SELECT json_build_object('file',$2::text,'project',p.name,'generation',p.generation,'freshness','current','resolved',true,
 'dependency_edges',COALESCE((SELECT json_agg(json_build_object('identity',e.target,'provenance','code_structure','confidence','structural','project',p.name,'generation',p.generation,'freshness','current')) FROM edges e WHERE e.project=p.name AND e.source=$2),'[]'::json),
 'dependent_edges',COALESCE((SELECT json_agg(json_build_object('path',e.source,'provenance','code_structure','confidence','structural','project',p.name,'generation',p.generation,'freshness','current')) FROM edges e WHERE e.project=p.name AND e.target=$2),'[]'::json),
 'dependents',COALESCE((SELECT json_agg(e.source) FROM edges e WHERE e.project=p.name AND e.target=$2),'[]'::json),
 'dependencies',COALESCE((SELECT json_agg(e.target) FROM edges e WHERE e.project=p.name AND e.source=$2),'[]'::json))::text
-FROM user_code_projects p JOIN user_code_files f ON f.project=p.name WHERE p.name=$1 AND f.path=$2`, project, file)
+FROM user_code_projects p JOIN user_code_files f ON f.project=p.name WHERE p.name=$1 AND f.path=$2),
+json_build_object('file',$2::text,'project',$1::text,'error','source file is not in the published index','resolved',false,'dependency_edges','[]'::json,'dependent_edges','[]'::json,'dependents','[]'::json,'dependencies','[]'::json)::text)`, project, file)
+}
+
+// Source recovery reads the published generation, including detached uploads.
+// No supplied path is opened on the server's filesystem.
+func (s *postgresDataStore) codeSpan(ctx context.Context, project string, req CodeIndexRequest) (json.RawMessage, error) {
+	fail := func(message string) (json.RawMessage, error) { return json.Marshal(map[string]any{"error": message}) }
+	if project == "" || !validCodePath(req.FilePath) {
+		return fail("invalid project or source path")
+	}
+	var content string
+	var generation int64
+	err := s.db.QueryRow(ctx, `SELECT f.content,p.generation FROM user_code_files f JOIN user_code_projects p ON p.name=f.project WHERE f.project=$1 AND f.path=$2 AND p.generation>0`, project, req.FilePath).Scan(&content, &generation)
+	if store.IsNoRows(err) {
+		return fail("source file is not in the published index")
+	}
+	if err != nil {
+		return nil, err
+	}
+	start, end, max := req.LineStart, req.LineEnd, req.MaxLines
+	if start < 1 {
+		start = 1
+	}
+	if end < start {
+		end = start
+	}
+	if max <= 0 || max > 400 {
+		max = 400
+	}
+	clamped := end-start >= max
+	if clamped {
+		end = start + max - 1
+	}
+	lines := strings.SplitAfter(content, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	var out strings.Builder
+	emitted := 0
+	truncated := false
+	for i := start - 1; i < len(lines) && i < end; i++ {
+		if out.Len()+len(lines[i]) > 64*1024 {
+			truncated = true
+			break
+		}
+		out.WriteString(lines[i])
+		emitted++
+	}
+	if clamped && end < len(lines) {
+		truncated = true
+	}
+	actualEnd := 0
+	if emitted > 0 {
+		actualEnd = start + emitted - 1
+	}
+	return json.Marshal(map[string]any{"project": project, "file_path": req.FilePath, "line_start": start, "line_end": actualEnd, "line_count": emitted, "truncated": truncated, "content": out.String(), "source_version": fmt.Sprintf("%x", sha256.Sum256([]byte(content))), "generation": generation, "freshness": "published"})
 }

@@ -1,6 +1,7 @@
 /* Private code indexing: reuse the shipping collector and language extractors;
  * persist through the existing memory and PostgreSQL modules. */
 #include "server_code_index.h"
+#include "code_span.h"
 #include "module_stage_adapters.h"
 #include "aimee.h"
 #include "index.h"
@@ -80,7 +81,7 @@ static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file)
    cJSON_AddStringToObject(request, "operation", "code-index");
    cJSON *index = cJSON_AddObjectToObject(request, "code_index");
    cJSON_AddStringToObject(index, "route", route);
-   const char *fields[] = {"project", "root_path", "phase", "scan_id"};
+   const char *fields[] = {"project", "root_path", "phase", "scan_id", "file_path"};
    for (unsigned i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i)
    {
       const cJSON *v = cJSON_GetObjectItemCaseSensitive(body, fields[i]);
@@ -90,6 +91,13 @@ static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file)
    const cJSON *count = cJSON_GetObjectItemCaseSensitive(body, "expected_files");
    if (cJSON_IsNumber(count))
       cJSON_AddNumberToObject(index, "expected_files", count->valuedouble);
+   const char *line_fields[] = {"line_start", "line_end", "max_lines"};
+   for (unsigned i = 0; i < sizeof(line_fields) / sizeof(line_fields[0]); ++i)
+   {
+      const cJSON *v = cJSON_GetObjectItemCaseSensitive(body, line_fields[i]);
+      if (cJSON_IsNumber(v))
+         cJSON_AddNumberToObject(index, line_fields[i], v->valuedouble);
+   }
    if (file)
    {
       cJSON *files = cJSON_AddArrayToObject(index, "files");
@@ -100,6 +108,24 @@ static cJSON *call_code(const char *route, const cJSON *body, const cJSON *file)
    cJSON *payload = cJSON_DetachItemFromObjectCaseSensitive(reply, "payload");
    cJSON_Delete(reply);
    return payload;
+}
+
+static cJSON *local_code_span(const char *project, const char *path, int start, int end, int max)
+{
+   cJSON *body = cJSON_CreateObject();
+   cJSON_AddStringToObject(body, "project", project);
+   cJSON_AddStringToObject(body, "file_path", path);
+   cJSON_AddNumberToObject(body, "line_start", start);
+   cJSON_AddNumberToObject(body, "line_end", end);
+   cJSON_AddNumberToObject(body, "max_lines", max);
+   cJSON *reply = call_code("/v1/code/span", body, NULL);
+   cJSON_Delete(body);
+   if (!reply)
+   {
+      reply = cJSON_CreateObject();
+      cJSON_AddStringToObject(reply, "error", "published source index unavailable");
+   }
+   return reply;
 }
 
 static char *local_code(const char *route, const void *body_v, int *status)
@@ -247,6 +273,8 @@ static void *scan_main(void *unused)
 void server_code_index_start(void)
 {
    kb_client_set_local_code_provider(local_code);
+   if (kb_client_local_code_enabled())
+      code_span_set_index_reader(local_code_span);
    atomic_store(&scan_stop, 0);
    scan_started = pthread_create(&scan_thread, NULL, scan_main, NULL) == 0;
 }

@@ -1,0 +1,15 @@
+{
+  "candidate": "0.4.4-rc1",
+  "image_id": "sha256:911d2a89bfe464cba1fcb67fd1f0cdaecd51dafbf6318fd7754fe1d227d64aee",
+  "server": "LXC 103",
+  "sha256": {
+    "/usr/local/bin/aimee-server": "e77823e6671006e834f5f657a85d283c1598d60e2a20330aedf678ba46db6fc9",
+    "/usr/local/bin/aimee": "f0f612dbd0220cb31cf4a9f3355b38023f69a507397cbb1eb6c96e302054330f",
+    "/usr/local/libexec/aimee-modules/aimee-module-memory": "d57d32f9ca3c2f4c672c4e5d4adb4291ee2469b5c50a16e7f30969ddcf6a493c",
+    "/usr/local/libexec/aimee-modules/aimee-module-workspace": "d57d32f9ca3c2f4c672c4e5d4adb4291ee2469b5c50a16e7f30969ddcf6a493c",
+    "/usr/local/share/aimee-runtime-web/index.html": "2e0d542962a74f615320993463accc6a09bcdf26a3062f17b8d911c37a1de272"
+  },
+  "ready_after_restart": true,
+  "restart_count": 0,
+  "hotfix_mounts": false
+}

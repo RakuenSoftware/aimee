@@ -83,6 +83,7 @@ type rendezvous struct {
 	// makes this unambiguous: there is only ever one stream to pull from.
 	inflight *exchange
 	closed   bool
+	lastPoll time.Time
 	done     chan struct{}
 }
 
@@ -111,6 +112,19 @@ func (r *rendezvous) close() {
 	close(r.done)
 }
 
+// Registration records an authorized tree; only polling proves that a client
+// is serving it. Otherwise a submit pins a shared RPC slot for ten minutes.
+func (r *rendezvous) markServing() {
+	r.mu.Lock()
+	r.lastPoll = time.Now()
+	r.mu.Unlock()
+}
+func (r *rendezvous) hasLiveRunner() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.closed && !r.lastPoll.IsZero() && time.Since(r.lastPoll) < time.Minute
+}
+
 func (r *rendezvous) isClosed() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -126,7 +140,7 @@ func (r *rendezvous) submit(invocation bus.ModuleInvocation, payload []byte) (
 	item := &exchange{payload: payload, chunks: make(chan chunk, ioChunkBuffer)}
 
 	for {
-		if invocation.Cancelled() || r.isClosed() {
+		if invocation.Cancelled() || !r.hasLiveRunner() {
 			return nil, false, false
 		}
 		select {
@@ -186,6 +200,7 @@ func (r *rendezvous) take(invocation bus.ModuleInvocation, item *exchange) ([]by
 // it reports cancelled rather than OK-with-nothing because cancellation
 // precedence is the bus's convention, not this module's to reinterpret.
 func (r *rendezvous) poll(invocation bus.ModuleInvocation) ([]byte, bool) {
+	r.markServing()
 	for {
 		if r.isClosed() {
 			return nil, false
@@ -286,6 +301,9 @@ func handleRunnerIO(invocation bus.ModuleInvocation, request []byte) ([]byte, bu
 
 	switch op {
 	case IOOpSubmit:
+		if !point.hasLiveRunner() {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
 		result, more, ok := point.submit(invocation, payload)
 		if !ok {
 			return nil, bus.ModuleStatusCancelled

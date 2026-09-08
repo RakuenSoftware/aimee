@@ -130,6 +130,8 @@ int is_sensitive_file(const char *path);
 
 /* Classify a file path by sensitivity and blast radius. */
 classification_t classify_path(const char *file_path);
+/* Sensitivity excludes edit blast radius; read access must not depend on callers. */
+classification_t classify_path_sensitivity(const char *file_path);
 
 /* Pre-tool check. Returns exit code:
  *   0 = allow (msg_buf may contain warnings)

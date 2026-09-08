@@ -116,9 +116,21 @@ cJSON *server_module_memory_data(const cJSON *request)
       free(encoded);
       return NULL;
    }
+   uint64_t budget = MODULE_MEMORY_DATA_DEADLINE_NS;
+   const cJSON *operation = cJSON_GetObjectItemCaseSensitive(request, "operation");
+   if (cJSON_IsString(operation) && strcmp(operation->valuestring, "code-index") == 0)
+   {
+      const cJSON *index = cJSON_GetObjectItemCaseSensitive(request, "code_index");
+      const cJSON *route = cJSON_GetObjectItemCaseSensitive(index, "route");
+      /* Publication builds the search index atomically. A repository scan must
+       * not inherit the five-second budget for an individual memory lookup. */
+      budget = cJSON_IsString(route) && strcmp(route->valuestring, "/v1/code/scan") == 0
+                   ? 120ULL * 1000000000ULL
+                   : 30ULL * 1000000000ULL;
+   }
    int rc = call_module_with_budget(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, encoded,
                                     (uint32_t)request_len, response, AIMEE_MODULE_MESSAGE_MAX_BODY,
-                                    &response_len, MODULE_MEMORY_DATA_DEADLINE_NS);
+                                    &response_len, budget);
    free(encoded);
    cJSON *decoded = NULL;
    if (rc == 0 && response_len > 0)

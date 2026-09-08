@@ -1,4 +1,31 @@
-# What's new in 0.4.0
+# What's new
+
+## 0.4.4 repairs setup and private indexing
+
+0.4.4 is a patch for existing 0.4.x installations. Keep the instance volumes, account,
+client identities, and memories when upgrading. Release validation is recorded in
+[the 0.4.4 report](validation/release-0.4.4-2026-09-08.md).
+
+- A fresh account opens the setup wizard even when the browser remembers dismissing setup
+  on a previous installation.
+- Organization cloning reports each repository as it completes. If a response is lost,
+  the wizard and Projects page check the published inventory before continuing. An
+  unconfirmed clone pauses the queue; a confirmed clone is not submitted twice.
+- Private code scans and graph queries have separate bounded deadlines. Graph expansion
+  joins references and definitions around the requested files, allowing large repositories
+  to answer search and blast-radius requests without the previous whole-repository join.
+- Source spans recover bounded, hashed content from the published private index, including
+  detached client uploads. They are snapshots: publish a new scan to refresh them.
+  A file's edit blast radius no longer makes an otherwise readable source file sensitive.
+- Hidden configuration files are excluded from collection, and the private index accepts
+  the collector's explicit `.gitmodules` build manifest. These files previously caused
+  entire repository scans to fail. Hidden directories and credential files remain excluded.
+- Registering a detached workspace no longer claims that a runner is connected. Requests
+  fail promptly when no client is serving it, instead of occupying shared request slots.
+- Audit SHA-256 remains deterministic after OpenSSL cleanup. Existing damaged audit segments
+  still fail verification; this patch does not silently rewrite or discard audit evidence.
+
+## 0.4.0 changed the deployment and runtime
 
 0.4.0 is a one-way upgrade. It removes the combined image, the work queue, the generic inference gateway,
 the interactive TUI, and the generic RPC transport, and it will not read a 0.2 deployment back.

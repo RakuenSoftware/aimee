@@ -1,0 +1,111 @@
+{
+  "frontend_tests": 209,
+  "frontend_test_files": 26,
+  "native_unit_binaries": 637,
+  "native_unit_environment_skips": true,
+  "repository_lint_checks": 77,
+  "script_test_files_before_browser_gate": 58,
+  "browser_release_scenarios": 5,
+  "postgres_memory_gate": "passed with race detection, 105-case corpus for Server and KB plus privacy and all private-index regressions",
+  "sanitizers": [
+    {
+      "test": "code-collect",
+      "exit_code": 0
+    },
+    {
+      "test": "code-span",
+      "exit_code": 0
+    },
+    {
+      "test": "module-json-call",
+      "exit_code": 0
+    },
+    {
+      "test": "audit-worm-chain",
+      "exit_code": 0
+    }
+  ],
+  "source_base": "b65d8385a6",
+  "candidate": "0.4.4-rc1",
+  "published_release": false,
+  "final_validation": [
+    {
+      "name": "verify-local",
+      "command": [
+        "make",
+        "-C",
+        "src",
+        "-j8",
+        "verify-local",
+        "GIT_VERSION=v0.4.4-rc1",
+        "AIMEE_VERIFY_TEST_JOBS=2"
+      ],
+      "seconds": 286.08,
+      "exit_code": 0
+    },
+    {
+      "name": "frontend-ci",
+      "command": [
+        "npm",
+        "--prefix",
+        "frontend",
+        "ci",
+        "--no-audit",
+        "--no-fund"
+      ],
+      "seconds": 0.99,
+      "exit_code": 0
+    },
+    {
+      "name": "frontend-tests-final",
+      "command": [
+        "npm",
+        "--prefix",
+        "frontend",
+        "test"
+      ],
+      "seconds": 2.74,
+      "exit_code": 0
+    },
+    {
+      "name": "frontend-build-final",
+      "command": [
+        "npm",
+        "--prefix",
+        "frontend",
+        "run",
+        "build"
+      ],
+      "seconds": 4.33,
+      "exit_code": 0
+    },
+    {
+      "name": "browser-final",
+      "command": [
+        "node",
+        "scripts/test-setup-browser.cjs"
+      ],
+      "seconds": 10.84,
+      "exit_code": 0
+    },
+    {
+      "name": "ci-gate-test",
+      "command": [
+        "python3",
+        "-I",
+        "scripts/tests/test_frontend_release_gate.py"
+      ],
+      "seconds": 0.03,
+      "exit_code": 0
+    },
+    {
+      "name": "release-policy",
+      "command": [
+        "bash",
+        "scripts/check-release-policy.sh"
+      ],
+      "seconds": 0.03,
+      "exit_code": 0
+    }
+  ]
+}

@@ -426,6 +426,30 @@ jobs:
           make -C src docs-gen-check
           git diff --check
 
+  frontend-tests:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Frontend unit tests and production build
+        working-directory: frontend
+        run: |
+          npm test
+          npm run build
+      - name: Install the pinned browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: First boot and clone recovery in the built browser
+        working-directory: frontend
+        run: npm run test:browser
+      - name: Confirm browser failures block the required gate
+        run: python3 -I scripts/tests/test_frontend_release_gate.py
+
   # Go unit tests, which until now ran in NO job that a pull request into testing
   # could reach.
   #
@@ -1040,7 +1064,7 @@ jobs:
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate, go-unit-tests, lsp-real-providers]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate, go-unit-tests, frontend-tests, lsp-real-providers]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1054,6 +1078,7 @@ jobs:
           DB2_REPLAY_RESULT: ${{ needs.db2-process-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
           GO_RESULT: ${{ needs.go-unit-tests.result }}
+          FRONTEND_RESULT: ${{ needs.frontend-tests.result }}
           LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}
         run: |
           if [ "$CHANGE_SCOPE_RESULT" = success ] && [ "$DOCS_ONLY" = true ]; then
@@ -1084,11 +1109,15 @@ jobs:
             echo "Go unit-test result: $GO_RESULT" >&2
             exit 1
           }
+          [ "$FRONTEND_RESULT" = success ] || {
+            echo "Frontend unit/browser result: $FRONTEND_RESULT" >&2
+            exit 1
+          }
           [ "$LSP_REAL_RESULT" = success ] || {
             echo "Real-provider LSP result: $LSP_REAL_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, the P1 RLS gate, the Go unit tests, and the real-provider LSP baseline passed."
+          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, the P1 RLS gate, the Go unit tests, frontend unit/browser tests, and the real-provider LSP baseline passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.

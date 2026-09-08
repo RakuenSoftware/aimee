@@ -58,6 +58,10 @@ type CodeFile struct {
 	Imports        []string         `json:"imports"`
 }
 type CodeIndexRequest struct {
+	FilePath      string     `json:"file_path"`
+	LineStart     int        `json:"line_start"`
+	LineEnd       int        `json:"line_end"`
+	MaxLines      int        `json:"max_lines"`
 	Route         string     `json:"route"`
 	Project       string     `json:"project"`
 	Root          string     `json:"root_path"`
@@ -89,8 +93,11 @@ func validCodePath(p string) bool {
 	if p == "" || len(p) > 4096 || strings.ContainsAny(p, "\\\x00\r\n") || path.IsAbs(p) || path.Clean(p) != p || p == ".." || strings.HasPrefix(p, "../") {
 		return false
 	}
-	for _, c := range strings.Split(p, "/") {
-		if strings.HasPrefix(c, ".") {
+	components := strings.Split(p, "/")
+	for i, c := range components {
+		// The collector explicitly includes this build manifest. Other hidden
+		// files and every hidden directory remain outside the code corpus.
+		if strings.HasPrefix(c, ".") && !(i == len(components)-1 && c == ".gitmodules") {
 			return false
 		}
 	}
