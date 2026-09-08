@@ -42,7 +42,7 @@ requests and counts.
 | Native unit suite | Passed; 637 test binaries scheduled, with environment-dependent skips below. |
 | Go unit suite | Passed across all three Go modules, including C/Go bus interoperability. |
 | Repository lint | All 77 checks passed. |
-| Script suite | All 58 existing script test files passed; the added frontend gate test also passed. |
+| Script suite | All 58 existing script test files passed; the added frontend and upgrade-log gate tests also passed. |
 | Frontend | Clean `npm ci`, 209 tests in 26 files, TypeScript, and production build passed. |
 | Built-browser regressions | Five scenarios passed: first boot with old dismissal, lost responses and HTTP 503 on both clone screens. |
 | PostgreSQL memory gate | Passed with race detection: private code regressions, privacy separation, content gate, and the 105-case retrieval corpus in both Server and KB placement. |
@@ -76,6 +76,15 @@ manifest. One such file aborted the whole scan.
 The collector regression failed on the original implementation and passed after aligning
 these contracts. Hidden configuration files are excluded; `.gitmodules` remains an explicit
 manifest exception. All 18 affected repositories subsequently published on the live instance.
+
+## CI exposed a race in the upgrade test's log assertion
+
+The first CI run passed init/migrate routing but exited 141 at the historical-store test's
+final log assertion. Under `pipefail`, `grep -q` closed a matching log stream early and caused
+Docker to receive SIGPIPE. The assertion now drains the stream while preserving both missing
+message and producer-error failures. A regression with a large stream reproduced exit 141
+before the fix and passed all three outcomes afterwards. The complete upgrade test then
+passed against disposable PostgreSQL containers for both `aimee_store` and `aimee_shared`.
 
 ## Audit recovery retained the original evidence
 

@@ -178,6 +178,7 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 test "$(docker inspect -f '{{.State.Running}}' "$repaired_container")" = false
-docker logs "$repaired_container" 2>&1 | grep -q 'both aimee_shared and aimee_store exist'
+# Drain the log stream: grep -q can SIGPIPE Docker under pipefail.
+docker logs "$repaired_container" 2>&1 | grep 'both aimee_shared and aimee_store exist' >/dev/null
 
 echo "postgres-store-upgrade: ok ($LEGACY_STORE_DB)"
