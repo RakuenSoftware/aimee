@@ -4,7 +4,7 @@
 
 0.4.4 is a patch for existing 0.4.x installations. Keep the instance volumes, account,
 client identities, and memories when upgrading. Release validation is recorded in
-[the 0.4.4 report](validation/release-0.4.4-2026-09-08.md).
+[the 0.4.4 report](validation/release-0.4.4-2026-09-09.md).
 
 - Ordinary non-Git folders no longer require a worktree. The existing
   `require_session_worktree=false` setting disables automatic worktree creation,

@@ -27,7 +27,7 @@
       "files": [
         {
           "path": "docs/gen/configuration.md",
-          "sha256": "1de278794e1a592e6c91693b1dc46f5a60d5893ab919d5c172a960a785c73a59"
+          "sha256": "e02ebebd78c4e7261585bf34d2c506b46f29b0eeb6f482ea6631497f0df11cce"
         }
       ]
     },
@@ -419,7 +419,7 @@
         },
         {
           "path": "src/headers/cli_attention_guard.h",
-          "sha256": "519e39f467fba9558bcaecad959ef0da7a5bfb111a3fed798d39648f05b203c0"
+          "sha256": "7a1ab84f9dd45a062b45bec7b5c586513c01a6ba856d893c27f48873f8c913e7"
         },
         {
           "path": "src/headers/cli_chat_stream.h",
@@ -1582,6 +1582,10 @@
           "sha256": "c2e6f5d2569625cbb32473a3948e487f11e72c53f7147760c82d5cedd99a5c11"
         },
         {
+          "path": "src/headers/worktree_scope.h",
+          "sha256": "4df8d02873f66eff676ac71d3ebf8b65e66f28b248234d2278b7915a3149c9c8"
+        },
+        {
           "path": "src/headers/ws_registry.h",
           "sha256": "728bf11075efba1073f1424ce3038f76f3ae09258cb30e2cccd64604c492707e"
         },
@@ -1904,7 +1908,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "8141e8fb95f259008f32e5bee0edcf94d26d60f0d8486873de6bf9ef1f5ac91a",
+      "sha256": "0a7edcd094c1fd426dac7eebecec2d247e6ddb139ea254b50e6ae00cadab2d4c",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

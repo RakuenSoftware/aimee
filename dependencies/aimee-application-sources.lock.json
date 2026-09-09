@@ -600,7 +600,7 @@
       "placements": [
         "kb"
       ],
-      "source_sha256": "36b90f5a600cb7cecf6d10c18b4996dbe9e001962a16c2e4b5903a270ac3dc9e",
+      "source_sha256": "466e5205fb419561219bf7c786a1db76058e0baf5b77a8a5c8f50e5fecb01374",
       "runtime": "c",
       "principal_class": 1,
       "principal_ref": 29,

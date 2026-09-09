@@ -1,0 +1,1032 @@
+[
+  {
+    "command": [
+      "index",
+      "overview"
+    ],
+    "seconds": 0.719,
+    "passed": true,
+    "projects": 74
+  },
+  {
+    "command": [
+      "index",
+      "find",
+      "memory_insert",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 0.76,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "src/headers/memory.h",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 0.759,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "src/headers/memory.h",
+      "382",
+      "387",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 0.765,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "callers",
+      "memory_insert",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 0.765,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "blast-radius",
+      "src/headers/memory.h",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 1.039,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "hybrid",
+      "memory_insert",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 3.723,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "investigate",
+      "memory_insert",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 4.98,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      ".env",
+      "1",
+      "2",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 0.772,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "../outside.c",
+      "1",
+      "2",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 0.614,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "/etc/passwd",
+      "1",
+      "2",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 0.679,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "__aimee_missing_source__.c",
+      "1",
+      "2",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 0.741,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "__aimee_missing_source__.c",
+      "--project",
+      "aimee"
+    ],
+    "seconds": 0.737,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "find",
+      "memory_insert",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 0.74,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "src/headers/memory.h",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 0.792,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "src/headers/memory.h",
+      "382",
+      "387",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 0.755,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "callers",
+      "memory_insert",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 0.844,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "blast-radius",
+      "src/headers/memory.h",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 0.949,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "hybrid",
+      "memory_insert",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 3.623,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "investigate",
+      "memory_insert",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 5.121,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      ".env",
+      "1",
+      "2",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 0.73,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "../outside.c",
+      "1",
+      "2",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 0.781,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "/etc/passwd",
+      "1",
+      "2",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 0.656,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "__aimee_missing_source__.c",
+      "1",
+      "2",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 0.745,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "__aimee_missing_source__.c",
+      "--project",
+      "rakuensoftware/aimee"
+    ],
+    "seconds": 0.698,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "find",
+      "die",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 0.771,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "scripts/wolf-input-diag.sh",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 0.792,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "scripts/wolf-input-diag.sh",
+      "46",
+      "51",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 0.674,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "callers",
+      "die",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 0.794,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "blast-radius",
+      "scripts/wolf-input-diag.sh",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 0.781,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "hybrid",
+      "die",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 1.579,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "investigate",
+      "die",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 1.684,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      ".env",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 0.74,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "../outside.c",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 0.822,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "/etc/passwd",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 0.711,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "__aimee_missing_source__.c",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 0.765,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "__aimee_missing_source__.c",
+      "--project",
+      "games-on-whales/wolf"
+    ],
+    "seconds": 0.681,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "find",
+      "main",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 0.815,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "cmd/moonlight-proxy/main.go",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 0.588,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "cmd/moonlight-proxy/main.go",
+      "20",
+      "25",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 0.795,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "callers",
+      "main",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 0.724,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "blast-radius",
+      "cmd/moonlight-proxy/main.go",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 0.626,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "hybrid",
+      "main",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 1.723,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "investigate",
+      "main",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 1.886,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      ".env",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 0.686,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "../outside.c",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 0.723,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "/etc/passwd",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 0.791,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "__aimee_missing_source__.c",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 0.732,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "__aimee_missing_source__.c",
+      "--project",
+      "games-on-whales/fenrir"
+    ],
+    "seconds": 0.629,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "find",
+      "LiStartConnection",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.763,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "src/Connection.c",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.745,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "src/Connection.c",
+      "209",
+      "214",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.717,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "callers",
+      "LiStartConnection",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.658,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "blast-radius",
+      "src/Connection.c",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.689,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "hybrid",
+      "LiStartConnection",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.98,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "investigate",
+      "LiStartConnection",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 1.119,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      ".env",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.765,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "../outside.c",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.678,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "/etc/passwd",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.595,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "__aimee_missing_source__.c",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.677,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "__aimee_missing_source__.c",
+      "--project",
+      "games-on-whales/moonlight-common-c"
+    ],
+    "seconds": 0.816,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "find",
+      "main",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 0.708,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "app/main.cpp",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 0.688,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "app/main.cpp",
+      "307",
+      "312",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 0.79,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "callers",
+      "main",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 0.67,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "blast-radius",
+      "app/main.cpp",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 0.676,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "hybrid",
+      "main",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 1.663,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "investigate",
+      "main",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 1.841,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      ".env",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 0.645,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "../outside.c",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 0.691,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "/etc/passwd",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 0.726,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "span",
+      "__aimee_missing_source__.c",
+      "1",
+      "2",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 0.812,
+    "passed": true
+  },
+  {
+    "command": [
+      "index",
+      "structure",
+      "__aimee_missing_source__.c",
+      "--project",
+      "games-on-whales/moonlight-qt"
+    ],
+    "seconds": 0.589,
+    "passed": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.854,
+    "passed": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.556,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.619,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.602,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.556,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.494,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.555,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.602,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.555,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.551,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.527,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.527,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.538,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.489,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.444,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.491,
+    "passed": true,
+    "concurrent": true
+  },
+  {
+    "command": [
+      "memory",
+      "search",
+      "aimee-private-code-spans"
+    ],
+    "seconds": 0.511,
+    "passed": true,
+    "concurrent": true
+  }
+]

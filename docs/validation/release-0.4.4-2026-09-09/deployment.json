@@ -1,0 +1,18 @@
+{
+  "revision": "5abadd1fc1723777d1e8c0dfd8848b0429377aef",
+  "image": "ghcr.io/rakuensoftware/aimee:testing-5abadd1",
+  "image_id": "sha256:c404535d95fb1062780b30c960b2505452582217fac1f5d611c99363b8b81896",
+  "repo_digests": [
+    "ghcr.io/rakuensoftware/aimee@sha256:2ab506a863d0d890531e010b80e59d65eaf23ec43768e31895adfb5f083db2bd"
+  ],
+  "version": "aimee vtesting-5abadd1",
+  "health": "healthy",
+  "restarts": 0,
+  "binary_sha256": {
+    "/usr/local/bin/aimee-server": "79f1b836eeb795e27977dbcf4295a3b435c375c3ee10acdf96a8516a46dc4534",
+    "/usr/local/bin/aimee": "853be2cc0122371c0c410d6b74c44b915bc7cd383ebd114af6826d562783280d",
+    "/usr/local/libexec/aimee-modules/aimee-module-memory": "21712561d84d507550282d66dce187b1513453cc9b4f4f08cf22a8d1682ca022"
+  },
+  "validation_client_sha256": "24cb1df6b6b471e271bb034306023c5c046212b1f3d177fa3af1086a3bdd5664",
+  "publishing_run": "https://github.com/RakuenSoftware/aimee/actions/runs/34337002229"
+}

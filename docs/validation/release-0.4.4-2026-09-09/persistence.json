@@ -1,0 +1,34 @@
+{
+  "before_upgrade": {
+    "memories": [
+      {
+        "id": 1,
+        "key": "aimee-deployment",
+        "sha256": "22f7b6390738ed85ab6f94586f524dcc0aa179e72e3518af189e8caa347a6034"
+      },
+      {
+        "id": 2,
+        "key": "aimee-private-code-spans",
+        "sha256": "77ca2db0e6c3128971509966fce746c8fcd36b0748ba977e932d94a9edb56f63"
+      }
+    ],
+    "project_count": 74,
+    "project_roots_sha256": "ca2703400eaccaa74047133678085db8417532e6acefde764e95a036a3399168"
+  },
+  "after_restart": {
+    "memories": [
+      {
+        "id": 1,
+        "key": "aimee-deployment",
+        "sha256": "22f7b6390738ed85ab6f94586f524dcc0aa179e72e3518af189e8caa347a6034"
+      },
+      {
+        "id": 2,
+        "key": "aimee-private-code-spans",
+        "sha256": "77ca2db0e6c3128971509966fce746c8fcd36b0748ba977e932d94a9edb56f63"
+      }
+    ],
+    "project_count": 74,
+    "project_roots_sha256": "ca2703400eaccaa74047133678085db8417532e6acefde764e95a036a3399168"
+  }
+}
