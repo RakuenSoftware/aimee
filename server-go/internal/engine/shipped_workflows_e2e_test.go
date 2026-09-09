@@ -135,7 +135,11 @@ func runExactShippedWorkflow(t *testing.T, workflowName, wantState, wantPause st
 	go func() { scheduler.Run(ctx); close(done) }()
 	defer func() { cancel(); <-done }()
 
-	deadline := time.Now().Add(25 * time.Second)
+	// These graphs run real Git worktrees and module/PostgreSQL calls, including
+	// a child workflow and parent continuation for build and build-triggered.
+	// Match the native workflow E2E budget so race-instrumented CI has time to
+	// finish every stage; completion and stage-coverage assertions still apply.
+	deadline := time.Now().Add(2 * time.Minute)
 	var item workflowstore.WorkItem
 	for time.Now().Before(deadline) {
 		item, err = store.WorkItem(t.Context(), id)
