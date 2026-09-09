@@ -811,14 +811,18 @@ int client_session_worktree_ensure_at(const char *sid, const char *cwd, char *ou
    if (!out || !cap)
       return -1;
    out[0] = '\0';
-   if (!client_config_bool("require_session_worktree", 1))
-      return -1; /* Explicit operator opt-out: no provisioning or cwd change. */
 
    char source[4096], top[4096];
    int already_owned = 0;
    if (!sid || !sid[0] || !cwd || !cwd[0] ||
-       csw_repo_context(cwd, sid, source, sizeof source, top, sizeof top, &already_owned) != 0 ||
-       already_owned)
+       csw_repo_context(cwd, sid, source, sizeof source, top, sizeof top, &already_owned) != 0)
+      return csw_ensure_at_unlocked(sid, cwd, out, cap);
+
+   /* No repository means no isolation policy to consult. Keep document-only
+    * startup local; a Git session still honors the operator's live opt-out. */
+   if (!client_config_bool("require_session_worktree", 1))
+      return -1;
+   if (already_owned)
       return csw_ensure_at_unlocked(sid, cwd, out, cap);
 
    char common_dir[4096], lock_path[4200];
