@@ -27,7 +27,8 @@ modules supervise the standard modules around the existing C resource and event-
   cheapest model that fits the role. See [Delegates](docs/DELEGATES.md).
 - **Guardrails before execution.** Secret paths, unsafe writes, worktree escapes, and untrusted MCP
   packages are checked first, and delegate sandboxes run with no network and no credentials. See
-  [Security](docs/SECURITY.md).
+  [Security](docs/SECURITY.md). Git worktree isolation can be disabled in instance settings;
+  ordinary non-Git folders do not require a worktree.
 - **One bus, one audit trail.** Every governed action, memory write, guardrail decision and vault
   read crosses one sequenced tap into a WORM ledger. See [Event bus](docs/EVENT_BUS.md).
 - **Any provider.** OpenAI, Anthropic, Gemini, Mistral, Bedrock, and local OpenAI-compatible servers

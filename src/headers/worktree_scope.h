@@ -33,8 +33,8 @@ static inline int worktree_scope_path_non_git(const char *path)
       if (errno != ENOENT && errno != ENOTDIR)
          return 0;
       char *slash = strrchr(probe, '/');
-      if (!slash)
-         return 0;
+      if (!slash || !slash[1])
+         return 0; /* An unavailable root (for example a disconnected drive). */
       if (slash == probe || (slash == probe + 2 && probe[1] == ':'))
          slash[1] = '\0';
       else

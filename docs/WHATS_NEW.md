@@ -1,11 +1,15 @@
 # What's new
 
-## 0.4.4 repairs setup and private indexing
+## 0.4.4 repairs setup, private indexing, and worktree enforcement
 
 0.4.4 is a patch for existing 0.4.x installations. Keep the instance volumes, account,
 client identities, and memories when upgrading. Release validation is recorded in
 [the 0.4.4 report](validation/release-0.4.4-2026-09-08.md).
 
+- Ordinary non-Git folders no longer require a worktree. The existing
+  `require_session_worktree=false` setting disables automatic worktree creation,
+  hook path routing, and worktree write restrictions. Remote hooks use the authenticated
+  client’s filesystem scope and recover their identity after a server restart.
 - A fresh account opens the setup wizard even when the browser remembers dismissing setup
   on a previous installation.
 - Organization cloning reports each repository as it completes. If a response is lost,
