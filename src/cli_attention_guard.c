@@ -1,4 +1,3 @@
-#include "worktree_scope.h"
 /* cli_attention_guard.c: see cli_attention_guard.h.
  *
  * Per-session attention log lives at $AIMEE_HOME/.cache/attention/<session>.json
@@ -16,6 +15,7 @@
  * (require_session_worktree: false), never something the guarded agent can do.
  */
 #include "cli_attention_guard.h"
+#include "worktree_scope.h"
 #include "cli_session_start.h" /* read_stdin */
 #include "client_config.h"
 #include "client_session_worktree.h"

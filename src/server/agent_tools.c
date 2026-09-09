@@ -1,4 +1,3 @@
-#include "worktree_scope.h"
 /* agent_tools.c: tool execution, checkpoints, and tool definition JSON builders.
  *
  * BOUNDARY (core modularization): this is the server-side session-state slice of
@@ -9,6 +8,7 @@
  * halves communicate only through the public agent_tools.h. Do NOT add tool
  * dispatch or tool implementations here; they belong in src/modules/tools/. */
 #include "aimee.h"
+#include "worktree_scope.h"
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
 #include "agent_exec.h"

@@ -1,4 +1,3 @@
-#include "worktree_scope.h"
 /* guardrails_orchestrator.c: the `pre_tool_check` entry point and its
  * orchestrator-self-discipline helpers (write-command classification,
  * bash-guard messaging, per-session counters).
@@ -9,6 +8,7 @@
 #define _GNU_SOURCE
 #endif
 #include "aimee.h"
+#include "worktree_scope.h"
 #include "cJSON.h"
 #include "computer_use.h"
 #include "guardrails_internal.h"
