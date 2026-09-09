@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <utime.h>
 #include "aimee.h"
 #include <aimee/audit/obs_bus.h> /* obs_bus_flush — gsem_record records guardrail events async now */
 #include "db1_client/db1.h"
@@ -347,9 +348,15 @@ static void test_policy_file_reloads_on_change(void)
    assert(classify_path("alpha.secret").severity == SEV_BLOCK);
    assert(classify_path("beta.secret").severity == SEV_GREEN);
 
-   sleep(1);
+   struct stat before;
+   assert(stat(policy_path, &before) == 0);
    write_file_text(policy_path,
                    "{ \"sensitive_exact\": [\"beta.secret\"], \"write_commands\": [\"sync \"] }\n");
+
+   /* The loader compares whole-second mtimes. sleep(1) can be interrupted by
+    * a fixture child's SIGCHLD and leave both writes in the same clock tick. */
+   struct utimbuf changed = {.actime = before.st_atime, .modtime = before.st_mtime + 2};
+   assert(utime(policy_path, &changed) == 0);
 
    assert(classify_path("alpha.secret").severity == SEV_GREEN);
    assert(classify_path("beta.secret").severity == SEV_BLOCK);
