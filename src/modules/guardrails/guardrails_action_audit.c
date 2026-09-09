@@ -148,11 +148,20 @@ static int emit_action_audit(const char *tool_name, const char *input_json,
 int pre_tool_check(const char *tool_name, const char *input_json, session_state_t *state,
                    const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len)
 {
+   return pre_tool_check_client_workspace(tool_name, input_json, state, guardrail_mode, cwd,
+                                          msg_buf, msg_len, 0);
+}
+
+int pre_tool_check_client_workspace(const char *tool_name, const char *input_json,
+                                    session_state_t *state, const char *guardrail_mode,
+                                    const char *cwd, char *msg_buf, size_t msg_len,
+                                    int client_non_git_workspace)
+{
    /* Clear the last audit event before the verdict so a block site's key from a
     * prior call cannot leak as this call's reason_code. */
    audit_last_event_reset();
-   int rc =
-       pre_tool_check_inner(tool_name, input_json, state, guardrail_mode, cwd, msg_buf, msg_len);
+   int rc = pre_tool_check_inner(tool_name, input_json, state, guardrail_mode, cwd, msg_buf,
+                                 msg_len, client_non_git_workspace);
    if (emit_action_audit(tool_name, input_json, guardrail_mode, state, rc, msg_buf) != 0 && rc != 2)
    {
       if (msg_buf && msg_len > 0)

@@ -64,6 +64,13 @@ static int code_build_manifest(const char *name)
 /* A file is wanted if it is code by extension OR a build manifest by name. */
 static int code_file_wanted(const char *name)
 {
+   const char *slash = strrchr(name, '/');
+   const char *base = slash ? slash + 1 : name;
+   /* Hidden configuration can carry credentials. The private index rejects
+    * it; sending it would abort publication of the entire repository. Keep
+    * the explicit build manifest accepted by both collectors and stores. */
+   if (base[0] == '.' && strcmp(base, ".gitmodules") != 0)
+      return 0;
    return code_ext_ok(name) || code_build_manifest(name);
 }
 

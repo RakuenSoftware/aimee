@@ -4,6 +4,14 @@ This page describes the current testing tree. `Done` means the path is implement
 its normal tests. `Gated` means it ships behind configuration or deployment requirements. `Next`
 means the contract or branch exists but is not part of the integrated path yet.
 
+The 0.4.4 candidate repairs first-boot setup, clone progress, private index publication and
+retrieval, detached runner admission, and audit hashing during shutdown. See the
+[release validation](validation/release-0.4.4-2026-09-09.md) for tested configurations and remaining
+release gates. Detached source spans read the last published snapshot; workspace registration
+alone does not start a client runner. The worktree repair for this release allows non-Git
+document work and honors `require_session_worktree=false` across startup, hooks, and native
+writes; it requires updated client and server binaries.
+
 ## Runtime
 
 | Feature | State | Boundary |

@@ -448,7 +448,7 @@ int is_sensitive_file(const char *path)
    return policy_list_matches_substring(&g_policy.sensitive_patterns, path);
 }
 
-classification_t classify_path(const char *file_path)
+classification_t classify_path_sensitivity(const char *file_path)
 {
    classification_t result;
    memset(&result, 0, sizeof(result));
@@ -487,6 +487,15 @@ classification_t classify_path(const char *file_path)
       snprintf(result.reason, sizeof(result.reason), "database file");
       return result;
    }
+
+   return result;
+}
+
+classification_t classify_path(const char *file_path)
+{
+   classification_t result = classify_path_sensitivity(file_path);
+   if (result.severity >= SEV_RED)
+      return result;
 
    /* Check blast radius via the structural code index (shared resolver — also
     * used by the §7 blast-radius advisory; see guardrails_blast_radius.c). */
@@ -655,7 +664,7 @@ const char *guardrails_check_sensitive_path(const char *path, char *resolved_buf
          return "error: path too long";
    }
 
-   classification_t classification = classify_path(canonical);
+   classification_t classification = classify_path_sensitivity(canonical);
    if (classification.severity >= SEV_RED)
       return "error: access to sensitive path denied";
 

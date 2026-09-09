@@ -164,16 +164,18 @@ def run_client(
         (home / ".claude").mkdir(exist_ok=True)
     else:
         env["AIMEE_NO_CLIENT_INTEGRATIONS"] = "1"
-    for key in ("AIMEE_SERVER_URL", "AIMEE_SERVER_TOKEN", "AIMEE_TLS_INSECURE"):
+    for key in ("AIMEE_SERVER_URL", "AIMEE_SERVER_TOKEN", "AIMEE_TLS_INSECURE",
+                "AIMEE_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID", "AIMEE_HOOK_CLIENT"):
         env.pop(key, None)
     return subprocess.run(
         [str(binary), "--json", *command],
         env=env,
+        cwd=home,
         text=True,
         capture_output=True,
         input='{"tool_name":"Read","tool_input":{},"cwd":"/tmp"}\n'
         if command[:1] == ["hooks"]
-        else "{}\n"
+        else json.dumps({"session_id": "remote-exclusive-start", "cwd": str(home)}) + "\n"
         if command == ["session-start"]
         else None,
         timeout=20,
@@ -239,8 +241,8 @@ def main() -> int:
                 assert RemoteHandler.count() > before, (command, special.stderr)
                 assert sentinel.contacts_after_settle() == 0, f"{command} contacted local UDS"
 
-            # session-start is now local-only, and that is a contract in its own
-            # right: it must reach NEITHER the remote nor the local socket. A
+            # Non-Git session-start without a harness identity is local-only:
+            # it must reach NEITHER the remote nor the local socket. A
             # regression that reintroduced per-client assembly here would show
             # up as a request to one of the two.
             before = RemoteHandler.count()

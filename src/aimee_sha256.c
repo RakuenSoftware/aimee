@@ -6,6 +6,9 @@
  */
 #include "headers/aimee_sha256.h"
 
+/* The low-level context owns no provider state. Audit writers may still finish
+ * during process teardown, after OpenSSL's global provider cleanup has run. */
+#define OPENSSL_SUPPRESS_DEPRECATED
 #include <openssl/sha.h>
 
 int aimee_sha256_raw(const void *data, size_t len, unsigned char out[32])
@@ -15,7 +18,10 @@ int aimee_sha256_raw(const void *data, size_t len, unsigned char out[32])
    /* A NULL input hashes the empty string, preserving the contract of the
     * workflows-owned wfe_sha256_raw() this replaces. */
    const unsigned char *in = data ? (const unsigned char *)data : (const unsigned char *)"";
-   SHA256(in, data ? len : 0, out);
+   SHA256_CTX ctx;
+   if (SHA256_Init(&ctx) != 1 || SHA256_Update(&ctx, in, data ? len : 0) != 1 ||
+       SHA256_Final(out, &ctx) != 1)
+      return -1;
    return 0;
 }
 

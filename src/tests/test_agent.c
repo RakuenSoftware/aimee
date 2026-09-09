@@ -3508,6 +3508,21 @@ static void test_session_isolation_guard(void)
    /* Traversal OUT of a wfe worktree still blocks. */
    assert(agent_tools_session_isolation_blocks(
               "/var/lib/aimee/wfe-worktrees/wi_ab12.s3/../../escape.c", NULL) == 1);
+   /* Ordinary document folders, including missing descendants, are writable. */
+   assert(agent_tools_session_isolation_blocks("reports/new/report.md", home) == 0);
+   char repository[640], git_marker[700], target[700];
+   snprintf(repository, sizeof(repository), "%s/repo", home);
+   assert(platform_mkdir_p(repository, 0700) == 0);
+   snprintf(git_marker, sizeof(git_marker), "%s/.git", repository);
+   assert(platform_mkdir_p(git_marker, 0700) == 0);
+   snprintf(target, sizeof(target), "%s/reports/new/report.md", repository);
+   assert(agent_tools_session_isolation_blocks(target, home) == 1);
+   assert(config_set_require_session_worktree(0) == 0);
+   assert(agent_tools_session_isolation_blocks(target, repository) == 0);
+   assert(config_set_require_session_worktree(1) == 0);
+   assert(agent_tools_session_isolation_blocks(target, repository) == 1);
+   assert(rmdir(git_marker) == 0);
+   assert(rmdir(repository) == 0);
    /* NULL path is a no-op (returns 0). */
    assert(agent_tools_session_isolation_blocks(NULL, NULL) == 0);
 

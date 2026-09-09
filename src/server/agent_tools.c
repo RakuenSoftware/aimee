@@ -8,6 +8,7 @@
  * halves communicate only through the public agent_tools.h. Do NOT add tool
  * dispatch or tool implementations here; they belong in src/modules/tools/. */
 #include "aimee.h"
+#include "worktree_scope.h"
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
 #include "agent_exec.h"
@@ -245,6 +246,8 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
     * preferences. */
    char norm[MAX_PATH_LEN];
    normalize_path(path, cwd, norm, sizeof(norm));
+   if (worktree_scope_non_git(cwd, norm))
+      return 0;
    size_t root_len = agent_tools_managed_root_len(norm);
    if (root_len && cwd && cwd[0])
    {

@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <utime.h>
 #include "aimee.h"
 #include <aimee/audit/obs_bus.h> /* obs_bus_flush — gsem_record records guardrail events async now */
 #include "db1_client/db1.h"
@@ -347,9 +348,15 @@ static void test_policy_file_reloads_on_change(void)
    assert(classify_path("alpha.secret").severity == SEV_BLOCK);
    assert(classify_path("beta.secret").severity == SEV_GREEN);
 
-   sleep(1);
+   struct stat before;
+   assert(stat(policy_path, &before) == 0);
    write_file_text(policy_path,
                    "{ \"sensitive_exact\": [\"beta.secret\"], \"write_commands\": [\"sync \"] }\n");
+
+   /* The loader compares whole-second mtimes. sleep(1) can be interrupted by
+    * a fixture child's SIGCHLD and leave both writes in the same clock tick. */
+   struct utimbuf changed = {.actime = before.st_atime, .modtime = before.st_mtime + 2};
+   assert(utime(policy_path, &changed) == 0);
 
    assert(classify_path("alpha.secret").severity == SEV_GREEN);
    assert(classify_path("beta.secret").severity == SEV_BLOCK);
@@ -1772,7 +1779,7 @@ static void test_hook_call_count_increments(void)
    guardrails_close_test_sqlite();
 }
 
-static void test_no_worktree_blocks_writes(void)
+static void test_unknown_workspace_blocks_writes(void)
 {
    guardrails_open_test_sqlite();
    session_state_t state;
@@ -1784,26 +1791,26 @@ static void test_no_worktree_blocks_writes(void)
    int rc = pre_tool_check("Edit",
                            "{\"file_path\":\"/tmp/test.c\","
                            "\"old_string\":\"old\",\"new_string\":\"new\"}",
-                           &state, MODE_APPROVE, "/tmp", msg, sizeof(msg));
+                           &state, MODE_APPROVE, "/missing-client-workspace", msg, sizeof(msg));
    assert(rc == 2);
    assert(strstr(msg, "not running in a worktree") != NULL);
 
    msg[0] = '\0';
    rc = pre_tool_check("Bash", "{\"command\":\"echo x > /tmp/test.c\"}", &state, MODE_APPROVE,
-                       "/tmp", msg, sizeof(msg));
+                       "/missing-client-workspace", msg, sizeof(msg));
    assert(rc == 2);
    assert(strstr(msg, "not running in a worktree") != NULL);
 
    msg[0] = '\0';
    rc =
        pre_tool_check("execute_script", "{\"language\":\"bash\",\"body\":\"echo x > /tmp/test.c\"}",
-                      &state, MODE_APPROVE, "/tmp", msg, sizeof(msg));
+                      &state, MODE_APPROVE, "/missing-client-workspace", msg, sizeof(msg));
    assert(rc == 2);
    assert(strstr(msg, "not running in a worktree") != NULL);
 
    msg[0] = '\0';
-   rc = pre_tool_check("Bash", "{\"command\":\"git status\"}", &state, MODE_APPROVE, "/tmp", msg,
-                       sizeof(msg));
+   rc = pre_tool_check("Bash", "{\"command\":\"git status\"}", &state, MODE_APPROVE,
+                       "/missing-client-workspace", msg, sizeof(msg));
    assert(rc == 0);
 
    guardrails_close_test_sqlite();
@@ -1827,7 +1834,7 @@ static void test_container_delegate_exempt_from_worktree_guard(void)
    workspace_turn_set_container_bound_for_test(0);
    int rc = pre_tool_check(
        "Edit", "{\"file_path\":\"/tmp/test.c\",\"old_string\":\"a\",\"new_string\":\"b\"}", &state,
-       MODE_APPROVE, "/tmp", msg, sizeof(msg));
+       MODE_APPROVE, "/missing-client-workspace", msg, sizeof(msg));
    assert(rc == 2 && strstr(msg, "not running in a worktree") != NULL);
 
    /* Container-bound delegate: the same write must NOT be blocked by the worktree guard. */
@@ -1835,14 +1842,14 @@ static void test_container_delegate_exempt_from_worktree_guard(void)
    msg[0] = '\0';
    rc = pre_tool_check("Edit",
                        "{\"file_path\":\"/tmp/test.c\",\"old_string\":\"a\",\"new_string\":\"b\"}",
-                       &state, MODE_APPROVE, "/tmp", msg, sizeof(msg));
+                       &state, MODE_APPROVE, "/missing-client-workspace", msg, sizeof(msg));
    assert(strstr(msg, "not running in a worktree") == NULL);
 
    /* execute_script (the script_tool path, second block site) is also exempt. */
    msg[0] = '\0';
    rc =
        pre_tool_check("execute_script", "{\"language\":\"bash\",\"body\":\"echo x > /tmp/test.c\"}",
-                      &state, MODE_APPROVE, "/tmp", msg, sizeof(msg));
+                      &state, MODE_APPROVE, "/missing-client-workspace", msg, sizeof(msg));
    assert(strstr(msg, "not running in a worktree") == NULL);
    (void)rc;
 
@@ -1965,6 +1972,52 @@ static void test_external_default_checkout_blocks_writes(void)
 
    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
    system(cmd);
+}
+
+static void test_non_git_work_and_worktree_opt_out(void)
+{
+   char dir[256], command[1024], msg[2048], input[1024];
+   snprintf(dir, sizeof(dir), "%s/aimee-doc-work-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(dir));
+   guardrails_open_test_sqlite();
+   session_state_t state = {0};
+   strcpy(state.session_mode, MODE_IMPLEMENT);
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+   assert(config_set_require_session_worktree(1) == 0);
+   /* Document work has no repository to isolate, including new directories. */
+   assert(pre_tool_check("Write", "{\"file_path\":\"reports/new/report.md\"}", &state, MODE_APPROVE,
+                         dir, msg, sizeof(msg)) != 2);
+   assert(pre_tool_check("Bash",
+                         "{\"command\":\"mkdir -p extracted && tar -xf archive.tar -C extracted\"}",
+                         &state, MODE_APPROVE, dir, msg, sizeof(msg)) == 0);
+   assert(pre_tool_check("execute_script", "{}", &state, MODE_APPROVE, dir, msg, sizeof(msg)) == 0);
+   snprintf(command, sizeof(command), "git -C '%s' init -q", dir);
+   assert(system(command) == 0);
+   /* The explicit opt-out must disable hard blocks AND read/write rerouting. */
+   assert(config_set_require_session_worktree(0) == 0);
+   const char *names[] = {"Write", "Read", "Bash", "execute_script"};
+   const char *inputs[] = {"{\"file_path\":\"reports/new/report.md\"}",
+                           "{\"file_path\":\"report.md\"}", "{\"command\":\"mkdir -p extracted\"}",
+                           "{}"};
+   for (int i = 0; i < 4; i++)
+      assert(pre_tool_check(names[i], inputs[i], &state, MODE_APPROVE, dir, msg, sizeof(msg)) == 0);
+   snprintf(input, sizeof(input), "%s/.aimee", dir);
+   assert(access(input, F_OK) != 0);
+   /* Authenticated client evidence also works when its folder is not mounted
+    * on the server; it cannot leak into the next native tool check. */
+   assert(config_set_require_session_worktree(1) == 0);
+   assert(pre_tool_check_client_workspace("Write", inputs[0], &state, MODE_APPROVE,
+                                          "/client-only/documents", msg, sizeof(msg), 1) == 0);
+   assert(pre_tool_check("Write", inputs[0], &state, MODE_APPROVE, "/client-only/documents", msg,
+                         sizeof(msg)) == 2);
+   assert(config_set_require_session_worktree(0) == 0);
+   /* Disabling worktrees does not disable plan-mode protection. */
+   strcpy(state.session_mode, MODE_PLAN);
+   assert(pre_tool_check("Write", inputs[0], &state, MODE_APPROVE, dir, msg, sizeof(msg)) == 2);
+   assert(config_set_require_session_worktree(1) == 0);
+   guardrails_close_test_sqlite();
+   snprintf(command, sizeof(command), "rm -rf '%s'", dir);
+   assert(system(command) == 0);
 }
 
 static void test_shell_in_main_checkout_forced_to_worktree(void)
@@ -4046,12 +4099,13 @@ int main(void)
    test_known_subagent_tools_blocked();
    test_unknown_subagent_surface_blocked();
    test_hook_call_count_increments();
-   test_no_worktree_blocks_writes();
+   test_unknown_workspace_blocks_writes();
    test_container_delegate_exempt_from_worktree_guard();
    test_shell_command_targeting_worktree_allows_write();
    test_write_file_targeting_worktree_allows_stale_cwd();
    test_external_feature_checkout_allows_writes();
    test_external_default_checkout_blocks_writes();
+   test_non_git_work_and_worktree_opt_out();
    test_shell_in_main_checkout_forced_to_worktree();
    test_path_tool_redirect_is_cwd_independent();
    test_git_commands_allowed_by_default();

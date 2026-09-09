@@ -301,6 +301,37 @@ static void test_build_manifests_collected_git(void)
 
 /* §6 live: the default-branch tree SHA tracks commits, and the pure change-gate
  * decides when a re-index is warranted. */
+static void test_hidden_files_excluded(void)
+{
+   make_root("hidden-files");
+   write_file("source.c", "int visible(void){return 0;}");
+   write_file(".mcp.json", "{\"token\":\"fixture\"}");
+   write_file("nested/.env.production.json", "{\"secret\":true}");
+   write_file(".golangci.yml", "version: 2");
+   write_file(".gitmodules", "[submodule \"x\"]");
+   write_file("nested/.gitmodules", "[submodule \"y\"]");
+   for (int tracked = 0; tracked < 2; ++tracked)
+   {
+      if (tracked)
+      {
+         git("init -q -b main");
+         git("config user.email t@t");
+         git("config user.name t");
+         git("add -A");
+         git("commit -qm fixture");
+      }
+      reset();
+      code_collect_files_cb(g_root, rec_cb, NULL);
+      assert(has("source.c"));
+      assert(has(".gitmodules"));
+      assert(has("nested/.gitmodules"));
+      assert(!has(".mcp.json"));
+      assert(!has("nested/.env.production.json"));
+      assert(!has(".golangci.yml"));
+   }
+   printf("  test_hidden_files_excluded: ok\n");
+}
+
 static void test_default_branch_sha_tracks_commits(void)
 {
    make_root("sha");
@@ -498,6 +529,7 @@ int main(void)
       printf("  (git unavailable; skipping)\nALL PASS\n");
       return 0;
    }
+   test_hidden_files_excluded();
    test_default_branch_is_canonical();
    test_worktree_optin();
    test_clone_resolves_origin_head();

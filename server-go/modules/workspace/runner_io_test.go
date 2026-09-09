@@ -44,6 +44,7 @@ func ioFull(op byte, id string, payload []byte) ([]byte, bool, bus.ModuleStatus)
 func TestRunnerIOCarriesAnOpToTheClientAndItsResultBack(t *testing.T) {
 	reset()
 	call(t, RunnerOpRegister, "/srv/repo")
+	runnerFor("/srv/repo").markServing() // model a client that has already polled
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -107,6 +108,7 @@ func TestRunnerIORefusesATreeNobodyIsServing(t *testing.T) {
 func TestRunnerIOReleasesASubmitterWhenTheClientLeaves(t *testing.T) {
 	reset()
 	call(t, RunnerOpRegister, "/srv/repo")
+	runnerFor("/srv/repo").markServing() // model a client that has already polled
 
 	done := make(chan bus.ModuleStatus, 1)
 	go func() {
@@ -135,6 +137,7 @@ func TestRunnerIOReleasesASubmitterWhenTheClientLeaves(t *testing.T) {
 func TestRunnerIOElapsedPollReportsCancelledSoTheClientRepolls(t *testing.T) {
 	reset()
 	call(t, RunnerOpRegister, "/srv/repo")
+	runnerFor("/srv/repo").markServing() // model a client that has already polled
 
 	// DeadlineNS 1 is already past, so the wait ends immediately.
 	_, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO, DeadlineNS: 1},
@@ -150,6 +153,7 @@ func TestRunnerIOElapsedPollReportsCancelledSoTheClientRepolls(t *testing.T) {
 func TestRunnerIOStreamsAResultInChunks(t *testing.T) {
 	reset()
 	call(t, RunnerOpRegister, "/srv/repo")
+	runnerFor("/srv/repo").markServing() // model a client that has already polled
 
 	type outcome struct {
 		chunks []string
@@ -220,6 +224,7 @@ func TestRunnerIOStreamsAResultInChunks(t *testing.T) {
 func TestRunnerIOPartialKeepsTheClaimAndFinalReleasesIt(t *testing.T) {
 	reset()
 	call(t, RunnerOpRegister, "/srv/repo")
+	runnerFor("/srv/repo").markServing() // model a client that has already polled
 
 	go func() { _, _, _ = ioFull(IOOpSubmit, "/srv/repo", []byte("op")) }()
 
@@ -250,6 +255,7 @@ func TestRunnerIOPartialKeepsTheClaimAndFinalReleasesIt(t *testing.T) {
 func TestRunnerIORejectsAnUnclaimedResponse(t *testing.T) {
 	reset()
 	call(t, RunnerOpRegister, "/srv/repo")
+	runnerFor("/srv/repo").markServing() // model a client that has already polled
 	if _, status := io(IOOpRespond, "/srv/repo", []byte("result")); status != bus.ModuleStatusInvalidRequest {
 		t.Fatalf("unclaimed respond status = %d", status)
 	}
@@ -258,6 +264,7 @@ func TestRunnerIORejectsAnUnclaimedResponse(t *testing.T) {
 func TestRunnerIORejectsInvalidEnvelope(t *testing.T) {
 	reset()
 	call(t, RunnerOpRegister, "/srv/repo")
+	runnerFor("/srv/repo").markServing() // model a client that has already polled
 
 	short := ioRequest(IOOpPoll, "/srv/repo", nil)[:ioHeaderLen-1]
 	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO}, short); status != bus.ModuleStatusInvalidRequest {
@@ -279,5 +286,22 @@ func TestRunnerIORejectsInvalidEnvelope(t *testing.T) {
 	if _, status := Handle(bus.ModuleInvocation{StageID: StageRunnerIO},
 		ioRequest(IOOpPoll, strings.Repeat("a", runnerIDMax+1), nil)); status != bus.ModuleStatusInvalidRequest {
 		t.Fatalf("oversized-id status = %d", status)
+	}
+}
+
+func TestRegisteredWorkspaceWithoutPollerFailsPromptly(t *testing.T) {
+	reset()
+	call(t, RunnerOpRegister, "/srv/offline")
+	started := time.Now()
+	if _, status := io(IOOpSubmit, "/srv/offline", []byte("rev-parse")); status != bus.ModuleStatusCapabilityAbsent {
+		t.Fatalf("offline runner status: %v", status)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("offline runner occupied the RPC pool")
+	}
+	point := runnerFor("/srv/offline")
+	point.lastPoll = time.Now().Add(-2 * time.Minute)
+	if _, status := io(IOOpSubmit, "/srv/offline", []byte("rev-parse")); status != bus.ModuleStatusCapabilityAbsent {
+		t.Fatalf("stale runner status: %v", status)
 	}
 }

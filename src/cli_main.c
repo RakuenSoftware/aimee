@@ -1164,6 +1164,11 @@ static int handle_hooks(int argc, char **argv, int json_output)
    cJSON_AddStringToObject(req, "tool_name", tool_name);
    cJSON_AddStringToObject(req, "tool_input", tool_input);
    cJSON_AddStringToObject(req, "cwd", cwd);
+   if (strcmp(phase, "pre") == 0 &&
+       attn_tool_in_non_git_workspace(hook_cwd, tool_name,
+                                      local_updated ? local_updated : hook_input))
+      cJSON_AddBoolToObject(req, "client_non_git_workspace", 1);
+
    if (sid && sid[0])
       cJSON_AddStringToObject(req, "session_id", sid);
 
@@ -1200,6 +1205,35 @@ static int handle_hooks(int argc, char **argv, int json_output)
    }
 
    cJSON *resp = cli_v1_dispatch(req, 5000);
+   /* Hook identities are process-local on the server. A restart (or a resumed
+    * client that missed SessionStart) must not turn ordinary document work back
+    * into a worktree error. Renew once through the authenticated lifecycle route
+    * and retry the same preflight; never trust or forward a caller-supplied token. */
+   const char *identity =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "hook_identity"));
+   if (resp && identity && strcmp(identity, "untrusted") == 0 &&
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "client_non_git_workspace")) && sid &&
+       sid[0] && hook_client && hook_client[0])
+   {
+      cJSON *start = cJSON_CreateObject();
+      cJSON_AddStringToObject(start, "method", "hooks.session_start");
+      cJSON_AddStringToObject(start, "session_id", sid);
+      cJSON_AddStringToObject(start, "harness_client", hook_client);
+      cJSON_AddStringToObject(start, "hook_input", "{}");
+      cJSON_AddBoolToObject(start, "nonblocking", 1);
+      cJSON *renewed = cli_v1_dispatch(start, 5000);
+      cJSON_Delete(start);
+      const char *token =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(renewed, "hook_token"));
+      if (token && hook_session_token_store(aimee_home(), sid, hook_client, token) == 0)
+      {
+         cJSON_DeleteItemFromObjectCaseSensitive(req, "hook_token");
+         cJSON_AddStringToObject(req, "hook_token", token);
+         cJSON_Delete(resp);
+         resp = cli_v1_dispatch(req, 5000);
+      }
+      cJSON_Delete(renewed);
+   }
    cJSON_Delete(req);
    free(stdin_data);
 

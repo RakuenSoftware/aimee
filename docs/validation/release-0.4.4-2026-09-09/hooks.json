@@ -1,0 +1,231 @@
+{
+  "before_upgrade": {
+    "returncode": 0,
+    "worktree_denial": true,
+    "denied": true
+  },
+  "after_upgrade": [
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "non-git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "non-git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "non-git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "session-start"
+      ],
+      "scope": "non-git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "launch",
+        "--",
+        "/bin/pwd"
+      ],
+      "scope": "non-git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "session-start"
+      ],
+      "scope": "git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "launch",
+        "--",
+        "/bin/pwd"
+      ],
+      "scope": "git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    }
+  ],
+  "after_restart": [
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "non-git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "non-git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "non-git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "session-start"
+      ],
+      "scope": "non-git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "launch",
+        "--",
+        "/bin/pwd"
+      ],
+      "scope": "non-git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "hooks",
+        "pre"
+      ],
+      "scope": "git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "session-start"
+      ],
+      "scope": "git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    },
+    {
+      "operation": [
+        "launch",
+        "--",
+        "/bin/pwd"
+      ],
+      "scope": "git",
+      "exit_code": 0,
+      "denied": false,
+      "worktree_denial": false,
+      "rewritten": false
+    }
+  ]
+}

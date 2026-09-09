@@ -32,4 +32,9 @@
 cJSON *code_span_read(const char *project, const char *project_root, const char *file_path,
                       int line_start, int line_end, int max_lines);
 
+/* Private indexes serve published source snapshots without accessing a client path.
+ * Registered at startup; the filesystem/provider path remains the default. */
+typedef cJSON *(*code_span_index_reader_fn)(const char *, const char *, int, int, int);
+void code_span_set_index_reader(code_span_index_reader_fn reader);
+
 #endif /* DEC_CODE_SPAN_H */

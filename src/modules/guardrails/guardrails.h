@@ -130,6 +130,8 @@ int is_sensitive_file(const char *path);
 
 /* Classify a file path by sensitivity and blast radius. */
 classification_t classify_path(const char *file_path);
+/* Sensitivity excludes edit blast radius; read access must not depend on callers. */
+classification_t classify_path_sensitivity(const char *file_path);
 
 /* Pre-tool check. Returns exit code:
  *   0 = allow (msg_buf may contain warnings)
@@ -137,6 +139,12 @@ classification_t classify_path(const char *file_path);
  *   2 = block (msg_buf contains error message) */
 int pre_tool_check(const char *tool_name, const char *input_json, session_state_t *state,
                    const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len);
+/* Hook adapter only: the authenticated client has checked its own filesystem.
+ * Native/server tools must use pre_tool_check and the server's scope check. */
+int pre_tool_check_client_workspace(const char *tool_name, const char *input_json,
+                                    session_state_t *state, const char *guardrail_mode,
+                                    const char *cwd, char *msg_buf, size_t msg_len,
+                                    int client_non_git_workspace);
 
 /* Register a config-reload reapplier that clears the cached audit_action_enabled
  * / audit_worm_enabled gates so a live config.set / SIGHUP takes effect without a
@@ -147,8 +155,8 @@ void guardrails_action_audit_register_reload(void);
  * guardrails_action_audit.c) that calls this and emits the per-action audit
  * row. Same return contract as pre_tool_check. */
 int pre_tool_check_inner(const char *tool_name, const char *input_json, session_state_t *state,
-                         const char *guardrail_mode, const char *cwd, char *msg_buf,
-                         size_t msg_len);
+                         const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len,
+                         int client_non_git_workspace);
 
 /* Normalize provider/internal tool names into guardrail-facing categories.
  * Provider-native sub-agent spawns (Task/Agent/spawn_agent/RemoteTrigger) map to

@@ -1,0 +1,42 @@
+[
+  {
+    "route": "/api/auth/me",
+    "status": 200
+  },
+  {
+    "route": "/api/setup/account",
+    "status": 200
+  },
+  {
+    "route": "/api/git/projects",
+    "status": 200,
+    "projects": 73
+  },
+  {
+    "route": "/api/config",
+    "status": 200
+  },
+  {
+    "page": "Projects and setup wizard",
+    "errors": [],
+    "failed": [],
+    "text": "Set up this instance\n×\n\nEverything required is configured. 🎉\n\n✅\nAccount\nlogin secured\n✅\nProvider\nprimary: codex\n✅\nEmbedding\nlocal memory embedder configured\n✅\nGit Identity\ncommit author stored in the Vault\n✅\nConnection\n1 host connected\n✅\nProject\n73 projects cloned\nDeploy local model services\nRe-deploy\nDeploy the selected local embedding and optional synthesis services.\n🟢\naimee-aimee-embedder-1\nrunning (healthy)\nFinish"
+  },
+  {
+    "page": "Real organization cloning",
+    "batches": [
+      [
+        "markupsafe"
+      ],
+      [
+        "itsdangerous"
+      ],
+      [
+        "click"
+      ]
+    ],
+    "lostResponseRecovered": true,
+    "projectsBefore": 73,
+    "projectsAfter": 76
+  }
+]

@@ -1,0 +1,358 @@
+{
+  "commit": "bb3fdaa6bb",
+  "application_commit": "11cd30b611",
+  "pr": "https://github.com/RakuenSoftware/aimee/pull/2975",
+  "base": "testing",
+  "recorded_at": "2026-09-08T20:11:16.890585+00:00",
+  "checks": [
+    {
+      "name": "Address and undefined-behavior sanitizers",
+      "status": "pass",
+      "duration": "15m1s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509577"
+    },
+    {
+      "name": "Clang-tidy (0/8)",
+      "status": "pass",
+      "duration": "2m17s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509539"
+    },
+    {
+      "name": "Clang-tidy (1/8)",
+      "status": "pass",
+      "duration": "2m56s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509294"
+    },
+    {
+      "name": "Clang-tidy (2/8)",
+      "status": "pass",
+      "duration": "1m37s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509470"
+    },
+    {
+      "name": "Clang-tidy (3/8)",
+      "status": "pass",
+      "duration": "2m33s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509393"
+    },
+    {
+      "name": "Clang-tidy (4/8)",
+      "status": "pass",
+      "duration": "2m51s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509433"
+    },
+    {
+      "name": "Clang-tidy (5/8)",
+      "status": "pass",
+      "duration": "2m41s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509463"
+    },
+    {
+      "name": "Clang-tidy (6/8)",
+      "status": "pass",
+      "duration": "2m30s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509505"
+    },
+    {
+      "name": "Clang-tidy (7/8)",
+      "status": "pass",
+      "duration": "1m49s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509362"
+    },
+    {
+      "name": "Complete script regression suite",
+      "status": "pass",
+      "duration": "12m56s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509327"
+    },
+    {
+      "name": "Cppcheck (0/8)",
+      "status": "pass",
+      "duration": "2m41s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509588"
+    },
+    {
+      "name": "Cppcheck (1/8)",
+      "status": "pass",
+      "duration": "2m3s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509560"
+    },
+    {
+      "name": "Cppcheck (2/8)",
+      "status": "pass",
+      "duration": "4m34s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509500"
+    },
+    {
+      "name": "Cppcheck (3/8)",
+      "status": "pass",
+      "duration": "7m27s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509446"
+    },
+    {
+      "name": "Cppcheck (4/8)",
+      "status": "pass",
+      "duration": "2m23s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509276"
+    },
+    {
+      "name": "Cppcheck (5/8)",
+      "status": "pass",
+      "duration": "4m45s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509476"
+    },
+    {
+      "name": "Cppcheck (6/8)",
+      "status": "pass",
+      "duration": "1m20s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509696"
+    },
+    {
+      "name": "Cppcheck (7/8)",
+      "status": "pass",
+      "duration": "2m5s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509670"
+    },
+    {
+      "name": "Secret scanning",
+      "status": "pass",
+      "duration": "1m21s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509034"
+    },
+    {
+      "name": "Static analysis and secret scanning",
+      "status": "pass",
+      "duration": "12s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102216993103"
+    },
+    {
+      "name": "authz-residual-live",
+      "status": "pass",
+      "duration": "7m41s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648926"
+    },
+    {
+      "name": "build",
+      "status": "pass",
+      "duration": "3m54s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648668"
+    },
+    {
+      "name": "build-integrity",
+      "status": "pass",
+      "duration": "2m45s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648507"
+    },
+    {
+      "name": "change-scope",
+      "status": "pass",
+      "duration": "22s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509394"
+    },
+    {
+      "name": "db2-process-replay",
+      "status": "pass",
+      "duration": "1m33s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648902"
+    },
+    {
+      "name": "e2e-adoption",
+      "status": "pass",
+      "duration": "2m53s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648806"
+    },
+    {
+      "name": "e2e-docker (T1)",
+      "status": "pass",
+      "duration": "8m19s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214649032"
+    },
+    {
+      "name": "e2e-docker (T2)",
+      "status": "pass",
+      "duration": "11m7s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214649201"
+    },
+    {
+      "name": "e2e-docker (T2-luks)",
+      "status": "pass",
+      "duration": "14m47s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214649071"
+    },
+    {
+      "name": "e2e-docker (T3)",
+      "status": "pass",
+      "duration": "9m24s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214649026"
+    },
+    {
+      "name": "frontend-tests",
+      "status": "pass",
+      "duration": "57s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648690"
+    },
+    {
+      "name": "fuzz",
+      "status": "pass",
+      "duration": "27s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555805/job/102214119472"
+    },
+    {
+      "name": "go-unit-tests",
+      "status": "pass",
+      "duration": "3m4s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214649175"
+    },
+    {
+      "name": "identity-mint-e2e",
+      "status": "pass",
+      "duration": "1m0s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648790"
+    },
+    {
+      "name": "init-migrate-service-test",
+      "status": "pass",
+      "duration": "2m36s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648980"
+    },
+    {
+      "name": "integration-tests",
+      "status": "pass",
+      "duration": "2m33s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648943"
+    },
+    {
+      "name": "lint",
+      "status": "pass",
+      "duration": "2m48s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648586"
+    },
+    {
+      "name": "lsp-real-providers (macos-latest, macos)",
+      "status": "pass",
+      "duration": "2m43s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648914"
+    },
+    {
+      "name": "lsp-real-providers (ubuntu-24.04, linux)",
+      "status": "pass",
+      "duration": "2m27s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648873"
+    },
+    {
+      "name": "macos-build",
+      "status": "pass",
+      "duration": "4m21s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648891"
+    },
+    {
+      "name": "memory-retrieval-eval",
+      "status": "pass",
+      "duration": "1m5s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648904"
+    },
+    {
+      "name": "no-coauthor-trailers",
+      "status": "pass",
+      "duration": "20s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214509481"
+    },
+    {
+      "name": "oidc-login-live",
+      "status": "pass",
+      "duration": "1m38s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648964"
+    },
+    {
+      "name": "p1-rls-gate",
+      "status": "pass",
+      "duration": "42s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648849"
+    },
+    {
+      "name": "pam-login-live",
+      "status": "pass",
+      "duration": "3m20s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214649065"
+    },
+    {
+      "name": "pins",
+      "status": "pass",
+      "duration": "2m27s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555873/job/102214119202"
+    },
+    {
+      "name": "release-policy",
+      "status": "pass",
+      "duration": "11s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555807/job/102214118907"
+    },
+    {
+      "name": "treesitter",
+      "status": "pass",
+      "duration": "52s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648798"
+    },
+    {
+      "name": "unit-tests",
+      "status": "pass",
+      "duration": "4s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102217826867"
+    },
+    {
+      "name": "unit-tests (1/2)",
+      "status": "pass",
+      "duration": "3m30s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648540"
+    },
+    {
+      "name": "unit-tests (2/2)",
+      "status": "pass",
+      "duration": "3m51s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648603"
+    },
+    {
+      "name": "unit-tests-pg (1/3)",
+      "status": "pass",
+      "duration": "9m30s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648623"
+    },
+    {
+      "name": "unit-tests-pg (2/3)",
+      "status": "pass",
+      "duration": "3m2s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648624"
+    },
+    {
+      "name": "unit-tests-pg (3/3)",
+      "status": "pass",
+      "duration": "3m10s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648789"
+    },
+    {
+      "name": "vault-pkcs11-token",
+      "status": "pass",
+      "duration": "33s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648907"
+    },
+    {
+      "name": "windows-build",
+      "status": "pass",
+      "duration": "3m6s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648978"
+    },
+    {
+      "name": "windows-cmake",
+      "status": "pass",
+      "duration": "2m44s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648945"
+    },
+    {
+      "name": "write-tier-enforce-live",
+      "status": "pass",
+      "duration": "3m18s",
+      "url": "https://github.com/RakuenSoftware/aimee/actions/runs/34271555763/job/102214648881"
+    }
+  ],
+  "public_release_published": false
+}

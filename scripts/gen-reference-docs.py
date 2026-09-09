@@ -258,8 +258,9 @@ CFG_KEY_DESC = {
     "clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the "
     "prompt + history; the context-economizer (aggressive tier) compresses older results to keep "
     "history bounded.",
-    "require_session_worktree": "Fail closed on mutating ops outside this session's isolated worktree "
-    "(session-isolation guard; default on).",
+    "require_session_worktree": "Isolate Git work in a session worktree (default on). "
+    "False disables automatic creation, routing, and worktree write restrictions. "
+    "Non-Git folders do not require a worktree.",
     "subagent_ban_enabled": "Prevent provider-native sub-agent tools when an aimee delegate is "
     "available, and install the matching client guardrails (default on).",
     "require_aimee_memory": "Block agent writes to external file-based agent-memory stores "

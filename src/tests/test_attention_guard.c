@@ -658,6 +658,56 @@ static int capture_stderr(char *out, size_t outsz)
    return rc;
 }
 
+static void test_non_git_document_work(void)
+{
+   char dir[256], hook[2048], path[512];
+   snprintf(dir, sizeof(dir), "%s/aimee-doc-attn-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(dir));
+   write_config(NULL);
+   snprintf(hook, sizeof(hook),
+            "{\"session_id\":\"documents\",\"cwd\":\"%s\",\"tool_name\":\"Write\","
+            "\"tool_input\":{\"file_path\":\"reports/new/report.md\"}}",
+            dir);
+   g_stdin_json = hook;
+   assert(handle_attention_guard() == 0);
+   cJSON *input = cJSON_Parse("{\"file_path\":\"reports/new/report.md\"}");
+   assert(attn_tool_in_non_git_workspace(dir, "Write", input) == 1);
+   cJSON_Delete(input);
+
+   snprintf(hook, sizeof(hook),
+            "{\"session_id\":\"documents\",\"cwd\":\"%s\",\"tool_name\":\"Bash\","
+            "\"tool_input\":{\"command\":\"mkdir -p %s/extracted\"}}",
+            dir, dir);
+   assert(handle_attention_guard() == 0);
+   /* A document session cannot use its cwd to excuse writes into a repository. */
+   snprintf(path, sizeof(path), "%s/repo", dir);
+   assert(mkdir(path, 0700) == 0);
+   snprintf(path, sizeof(path), "%s/repo/.git", dir);
+   assert(mkdir(path, 0700) == 0);
+   snprintf(path, sizeof(path), "%s/repo/new/file.md", dir);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, path, dir, "documents") == 1);
+   input = cJSON_CreateObject();
+   cJSON_AddStringToObject(input, "file_path", path);
+   assert(attn_tool_in_non_git_workspace(dir, "Write", input) == 0);
+   cJSON_Delete(input);
+   char link[512];
+   snprintf(link, sizeof(link), "%s/linked", dir);
+   snprintf(path, sizeof(path), "%s/repo", dir);
+   assert(symlink(path, link) == 0);
+   snprintf(path, sizeof(path), "%s/linked/new/file.md", dir);
+   assert(attn_session_isolation_blocked(ATTN_OP_SOFT, path, dir, "documents") == 1);
+   assert(unlink(link) == 0);
+
+   snprintf(hook, sizeof(hook), "mkdir -p %s/repo/new", dir);
+   assert(attn_bash_escapes_worktree(hook, dir) == 1);
+   snprintf(path, sizeof(path), "%s/repo/.git", dir);
+   assert(rmdir(path) == 0);
+   snprintf(path, sizeof(path), "%s/repo", dir);
+   assert(rmdir(path) == 0);
+   assert(rmdir(dir) == 0);
+   g_stdin_json = NULL;
+}
+
 static void test_isolation_enforcement(void)
 {
    snprintf(g_home, sizeof(g_home), "%s/aimee_iso_test_%d", platform_tmpdir(), (int)getpid());
@@ -779,6 +829,7 @@ int main(void)
    test_guard_enforcement();
    test_required_discovery_activation();
    test_session_isolation_decision();
+   test_non_git_document_work();
    test_isolation_enforcement();
    test_camel_case_client_path_routing();
    test_external_memory_decision();
