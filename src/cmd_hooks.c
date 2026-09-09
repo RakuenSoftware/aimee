@@ -380,7 +380,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
             if (cJSON_IsString(fp))
                wt_fpath = fp->valuestring;
          }
-         int wt_block = is_write_tool(tool_name) && cwd[0] &&
+         int wt_block = config_require_session_worktree() && is_write_tool(tool_name) && cwd[0] &&
                         aimee_edit_target_in_main_clone(wt_fpath, cwd) &&
                         !aimee_main_clone_edits_allowed(cwd);
          cJSON_Delete(wt_ti);

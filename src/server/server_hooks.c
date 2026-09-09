@@ -174,6 +174,9 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
 
 int hooks_ensure_cwd_worktree(session_state_t *state, const char *sid, const char *cwd)
 {
+   if (!config_require_session_worktree())
+      return 0;
+
    if (!state || !sid || !sid[0] || strcmp(sid, "unknown") == 0 || !cwd || !cwd[0])
       return 0;
 

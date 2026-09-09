@@ -34,6 +34,34 @@ class Peer(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        if self.path in ("/v1/cli/manifest", "/v1/config/get", "/v1/hooks/pre", "/v1/hooks/session_start") and not self.server.reject:
+            request = json.loads(body) if body else {}
+            self.server.control_requests.append((self.path, request))
+            if self.path == "/v1/cli/manifest":
+                response = {"manifest_version": 1, "routes": [
+                    {"op": op, "verb": "POST", "path": "/v1/" + op.replace(".", "/")}
+                    for op in ("config.get", "hooks.pre", "hooks.session_start")]}
+            elif self.path == "/v1/config/get":
+                response = {"value": self.server.require_worktree if request.get("key") == "require_session_worktree" else False}
+            elif self.path == "/v1/hooks/session_start":
+                self.server.hook_starts += 1
+                self.server.hook_token = f"{self.server.hook_starts:064x}"
+                response = {"hook_token": self.server.hook_token, "exit_code": 0}
+            else:
+                trusted = self.server.hook_token is not None and request.get("hook_token") == self.server.hook_token
+                allowed = not self.server.require_worktree or (trusted and request.get("client_non_git_workspace") is True)
+                response = {"exit_code": 0 if allowed else 2,
+                            "hook_identity": "trusted" if trusted else "untrusted",
+                            "message": "" if allowed else "worktree required"}
+            payload = json.dumps(response).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(payload)
+            self.close_connection = True
+            return
         self.server.requests.put((self.path, dict(self.headers), body))
         if self.path == "/v1/responses" and self.server.codex_response:
             self.send_response(200)
@@ -123,6 +151,10 @@ class ThinClientProxyTest(unittest.TestCase):
         Path(self.env["CODEX_HOME"]).mkdir()
         self.peer = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Peer)
         self.peer.requests = queue.Queue()
+        self.peer.control_requests = []
+        self.peer.require_worktree = True
+        self.peer.hook_token = None
+        self.peer.hook_starts = 0
         self.peer.release = threading.Event()
         self.peer.cancelled = threading.Event()
         self.peer.reject = False
@@ -417,6 +449,61 @@ class ThinClientProxyTest(unittest.TestCase):
         self.assertIn("server rejected the client certificate", result.stdout)
         self.assertNotIn("rejected the stored token", result.stdout)
         self.assertEqual((self.root / "tls/client.crt").read_bytes(), original)
+
+    def run_hook(self, cwd, tool="Write", **tool_input):
+        payload = {"session_id": "document-regression", "cwd": str(cwd),
+                   "tool_name": tool, "tool_input": tool_input or {"file_path": "reports/new/report.md"}}
+        return subprocess.run([str(BINARY), "hooks", "pre"], input=json.dumps(payload),
+                              cwd=cwd, env={**self.env, "AIMEE_HOOK_CLIENT": "codex"},
+                              capture_output=True, text=True, timeout=15)
+
+    def test_document_hook_scope_and_identity_recovery_over_mtls(self):
+        self.start_peer(tls=True)
+        result = self.run_hook(self.root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('"deny"', result.stdout)
+        self.assertEqual(self.peer.hook_starts, 1)
+        self.assertFalse((self.root / ".aimee/worktrees").exists())
+        checks = [request for path, request in self.peer.control_requests if path == "/v1/hooks/pre"]
+        self.assertEqual(len(checks), 2)
+        self.assertTrue(all(request.get("client_non_git_workspace") is True for request in checks))
+        self.assertEqual(checks[-1]["hook_token"], self.peer.hook_token)
+        # Simulate server restart: the process-local authority forgot this token.
+        self.peer.hook_token = None
+        result = self.run_hook(self.root, "Bash", command=f"mkdir -p {self.root}/extracted")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('"deny"', result.stdout)
+        self.assertEqual(self.peer.hook_starts, 2)
+        # A non-Git cwd must not attest that an absolute Git target is ordinary work.
+        repo = self.root / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        result = self.run_hook(self.root, file_path=str(repo / "new/report.md"))
+        self.assertIn('"deny"', result.stdout)
+        last = [request for path, request in self.peer.control_requests if path == "/v1/hooks/pre"][-1]
+        self.assertNotIn("client_non_git_workspace", last)
+
+    def test_worktree_disabled_skips_launch_and_session_start_provisioning(self):
+        self.start_peer()
+        self.peer.require_worktree = False
+        repo = self.root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        result = subprocess.run([str(BINARY), "launch", "--", "/bin/pwd"], cwd=repo,
+                                env=self.env, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(Path(result.stdout.strip()), repo)
+        result = subprocess.run([str(BINARY), "session-start"], cwd=repo,
+                                input=json.dumps({"session_id": "disabled", "cwd": str(repo)}),
+                                env={**self.env, "AIMEE_HOOK_CLIENT": "codex"},
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for tool in ("Write", "Read", "Bash"):
+            result = self.run_hook(repo, tool, **({"command": "touch new.txt"} if tool == "Bash" else {"file_path": "new.txt"}))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn('"deny"', result.stdout)
+            self.assertNotIn("updatedInput", result.stdout)
+        self.assertFalse((repo / ".aimee").exists())
 
     def test_gateway_launch_configures_codex_and_owns_proxy_lifetime(self):
         self.start_peer()

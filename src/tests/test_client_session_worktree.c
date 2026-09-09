@@ -8,6 +8,7 @@
  * invisible to a mocked git.
  */
 #include "client_session_worktree.h"
+#include "client_config.h"
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -368,6 +369,31 @@ static void test_ensure_requires_a_session_id_and_a_repo(void)
 
    assert(chdir(cwd_before) == 0);
    printf("  ensure: no session id / no repo -> not applicable: ok\n");
+}
+
+static cJSON *worktree_disabled_config(const char *key)
+{
+   return strcmp(key, "require_session_worktree") == 0 ? cJSON_CreateFalse() : NULL;
+}
+
+static void test_worktree_opt_out(void)
+{
+   char repo[512], out[8192], marker[640];
+   make_repo("worktree-disabled", "main", repo, sizeof repo);
+   client_config_set_provider(worktree_disabled_config);
+   assert(client_session_worktree_ensure_at("disabled", repo, out, sizeof out) == -1);
+   assert(out[0] == '\0');
+   assert(client_session_worktree_route_path("disabled", repo, "new.txt", out, sizeof out) == 1);
+   assert(client_session_worktree_route_command("disabled", repo, "touch new.txt", out,
+                                                sizeof out) == 1);
+   assert(client_session_worktree_route_patch(
+              "disabled", repo, "*** Begin Patch\n*** Add File: new.txt\n+text\n*** End Patch\n",
+              out, sizeof out) == 1);
+   snprintf(marker, sizeof marker, "%s/.aimee", repo);
+   assert(access(marker, F_OK) != 0);
+   /* A live setting change restores provisioning for the same repository. */
+   client_config_set_provider(NULL);
+   assert(client_session_worktree_ensure_at("disabled", repo, out, sizeof out) == 0);
 }
 
 static void test_external_path_does_not_provision_a_worktree(void)
@@ -748,6 +774,7 @@ int main(void)
    test_explicit_feature_base_incorporates_latest_default();
    test_concurrent_session_starts_get_distinct_worktrees();
    test_ensure_requires_a_session_id_and_a_repo();
+   test_worktree_opt_out();
    test_external_path_does_not_provision_a_worktree();
    test_routes_reads_writes_shell_and_patch_per_session();
    test_release_recycles_only_clean_session_worktrees();

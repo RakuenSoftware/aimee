@@ -41,6 +41,13 @@ Connection precedence is:
 
 The client does not hold DB1, DB2, server vault keys, workflow state, or KB credentials.
 
+Git worktree isolation is enabled by default. Set `require_session_worktree` to
+`false` in the instance settings to disable automatic worktree creation, hook path
+routing, and worktree write restrictions. Ordinary non-Git folders are writable
+with isolation enabled. A remote hook carries the client's filesystem scope check
+under its authenticated session identity; the server does not infer the client's
+Git state from its own filesystem. Other write policies still apply.
+
 ## Workspaces and uploads
 
 ```bash

@@ -72,6 +72,9 @@ int attn_weight_for(attn_op_t op);
  * `session_id` (the hook's session id, may be NULL) admits this session's own
  * harness scratch dir — "<tmp>/claude-<uid>/<slug>/<session-id>/..." — which is
  * harness-owned temp space rather than repo content. */
+/* Positive filesystem evidence for a hook forwarded to a remote server. */
+int attn_tool_in_non_git_workspace(const char *cwd, const char *tool, const cJSON *input);
+
 int attn_session_isolation_blocked(attn_op_t op, const char *file_path, const char *cwd,
                                    const char *session_id);
 

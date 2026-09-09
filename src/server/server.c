@@ -938,15 +938,20 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
    char saved_cwd[MAX_PATH_LEN];
    snprintf(saved_cwd, sizeof(saved_cwd), "%s", run_cmd_get_cwd() ? run_cmd_get_cwd() : "");
+   /* Only an authenticated lifecycle hook may attest to client-local scope.
+    * The claim never reaches native tool execution or disables other guards. */
+   int client_non_git =
+       hook_identity == 1 &&
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "client_non_git_workspace"));
    int bound = workspace_turn_bind_active(target_cwd);
    const workspace_provider_t *provider = workspace_provider_active();
    int detached = bound && provider->kind == WS_PROVIDER_DETACHED;
    if (detached)
       run_cmd_set_cwd(target_cwd);
-   else
+   else if (!client_non_git)
       hooks_ensure_cwd_worktree(&state, sid, cwd);
-   int rc = pre_tool_check(tool_name, tool_input, &state, config_guardrail_mode(), cwd, msg,
-                           sizeof(msg));
+   int rc = pre_tool_check_client_workspace(tool_name, tool_input, &state, config_guardrail_mode(),
+                                            cwd, msg, sizeof(msg), client_non_git);
    run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
    workspace_turn_unbind_active();
    cJSON_Delete(input);

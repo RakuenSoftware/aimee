@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #endif
 #include "aimee.h"
+#include "worktree_scope.h"
 #include "cJSON.h"
 #include "computer_use.h"
 #include "guardrails_internal.h"
@@ -849,12 +850,6 @@ static int git_checkout_on_non_default_branch(const char *dir)
    return ok;
 }
 
-static int cwd_is_git_checkout(const char *cwd)
-{
-   char git_root[MAX_PATH_LEN];
-   return cwd && cwd[0] && git_repo_root(cwd, git_root, sizeof(git_root)) == 0 && git_root[0];
-}
-
 static int git_checkout_is_external_feature_worktree(const char *cwd)
 {
    char git_root[MAX_PATH_LEN];
@@ -1193,7 +1188,7 @@ static int is_write_intent(const char *tool_name, cJSON *root)
 
 static int pre_tool_check_impl(const char *tool_name, const char *input_json,
                                session_state_t *state, const char *guardrail_mode, const char *cwd,
-                               char *msg_buf, size_t msg_len)
+                               char *msg_buf, size_t msg_len, int client_non_git_workspace)
 {
    if (!tool_name || !input_json || !state)
       return 0;
@@ -1285,18 +1280,6 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
       }
    }
 
-   if (!container_delegate && (script_tool || is_write_intent(tool_name, root)) &&
-       !cwd_is_git_checkout(effective_cwd) && !session_cwd_is_worktree(effective_cwd) &&
-       !command_targets_worktree && !target_is_worktree &&
-       !cwd_is_detached_workspace(effective_cwd))
-   {
-      snprintf(msg_buf, msg_len,
-               "BLOCKED: write blocked because this session is not running in a worktree. "
-               "Enter the session worktree before writing.");
-      cJSON_Delete(root);
-      return 2;
-   }
-
    /* Verify gate: block push/PR (enforce:true); --show-toplevel keeps worktrees independent. */
    if (is_shell_tool(tool_name) && cmd && cJSON_IsString(cmd) &&
        (bash_has_git_push_requiring_gate(cmd->valuestring) ||
@@ -1364,7 +1347,8 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
     * run independently of this block, so they still apply. */
    const workspace_provider_t *gr_ws_active = workspace_provider_active();
    int gr_detached_active = gr_ws_active && gr_ws_active->kind == WS_PROVIDER_DETACHED;
-   if (!gr_detached_active &&
+   const int require_worktree = config_require_session_worktree() && !client_non_git_workspace;
+   if (require_worktree && !gr_detached_active &&
        (is_path_tool(tool_name) || (is_shell_tool(tool_name) && cmd && cJSON_IsString(cmd))))
    {
       /* Determine target path */
@@ -1523,10 +1507,19 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
       }
    }
 
+   char scope_target[MAX_PATH_LEN];
+   snprintf(scope_target, sizeof(scope_target), "%s", effective_cwd ? effective_cwd : "");
+   if (is_path_tool(tool_name) && cJSON_IsString(fp))
+      normalize_path(fp->valuestring, effective_cwd, scope_target, sizeof(scope_target));
+   else if (is_shell_tool(tool_name) && cJSON_IsString(cmd))
+      bash_git_target_dir(cmd->valuestring, effective_cwd, scope_target, sizeof(scope_target));
+
    /* Hard block for write intents the redirect above cannot handle (e.g.
     * script tools) when the session is not running in any worktree. A detached
     * workspace is exempt: its tree lives on the serving client, not here. */
-   if (!container_delegate && (script_tool || is_write_intent(tool_name, root)) &&
+   if (require_worktree && !container_delegate &&
+       !worktree_scope_non_git(effective_cwd, scope_target) &&
+       (script_tool || is_write_intent(tool_name, root)) &&
        !session_cwd_is_worktree(effective_cwd) && !command_targets_worktree &&
        !target_is_worktree && !cwd_is_detached_workspace(effective_cwd))
    {
@@ -2031,7 +2024,8 @@ static char *guardrails_workspace_exec(void *ctx, const char *cmd, int *exit_cod
 }
 
 int pre_tool_check_inner(const char *tool_name, const char *input_json, session_state_t *state,
-                         const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len)
+                         const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len,
+                         int client_non_git_workspace)
 {
    /* Worktree/branch/verify helpers predate workspace providers and use run_cmd.
     * Keep every probe on the same filesystem as the tool being checked, for
@@ -2044,8 +2038,8 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
    if (detached)
       previous = run_cmd_exchange_executor(
           (run_cmd_executor_t){guardrails_workspace_exec, (void *)provider});
-   int rc =
-       pre_tool_check_impl(tool_name, input_json, state, guardrail_mode, cwd, msg_buf, msg_len);
+   int rc = pre_tool_check_impl(tool_name, input_json, state, guardrail_mode, cwd, msg_buf, msg_len,
+                                client_non_git_workspace);
    if (detached)
       run_cmd_exchange_executor(previous);
    return rc;
