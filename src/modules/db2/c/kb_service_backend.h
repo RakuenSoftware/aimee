@@ -210,19 +210,6 @@ extern "C"
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
    cJSON *db2_kb_service_memory_episode_card_generate_json(const char *source_session);
-   /* `authority` decides destructiveness, not permission — the caller's
-    * capability was already checked at the entry point. It carries a
-    * memory_authority_t value: 0 (MEMORY_AUTHORITY_MODEL, and the default for a
-    * request that omits the field) retires/versions the old value, 1
-    * (MEMORY_AUTHORITY_USER) destroys it.
-    *
-    * Spelled `int` rather than the enum deliberately: DB2's outbound dependency
-    * surface is frozen (scripts/check_db2_source_boundary.py), and naming the
-    * type here would add an edge from a DB2 header to src/headers for a
-    * parameter whose contract is two documented values. The enum lives in
-    * memory_authority.h and is used either side of this seam; only the frozen
-    * header spells it as int. Note that 0 is the SAFE value, so a caller that
-    * passes nothing meaningful still gets the non-destructive path. */
    cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
    cJSON *db2_kb_service_memory_search_json(const cJSON *clusters_arr, int limit);
    cJSON *db2_kb_service_memory_find_facts_visible_json(const char *query, const char *workspace,
@@ -232,24 +219,6 @@ extern "C"
    cJSON *db2_kb_service_memory_diagnose_scoped_json(const char *query, const char *scope_type,
                                                      const char *scope_value, int limit);
    cJSON *db2_kb_service_memory_explain_match_json(const char *query, int64_t memory_id);
-   cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, const char *key,
-                                            const char *content, double confidence,
-                                            const char *session_id);
-   /* `authority` is persisted as the new row's provenance_category, which is what
-    * the typed-fact drain later reads to decide whether facts mined from this
-    * note may enter at Class A. The RPC handler derives it from the calling
-    * surface and the request's authentication — see memory.h's memory_insert_ex.
-    * Spelled `int` for the same frozen-boundary reason as the delete/update pair
-    * below, and with the same safe default: 0 is MEMORY_AUTHORITY_MODEL. */
-   cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, const char *key,
-                                               const char *content, const char *use_cases,
-                                               double confidence, const char *session_id,
-                                               int authority);
-   cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const char *kind,
-                                                         const char *epistemic_kind,
-                                                         const char *key, const char *content,
-                                                         const char *use_cases, double confidence,
-                                                         const char *session_id, int authority);
    /* `authority` is the typed-fact write authority for the §4 retraction this
     * turn may perform; the RPC handler derives it from the request's
     * authenticated actor, never from the request body. See db2_typed_fact_ingress

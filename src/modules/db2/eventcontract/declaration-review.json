@@ -564,20 +564,6 @@
       "reason": "The cJSON session-fold wrapper cannot define or split the transaction; a typed memory.session_fold operation owns checkpoint creation and L0 cleanup before replying."
     },
     {
-      "symbol": "db2_kb_service_memory_insert_ex_json",
-      "signature_sha256": "dcc24d31a3c30dbd0de3f55f2d3ecdcddd9545612344c2a16b5daced5c1e2bb7",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The extended-insert cJSON facade is not the mutation boundary; one typed memory.insert operation validates all bounded fields and owns the complete transactional insert."
-    },
-    {
-      "symbol": "db2_kb_service_memory_insert_json",
-      "signature_sha256": "6447c87043a81c766cdf9b095223b8c2c24160b43f5a89668765512edb629856",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The legacy insert cJSON wrapper remains caller presentation; the typed memory.insert operation owns validation, provenance, and its structured result."
-    },
-    {
       "symbol": "db2_kb_service_memory_learn_style_json",
       "signature_sha256": "d410aa57cfd1f5ab7fbbb134dacc1fedf7fb792d9d3a95cf9874d5f6fa29d665",
       "disposition": "private-db2",

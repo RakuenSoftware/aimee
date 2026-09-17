@@ -11,6 +11,7 @@ type commandRoute struct {
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"store", "Store a memory and schedule fact extraction.", handleStoreCommand, true},
 	{"delete", "Delete memories.", handleMutationCommand, true},
 	{"update", "Update memories.", handleMutationCommand, true},
 	{"touch", "Touch memories.", handleMutationCommand, true},

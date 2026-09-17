@@ -2,6 +2,7 @@
  * See docs/proposals/done/cross-source-learning-substrate.md */
 
 #include "learning_evidence.h"
+#include "module_commands.h"
 #include "aimee.h" /* memory_directive_t and friends, TIER_* */
 #include "modules/db2/c/artifacts.h"
 #include "modules/db2/c/anti_patterns.h"
@@ -223,10 +224,17 @@ static int promote_memory(const db2_artifact_row_t *art, int flagged)
    if (!content[0])
       snprintf(content, sizeof(content), "%s", key);
 
-   /* Durable tier; routes through db2_kb_service_memory_insert_json -> the
-    * memory_insert typed-verb "store" path defined by memory-public-contract. */
-   cJSON *resp =
-       db2_kb_service_memory_insert_json(TIER_L1, "preference", key, content, art->confidence, "");
+   /* The memory owner performs the write and schedules extraction atomically. */
+   cJSON *request = cJSON_CreateObject(), *resp = NULL;
+   if (!request)
+      return -1;
+   cJSON_AddStringToObject(request, "tier", "L1");
+   cJSON_AddStringToObject(request, "kind", "preference");
+   cJSON_AddStringToObject(request, "key", key);
+   cJSON_AddStringToObject(request, "content", content);
+   cJSON_AddNumberToObject(request, "confidence", art->confidence);
+   (void)aimee_module_commands_dispatch("memory.store", request, &resp);
+   cJSON_Delete(request);
    if (!resp)
       return -1;
    const cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");

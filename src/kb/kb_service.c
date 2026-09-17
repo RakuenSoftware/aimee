@@ -1257,7 +1257,6 @@ static const struct
     {"graph.sync_code", kb_handle_graph_sync_code},
     {"graph.explain", kb_handle_graph_explain},
     {"code.audit", kb_handle_code_audit},
-    {"memory.store", kb_handle_memory_store},
     {"memory.supersede", kb_handle_memory_supersede},
     {"facts.retract", kb_handle_facts_retract},
     {"entities.merge", kb_handle_entities_merge},

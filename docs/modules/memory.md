@@ -294,3 +294,10 @@ verb, arguments and verifier context separately; CMPS responses remain v1.
 Memory accepts verifier context only from the host's reserved bus principal.
 External grants cannot claim that principal and the bus stamps sender identity.
 Plugins retain their v1 invocation and receive no verifier context.
+
+KB store also runs in the Go owner. The memory row, fact-extraction actor capture,
+and extraction job commit together; capture or enqueue failures roll back the
+write. Verified host context is required for user provenance, and replacement
+of a key with model-authored text resets captured authority. Learning promotion
+and import consume the generic command route. Import applies its workspace
+before writing and reports module failures instead of counting them as imported.

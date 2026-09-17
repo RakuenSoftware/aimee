@@ -552,27 +552,6 @@ int kb_handle_memory_assemble_typed_context(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to assemble typed context");
 }
 
-/* Read the request's destructive-edit authority. Only the exact string "user"
- * grants it: an absent, misspelled, or non-string field means MODEL, so a caller
- * that does not know about this field cannot destroy anything by accident.
- *
- * And asking is not the same as being granted. `authority` is a REQUEST — these
- * actions are reachable from outside as POST /v1/actions/memory.delete and
- * .update, where "user" means destroy rather than retire — so it is capped by
- * what the request actually authenticated as (kb_memory_request_authority,
- * below). A caller that cannot prove a human never destroys a memory outright. */
-static memory_authority_t kb_memory_authority(cJSON *req)
-{
-   cJSON *a = cJSON_GetObjectItemCaseSensitive(req, "authority");
-   int wants_user = cJSON_IsString(a) && a->valuestring && strcmp(a->valuestring, "user") == 0;
-   if (wants_user && kb_memory_request_authority() == FACT_AUTHORITY_USER)
-      return MEMORY_AUTHORITY_USER;
-   if (wants_user)
-      LOG_WARN("kb.memory", "user-authority memory edit served at model authority: the request "
-                            "carries no authenticated human actor");
-   return MEMORY_AUTHORITY_MODEL;
-}
-
 int kb_handle_session_briefing_commitments(int fd, cJSON *req)
 {
    return kb_handle_session_briefing_section(fd, req,
@@ -1230,42 +1209,4 @@ int kb_handle_task_list(int fd, cJSON *req)
 
    cJSON *resp = db2_kb_service_task_list_json(state, sid, limit);
    return kb_reply_or_error(fd, resp, "failed to list tasks");
-}
-
-int kb_handle_memory_store(int fd, cJSON *req)
-{
-   cJSON *key_j = cJSON_GetObjectItemCaseSensitive(req, "key");
-   cJSON *content_j = cJSON_GetObjectItemCaseSensitive(req, "content");
-   if (!cJSON_IsString(key_j) || !cJSON_IsString(content_j))
-      return kb_send_error(fd, "memory.store requires key and content");
-
-   cJSON *tier_j = cJSON_GetObjectItemCaseSensitive(req, "tier");
-   cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(req, "kind");
-   cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(req, "confidence");
-   if (conf_j &&
-       (!cJSON_IsNumber(conf_j) || !(conf_j->valuedouble >= 0.0 && conf_j->valuedouble <= 1.0)))
-      return kb_send_error(fd, "memory.store confidence must be between 0 and 1");
-   cJSON *sid_j = cJSON_GetObjectItemCaseSensitive(req, "session_id");
-   cJSON *use_cases_j = cJSON_GetObjectItemCaseSensitive(req, "use_cases");
-   cJSON *epistemic_j = cJSON_GetObjectItemCaseSensitive(req, "epistemic_kind");
-   const char *tier = cJSON_IsString(tier_j) ? tier_j->valuestring : TIER_L0;
-   const char *kind = cJSON_IsString(kind_j) ? kind_j->valuestring : KIND_FACT;
-   double confidence = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 1.0;
-   const char *session_id = cJSON_IsString(sid_j) ? sid_j->valuestring : "";
-   const char *use_cases = cJSON_IsString(use_cases_j) ? use_cases_j->valuestring : "";
-   const char *epistemic_kind =
-       cJSON_IsString(epistemic_j) ? epistemic_j->valuestring : "world_fact";
-
-   /* The write's authority is persisted as the row's provenance, so the drain can
-    * tell later whether facts mined from this note may be Class A. Same rule as
-    * every other authority on this surface: the body asks, the request's
-    * authentication grants (kb_memory_authority). A caller that says nothing —
-    * every internal writer — records the fail-closed agent provenance. */
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_insert_epistemic_ex_json(
-       tier, kind, epistemic_kind, key_j->valuestring, content_j->valuestring, use_cases,
-       confidence, session_id, (int)kb_memory_authority(req));
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to store memory");
 }

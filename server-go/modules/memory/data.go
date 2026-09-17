@@ -727,6 +727,7 @@ type handlerOptions struct {
 	placement      Placement
 	data           DataStore
 	commandContext *bus.CommandContext
+	publicWrite    bool
 }
 
 type HandlerOption func(*handlerOptions)
@@ -1215,9 +1216,19 @@ set_config('aimee.memory_scope_all',$5,true)`,
 				(request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
+			if options.publicWrite && transaction == nil {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
 			request.Scope = scope
 			var record Record
 			record, err = mutations.InsertEpistemic(ctx, request)
+			if err == nil && options.publicWrite {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				err = backend.captureStoredFactActor(ctx, record.ID, request.Authority, options.commandContext)
+			}
 			response.Records = []Record{record}
 		case "update-as":
 			if request.ID <= 0 || request.Content == "" ||
