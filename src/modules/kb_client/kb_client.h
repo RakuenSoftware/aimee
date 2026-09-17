@@ -584,7 +584,7 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
 
 /* Upsert a workflow:<workspace>:<signal_type> memory via aimee-kb.
  * Returns the new memory id (>0) or -1 on failure / kb unreachable.
- * Mirrors memory_upsert_workflow(). */
+ * Uses the shared Go workflow command. */
 int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *signal_type,
                                          const char *rule, double observed_confidence,
                                          const char *session_id);
@@ -865,7 +865,7 @@ int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind);
  * DB2 owner).  The kb side runs the full version-bump + provenance +
  * link pipeline.  Returns 0 on success (out filled if non-NULL) or
  * -1 if kb is unreachable / supersede failed.  Mirrors
- * memory_supersede(). */
+ * the shared Go replacement command. */
 int kb_client_memory_supersede(int64_t old_id, const char *new_content, double confidence,
                                const char *session_id, memory_t *out);
 

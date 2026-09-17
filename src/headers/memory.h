@@ -634,8 +634,6 @@ double memory_effective_importance(const memory_t *m, time_t now_sec);
  * Key format: workflow:{workspace}:{signal_type}. Content is the rule text.
  * Repeat observations merge into the existing row and bump confidence toward
  * its durable provenance ceiling. Returns the memory id on success, -1 on failure. */
-int64_t memory_upsert_workflow(const char *workspace, const char *signal_type, const char *rule,
-                               double observed_confidence, const char *session_id);
 
 /* Observe a Bash command and, if it carries a learnable workflow signal,
  * upsert a workflow memory tagged to the workspace matching the current
@@ -872,8 +870,6 @@ int memory_synthesize_failure_episodes(void);
 /* --- Temporal Facts --- */
 /* Returns -2 when an episode/experience must be annotated and -3 when an
  * instruction/policy must be revoked instead of corrected. */
-int memory_supersede(int64_t old_id, const char *new_content, double confidence,
-                     const char *session_id, memory_t *out);
 int memory_fact_history(const char *key, memory_t *out, int max);
 
 /* Retire a memory without a replacement: rename the row to `key#vN` and stamp
@@ -1060,7 +1056,6 @@ int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confi
  * utility_score on entity_edges touching the cited memories.  When success=0,
  * decrement and write a REL_CORRECTED_BY relation in memory_relations.
  * Returns 0 on success, -1 on error. */
-int memory_apply_feedback(int success, int64_t *citation_ids, int citation_count);
 
 /* Phase 7: apply correctness feedback distributed across a retrieval path.
  * The total |delta| (+0.1 success / -0.1 failure) is split across the path

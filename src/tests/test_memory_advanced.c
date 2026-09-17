@@ -486,25 +486,6 @@ int main(void)
       }
    }
 
-   /* --- memory_supersede --- */
-   {
-      memory_t old_mem;
-      memory_insert(TIER_L1, KIND_FACT, "supersede-test", "old value", 0.8, "", &old_mem);
-
-      memory_t new_mem;
-      int rc = memory_supersede(old_mem.id, "new value", 0.9, "sess-1", &new_mem);
-      assert(rc == 0);
-      assert(new_mem.id != old_mem.id);
-      assert(strcmp(new_mem.content, "new value") == 0);
-   }
-
-   /* --- memory_fact_history --- */
-   {
-      memory_t hist[8];
-      int count = memory_fact_history("supersede-test", hist, 8);
-      assert(count >= 2); /* old + new */
-   }
-
    /* --- memory_is_profile_query --- */
    {
       assert(memory_is_profile_query("what kind of person is Caroline?") == 1);
@@ -644,46 +625,6 @@ int main(void)
       int again = memory_improve_dedupe(0);
       assert(again == 0);
       printf("  dedupe_audit: ok\n");
-   }
-
-   /* --- memory_apply_feedback: updates utility scores on success and failure --- */
-   {
-      char err[256] = "";
-      memory_t m;
-      memory_insert(TIER_L2, KIND_FACT, "cited-fact", "Python is the project language", 0.9, "s1",
-                    &m);
-
-      /* Insert an entity edge for the cited key */
-      static const char *edge_sql =
-          "INSERT INTO entity_edges (source, relation, target, weight) VALUES (?1, ?2, ?3, ?4)";
-      aimee_pg_stmt_t *es = aimee_pg_prepare(db2_conn(), edge_sql, err, sizeof(err));
-      assert(es);
-      aimee_pg_bind_text(es, "?1", "cited-fact");
-      aimee_pg_bind_text(es, "?2", "co_discussed");
-      aimee_pg_bind_text(es, "?3", "python");
-      aimee_pg_bind_int(es, "?4", 1);
-      aimee_pg_step(es, err, sizeof(err));
-      aimee_pg_finalize(es);
-
-      /* Positive feedback: utility_score should go up */
-      int64_t cit_ids[] = {m.id};
-      int rc = memory_apply_feedback(1, cit_ids, 1);
-      assert(rc == 0);
-
-      /* Negative feedback: utility_score should go down and a corrected_by relation inserted */
-      rc = memory_apply_feedback(0, cit_ids, 1);
-      assert(rc == 0);
-
-      /* Verify corrected_by relation was inserted */
-      aimee_pg_stmt_t *rel_stmt = aimee_pg_prepare(
-          db2_conn(),
-          "SELECT COUNT(*) FROM memory_relations WHERE relation='corrected_by' AND memory_id=?1",
-          err, sizeof(err));
-      assert(rel_stmt);
-      aimee_pg_bind_int64(rel_stmt, "?1", m.id);
-      assert(aimee_pg_step(rel_stmt, err, sizeof(err)) == AIMEE_PG_ROW);
-      assert(aimee_pg_column_int(rel_stmt, 0) >= 1);
-      aimee_pg_finalize(rel_stmt);
    }
 
    /* --- memory_cognify_parse_response: valid JSON with relations and claims --- */
@@ -2309,23 +2250,6 @@ int main(void)
       assert(db2_memory_valid_at(m.id, spaced_after) == 0);
       assert(db2_memory_valid_at(m.id, iso_before) == 1);
       assert(db2_memory_valid_at(m.id, spaced_before) == 1);
-
-      /* valid_from side: memory_supersede stamps the replacement's valid_from at
-       * the same instant it closes the old row's valid_until, so the intervals
-       * meet exactly -- at that instant the old row is out and the new one in,
-       * with neither a gap nor an overlap. Later today the replacement is in
-       * force; against the bug the spaced form read "not yet valid". */
-      memory_t sup_src, replacement;
-      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "bt:from", "original value", 0.9, "s-bt",
-                           &sup_src) == 0);
-      assert(memory_supersede(sup_src.id, "replacement value", 0.9, "s-bt", &replacement) == 0);
-      assert(db2_memory_valid_at(replacement.id, spaced_after) == 1);
-      assert(db2_memory_valid_at(replacement.id, iso_after) == 1);
-      assert(db2_memory_valid_at(replacement.id, spaced_before) == 0);
-      assert(db2_memory_valid_at(replacement.id, iso_before) == 0);
-
-      /* The superseded original closed at that same instant. */
-      assert(db2_memory_valid_at(sup_src.id, spaced_after) == 0);
 
       printf("  bitemporal_rows: ok\n");
    }

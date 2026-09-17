@@ -1680,8 +1680,7 @@
         "src/tests/test_db2_code_audit.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_kb_maintenance.c",
-        "src/tests/test_memory_advanced.c",
-        "src/tests/test_workspace_memory.c"
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -1892,8 +1891,7 @@
         "src/tests/test_ranker_fit.c",
         "src/tests/test_schema_subst.c",
         "src/tests/test_witness_canary_pg.c",
-        "src/tests/test_witness_checkpoint_produce_pg.c",
-        "src/tests/test_workspace_memory.c"
+        "src/tests/test_witness_checkpoint_produce_pg.c"
       ],
       "locations": [
         {
@@ -24075,7 +24073,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "0a931062074dfb2ed118bda82ec6a4525fdcd4c92199c1153413c1485f757cb0",
+  "fingerprint": "8e30ee233c67fbd3c4253ab3ccd7e8de78796948a0387357bd5dc191475231a5",
   "module": "db2",
   "schema_version": 1,
   "summary": {

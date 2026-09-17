@@ -546,9 +546,13 @@ func (s *postgresDataStore) Feedback(ctx context.Context, scope Scope, ids []int
 		if id <= 0 {
 			continue
 		}
-		_, err := s.db.Exec(ctx, `UPDATE entity_edges SET utility_score = GREATEST(-1.0, LEAST(1.0, COALESCE(utility_score, 0) + $1)), utility_touched_at = pg_now_text()
-WHERE source = (SELECT key FROM memories WHERE id = $2)
-   OR target = (SELECT key FROM memories WHERE id = $2)`, delta, id)
+		_, err := s.db.Exec(ctx, `WITH cited AS MATERIALIZED (
+ SELECT id,key FROM memories WHERE id=$2 AND lifecycle_state='active'
+), edges AS (
+ UPDATE entity_edges SET utility_score=GREATEST(-1.0,LEAST(1.0,COALESCE(utility_score,0)+$1)),utility_touched_at=pg_now_text()
+ WHERE source IN (SELECT key FROM cited) OR target IN (SELECT key FROM cited) RETURNING 1
+) INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text)
+ SELECT id,key,'corrected_by',key,'Feedback correction' FROM cited WHERE $1<0`, delta, id)
 		if err != nil {
 			return err
 		}
@@ -1430,6 +1434,12 @@ set_config('aimee.correlation_id',$9,true)`,
 	case "upsert-workflow":
 		if options.placement != PlacementKB || request.Workspace == "" || request.SignalType == "" || request.Rule == "" {
 			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if backend, ok := options.data.(*postgresDataStore); ok {
+			var record Record
+			record, err = backend.upsertWorkflow(ctx, request)
+			response.Records = []Record{record}
+			break
 		}
 		workflowScope := Scope{Type: ScopeWorkspace, Value: request.Workspace}
 		key := "workflow:" + request.Workspace + ":" + request.SignalType

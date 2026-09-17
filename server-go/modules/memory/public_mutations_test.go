@@ -157,11 +157,6 @@ UPDATE memories SET epistemic_kind='policy' WHERE id=8;`)
 			t.Fatalf("%s: %v", verb, r)
 		}
 	}
-	first := run("upsert_workflow", `{"workspace":"team","signal_type":"lint","rule":"run lint"}`, false)
-	second := run("upsert_workflow", `{"workspace":"team","signal_type":"lint","rule":"run all lint","observed_confidence":0.7}`, false)
-	if first["status"] != "ok" || second["status"] != "ok" || first["id"] != second["id"] {
-		t.Fatal(first, second)
-	}
 	// A host-authenticated caller still cannot mutate a hidden project record.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_mutation_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA mutation_command_test TO memory_mutation_test;

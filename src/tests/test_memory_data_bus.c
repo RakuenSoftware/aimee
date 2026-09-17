@@ -8,17 +8,12 @@
 
 static const char *content;
 static int mode;
-static int replacing;
 static const char *expected_as_of;
 cJSON *aimee_module_json_call(uint32_t event, uint32_t stage, cJSON *request, size_t max_body,
                               int timeout, aimee_module_call_result_t *result)
 {
    assert(event == AIMEE_MEMORY_EVENT_DATA && stage == AIMEE_MEMORY_STAGE_DATA);
-   assert(strcmp(cJSON_GetObjectItem(request, "operation")->valuestring,
-                 replacing ? "supersede" : "get") == 0);
-   if (replacing)
-      assert(strcmp(cJSON_GetObjectItem(request, "session_id")->valuestring,
-                    "replacement-session") == 0);
+   assert(strcmp(cJSON_GetObjectItem(request, "operation")->valuestring, "get") == 0);
    cJSON *as_of = cJSON_GetObjectItem(request, "as_of");
    assert(expected_as_of ? as_of && strcmp(as_of->valuestring, expected_as_of) == 0 : !as_of);
    cJSON_Delete(request);
@@ -63,13 +58,6 @@ int main(void)
    assert(memory_get(42, &row) == -1); /* Existing ABI unchanged. */
    mode = -1;
    assert(memory_get_result(42, &row) == -1);
-   replacing = 1;
-   mode = 0;
-   assert(memory_supersede(41, "replacement", 0.8, "replacement-session", &row) == 0);
-   mode = 2;
-   assert(memory_supersede(41, "replacement", 0.8, "replacement-session", &row) == -2);
-   mode = 3;
-   assert(memory_supersede(41, "replacement", 0.8, "replacement-session", &row) == -3);
    free(long_text);
    return 0;
 }

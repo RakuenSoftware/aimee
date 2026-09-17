@@ -377,3 +377,10 @@ and embedding/synthesis queue writes. Sources retain their scope; mixed scopes,
 non-active sources and sessions above 64 rows are refused. Checkpoint, lineage,
 evidence and source removal share one SQL statement. Restricted-role replay
 covers complete digests, refusal and rollback when a queue write fails.
+
+Accepted learning proposals now invoke the host-only Go memory owner for
+feedback, replacements and workflows. Negative feedback records a corrected-by
+relation; workflow reinforcement uses canonical scoped writes, model provenance,
+a 0.8 confidence ceiling and rejection checks. Workflow identity updates are
+serialized per scope/key. Go packaged-schema replay replaces the old mutation
+fixtures; the native proposal-consumer test checks routing and failure handling.

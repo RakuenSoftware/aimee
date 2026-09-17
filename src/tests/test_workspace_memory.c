@@ -265,101 +265,6 @@ static void test_ws_null_workspace_falls_back(void)
    teardown();
 }
 
-static int count_key(const char *key)
-{
-   return count_for_key("SELECT COUNT(*) FROM memories WHERE key = ?1", key);
-}
-
-static double conf_for_key(const char *key)
-{
-   char err[128] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT confidence FROM memories WHERE key = ?1", err, sizeof(err));
-   assert(st != NULL);
-   aimee_pg_bind_text(st, "?1", key);
-   double c = -1.0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      c = aimee_pg_column_double(st, 0);
-   aimee_pg_finalize(st);
-   return c;
-}
-
-static void test_upsert_workflow_inserts_and_tags(void)
-{
-   setup();
-
-   int64_t id = memory_upsert_workflow("SmoothNAS", "pr-target", "PRs target the `testing` branch.",
-                                       0.6, "s1");
-   assert(id > 0);
-
-   /* Single row keyed by workflow:smoothnas:pr-target (key is normalized
-    * lowercase by the memory layer). */
-   assert(count_key("workflow:smoothnas:pr-target") == 1);
-
-   /* Confidence starts around the observed value (0.6). */
-   double c = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c >= 0.59 && c <= 0.61);
-
-   /* Tagged to the requested workspace. */
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1"
-                           " AND workspace = 'SmoothNAS'",
-                           id) == 1);
-
-   /* Row kind is `workflow`. */
-   {
-      char err[128] = "";
-      aimee_pg_stmt_t *st =
-          aimee_pg_prepare(db2_conn(), "SELECT kind FROM memories WHERE id = ?1", err, sizeof(err));
-      assert(st != NULL);
-      aimee_pg_bind_int64(st, "?1", id);
-      assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-      const char *kind = aimee_pg_column_text(st, 0);
-      assert(kind && strcmp(kind, KIND_WORKFLOW) == 0);
-      aimee_pg_finalize(st);
-   }
-
-   teardown();
-}
-
-static void test_upsert_workflow_dedupes_and_bumps(void)
-{
-   setup();
-
-   int64_t first = memory_upsert_workflow("SmoothNAS", "pr-target",
-                                          "PRs target the `testing` branch.", 0.6, "s1");
-   assert(first > 0);
-
-   /* Second observation with the same signal: must update, not duplicate. */
-   int64_t second = memory_upsert_workflow("SmoothNAS", "pr-target",
-                                           "PRs target the `testing` branch.", 0.6, "s2");
-   assert(second == first);
-   assert(count_key("workflow:smoothnas:pr-target") == 1);
-
-   /* Confidence bumps toward the durable model-authored provenance ceiling. */
-   double c2 = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c2 >= 0.79 && c2 <= 0.81);
-
-   memory_upsert_workflow("SmoothNAS", "pr-target", "PRs target the `testing` branch.", 0.6, "s3");
-   double c3 = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c3 >= 0.79 && c3 <= 0.81);
-
-   /* Re-exposure cannot lift belief above the provenance ceiling. */
-   memory_upsert_workflow("SmoothNAS", "pr-target", "PRs target the `testing` branch.", 0.6, "s4");
-   double c4 = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c4 >= 0.79 && c4 <= 0.81);
-
-   teardown();
-}
-
-static void test_upsert_workflow_rejects_empty_args(void)
-{
-   setup();
-   assert(memory_upsert_workflow("", "pr-target", "rule", 0.6, "s1") == -1);
-   assert(memory_upsert_workflow("ws", "", "rule", 0.6, "s1") == -1);
-   assert(memory_upsert_workflow("ws", "pr-target", "", 0.6, "s1") == -1);
-   teardown();
-}
-
 static void test_auto_tag_shared_keywords(void)
 {
    setup();
@@ -964,9 +869,6 @@ int main(void)
    test_ws_context_prefers_project_scope_when_available();
    test_api_memory_stats_includes_scope_counts();
    test_api_memory_stats_includes_functional_tiers();
-   test_upsert_workflow_inserts_and_tags();
-   test_upsert_workflow_dedupes_and_bumps();
-   test_upsert_workflow_rejects_empty_args();
    printf("workspace_memory: all tests passed\n");
    return 0;
 }

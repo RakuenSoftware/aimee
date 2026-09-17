@@ -15,6 +15,9 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	operation := args.stringOr("operation", "")
+	if operation == "learning-apply" {
+		return handleLearningMutation(options, invocation, args)
+	}
 	request := DataRequest{IncludeAll: true}
 	switch operation {
 	case "directive-create":

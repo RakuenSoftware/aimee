@@ -376,9 +376,18 @@ static void test_task_hint_formats_xml_and_negative_context(void)
    memory_t old_mem, new_mem, fact;
    memory_insert(TIER_L2, KIND_FACT, "transport",
                  "Use WebSockets for browser transport in the frontend.", 0.8, "s1", &old_mem);
-   assert(memory_supersede(old_mem.id,
-                           "Use server-sent events for browser transport in the frontend.", 0.95,
-                           "s2", &new_mem) == 0);
+   /* Mutation parity is covered by the Go runtime replay. Seed the history
+    * needed by this independent context-rendering fixture directly. */
+   assert(memory_insert(TIER_L2, KIND_FACT, "transport#v2",
+                        "Use server-sent events for browser transport in the frontend.", 0.8, "s2",
+                        &new_mem) == 0);
+   char history_sql[512], history_err[128] = "";
+   snprintf(
+       history_sql, sizeof(history_sql),
+       "UPDATE memories SET valid_until=pg_now_text(),lifecycle_state='superseded' WHERE id=%lld;"
+       "INSERT INTO memory_links(source_id,target_id,relation) VALUES(%lld,%lld,'supersedes')",
+       (long long)old_mem.id, (long long)new_mem.id, (long long)old_mem.id);
+   assert(aimee_pg_exec(db2_conn(), history_sql, history_err, sizeof(history_err)) == 0);
    memory_insert(TIER_L2, KIND_FACT, "frontend facts",
                  "Frontend clients subscribe to event updates over HTTP streams.", 0.9, "s2",
                  &fact);
