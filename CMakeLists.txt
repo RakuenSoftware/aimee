@@ -911,7 +911,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/memory/gw_stage_memory.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_embed_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_pii_gate.c
     ${AIMEE_SRC_DIR}/server/obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/server/module_routing_adapter.c
     ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
@@ -1066,7 +1065,6 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_main.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_embed_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_pii_gate.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_domain_bus.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_domain_runtime_bus.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_scope_connection.c

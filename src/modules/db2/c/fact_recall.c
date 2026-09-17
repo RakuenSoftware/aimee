@@ -35,9 +35,9 @@ int db2_fact_recall_block(const char *entity, int turn_requests_sensitive, char 
    return fact_recall_call(entity, NULL, turn_requests_sensitive, out, cap);
 }
 
-int db2_fact_recall_in_query(const char *query, int turn_requests_sensitive, char *out, size_t cap)
+int db2_fact_recall_in_query(const char *query, char *out, size_t cap)
 {
    if (!query)
       return -1;
-   return fact_recall_call(NULL, query, turn_requests_sensitive, out, cap);
+   return fact_recall_call(NULL, query, 0, out, cap);
 }

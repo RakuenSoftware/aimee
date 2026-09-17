@@ -28,6 +28,7 @@ const (
 )
 
 type DataRequest struct {
+	FactWrite *FactWriteRequest `json:"fact_write,omitempty"`
 	CodeIndex *CodeIndexRequest `json:"code_index,omitempty"`
 	// Accepted for old callers, but never used to override instance configuration.
 	GraphCodeFusionState  string    `json:"graph_code_fusion_state,omitempty"`
@@ -129,6 +130,7 @@ type Record struct {
 }
 
 type DataResponse struct {
+	FactWrite          *FactWriteDecision   `json:"fact_write,omitempty"`
 	Records            []Record             `json:"records"`
 	Deleted            bool                 `json:"deleted,omitempty"`
 	Allowed            *bool                `json:"allowed,omitempty"`
@@ -842,6 +844,17 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
+	}
+	if request.Operation == "fact-write-decision" {
+		if request.FactWrite == nil || len(request.FactWrite.Relation) > relTypeMax {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		decision := DecideFactWrite(*request.FactWrite)
+		encoded, err := json.Marshal(DataResponse{FactWrite: &decision})
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		return encoded, bus.ModuleStatusOK
 	}
 	if request.Operation == "recall-gate" {
 		enabled, enforce := recallGateMode()

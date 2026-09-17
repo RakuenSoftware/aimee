@@ -25,7 +25,7 @@ extern "C"
    /* Recall `entity`'s current semantic facts and format the ones that pass §7
     * PII gating into `out` (one "- <relation>: <target>\n" line each, highest
     * confidence first, up to an internal cap). `turn_requests_sensitive` is the
-    * result of memory_pii_turn_requests_sensitive(query): when 0, PII/SECRET
+    * caller-provided turn context for entity-only recall: when 0, PII/SECRET
     * attributes are withheld; identity/normal facts always pass above the
     * confidence floor. Writes "" when nothing qualifies. Returns the number of
     * facts written (>=0), or -1 on bad args. */
@@ -35,10 +35,10 @@ extern "C"
    /* Query-scoped recall: the user's own facts PLUS facts about any registered
     * entity whose (>=3-char) alias appears in `query` (resolved through the
     * registry, so "DevBox"/"the workstation" collapse to one node). Each entity's
-    * facts are §7 PII-gated exactly as db2_fact_recall_block. Bounded by an
+    * facts are §7 PII-gated in Go from the query itself. Bounded by an
     * internal entity cap and the caller's buffer. Returns the total facts written
     * (>=0), or -1 on bad args. */
-   int db2_fact_recall_in_query(const char *query, int turn_requests_sensitive, char *out,
+   int db2_fact_recall_in_query(const char *query, char *out,
                                 size_t cap);
 
 #ifdef __cplusplus

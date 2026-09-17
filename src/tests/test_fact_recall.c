@@ -45,7 +45,7 @@ int main(void)
    assert(db2_fact_recall_block("user", 1, out, sizeof(out)) == 1);
    assert(strcmp(out, "- works_for: acme\n") == 0);
    assert(g_sensitive == 1);
-   assert(db2_fact_recall_in_query("what about devbox", 0, out, sizeof(out)) == 1);
+   assert(db2_fact_recall_in_query("what about devbox", out, sizeof(out)) == 1);
    assert(strcmp(out, "- device_has_ip: 10.0.0.5\n") == 0);
    assert(g_sensitive == 0);
 
@@ -64,7 +64,7 @@ int main(void)
    assert(db2_fact_recall_block("", 0, out, sizeof(out)) == -1);
    assert(db2_fact_recall_block("user", 0, NULL, sizeof(out)) == -1);
    assert(db2_fact_recall_block("user", 0, out, 0) == -1);
-   assert(db2_fact_recall_in_query(NULL, 0, out, sizeof(out)) == -1);
+   assert(db2_fact_recall_in_query(NULL, out, sizeof(out)) == -1);
 
    puts("fact_recall: all tests passed");
    return 0;

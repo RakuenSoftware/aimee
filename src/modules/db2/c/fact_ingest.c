@@ -6,7 +6,6 @@
 #include "rel_types_store.h"  /* db2_fact_commit */
 #include "../headers/aimee.h" /* legacy_config_record */
 #include "../support/db2_runtime_config.h"
-#include "modules/memory/memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
 #include "../support/db2_log.h"             /* LOG_WARN */
 
 #define FI_MAX_TRIPLES 16
@@ -139,7 +138,6 @@ int db2_typed_fact_ingress(const char *query, fact_authority_t authority, char *
     * A gate that silently disables a correctness feature is worse than no
     * feature: this one returned 0 here, so a turn asking to forget a fact
     * completed normally with the fact still standing and nothing logged. */
-   int requests_sensitive = memory_pii_turn_requests_sensitive(query);
 
    /* §4: a retraction turn corrects rather than asserts — retract the named
     * attribute about the user at the CALLER'S authority (an imprecise attr safely
@@ -229,7 +227,7 @@ int db2_typed_fact_ingress(const char *query, fact_authority_t authority, char *
     * PII-gated, into the envelope. */
    if (!facts_out || !facts_cap)
       return 0;
-   int fr = db2_fact_recall_in_query(query, requests_sensitive, facts_out, facts_cap);
+   int fr = db2_fact_recall_in_query(query, facts_out, facts_cap);
    if (fr < 0) /* recall affects prompt content, so a persistent failure is worth surfacing */
       LOG_WARN("memory", "typed-fact recall failed (db2 unavailable?)");
    return fr < 0 ? 0 : fr;

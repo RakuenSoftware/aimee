@@ -70,7 +70,8 @@ class MemoryCBoundaryTest(unittest.TestCase):
 
     def test_rejects_retired_gate_or_extraction_file(self) -> None:
         for name in ("memory_fact_gate.c", "memory_extract_patterns.c",
-                     "memory_extract_patterns.h", "memory_assemble_util.h"):
+                     "memory_extract_patterns.h", "memory_assemble_util.h",
+                     "memory_pii_gate.c", "memory_pii_gate.h"):
             with self.subTest(name=name):
                 root = self.fixture()
                 (root / "src/modules/memory" / name).write_text("/* retired */\n", encoding="utf-8")
@@ -83,6 +84,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
             ("h", "void memory_fact_gate_register_checker(void *checker);"),
             ("h", "#define memory_pattern_scan_turn host_scan"),
             ("h", "static inline int assemble_texts_near_duplicate(void) { return 1; }"),
+            ("c", "int memory_pii_turn_requests_sensitive(const char *turn) { return 1; }"),
         ):
             with self.subTest(declaration=declaration):
                 root = self.fixture()

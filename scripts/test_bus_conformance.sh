@@ -75,10 +75,18 @@ print(" ".join(
     if component.get("runtime") == "go" and not component.get("hosted_by")
     and component["id"] not in EXTERNAL
 ))')
+memory_probe="$repo_root/src/build/obj/tests/aimee-memory-bus-probe"
+( cd server-go && CGO_ENABLED=0 go build -trimpath -o "$memory_probe" ./modules/memory/cmd/aimee-memory-bus-probe )
 for module_id in $module_ids; do
    executable="$repo_root/src/build/obj/tests/aimee-module-$module_id"
    install -m 0755 "$go_multicall" "$executable"
-   timeout 60s "$module_harness" "$executable" "$module_id"
+   if [ "$module_id" = memory ]; then
+      for placement in server kb; do
+         AIMEE_TEST_MEMORY_PLACEMENT="$placement" timeout 60s "$module_harness" "$executable" "$module_id" "$memory_probe"
+      done
+   else
+      timeout 60s "$module_harness" "$executable" "$module_id"
+   fi
 done
 
 echo "== 3. single-host (D8) =="

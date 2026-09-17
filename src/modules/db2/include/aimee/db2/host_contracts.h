@@ -48,11 +48,11 @@ extern "C"
       AIMEE_DB2_FACT_GATE_BADARG = 3,
    };
 
-   /* Validate one typed-fact relation through the host's memory gate. The
-    * provider returns 0 and writes one AIMEE_DB2_FACT_GATE_* verdict, or -1
-    * when no authoritative verdict is available. */
+   /* The Go owner returns the ontology verdict and commit eligibility together.
+    * The provider writes an AIMEE_DB2_FACT_GATE_* verdict and a 0/1 allowed
+    * flag, or returns -1 when no authoritative decision is available. */
    typedef int (*aimee_db2_fact_gate_fn)(int head_kind, const char *rel_type, int tail_kind,
-                                         int *verdict);
+                                         int *verdict, int *commit_allowed);
 
    /* Install the host's canonical memory fact gate during process startup. NULL
     * removes it; DB2 then defers typed-fact commits rather than writing without

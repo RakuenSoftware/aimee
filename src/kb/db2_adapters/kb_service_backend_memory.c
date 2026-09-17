@@ -13,7 +13,6 @@
 #include "modules/db2/c/fact_ingest.h"      /* db2_typed_fact_ingress */
 #include "modules/db2/c/fact_lifecycle.h"   /* db2_fact_retract, FACT_RETRACT_IMMUTABLE */
 #include "modules/db2/c/fact_recall.h"      /* db2_fact_recall_in_query */
-#include "modules/memory/memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
 #include "modules/db2/c/kb_payload.h"       /* db2_kb_async_enqueue */
 #include "modules/db2/c/decision_log.h"
 #include "memory.h"
@@ -1451,7 +1450,7 @@ cJSON *db2_kb_service_memory_facts_json(const char *query)
        *
        * Still a soft failure: the turn proceeds without facts rather than
        * erroring, which is the right trade for a read. It must not be silent. */
-      int fr = db2_fact_recall_in_query(query, memory_pii_turn_requests_sensitive(query), facts,
+      int fr = db2_fact_recall_in_query(query, facts,
                                         sizeof(facts));
       if (fr < 0)
          aimee_log(LOG_WARN, "memory",

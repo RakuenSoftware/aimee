@@ -110,10 +110,18 @@ The Go client/handler conformance tests retain the frozen historical fixtures;
 DB2 ingest tests inject candidates directly into their commit-path fixture.
 The remaining fact-gate header contains only legacy DB2 result codes.
 
+PII classification and the credential write boundary now execute together with
+their Go operations. `fact-write-decision` returns the ontology verdict and
+commit eligibility in one reply; an incomplete decision defers the DB2 write.
+Query-scoped typed-fact recall classifies the query in Go rather than accepting
+a native caller's PII flag. The native PII callbacks, their headers and their
+binary gate/PII encoders are deleted. The live process smoke test uses the Go
+client in both placements, including concurrent calls and version rejection.
+
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host
 directories. Passing a pure-Go process/client build does not complete G0 while
-those C paths remain. The module currently retains eight C sources and twelve
+those C paths remain. The module currently retains seven C sources and ten
 headers. The descriptor's `ownership_complete` flag verifies the declared file
 inventory; it does not assert that the Go migration is complete.
 
@@ -170,7 +178,7 @@ An expired call still fails rather than retrying indefinitely or changing stores
 The remaining C transport and host integration is migration debt:
 
 - `memory_data_bus.c`, `memory_domain_bus.c`, `memory_domain_runtime_bus.c`, `memory_embed_bus.c`,
-  `memory_content_gate_bus.c`, and `memory_pii_gate.c` encode/decode bounded event-bus
+  and `memory_content_gate_bus.c` encode/decode bounded event-bus
   messages. `memory_scope_connection.c` only binds caller scope to an already
   prepared connection request.
 - `gw_stage_memory.c` connects the gateway IR stage to the module.
@@ -185,7 +193,7 @@ The remaining C transport and host integration is migration debt:
   grounding, relation canonicalization, kind selection, and provenance are in
   `memory_facts.go`.
 
-`scripts/check_memory_c_boundary.py` reduces that boundary: only the eight named
+`scripts/check_memory_c_boundary.py` reduces that boundary: only the seven named
 bus/integration translation units may exist under the memory module, none may
 include a DB client, and DB2 may not regain a `memory_*.c` implementation.
 The same check prevents the former POSIX/Windows regex-policy files and the
@@ -193,6 +201,11 @@ retired in-process C query rewriter from returning; those gates now use
 `content_gate.go` through the bus adapter.
 It also rejects restoring or relocating the deleted native gate, extraction and
 context-assembly APIs, including declarations and macro aliases.
+
+`scripts/check_memory_go_only.py --report` audits the final G0 boundary across
+the repository, including native callers, types, forwarding headers, cgo imports
+and build registrations. It exits unsuccessfully while any such debt remains;
+the transitional allowlist passing is not evidence that G0 is complete.
 
 There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report

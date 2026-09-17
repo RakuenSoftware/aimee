@@ -17,7 +17,6 @@ ALLOWED_C = {
     "src/modules/memory/memory_domain_runtime_bus.c",
     "src/modules/memory/memory_scope_connection.c",
     "src/modules/memory/memory_embed_bus.c",
-    "src/modules/memory/memory_pii_gate.c",
 }
 
 FORBIDDEN_INCLUDES = (
@@ -29,6 +28,9 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/memory/memory_pii_gate.c",
+    "src/modules/memory/memory_pii_gate.h",
+    "src/modules/memory/include/aimee/memory/pii_provider.h",
     "src/modules/memory/memory_assemble_util.h",
     "src/modules/memory/memory_extract_patterns.c",
     "src/modules/memory/memory_extract_patterns.h",
@@ -52,6 +54,7 @@ RETIRED_NATIVE_SYMBOLS = re.compile(
     r"memory_extract_register_extractor|memory_extract_register_turn_scanner|"
     r"memory_pattern_extractor_fn|memory_pattern_turn_scanner_fn|"
     r"pattern_triple_t|memory_pattern_turn_t|assemble_texts_near_duplicate|"
+    r"memory_pii_(?:register_\w+|turn_requests_sensitive|rel_sensitivity(?:_batch)?|should_inject)|"
     r"assemble_token_bits|context_recency_from_age_days|context_apply_recency|"
     r"context_xml_tag_for_header)\b"
 )

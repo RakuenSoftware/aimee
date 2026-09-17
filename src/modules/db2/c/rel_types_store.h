@@ -1,7 +1,7 @@
 /* rel_types_store.h: DB2-backed persistence + commit path for the typed-fact
  * ontology (typed-fact §1 / P1b). The live `rel_types` table overlay of the
  * in-code SEED_ONTOLOGY, plus db2_fact_commit() — the single commit point for
- * `semantic` edges. Pure ontology logic stays in rel_types.c / memory_fact_gate.c;
+ * `semantic` edges. The Go memory owner supplies the complete write decision;
  * this file is the part that needs a DB2 connection. */
 #ifndef DEC_DB2_REL_TYPES_STORE_H
 #define DEC_DB2_REL_TYPES_STORE_H 1
@@ -25,7 +25,7 @@ extern "C"
    };
 
    typedef int (*db2_fact_gate_fn)(int head_kind, const char *rel_type, int tail_kind,
-                                   int *verdict);
+                                   int *verdict, int *commit_allowed);
 
    /* Internal declaration of the host contract exported publicly through
     * <aimee/db2/host_contracts.h>. NULL removes the provider. */

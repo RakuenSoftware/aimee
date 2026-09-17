@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "a8abc2e10d56ceb22a5fcdcad5ba426f0208d15e",
-  "source_fingerprint": "1d83b8ea386cb528f6ca4ca083c4e896dff92739dac1f1e4a32f015125d9adb3",
+  "source_revision": "a705a6d29468860f5d895a94794de954c25301b6",
+  "source_fingerprint": "897b4aeb142bd760da2971e37501b5d6411d5d8530472fa3658912944ae04ee2",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2280,22 +2280,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "memory_pii_rel_sensitivity",
-      "references": [
-        "src/modules/db2/c/rel_types_store.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "memory_pii_turn_requests_sensitive",
-      "references": [
-        "src/modules/db2/c/fact_ingest.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "mktime",
       "references": [
         "src/modules/db2/c/entity_edges.c"
@@ -3113,15 +3097,15 @@
   "summary": {
     "translation_units": 125,
     "descriptor_support_units": 19,
-    "unresolved_symbols": 149,
+    "unresolved_symbols": 147,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 9,
+      "injected-module-contract": 7,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 140
     }
   },
-  "fingerprint": "ee445f8cb4473d33730c42697efc1efeb1c29bd3cd461f494fcb1d796d0b76c3"
+  "fingerprint": "14d0b9724470366e17698ff5c1ca9ccb3aa9516c88ccbf6663ad91ab4f7a98bd"
 }

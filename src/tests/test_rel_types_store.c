@@ -36,22 +36,37 @@ static int neighbor_node_present(const db2_entity_neighbor_t *nb, int n, const c
    return 0;
 }
 
-static int invalid_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
+static int invalid_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict,
+                             int *commit_allowed)
 {
    (void)head_kind;
    (void)rel_type;
    (void)tail_kind;
    *verdict = FACT_GATE_DEFER;
+   *commit_allowed = 1;
    return 0;
 }
 
-static int failing_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
+static int failing_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict,
+                             int *commit_allowed)
 {
    (void)head_kind;
    (void)rel_type;
    (void)tail_kind;
    (void)verdict;
+   (void)commit_allowed;
    return -1;
+}
+
+static int missing_commit_decision(int head_kind, const char *rel_type, int tail_kind,
+                                    int *verdict, int *commit_allowed)
+{
+   (void)head_kind;
+   (void)rel_type;
+   (void)tail_kind;
+   (void)commit_allowed;
+   *verdict = FACT_GATE_ACCEPT;
+   return 0;
 }
 
 int main(void)
@@ -73,6 +88,10 @@ int main(void)
    assert(db2_fact_commit("invalid", NODE_PERSON, "works_for", "acme", NODE_ORG,
                           FACT_AUTHORITY_MODEL, 1) == FACT_GATE_DEFER);
    assert(semantic_count("invalid") == 0);
+   aimee_db2_register_fact_gate_provider(missing_commit_decision);
+   assert(db2_fact_commit("incomplete", NODE_PERSON, "works_for", "acme", NODE_ORG,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_DEFER);
+   assert(semantic_count("incomplete") == 0);
    test_memory_policy_register();
 
    /* Resolve: seeded names (normalized), absent names. */

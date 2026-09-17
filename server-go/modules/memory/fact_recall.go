@@ -175,6 +175,10 @@ func (s *postgresDataStore) RecallFacts(ctx context.Context, entity, query strin
 	if entity != "" {
 		return s.recallFactBlock(ctx, entity, turnRequestsSensitive, capacity)
 	}
+	// Query recall owns classification as well as filtering. Native callers no
+	// longer classify the turn separately, and a caller-supplied true flag cannot
+	// turn an unrelated query into permission to include PII.
+	turnRequestsSensitive = TurnRequestsSensitive(query)
 
 	block, total, err := s.recallFactBlock(ctx, "user", turnRequestsSensitive, capacity)
 	if err != nil {

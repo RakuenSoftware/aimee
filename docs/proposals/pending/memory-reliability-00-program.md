@@ -105,7 +105,10 @@ Implementation progress: PR #2984's Go client is integrated into this branch. Th
 next removal slice deletes the unused native extraction and fact-gate callbacks,
 their Server registrations, and the obsolete inline context-assembly helpers.
 The Go client retains gate/extraction conformance against historical fixtures.
-The current inventory is eight C sources and twelve headers; the table above
+The next live cutover also removes the PII callback layer: Go now supplies a
+combined fact-write decision and classifies queries inside typed-fact recall.
+Gate/PII binary framing and live decision smoke coverage now have Go callers.
+The current inventory is seven C sources and ten headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.

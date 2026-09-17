@@ -98,6 +98,48 @@ func TestTypedFactRecallPolicyLivesInGo(t *testing.T) {
 	}
 }
 
+func TestQueryRecallOwnsSensitiveClassification(t *testing.T) {
+	for _, test := range []struct {
+		query      string
+		callerFlag bool
+		wantEmail  bool
+	}{
+		{"what is my email", false, true},
+		{"tell me about work", true, false},
+		{"what is my password", true, true},
+		{"", true, false},
+	} {
+		t.Run(test.query, func(t *testing.T) {
+			queryer := &factRecallQueryer{rows: []store.Rows{
+				&factRecallRows{index: -1, values: [][]any{
+					{"role", "engineer", .9},
+					{"email", "ada@example.test", .9},
+					{"password", "never-inject", 1.0},
+				}},
+				&factRecallRows{index: -1},
+			}}
+			backend := &postgresDataStore{db: queryer, placement: PlacementKB}
+			client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, backend)))
+			reply, err := client.Data(context.Background(), 73, DataRequest{
+				Operation: "fact-recall", Query: test.query,
+				TurnRequestsSensitive: test.callerFlag, ContentCapacity: 1024,
+			})
+			if err != nil || reply.Block == nil || reply.Count == nil {
+				t.Fatalf("recall: %+v %v", reply, err)
+			}
+			want := "- role: engineer\n"
+			count := 1
+			if test.wantEmail {
+				want += "- email: ada@example.test\n"
+				count++
+			}
+			if *reply.Block != want || *reply.Count != count {
+				t.Fatalf("block=%q count=%d want=%q", *reply.Block, *reply.Count, want)
+			}
+		})
+	}
+}
+
 func TestMemoryValidAtUsesOpenBitemporalBounds(t *testing.T) {
 	queryer := &factRecallQueryer{row: factRecallRow{values: []any{"2026-01-01 00:00:00", ""}}}
 	backend := &postgresDataStore{db: queryer, placement: PlacementKB}

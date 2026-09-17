@@ -14,7 +14,6 @@
 #include <aimee/learning/learning.h>
 #include "response_dedup.h"
 #include "server_error_kind.h"
-#include "modules/memory/memory_pii_gate.h"
 #include "modules/skills/skill_trigger_policy.h"
 #include "cmd_agent_delegate_impl.h" /* delegate_routing_register_capability_provider */
 #include "modules/webuser/webuser_runtime.h"
@@ -157,91 +156,6 @@ static int memory_confidence(double score, const char **confidence)
                  : result == AIMEE_MEMORY_CONFIDENCE_MEDIUM ? "medium"
                                                             : "low";
    return 0;
-}
-
-static int memory_pii_turn(const char *turn_text, int *requests_sensitive)
-{
-   if (!turn_text || !requests_sensitive)
-      return -1;
-   size_t request_len = aimee_memory_pii_request_size(turn_text);
-   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
-      return -1;
-   uint8_t *request = malloc(request_len);
-   uint8_t response[AIMEE_MEMORY_PII_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   if (!request)
-      return -1;
-   int rc =
-       aimee_memory_pii_request_encode(turn_text, request, request_len) == 0 &&
-               call_module(AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, request,
-                           (uint32_t)request_len, response, sizeof(response), &response_len) == 0
-           ? aimee_memory_pii_response_decode(response, response_len, requests_sensitive)
-           : -1;
-   free(request);
-   return rc;
-}
-
-/* The wire tiers are compared against rel_sensitivity_t directly, so the two
- * enums have to agree. Checked here, the one place that sees both. */
-_Static_assert((int)AIMEE_MEMORY_SENS_NORMAL == (int)SENS_NORMAL &&
-                   (int)AIMEE_MEMORY_SENS_PII == (int)SENS_PII &&
-                   (int)AIMEE_MEMORY_SENS_SECRET == (int)SENS_SECRET,
-               "wire sensitivity tiers must match rel_sensitivity_t");
-
-static int memory_pii_sensitivity(const char *const *rel_types, int count, rel_sensitivity_t *out)
-{
-   if (!rel_types || !out || count <= 0)
-      return -1;
-   size_t request_len = aimee_memory_sens_request_size(rel_types, count);
-   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
-      return -1;
-   size_t response_cap = AIMEE_MEMORY_SENS_RESPONSE_MAX(count);
-   uint8_t *request = malloc(request_len);
-   uint8_t *response = malloc(response_cap);
-   aimee_memory_sensitivity_t *tiers = calloc((size_t)count, sizeof(*tiers));
-   uint32_t response_len = 0;
-   int rc = -1;
-   if (request && response && tiers && response_cap <= UINT32_MAX &&
-       aimee_memory_sens_request_encode(rel_types, count, request, request_len) == 0 &&
-       call_module(AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, request,
-                   (uint32_t)request_len, response, (uint32_t)response_cap, &response_len) == 0 &&
-       aimee_memory_sens_response_decode(response, response_len, tiers, count) == 0)
-   {
-      for (int i = 0; i < count; ++i)
-         out[i] = (rel_sensitivity_t)tiers[i];
-      rc = 0;
-   }
-   free(request);
-   free(response);
-   free(tiers);
-   return rc;
-}
-
-static int memory_pii_inject(int sensitivity, double confidence, int turn_requests_sensitive,
-                             int *allowed)
-{
-   if (!allowed)
-      return -1;
-   cJSON *request = cJSON_CreateObject();
-   if (!request)
-      return -1;
-   cJSON_AddStringToObject(request, "operation", "pii-inject");
-   cJSON_AddNumberToObject(request, "sensitivity", (double)sensitivity);
-   cJSON_AddNumberToObject(request, "confidence", confidence);
-   cJSON_AddBoolToObject(request, "turn_requests_sensitive", turn_requests_sensitive != 0);
-   cJSON *response = server_module_memory_data(request);
-   cJSON_Delete(request);
-   if (!response)
-      return -1;
-   cJSON *value = cJSON_GetObjectItemCaseSensitive(response, "allowed");
-   int rc = -1;
-   if (cJSON_IsBool(value))
-   {
-      *allowed = cJSON_IsTrue(value) ? 1 : 0;
-      rc = 0;
-   }
-   cJSON_Delete(response);
-   return rc;
 }
 
 static int learning_classify(const char *signal, uint32_t *sink_mask)
@@ -1192,9 +1106,6 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
 void server_module_stage_adapters_configure(void)
 {
    ingress_preinject_register_confidence_provider(memory_confidence);
-   memory_pii_register_turn_classifier(memory_pii_turn);
-   memory_pii_register_sensitivity_batch(memory_pii_sensitivity);
-   memory_pii_register_inject_classifier(memory_pii_inject);
    learning_router_register_signal_classifier(learning_classify);
    delegate_role_register_canonicalizer(delegate_canonicalize);
    delegate_routing_register_capability_provider(delegate_infer_caps);

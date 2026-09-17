@@ -17,7 +17,6 @@
     "src/modules/memory/memory_data_bus.c",
     "src/modules/memory/memory_domain_bus.c",
     "src/modules/memory/memory_domain_runtime_bus.c",
-    "src/modules/memory/memory_pii_gate.c",
     "src/modules/memory/memory_scope_connection.c"
   ],
   "go_sources": [
@@ -54,7 +53,8 @@
     "server-go/modules/memory/code_index.go",
     "server-go/modules/memory/code_query.go",
     "server-go/modules/memory/code_vectors.go",
-    "server-go/modules/memory/client.go"
+    "server-go/modules/memory/client.go",
+    "server-go/modules/memory/fact_write.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -75,11 +75,11 @@
     "server-go/modules/memory/retrieval_eval_test.go",
     "server-go/modules/memory/runtime_role_test.go",
     "server-go/modules/memory/code_index_test.go",
-    "server-go/modules/memory/client_test.go"
+    "server-go/modules/memory/client_test.go",
+    "server-go/modules/memory/fact_write_test.go"
   ],
   "public_headers": [
-    "src/modules/memory/include/aimee/memory/module_api.h",
-    "src/modules/memory/include/aimee/memory/pii_provider.h"
+    "src/modules/memory/include/aimee/memory/module_api.h"
   ],
   "private_headers": [
     "src/modules/memory/gw_stage_memory.h",
@@ -89,7 +89,6 @@
     "src/modules/memory/memory_fact_gate.h",
     "src/modules/memory/memory_graph_fusion.h",
     "src/modules/memory/memory_ontology.h",
-    "src/modules/memory/memory_pii_gate.h",
     "src/modules/memory/memory_platform.h",
     "src/modules/memory/memory_profile_pack.h"
   ],
