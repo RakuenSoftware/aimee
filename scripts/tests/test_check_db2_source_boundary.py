@@ -359,7 +359,6 @@ class BoundaryTests(unittest.TestCase):
         admitted = (
             ("src/tests/test_fact_recall.c", "modules/db2/c/fact_recall.h"),
             ("src/tests/test_fact_recall.c", "modules/db2/include/aimee/db2/host_contracts.h"),
-            ("src/tests/test_kb_memory_list.c", "modules/db2/c/memory_query.h"),
         )
         for source, header in admitted:
             current = {"consumers": [{

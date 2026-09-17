@@ -154,7 +154,6 @@ extern "C"
                                                    int64_t tokens_used,
                                                    const char *tool_error_pattern);
    cJSON *db2_kb_service_agent_hint_consume_json(const char *role, const char *prompt);
-   cJSON *db2_kb_service_memory_search_facts_patterns_by_keyword_json(const char *keyword, int max);
    cJSON *db2_kb_service_task_list_json(const char *state, const char *session_id, int limit);
    cJSON *db2_kb_service_task_create_json(const char *title, const char *session_id,
                                           int64_t parent_id);
@@ -189,7 +188,6 @@ extern "C"
                                               const char *description, int weight);
    cJSON *db2_kb_service_memory_supersede_json(int64_t old_id, const char *new_content,
                                                double confidence, const char *session_id);
-   cJSON *db2_kb_service_memory_fact_history_json(const char *key, int max);
    /* Typed-fact §4 correction surface. `target` NULL/empty retracts every current
     * value of (source, relation); `authority` is "user" or "model" (anything else
     * reads as model). Reports the number of edges affected, so a request that
@@ -201,8 +199,6 @@ extern "C"
    cJSON *db2_kb_service_entities_unmerge_json(int64_t merge_id);
    cJSON *db2_kb_service_memory_check_drift_json(int64_t task_id, const char *file_path,
                                                  const char *command);
-   cJSON *db2_kb_service_memory_list_session_scope_priority_json(int max);
-   cJSON *db2_kb_service_memory_list_session_scope_priority_like_json(const char *pattern, int max);
    cJSON *db2_kb_service_directive_expire_session_json(void);
    cJSON *db2_kb_service_memory_scan_conversations_json(const cJSON *dirs);
    /* Dashboard endpoints that walk DB2 tables.  Each returns
@@ -213,19 +209,9 @@ extern "C"
    cJSON *db2_kb_service_dashboard_recall_json(void);
    cJSON *db2_kb_service_dashboard_directives_json(void);
    cJSON *db2_kb_service_memory_find_facts_json(const char *query, int limit);
-   cJSON *db2_kb_service_memory_list_json(const char *tier, const char *kind, int limit);
-   cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of);
-   cJSON *db2_kb_service_memory_load_eval_corpus_json(int max);
-   cJSON *db2_kb_service_memory_top_l2_facts_json(int max);
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
-   cJSON *db2_kb_service_memory_scope_visibility_rank_json(const int64_t *ids, int id_count,
-                                                           const char *workspace,
-                                                           const char *project);
    cJSON *db2_kb_service_memory_episode_card_generate_json(const char *source_session);
-   cJSON *db2_kb_service_memory_tag_workspace_json(int64_t memory_id, const char *workspace);
-   cJSON *db2_kb_service_memory_tag_scope_json(int64_t memory_id, const char *scope_type,
-                                               const char *scope_value);
    cJSON *db2_kb_service_memory_alerts_json(const char *since);
    cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
                                                      const char *rule, double observed_confidence,

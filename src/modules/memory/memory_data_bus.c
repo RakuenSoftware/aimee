@@ -226,53 +226,6 @@ int db2_memory_get(int64_t id, memory_t *out)
    return memory_get(id, out);
 }
 
-char *memory_content_as_of_dup(int64_t memory_id, const char *as_of)
-{
-   if (memory_id <= 0)
-      return NULL;
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "get") ||
-       !cJSON_AddNumberToObject(request, "id", (double)memory_id))
-   {
-      cJSON_Delete(request);
-      return NULL;
-   }
-   if (as_of && as_of[0])
-      cJSON_AddStringToObject(request, "as_of", as_of);
-   cJSON *response = memory_data_call(request);
-   const cJSON *records = response ? cJSON_GetObjectItemCaseSensitive(response, "records") : NULL;
-   const cJSON *record = cJSON_IsArray(records) ? cJSON_GetArrayItem(records, 0) : NULL;
-   const cJSON *content = record ? cJSON_GetObjectItemCaseSensitive(record, "content") : NULL;
-   char *copy =
-       cJSON_IsString(content) && content->valuestring ? strdup(content->valuestring) : NULL;
-   cJSON_Delete(response);
-   return copy;
-}
-
-char *memory_content_dup(int64_t memory_id)
-{
-   return memory_content_as_of_dup(memory_id, NULL);
-}
-
-int memory_valid_at(int64_t memory_id, const char *as_of)
-{
-   if (memory_id <= 0 || !as_of || !as_of[0])
-      return -1;
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "valid-at") ||
-       !cJSON_AddNumberToObject(request, "id", (double)memory_id) ||
-       !cJSON_AddStringToObject(request, "as_of", as_of))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = memory_data_call(request);
-   const cJSON *valid = response ? cJSON_GetObjectItemCaseSensitive(response, "valid_at") : NULL;
-   int result = cJSON_IsBool(valid) ? cJSON_IsTrue(valid) : -1;
-   cJSON_Delete(response);
-   return result;
-}
-
 int db2_memory_provenance_by_id(int64_t memory_id, char *kind_out, int kind_len, char *source_out,
                                 int source_len, char *version_out, int version_len)
 {

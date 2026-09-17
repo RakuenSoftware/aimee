@@ -156,7 +156,7 @@ func TestPublicCommandMissingAndOutage(t *testing.T) {
 }
 
 func TestCommandStageRejectsWrongPlacementAndMalformedFrames(t *testing.T) {
-	frame, _ := bus.EncodeCommand("get", json.RawMessage(`{"id":42}`))
+	frame, _ := bus.EncodeCommand("delete", json.RawMessage(`{"id":42}`))
 	for _, placement := range []Placement{PlacementKB, ""} {
 		_, status := NewHandler(nil, WithDataStore(placement, nil))(bus.ModuleInvocation{StageID: StageCommand}, frame)
 		if status != bus.ModuleStatusCapabilityAbsent {

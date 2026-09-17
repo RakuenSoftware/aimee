@@ -837,17 +837,6 @@ extern "C"
    int db2_memory_list(const char *tier, const char *kind, int hide_archived, int limit,
                        memory_t *out, int max);
 
-   /* Load a memory corpus suitable for the live `aimee eval mem`
-    * harness.  Tries three plans in order — L2 facts, then any-tier
-    * facts in {L1,L2,L3}, then durable memories in {L1,L2,L3} with
-    * kind != 'scratch' — and returns the first plan that yields rows.
-    *
-    * On success writes up to |max| rows into |out|, copies the chosen
-    * plan's label into |label_out| (when non-NULL), and returns the
-    * row count.  Returns 0 (and clears |label_out|) when no plan
-    * matches or DB2 is not initialized. */
-   int db2_memory_load_eval_corpus(memory_t *out, int max, char *label_out, size_t label_len);
-
    /* Look up an existing high-confidence L2 memory whose key matches and
     * whose content differs from `content` (the conflict-gate probe).
     * Fills *existing_confidence_out with the conflicting row's

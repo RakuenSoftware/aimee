@@ -649,7 +649,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-session-start-util \
                $(TESTPREFIX)/unit-test-memory-bus-context \
                $(TESTPREFIX)/unit-test-memory-data-bus \
-               $(TESTPREFIX)/unit-test-kb-memory-list \
                $(TESTPREFIX)/unit-test-server-memory-get \
                $(TESTPREFIX)/unit-test-session-brief \
                $(TESTPREFIX)/unit-test-learning-eval-synthesis \
@@ -7901,8 +7900,6 @@ $(OBJDIR)/aimee-providers-fixture: $(wildcard ../server-go/modules/providers/*.g
 $(TESTPREFIX)/unit-test-memory-data-bus: $(OBJDIR)/tests/test_memory_data_bus.o $(OBJDIR)/modules/memory/memory_data_bus.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-kb-memory-list: $(OBJDIR)/tests/test_kb_memory_list.o $(OBJDIR)/kb/db2_adapters/kb_service_backend_memory.o $(OBJDIR)/vendor/cJSON.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(OBJDIR)/tests/test_module_commands.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-module-commands: $(OBJDIR)/tests/test_module_commands.o \

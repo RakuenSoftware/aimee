@@ -26,9 +26,6 @@
 
 /* Dashboard transport. The count is computed by the Go KB placement. */
 int memory_prospective_count_by_state(int *armed, int *triggered, int *completed, int *expired);
-/* Allocates the full, untruncated content returned by stage 7. Caller frees. */
-char *memory_content_dup(int64_t memory_id);
-int memory_valid_at(int64_t memory_id, const char *as_of);
 #define AIMEE_MEMORY_REQUEST_MAGIC  0x4b4e524du /* "MRNK" */
 #define AIMEE_MEMORY_RESPONSE_MAGIC 0x464e434du /* "MCNF" */
 #define AIMEE_MEMORY_WIRE_VERSION   1u

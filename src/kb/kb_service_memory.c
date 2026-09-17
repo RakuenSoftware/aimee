@@ -416,24 +416,6 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to search memory facts");
 }
 
-int kb_handle_memory_list(int fd, cJSON *req)
-{
-   cJSON *tier_j = cJSON_GetObjectItemCaseSensitive(req, "tier");
-   cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(req, "kind");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   const char *tier =
-       (cJSON_IsString(tier_j) && tier_j->valuestring[0]) ? tier_j->valuestring : NULL;
-   const char *kind =
-       (cJSON_IsString(kind_j) && kind_j->valuestring[0]) ? kind_j->valuestring : NULL;
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 20;
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_list_json(tier, kind, limit);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to list memories");
-}
-
 static int kb_handle_session_briefing_section(int fd, cJSON *req, cJSON *(*fn)(int limit),
                                               const char *err_msg)
 {
@@ -454,60 +436,6 @@ int kb_handle_memory_episode_card_generate(int fd, cJSON *req)
       return kb_send_error(fd, "missing source_session");
    cJSON *resp = db2_kb_service_memory_episode_card_generate_json(sid_j->valuestring);
    return kb_reply_or_error(fd, resp, "failed to generate episode card");
-}
-
-int kb_handle_memory_scope_visibility_rank(int fd, cJSON *req)
-{
-   cJSON *ids_j = cJSON_GetObjectItemCaseSensitive(req, "ids");
-   cJSON *ws_j = cJSON_GetObjectItemCaseSensitive(req, "workspace");
-   cJSON *pr_j = cJSON_GetObjectItemCaseSensitive(req, "project");
-   if (!cJSON_IsArray(ids_j))
-      return kb_send_error(fd, "missing ids array");
-   int n = cJSON_GetArraySize(ids_j);
-   if (n < 0)
-      n = 0;
-   if (n > 256)
-      n = 256;
-   int64_t *ids = n > 0 ? calloc((size_t)n, sizeof(int64_t)) : NULL;
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *it = cJSON_GetArrayItem(ids_j, i);
-      ids[i] = (int64_t)(cJSON_IsNumber(it) ? it->valuedouble : 0);
-   }
-   const char *ws = (cJSON_IsString(ws_j) && ws_j->valuestring[0]) ? ws_j->valuestring : NULL;
-   const char *pr = (cJSON_IsString(pr_j) && pr_j->valuestring[0]) ? pr_j->valuestring : NULL;
-   cJSON *resp = db2_kb_service_memory_scope_visibility_rank_json(ids, n, ws, pr);
-   free(ids);
-   return kb_reply_or_error(fd, resp, "failed to compute scope visibility ranks");
-}
-
-int kb_handle_memory_tag_workspace(int fd, cJSON *req)
-{
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "memory_id");
-   cJSON *ws_j = cJSON_GetObjectItemCaseSensitive(req, "workspace");
-   if (!cJSON_IsNumber(id_j) || !cJSON_IsString(ws_j))
-      return kb_send_error(fd, "missing memory_id or workspace");
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp =
-       db2_kb_service_memory_tag_workspace_json((int64_t)id_j->valuedouble, ws_j->valuestring);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to tag workspace");
-}
-
-int kb_handle_memory_tag_scope(int fd, cJSON *req)
-{
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "memory_id");
-   cJSON *st_j = cJSON_GetObjectItemCaseSensitive(req, "scope_type");
-   cJSON *sv_j = cJSON_GetObjectItemCaseSensitive(req, "scope_value");
-   if (!cJSON_IsNumber(id_j) || !cJSON_IsString(st_j) || !cJSON_IsString(sv_j))
-      return kb_send_error(fd, "missing memory_id, scope_type or scope_value");
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_tag_scope_json((int64_t)id_j->valuedouble, st_j->valuestring,
-                                                      sv_j->valuestring);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to tag scope");
 }
 
 int kb_handle_memory_diagnose_scoped(int fd, cJSON *req)
@@ -786,40 +714,6 @@ int kb_handle_session_briefing_directives(int fd, cJSON *req)
    return kb_handle_session_briefing_section(fd, req,
                                              db2_kb_service_session_briefing_directives_json,
                                              "failed to render session-briefing directives");
-}
-
-int kb_handle_memory_top_l2_facts(int fd, cJSON *req)
-{
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 5;
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_top_l2_facts_json(max);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to load top L2 facts");
-}
-
-int kb_handle_memory_load_eval_corpus(int fd, cJSON *req)
-{
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 100;
-   cJSON *resp = db2_kb_service_memory_load_eval_corpus_json(max);
-   return kb_reply_or_error(fd, resp, "failed to load eval corpus");
-}
-
-int kb_handle_memory_get(int fd, cJSON *req)
-{
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "memory.get requires id");
-
-   /* Optional: was this memory in force at `as_of`, in EVENT time? */
-   const char *as_of = jo_str(req, "as_of", "");
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_get_json((int64_t)id_j->valuedouble, as_of);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to get memory");
 }
 
 int kb_handle_memory_briefing(int fd, cJSON *req)
@@ -1312,22 +1206,6 @@ int kb_handle_memory_ask(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to answer query");
 }
 
-int kb_handle_memory_search_facts_patterns_by_keyword(int fd, cJSON *req)
-{
-   cJSON *kw_j = cJSON_GetObjectItemCaseSensitive(req, "keyword");
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   if (!cJSON_IsString(kw_j))
-      return kb_send_error(fd, "memory.search_facts_patterns_by_keyword requires keyword");
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 5;
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp =
-       db2_kb_service_memory_search_facts_patterns_by_keyword_json(kw_j->valuestring, max);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to search facts/patterns");
-}
-
 int kb_handle_memory_supersede(int fd, cJSON *req)
 {
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "old_id");
@@ -1418,46 +1296,6 @@ int kb_handle_entities_unmerge(int fd, cJSON *req)
 
    cJSON *resp = db2_kb_service_entities_unmerge_json((int64_t)mid_j->valuedouble);
    return kb_reply_or_error(fd, resp, "failed to unmerge entities");
-}
-
-int kb_handle_memory_fact_history(int fd, cJSON *req)
-{
-   cJSON *key_j = cJSON_GetObjectItemCaseSensitive(req, "key");
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   if (!cJSON_IsString(key_j))
-      return kb_send_error(fd, "memory.fact_history requires key");
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 16;
-
-   cJSON *resp = db2_kb_service_memory_fact_history_json(key_j->valuestring, max);
-   return kb_reply_or_error(fd, resp, "failed to fetch fact history");
-}
-
-int kb_handle_memory_list_session_scope_priority(int fd, cJSON *req)
-{
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 24;
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_list_session_scope_priority_json(max);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to list session-scope memories");
-}
-
-int kb_handle_memory_list_session_scope_priority_like(int fd, cJSON *req)
-{
-   cJSON *pat_j = cJSON_GetObjectItemCaseSensitive(req, "pattern");
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   if (!cJSON_IsString(pat_j))
-      return kb_send_error(fd, "memory.list_session_scope_priority_like requires pattern");
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 5;
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp =
-       db2_kb_service_memory_list_session_scope_priority_like_json(pat_j->valuestring, max);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to list session-scope memories (like)");
 }
 
 int kb_handle_memory_check_drift(int fd, cJSON *req)

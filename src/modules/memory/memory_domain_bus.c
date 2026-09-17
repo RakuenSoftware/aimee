@@ -900,14 +900,6 @@ int db2_memory_search_facts_patterns_by_keyword(const char *keyword, memory_t *o
    return domain_query_records("facts-patterns", keyword ? keyword : "", 0, out, max);
 }
 
-int db2_memory_load_eval_corpus(memory_t *out, int max, char *label_out, size_t label_len)
-{
-   int n = domain_query_records("eval", "", 0, out, max);
-   if (label_out && label_len)
-      snprintf(label_out, label_len, "%s", n > 0 ? "durable L1-L3" : "");
-   return n < 0 ? 0 : n;
-}
-
 int db2_memory_key_exists(const char *key)
 {
    if (!key || !key[0])

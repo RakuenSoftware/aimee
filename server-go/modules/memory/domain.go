@@ -368,7 +368,7 @@ func (s *postgresDataStore) ScopeRanks(ctx context.Context, ids []int64, workspa
  WHEN $2<>'' AND scope_type='workspace' AND scope_value=$2 THEN 2
  WHEN (scope_type='global' AND scope_value='_global') OR
       (scope_type='workspace' AND scope_value='_shared') THEN 1 ELSE 0 END
-FROM memories WHERE id=ANY($1)`, ids, workspace, project, includeAll)
+FROM memories WHERE id=ANY($1::text::bigint[])`, memoryIDsParameter(ids), workspace, project, includeAll)
 	if err != nil {
 		return nil, err
 	}

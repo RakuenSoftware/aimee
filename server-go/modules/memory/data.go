@@ -28,6 +28,8 @@ const (
 )
 
 type DataRequest struct {
+	TagScope   *Scope            `json:"tag_scope,omitempty"`
+	PublicView bool              `json:"public_view,omitempty"`
 	Activation json.RawMessage   `json:"activation,omitempty"`
 	FactWrite  *FactWriteRequest `json:"fact_write,omitempty"`
 	CodeIndex  *CodeIndexRequest `json:"code_index,omitempty"`
@@ -131,6 +133,7 @@ type Record struct {
 }
 
 type DataResponse struct {
+	PublicRecords      []publicMemoryRecord `json:"public_records,omitempty"`
 	Deduplicated       bool                 `json:"deduplicated,omitempty"`
 	FactWrite          *FactWriteDecision   `json:"fact_write,omitempty"`
 	Records            []Record             `json:"records"`
@@ -1560,10 +1563,17 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			}
 			response.Updated, err = domain.ConflictResolve(ctx, request.ID, request.Resolution)
 		case "scope-tag":
-			if request.ID <= 0 || request.Scope.Type == "" {
+			target := scope
+			if request.TagScope != nil {
+				target, err = normalizeScope(options.placement, *request.TagScope)
+				if err != nil {
+					return nil, bus.ModuleStatusInvalidRequest
+				}
+			}
+			if request.ID <= 0 || (request.TagScope == nil && request.Scope.Type == "") {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			response.Updated, err = domain.ScopeTag(ctx, request.ID, scope)
+			response.Updated, err = domain.ScopeTag(ctx, request.ID, target)
 		case "scope-collect":
 			if request.ID <= 0 {
 				return nil, bus.ModuleStatusInvalidRequest
@@ -1809,6 +1819,22 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			return nil, bus.ModuleStatusCancelled
 		}
 		return nil, bus.ModuleStatusInternal
+	}
+	if request.PublicView {
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.PublicRecords, err = backend.publicRecords(ctx, response.Records)
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		if request.Operation == "get" && request.AsOf != "" && len(response.Records) > 0 {
+			valid, validErr := backend.ValidAt(ctx, request.ID, request.AsOf)
+			if validErr == nil {
+				response.ValidAt = &valid
+			}
+		}
 	}
 	encoded, err := json.Marshal(response)
 	if err != nil {

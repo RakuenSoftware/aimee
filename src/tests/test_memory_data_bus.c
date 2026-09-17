@@ -45,14 +45,8 @@ int main(void)
    assert(memory_get(42, &row) == 0); /* Long records remain valid through the fixed ABI. */
    assert(strlen(row.content) > 0 && strlen(row.content) < sizeof(row.content));
    assert(strlen(row.content) % 4 == 0); /* Preview does not cut a Unicode code point. */
-   char *full = memory_content_dup(42);
-   assert(full && strcmp(full, long_text) == 0);
-   free(full);
    expected_as_of = "2020-01-01T00:00:00Z";
    assert(memory_get_as_of_result(42, expected_as_of, &row) == 0);
-   full = memory_content_as_of_dup(42, expected_as_of);
-   assert(full && strcmp(full, long_text) == 0);
-   free(full);
    expected_as_of = NULL;
    mode = 1;
    assert(memory_get_result(42, &row) == 1);

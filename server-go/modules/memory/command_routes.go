@@ -11,6 +11,18 @@ type commandRoute struct {
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"get", "Get memories.", handleRecordCommand, true},
+	{"list", "List memories.", handleRecordCommand, true},
+	{"fact_history", "Fact history memories.", handleRecordCommand, true},
+	{"top_l2_facts", "Top l2 facts memories.", handleRecordCommand, true},
+	{"load_eval_corpus", "Load eval corpus memories.", handleRecordCommand, true},
+	{"list_session_scope_priority", "List session scope priority memories.", handleRecordCommand, true},
+	{"list_session_scope_priority_like", "List session scope priority like memories.", handleRecordCommand, true},
+	{"search_facts_patterns_by_keyword", "Search facts patterns by keyword memories.", handleRecordCommand, true},
+	{"scope_visibility_rank", "Scope visibility rank memories.", handleScopeCommand, true},
+	{"tag_workspace", "Tag workspace memories.", handleScopeCommand, true},
+	{"tag_scope", "Tag scope memories.", handleScopeCommand, true},
+
 	{"recall", "Recall memories for the current turn.", func(o handlerOptions, i bus.ModuleInvocation, _ string, a commandArgs) ([]byte, bus.ModuleStatus) {
 		return handleRecallCommand(o, i, a)
 	}, true},

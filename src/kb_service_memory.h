@@ -7,16 +7,9 @@
 #include "cJSON.h"
 
 int kb_handle_memory_find_facts(int fd, cJSON *req);
-int kb_handle_memory_list(int fd, cJSON *req);
-int kb_handle_memory_get(int fd, cJSON *req);
-int kb_handle_memory_load_eval_corpus(int fd, cJSON *req);
-int kb_handle_memory_top_l2_facts(int fd, cJSON *req);
 int kb_handle_session_briefing_commitments(int fd, cJSON *req);
 int kb_handle_session_briefing_directives(int fd, cJSON *req);
-int kb_handle_memory_tag_workspace(int fd, cJSON *req);
-int kb_handle_memory_scope_visibility_rank(int fd, cJSON *req);
 int kb_handle_memory_episode_card_generate(int fd, cJSON *req);
-int kb_handle_memory_tag_scope(int fd, cJSON *req);
 int kb_handle_memory_alerts(int fd, cJSON *req);
 int kb_handle_memory_upsert_workflow(int fd, cJSON *req);
 int kb_handle_memory_delete(int fd, cJSON *req);
@@ -52,9 +45,7 @@ int kb_handle_css_signals(int fd, cJSON *req);
 int kb_handle_memory_search_assertions(int fd, cJSON *req);
 int kb_handle_memory_ask(int fd, cJSON *req);
 int kb_handle_memory_store(int fd, cJSON *req);
-int kb_handle_memory_search_facts_patterns_by_keyword(int fd, cJSON *req);
 int kb_handle_memory_supersede(int fd, cJSON *req);
-int kb_handle_memory_fact_history(int fd, cJSON *req);
 /* Typed-fact §4 correction + §3 entity merge/unmerge surface. */
 int kb_handle_facts_retract(int fd, cJSON *req);
 int kb_handle_entities_merge(int fd, cJSON *req);
@@ -66,7 +57,5 @@ int kb_handle_task_update_state(int fd, cJSON *req);
 int kb_handle_task_delete(int fd, cJSON *req);
 int kb_handle_task_add_edge(int fd, cJSON *req);
 int kb_handle_task_get_edges(int fd, cJSON *req);
-int kb_handle_memory_list_session_scope_priority(int fd, cJSON *req);
-int kb_handle_memory_list_session_scope_priority_like(int fd, cJSON *req);
 
 #endif /* DEC_KB_SERVICE_MEMORY_H */

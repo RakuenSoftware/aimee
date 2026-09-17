@@ -271,3 +271,11 @@ bus-framing tests, and update the descriptor-owned sources. Do not restore a
 retired C policy or storage implementation to satisfy a legacy ABI. Both role
 supervisors require memory; removing it requires migrating those consumers
 and their event contracts rather than silently dropping recall behavior.
+
+KB record reads, history, session-priority queries, scope ranks and tagging also
+execute at stage 8. Public record responses preserve full content, headlines and
+stored metadata inside the request's scoped transaction. Tag destinations are
+separate from the source visibility context. PostgreSQL tests exercise these
+commands as a non-owner role, including historical validity, hidden records,
+empty results and bounded lists. The retired native list/get adapters and
+full-content ABI helpers are removed.

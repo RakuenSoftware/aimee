@@ -67,7 +67,7 @@ func probeDecisions(ctx context.Context, client *memory.Client, caller memory.St
 	declaration, err := caller.Call(ctx, 6143, bus.StageDescribeCommands, 2112, time.Second, []byte{'D', 'C', 'M', 'D', 2, 0, 0, 0})
 	wantCommands := uint32(0)
 	if os.Getenv("AIMEE_TEST_MEMORY_PLACEMENT") == "kb" {
-		wantCommands = 34
+		wantCommands = 45
 	}
 	if err != nil || len(declaration) < 16 || string(declaration[:4]) != "DCMR" ||
 		binary.LittleEndian.Uint32(declaration[4:]) != 2 ||
@@ -128,17 +128,11 @@ func probeDecisions(ctx context.Context, client *memory.Client, caller memory.St
 	}
 	// Public commands validate inside Go before any database access.
 	command, commandErr := client.Command(ctx, 2111, "get", json.RawMessage(`{"id":0}`))
-	if os.Getenv("AIMEE_TEST_MEMORY_PLACEMENT") == "kb" {
-		var status *bus.ModuleCallStatusError
-		if !errors.As(commandErr, &status) || status.Status != bus.ModuleStatusCapabilityAbsent {
-			return fmt.Errorf("private command on KB: %s %v", command, commandErr)
-		}
-	} else {
-		var reply struct{ Status, Kind, Message string }
-		if commandErr != nil || json.Unmarshal(command, &reply) != nil || reply.Status != "error" ||
-			reply.Kind != "invalid_argument" || reply.Message != "memory.get requires a positive integer id" {
-			return fmt.Errorf("public command validation: %s %v", command, commandErr)
-		}
+
+	var reply struct{ Status, Kind, Message string }
+	if commandErr != nil || json.Unmarshal(command, &reply) != nil || reply.Status != "error" ||
+		reply.Kind != "invalid_argument" || reply.Message != "memory.get requires a positive integer id" {
+		return fmt.Errorf("public command validation: %s %v", command, commandErr)
 	}
 
 	// An unsupported protocol version must fail across the real process boundary.
