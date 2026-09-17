@@ -139,6 +139,12 @@ Host dashboard formatting, fusion-state reads and recall metrics now run through
 the shared Go runtime command. Saved maintenance summaries, counters and config
 are rendered by Go; the native formatter and state/metrics adapters are removed.
 The internal command is absent from public discovery and rejects non-host callers.
+Vector rebuild/reindex command handling is now Go. Rebuild validates the deployed
+dimension and ANN index, uses a transaction advisory lock, and atomically clears
+derived vectors, queues replacements and records the version. Runtime callers
+perform no DDL or TRUNCATE. Restricted-role replay covers competing rebuilds,
+dimension mismatch and rollback after a late failure; native rebuild adapters
+are removed. Historical generation cutover remains later MR-11 work.
 The current inventory is five C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

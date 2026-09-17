@@ -499,25 +499,6 @@ func vectorText(vector []float64) (string, error) {
 	return "[" + strings.Join(parts, ",") + "]", nil
 }
 
-func (s *postgresDataStore) VectorCollectionExists(ctx context.Context) (bool, error) {
-	var exists bool
-	err := s.db.QueryRow(ctx, `SELECT to_regclass('memory_embeddings') IS NOT NULL AND EXISTS(
- SELECT 1 FROM pg_indexes WHERE tablename='memory_embeddings' AND indexdef ILIKE '%hnsw%')`).Scan(&exists)
-	return exists, err
-}
-
-func (s *postgresDataStore) RecreateVectorCollection(ctx context.Context, dim int) error {
-	if dim < 1 || dim > 4000 {
-		return errors.New("memory: invalid vector dimension")
-	}
-	if _, err := s.db.Exec(ctx, `TRUNCATE TABLE memory_embeddings`); err != nil {
-		return err
-	}
-	_, err := s.db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_memory_embeddings_hnsw
-ON memory_embeddings USING hnsw (embedding vector_cosine_ops)`)
-	return err
-}
-
 func (s *postgresDataStore) SearchVectors(ctx context.Context, vector []float64, recordType,
 	workspace, project string, includeAll bool, limit int) ([]VectorHit, error) {
 	encoded, err := vectorText(vector)
@@ -545,26 +526,6 @@ FROM memory_embeddings e WHERE e.record_type=$2 AND ($5 OR
 		hits = append(hits, hit)
 	}
 	return hits, rows.Err()
-}
-
-func (s *postgresDataStore) RebuildVectorIndex(ctx context.Context, version string) (int, int, error) {
-	if version == "" {
-		return 0, 0, errors.New("memory: embedder version is required")
-	}
-	if err := s.RecreateVectorCollection(ctx, 1); err != nil {
-		return 0, 0, err
-	}
-	if _, err := s.db.Exec(ctx, `INSERT INTO kb_meta(key,value) VALUES('vector_schema_version',$1)
-ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, version); err != nil {
-		return 0, 0, err
-	}
-	var queued int
-	err := s.db.QueryRow(ctx, `WITH q AS (
- INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
- SELECT id,'memory',id,'pending',0,'',pg_now_text() FROM memories WHERE lifecycle_state='active'
- ON CONFLICT(point_id) DO UPDATE SET status='pending',attempts=0,last_error='',updated_at=pg_now_text()
- RETURNING 1) SELECT count(*) FROM q`).Scan(&queued)
-	return queued, 0, err
 }
 
 func (s *postgresDataStore) FailedEmbeddingIDs(ctx context.Context, limit int) ([]int64, error) {

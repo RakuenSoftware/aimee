@@ -70,6 +70,8 @@
     "server-go/modules/memory/public_diagnostics.go",
     "server-go/modules/memory/embed_batch.go",
     "server-go/modules/memory/runtime_command.go",
+    "server-go/modules/memory/vector_maintenance.go",
+    "server-go/modules/memory/public_vector.go",
     "server-go/modules/memory/answer.go",
     "server-go/modules/memory/public_answer.go"
   ],
@@ -112,6 +114,7 @@
     "server-go/modules/memory/public_learning_test.go",
     "server-go/modules/memory/embed_batch_test.go",
     "server-go/modules/memory/runtime_command_test.go",
+    "server-go/modules/memory/vector_maintenance_test.go",
     "server-go/modules/memory/answer_test.go"
   ],
   "public_headers": [

@@ -16,6 +16,8 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "rebuild", "Rebuild the memory vector index.", handleVectorCommand, true},
+	{"memory", "reindex", "Rebuild derived memory indexes.", handleVectorCommand, true},
 	{"memory", "ask", "Answer from scoped memory evidence.", handleAnswerCommand, true},
 	{"memory", "diagnose_scoped", "Explain scoped memory retrieval and optionally record its trace.", handleDiagnosticCommand, true},
 	{"memory", "explain_match", "Explain a memory's match to a query.", handleDiagnosticCommand, true},

@@ -15,8 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DOMAIN_TIMEOUT_MS             5000
-#define DOMAIN_MAINTENANCE_TIMEOUT_MS 120000
+#define DOMAIN_TIMEOUT_MS 5000
 
 static cJSON *domain_call_with_timeout(cJSON *request, int timeout_ms)
 {
@@ -94,21 +93,6 @@ const char *memory_answer_evidence_reason_str(const memory_answer_evidence_t *tr
    default:
       return "db_unavailable";
    }
-}
-
-int memory_rebuild_derived_indexes(int limit)
-{
-   cJSON *request = domain_request("rebuild-derived");
-   if (!request || !cJSON_AddNumberToObject(request, "limit", limit > 0 ? limit : 100000))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call_with_timeout(request, DOMAIN_MAINTENANCE_TIMEOUT_MS);
-   int count = -1;
-   (void)domain_number(response, "count", &count);
-   cJSON_Delete(response);
-   return count;
 }
 
 int64_t memory_episode_card_generate(const char *source_session)
@@ -211,26 +195,4 @@ int memory_repair_vector_index_failed_only(const char *command, int limit, int *
    if (failed_out)
       *failed_out = failed;
    return repaired;
-}
-
-int memory_rebuild_vector_index_for_version(const char *version, int *failed_out)
-{
-   if (failed_out)
-      *failed_out = 0;
-   if (!version || !version[0])
-      return -1;
-   cJSON *request = domain_request("vector-rebuild");
-   if (!request || !cJSON_AddStringToObject(request, "version", version))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   int rebuilt = -1, failed = 0;
-   (void)domain_number(response, "count", &rebuilt);
-   (void)domain_number(response, "failed", &failed);
-   cJSON_Delete(response);
-   if (failed_out)
-      *failed_out = failed;
-   return rebuilt;
 }

@@ -134,6 +134,7 @@ type Record struct {
 }
 
 type DataResponse struct {
+	Version            string               `json:"version,omitempty"`
 	PublicRecords      []publicMemoryRecord `json:"public_records,omitempty"`
 	Deduplicated       bool                 `json:"deduplicated,omitempty"`
 	FactWrite          *FactWriteDecision   `json:"fact_write,omitempty"`
@@ -798,6 +799,8 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	}
 	maxLimit := 100
 	switch request.Operation {
+	case "rebuild-derived":
+		maxLimit = 100000
 	case "prospective-list", "directive-list", "lint", "conflict-list", "low-effectiveness", "unused-l2", "superseded-keys", "entity-edges":
 		maxLimit = 256
 	}
@@ -1170,6 +1173,16 @@ set_config('aimee.correlation_id',$9,true)`,
 				request.Workspace, request.Project, request.IncludeAll, request.MaxResults)
 		case "vector-rebuild":
 			var rebuilt int
+			if request.Version == "" {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				if err := backend.db.QueryRow(ctx, `SELECT version FROM memory_active_embedder WHERE id=1`).Scan(&request.Version); err != nil || request.Version == "" {
+					return nil, bus.ModuleStatusInvalidRequest
+				}
+			}
+			response.Version = request.Version
 			rebuilt, response.Failed, err = legacy.RebuildVectorIndex(ctx, request.Version)
 			response.Count = &rebuilt
 		}

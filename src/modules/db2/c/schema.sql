@@ -17699,7 +17699,7 @@ BEGIN
     END LOOP;
   END LOOP;
   GRANT SELECT ON tasks, fact_evidence, docs, evidence_lifecycle_settings,
-    memory_event_frames, memory_temporal_refs,
+    memory_event_frames, memory_temporal_refs, memory_active_embedder,
     document_versions, derivation_policy_versions TO aimee_store_runtime;
   GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT),
     kb_fact_commit_worm_seal(TEXT,TEXT) TO aimee_store_runtime;

@@ -142,54 +142,6 @@ int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg)
    return rc;
 }
 
-static int kb_handle_memory_rebuild(int fd, cJSON *req)
-{
-   cJSON *version_j = cJSON_GetObjectItemCaseSensitive(req, "version");
-   const char *requested_version =
-       (cJSON_IsString(version_j) && version_j->valuestring[0]) ? version_j->valuestring : NULL;
-
-   char active_ver[256] = "";
-   const char *version = requested_version;
-   if (!version)
-   {
-      (void)db2_kb_service_get_active_embedder_version(active_ver, sizeof(active_ver));
-      if (!active_ver[0])
-         return kb_send_error(fd,
-                              "no active embedder version; pass a version or run memory reembed");
-      version = active_ver;
-   }
-
-   int failed = 0;
-   int rebuilt = memory_rebuild_vector_index_for_version(version, &failed);
-
-   if (rebuilt < 0)
-      return kb_send_error(
-          fd, "memory rebuild failed (another rebuild may be running; check rebuild_lock_held)");
-
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "version", version);
-   cJSON_AddNumberToObject(resp, "rebuilt", rebuilt);
-   cJSON_AddNumberToObject(resp, "failed", failed);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-static int kb_handle_reindex(int fd, cJSON *req)
-{
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 0;
-
-   if (!db2_is_initialized())
-      return kb_send_error(fd, "failed to open knowledge service store");
-   int rebuilt = memory_rebuild_derived_indexes(limit);
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "rebuilt", rebuilt);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
 static int kb_handle_memory_repair(int fd, cJSON *req)
 {
    cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
@@ -621,7 +573,13 @@ static int kb_handle_memory_reembed_rollback(int fd, cJSON *req)
       return kb_send_error(fd, "rollback: update failed");
 
    int rebuild_failed = 0;
-   int rebuilt = memory_rebuild_vector_index_for_version(version, &rebuild_failed);
+   cJSON *rebuild_args = cJSON_CreateObject(), *rebuild_result = NULL;
+   cJSON_AddStringToObject(rebuild_args, "version", version);
+   int rebuild_rc = aimee_module_commands_dispatch("memory.rebuild", rebuild_args, &rebuild_result);
+   cJSON_Delete(rebuild_args);
+   int rebuilt = rebuild_rc > 0 ? jo_int(rebuild_result, "rebuilt", -1) : -1;
+   rebuild_failed = jo_int(rebuild_result, "failed", 0);
+   cJSON_Delete(rebuild_result);
    if (rebuilt < 0)
       return kb_send_error(fd,
                            "rollback: failed to rebuild the vector index for requested version");
@@ -655,7 +613,13 @@ static int kb_handle_memory_reembed_cutover(int fd, cJSON *req)
    (void)db2_kb_service_mark_reembed_finished(ts);
 
    int rebuild_failed = 0;
-   int rebuilt = memory_rebuild_vector_index_for_version(st.target_version, &rebuild_failed);
+   cJSON *rebuild_args = cJSON_CreateObject(), *rebuild_result = NULL;
+   cJSON_AddStringToObject(rebuild_args, "version", st.target_version);
+   int rebuild_rc = aimee_module_commands_dispatch("memory.rebuild", rebuild_args, &rebuild_result);
+   cJSON_Delete(rebuild_args);
+   int rebuilt = rebuild_rc > 0 ? jo_int(rebuild_result, "rebuilt", -1) : -1;
+   rebuild_failed = jo_int(rebuild_result, "failed", 0);
+   cJSON_Delete(rebuild_result);
    if (rebuilt < 0)
       return kb_send_error(fd, "cutover: failed to rebuild the retrieval index for target version");
 
@@ -1191,8 +1155,6 @@ static const struct
     {"kb.maintenance.run", kb_handle_maintenance_run},
     {"kb.export", kb_handle_kb_export},
     {"kb.import", kb_handle_kb_import},
-    {"memory.reindex", kb_handle_reindex},
-    {"memory.rebuild", kb_handle_memory_rebuild},
     {"memory.repair", kb_handle_memory_repair},
     {"memory.verify", kb_handle_memory_verify},
     {"memory.embed", kb_handle_memory_embed},

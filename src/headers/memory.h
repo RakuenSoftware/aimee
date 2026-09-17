@@ -412,10 +412,8 @@ void memory_set_audit_hook(memory_audit_hook_fn fn);
  * contract above requires. Not for callers outside the module. */
 void memory_audit_emit(const char *op, int64_t id, const char *tier, const char *kind,
                        const char *key, double confidence, const char *session_id);
-int memory_rebuild_derived_indexes(int limit);
 int memory_repair_vector_index(int64_t memory_id, const char *command);
 int memory_repair_vector_index_failed_only(const char *command, int limit, int *failed_out);
-int memory_rebuild_vector_index_for_version(const char *version, int *failed_out);
 int memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max);
 
 /* Returns 1 if answer contains at least one citation marker ([#N]). */
