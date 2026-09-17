@@ -14,7 +14,7 @@ Provide bounded independent arm pools, explicit fusion, limited prior influence 
 
 ## Integration points
 
-Implement collection/fusion in `server-go/modules/memory/{data.go,visibility_search.go,personal_vectors.go,fusion.go}`. Migrate the memory semantics of `kbs_semantic_assertion_hybrid` from the typed context backend to that Go owner and switch its C callers to the shared contract. Publish capabilities per endpoint and placement: lexical, dense, graph, code, temporal mode, index readiness and fallback. An unavailable arm must not silently satisfy an endpoint's semantic-retrieval promise.
+Implement collection/fusion in `server-go/modules/memory/{data.go,visibility_search.go,personal_vectors.go,fusion.go}`. Migrate the memory semantics of `kbs_semantic_assertion_hybrid` from the typed context backend to that Go owner and replace its C memory callers with Go callers of the shared contract. Publish capabilities per endpoint and placement: lexical, dense, graph, code, temporal mode, index readiness and fallback. An unavailable arm must not silently satisfy an endpoint's semantic-retrieval promise.
 
 ## Candidate collection and fusion
 

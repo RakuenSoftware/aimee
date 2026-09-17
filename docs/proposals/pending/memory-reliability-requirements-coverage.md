@@ -4,7 +4,7 @@ This matrix assigns each required concept to concrete proposal and test ownershi
 
 | Requirement | Primary proposal | Integration / acceptance ownership |
 |---|---|---|
-| Golang-only memory module; C clients owned by external hosts | [Program integration contract and G0 extraction](memory-reliability-00-program.md#go-memory-module-integration) | [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) zero-C/header/descriptor gate, `CGO_ENABLED=0` build, host registration and process/placement parity; no forwarding or cgo exceptions |
+| Golang-only memory implementation and communication; no relocated C clients | [Program integration contract and G0 extraction](memory-reliability-00-program.md#go-memory-module-integration) | [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) repository-wide zero-C-memory gate, module/client `CGO_ENABLED=0` builds, Go communication and process/placement parity; reject host relocation, forwarding headers and cgo |
 | Consistent current/historical lifecycle, suppression and authorization | [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) | [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) cross-surface/non-owner-role fixtures |
 | World-time and belief-time correctness | [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) | [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) coherent requirements; [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) interval/correction cases |
 | Authority-preserving create/upsert/update/delete | [MR-02](memory-reliability-02-authority-preserving-mutations.md) | Durable transition, concurrency and tombstone tests |

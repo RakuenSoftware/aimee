@@ -16,7 +16,7 @@ Add a bounded hygiene job that detects problems and creates reviewable proposals
 
 Reuse `server-go/modules/memory/maintenance.go`, existing lint/drift functions, `learning_proposals` and current review/commit machinery. Inventory existing automatic promotion, merge, prune and summarize behavior before attaching the hygiene scheduler. The proposal-only guarantee applies to this new path and must be enforced at its mutation boundary.
 
-Implement detectors and memory finding projection in the Go memory owner, reusing its eligibility, lineage and mutation contracts. Scheduling supplies bounded work over the bus; the existing learning owner retains review/commit authority. C maintenance commands remain adapters and cannot call a local mutation path when the Go module is unavailable.
+Implement detectors and memory finding projection in the Go memory owner, reusing its eligibility, lineage and mutation contracts. Scheduling supplies bounded work over the bus; the existing learning owner retains review/commit authority. Memory maintenance commands and their communication move to Go; an unavailable module cannot activate a local C mutation or transport fallback.
 
 ## Job and finding model
 

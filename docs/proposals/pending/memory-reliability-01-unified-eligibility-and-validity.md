@@ -14,7 +14,7 @@ Provide one versioned eligibility decision for every memory-bearing surface. Per
 
 ## Existing integration points
 
-Implement the shared eligibility decision in `server-go/modules/memory` and use it from `{data.go,visibility_search.go,retrieval.go,fact_recall.go,fusion.go}`. Migrate memory eligibility decisions from the typed context backend `src/kb/db2_adapters/kb_service_backend_context.c` behind that Go contract; the C caller retains framing and host integration. Reuse `memory_row_scope_visible`, transaction-local request scope and existing semantic-assertion filters in `src/modules/db2/c/schema.sql` through the storage owner. A memory-row policy does not automatically protect fact edges, aliases, derived rows or cached projections; inventory those paths explicitly.
+Implement the shared eligibility decision in `server-go/modules/memory` and use it from `{data.go,visibility_search.go,retrieval.go,fact_recall.go,fusion.go}`. Migrate memory eligibility decisions from the typed context backend `src/kb/db2_adapters/kb_service_backend_context.c` behind that Go contract; memory-specific callers and framing also move to Go under G0. Reuse `memory_row_scope_visible`, transaction-local request scope and existing semantic-assertion filters in `src/modules/db2/c/schema.sql` through the storage owner. A memory-row policy does not automatically protect fact edges, aliases, derived rows or cached projections; inventory those paths explicitly.
 
 ## Contract
 

@@ -14,7 +14,7 @@ Expose named served-memory views and read-only claim cards over existing canonic
 
 ## Proposed API and views
 
-Add `aimee memory serve <view> --task <text> --json`, with authenticated scope inherited from the host. Temporal arguments are explicit and supported consistently. Implement the view operation inside the existing Go memory process and memory-data contract. CLI/bus/HTTP/MCP adapters translate to that operation; they do not implement separate SQL/ranking rules or start a new view service. Publish capabilities for Server and KB placements without routing private data into the shared store to fill an unavailable view.
+Add `aimee memory serve <view> --task <text> --json`, with authenticated scope inherited from the host. Temporal arguments are explicit and supported consistently. Implement the view operation inside the existing Go memory process and memory-data contract. Go memory clients for CLI/bus/HTTP/MCP translate to that operation; they do not implement separate SQL/ranking rules or start a new view service. Publish capabilities for Server and KB placements without routing private data into the shared store to fill an unavailable view.
 
 | View | Required semantics |
 |---|---|
