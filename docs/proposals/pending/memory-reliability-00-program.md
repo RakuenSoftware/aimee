@@ -135,6 +135,10 @@ counters are owned by the Go process and included in recall metrics. Confidence
 is display metadata and no longer changes the Go text-ranking score or ordering.
 Native ask and diagnostic decoding adapters and their backend handlers are removed;
 the benchmark reads diagnostic JSON through the generic command dispatcher.
+Host dashboard formatting, fusion-state reads and recall metrics now run through
+the shared Go runtime command. Saved maintenance summaries, counters and config
+are rendered by Go; the native formatter and state/metrics adapters are removed.
+The internal command is absent from public discovery and rejects non-host callers.
 The current inventory is five C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

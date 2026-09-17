@@ -40,7 +40,16 @@ func TestMaintenancePublicPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB})))
+	backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB, settings: func() (map[string]any, error) {
+		return map[string]any{"memory_maintenance_enabled": true, "memory_maintenance_interval_seconds": float64(600), "memory_maintenance_summarize_enabled": true}, nil
+	}}
+	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
+	client := clientForHandler(t, handler)
+	before := runHostRuntime(t, handler, `{"operation":"maintenance-dashboard"}`)
+	if before["last"] != nil || before["config"].(map[string]any)["interval_seconds"] != float64(600) {
+		t.Fatal(before)
+	}
+	beforeMetrics := before["metrics"].(map[string]any)
 	lint := runPublicCommand(t, client, "lint", `{}`)
 	if lint["issue_count"] != float64(3) || len(lint["issues"].([]any)) != 3 {
 		t.Fatal(lint)
@@ -74,6 +83,15 @@ func TestMaintenancePublicPostgres(t *testing.T) {
 	forced := runPublicCommand(t, client, "maintenance_run", `{"modes":1,"force":true,"dry_run":true}`)["summary"].(map[string]any)
 	if forced["skipped"] != false || forced["dry_run"] != true {
 		t.Fatal(forced)
+	}
+	dashboard := runHostRuntime(t, handler, `{"operation":"maintenance-dashboard"}`)
+	last := dashboard["last"].(map[string]any)
+	if last["modes_run"] != float64(1) || last["dry_run"] != false || last["skipped"] != false {
+		t.Fatal(dashboard)
+	}
+	metrics := dashboard["metrics"].(map[string]any)
+	if metrics["runs_total"].(float64)-beforeMetrics["runs_total"].(float64) != 3 || metrics["skips_total"].(float64)-beforeMetrics["skips_total"].(float64) != 1 || metrics["ms_max"].(float64) < 0 {
+		t.Fatal(metrics)
 	}
 	_, err = tx.Exec(ctx, `TRUNCATE memories`)
 	if err != nil {

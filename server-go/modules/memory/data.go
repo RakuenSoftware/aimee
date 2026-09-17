@@ -1061,6 +1061,13 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
+	case "maintenance-dashboard":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.maintenanceDashboard(ctx)
+
 	case "memory-facts-claim", "memory-facts-parse", "memory-facts-finish":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusInvalidRequest

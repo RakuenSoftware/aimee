@@ -114,7 +114,6 @@ int memory_graph_distribute_path_credit(double delta, const memory_graph_path_ed
  * configured on server and KB. Legacy set/clear entry points are no-ops;
  * request fields cannot change the instance policy. */
 void memory_fusion_state_set(const char *graph_code_fusion_state);
-int memory_fusion_state_is_on(void);
 void memory_fusion_state_clear(void);
 void memory_fusion_expansions_set(const memory_graph_expansion_t *expansions, int count);
 void memory_fusion_expansions_apply(memory_score_parts_t *parts, int64_t memory_id);

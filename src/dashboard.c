@@ -1,3 +1,5 @@
+#include "json_fluent.h"
+#include "module_commands.h"
 /* dashboard.c: embedded HTTP dashboard server with JSON API endpoints */
 #include "aimee.h"
 #include "aimee_home.h"
@@ -118,44 +120,18 @@ char *api_plans(void)
 
 char *api_dashboard_maintenance(void)
 {
-   cJSON *obj = cJSON_CreateObject();
-
-   /* Last persisted cycle. */
-   memory_maintenance_summary_t last;
-   if (memory_maintenance_last_summary(&last) == 0)
+   cJSON *args = cJSON_CreateObject(), *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "maintenance-dashboard");
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   cJSON_Delete(args);
+   if (rc <= 0 || !cJSON_IsObject(response))
    {
-      cJSON *j = memory_maintenance_summary_to_json(&last);
-      cJSON_AddItemToObject(obj, "last", j);
+      cJSON_Delete(response);
+      return NULL;
    }
-   else
-   {
-      cJSON_AddNullToObject(obj, "last");
-   }
-
-   /* Process-local totals since boot. */
-   int64_t runs_total = 0, skips_total = 0, changes_total = 0;
-   double ms_avg = 0.0, ms_max = 0.0;
-   memory_maintenance_metrics(&runs_total, &skips_total, &changes_total, &ms_avg, &ms_max);
-   cJSON *metrics = cJSON_AddObjectToObject(obj, "metrics");
-   cJSON_AddNumberToObject(metrics, "runs_total", (double)runs_total);
-   cJSON_AddNumberToObject(metrics, "skips_total", (double)skips_total);
-   cJSON_AddNumberToObject(metrics, "changes_total", (double)changes_total);
-   cJSON_AddNumberToObject(metrics, "ms_avg", ms_avg);
-   cJSON_AddNumberToObject(metrics, "ms_max", ms_max);
-
-   /* Config snapshot so operators can see cadence + gates. */
-   cJSON *cfg_obj = cJSON_AddObjectToObject(obj, "config");
-   cJSON_AddBoolToObject(cfg_obj, "enabled", config_memory_maintenance_enabled() ? 1 : 0);
-   int interval = config_memory_maintenance_interval_seconds() > 0
-                      ? config_memory_maintenance_interval_seconds()
-                      : MEMORY_MAINTENANCE_DEFAULT_INTERVAL_SECS;
-   cJSON_AddNumberToObject(cfg_obj, "interval_seconds", interval);
-   cJSON_AddBoolToObject(cfg_obj, "summarize_enabled",
-                         config_memory_maintenance_summarize_enabled() ? 1 : 0);
-
-   char *json = cJSON_PrintUnformatted(obj);
-   cJSON_Delete(obj);
-   return json ? json : strdup("{}");
+   char *json = cJSON_PrintUnformatted(response);
+   cJSON_Delete(response);
+   return json;
 }
 
 char *api_dashboard_identity(void)

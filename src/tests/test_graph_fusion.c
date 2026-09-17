@@ -334,24 +334,6 @@ static void test_e2e_non_code_query_gated_out(void)
 
 /* --- recall-path fusion state (thread-local plumbing, no DB) --- */
 
-static void test_fusion_state_on_off(void)
-{
-   memory_fusion_state_set("on");
-   assert(memory_fusion_state_is_on() == 1);
-   /* "shadow"/"off"/unknown/NULL are all not-on (shadow capture is a follow-up). */
-   memory_fusion_state_set("shadow");
-   assert(memory_fusion_state_is_on() == 0);
-   memory_fusion_state_set("off");
-   assert(memory_fusion_state_is_on() == 0);
-   memory_fusion_state_set("bogus");
-   assert(memory_fusion_state_is_on() == 0);
-   memory_fusion_state_set(NULL);
-   assert(memory_fusion_state_is_on() == 0);
-   memory_fusion_state_set("on");
-   memory_fusion_state_clear();
-   assert(memory_fusion_state_is_on() == 0);
-}
-
 static void test_fusion_expansions_apply(void)
 {
    memory_graph_expansion_t exp[1];
@@ -494,9 +476,6 @@ int main(void)
    printf("ok\n");
    printf("test_explain_read_provenance... ");
    test_explain_read_provenance();
-   printf("ok\n");
-   printf("test_fusion_state_on_off... ");
-   test_fusion_state_on_off();
    printf("ok\n");
    printf("test_fusion_expansions_apply... ");
    test_fusion_expansions_apply();

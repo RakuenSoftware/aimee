@@ -126,7 +126,14 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 	if _, err := s.RecallBundleWithActivation(ctx, "", 0, false, raw); err != nil {
 		t.Fatal(err)
 	}
-	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, s)))
+	handler := NewHandler(nil, WithDataStore(PlacementKB, s))
+	beforeMetrics := recallMetrics()
+	dashboard := runHostRuntime(t, handler, `{"operation":"recall-dashboard"}`)
+	metrics := dashboard["metrics"].(map[string]any)
+	if dashboard["session_start"] != true || metrics["assemblies_total"].(float64) != float64(beforeMetrics.Assemblies+1) || metrics["session_start_assemblies"].(float64) != float64(beforeMetrics.Starts+1) || metrics["ms_max"].(float64) < 0 {
+		t.Fatal(dashboard)
+	}
+	client := clientForHandler(t, handler)
 	reply, err := client.Data(ctx, 73, DataRequest{Operation: "recall-bundle", Activation: raw})
 	if err != nil {
 		t.Fatal(err)

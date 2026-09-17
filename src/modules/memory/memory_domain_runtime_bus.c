@@ -46,12 +46,6 @@ static cJSON *domain_request(const char *operation)
    return request;
 }
 
-static int domain_bool(const cJSON *response, const char *key)
-{
-   const cJSON *value = response ? cJSON_GetObjectItemCaseSensitive(response, key) : NULL;
-   return cJSON_IsBool(value) && cJSON_IsTrue(value);
-}
-
 static int domain_number(const cJSON *response, const char *key, int *out)
 {
    const cJSON *value = response ? cJSON_GetObjectItemCaseSensitive(response, key) : NULL;
@@ -60,90 +54,6 @@ static int domain_number(const cJSON *response, const char *key, int *out)
    if (out)
       *out = value->valueint;
    return 0;
-}
-
-cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *summary)
-{
-   if (!summary)
-      return NULL;
-   cJSON *out = cJSON_CreateObject();
-   if (!out)
-      return NULL;
-   cJSON_AddNumberToObject(out, "modes_run", summary->modes_run);
-   cJSON_AddBoolToObject(out, "skipped", summary->skipped != 0);
-   cJSON_AddBoolToObject(out, "dry_run", summary->dry_run != 0);
-   cJSON_AddNumberToObject(out, "promoted", summary->promoted);
-   cJSON_AddNumberToObject(out, "demoted", summary->demoted);
-   cJSON_AddNumberToObject(out, "expired", summary->expired);
-   cJSON_AddNumberToObject(out, "lifecycle_archived", summary->lifecycle_archived);
-   cJSON_AddNumberToObject(out, "reminders_expired", summary->reminders_expired);
-   cJSON_AddNumberToObject(out, "directives_expired", summary->directives_expired);
-   cJSON_AddNumberToObject(out, "rescored", summary->rescored);
-   cJSON_AddNumberToObject(out, "profile_cards_refreshed", summary->profile_cards_refreshed);
-   cJSON_AddNumberToObject(out, "merged", summary->merged);
-   cJSON_AddNumberToObject(out, "summarized", summary->summarized);
-   cJSON_AddNumberToObject(out, "drift_candidates", summary->drift_candidates);
-   cJSON_AddNumberToObject(out, "drift_requeued", summary->drift_requeued);
-   cJSON_AddNumberToObject(out, "elapsed_ms", summary->elapsed_ms);
-   cJSON_AddNumberToObject(out, "memory_count_before", (double)summary->memory_count_before);
-   cJSON_AddNumberToObject(out, "memory_count_after", (double)summary->memory_count_after);
-   return out;
-}
-
-static int fusion_state_call(const char *operation, const char *state)
-{
-   cJSON *request = domain_request(operation);
-   if (!request || (state && !cJSON_AddStringToObject(request, "state", state)))
-   {
-      cJSON_Delete(request);
-      return 0;
-   }
-   cJSON *response = domain_call(request);
-   int enabled = domain_bool(response, "allowed");
-   cJSON_Delete(response);
-   return enabled;
-}
-
-/* Kept for ABI compatibility with older recall adapters. Request fields no
- * longer change fusion: the memory owner reads the instance configuration. */
-
-int memory_fusion_state_is_on(void)
-{
-   return fusion_state_call("fusion-state-get", NULL);
-}
-
-static cJSON *runtime_metrics_call(const char *operation)
-{
-   cJSON *response = domain_call(domain_request(operation));
-   cJSON *metrics = response ? cJSON_DetachItemFromObjectCaseSensitive(response, "metrics") : NULL;
-   cJSON_Delete(response);
-   return metrics;
-}
-
-static int64_t metric_i64(const cJSON *metrics, const char *key)
-{
-   const cJSON *value = metrics ? cJSON_GetObjectItemCaseSensitive(metrics, key) : NULL;
-   return cJSON_IsNumber(value) ? (int64_t)value->valuedouble : 0;
-}
-
-static double metric_double(const cJSON *metrics, const char *key)
-{
-   const cJSON *value = metrics ? cJSON_GetObjectItemCaseSensitive(metrics, key) : NULL;
-   return cJSON_IsNumber(value) ? value->valuedouble : 0.0;
-}
-
-void memory_recall_metrics(int64_t *assemblies, int64_t *starts, double *average, double *maximum)
-{
-   cJSON *metrics = runtime_metrics_call("recall-metrics");
-   if (assemblies)
-      *assemblies = metric_i64(metrics, "assemblies");
-   if (starts)
-      *starts = metric_i64(metrics, "starts");
-   if (average)
-      *average = metric_double(metrics, "average_ms");
-   if (maximum)
-      *maximum = metric_double(metrics, "maximum_ms");
-   cJSON_Delete(metrics);
 }
 
 const char *memory_answer_evidence_decision_str(const memory_answer_evidence_t *trace)

@@ -1133,7 +1133,12 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
     * /v1/code/callers route — canonical_index_find_callers takes its all-projects
     * SQL path on NULL, so both legs scope identically instead of one searching all
     * projects (NULL) while the other got "" (which is not the all-projects sentinel). */
-   int fusion_on = memory_fusion_state_is_on();
+   cJSON *state_args = cJSON_CreateObject(), *state = NULL;
+   cJSON_AddStringToObject(state_args, "operation", "fusion-state");
+   int state_rc = aimee_module_commands_dispatch_internal("memory.runtime", state_args, &state);
+   cJSON_Delete(state_args);
+   int fusion_on = state_rc > 0 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(state, "enabled"));
+   cJSON_Delete(state);
    int ng = 0;
    int ngraph = 0;
    if (fusion_on && symbol[0])

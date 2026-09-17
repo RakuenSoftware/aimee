@@ -1643,10 +1643,6 @@ struct cJSON *memory_recall(const char *task_hint, int limit_tokens, int session
 #define MEMORY_RECALL_PIVOT_DEFAULT_THRESHOLD 0.15
 int memory_recall_topic_pivot(const char *prev_text, const char *cur_text, double threshold);
 
-/* Process-local metrics accessor.  Any output pointer may be NULL. */
-void memory_recall_metrics(int64_t *assemblies_total, int64_t *session_start_assemblies,
-                           double *ms_avg, double *ms_max);
-
 /* --- Scheduled Memory Maintenance Cycles ---
  *
  * Bounded, mostly-deterministic curation pass that runs on a cadence
@@ -1718,16 +1714,5 @@ int memory_maintenance_run(unsigned int modes, int force, int dry_run,
  * elapsed since the last run (or when no previous run exists).  Cheap
  * no-op when not yet due.  Returns 1 if a cycle ran, 0 if skipped. */
 int memory_maintenance_maybe_run(memory_maintenance_summary_t *summary_out);
-
-/* Fetch the last-persisted maintenance summary (for the dashboard
- * card).  Returns 0 if a record exists, -1 otherwise. */
-int memory_maintenance_last_summary(memory_maintenance_summary_t *out);
-
-/* Serialise a summary to a fresh cJSON object.  Caller owns it. */
-struct cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *summary);
-
-/* Process-local metrics accessor.  Any output pointer may be NULL. */
-void memory_maintenance_metrics(int64_t *runs_total, int64_t *skips_total, int64_t *changes_total,
-                                double *ms_avg, double *ms_max);
 
 #endif /* DEC_MEMORY_H */

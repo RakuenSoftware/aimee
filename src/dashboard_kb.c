@@ -1,3 +1,4 @@
+#include "json_fluent.h"
 #include "module_commands.h"
 #include "aimee/memory/module_api.h"
 /* dashboard_kb.c: dashboard JSON helpers that touch only DB2 + audit.log.
@@ -248,28 +249,18 @@ char *api_dashboard_reminders(void)
 
 char *api_dashboard_recall(void)
 {
-   if (!db2_is_initialized())
+   cJSON *args = cJSON_CreateObject(), *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "recall-dashboard");
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   cJSON_Delete(args);
+   if (rc <= 0 || !cJSON_IsObject(response))
+   {
+      cJSON_Delete(response);
       return NULL;
-   /* Assemble a fresh session-start bundle so the dashboard shows what
-    * the agent would see on first turn right now.  Cheap — pure DB. */
-   cJSON *bundle = memory_recall(NULL, 0, 1);
-   if (!bundle)
-      return strdup("{}");
-
-   /* Augment with cumulative metrics so operators can spot a runaway
-    * assembly count or latency regression. */
-   cJSON *metrics = cJSON_AddObjectToObject(bundle, "metrics");
-   int64_t total = 0, session_starts = 0;
-   double avg = 0.0, max = 0.0;
-   memory_recall_metrics(&total, &session_starts, &avg, &max);
-   cJSON_AddNumberToObject(metrics, "assemblies_total", (double)total);
-   cJSON_AddNumberToObject(metrics, "session_start_assemblies", (double)session_starts);
-   cJSON_AddNumberToObject(metrics, "ms_avg", avg);
-   cJSON_AddNumberToObject(metrics, "ms_max", max);
-
-   char *json = cJSON_PrintUnformatted(bundle);
-   cJSON_Delete(bundle);
-   return json ? json : strdup("{}");
+   }
+   char *json = cJSON_PrintUnformatted(response);
+   cJSON_Delete(response);
+   return json;
 }
 
 char *api_dashboard_directives(void)

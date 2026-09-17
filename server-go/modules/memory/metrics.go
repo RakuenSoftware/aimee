@@ -44,6 +44,9 @@ func (m *durationCounters) snapshot() (int64, float64, float64) {
 }
 
 var runtimeMetricState struct {
+	maintenanceCalls   durationCounters
+	maintenanceSkips   atomic.Int64
+	maintenanceChanges atomic.Int64
 	directiveCreated   atomic.Int64
 	directiveResolved  atomic.Int64
 	directiveExpired   atomic.Int64

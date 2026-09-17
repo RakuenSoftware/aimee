@@ -107,6 +107,9 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
+	if verb == "runtime" {
+		return handleRuntimeView(options, invocation, args)
+	}
 	if verb == "embed" {
 		if invocation.PrincipalRef != 0 {
 			return nil, bus.ModuleStatusInvalidRequest

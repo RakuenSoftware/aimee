@@ -1981,14 +1981,6 @@ int main(void)
       cJSON_Delete(b_session);
       cJSON_Delete(b_turn);
 
-      /* Telemetry is recorded for operator inspection. Latency budgets are
-       * tracked by explicit benchmarks, not unit-test gates. */
-      int64_t assemblies = 0;
-      double ms_max = 0.0;
-      memory_recall_metrics(&assemblies, NULL, NULL, &ms_max);
-      assert(assemblies > 0);
-      assert(ms_max >= 0.0);
-
       /* Token-cap truncation: under a squeezed budget, the trim pass walks
        * from low-priority sections first (directives → reminders →
        * open_commitments → active_context → preferences → identity).
@@ -2339,16 +2331,6 @@ int main(void)
       assert(cJSON_IsNumber(cJSON_GetObjectItem(parsed, "modes_run")));
       assert(cJSON_IsNumber(cJSON_GetObjectItem(parsed, "elapsed_ms")));
       cJSON_Delete(parsed);
-
-      /* last_summary persists for the dashboard accessor. */
-      memory_maintenance_summary_t last;
-      assert(memory_maintenance_last_summary(&last) == 0);
-      assert(last.summary_json[0] != 0);
-
-      int64_t runs_total = 0, skips_total = 0;
-      memory_maintenance_metrics(&runs_total, &skips_total, NULL, NULL, NULL);
-      assert(runs_total >= 2);
-      assert(skips_total >= 1);
 
       /* maybe_run is gated on memory_maintenance.enabled; say so in config. */
       write_test_config("memory_maintenance:\n  enabled: false\n");

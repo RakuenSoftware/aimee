@@ -1,3 +1,5 @@
+#include "json_fluent.h"
+#include "module_commands.h"
 #include <aimee/core/event_bus/bus_runtime.h>
 #include "aimee.h"
 #include "aimee_home.h"
@@ -711,8 +713,13 @@ static int kb_run_fusion_probe(const char *query)
       fprintf(stderr, "fusion probe: instance memory retrieval unavailable\n");
       return 1;
    }
-   printf("fusion=%s (instance setting), results=%d\n", memory_fusion_state_is_on() ? "on" : "off",
-          count);
+   cJSON *state_args = cJSON_CreateObject(), *state = NULL;
+   cJSON_AddStringToObject(state_args, "operation", "fusion-state");
+   int state_rc = aimee_module_commands_dispatch_internal("memory.runtime", state_args, &state);
+   cJSON_Delete(state_args);
+   int fusion_on = state_rc > 0 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(state, "enabled"));
+   cJSON_Delete(state);
+   printf("fusion=%s (instance setting), results=%d\n", fusion_on ? "on" : "off", count);
    for (int i = 0; i < count; i++)
       printf("  #%-2d id=%-8lld %s\n", i + 1, (long long)results[i].id, results[i].key);
    return 0;

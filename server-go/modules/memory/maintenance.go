@@ -110,15 +110,27 @@ func (s *postgresDataStore) maintenanceChange(ctx context.Context, query string)
 	return int(tag.RowsAffected()), nil
 }
 
-func (s *postgresDataStore) RunMaintenance(ctx context.Context, modes uint32, force, dryRun bool) (MaintenanceSummary, error) {
+func (s *postgresDataStore) RunMaintenance(ctx context.Context, modes uint32, force, dryRun bool) (out MaintenanceSummary, err error) {
 	if err := s.requireKBDomain(); err != nil {
 		return MaintenanceSummary{}, err
 	}
 	started := time.Now()
+	defer func() {
+		if err != nil {
+			return
+		}
+		if out.Skipped {
+			runtimeMetricState.maintenanceSkips.Add(1)
+			return
+		}
+		runtimeMetricState.maintenanceCalls.observe(started)
+		changes := out.Promoted + out.Demoted + out.Expired + out.LifecycleArchived + out.RemindersExpired + out.DirectivesExpired + out.Rescored + out.ProfileCardsRefreshed + out.Merged + out.Summarized + out.DriftRequeued
+		runtimeMetricState.maintenanceChanges.Add(int64(changes))
+	}()
 	if modes == 0 {
 		modes = MaintenanceDefault
 	}
-	out := MaintenanceSummary{ModesRun: modes, DryRun: dryRun}
+	out = MaintenanceSummary{ModesRun: modes, DryRun: dryRun}
 	if !force {
 		var recent bool
 		if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kb_meta
@@ -131,7 +143,6 @@ WHERE key='memory_maintenance_last_run' AND value::timestamp>CURRENT_TIMESTAMP-i
 			return out, nil
 		}
 	}
-	var err error
 	out.MemoryCountBefore, err = s.countMemories(ctx)
 	if err != nil {
 		return out, err

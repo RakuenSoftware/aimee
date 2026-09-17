@@ -4602,6 +4602,7 @@ int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
  * (g_vec_enabled=0 -> memory_embed_text returns 0 -> the leg is skipped), so the
  * existing hybrid tests are unaffected; test_code_hybrid_vector_ok flips it on. */
 static int g_vec_enabled = 0;
+static int instance_fusion_enabled = 1;
 static int g_vec_search_unavailable = 0;
 static int g_vec_unauthorized = 0;
 /* The module's query behavior is exercised in Go; this fixture owns HTTP
@@ -4618,6 +4619,13 @@ cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const c
 
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
+   if (strcmp(method, "memory.runtime") == 0)
+   {
+      assert(strcmp(jo_cstr(args, "operation"), "fusion-state") == 0);
+      *result = cJSON_CreateObject();
+      cJSON_AddBoolToObject(*result, "enabled", instance_fusion_enabled);
+      return 1;
+   }
    assert(strcmp(method, "memory.embed") == 0);
    *result = cJSON_CreateObject();
    int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
@@ -4997,11 +5005,6 @@ static void test_code_scope_all_keeps_active_project_first(void)
 }
 
 /* §5 hybrid retrieval: fuse lexical-code + graph-callers (RRF) + memory "why". */
-static int instance_fusion_enabled = 1;
-int memory_fusion_state_is_on(void)
-{
-   return instance_fusion_enabled;
-}
 
 static void test_code_hybrid_instance_off(void)
 {

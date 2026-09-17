@@ -1,3 +1,5 @@
+#include "json_fluent.h"
+#include "module_commands.h"
 /* cmd_memory_embed.c: embed, reembed, diagnose, answer, reflect, audit,
  * calibrate, and benchmark subcommand handlers. Includes the
  * memory_score_parts_to_json helper (used by the search / explain paths
@@ -1810,7 +1812,14 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
          corpus_path = "benchmarks/code-vector-graph/production-corpus.json";
       if (opt_get(&opts, "arm") || opt_get(&opts, "fusion-state"))
          fatal("fusion is per-instance; configure AIMEE_GRAPH_FUSION=on|off and restart");
-      const char *fstate = memory_fusion_state_is_on() ? "on" : "off";
+      cJSON *state_args = cJSON_CreateObject(), *state = NULL;
+      cJSON_AddStringToObject(state_args, "operation", "fusion-state");
+      int state_rc = aimee_module_commands_dispatch_internal("memory.runtime", state_args, &state);
+      cJSON_Delete(state_args);
+      int fusion_on =
+          state_rc > 0 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(state, "enabled"));
+      cJSON_Delete(state);
+      const char *fstate = fusion_on ? "on" : "off";
 
       mem_eval_case_t cases[200];
       int n_cases = mem_eval_load_production_corpus(corpus_path, cases,
