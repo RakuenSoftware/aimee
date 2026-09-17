@@ -172,7 +172,8 @@ func (s *postgresDataStore) LinkCreate(ctx context.Context, sourceID, targetID i
 	}
 	var item MemoryLink
 	err := scanLink(s.db.QueryRow(ctx, `INSERT INTO memory_links(source_id,target_id,relation)
-VALUES($1,$2,$3) RETURNING id,source_id,target_id,relation,weight,created_at`, sourceID, targetID, relation), &item)
+SELECT $1,$2,$3 WHERE $1 IN (SELECT id FROM memories) AND $2 IN (SELECT id FROM memories)
+RETURNING id,source_id,target_id,relation,weight,created_at`, sourceID, targetID, relation), &item)
 	return item, err
 }
 
@@ -181,7 +182,8 @@ func (s *postgresDataStore) LinkQuery(ctx context.Context, id int64, limit int) 
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,source_id,target_id,relation,weight,created_at
-FROM memory_links WHERE source_id=$1 OR target_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2`, id, limit)
+FROM memory_links WHERE (source_id=$1 OR target_id=$1)
+AND source_id IN (SELECT id FROM memories) AND target_id IN (SELECT id FROM memories) ORDER BY created_at DESC,id DESC LIMIT $2`, id, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +203,8 @@ func (s *postgresDataStore) LinkDelete(ctx context.Context, id int64) (bool, err
 	if err := s.requireKBDomain(); err != nil {
 		return false, err
 	}
-	tag, err := s.db.Exec(ctx, `DELETE FROM memory_links WHERE id=$1`, id)
+	tag, err := s.db.Exec(ctx, `DELETE FROM memory_links WHERE id=$1
+AND source_id IN (SELECT id FROM memories) AND target_id IN (SELECT id FROM memories)`, id)
 	return err == nil && tag.RowsAffected() > 0, err
 }
 
@@ -210,7 +213,7 @@ func (s *postgresDataStore) ProvenanceList(ctx context.Context, id int64, limit 
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,memory_id,session_id,action,COALESCE(details,''),created_at
-FROM memory_provenance WHERE memory_id=$1 ORDER BY id LIMIT $2`, id, limit)
+FROM memory_provenance WHERE memory_id=$1 AND memory_id IN (SELECT id FROM memories) ORDER BY id LIMIT $2`, id, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +252,8 @@ func (s *postgresDataStore) ConflictList(ctx context.Context, limit int) ([]Conf
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,memory_a,memory_b,detected_at,resolved,COALESCE(resolution,'')
-FROM memory_conflicts WHERE resolved=0 ORDER BY detected_at DESC,id DESC LIMIT $1`, limit)
+FROM memory_conflicts WHERE resolved=0
+AND memory_a IN (SELECT id FROM memories) AND memory_b IN (SELECT id FROM memories) ORDER BY detected_at DESC,id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -312,6 +316,7 @@ func (s *postgresDataStore) ScopeCollect(ctx context.Context, id int64) ([]Scope
 	rows, err := s.db.Query(ctx, `SELECT scope_type,scope_value FROM (
  SELECT scope_type,scope_value,0 AS ordering FROM memories WHERE id=$1
  UNION SELECT scope_type,scope_value,1 FROM memory_scopes WHERE memory_id=$1
+ AND memory_id IN (SELECT id FROM memories)
 ) s ORDER BY ordering,scope_type,scope_value`, id)
 	if err != nil {
 		return nil, err
@@ -432,7 +437,8 @@ count(*) FILTER(WHERE embedding IS NOT NULL AND embedding_fingerprint=fingerprin
 	if s.placement == PlacementServer {
 		return result, nil
 	}
-	err = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0`).Scan(&result.Conflicts)
+	err = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0
+AND memory_a IN (SELECT id FROM memories) AND memory_b IN (SELECT id FROM memories)`).Scan(&result.Conflicts)
 	return result, err
 }
 
@@ -551,7 +557,8 @@ func (s *postgresDataStore) EpisodeList(ctx context.Context, query string, limit
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+episodeColumns+` FROM memory_episodes
-WHERE $1='' OR episode_key ILIKE '%'||$1||'%' OR episode_text ILIKE '%'||$1||'%'
+WHERE ($1='' OR episode_key ILIKE '%'||$1||'%' OR episode_text ILIKE '%'||$1||'%')
+AND memory_id IN (SELECT id FROM memories)
 ORDER BY reference_time DESC,created_at DESC,id DESC LIMIT $2`, query, limit)
 	if err != nil {
 		return nil, err
@@ -574,7 +581,7 @@ func (s *postgresDataStore) EpisodeGet(ctx context.Context, key string) (Episode
 	}
 	var item Episode
 	err := scanEpisode(s.db.QueryRow(ctx, `SELECT `+episodeColumns+` FROM memory_episodes
-WHERE episode_key=$1 ORDER BY id DESC LIMIT 1`, key), &item)
+WHERE episode_key=$1 AND memory_id IN (SELECT id FROM memories) ORDER BY id DESC LIMIT 1`, key), &item)
 	if store.IsNoRows(err) {
 		return Episode{}, ErrMemoryNotFound
 	}
@@ -605,6 +612,7 @@ func (s *postgresDataStore) RelationSearch(ctx context.Context, query, asOf stri
 	rows, err := s.db.Query(ctx, `SELECT `+relationColumns+` FROM memory_relations
 WHERE ($1='' OR src_entity ILIKE '%'||$1||'%' OR relation ILIKE '%'||$1||'%' OR
 dst_entity ILIKE '%'||$1||'%' OR fact_text ILIKE '%'||$1||'%')
+AND memory_id IN (SELECT id FROM memories)
 AND ($2='' OR ((valid_at='' OR valid_at<=$2) AND (invalid_at='' OR invalid_at>$2)))
 ORDER BY weight DESC,CASE WHEN valid_at<>'' THEN 1 ELSE 0 END DESC,created_at DESC LIMIT $3`, query, asOf, limit)
 	if err != nil {
@@ -618,7 +626,8 @@ func (s *postgresDataStore) EntityEdges(ctx context.Context, entity string, limi
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+relationColumns+` FROM memory_relations
-WHERE lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)
+WHERE (lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1))
+AND memory_id IN (SELECT id FROM memories)
 ORDER BY weight DESC,created_at DESC LIMIT $2`, entity, limit)
 	if err != nil {
 		return nil, err
@@ -631,14 +640,17 @@ func (s *postgresDataStore) EntityProfile(ctx context.Context, entity string) (E
 	if err := s.requireKBDomain(); err != nil {
 		return result, err
 	}
-	err := s.db.QueryRow(ctx, `SELECT
-(SELECT COUNT(*) FROM memory_relations WHERE lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)),
-(SELECT COUNT(DISTINCT relation) FROM memory_relations WHERE lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)),
-COALESCE((SELECT me.episode_key FROM memory_episodes me JOIN memory_relations mr ON mr.episode_id=me.id
- WHERE lower(mr.src_entity)=lower($1) OR lower(mr.dst_entity)=lower($1)
+	err := s.db.QueryRow(ctx, `WITH visible_relations AS (SELECT * FROM memory_relations
+ WHERE memory_id IN (SELECT id FROM memories))
+SELECT
+(SELECT COUNT(*) FROM visible_relations WHERE lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)),
+(SELECT COUNT(DISTINCT relation) FROM visible_relations WHERE lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)),
+COALESCE((SELECT me.episode_key FROM memory_episodes me JOIN visible_relations mr ON mr.episode_id=me.id
+ WHERE (lower(mr.src_entity)=lower($1) OR lower(mr.dst_entity)=lower($1))
+ AND me.memory_id IN (SELECT id FROM memories)
  ORDER BY me.reference_time DESC,me.created_at DESC LIMIT 1),''),
 COALESCE((SELECT string_agg(fact_text,'; ' ORDER BY weight DESC) FROM
- (SELECT DISTINCT fact_text,weight FROM memory_relations WHERE fact_text<>'' AND
+ (SELECT DISTINCT fact_text,weight FROM visible_relations WHERE fact_text<>'' AND
   (lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)) ORDER BY weight DESC LIMIT 8) facts),'')`,
 		entity).Scan(&result.Mentions, &result.Relations, &result.LatestEpisode, &result.Summary)
 	return result, err

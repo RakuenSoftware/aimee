@@ -563,13 +563,9 @@ int kb_handle_memory_tag_scope(int fd, cJSON *req)
 
 int kb_handle_memory_get_provenance(int fd, cJSON *req)
 {
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "memory_id");
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "missing memory_id");
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : MAX_PROVENANCE_ENTRIES;
-   cJSON *resp = db2_kb_service_memory_get_provenance_json((int64_t)id_j->valuedouble, max);
-   return kb_reply_or_error(fd, resp, "failed to get provenance");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "get_provenance", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_prospective_match(int fd, cJSON *req)
@@ -588,17 +584,16 @@ int kb_handle_memory_prospective_mark_triggered(int fd, cJSON *req)
 
 int kb_handle_memory_list_conflicts(int fd, cJSON *req)
 {
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 64;
-   cJSON *resp = db2_kb_service_memory_list_conflicts_json(max);
-   return kb_reply_or_error(fd, resp, "failed to list memory conflicts");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "list_conflicts", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_query_health(int fd, cJSON *req)
 {
-   (void)req;
-   cJSON *resp = db2_kb_service_memory_query_health_json();
-   return kb_reply_or_error(fd, resp, "failed to query memory health");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "query_health", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_diagnose_scoped(int fd, cJSON *req)
@@ -862,41 +857,30 @@ int kb_handle_memory_review_list(int fd, cJSON *req)
 
 int kb_handle_memory_stats(int fd, cJSON *req)
 {
-   (void)req;
-   cJSON *resp = db2_kb_service_memory_stats_json();
-   return kb_reply_or_error(fd, resp, "failed to compute memory stats");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "stats", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_link_create(int fd, cJSON *req)
 {
-   cJSON *src_j = cJSON_GetObjectItemCaseSensitive(req, "source_id");
-   cJSON *tgt_j = cJSON_GetObjectItemCaseSensitive(req, "target_id");
-   cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(req, "relation");
-   if (!cJSON_IsNumber(src_j) || !cJSON_IsNumber(tgt_j) || !cJSON_IsString(rel_j))
-      return kb_send_error(fd, "missing source_id/target_id/relation");
-   cJSON *resp = db2_kb_service_memory_link_create_json(
-       (int64_t)src_j->valuedouble, (int64_t)tgt_j->valuedouble, rel_j->valuestring);
-   return kb_reply_or_error(fd, resp, "failed to create memory link");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "link_create", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_link_query(int fd, cJSON *req)
 {
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "memory_id");
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "missing memory_id");
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 32;
-   cJSON *resp = db2_kb_service_memory_link_query_json((int64_t)id_j->valuedouble, max);
-   return kb_reply_or_error(fd, resp, "failed to query memory links");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "link_query", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_link_delete(int fd, cJSON *req)
 {
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "link_id");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "missing link_id");
-   cJSON *resp = db2_kb_service_memory_link_delete_json((int64_t)id_j->valuedouble);
-   return kb_reply_or_error(fd, resp, "failed to delete memory link");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "link_delete", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_upsert_workflow(int fd, cJSON *req)
@@ -1455,64 +1439,30 @@ int kb_handle_evidence_fidelity(int fd, cJSON *req)
 
 int kb_handle_memory_entity_profile(int fd, cJSON *req)
 {
-   cJSON *entity_j = cJSON_GetObjectItemCaseSensitive(req, "entity");
-   if (!cJSON_IsString(entity_j))
-      return kb_send_error(fd, "memory.entity_profile requires entity");
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_entity_profile_json(entity_j->valuestring);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to fetch entity profile");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "entity_profile", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_entity_edges(int fd, cJSON *req)
 {
-   cJSON *entity_j = cJSON_GetObjectItemCaseSensitive(req, "entity");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   if (!cJSON_IsString(entity_j))
-      return kb_send_error(fd, "memory.entity_edges requires entity");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_entity_edges_json(entity_j->valuestring, limit);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to fetch entity edges");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "entity_edges", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_search_graph(int fd, cJSON *req)
 {
-   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   if (!cJSON_IsString(query_j))
-      return kb_send_error(fd, "memory.search_graph requires query");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_search_graph_json(query_j->valuestring, limit);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to search memory graph");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "search_graph", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_search_graph_as_of(int fd, cJSON *req)
 {
-   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
-   cJSON *as_of_j = cJSON_GetObjectItemCaseSensitive(req, "as_of");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   if (!cJSON_IsString(query_j))
-      return kb_send_error(fd, "memory.search_graph_as_of requires query");
-   if (!cJSON_IsString(as_of_j))
-      return kb_send_error(fd, "memory.search_graph_as_of requires as_of");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_search_graph_as_of_json(query_j->valuestring,
-                                                               as_of_j->valuestring, limit);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to search memory graph as-of");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "search_graph_as_of", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_search_assertions(int fd, cJSON *req)
@@ -1549,12 +1499,9 @@ int kb_handle_memory_search_assertions(int fd, cJSON *req)
 
 int kb_handle_memory_get_episode(int fd, cJSON *req)
 {
-   cJSON *key_j = cJSON_GetObjectItemCaseSensitive(req, "episode_key");
-   if (!cJSON_IsString(key_j))
-      return kb_send_error(fd, "memory.get_episode requires episode_key");
-
-   cJSON *resp = db2_kb_service_memory_get_episode_json(key_j->valuestring);
-   return kb_reply_or_error(fd, resp, "failed to fetch episode");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "get_episode", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_ask(int fd, cJSON *req)

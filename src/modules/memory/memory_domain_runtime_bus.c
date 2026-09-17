@@ -274,18 +274,10 @@ static int fusion_state_call(const char *operation, const char *state)
 
 /* Kept for ABI compatibility with older recall adapters. Request fields no
  * longer change fusion: the memory owner reads the instance configuration. */
-void memory_fusion_state_set(const char *state)
-{
-   (void)state;
-}
 
 int memory_fusion_state_is_on(void)
 {
    return fusion_state_call("fusion-state-get", NULL);
-}
-
-void memory_fusion_state_clear(void)
-{
 }
 
 static cJSON *runtime_metrics_call(const char *operation)
@@ -329,10 +321,6 @@ static void recall_trace_event(const char *operation)
 }
 
 void memory_recall_trace_capture_begin(void)
-{
-   recall_trace_event("recall-trace-begin");
-}
-void memory_recall_trace_capture_reset(void)
 {
    recall_trace_event("recall-trace-begin");
 }
@@ -616,28 +604,6 @@ int64_t memory_episode_card_generate(const char *source_session)
    int64_t result = cJSON_IsNumber(id) ? (int64_t)id->valuedouble : 0;
    cJSON_Delete(response);
    return result;
-}
-
-int pgvec_memory_vector_collection_exists(void)
-{
-   cJSON *response = domain_call(domain_request("vector-collection-exists"));
-   int exists = domain_bool(response, "allowed");
-   cJSON_Delete(response);
-   return exists;
-}
-
-int pgvec_memory_vector_collection_recreate(int dim)
-{
-   cJSON *request = domain_request("vector-collection-recreate");
-   if (!request || !cJSON_AddNumberToObject(request, "dimension", dim))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   int updated = domain_bool(response, "updated");
-   cJSON_Delete(response);
-   return updated ? 0 : -1;
 }
 
 int pgvec_memory_vector_search_record_type(const char *record_type, const float *vec, int dim,

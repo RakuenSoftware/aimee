@@ -793,7 +793,7 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		request.Limit = 20
 	}
 	maxLimit := 100
-	if request.Operation == "prospective-list" || request.Operation == "directive-list" || request.Operation == "lint" {
+	if request.Operation == "prospective-list" || request.Operation == "directive-list" || request.Operation == "lint" || request.Operation == "conflict-list" {
 		maxLimit = 256
 	}
 	if request.Limit < 1 || request.Limit > maxLimit || len(request.Kind) > 64 ||
@@ -1619,7 +1619,12 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			}
 			var item Episode
 			item, err = domain.EpisodeGet(ctx, request.Key)
-			response.Episodes = []Episode{item}
+			if errors.Is(err, ErrMemoryNotFound) {
+				err = nil
+				response.Episodes = []Episode{}
+			} else if err == nil {
+				response.Episodes = []Episode{item}
+			}
 		case "relation-search":
 			response.Relations, err = domain.RelationSearch(ctx, request.Query, request.AsOf, request.Limit)
 		case "entity-edges":
@@ -1651,6 +1656,14 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		var valid bool
 		valid, err = temporal.ValidAt(ctx, request.ID, request.AsOf)
 		response.ValidAt = &valid
+	case "stats-dashboard":
+		dashboard, ok := options.data.(interface {
+			DashboardStats(context.Context) (json.RawMessage, error)
+		})
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = dashboard.DashboardStats(ctx)
 	case "stats":
 		domain, ok := options.data.(domainDataStore)
 		if !ok {

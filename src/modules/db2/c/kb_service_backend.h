@@ -227,7 +227,6 @@ extern "C"
    cJSON *db2_kb_service_memory_top_l2_facts_json(int max);
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
-   cJSON *db2_kb_service_memory_get_provenance_json(int64_t memory_id, int max);
    cJSON *db2_kb_service_memory_scope_visibility_rank_json(const int64_t *ids, int id_count,
                                                            const char *workspace,
                                                            const char *project);
@@ -258,9 +257,6 @@ extern "C"
    cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason);
    cJSON *db2_kb_service_memory_restore_json(int64_t id, const char *actor);
    cJSON *db2_kb_service_memory_review_list_json(const char *state, int limit);
-   cJSON *db2_kb_service_memory_stats_json(void);
-   cJSON *db2_kb_service_memory_list_conflicts_json(int max);
-   cJSON *db2_kb_service_memory_query_health_json(void);
    cJSON *db2_kb_service_memory_effectiveness_stats_json(void);
    cJSON *db2_kb_service_memory_query_edges_json(const char *entity, int max);
    cJSON *db2_kb_service_memory_compact_windows_json(void);
@@ -274,10 +270,6 @@ extern "C"
    cJSON *db2_kb_service_memory_diagnose_scoped_json(const char *query, const char *scope_type,
                                                      const char *scope_value, int limit);
    cJSON *db2_kb_service_memory_explain_match_json(const char *query, int64_t memory_id);
-   cJSON *db2_kb_service_memory_link_create_json(int64_t source_id, int64_t target_id,
-                                                 const char *relation);
-   cJSON *db2_kb_service_memory_link_query_json(int64_t memory_id, int max);
-   cJSON *db2_kb_service_memory_link_delete_json(int64_t link_id);
    cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, const char *key,
                                             const char *content, double confidence,
                                             const char *session_id);
@@ -307,16 +299,10 @@ extern "C"
     * query, PII-gated. Returns {status, facts} (facts="" when off/none). Lets the
     * server auto-inject facts without the full context-block assembly. */
    cJSON *db2_kb_service_memory_facts_json(const char *query);
-   cJSON *db2_kb_service_memory_entity_profile_json(const char *entity);
-   cJSON *db2_kb_service_memory_entity_edges_json(const char *entity, int limit);
-   cJSON *db2_kb_service_memory_search_graph_json(const char *query, int limit);
-   cJSON *db2_kb_service_memory_search_graph_as_of_json(const char *query, const char *as_of,
-                                                        int limit);
    cJSON *db2_kb_service_memory_search_assertions_json(const char *query, const char *valid_at,
                                                        const char *believed_at,
                                                        int include_historical, int max_hops,
                                                        int limit);
-   cJSON *db2_kb_service_memory_get_episode_json(const char *episode_key);
    cJSON *db2_kb_service_memory_ask_json(const char *query, const char *scope_type,
                                          const char *scope_value, int limit);
    typedef struct

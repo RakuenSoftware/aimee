@@ -134,8 +134,15 @@ has_schema_privilege(current_user,'public','CREATE') OR
 			t.Fatalf("project scope mismatch: %+v", result)
 		}
 	}
-	var leaked int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE key='runtime-role-probe'`).Scan(&leaked); err != nil || leaked != 0 {
-		t.Fatalf("request scope leaked into pooled connection: rows=%d err=%v", leaked, err)
+
+	// Calls use nested transactions in this fixture; releasing a savepoint
+	// retains SET LOCAL until the enclosing transaction ends. Production store
+	// transactions are top-level, so inspect reset at that same boundary.
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var retained string
+	if err := conn.QueryRow(ctx, `SELECT COALESCE(current_setting('aimee.memory_scope_value',true),'')`).Scan(&retained); err != nil || retained != "" {
+		t.Fatalf("request scope retained after transaction: %q %v", retained, err)
 	}
 }

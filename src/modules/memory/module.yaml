@@ -59,7 +59,9 @@
     "server-go/modules/memory/activation.go",
     "server-go/modules/memory/public_prospective.go",
     "server-go/modules/memory/public_directives.go",
-    "server-go/modules/memory/public_maintenance.go"
+    "server-go/modules/memory/public_maintenance.go",
+    "server-go/modules/memory/public_domain.go",
+    "server-go/modules/memory/dashboard.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -86,7 +88,8 @@
     "server-go/modules/memory/activation_test.go",
     "server-go/modules/memory/public_prospective_test.go",
     "server-go/modules/memory/public_directives_test.go",
-    "server-go/modules/memory/public_maintenance_test.go"
+    "server-go/modules/memory/public_maintenance_test.go",
+    "server-go/modules/memory/public_domain_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

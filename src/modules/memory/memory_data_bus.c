@@ -490,11 +490,6 @@ int memory_delete_as(int64_t id, memory_authority_t authority)
    return result;
 }
 
-int memory_delete(int64_t id)
-{
-   return memory_delete_as(id, MEMORY_AUTHORITY_USER);
-}
-
 int memory_fold_session(const char *session_id, char *summary_out, size_t summary_out_len)
 {
    if (summary_out && summary_out_len > 0)

@@ -151,6 +151,13 @@ Maintenance and lint commands also render their complete results in Go. A
 maintenance dry run no longer writes the last-run timestamp and delays the next
 real cycle. Unused native background-embedding hooks and their suppression state
 are deleted; the Go embedding worker and explicit embedding operations remain.
+Graph queries, entity profiles, episode lookup, provenance, links, conflict
+lists, and health/statistics responses are also assembled in Go. The dashboard
+uses one grouped query for scope counts and includes all unresolved conflicts.
+Derived graph, episode, link, and provenance queries consult their parent memory
+rows so the runtime role's scope policy also protects these child tables.
+PostgreSQL tests exercise these commands with a non-owner role and verify that
+request scope does not remain on the pooled connection.
 Authenticated admission and the server-to-KB transport remain native callers.
 
 Production C memory clients, native headers and gateway integration still need

@@ -557,20 +557,6 @@
       "reason": "The effectiveness-stat cJSON response is presentation code; bounded typed counters and scores define the stable memory reply."
     },
     {
-      "symbol": "db2_kb_service_memory_entity_edges_json",
-      "signature_sha256": "336e478c753419932625b565abec8b60433aec7df2218643c7f49dc1fb4eaf79",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The entity-edge cJSON array is caller serialization; a typed bounded query returns edge records and truncation state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_entity_profile_json",
-      "signature_sha256": "de652743d15d5dec814bf4ae740c20b7dabb64e093d55d6a90c91e415887e15b",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The entity-profile cJSON tree stays local presentation; a typed memory operation returns bounded profile statistics and relation records."
-    },
-    {
       "symbol": "db2_kb_service_memory_episode_card_generate_json",
       "signature_sha256": "24295ef8a045390f4a6bab2eb84dfc6c43f1cf98af925956e39ced5980259bc4",
       "disposition": "private-db2",
@@ -641,25 +627,11 @@
       "reason": "The cJSON session-fold wrapper cannot define or split the transaction; a typed memory.session_fold operation owns checkpoint creation and L0 cleanup before replying."
     },
     {
-      "symbol": "db2_kb_service_memory_get_episode_json",
-      "signature_sha256": "12a34b457fceded4f6be5995ecddeec6c7d4c55a3f516a5e532df1d192931805",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The episode cJSON response remains caller serialization; a typed bounded lookup returns the episode record and explicit found state."
-    },
-    {
       "symbol": "db2_kb_service_memory_get_json",
       "signature_sha256": "4b3162d73b2fa727cadf53aed611965a3bff2a9179880e7bc63dfd619857dc2a",
       "disposition": "private-db2",
       "family": "memory",
       "reason": "The memory-record cJSON builder is a compatibility facade; typed bounded fields and explicit not-found status define the retrieval contract."
-    },
-    {
-      "symbol": "db2_kb_service_memory_get_provenance_json",
-      "signature_sha256": "0ade9c6db181e7fc24e75f2c8ff67f849dc755402447e41db4f5b032ff7c3523",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The provenance cJSON object stays local presentation; a typed lookup returns bounded provenance fields and explicit missing state."
     },
     {
       "symbol": "db2_kb_service_memory_insert_ex_json",
@@ -688,34 +660,6 @@
       "disposition": "private-db2",
       "family": "memory",
       "reason": "The cJSON style-learning result is caller presentation; a typed operation validates bounded evidence and returns structured learning status."
-    },
-    {
-      "symbol": "db2_kb_service_memory_link_create_json",
-      "signature_sha256": "3ae2d85c0f6a752e3d1d1ff6bc9fefa999ea5858493f77f7c939de37a944ff05",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The link-create cJSON envelope is not the mutation contract; a typed operation validates the IDs and closed relation before returning explicit status."
-    },
-    {
-      "symbol": "db2_kb_service_memory_link_delete_json",
-      "signature_sha256": "2a34a96e942ff79512f23122fd3164e0df0d79b2b2e4b600bc7735de2c9ad67f",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The link-delete cJSON wrapper remains local serialization; a typed memory mutation owns deletion and returns explicit found and result state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_link_query_json",
-      "signature_sha256": "787c99ed14f1545f7fd94d2c71842b6319c2f925cba50ad52f883484a694890f",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The link-query cJSON array is caller rendering; a typed bounded query returns canonical link records and truncation evidence."
-    },
-    {
-      "symbol": "db2_kb_service_memory_list_conflicts_json",
-      "signature_sha256": "b08c91d1fa6e5ecf1f94d8eee98c2720e91ceba37f109ed4b8ec4b3a064933f7",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The conflict-list cJSON response stays local presentation; a typed bounded query returns unresolved conflict records."
     },
     {
       "symbol": "db2_kb_service_memory_list_json",
@@ -774,13 +718,6 @@
       "reason": "The graph-edge cJSON response is caller rendering; a typed bounded query returns canonical edge records and truncation state."
     },
     {
-      "symbol": "db2_kb_service_memory_query_health_json",
-      "signature_sha256": "cf9b0e50e85689142c20c903b8e40a8ff64dd8d91e8669a85c10a52871fc54e8",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The memory-health cJSON document is presentation-only; typed bounded counters and diagnostic flags define the operation reply."
-    },
-    {
       "symbol": "db2_kb_service_memory_reject_json",
       "signature_sha256": "22cea8b9945d973688698ab373adae111ff68b5d104be8c5e3886af54a8b3d68",
       "disposition": "private-db2",
@@ -809,20 +746,6 @@
       "reason": "The keyword-search cJSON array is local rendering; a typed request bounds the keyword and returns bounded fact and pattern records."
     },
     {
-      "symbol": "db2_kb_service_memory_search_graph_as_of_json",
-      "signature_sha256": "c7f4503d311b0565e196413113554b4a6793191dd5d66d36a91e6d93be023d9b",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The temporal graph-search cJSON response is presentation-only; a typed operation validates the timestamp and returns bounded relation records."
-    },
-    {
-      "symbol": "db2_kb_service_memory_search_graph_json",
-      "signature_sha256": "f0bcbd12a88a054771ab7052d7a5db3a54efdc63f659556169cca0186bf6a7be",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The graph-search cJSON document remains caller serialization; typed bounded query fields and relation records define the stable reply."
-    },
-    {
       "symbol": "db2_kb_service_memory_search_json",
       "signature_sha256": "46f1050929505ea123cb546043465fd326da5fc268390e041ecc6b5b66c5dd38",
       "disposition": "private-db2",
@@ -835,13 +758,6 @@
       "disposition": "private-db2",
       "family": "memory",
       "reason": "The artifact-update cJSON facade is not the mutation contract; a typed operation validates bounded artifact fields and returns explicit status."
-    },
-    {
-      "symbol": "db2_kb_service_memory_stats_json",
-      "signature_sha256": "7a8d87441743282ef4ca5c64784d1044876c818f7aec459920c36770ae21994d",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The memory-stat cJSON response is compatibility rendering; fixed typed counters and scores form the stable operation reply."
     },
     {
       "symbol": "db2_kb_service_memory_supersede_json",
@@ -1317,7 +1233,7 @@
       "signature_sha256": "7774ad32c2c5d27c72f22ce7ebdcf2608add0a25daddc4b23f5bdec5d52f5e4f",
       "disposition": "wire-operation",
       "family": "memory",
-      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy — tier, kinds, confidence floor, use count, and settling window — so callers cannot promote rows into the slow-changing tier on terms of their own."
+      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy \u2014 tier, kinds, confidence floor, use count, and settling window \u2014 so callers cannot promote rows into the slow-changing tier on terms of their own."
     },
     {
       "symbol": "db2_memory_promotion_reclassify_directives",

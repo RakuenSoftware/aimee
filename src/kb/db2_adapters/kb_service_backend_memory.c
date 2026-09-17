@@ -145,36 +145,6 @@ cJSON *db2_kb_service_memory_list_json(const char *tier, const char *kind, int l
    return resp;
 }
 
-cJSON *db2_kb_service_memory_list_conflicts_json(int max)
-{
-   if (max < 1)
-      max = 64;
-   if (max > 256)
-      max = 256;
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "conflicts") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   conflict_t conflicts[256];
-   int n = memory_list_conflicts(conflicts, max);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      cJSON_AddNumberToObject(obj, "id", (double)conflicts[i].id);
-      cJSON_AddNumberToObject(obj, "memory_a", (double)conflicts[i].memory_a);
-      cJSON_AddNumberToObject(obj, "memory_b", (double)conflicts[i].memory_b);
-      cJSON_AddStringToObject(obj, "detected_at", conflicts[i].detected_at);
-      cJSON_AddNumberToObject(obj, "resolved", conflicts[i].resolved);
-      cJSON_AddStringToObject(obj, "resolution", conflicts[i].resolution);
-      cJSON_AddItemToArray(arr, obj);
-   }
-   return resp;
-}
-
 static cJSON *kbs_memory_diagnostic_to_json(const memory_diagnostic_t *d)
 {
    cJSON *j = cJSON_CreateObject();
@@ -600,44 +570,6 @@ cJSON *db2_kb_service_memory_effectiveness_stats_json(void)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_query_health_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   memory_health_t health;
-   memset(&health, 0, sizeof(health));
-   int rc = memory_query_health(&health);
-   if (rc != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "memory_query_health failed");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON *h = cJSON_AddObjectToObject(resp, "health");
-   cJSON_AddNumberToObject(h, "cycles", health.cycles);
-   cJSON_AddNumberToObject(h, "contradiction_rate", health.contradiction_rate);
-   cJSON_AddNumberToObject(h, "promotion_rate", health.promotion_rate);
-   cJSON_AddNumberToObject(h, "demotion_rate", health.demotion_rate);
-   cJSON_AddNumberToObject(h, "staleness", health.staleness);
-   cJSON_AddNumberToObject(h, "total_contradictions", health.total_contradictions);
-   cJSON_AddNumberToObject(h, "total_promotions", health.total_promotions);
-   cJSON_AddNumberToObject(h, "total_demotions", health.total_demotions);
-   cJSON_AddNumberToObject(h, "total_expirations", health.total_expirations);
-   cJSON *lag = cJSON_AddObjectToObject(h, "write_to_readable_lag");
-   cJSON_AddNumberToObject(lag, "samples", (double)health.write_to_readable_samples);
-   if (health.write_to_readable_samples > 0)
-   {
-      cJSON_AddNumberToObject(lag, "p50_secs", health.write_to_readable_p50_secs);
-      cJSON_AddNumberToObject(lag, "p95_secs", health.write_to_readable_p95_secs);
-      cJSON_AddNumberToObject(lag, "p99_secs", health.write_to_readable_p99_secs);
-   }
-   else
-      cJSON_AddStringToObject(lag, "state", "unmeasured");
-   return resp;
-}
-
 cJSON *db2_kb_service_memory_delete_json(int64_t id, int authority)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -761,100 +693,6 @@ cJSON *db2_kb_service_memory_review_list_json(const char *state, int limit)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_stats_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   memory_stats_t stats;
-   memset(&stats, 0, sizeof(stats));
-   int rc = memory_stats(&stats);
-   if (rc != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "memory_stats failed");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON *s = cJSON_AddObjectToObject(resp, "stats");
-   cJSON_AddNumberToObject(s, "total", stats.total);
-   cJSON_AddNumberToObject(s, "conflicts", stats.conflicts);
-   cJSON_AddNumberToObject(s, "pagerank_last_ms", stats.pagerank_last_ms);
-   cJSON_AddNumberToObject(s, "pagerank_avg_ms", stats.pagerank_avg_ms);
-   cJSON_AddNumberToObject(s, "pagerank_max_ms", stats.pagerank_max_ms);
-   cJSON_AddNumberToObject(s, "pagerank_samples", stats.pagerank_samples);
-   cJSON_AddNumberToObject(s, "pagerank_last_candidates", stats.pagerank_last_candidates);
-   cJSON_AddNumberToObject(s, "pagerank_last_edges", stats.pagerank_last_edges);
-   cJSON *tiers = cJSON_AddArrayToObject(s, "tier_counts");
-   for (int i = 0; i < 6; i++)
-      cJSON_AddItemToArray(tiers, cJSON_CreateNumber(stats.tier_counts[i]));
-   cJSON *kinds = cJSON_AddArrayToObject(s, "kind_counts");
-   for (int i = 0; i < KIND_COUNT; i++)
-      cJSON_AddItemToArray(kinds, cJSON_CreateNumber(stats.kind_counts[i]));
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_link_create_json(int64_t source_id, int64_t target_id,
-                                              const char *relation)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int rc = memory_link_create(source_id, target_id, relation ? relation : "");
-   if (rc != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "failed to create link");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_link_query_json(int64_t memory_id, int max)
-{
-   if (max < 1)
-      max = 32;
-   if (max > 64)
-      max = 64;
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "links") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   memory_link_t links[64];
-   int n = memory_link_query(memory_id, links, max);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      cJSON_AddNumberToObject(obj, "id", (double)links[i].id);
-      cJSON_AddNumberToObject(obj, "source_id", (double)links[i].source_id);
-      cJSON_AddNumberToObject(obj, "target_id", (double)links[i].target_id);
-      cJSON_AddStringToObject(obj, "relation", links[i].relation);
-      cJSON_AddStringToObject(obj, "created_at", links[i].created_at);
-      cJSON_AddItemToArray(arr, obj);
-   }
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_link_delete_json(int64_t link_id)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   if (memory_link_delete(link_id) != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "failed to delete link");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   return resp;
-}
-
 cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
                                                   const char *rule, double observed_confidence,
                                                   const char *session_id)
@@ -941,34 +779,6 @@ cJSON *db2_kb_service_memory_tag_scope_json(int64_t memory_id, const char *scope
    cJSON_AddStringToObject(resp, "status", rc == 0 ? "ok" : "error");
    if (rc != 0)
       cJSON_AddStringToObject(resp, "message", "tag_scope failed");
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_get_provenance_json(int64_t memory_id, int max)
-{
-   if (max < 1 || max > MAX_PROVENANCE_ENTRIES)
-      max = MAX_PROVENANCE_ENTRIES;
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "entries") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   provenance_entry_t rows[MAX_PROVENANCE_ENTRIES];
-   int n = memory_get_provenance(memory_id, rows, max);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *r = cJSON_CreateObject();
-      cJSON_AddNumberToObject(r, "id", (double)rows[i].id);
-      cJSON_AddNumberToObject(r, "memory_id", (double)rows[i].memory_id);
-      cJSON_AddStringToObject(r, "session_id", rows[i].session_id);
-      cJSON_AddStringToObject(r, "action", rows[i].action);
-      cJSON_AddStringToObject(r, "details", rows[i].details);
-      cJSON_AddStringToObject(r, "created_at", rows[i].created_at);
-      cJSON_AddItemToArray(arr, r);
-   }
    return resp;
 }
 
@@ -1292,52 +1102,6 @@ cJSON *db2_kb_service_memory_facts_json(const char *query)
    }
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "facts", facts);
-   return resp;
-}
-
-static cJSON *kbs_memory_relation_to_json(const memory_relation_t *r)
-{
-   cJSON *obj = cJSON_CreateObject();
-   if (!obj)
-      return NULL;
-   cJSON_AddNumberToObject(obj, "id", (double)r->id);
-   cJSON_AddNumberToObject(obj, "memory_id", (double)r->memory_id);
-   cJSON_AddNumberToObject(obj, "episode_id", (double)r->episode_id);
-   cJSON_AddStringToObject(obj, "src_entity", r->src_entity);
-   cJSON_AddStringToObject(obj, "relation", r->relation);
-   cJSON_AddStringToObject(obj, "dst_entity", r->dst_entity);
-   cJSON_AddStringToObject(obj, "fact_text", r->fact_text);
-   cJSON_AddStringToObject(obj, "valid_at", r->valid_at);
-   cJSON_AddStringToObject(obj, "invalid_at", r->invalid_at);
-   cJSON_AddNumberToObject(obj, "weight", r->weight);
-   cJSON_AddStringToObject(obj, "created_at", r->created_at);
-   return obj;
-}
-
-cJSON *db2_kb_service_memory_entity_profile_json(const char *entity)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   memory_entity_profile_t profile;
-   if (memory_get_entity_profile(entity ? entity : "", &profile) != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "entity profile not found");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON *prof = cJSON_AddObjectToObject(resp, "profile");
-   if (!prof)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(prof, "entity", profile.entity);
-   cJSON_AddNumberToObject(prof, "mention_count", profile.mention_count);
-   cJSON_AddNumberToObject(prof, "relation_count", profile.relation_count);
-   cJSON_AddStringToObject(prof, "latest_episode", profile.latest_episode);
-   cJSON_AddStringToObject(prof, "summary", profile.summary);
    return resp;
 }
 
@@ -1802,130 +1566,6 @@ cJSON *db2_kb_service_task_list_json(const char *state, const char *session_id, 
       cJSON_AddStringToObject(obj, "session_id", rows[i].session_id);
       cJSON_AddItemToArray(arr, obj);
    }
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_entity_edges_json(const char *entity, int limit)
-{
-   if (limit < 1)
-      limit = 10;
-   if (limit > 64)
-      limit = 64;
-
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "edges") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-
-   memory_relation_t rels[64];
-   int n = memory_get_entity_edges(entity ? entity : "", limit, rels, 64);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = kbs_memory_relation_to_json(&rels[i]);
-      if (!obj)
-      {
-         cJSON_Delete(resp);
-         return NULL;
-      }
-      cJSON_AddItemToArray(arr, obj);
-   }
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_search_graph_json(const char *query, int limit)
-{
-   if (limit < 1)
-      limit = 10;
-   if (limit > 64)
-      limit = 64;
-
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "relations") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-
-   memory_relation_t rels[64];
-   int n = memory_search_graph(query ? query : "", limit, rels, 64);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = kbs_memory_relation_to_json(&rels[i]);
-      if (!obj)
-      {
-         cJSON_Delete(resp);
-         return NULL;
-      }
-      cJSON_AddItemToArray(arr, obj);
-   }
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_search_graph_as_of_json(const char *query, const char *as_of,
-                                                     int limit)
-{
-   if (limit < 1)
-      limit = 10;
-   if (limit > 64)
-      limit = 64;
-
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "relations") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-
-   memory_relation_t rels[64];
-   int n = memory_search_graph_as_of(query ? query : "", as_of ? as_of : "", limit, rels, 64);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = kbs_memory_relation_to_json(&rels[i]);
-      if (!obj)
-      {
-         cJSON_Delete(resp);
-         return NULL;
-      }
-      cJSON_AddItemToArray(arr, obj);
-   }
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_get_episode_json(const char *episode_key)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-
-   memory_episode_t episode;
-   if (memory_get_episode(episode_key ? episode_key : "", &episode) != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "episode not found");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON *ep = cJSON_AddObjectToObject(resp, "episode");
-   if (!ep)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddNumberToObject(ep, "id", (double)episode.id);
-   cJSON_AddNumberToObject(ep, "memory_id", (double)episode.memory_id);
-   cJSON_AddStringToObject(ep, "episode_key", episode.episode_key);
-   cJSON_AddStringToObject(ep, "episode_text", episode.episode_text);
-   cJSON_AddStringToObject(ep, "source_session", episode.source_session);
-   cJSON_AddStringToObject(ep, "reference_time", episode.reference_time);
-   cJSON_AddStringToObject(ep, "created_at", episode.created_at);
    return resp;
 }
 

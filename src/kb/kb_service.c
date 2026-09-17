@@ -1,4 +1,6 @@
 #include "aimee.h"
+#include "module_commands.h"
+#include "aimee/memory/module_api.h"
 #include "config.h" /* legacy_config_read — reembed default embedder */
 #include "kb_background.h"
 #include "kb_service.h"
@@ -948,7 +950,12 @@ static curiosity_evidence_t kb_curiosity_probe(const char *gap_type, const char 
    if (!subject || !subject[0])
       return CURIOSITY_EVIDENCE_UNKNOWN;
 
-   cJSON *found = db2_kb_service_memory_search_graph_json(subject, 3);
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "query", subject);
+   cJSON_AddNumberToObject(args, "limit", 3);
+   cJSON *found = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                            "search_graph", args);
+   cJSON_Delete(args);
    if (!found)
       return CURIOSITY_EVIDENCE_UNKNOWN;
 

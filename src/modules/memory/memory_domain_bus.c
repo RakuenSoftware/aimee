@@ -161,225 +161,12 @@ int memory_touch(int64_t id)
    return memory_touch_many(&id, 1);
 }
 
-int memory_update_content(int64_t id, const char *content)
-{
-   return domain_id_update("update-content", id, "content", content);
-}
-
 int memory_reject(int64_t id, const char *reason)
 {
    int result = domain_id_update("reject", id, "reason", reason);
    if (result == 0)
       memory_audit_emit("memory.reject", id, NULL, NULL, NULL, 0.0, NULL);
    return result;
-}
-
-static int link_from_json(const cJSON *obj, memory_link_t *out)
-{
-   const cJSON *id = cJSON_GetObjectItemCaseSensitive(obj, "id");
-   const cJSON *source = cJSON_GetObjectItemCaseSensitive(obj, "source_id");
-   const cJSON *target = cJSON_GetObjectItemCaseSensitive(obj, "target_id");
-   if (!out || !cJSON_IsNumber(id) || !cJSON_IsNumber(source) || !cJSON_IsNumber(target))
-      return -1;
-   memset(out, 0, sizeof(*out));
-   out->id = (int64_t)id->valuedouble;
-   out->source_id = (int64_t)source->valuedouble;
-   out->target_id = (int64_t)target->valuedouble;
-   return domain_copy(out->relation, sizeof(out->relation), obj, "relation") ||
-                  domain_copy(out->created_at, sizeof(out->created_at), obj, "created_at")
-              ? -1
-              : 0;
-}
-
-int memory_link_create(int64_t source_id, int64_t target_id, const char *relation)
-{
-   cJSON *request = domain_request("link-create");
-   if (!request || source_id <= 0 || target_id <= 0 || !relation || !relation[0] ||
-       !cJSON_AddNumberToObject(request, "source_id", (double)source_id) ||
-       !cJSON_AddNumberToObject(request, "target_id", (double)target_id) ||
-       !cJSON_AddStringToObject(request, "relation", relation))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *rows = response ? cJSON_GetObjectItemCaseSensitive(response, "links") : NULL;
-   int rc = cJSON_IsArray(rows) && cJSON_GetArraySize(rows) == 1 ? 0 : -1;
-   cJSON_Delete(response);
-   return rc;
-}
-
-int memory_link_query(int64_t memory_id, memory_link_t *out, int max)
-{
-   if (memory_id <= 0 || !out || max <= 0)
-      return -1;
-   cJSON *request = domain_request("link-query");
-   if (!request || !cJSON_AddNumberToObject(request, "id", (double)memory_id) ||
-       !cJSON_AddNumberToObject(request, "limit", max))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *rows = response ? cJSON_GetObjectItemCaseSensitive(response, "links") : NULL;
-   if (!cJSON_IsArray(rows))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(rows);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-      if (link_from_json(cJSON_GetArrayItem(rows, i), &out[i]) != 0)
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-   cJSON_Delete(response);
-   return n;
-}
-
-int memory_link_delete(int64_t link_id)
-{
-   cJSON *request = domain_request("link-delete");
-   if (!request || link_id <= 0 || !cJSON_AddNumberToObject(request, "id", (double)link_id))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   int ok = domain_bool(response, "deleted");
-   cJSON_Delete(response);
-   return ok ? 0 : -1;
-}
-
-int memory_get_provenance(int64_t memory_id, provenance_entry_t *out, int max)
-{
-   if (memory_id <= 0 || !out || max <= 0)
-      return -1;
-   cJSON *request = domain_request("provenance-list");
-   if (!request || !cJSON_AddNumberToObject(request, "id", (double)memory_id) ||
-       !cJSON_AddNumberToObject(request, "limit", max))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *rows = response ? cJSON_GetObjectItemCaseSensitive(response, "provenance") : NULL;
-   if (!cJSON_IsArray(rows))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(rows);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-   {
-      const cJSON *row = cJSON_GetArrayItem(rows, i);
-      const cJSON *id = cJSON_GetObjectItemCaseSensitive(row, "id");
-      const cJSON *mid = cJSON_GetObjectItemCaseSensitive(row, "memory_id");
-      if (!cJSON_IsNumber(id) || !cJSON_IsNumber(mid))
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-      memset(&out[i], 0, sizeof(out[i]));
-      out[i].id = (int64_t)id->valuedouble;
-      out[i].memory_id = (int64_t)mid->valuedouble;
-      domain_copy(out[i].session_id, sizeof(out[i].session_id), row, "session_id");
-      domain_copy(out[i].action, sizeof(out[i].action), row, "action");
-      domain_copy(out[i].details, sizeof(out[i].details), row, "details");
-      domain_copy(out[i].created_at, sizeof(out[i].created_at), row, "created_at");
-   }
-   cJSON_Delete(response);
-   return n;
-}
-
-void add_provenance(int64_t memory_id, const char *session_id, const char *action,
-                    const char *details)
-{
-   cJSON *request = domain_request("provenance-add");
-   if (!request || memory_id <= 0 || !action || !action[0] ||
-       !cJSON_AddNumberToObject(request, "id", (double)memory_id) ||
-       !cJSON_AddStringToObject(request, "session_id", session_id ? session_id : "") ||
-       !cJSON_AddStringToObject(request, "action_text", action) ||
-       !cJSON_AddStringToObject(request, "details", details ? details : ""))
-   {
-      cJSON_Delete(request);
-      return;
-   }
-   cJSON_Delete(domain_call(request));
-}
-
-static int conflict_from_json(const cJSON *row, conflict_t *out)
-{
-   const cJSON *id = cJSON_GetObjectItemCaseSensitive(row, "id");
-   const cJSON *a = cJSON_GetObjectItemCaseSensitive(row, "memory_a_id");
-   const cJSON *b = cJSON_GetObjectItemCaseSensitive(row, "memory_b_id");
-   const cJSON *resolved = cJSON_GetObjectItemCaseSensitive(row, "resolved");
-   if (!out || !cJSON_IsNumber(id) || !cJSON_IsNumber(a) || !cJSON_IsNumber(b))
-      return -1;
-   memset(out, 0, sizeof(*out));
-   out->id = (int64_t)id->valuedouble;
-   out->memory_a = (int64_t)a->valuedouble;
-   out->memory_b = (int64_t)b->valuedouble;
-   out->resolved = cJSON_IsTrue(resolved);
-   domain_copy(out->detected_at, sizeof(out->detected_at), row, "detected_at");
-   domain_copy(out->resolution, sizeof(out->resolution), row, "resolution");
-   return 0;
-}
-
-int memory_list_conflicts(conflict_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   cJSON *request = domain_request("conflict-list");
-   if (!request || !cJSON_AddNumberToObject(request, "limit", max))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *rows = response ? cJSON_GetObjectItemCaseSensitive(response, "conflicts") : NULL;
-   if (!cJSON_IsArray(rows))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(rows);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-      if (conflict_from_json(cJSON_GetArrayItem(rows, i), &out[i]) != 0)
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-   cJSON_Delete(response);
-   return n;
-}
-
-int memory_record_conflict(int64_t mem_a, int64_t mem_b)
-{
-   cJSON *request = domain_request("conflict-record");
-   if (!request || !cJSON_AddNumberToObject(request, "source_id", (double)mem_a) ||
-       !cJSON_AddNumberToObject(request, "target_id", (double)mem_b))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *rows = response ? cJSON_GetObjectItemCaseSensitive(response, "conflicts") : NULL;
-   int rc = cJSON_IsArray(rows) && cJSON_GetArraySize(rows) == 1 ? 0 : -1;
-   cJSON_Delete(response);
-   return rc;
-}
-
-int memory_resolve_conflict(int64_t conflict_id, const char *resolution)
-{
-   return domain_id_update("conflict-resolve", conflict_id, "resolution", resolution);
 }
 
 int memory_tag_scope(int64_t memory_id, const char *scope_type, const char *scope_value)
@@ -400,14 +187,6 @@ int memory_tag_scope(int64_t memory_id, const char *scope_type, const char *scop
    return ok ? 0 : -1;
 }
 
-int memory_tag_global(int64_t id)
-{
-   return memory_tag_scope(id, "global", "_global");
-}
-int memory_tag_project(int64_t id, const char *project)
-{
-   return memory_tag_scope(id, "project", project);
-}
 int memory_tag_workspace(int64_t id, const char *workspace)
 {
    return memory_tag_scope(id, "workspace", workspace);
@@ -512,87 +291,6 @@ static const char *domain_policy_name(const char *operation, const char *text_ke
 const char *memory_scope_level_name(memory_scope_level_t level)
 {
    return domain_policy_name("scope-level-name", NULL, NULL, "level", (int)level);
-}
-
-const char *memory_functional_tier_name(const char *tier)
-{
-   return domain_policy_name("tier-name", "tier", tier, NULL, 0);
-}
-
-int memory_stats(memory_stats_t *out)
-{
-   if (!out)
-      return -1;
-   cJSON *response = domain_call(domain_request("stats"));
-   const cJSON *stats = response ? cJSON_GetObjectItemCaseSensitive(response, "stats") : NULL;
-   const cJSON *tiers = stats ? cJSON_GetObjectItemCaseSensitive(stats, "tier_counts") : NULL;
-   const cJSON *kinds = stats ? cJSON_GetObjectItemCaseSensitive(stats, "kind_counts") : NULL;
-   const char *kind_names[KIND_COUNT] = {
-       KIND_FACT,    KIND_PREFERENCE, KIND_DECISION, KIND_EPISODE,  KIND_TASK,
-       KIND_SCRATCH, KIND_PROCEDURE,  KIND_POLICY,   KIND_WORKFLOW, KIND_OPINION};
-   if (!cJSON_IsObject(stats) || !cJSON_IsObject(tiers) || !cJSON_IsObject(kinds))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   memset(out, 0, sizeof(*out));
-   for (int i = 0; i < 6; ++i)
-   {
-      char tier[4];
-      snprintf(tier, sizeof(tier), "L%d", i);
-      const cJSON *value = cJSON_GetObjectItemCaseSensitive(tiers, tier);
-      out->tier_counts[i] = cJSON_IsNumber(value) ? value->valueint : 0;
-   }
-   for (int i = 0; i < KIND_COUNT; ++i)
-   {
-      const cJSON *value = cJSON_GetObjectItemCaseSensitive(kinds, kind_names[i]);
-      out->kind_counts[i] = cJSON_IsNumber(value) ? value->valueint : 0;
-   }
-   domain_number(stats, "total", &out->total);
-   domain_number(stats, "conflicts", &out->conflicts);
-   cJSON_Delete(response);
-   return 0;
-}
-
-int memory_query_health(memory_health_t *out)
-{
-   if (!out)
-      return -1;
-   cJSON *response = domain_call(domain_request("health"));
-   const cJSON *health = response ? cJSON_GetObjectItemCaseSensitive(response, "health") : NULL;
-   if (!cJSON_IsObject(health))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   memset(out, 0, sizeof(*out));
-#define HEALTH_DOUBLE(field, key)                                                                  \
-   do                                                                                              \
-   {                                                                                               \
-      const cJSON *v = cJSON_GetObjectItemCaseSensitive(health, key);                              \
-      if (cJSON_IsNumber(v))                                                                       \
-         out->field = v->valuedouble;                                                              \
-   } while (0)
-#define HEALTH_INT(field, key)                                                                     \
-   do                                                                                              \
-   {                                                                                               \
-      const cJSON *v = cJSON_GetObjectItemCaseSensitive(health, key);                              \
-      if (cJSON_IsNumber(v))                                                                       \
-         out->field = v->valueint;                                                                 \
-   } while (0)
-   HEALTH_DOUBLE(contradiction_rate, "contradiction_rate");
-   HEALTH_DOUBLE(promotion_rate, "promotion_rate");
-   HEALTH_DOUBLE(demotion_rate, "demotion_rate");
-   HEALTH_DOUBLE(staleness, "staleness");
-   HEALTH_INT(total_contradictions, "total_contradictions");
-   HEALTH_INT(total_promotions, "total_promotions");
-   HEALTH_INT(total_demotions, "total_demotions");
-   HEALTH_INT(total_expirations, "total_expirations");
-   HEALTH_INT(cycles, "cycles");
-#undef HEALTH_DOUBLE
-#undef HEALTH_INT
-   cJSON_Delete(response);
-   return 0;
 }
 
 int memory_fact_history(const char *key, memory_t *out, int max)
@@ -760,13 +458,6 @@ int memory_list_episodes(const char *query, int limit, memory_episode_t *out, in
    return episode_query("episode-list", NULL, query ? query : "", out, limit);
 }
 
-int memory_get_episode(const char *episode_key, memory_episode_t *out)
-{
-   if (!episode_key || !episode_key[0] || !out)
-      return -1;
-   return episode_query("episode-get", episode_key, NULL, out, 1) == 1 ? 0 : -1;
-}
-
 static int relation_from_json(const cJSON *row, memory_relation_t *out)
 {
    const cJSON *id = cJSON_GetObjectItemCaseSensitive(row, "id");
@@ -833,20 +524,6 @@ int memory_search_graph(const char *query, int limit, memory_relation_t *out, in
    return relation_query("relation-search", query ? query : "", NULL, NULL, limit, out, max);
 }
 
-int memory_search_graph_as_of(const char *query, const char *as_of, int limit,
-                              memory_relation_t *out, int max)
-{
-   return relation_query("relation-search", query ? query : "", as_of ? as_of : "", NULL, limit,
-                         out, max);
-}
-
-int memory_get_entity_edges(const char *entity, int limit, memory_relation_t *out, int max)
-{
-   if (!entity || !entity[0])
-      return -1;
-   return relation_query("entity-edges", NULL, NULL, entity, limit, out, max);
-}
-
 int memory_get_entity_profile(const char *entity, memory_entity_profile_t *out)
 {
    if (!entity || !entity[0] || !out)
@@ -875,77 +552,6 @@ int memory_get_entity_profile(const char *entity, memory_entity_profile_t *out)
    domain_copy(out->entity, sizeof(out->entity), profile, "entity");
    domain_copy(out->latest_episode, sizeof(out->latest_episode), profile, "latest_episode");
    domain_copy(out->summary, sizeof(out->summary), profile, "summary");
-   cJSON_Delete(response);
-   return 0;
-}
-
-int memory_transition_lifecycle(int64_t memory_id, const char *new_state,
-                                const char *archive_reason)
-{
-   cJSON *request = domain_request("lifecycle-transition");
-   if (!request || memory_id <= 0 || !new_state || !new_state[0] ||
-       !cJSON_AddNumberToObject(request, "id", (double)memory_id) ||
-       !cJSON_AddStringToObject(request, "lifecycle_state", new_state) ||
-       !cJSON_AddStringToObject(request, "archive_reason", archive_reason ? archive_reason : ""))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   int ok = domain_bool(response, "updated");
-   cJSON_Delete(response);
-   return ok ? 0 : -1;
-}
-
-int memory_mark_pending(int64_t memory_id, int ttl_days)
-{
-   cJSON *request = domain_request("lifecycle-pending");
-   if (!request || memory_id <= 0 || ttl_days <= 0 ||
-       !cJSON_AddNumberToObject(request, "id", (double)memory_id) ||
-       !cJSON_AddNumberToObject(request, "ttl_days", ttl_days))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   int ok = domain_bool(response, "updated");
-   cJSON_Delete(response);
-   return ok ? 0 : -1;
-}
-
-int memory_lifecycle_sweep_expired(void)
-{
-   cJSON *response = domain_call(domain_request("lifecycle-sweep"));
-   int count = -1;
-   domain_number(response, "count", &count);
-   cJSON_Delete(response);
-   return count;
-}
-
-int memory_lifecycle_counts(memory_lifecycle_counts_t *out)
-{
-   if (!out)
-      return -1;
-   cJSON *response = domain_call(domain_request("lifecycle-count"));
-   const cJSON *counts = response ? cJSON_GetObjectItemCaseSensitive(response, "lifecycle") : NULL;
-   if (!cJSON_IsObject(counts))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   const char *names[] = {"active", "pending", "fulfilled", "superseded", "archived"};
-   int64_t *targets[] = {&out->active, &out->pending, &out->fulfilled, &out->superseded,
-                         &out->archived};
-   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
-   {
-      const cJSON *value = cJSON_GetObjectItemCaseSensitive(counts, names[i]);
-      if (!cJSON_IsNumber(value))
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-      *targets[i] = (int64_t)value->valuedouble;
-   }
    cJSON_Delete(response);
    return 0;
 }
@@ -1004,12 +610,6 @@ static char *domain_context_call(const char *query, const char *block_type, int 
 char *memory_assemble_context(const char *task_hint)
 {
    return domain_context_call(task_hint ? task_hint : "", NULL, 12);
-}
-
-char *memory_assemble_context_ws(const char *task_hint, const char *workspace)
-{
-   (void)workspace;
-   return memory_assemble_context(task_hint);
 }
 
 char *memory_get_context_block(const char *query, const char *block_type, int limit)
@@ -1084,11 +684,6 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
                            int limit, memory_diagnostic_t *out, int max)
 {
    return diagnostic_call("diagnose", query, scope_type, scope_value, 0, limit, out, max);
-}
-
-int memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
-{
-   return memory_diagnose_scoped(query, NULL, NULL, limit, out, max);
 }
 
 int memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic_t *out)
@@ -1184,11 +779,6 @@ memory_relation_kind_t memory_ontology_relation_from_text(const char *label)
 const char *memory_ontology_relation_to_text(memory_relation_kind_t relation)
 {
    return domain_policy_name("ontology-relation-name", NULL, NULL, "relation_code", (int)relation);
-}
-
-memory_node_kind_t memory_ontology_node_kind_from_text(const char *label)
-{
-   return (memory_node_kind_t)domain_policy_code("ontology-node-code", "kind", label);
 }
 
 const char *memory_ontology_node_kind_to_text(memory_node_kind_t kind)
@@ -1366,11 +956,6 @@ int db2_memory_epistemic_kind(int64_t memory_id, char *out, size_t out_cap)
    int rc = domain_copy(out, out_cap, response, "name");
    cJSON_Delete(response);
    return rc;
-}
-
-int db2_memory_conflict_list(conflict_t *out, int max)
-{
-   return memory_list_conflicts(out, max);
 }
 
 void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type, const char *scope_value)
@@ -1713,85 +1298,6 @@ int db2_memory_scene_members(int64_t scene_id, db2_memory_scene_member_t *rows, 
       rows[i].memory_id = (int64_t)id->valuedouble;
       rows[i].membership_strength = strength->valuedouble;
       domain_copy(rows[i].key, sizeof(rows[i].key), item, "key");
-   }
-   cJSON_Delete(response);
-   return n;
-}
-
-int db2_memory_alloc_all_ids(int64_t **out_ids, size_t *out_count)
-{
-   if (!out_ids || !out_count)
-      return -1;
-   *out_ids = NULL;
-   *out_count = 0;
-   cJSON *response = domain_call(domain_request("all-ids"));
-   const cJSON *ids = response ? cJSON_GetObjectItemCaseSensitive(response, "ids") : NULL;
-   if (!cJSON_IsArray(ids))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(ids);
-   if (n > 0)
-   {
-      *out_ids = calloc((size_t)n, sizeof(**out_ids));
-      if (!*out_ids)
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-      for (int i = 0; i < n; ++i)
-      {
-         const cJSON *id = cJSON_GetArrayItem(ids, i);
-         if (!cJSON_IsNumber(id))
-         {
-            free(*out_ids);
-            *out_ids = NULL;
-            cJSON_Delete(response);
-            return -1;
-         }
-         (*out_ids)[i] = (int64_t)id->valuedouble;
-      }
-   }
-   *out_count = (size_t)n;
-   cJSON_Delete(response);
-   return 0;
-}
-
-int db2_memory_count_by_tier_kind(db2_memory_tier_kind_count_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   cJSON *request = domain_request("tier-kind-counts");
-   if (!request || !cJSON_AddNumberToObject(request, "limit", max))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *items =
-       response ? cJSON_GetObjectItemCaseSensitive(response, "tier_kind_counts") : NULL;
-   if (!cJSON_IsArray(items))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(items);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-   {
-      const cJSON *item = cJSON_GetArrayItem(items, i);
-      const cJSON *count = cJSON_GetObjectItemCaseSensitive(item, "count");
-      memset(&out[i], 0, sizeof(out[i]));
-      if (!cJSON_IsObject(item) || !cJSON_IsNumber(count) ||
-          domain_copy(out[i].tier, sizeof(out[i].tier), item, "tier") != 0 ||
-          domain_copy(out[i].kind, sizeof(out[i].kind), item, "kind") != 0)
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-      out[i].count = count->valueint;
    }
    cJSON_Delete(response);
    return n;

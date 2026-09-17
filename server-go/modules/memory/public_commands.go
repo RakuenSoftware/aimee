@@ -103,6 +103,13 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
+	if options.placement == PlacementKB {
+		switch verb {
+		case "entity_profile", "entity_edges", "search_graph", "search_graph_as_of", "get_episode",
+			"get_provenance", "link_query", "link_create", "link_delete", "list_conflicts", "query_health", "stats", "stats_dashboard":
+			return handleDomainCommand(options, invocation, verb, args)
+		}
+	}
 	if options.placement == PlacementKB && (verb == "maintenance_run" || verb == "lint") {
 		return handleMaintenanceCommand(options, invocation, verb, args)
 	}

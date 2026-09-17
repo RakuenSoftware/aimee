@@ -156,84 +156,14 @@ static int dashboard_log_row_compare_desc(const void *lhs, const void *rhs)
 
 char *api_memory_stats(void)
 {
-   if (!db2_is_initialized())
-      return NULL;
-   memory_stats_t stats;
-   if (memory_stats(&stats) != 0)
-      return strdup("[]");
-
-   cJSON *root = cJSON_CreateObject();
-   cJSON *tiers = cJSON_AddArrayToObject(root, "tiers");
-   cJSON *tier_kinds = cJSON_AddArrayToObject(root, "tier_kinds");
-   const char *tier_names[] = {TIER_L0, TIER_L1, TIER_L2, TIER_L3, TIER_L4, TIER_L5};
-
-   for (int i = 0; i < 6; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      cJSON_AddStringToObject(obj, "tier", tier_names[i]);
-      cJSON_AddStringToObject(obj, "functional_name", memory_functional_tier_name(tier_names[i]));
-      cJSON_AddNumberToObject(obj, "count", stats.tier_counts[i]);
-      cJSON_AddItemToArray(tiers, obj);
-   }
-
-   db2_memory_tier_kind_count_t tk_rows[256];
-   int n_tk = db2_memory_count_by_tier_kind(tk_rows, (int)(sizeof(tk_rows) / sizeof(tk_rows[0])));
-   for (int i = 0; i < n_tk; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      cJSON_AddStringToObject(obj, "tier", tk_rows[i].tier);
-      cJSON_AddStringToObject(obj, "functional_name", memory_functional_tier_name(tk_rows[i].tier));
-      cJSON_AddStringToObject(obj, "kind", tk_rows[i].kind);
-      cJSON_AddNumberToObject(obj, "count", tk_rows[i].count);
-      cJSON_AddItemToArray(tier_kinds, obj);
-   }
-
-   cJSON *scopes = cJSON_AddArrayToObject(root, "scopes");
-   int scope_counts[4] = {0};
-   int scope_conflicts[4] = {0};
-
-   /* Materialize id list before calling memory_primary_scope() — that helper
-    * issues its own DB2 queries, and the DB2 connection only supports one
-    * active result at a time. */
-   int64_t *mem_ids = NULL;
-   size_t mem_count = 0;
-   db2_memory_alloc_all_ids(&mem_ids, &mem_count);
-   for (size_t i = 0; i < mem_count; i++)
-   {
-      memory_scope_level_t level = memory_primary_scope(mem_ids[i], NULL, 0);
-      if (level >= MEMORY_SCOPE_GLOBAL && level <= MEMORY_SCOPE_PROJECT)
-         scope_counts[level]++;
-   }
-   free(mem_ids);
-
-   /* Pull the unresolved-conflict pair list through the typed db2 helper so
-    * we don't issue a second concurrent DB2 query against the same connection
-    * (memory_primary_scope below issues its own). */
-   conflict_t conflicts[256];
-   int conf_count =
-       db2_memory_conflict_list(conflicts, (int)(sizeof(conflicts) / sizeof(conflicts[0])));
-   for (int i = 0; i < conf_count; i++)
-   {
-      memory_scope_level_t a_level = memory_primary_scope(conflicts[i].memory_a, NULL, 0);
-      memory_scope_level_t b_level = memory_primary_scope(conflicts[i].memory_b, NULL, 0);
-      if (a_level >= MEMORY_SCOPE_GLOBAL && a_level <= MEMORY_SCOPE_PROJECT)
-         scope_conflicts[a_level]++;
-      if (b_level >= MEMORY_SCOPE_GLOBAL && b_level <= MEMORY_SCOPE_PROJECT)
-         scope_conflicts[b_level]++;
-   }
-
-   for (int level = MEMORY_SCOPE_GLOBAL; level <= MEMORY_SCOPE_PROJECT; level++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      cJSON_AddStringToObject(obj, "scope", memory_scope_level_name((memory_scope_level_t)level));
-      cJSON_AddNumberToObject(obj, "count", scope_counts[level]);
-      cJSON_AddNumberToObject(obj, "conflicted_memories", scope_conflicts[level]);
-      cJSON_AddItemToArray(scopes, obj);
-   }
-
-   char *json = cJSON_PrintUnformatted(root);
-   cJSON_Delete(root);
-   return json ? json : strdup("{\"tiers\":[],\"tier_kinds\":[],\"scopes\":[]}");
+   cJSON *req = cJSON_CreateObject();
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "stats_dashboard", req);
+   cJSON_Delete(req);
+   cJSON *data = resp ? cJSON_GetObjectItemCaseSensitive(resp, "dashboard") : NULL;
+   char *json = data ? cJSON_PrintUnformatted(data) : NULL;
+   cJSON_Delete(resp);
+   return json;
 }
 
 char *api_logs(void)

@@ -227,3 +227,9 @@ Cross-encoder reranking, vector quantization, alternative ANN backends, communit
 The 18 numbered proposal files are independently reviewable. This program index defines common contracts and delivery order. The [requirements coverage map](memory-reliability-requirements-coverage.md) assigns each requirement to a proposal and its acceptance gates.
 
 All documents remain proposed. Each implementation slice requires its own review, validation and rollout decision.
+
+The shared Go command owner also handles graph/entity queries, episodes,
+provenance, links, conflicts, health, and dashboard statistics. Native domain
+wrappers for these operations are retired. Derived reads are checked against
+parent memory visibility, with non-owner PostgreSQL scope regression coverage.
+The native caller inventory remains an explicit G0 blocker.
