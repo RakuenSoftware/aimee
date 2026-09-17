@@ -73,7 +73,7 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 }
 
 func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHandler {
-	options := handlerOptions{}
+	options := handlerOptions{executor: executor}
 	for _, apply := range option {
 		if apply != nil {
 			apply(&options)

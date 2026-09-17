@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 /* kb/db2_adapters/kb_service_backend_context.c: temporal semantic recall and default-on
  * typed context assembly. Kept separate from the compatibility memory RPCs so
  * the context contract can evolve without growing their translation unit. */
@@ -37,8 +39,17 @@ static int kbs_semantic_assertion_index_refresh(int max_rows)
       {
          float vec[EMBED_MAX_DIM];
          const char *embed_cmd = config_embedder_command_current(NULL);
-         int dim = memory_embed_text(rows[i].canonical_rendering, embed_cmd, EMBED_INPUT_DOCUMENT,
-                                     vec, EMBED_MAX_DIM);
+         cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+         cJSON_AddStringToObject(embed_0_args, "base_url", embed_cmd);
+         cJSON_AddStringToObject(embed_0_args, "input_type", "document");
+         cJSON_AddStringToObject(embed_0_args, "text", rows[i].canonical_rendering);
+         cJSON_AddNumberToObject(embed_0_args, "max_dim", EMBED_MAX_DIM);
+         (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args,
+                                                       &embed_0_reply);
+         cJSON_Delete(embed_0_args);
+         int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
+                                  EMBED_MAX_DIM);
+         cJSON_Delete(embed_0_reply);
          if (dim <= 0 || dim != db2_embedding_dim())
             return indexed > 0 ? indexed : -1;
          cJSON *payload = cJSON_CreateObject();
@@ -121,7 +132,16 @@ static int kbs_semantic_assertion_hybrid(const char *query, const char *valid_at
 
    float qvec[EMBED_MAX_DIM];
    const char *embed_cmd = config_embedder_command_current(NULL);
-   int qdim = memory_embed_text(query, embed_cmd, EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
+   cJSON *embed_1_args = cJSON_CreateObject(), *embed_1_reply = NULL;
+   cJSON_AddStringToObject(embed_1_args, "base_url", embed_cmd);
+   cJSON_AddStringToObject(embed_1_args, "input_type", "query");
+   cJSON_AddStringToObject(embed_1_args, "text", query);
+   cJSON_AddNumberToObject(embed_1_args, "max_dim", EMBED_MAX_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_1_args, &embed_1_reply);
+   cJSON_Delete(embed_1_args);
+   int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), qvec,
+                             EMBED_MAX_DIM);
+   cJSON_Delete(embed_1_reply);
    int64_t vector_ids[64];
    double vector_scores[64];
    int vector_n = 0;

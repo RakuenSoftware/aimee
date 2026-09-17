@@ -80,6 +80,7 @@ typedef struct
    char *verb;
    char *summary;
    char *module; /* registry `module` field, also the withdrawal key */
+   int internal; /* fixed-module route, absent from every external surface */
    uint32_t invoke_kind;
    uint32_t invoke_stage;
    char verb_wire[128]; /* verb as sent to the module, for the invoke frame */
@@ -180,8 +181,8 @@ static void wr_u16(unsigned char *p, uint16_t v)
 /* Encodes the shared invoke frame and returns the owner's JSON result.
  * Fixed modules use their declared stage; plugins retain their stage-1 route. Returns NULL on any
  * failure; the surface that called decides what that means, exactly as module_json_call.c does. */
-cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id, const char *verb,
-                                         const cJSON *args, const cJSON *context)
+static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                   const cJSON *args, const cJSON *context, int timeout_ms)
 {
    if (!event_kind || !stage_id || !verb || !verb[0] || strlen(verb) > 127)
       return NULL;
@@ -242,7 +243,7 @@ cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id,
    }
    uint32_t response_len = 0;
    aimee_module_call_result_t rc = obs_bus_module_call(
-       event_kind, stage_id, 0, aimee_module_call_deadline_ns(INVOKE_TIMEOUT_MS), request,
+       event_kind, stage_id, 0, aimee_module_call_deadline_ns(timeout_ms), request,
        (uint32_t)request_len, response, INVOKE_MAX_RESPONSE, &response_len, NULL, NULL);
    free(request);
 
@@ -270,6 +271,12 @@ cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id,
    cJSON *parsed = cJSON_ParseWithLength((const char *)response + INVOKE_RESPONSE_HEADER, body_len);
    free(response);
    return parsed;
+}
+
+cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                         const cJSON *args, const cJSON *context)
+{
+   return command_call_timeout(event_kind, stage_id, verb, args, context, INVOKE_TIMEOUT_MS);
 }
 
 cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const char *verb,
@@ -556,8 +563,8 @@ static int collect_one(uint32_t declare_kind, uint32_t declare_stage, uint32_t i
          uint16_t gl = rd_u16(response + cursor + 8);
          uint16_t vl = rd_u16(response + cursor + 10);
          uint16_t sl = rd_u16(response + cursor + 12);
-         if (!surfaces || (surfaces & ~15u) || visibility > 1 || !gl || !vl || gl > 127 ||
-             vl > 127 || rd_u16(response + cursor + 14) ||
+         if ((surfaces & ~15u) || visibility > 1 || !gl || !vl || gl > 127 || vl > 127 ||
+             rd_u16(response + cursor + 14) ||
              ((surfaces & AIMEE_SURFACE_MCP) && !(surfaces & AIMEE_SURFACE_CLI)) ||
              (uint64_t)cursor + DECL_RECORD_LEN + gl + vl + sl > response_len)
             goto malformed_routes;
@@ -640,6 +647,10 @@ static int collect_one(uint32_t declare_kind, uint32_t declare_stage, uint32_t i
          owned_pop_last();
          break;
       }
+
+      owned->internal = version == 2 && surfaces == 0;
+      if (owned->internal)
+         continue;
 
       aimee_command_t cmd;
       memset(&cmd, 0, sizeof cmd);
@@ -820,6 +831,37 @@ int aimee_module_commands_dispatch_context(const char *method, const cJSON *args
 int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
 {
    return aimee_module_commands_dispatch_context(method, args, NULL, result);
+}
+
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+{
+   if (!method || !result)
+      return 0;
+   *result = NULL;
+   (void)aimee_module_commands_refresh(2000);
+   uint32_t kind = 0, stage = 0;
+   char verb[128] = "";
+   int matches = 0;
+   pthread_mutex_lock(&g_collect_lock);
+   for (size_t i = 0; i < g_owned_count; ++i)
+   {
+      const owned_command_t *owned = g_owned[i];
+      if (!owned->internal)
+         continue;
+      size_t group_len = strlen(owned->group);
+      if (strncmp(method, owned->group, group_len) != 0 || method[group_len] != '.' ||
+          strcmp(method + group_len + 1, owned->verb) != 0)
+         continue;
+      ++matches;
+      kind = owned->invoke_kind;
+      stage = owned->invoke_stage;
+      snprintf(verb, sizeof verb, "%s", owned->verb_wire);
+   }
+   pthread_mutex_unlock(&g_collect_lock);
+   if (matches != 1 || !kind)
+      return matches ? -1 : 0;
+   *result = command_call_timeout(kind, stage, verb, args, NULL, 125000);
+   return *result ? 1 : -1;
 }
 
 void aimee_module_commands_reset(void)

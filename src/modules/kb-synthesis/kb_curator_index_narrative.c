@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 /* kb_curator_index_narrative.c: deep-curator narrative vector indexer.
  *
  * Claims one proposed doc_summary / synthesis / open_question artifact, embeds
@@ -108,7 +110,16 @@ int kb_curator_index_narrative_one(const kb_curator_extract_opts_t *opts)
 
    const char *embed_cmd = config_embedder_command_current(NULL);
    float vec[CURATOR_NARRATIVE_DIM];
-   int dim = memory_embed_text(text, embed_cmd, EMBED_INPUT_DOCUMENT, vec, CURATOR_NARRATIVE_DIM);
+   cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+   cJSON_AddStringToObject(embed_0_args, "base_url", embed_cmd);
+   cJSON_AddStringToObject(embed_0_args, "input_type", "document");
+   cJSON_AddStringToObject(embed_0_args, "text", text);
+   cJSON_AddNumberToObject(embed_0_args, "max_dim", CURATOR_NARRATIVE_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+   cJSON_Delete(embed_0_args);
+   int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
+                            CURATOR_NARRATIVE_DIM);
+   cJSON_Delete(embed_0_reply);
    if (dim > 0)
    {
       int64_t pid = narrative_point_id(id);

@@ -15,7 +15,6 @@ ALLOWED_C = {
     "src/modules/memory/memory_domain_bus.c",
     "src/modules/memory/memory_domain_runtime_bus.c",
     "src/modules/memory/memory_scope_connection.c",
-    "src/modules/memory/memory_embed_bus.c",
 }
 
 FORBIDDEN_INCLUDES = (
@@ -27,6 +26,7 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/memory/memory_embed_bus.c",
     "src/modules/memory/memory_profile_pack.h",
     "src/modules/memory/memory_content_gate_bus.c",
     "src/modules/memory/memory_platform.h",
@@ -54,6 +54,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:memory_embed_texts?|memory_embed_serving_id|memory_embed_command_is_http|memory_embedder_last_result_unauthorized)\b(?=\s*\()|"
     r"\bmemory_profile_pack_\w+\b|"
     r"\b(?:memory_recall_trace_\w+|memory_recall_rejection_t|memory_diagnose_scoped|db2_kb_service_memory_diagnose_scoped_json|db2_kb_service_memory_explain_match_json)\b(?=\s*\()|"
     r"\b(?:anti_pattern_extract_from_feedback|anti_pattern_extract_from_failures|anti_pattern_escalate|memory_learn_style|memory_scan_conversations)\b(?=\s*\()|"

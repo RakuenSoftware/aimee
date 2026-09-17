@@ -234,7 +234,7 @@ func callerPurposeAllowed(ref uint32, request Request, target *url.URL) bool {
 		return request.Purpose == "provider" && (request.Method == "GET" || request.Method == "POST")
 	case MemoryClientRef:
 		return (request.Purpose == "embedding" && request.Method == "POST" &&
-			strings.HasSuffix(target.EscapedPath(), "/embed")) ||
+			(strings.HasSuffix(target.EscapedPath(), "/embed") || strings.HasSuffix(target.EscapedPath(), "/embed_batch"))) ||
 			(request.Purpose == "embedding-health" && request.Method == "GET" &&
 				strings.HasSuffix(target.EscapedPath(), "/health"))
 	case GitClientRef:

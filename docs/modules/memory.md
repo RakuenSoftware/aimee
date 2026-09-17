@@ -174,7 +174,7 @@ Authenticated admission and the server-to-KB transport remain native callers.
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host
 directories. Passing a pure-Go process/client build does not complete G0 while
-those C paths remain. The module currently retains six C sources and seven
+those C paths remain. The module currently retains five C sources and seven
 headers. The descriptor's `ownership_complete` flag verifies the declared file
 inventory; it does not assert that the Go migration is complete.
 
@@ -335,3 +335,12 @@ persistence, feature reconstruction, scope fallback, and write failure.
 Profile packs share one Go implementation across server and KB, including bounded
 validation, directory selection, and atomic activation. Native pack policy and
 its header are removed; the CLI renders the shared command's response.
+
+Embedding consumers now invoke the shared Go owner through generic host-internal
+command dispatch. Zero-surface fixed-module declarations stay out of public
+CLI/RPC/MCP/ACP registries; the embedding owner rejects non-host principals.
+The native embedding adapter is deleted. Go owns single-text and batch requests,
+configured-program dimension probes, breaker state, and per-response authorization
+status. Batches issue one governed HTTP request and reject malformed rows without
+publishing partial vectors. Batch HTTP timeouts default to 120 seconds and accept
+`AIMEE_EMBED_HTTP_TIMEOUT_MS` overrides from 1 through 120000 milliseconds.

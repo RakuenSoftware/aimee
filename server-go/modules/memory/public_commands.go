@@ -107,6 +107,28 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
+	if verb == "embed" {
+		if invocation.PrincipalRef != 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		encoded, status := handleEmbed(options.executor, options, invocation, body)
+		if status != bus.ModuleStatusOK {
+			return nil, status
+		}
+		var response map[string]any
+		if json.Unmarshal(encoded, &response) != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		if response["truncated"] == true {
+			delete(response, "vector")
+			response["dim"] = 0
+			response["error"] = "embed: vector exceeds requested dimension"
+		}
+		if args.stringOr("operation", "") == "serving-id" && response["error"] == nil && response["serving_id"] == nil {
+			response["serving_id"] = ""
+		}
+		return commandResult(response)
+	}
 	for _, route := range sharedCommandRoutes {
 		if route.verb == verb {
 			return route.handler(options, invocation, verb, args)

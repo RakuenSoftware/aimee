@@ -14,6 +14,7 @@ import (
 
 	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
 const (
@@ -714,6 +715,7 @@ WHERE id = $1 AND scope_type = $2 AND scope_value = $3 AND lifecycle_state = 'ac
 }
 
 type handlerOptions struct {
+	executor       egress.Executor
 	placement      Placement
 	data           DataStore
 	commandContext *bus.CommandContext

@@ -1,6 +1,8 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include "module_commands.h"
+#include "json_fluent.h"
 #include "aimee.h"
 #include "modules/db2/c/kb_payload.h"
 #include "modules/db2/c/code_index.h"
@@ -806,9 +808,22 @@ static int kb_embed_file_chunks(kb_build_file_ctx_t *c, int n_chunks, float *out
       }
       kb_async_make_embed_text(c->chunks[i].heading_path, c->chunks[i].content, texts[i], 4096);
    }
-   int dim = built ? memory_embed_texts((const char *const *)texts, n_chunks, c->effective_cmd,
-                                        EMBED_INPUT_DOCUMENT, out, EMBED_MAX_DIM)
-                   : 0;
+   int dim = 0;
+   if (built)
+   {
+      cJSON *args = cJSON_CreateObject(), *reply = NULL;
+      cJSON_AddStringToObject(args, "operation", "batch");
+      cJSON_AddStringToObject(args, "base_url", c->effective_cmd);
+      cJSON_AddStringToObject(args, "input_type", "document");
+      cJSON_AddNumberToObject(args, "max_dim", EMBED_MAX_DIM);
+      cJSON_AddItemToObject(args, "texts",
+                            cJSON_CreateStringArray((const char *const *)texts, n_chunks));
+      (void)aimee_module_commands_dispatch_internal("memory.embed", args, &reply);
+      cJSON_Delete(args);
+      dim = jo_float_matrix(cJSON_GetObjectItemCaseSensitive(reply, "vectors"), out, n_chunks,
+                            EMBED_MAX_DIM);
+      cJSON_Delete(reply);
+   }
    for (int i = 0; i < n_chunks; i++)
       free(texts[i]);
    free(texts);
@@ -1125,8 +1140,17 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          }
          else
          {
-            dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
-                                    EMBED_MAX_DIM);
+            cJSON *embed_1_args = cJSON_CreateObject(), *embed_1_reply = NULL;
+            cJSON_AddStringToObject(embed_1_args, "base_url", c->effective_cmd);
+            cJSON_AddStringToObject(embed_1_args, "input_type", "document");
+            cJSON_AddStringToObject(embed_1_args, "text", embed_text);
+            cJSON_AddNumberToObject(embed_1_args, "max_dim", EMBED_MAX_DIM);
+            (void)aimee_module_commands_dispatch_internal("memory.embed", embed_1_args,
+                                                          &embed_1_reply);
+            cJSON_Delete(embed_1_args);
+            dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), vec,
+                                 EMBED_MAX_DIM);
+            cJSON_Delete(embed_1_reply);
          }
          if (dim > 0)
          {
@@ -1876,8 +1900,16 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
    int qdim = query_dim;
    if (!qvec || qdim <= 0)
    {
-      qdim =
-          memory_embed_text(query, effective_cmd, EMBED_INPUT_QUERY, embedded_qvec, EMBED_MAX_DIM);
+      cJSON *embed_2_args = cJSON_CreateObject(), *embed_2_reply = NULL;
+      cJSON_AddStringToObject(embed_2_args, "base_url", effective_cmd);
+      cJSON_AddStringToObject(embed_2_args, "input_type", "query");
+      cJSON_AddStringToObject(embed_2_args, "text", query);
+      cJSON_AddNumberToObject(embed_2_args, "max_dim", EMBED_MAX_DIM);
+      (void)aimee_module_commands_dispatch_internal("memory.embed", embed_2_args, &embed_2_reply);
+      cJSON_Delete(embed_2_args);
+      qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_2_reply, "vector"),
+                            embedded_qvec, EMBED_MAX_DIM);
+      cJSON_Delete(embed_2_reply);
       qvec = embedded_qvec;
    }
    if (qdim <= 0)
@@ -2278,8 +2310,16 @@ char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects, 
    }
 
    float qvec[EMBED_MAX_DIM];
-   int qdim = memory_embed_text(query, kb_effective_embedding_cmd(embedding_cmd), EMBED_INPUT_QUERY,
-                                qvec, EMBED_MAX_DIM);
+   cJSON *embed_3_args = cJSON_CreateObject(), *embed_3_reply = NULL;
+   cJSON_AddStringToObject(embed_3_args, "base_url", kb_effective_embedding_cmd(embedding_cmd));
+   cJSON_AddStringToObject(embed_3_args, "input_type", "query");
+   cJSON_AddStringToObject(embed_3_args, "text", query);
+   cJSON_AddNumberToObject(embed_3_args, "max_dim", EMBED_MAX_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_3_args, &embed_3_reply);
+   cJSON_Delete(embed_3_args);
+   int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_3_reply, "vector"), qvec,
+                             EMBED_MAX_DIM);
+   cJSON_Delete(embed_3_reply);
    if (qdim <= 0)
    {
       free(local);

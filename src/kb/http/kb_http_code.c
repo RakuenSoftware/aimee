@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 #include "kb_http_code.h"
 #include "kb_http_code_vector_status.h"
 #include "aimee.h"
@@ -1178,7 +1180,18 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    {
       const char *embed_cmd = config_embedder_command_current(NULL);
       float qvec[EMBED_MAX_DIM];
-      int qdim = memory_embed_text(query, embed_cmd, EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
+      cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+      cJSON_AddStringToObject(embed_0_args, "base_url", embed_cmd);
+      cJSON_AddStringToObject(embed_0_args, "input_type", "query");
+      cJSON_AddStringToObject(embed_0_args, "text", query);
+      cJSON_AddNumberToObject(embed_0_args, "max_dim", EMBED_MAX_DIM);
+      (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+      cJSON_Delete(embed_0_args);
+      int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), qvec,
+                                EMBED_MAX_DIM);
+      int embed_unauthorized =
+          cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "unauthorized"));
+      cJSON_Delete(embed_0_reply);
       if (qdim > 0 && qdim == db2_embedding_dim())
       {
          int vector_rc =
@@ -1200,7 +1213,7 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       }
       else
          kb_code_vector_status_embed(&vector_status, embed_cmd, qdim, db2_embedding_dim(),
-                                     memory_embedder_last_result_unauthorized());
+                                     embed_unauthorized);
    }
    /* Signal D — cross-session memory / knowledge graph (§6 fusion). Symbol-anchored
     * like the graph leg: seed the symbol's entity node and walk its incident

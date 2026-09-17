@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 /* learning_bundle.c: cross-source evidence neighbourhood builder.
  *
  * Embed the query, scan stored evidence vectors, rank by cosine similarity,
@@ -8,7 +10,6 @@
 
 #include "aimee.h"
 #include "modules/db2/c/evidence_vectors.h"
-#include "memory.h" /* memory_embed_text */
 
 #include <math.h>
 #include <stdio.h>
@@ -92,7 +93,16 @@ int learning_bundle_build(const char *query, const char *embed_cmd, int k, learn
 
    const char *model = config_embedder_command_current(embed_cmd);
    float qvec[BUNDLE_EMBED_DIM];
-   int qdim = memory_embed_text(query, model, EMBED_INPUT_QUERY, qvec, BUNDLE_EMBED_DIM);
+   cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+   cJSON_AddStringToObject(embed_0_args, "base_url", model);
+   cJSON_AddStringToObject(embed_0_args, "input_type", "query");
+   cJSON_AddStringToObject(embed_0_args, "text", query);
+   cJSON_AddNumberToObject(embed_0_args, "max_dim", BUNDLE_EMBED_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+   cJSON_Delete(embed_0_args);
+   int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), qvec,
+                             BUNDLE_EMBED_DIM);
+   cJSON_Delete(embed_0_reply);
    if (qdim <= 0)
       return -1;
 

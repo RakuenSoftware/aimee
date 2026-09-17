@@ -128,7 +128,7 @@ tests exercise these commands under the restricted runtime role.
 Model edits preserve history, scope tags and lineage without inheriting user
 provenance. Public edits capture extraction authority in the same transaction;
 audit triggers receive the verified initiator and the effective content authority.
-The current inventory is six C sources and seven headers; the table above
+The current inventory is five C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.

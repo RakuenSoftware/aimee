@@ -106,7 +106,7 @@ func describeCommandRoutes(options handlerOptions, invocation bus.ModuleInvocati
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
-	commands := []bus.CommandDefinition{}
+	commands := []bus.CommandDefinition{{Group: "memory", Verb: "embed", Summary: "Embed trusted host input."}}
 	// The Server's shared-KB transport is still being migrated. Do not shadow
 	// those handlers with private-only commands under the same public name.
 	routes := sharedCommandRoutes

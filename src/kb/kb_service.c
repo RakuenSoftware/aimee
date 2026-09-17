@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 #include "aimee.h"
 #include "module_commands.h"
 #include "kb_reqctx.h"
@@ -311,8 +313,16 @@ static int kb_handle_memory_verify(int fd, cJSON *req)
    (void)db2_kb_service_collect_verify_snapshot(&db2_snapshot);
 
    float probe_vec[EMBED_MAX_DIM];
-   int embedder_dim =
-       memory_embed_text("probe", embed_cmd, EMBED_INPUT_DOCUMENT, probe_vec, EMBED_MAX_DIM);
+   cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+   cJSON_AddStringToObject(embed_0_args, "base_url", embed_cmd);
+   cJSON_AddStringToObject(embed_0_args, "input_type", "document");
+   cJSON_AddStringToObject(embed_0_args, "text", "probe");
+   cJSON_AddNumberToObject(embed_0_args, "max_dim", EMBED_MAX_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+   cJSON_Delete(embed_0_args);
+   int embedder_dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"),
+                                     probe_vec, EMBED_MAX_DIM);
+   cJSON_Delete(embed_0_reply);
 
    int timings_trials = 0;
    int64_t timings_total_us = 0;
@@ -325,7 +335,17 @@ static int kb_handle_memory_verify(int fd, cJSON *req)
          float qvec[EMBED_MAX_DIM];
          char probe[64];
          snprintf(probe, sizeof(probe), "probe query %d", i);
-         int qdim = memory_embed_text(probe, "builtin", EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
+         cJSON *embed_1_args = cJSON_CreateObject(), *embed_1_reply = NULL;
+         cJSON_AddStringToObject(embed_1_args, "base_url", "builtin");
+         cJSON_AddStringToObject(embed_1_args, "input_type", "query");
+         cJSON_AddStringToObject(embed_1_args, "text", probe);
+         cJSON_AddNumberToObject(embed_1_args, "max_dim", EMBED_MAX_DIM);
+         (void)aimee_module_commands_dispatch_internal("memory.embed", embed_1_args,
+                                                       &embed_1_reply);
+         cJSON_Delete(embed_1_args);
+         int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), qvec,
+                                   EMBED_MAX_DIM);
+         cJSON_Delete(embed_1_reply);
          if (qdim <= 0)
             continue;
          int64_t ids[8];

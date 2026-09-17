@@ -56,6 +56,9 @@ int aimee_module_commands_collect(void);
 /* Refresh declarations and dispatch a public RPC from a copied route. Returns
  * 0 if undeclared, 1 with an owned JSON result, -1 for a transport failure. */
 int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result);
+/* Host-only fixed-module commands (zero declared surfaces). These are absent
+ * from CLI/RPC/MCP/ACP discovery and cannot be invoked by public dispatch. */
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result);
 /* Verified request context stays separate from untrusted command arguments.
  * Only fixed modules receive the v2 frame; plugin invocation remains v1. */
 int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,

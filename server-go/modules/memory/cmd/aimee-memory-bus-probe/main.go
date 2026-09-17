@@ -65,15 +65,20 @@ func main() {
 // fixed; deriving it from the implementation would hide wire/domain drift.
 func probeDecisions(ctx context.Context, client *memory.Client, caller memory.StageCaller) error {
 	declaration, err := caller.Call(ctx, 6143, bus.StageDescribeCommands, 2112, time.Second, []byte{'D', 'C', 'M', 'D', 2, 0, 0, 0})
-	wantCommands := uint32(2)
+	wantCommands := uint32(3)
 	if os.Getenv("AIMEE_TEST_MEMORY_PLACEMENT") == "kb" {
-		wantCommands = 75
+		wantCommands = 76
 	}
 	if err != nil || len(declaration) < 16 || string(declaration[:4]) != "DCMR" ||
 		binary.LittleEndian.Uint32(declaration[4:]) != 2 ||
 		binary.LittleEndian.Uint32(declaration[8:]) != wantCommands ||
 		binary.LittleEndian.Uint32(declaration[12:]) != memory.StageCommand {
 		return fmt.Errorf("public command discovery: %x %v", declaration, err)
+	}
+	// Declared internal commands must remain unavailable to non-host principals.
+	internal, _ := bus.EncodeCommand("embed", []byte(`{"base_url":"printf '[1,2,3]'","text":"probe","max_dim":3}`))
+	if _, err := caller.Call(ctx, memory.EventCommand, memory.StageCommand, 2115, time.Second, internal); err == nil {
+		return fmt.Errorf("host-only embedding accepted from module principal")
 	}
 	screen, err := client.Command(ctx, 2114, "screen_content", json.RawMessage(`{"content":"token=first password=second"}`))
 	var screened map[string]any

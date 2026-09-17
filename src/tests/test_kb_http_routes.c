@@ -1,3 +1,6 @@
+#include "module_commands.h"
+#include "json_fluent.h"
+#include <assert.h>
 /* test_kb_http_routes.c: unit tests for kb_http_route() (Phase 1+5). */
 #include <assert.h>
 #include <signal.h>
@@ -4601,25 +4604,31 @@ int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
 static int g_vec_enabled = 0;
 static int g_vec_search_unavailable = 0;
 static int g_vec_unauthorized = 0;
-int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
-                      float *out, int max_dim)
+/* The module's query behavior is exercised in Go; this fixture owns HTTP
+ * rendering of its command result. */
+cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                 const cJSON *args)
 {
-   (void)text;
-   (void)command;
-   (void)input_type;
-   if (!g_vec_enabled || !out || max_dim <= 0)
-      return 0;
-   int d = 2560; /* the stub embedder's FIXED output dim (independent of the corpus
-                  * dim) so the route's qdim==db2_embedding_dim() gate can mismatch. */
-   if (d > max_dim)
-      return 0;
-   for (int i = 0; i < d; i++)
-      out[i] = 0.01f * (float)(i % 7);
-   return d;
+   (void)event_kind;
+   (void)stage_id;
+   (void)args;
+   assert(strcmp(verb, "review_console") == 0);
+   return cJSON_Parse("{\"status\":\"ok\",\"schema\":\"console.memories.v1\",\"memories\":[]}");
 }
-int memory_embedder_last_result_unauthorized(void)
+
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   return g_vec_unauthorized;
+   assert(strcmp(method, "memory.embed") == 0);
+   *result = cJSON_CreateObject();
+   int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
+   cJSON_AddBoolToObject(*result, "unauthorized", g_vec_unauthorized);
+   if (!g_vec_enabled || max_dim < 2560)
+      return 1;
+   int dim = 2560;
+   cJSON *vector = cJSON_AddArrayToObject(*result, "vector");
+   for (int i = 0; i < dim; ++i)
+      cJSON_AddItemToArray(vector, cJSON_CreateNumber(0.01f * (float)(i % 7)));
+   return 1;
 }
 int pgvec_code_search_paths(const char *project, const float *vec, int dim, int limit, char *paths,
                             int path_cap, double *scores, int max)

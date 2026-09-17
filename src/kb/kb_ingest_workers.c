@@ -15,6 +15,8 @@
 #define _GNU_SOURCE
 #endif
 
+#include "module_commands.h"
+#include "json_fluent.h"
 #include "aimee.h"
 #include "config.h"
 #include "kb.h"
@@ -790,8 +792,16 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
        * re-acquire lazily. See kb_curator_extract_code / kb_service_code_embed. */
       db2_lease_release_idle();
       float vec[EMBED_MAX_DIM];
-      int dim =
-          memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
+      cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+      cJSON_AddStringToObject(embed_0_args, "base_url", effective_cmd);
+      cJSON_AddStringToObject(embed_0_args, "input_type", "document");
+      cJSON_AddStringToObject(embed_0_args, "text", embed_text);
+      cJSON_AddNumberToObject(embed_0_args, "max_dim", EMBED_MAX_DIM);
+      (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+      cJSON_Delete(embed_0_args);
+      int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
+                               EMBED_MAX_DIM);
+      cJSON_Delete(embed_0_reply);
       if (dim > 0)
       {
          accept_generated_embedding(doc_id, vec, dim);
@@ -991,8 +1001,16 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
        * so holding the lease across it trips the stuck-lease ceiling. */
       db2_lease_release_idle();
       float vec[EMBED_MAX_DIM];
-      int dim =
-          memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
+      cJSON *embed_1_args = cJSON_CreateObject(), *embed_1_reply = NULL;
+      cJSON_AddStringToObject(embed_1_args, "base_url", effective_cmd);
+      cJSON_AddStringToObject(embed_1_args, "input_type", "document");
+      cJSON_AddStringToObject(embed_1_args, "text", embed_text);
+      cJSON_AddNumberToObject(embed_1_args, "max_dim", EMBED_MAX_DIM);
+      (void)aimee_module_commands_dispatch_internal("memory.embed", embed_1_args, &embed_1_reply);
+      cJSON_Delete(embed_1_args);
+      int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), vec,
+                               EMBED_MAX_DIM);
+      cJSON_Delete(embed_1_reply);
       /* Payload reconstruction reads kb_documents, so it needs a fresh short
        * project scope after the embedder round-trip. The fenced helper opens
        * that transaction, reapplies the current maintenance context, and keeps

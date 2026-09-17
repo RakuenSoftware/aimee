@@ -43,3 +43,11 @@ func TestCommandDeclarationWire(t *testing.T) {
 		}
 	}
 }
+
+func TestInternalCommandDeclaration(t *testing.T) {
+	request := []byte{'D', 'C', 'M', 'D', 2, 0, 0, 0}
+	frame, err := EncodeCommandDeclaration(request, 8, []CommandDefinition{{Group: "memory", Verb: "embed"}})
+	if err != nil || binary.LittleEndian.Uint32(frame[16:]) != 0 {
+		t.Fatalf("internal declaration: %x %v", frame, err)
+	}
+}

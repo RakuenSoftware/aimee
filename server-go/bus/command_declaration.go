@@ -16,6 +16,8 @@ type CommandDefinition struct {
 	Surfaces, Visibility uint32
 }
 
+// A zero surface mask declares a host-internal command. It must never enter
+// an external command registry.
 // EncodeCommandDeclaration answers DCMD version 2. DCMR adds an invocation
 // stage after the count; the event kind is derived from the serving principal.
 // Records retain the version-1 16-byte header and length-prefixed strings.
@@ -31,7 +33,7 @@ func EncodeCommandDeclaration(request []byte, stage uint32, commands []CommandDe
 	seen := make(map[string]bool, len(commands))
 	for _, c := range commands {
 		key := c.Group + "." + c.Verb
-		if !commandNameValid(c.Group) || !commandNameValid(c.Verb) || len(c.Group) > 127 || len(c.Verb) > 127 || len(c.Summary) > 65535 || c.Surfaces == 0 || c.Surfaces & ^uint32(15) != 0 || c.Visibility > 1 ||
+		if !commandNameValid(c.Group) || !commandNameValid(c.Verb) || len(c.Group) > 127 || len(c.Verb) > 127 || len(c.Summary) > 65535 || c.Surfaces & ^uint32(15) != 0 || c.Visibility > 1 ||
 			(c.Surfaces&4 != 0 && c.Surfaces&1 == 0) || strings.ContainsAny(c.Group, "\x00.") || strings.ContainsAny(c.Verb, "\x00.") || strings.ContainsRune(c.Summary, 0) || seen[key] {
 			return nil, errors.New("invalid declared command")
 		}

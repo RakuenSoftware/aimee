@@ -348,8 +348,6 @@ static int extract_facts(const char *text, aimee_db2_fact_candidate_t *out, int 
    return rc;
 }
 
-int memory_embed_command_is_http(const char *command);
-
 cJSON *kb_module_memory_data(const cJSON *request_json)
 {
    if (!request_json)
@@ -529,7 +527,7 @@ static int embed_text(const char *text, const char *command, int input_type, flo
    if (!text || !command || !command[0] || !out || max_dim <= 0 ||
        (input_type != AIMEE_DB2_EMBED_DOCUMENT && input_type != AIMEE_DB2_EMBED_QUERY))
       return 0;
-   return memory_embed_command_is_http(command)
+   return (command && (strncmp(command, "http://", 7) == 0 || strncmp(command, "https://", 8) == 0))
               ? embed_over_module(text, command, input_type, out, max_dim)
               : 0;
 }

@@ -4649,6 +4649,7 @@ $(TESTPREFIX)/unit-test-curator-index-code-unit: \
 $(TESTPREFIX)/unit-test-curator-pipeline: \
                                        $(OBJDIR)/tests/test_curator_pipeline.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_resolve_entities.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_promote.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_index_code_unit.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \

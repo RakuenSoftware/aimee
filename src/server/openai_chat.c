@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 /* openai_chat.c: inference-backed handlers for the OpenAI-compatible
  * /v1/chat/completions and /v1/completions routes.
  *
@@ -47,7 +49,6 @@
 #include <aimee/gateway/gateway_policy.h> /* gateway_policy_apply_request — tool-policing stage */
 #include "router_advise.h"                /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_serve.h"               /* IR-routed /v1/responses parse */
-#include "memory.h"                       /* memory_embed_text */
 #include "request_context.h"
 #include "response_dedup.h"
 #include "token_tracker.h"
@@ -611,7 +612,7 @@ static int codex_models_raw(char *resp, int cap)
 }
 
 /* POST /v1/embeddings: embed each input via the configured embedder
- * (memory_embed_text) and shape the OpenAI embeddings list. Returns 502 when
+ * (the shared Go embedding command) and shape the OpenAI embeddings list. Returns 502 when
  * the embedder is unavailable (e.g. the sidecar isn't running). */
 static int embeddings_handler(const char *body, char *resp, int cap)
 {
@@ -647,7 +648,16 @@ static int embeddings_handler(const char *body, char *resp, int cap)
          ok = 0;
          break;
       }
-      int d = memory_embed_text(inputs[i], cmd, EMBED_INPUT_DOCUMENT, vecs[i], EMBED_MAX_DIM);
+      cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+      cJSON_AddStringToObject(embed_0_args, "base_url", cmd);
+      cJSON_AddStringToObject(embed_0_args, "input_type", "document");
+      cJSON_AddStringToObject(embed_0_args, "text", inputs[i]);
+      cJSON_AddNumberToObject(embed_0_args, "max_dim", EMBED_MAX_DIM);
+      (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+      cJSON_Delete(embed_0_args);
+      int d = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vecs[i],
+                             EMBED_MAX_DIM);
+      cJSON_Delete(embed_0_reply);
       if (d <= 0)
       {
          ok = 0;

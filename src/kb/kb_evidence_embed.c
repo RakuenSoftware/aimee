@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 /* kb_evidence_embed.c: evidence-vector embed worker.
  *
  * Per pending evidence_index_ops row: read the evidence artifact, extract its
@@ -131,7 +133,16 @@ int kb_evidence_embed_one(const char *embed_cmd)
     * kb_curator_extract_code / kb_service_code_embed). No-op in a lease scope. */
    db2_lease_release_idle();
    float vec[EVIDENCE_EMBED_DIM];
-   int dim = memory_embed_text(content, model, EMBED_INPUT_DOCUMENT, vec, EVIDENCE_EMBED_DIM);
+   cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+   cJSON_AddStringToObject(embed_0_args, "base_url", model);
+   cJSON_AddStringToObject(embed_0_args, "input_type", "document");
+   cJSON_AddStringToObject(embed_0_args, "text", content);
+   cJSON_AddNumberToObject(embed_0_args, "max_dim", EVIDENCE_EMBED_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+   cJSON_Delete(embed_0_args);
+   int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
+                            EVIDENCE_EMBED_DIM);
+   cJSON_Delete(embed_0_reply);
    if (dim != EVIDENCE_EMBED_DIM)
    {
       char err[128];

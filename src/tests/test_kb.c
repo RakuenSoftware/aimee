@@ -44,7 +44,11 @@ static int test_db2_embed_provider(const char *text, const char *command, int in
       out[0] = NAN;
       return 1;
    }
-   return memory_embed_text(text, command, (embed_input_type_t)input_type, out, max_dim);
+   (void)text;
+   (void)input_type;
+   for (int i = 0; i < max_dim; ++i)
+      out[i] = i == 0 ? 1.0f : 0.0f;
+   return max_dim;
 }
 
 static void test_db2_embed_contract(void)

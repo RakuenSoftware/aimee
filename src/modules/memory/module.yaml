@@ -12,7 +12,6 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/memory/gw_stage_memory.c",
-    "src/modules/memory/memory_embed_bus.c",
     "src/modules/memory/memory_data_bus.c",
     "src/modules/memory/memory_domain_bus.c",
     "src/modules/memory/memory_domain_runtime_bus.c",
@@ -68,7 +67,8 @@
     "server-go/modules/memory/public_mutations.go",
     "server-go/modules/memory/public_store.go",
     "server-go/modules/memory/profile_pack.go",
-    "server-go/modules/memory/public_diagnostics.go"
+    "server-go/modules/memory/public_diagnostics.go",
+    "server-go/modules/memory/embed_batch.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -106,7 +106,8 @@
     "server-go/modules/memory/public_archive_test.go",
     "server-go/modules/memory/profile_pack_test.go",
     "server-go/modules/memory/public_diagnostics_test.go",
-    "server-go/modules/memory/public_learning_test.go"
+    "server-go/modules/memory/public_learning_test.go",
+    "server-go/modules/memory/embed_batch_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"
