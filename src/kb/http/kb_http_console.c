@@ -4,6 +4,8 @@
 #include "kb_http_console.h"
 
 #include "aimee.h" /* now_utc */
+#include "module_commands.h"
+#include "aimee/memory/module_api.h"
 #include "cJSON.h"
 #include "config.h"
 #include "config_client.h"
@@ -297,42 +299,15 @@ static int console_typed_facts(char *out_buf, int out_cap)
  * constrained by row RLS and the canonical scope filter. */
 static int console_memories(char *out_buf, int out_cap)
 {
-   db2_memory_review_row_t rows[32];
-   db2_memory_scope_context_set("", "", 1);
-   int n = db2_memory_review_list("", 32, rows, 32);
-   db2_memory_scope_context_clear();
-   if (n < 0)
+   cJSON *req = cJSON_CreateObject();
+   cJSON *root = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "review_console", req);
+   cJSON_Delete(req);
+   if (!root)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory review unavailable\"}");
       return 500;
    }
-   cJSON *root = cJSON_CreateObject();
-   cJSON *items = root ? cJSON_AddArrayToObject(root, "memories") : NULL;
-   if (!root || !items)
-   {
-      cJSON_Delete(root);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory review alloc failed\"}");
-      return 500;
-   }
-   cJSON_AddStringToObject(root, "schema", "console.memories.v1");
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *o = cJSON_CreateObject();
-      cJSON_AddNumberToObject(o, "id", (double)rows[i].id);
-      cJSON_AddStringToObject(o, "tier", rows[i].tier);
-      cJSON_AddStringToObject(o, "kind", rows[i].kind);
-      cJSON_AddStringToObject(o, "key", rows[i].key);
-      cJSON_AddStringToObject(o, "content", rows[i].content);
-      cJSON_AddNumberToObject(o, "confidence", rows[i].confidence);
-      cJSON_AddStringToObject(o, "lifecycle", rows[i].lifecycle_state);
-      cJSON_AddStringToObject(o, "review_reason", rows[i].review_reason);
-      cJSON_AddStringToObject(o, "scope_type", rows[i].scope_type);
-      cJSON_AddStringToObject(o, "scope_value", rows[i].scope_value);
-      cJSON_AddStringToObject(o, "created_at", rows[i].created_at);
-      cJSON_AddStringToObject(o, "updated_at", rows[i].updated_at);
-      cJSON_AddItemToArray(items, o);
-   }
-   cJSON_AddNumberToObject(root, "count", n);
    return console_send(root, 200, "{\"schema\":\"console.memories.v1\",\"memories\":[]}", out_buf,
                        out_cap);
 }

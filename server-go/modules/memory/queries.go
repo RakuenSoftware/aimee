@@ -162,7 +162,7 @@ func (s *postgresDataStore) UnusedL2(ctx context.Context, days, limit int) ([]Re
 		days = 30
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE tier='L2' AND use_count=0 AND created_at<pg_now_text(('-'||$1::text||' days')::text)
+WHERE tier='L2' AND use_count=0 AND created_at<pg_now_text(('-'||$1::integer::text||' days')::text)
 ORDER BY created_at,id LIMIT $2`, days, limit)
 	if err != nil {
 		return nil, err
@@ -196,6 +196,7 @@ func (s *postgresDataStore) ReviewList(ctx context.Context, state string, limit 
 	query := `SELECT id,tier,kind,key,content,confidence,lifecycle_state,
 COALESCE(NULLIF(archive_reason,''),(SELECT reason FROM memory_rejection_tombstones t
  WHERE t.object_kind='memory' AND t.memory_key=m.key AND t.memory_content=m.content
+ AND t.scope_type=m.scope_type AND t.scope_value=m.scope_value
  ORDER BY t.id DESC LIMIT 1),''),scope_type,scope_value,created_at,updated_at
 FROM memories m WHERE ($1='' OR lifecycle_state=$1 OR ($1='rejected' AND EXISTS(
  SELECT 1 FROM memory_rejection_tombstones t WHERE t.object_kind='memory' AND t.active=1

@@ -158,6 +158,11 @@ Derived graph, episode, link, and provenance queries consult their parent memory
 rows so the runtime role's scope policy also protects these child tables.
 PostgreSQL tests exercise these commands with a non-owner role and verify that
 request scope does not remain on the pooled connection.
+The shared command owner also serves key lookup, effectiveness/unused/superseded
+lists, artifact updates, and memory review (including the operator console).
+Review reasons are matched to the memory's exact scope. Diagnostic list caps are
+validated consistently through the 256-row transport limit; PostgreSQL tests
+exercise the actual unused-memory interval binding and public response fields.
 Authenticated admission and the server-to-KB transport remain native callers.
 
 Production C memory clients, native headers and gateway integration still need

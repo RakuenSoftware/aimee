@@ -793,7 +793,8 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		request.Limit = 20
 	}
 	maxLimit := 100
-	if request.Operation == "prospective-list" || request.Operation == "directive-list" || request.Operation == "lint" || request.Operation == "conflict-list" {
+	switch request.Operation {
+	case "prospective-list", "directive-list", "lint", "conflict-list", "low-effectiveness", "unused-l2", "superseded-keys":
 		maxLimit = 256
 	}
 	if request.Limit < 1 || request.Limit > maxLimit || len(request.Kind) > 64 ||

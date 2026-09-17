@@ -688,11 +688,9 @@ int kb_handle_memory_decisions_export_jsonl(int fd, cJSON *req)
 
 int kb_handle_memory_key_exists(int fd, cJSON *req)
 {
-   cJSON *key_j = cJSON_GetObjectItemCaseSensitive(req, "key");
-   if (!cJSON_IsString(key_j))
-      return kb_send_error(fd, "missing key");
-   cJSON *resp = db2_kb_service_memory_key_exists_json(key_j->valuestring);
-   return kb_reply_or_error(fd, resp, "key_exists check failed");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "key_exists", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_search(int fd, cJSON *req)
@@ -750,9 +748,9 @@ int kb_handle_memory_query_edges(int fd, cJSON *req)
 
 int kb_handle_memory_effectiveness_stats(int fd, cJSON *req)
 {
-   (void)req;
-   cJSON *resp = db2_kb_service_memory_effectiveness_stats_json();
-   return kb_reply_or_error(fd, resp, "failed to compute effectiveness stats");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "effectiveness_stats", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 /* Read the request's destructive-edit authority. Only the exact string "user"
@@ -846,13 +844,9 @@ int kb_handle_memory_restore(int fd, cJSON *req)
 
 int kb_handle_memory_review_list(int fd, cJSON *req)
 {
-   const char *state = jo_str(req, "state", "");
-   int limit = jo_int(req, "limit", 64);
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_review_list_json(state, limit);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to list memory review rows");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "review_list", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_stats(int fd, cJSON *req)
@@ -1525,17 +1519,9 @@ int kb_handle_memory_ask(int fd, cJSON *req)
 
 int kb_handle_memory_find_id_by_key_kind(int fd, cJSON *req)
 {
-   cJSON *key_j = cJSON_GetObjectItemCaseSensitive(req, "key");
-   cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(req, "kind");
-   if (!cJSON_IsString(key_j) || !cJSON_IsString(kind_j))
-      return kb_send_error(fd, "memory.find_id_by_key_kind requires key and kind");
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp =
-       db2_kb_service_memory_find_id_by_key_kind_json(key_j->valuestring, kind_j->valuestring);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to look up memory id");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "find_id_by_key_kind", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_search_facts_patterns_by_keyword(int fd, cJSON *req)
@@ -1672,52 +1658,30 @@ int kb_handle_memory_list_session_scope_priority(int fd, cJSON *req)
 
 int kb_handle_memory_list_low_effectiveness(int fd, cJSON *req)
 {
-   cJSON *th_j = cJSON_GetObjectItemCaseSensitive(req, "threshold");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   double threshold = cJSON_IsNumber(th_j) ? th_j->valuedouble : 0.5;
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 50;
-
-   cJSON *resp = db2_kb_service_memory_list_low_effectiveness_json(threshold, limit);
-   return kb_reply_or_error(fd, resp, "failed to list low-effectiveness memories");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "list_low_effectiveness", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_list_unused_l2(int fd, cJSON *req)
 {
-   cJSON *days_j = cJSON_GetObjectItemCaseSensitive(req, "days");
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   int days = cJSON_IsNumber(days_j) ? (int)days_j->valuedouble : 14;
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 64;
-
-   cJSON *resp = db2_kb_service_memory_list_unused_l2_json(days, max);
-   return kb_reply_or_error(fd, resp, "failed to list unused L2 memories");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "list_unused_l2", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_list_superseded_keys(int fd, cJSON *req)
 {
-   cJSON *mv_j = cJSON_GetObjectItemCaseSensitive(req, "min_versions");
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   int mv = cJSON_IsNumber(mv_j) ? (int)mv_j->valuedouble : 3;
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 64;
-
-   cJSON *resp = db2_kb_service_memory_list_superseded_keys_json(mv, max);
-   return kb_reply_or_error(fd, resp, "failed to list superseded memory keys");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "list_superseded_keys", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_set_artifact(int fd, cJSON *req)
 {
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "memory_id");
-   cJSON *type_j = cJSON_GetObjectItemCaseSensitive(req, "artifact_type");
-   cJSON *ref_j = cJSON_GetObjectItemCaseSensitive(req, "artifact_ref");
-   cJSON *hash_j = cJSON_GetObjectItemCaseSensitive(req, "artifact_hash");
-   if (!cJSON_IsNumber(id_j) || !cJSON_IsString(type_j) || !cJSON_IsString(ref_j))
-      return kb_send_error(fd,
-                           "memory.set_artifact requires memory_id, artifact_type, artifact_ref");
-   const char *hash =
-       (cJSON_IsString(hash_j) && hash_j->valuestring[0]) ? hash_j->valuestring : NULL;
-
-   cJSON *resp = db2_kb_service_memory_set_artifact_json(
-       (int64_t)id_j->valuedouble, type_j->valuestring, ref_j->valuestring, hash);
-   return kb_reply_or_error(fd, resp, "failed to set artifact");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "set_artifact", req);
+   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_list_session_scope_priority_like(int fd, cJSON *req)

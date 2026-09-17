@@ -134,7 +134,6 @@ extern "C"
    cJSON *db2_kb_service_relations_schema_list_json(void);
    cJSON *db2_kb_service_memory_export_jsonl_json(const char *path);
    cJSON *db2_kb_service_memory_decisions_export_jsonl_json(const char *path);
-   cJSON *db2_kb_service_memory_key_exists_json(const char *key);
    cJSON *db2_kb_service_collab_rules_propose_json(const char *text, const char *reason,
                                                    const char *proposed_by);
    cJSON *db2_kb_service_collab_rules_list_json(void);
@@ -155,7 +154,6 @@ extern "C"
                                                    int64_t tokens_used,
                                                    const char *tool_error_pattern);
    cJSON *db2_kb_service_agent_hint_consume_json(const char *role, const char *prompt);
-   cJSON *db2_kb_service_memory_find_id_by_key_kind_json(const char *key, const char *kind);
    cJSON *db2_kb_service_memory_search_facts_patterns_by_keyword_json(const char *keyword, int max);
    cJSON *db2_kb_service_task_list_json(const char *state, const char *session_id, int limit);
    cJSON *db2_kb_service_task_create_json(const char *title, const char *session_id,
@@ -205,12 +203,6 @@ extern "C"
                                                  const char *command);
    cJSON *db2_kb_service_memory_list_session_scope_priority_json(int max);
    cJSON *db2_kb_service_memory_list_session_scope_priority_like_json(const char *pattern, int max);
-   cJSON *db2_kb_service_memory_list_low_effectiveness_json(double threshold, int limit);
-   cJSON *db2_kb_service_memory_list_unused_l2_json(int days, int max);
-   cJSON *db2_kb_service_memory_list_superseded_keys_json(int min_versions, int max);
-   cJSON *db2_kb_service_memory_set_artifact_json(int64_t memory_id, const char *artifact_type,
-                                                  const char *artifact_ref,
-                                                  const char *artifact_hash);
    cJSON *db2_kb_service_directive_expire_session_json(void);
    cJSON *db2_kb_service_memory_scan_conversations_json(const cJSON *dirs);
    /* Dashboard endpoints that walk DB2 tables.  Each returns
@@ -256,8 +248,6 @@ extern "C"
    cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority);
    cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason);
    cJSON *db2_kb_service_memory_restore_json(int64_t id, const char *actor);
-   cJSON *db2_kb_service_memory_review_list_json(const char *state, int limit);
-   cJSON *db2_kb_service_memory_effectiveness_stats_json(void);
    cJSON *db2_kb_service_memory_query_edges_json(const char *entity, int max);
    cJSON *db2_kb_service_memory_compact_windows_json(void);
    cJSON *db2_kb_service_memory_assemble_context_json(const char *task_hint);
