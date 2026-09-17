@@ -29,6 +29,8 @@ const (
 )
 
 type DataRequest struct {
+	FailedOnly bool              `json:"failed_only,omitempty"`
+	ResetStuck bool              `json:"reset_stuck,omitempty"`
 	TagScope   *Scope            `json:"tag_scope,omitempty"`
 	PublicView bool              `json:"public_view,omitempty"`
 	Activation json.RawMessage   `json:"activation,omitempty"`
@@ -134,6 +136,8 @@ type Record struct {
 }
 
 type DataResponse struct {
+	Dimension          int                  `json:"dimension,omitempty"`
+	Embedding          *EmbedResponse       `json:"embedding,omitempty"`
 	Version            string               `json:"version,omitempty"`
 	PublicRecords      []publicMemoryRecord `json:"public_records,omitempty"`
 	Deduplicated       bool                 `json:"deduplicated,omitempty"`
@@ -461,7 +465,7 @@ WHERE id = $1 AND ($2 OR lifecycle_state='active')`, id, historical).
 	return r, err
 }
 
-func (s *postgresDataStore) UpsertEmbedding(ctx context.Context, record Record, vector []float32) error {
+func (s *postgresDataStore) upsertEmbedding(ctx context.Context, record Record, vector []float32) error {
 	if s.placement == PlacementServer {
 		return errors.New("personal vectors require the owner-selected serving identity")
 	}
@@ -502,8 +506,8 @@ ON CONFLICT (point_id) DO UPDATE SET
 		record.ID, vectorText, primaryScope, workspace, project, record.Kind, string(payload))
 	if err == nil {
 		_, err = s.db.Exec(ctx, `INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,indexed_at,updated_at)
-VALUES($1,'memory',$1,'indexed',0,'',pg_now_text(),pg_now_text()) ON CONFLICT(point_id) DO UPDATE SET
-status='indexed',last_error='',indexed_at=pg_now_text(),updated_at=pg_now_text()`, record.ID)
+VALUES($1,'memory',$1,'ok',0,'',pg_now_text(),pg_now_text()) ON CONFLICT(point_id) DO UPDATE SET
+status='ok',last_error='',indexed_at=pg_now_text(),updated_at=pg_now_text()`, record.ID)
 	}
 	return err
 }
@@ -799,6 +803,8 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	}
 	maxLimit := 100
 	switch request.Operation {
+	case "vector-repair-prepare":
+		maxLimit = 1024
 	case "rebuild-derived":
 		maxLimit = 100000
 	case "prospective-list", "directive-list", "lint", "conflict-list", "low-effectiveness", "unused-l2", "superseded-keys", "entity-edges":
@@ -995,7 +1001,11 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if options.data == nil {
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}
-	timeout := invocation.Remaining(dataTimeout)
+	budget := dataTimeout
+	if request.Operation == "vector-repair-record" {
+		budget = embedHTTPTimeout()
+	}
+	timeout := invocation.Remaining(budget)
 	if timeout <= 0 {
 		return nil, bus.ModuleStatusCancelled
 	}
@@ -1064,6 +1074,19 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
+	case "vector-repair-prepare":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response, err = backend.prepareVectorRepair(ctx, request)
+	case "vector-repair-record":
+		if options.placement != PlacementKB || request.ID <= 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		embedded := EmbedRecord(ctx, invocation.TraceID, options.executor, options.data, request.ID, request.Command, request.Dimension)
+		response.Embedding = &embedded
+
 	case "maintenance-dashboard":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok {

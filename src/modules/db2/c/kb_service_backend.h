@@ -82,8 +82,6 @@ extern "C"
       db2_kb_service_async_queue_stats_t queue;
    } db2_kb_service_project_status_t;
 
-   int db2_kb_service_reset_stuck_vector_ops(int max_attempts);
-
    int db2_kb_service_collect_memory_verify(int include_failed_detail, int max_attempts,
                                             db2_kb_service_memory_verify_t *out);
    int db2_kb_service_collect_verify_snapshot(db2_kb_service_verify_snapshot_t *out);
@@ -98,7 +96,7 @@ extern "C"
    int db2_kb_service_list_pending_reembed_memory_ids(const char *version, int resume_last_id,
                                                       int64_t *ids, int max_ids);
    int db2_kb_service_count_embeddings_for_version(const char *version);
-   int db2_kb_service_list_memory_ids_by_updated(int limit, int64_t *ids, int max_ids);
+
    int db2_kb_service_memory_record_exists(int64_t record_id);
    int db2_kb_service_kb_document_exists(int64_t document_id);
    /* Graph-derived code-health audit: dead exports, import cycles, clones. */

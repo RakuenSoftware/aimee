@@ -533,7 +533,7 @@ func (s *postgresDataStore) FailedEmbeddingIDs(ctx context.Context, limit int) (
 		limit = 256
 	}
 	rows, err := s.db.Query(ctx, `SELECT DISTINCT memory_id FROM vector_index_ops
-WHERE status='failed' AND attempts < 8 AND memory_id IS NOT NULL ORDER BY memory_id LIMIT $1`, limit)
+WHERE status='failed' AND attempts < $2 AND memory_id IS NOT NULL ORDER BY memory_id LIMIT $1`, limit, vectorRetryLimit())
 	if err != nil {
 		return nil, err
 	}

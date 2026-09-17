@@ -45,16 +45,6 @@ static cJSON *domain_request(const char *operation)
    return request;
 }
 
-static int domain_number(const cJSON *response, const char *key, int *out)
-{
-   const cJSON *value = response ? cJSON_GetObjectItemCaseSensitive(response, key) : NULL;
-   if (!cJSON_IsNumber(value))
-      return -1;
-   if (out)
-      *out = value->valueint;
-   return 0;
-}
-
 int64_t memory_episode_card_generate(const char *source_session)
 {
    if (!source_session || !source_session[0])
@@ -124,35 +114,4 @@ int pgvec_memory_vector_search_record_type(const char *record_type, const float 
    }
    cJSON_Delete(response);
    return n;
-}
-
-int memory_repair_vector_index(int64_t memory_id, const char *command)
-{
-   return memory_embed(memory_id, command);
-}
-
-int memory_repair_vector_index_failed_only(const char *command, int limit, int *failed_out)
-{
-   if (failed_out)
-      *failed_out = 0;
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "repair-failed") ||
-       !cJSON_AddStringToObject(request, "base_url", command ? command : "") ||
-       !cJSON_AddNumberToObject(request, "max_dim", EMBED_MAX_DIM) ||
-       !cJSON_AddNumberToObject(request, "limit", limit > 0 ? limit : 256))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
-   cJSON *response =
-       aimee_module_json_call(AIMEE_MEMORY_EVENT_EMBED, AIMEE_MEMORY_STAGE_EMBED, request,
-                              AIMEE_MODULE_MESSAGE_MAX_BODY, 120000, &result);
-   int repaired = -1, failed = 0;
-   (void)domain_number(response, "repaired", &repaired);
-   (void)domain_number(response, "failed", &failed);
-   cJSON_Delete(response);
-   if (failed_out)
-      *failed_out = failed;
-   return repaired;
 }

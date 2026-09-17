@@ -17676,7 +17676,7 @@ BEGIN
     RETURN;
   END IF;
   FOREACH relation_name IN ARRAY ARRAY[
-    'anti_patterns','decision_log','derived_memory_registry','derived_memory_dependencies','derived_rederivation_queue',
+    'anti_patterns','code_index_ops','decision_log','derived_memory_registry','derived_memory_dependencies','derived_rederivation_queue',
     'entity_aliases','entity_edges','entity_registry',
     'epistemic_directives','fact_graph_changes','fact_graph_commits',
     'kb_async_jobs','kb_meta','memories','memory_conflicts',

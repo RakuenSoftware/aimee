@@ -142,100 +142,6 @@ int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg)
    return rc;
 }
 
-static int kb_handle_memory_repair(int fd, cJSON *req)
-{
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   cJSON *failed_only_j = cJSON_GetObjectItemCaseSensitive(req, "failed_only");
-   cJSON *reset_stuck_j = cJSON_GetObjectItemCaseSensitive(req, "reset_stuck");
-   cJSON *memory_id_j = cJSON_GetObjectItemCaseSensitive(req, "memory_id");
-   cJSON *embed_j = cJSON_GetObjectItemCaseSensitive(req, "embedding_command");
-
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 0;
-   int failed_only = cJSON_IsTrue(failed_only_j) ? 1 : 0;
-   int reset_stuck = cJSON_IsTrue(reset_stuck_j) ? 1 : 0;
-   int64_t memory_id = cJSON_IsNumber(memory_id_j) ? (int64_t)memory_id_j->valuedouble : 0;
-   const char *embed_cmd = config_embedder_command_current(
-       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
-
-   if (reset_stuck)
-   {
-      int reset = db2_kb_service_reset_stuck_vector_ops(8);
-
-      cJSON *resp = jo_ok();
-      cJSON_AddStringToObject(resp, "mode", "reset_stuck");
-      cJSON_AddNumberToObject(resp, "reset_stuck", reset);
-      int srv_rc = kb_send_response(fd, resp);
-      cJSON_Delete(resp);
-      return srv_rc;
-   }
-
-   if (!db2_is_initialized())
-      return kb_send_error(fd, "failed to open knowledge service store");
-   /* Size the memory retrieval index at the deployment's embedding dimension —
-    * the same runtime dim the vector memory_embeddings column was created at
-    * (db2_set_embedding_dim at startup: 2560 GPU / 1024 CPU / external cap 4000).
-    * A hardcoded 384 never matched the vector column, so the index was wrong. */
-   int mem_embed_dim = db2_embedding_dim();
-   if (mem_embed_dim <= 0 || mem_embed_dim > EMBED_MAX_DIM)
-      mem_embed_dim = 1024;
-   if (pgvec_kb_service_ensure_memory_collection(mem_embed_dim) != 0)
-   {
-      return kb_send_error(fd, "failed to initialize the memory retrieval index");
-   }
-
-   int repaired = 0;
-   int failed = 0;
-   const char *mode = "all";
-
-   if (memory_id > 0)
-   {
-      mode = "single";
-      if (memory_repair_vector_index(memory_id, embed_cmd) == 0)
-         repaired = 1;
-      else
-         failed = 1;
-   }
-   else if (failed_only)
-   {
-      mode = "failed_only";
-      repaired = memory_repair_vector_index_failed_only(embed_cmd, limit, &failed);
-      if (repaired < 0)
-      {
-         return kb_send_error(fd, "failed to enumerate failed index ops");
-      }
-   }
-   else
-   {
-      int64_t ids[1024];
-      int id_count = db2_kb_service_list_memory_ids_by_updated(limit, ids, 1024);
-      if (id_count < 0)
-      {
-         return kb_send_error(fd, "failed to enumerate memories");
-      }
-
-      for (int i = 0; i < id_count; i++)
-      {
-         if (memory_repair_vector_index(ids[i], embed_cmd) == 0)
-            repaired++;
-         else
-            failed++;
-      }
-   }
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "mode", mode);
-   cJSON_AddNumberToObject(resp, "repaired", repaired);
-   cJSON_AddNumberToObject(resp, "failed", failed);
-   if (memory_id > 0)
-      cJSON_AddNumberToObject(resp, "memory_id", (double)memory_id);
-   if (limit > 0)
-      cJSON_AddNumberToObject(resp, "limit", limit);
-   if (failed_only)
-      cJSON_AddBoolToObject(resp, "failed_only", 1);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
 /* Verify collection + DB2 state for `aimee memory verify`. Fetches the pgvector
  * snapshot, DB2 row counts for memories/units/kb_documents, index_ops summary
  * (and optional failed detail), probes the embedder, and optionally runs a
@@ -1155,7 +1061,6 @@ static const struct
     {"kb.maintenance.run", kb_handle_maintenance_run},
     {"kb.export", kb_handle_kb_export},
     {"kb.import", kb_handle_kb_import},
-    {"memory.repair", kb_handle_memory_repair},
     {"memory.verify", kb_handle_memory_verify},
     {"memory.embed", kb_handle_memory_embed},
     {"code_embeddings_refresh", kb_handle_code_embeddings_refresh},

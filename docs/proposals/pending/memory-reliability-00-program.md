@@ -150,6 +150,11 @@ authenticated KB transport. The native answer decoder, structs and enum formatte
 are removed; MCP preserves long answers and new trace fields without truncation.
 A native presentation test covers scoped requests, abstention, malformed replies
 and unavailable transport without duplicating the Go answer policy.
+Vector repair now runs in Go, including single/all/failed-only modes, bounded
+retry configuration and stuck memory/code-job reset. Per-record transactions
+preserve progress; vector-write savepoints retain the prior vector on SQL failure
+while recording retry diagnostics. Successful jobs use the existing `ok` state.
+The native repair handler, wrappers and backend enumeration helpers are removed.
 The current inventory is five C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

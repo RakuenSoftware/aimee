@@ -103,14 +103,6 @@ static void db2_kb_learning_archive_expired(void)
        err, sizeof(err));
 }
 
-int db2_kb_service_reset_stuck_vector_ops(int max_attempts)
-{
-   /* Reset both the memory/evidence vector ops and the code-chunk ops so a
-    * single `memory repair --reset-stuck` retries orphaned code embeds too. */
-   return db2_vector_index_ops_reset_stuck(max_attempts) +
-          db2_code_index_ops_reset_stuck(max_attempts);
-}
-
 int db2_kb_service_collect_memory_verify(int include_failed_detail, int max_attempts,
                                          db2_kb_service_memory_verify_t *out)
 {
@@ -1042,34 +1034,6 @@ int db2_kb_service_count_embeddings_for_version(const char *version)
    if (aimee_pg_step(cs, err, sizeof(err)) == AIMEE_PG_ROW)
       count = aimee_pg_column_int(cs, 0);
    aimee_pg_finalize(cs);
-   return count;
-}
-
-int db2_kb_service_list_memory_ids_by_updated(int limit, int64_t *ids, int max_ids)
-{
-   if (!ids || max_ids < 1)
-      return -1;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char sql[256];
-   snprintf(sql, sizeof(sql), "SELECT id FROM memories ORDER BY updated_at DESC%s",
-            (limit > 0) ? " LIMIT ?1" : "");
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!stmt)
-      return -1;
-
-   if (limit > 0)
-      aimee_pg_bind_int(stmt, "?1", limit);
-
-   int count = 0;
-   while (count < max_ids && aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
-      ids[count++] = aimee_pg_column_int64(stmt, 0);
-   aimee_pg_finalize(stmt);
    return count;
 }
 
