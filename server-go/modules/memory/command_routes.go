@@ -15,6 +15,8 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "find_facts_visible", "Find facts in the active project, workspace and global scope.", handleRecordCommand, true},
+	{"memory", "find_facts_scoped", "Find facts in an explicit scope.", handleRecordCommand, true},
 	{"relations", "schema_list", "Read the enforced memory relation schema.", handleSchemaCommand, true},
 	{"memory", "search", "Search conversation memories.", handleRuntimeCommand, true},
 	{"memory", "episode_card_generate", "Build a scoped session episode card.", handleRuntimeCommand, true},

@@ -465,42 +465,6 @@ int kb_handle_memory_explain_match(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to explain match");
 }
 
-int kb_handle_memory_find_facts_visible(int fd, cJSON *req)
-{
-   cJSON *q = cJSON_GetObjectItemCaseSensitive(req, "query");
-   cJSON *ws = cJSON_GetObjectItemCaseSensitive(req, "workspace");
-   cJSON *pr = cJSON_GetObjectItemCaseSensitive(req, "project");
-   cJSON *l = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   if (!cJSON_IsString(q))
-      return kb_send_error(fd, "missing query");
-   const char *workspace = (cJSON_IsString(ws) && ws->valuestring[0]) ? ws->valuestring : NULL;
-   const char *project = (cJSON_IsString(pr) && pr->valuestring[0]) ? pr->valuestring : NULL;
-   int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 20;
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 1, &missing);
-   cJSON *resp =
-       db2_kb_service_memory_find_facts_visible_json(q->valuestring, workspace, project, limit);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to find visible facts");
-}
-
-int kb_handle_memory_find_facts_scoped(int fd, cJSON *req)
-{
-   cJSON *q = cJSON_GetObjectItemCaseSensitive(req, "query");
-   cJSON *st = cJSON_GetObjectItemCaseSensitive(req, "scope_type");
-   cJSON *sv = cJSON_GetObjectItemCaseSensitive(req, "scope_value");
-   cJSON *l = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   if (!cJSON_IsString(q))
-      return kb_send_error(fd, "missing query");
-   const char *scope_type = cJSON_IsString(st) ? st->valuestring : "";
-   const char *scope_value = cJSON_IsString(sv) ? sv->valuestring : "";
-   int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 20;
-   /* Fusion follows this KB instance's configuration. */
-   cJSON *resp =
-       db2_kb_service_memory_find_facts_scoped_json(q->valuestring, scope_type, scope_value, limit);
-   return kb_reply_or_error(fd, resp, "failed to find scoped facts");
-}
-
 int kb_handle_memory_assemble_typed_context(int fd, cJSON *req)
 {
    cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");

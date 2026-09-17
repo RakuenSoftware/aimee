@@ -1245,8 +1245,6 @@ static const struct
     {"tool_registry.snapshot", kb_handle_tool_registry_snapshot},
     {"tool_registry.lookup", kb_handle_tool_registry_lookup},
     {"mcp.call", kb_handle_mcp_call},
-    {"memory.find_facts_visible", kb_handle_memory_find_facts_visible},
-    {"memory.find_facts_scoped", kb_handle_memory_find_facts_scoped},
     {"memory.diagnose_scoped", kb_handle_memory_diagnose_scoped},
     {"memory.explain_match", kb_handle_memory_explain_match},
     {"graph.sync_code", kb_handle_graph_sync_code},

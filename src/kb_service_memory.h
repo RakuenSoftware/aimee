@@ -10,8 +10,6 @@ int kb_handle_memory_find_facts(int fd, cJSON *req);
 int kb_handle_session_briefing_commitments(int fd, cJSON *req);
 int kb_handle_session_briefing_directives(int fd, cJSON *req);
 int kb_handle_memory_assemble_typed_context(int fd, cJSON *req);
-int kb_handle_memory_find_facts_visible(int fd, cJSON *req);
-int kb_handle_memory_find_facts_scoped(int fd, cJSON *req);
 int kb_handle_memory_diagnose_scoped(int fd, cJSON *req);
 int kb_handle_memory_explain_match(int fd, cJSON *req);
 int kb_handle_memory_context_block(int fd, cJSON *req);

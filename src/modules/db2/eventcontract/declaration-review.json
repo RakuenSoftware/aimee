@@ -522,20 +522,6 @@
       "reason": "The cJSON fact-search response does not cross the typed ABI; a bounded query returns structured matches and truncation evidence."
     },
     {
-      "symbol": "db2_kb_service_memory_find_facts_scoped_json",
-      "signature_sha256": "0a3229393f7228731092b83e4d6150e134f4d12d12b2fa5abe648d8b1ff9ed59",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The scoped fact-search cJSON wrapper remains presentation; explicit bounded scope fields and typed matches define the memory operation."
-    },
-    {
-      "symbol": "db2_kb_service_memory_find_facts_visible_json",
-      "signature_sha256": "d5f8c42dd37676170cb4edca0568379bd940d0cda0e361de6a87bdbd87f89a4b",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The visibility-filtered cJSON result is local rendering; a typed query enforces scope and returns only bounded visible matches."
-    },
-    {
       "symbol": "db2_kb_service_memory_fold_session_json",
       "signature_sha256": "68f5de45d2cab8368b0b61cbdb90b0b1c619bf86ac3bdc47b8e1cb742d0ac07a",
       "disposition": "private-db2",

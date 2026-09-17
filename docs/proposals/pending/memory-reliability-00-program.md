@@ -122,6 +122,12 @@ cover lifecycle, deduplication, list caps, matching, and dry-run scheduling.
 Unused background-embedding C hooks and their suppression state are retired.
 Content screening is shared by both Go placements; the native content-gate
 source, header and platform build entries are removed.
+Scoped and visible fact-search commands now run through the Go command owner;
+their native KB handlers and response builders are removed. Packaged-schema
+tests exercise these commands under the restricted runtime role.
+Model edits preserve history, scope tags and lineage without inheriting user
+provenance. Public edits capture extraction authority in the same transaction;
+audit triggers receive the verified initiator and the effective content authority.
 The current inventory is six C sources and eight headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

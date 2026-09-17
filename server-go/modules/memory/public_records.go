@@ -88,6 +88,24 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 		return commandResult(commandError("invalid_argument", message))
 	}
 	switch verb {
+	case "find_facts_visible", "find_facts_scoped":
+		var ok bool
+		request.Query, ok = args.stringValue("query")
+		if !ok {
+			return invalid("memory." + verb + " requires query")
+		}
+		request.Limit, request.IncludeAll = args.limit("limit", 20, 64), false
+		if verb == "find_facts_visible" {
+			request.Operation = "visible-search"
+			request.Workspace, request.Project = args.stringOr("workspace", ""), args.stringOr("project", "")
+			scoped = true
+		} else {
+			request.Operation = "search"
+			request.Scope = Scope{Type: args.stringOr("scope_type", ""), Value: args.stringOr("scope_value", "")}
+			if _, err := normalizeScope(PlacementKB, request.Scope); err != nil {
+				return invalid(err.Error())
+			}
+		}
 	case "get":
 		var ok bool
 		request.ID, ok = args.positiveID("id")
@@ -171,6 +189,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 		key := "memories"
 		if verb == "fact_history" {
 			key = "history"
+		}
+		if verb == "find_facts_visible" || verb == "find_facts_scoped" {
+			key = "facts"
 		}
 		if response.PublicRecords == nil {
 			response.PublicRecords = []publicMemoryRecord{}

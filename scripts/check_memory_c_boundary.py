@@ -70,7 +70,7 @@ RETIRED_NATIVE_SYMBOLS = re.compile(
     r"db2_kb_service_memory_insert(?:_ex|_epistemic_ex)?_json|"
     r"db2_kb_service_memory_(?:delete|update|touch|reject|restore|upsert_workflow|supersede)_json|"
     r"db2_kb_service_memory_(?:briefing|alerts|assemble_context|compact_windows|query_edges|check_drift|episode_card_generate|export_jsonl|decisions_export_jsonl|search)_json|"
-    r"db2_kb_service_memory_(?:get|list|fact_history|top_l2_facts|load_eval_corpus|list_session_scope_priority|list_session_scope_priority_like|search_facts_patterns_by_keyword|scope_visibility_rank|tag_workspace|tag_scope)_json|"
+    r"db2_kb_service_memory_(?:find_facts_visible|find_facts_scoped|get|list|fact_history|top_l2_facts|load_eval_corpus|list_session_scope_priority|list_session_scope_priority_like|search_facts_patterns_by_keyword|scope_visibility_rank|tag_workspace|tag_scope)_json|"
     r"db2_kb_service_memory_(?:key_exists|find_id_by_key_kind|list_low_effectiveness|list_unused_l2|list_superseded_keys|review_list|set_artifact|effectiveness_stats)_json|"
     r"db2_kb_service_memory_(?:lint|maintenance_run|entity_profile|entity_edges|search_graph|search_graph_as_of|get_episode|get_provenance|link_query|link_create|link_delete|list_conflicts|query_health|stats)_json|"
     r"db2_kb_service_directive_(?:create|resolve|suppress|sweep_expired|list_json)|"

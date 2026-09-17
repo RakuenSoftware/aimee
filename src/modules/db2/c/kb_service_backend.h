@@ -205,10 +205,6 @@ extern "C"
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
    cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
-   cJSON *db2_kb_service_memory_find_facts_visible_json(const char *query, const char *workspace,
-                                                        const char *project, int limit);
-   cJSON *db2_kb_service_memory_find_facts_scoped_json(const char *query, const char *scope_type,
-                                                       const char *scope_value, int limit);
    cJSON *db2_kb_service_memory_diagnose_scoped_json(const char *query, const char *scope_type,
                                                      const char *scope_value, int limit);
    cJSON *db2_kb_service_memory_explain_match_json(const char *query, int64_t memory_id);

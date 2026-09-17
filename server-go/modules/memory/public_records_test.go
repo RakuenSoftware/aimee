@@ -16,6 +16,8 @@ func TestRecordPublicValidation(t *testing.T) {
 		{"list_session_scope_priority_like", `{"pattern":null}`}, {"search_facts_patterns_by_keyword", `{}`},
 		{"scope_visibility_rank", `{"ids":null}`}, {"tag_scope", `{"memory_id":1,"scope_type":"user","scope_value":"alice"}`},
 		{"tag_workspace", `{"memory_id":1,"workspace":""}`},
+		{"find_facts_visible", `{}`}, {"find_facts_scoped", `{"query":null}`},
+		{"find_facts_scoped", `{"query":"cache","scope_type":"project"}`},
 	} {
 		if r := runPublicCommand(t, client, tt.verb, tt.args); r["kind"] != "invalid_argument" {
 			t.Fatalf("%s: %v", tt.verb, r)
@@ -25,8 +27,8 @@ func TestRecordPublicValidation(t *testing.T) {
 		t.Fatal(r)
 	}
 	// A failed module must never look like a successful, empty recall.
-	for _, verb := range []string{"list", "get", "fact_history"} {
-		if r := runPublicCommand(t, client, verb, `{"id":1,"key":"missing"}`); r["kind"] != "unavailable" {
+	for _, verb := range []string{"list", "get", "fact_history", "find_facts_visible", "find_facts_scoped"} {
+		if r := runPublicCommand(t, client, verb, `{"id":1,"key":"missing","query":"anything"}`); r["kind"] != "unavailable" {
 			t.Fatalf("%s: %v", verb, r)
 		}
 	}
@@ -78,6 +80,33 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	record := run("get", `{"id":1}`)["memory"].(map[string]any)
 	if len(record) != 16 || record["headline"] != "Release headline" || record["content"] != strings.Repeat("memory detail ", 700) || record["use_count"] != float64(2) || record["source_session"] != "session-1" || record["provenance_category"] != "human" {
 		t.Fatal(record)
+	}
+	for _, tt := range []struct {
+		verb, args string
+		keys       []string
+	}{
+		{"find_facts_visible", `{"query":"key","workspace":"team","project":"app","include_all":true}`, []string{"workspace-key", "global-key"}},
+		{"find_facts_visible", `{"query":"key"}`, []string{"global-key"}},
+		{"find_facts_scoped", `{"query":"key","scope_type":"project","scope_value":"private"}`, []string{"private-key"}},
+		{"find_facts_scoped", `{"query":"key","scope_type":"workspace","scope_value":"team"}`, []string{"workspace-key"}},
+		{"find_facts_scoped", `{"query":"key"}`, []string{"global-key"}},
+		{"find_facts_visible", `{"query":"absent","workspace":"team","project":"app"}`, []string{}},
+	} {
+		r := run(tt.verb, tt.args)
+		rows := r["facts"].([]any)
+		if len(rows) != len(tt.keys) {
+			t.Fatal(tt.verb, tt.args, r)
+		}
+		for i, key := range tt.keys {
+			row := rows[i].(map[string]any)
+			if row["key"] != key || len(row) != 16 {
+				t.Fatal(row)
+			}
+		}
+	}
+	full := run("find_facts_visible", `{"query":"release","project":"app"}`)["facts"].([]any)
+	if len(full) != 1 || full[0].(map[string]any)["content"] != record["content"] {
+		t.Fatal(full)
 	}
 	if r := runPublicCommand(t, client, "get", `{"id":2}`); r["kind"] != "not_found" {
 		t.Fatal(r)

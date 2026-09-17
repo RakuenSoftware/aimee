@@ -160,6 +160,26 @@ WHERE c.object_kind='memory' AND c.object_key=$1 AND g.actor_principal=$2 AND g.
 			t.Fatalf("missing audit for %d actor=%s authority=%s: count=%d err=%v", id, principal, authority, count, err)
 		}
 	}
+	for _, verb := range []string{"find_facts_visible", "find_facts_scoped"} {
+		for _, project := range []string{"runtime-project-a", "runtime-project-b", ""} {
+			args := map[string]any{"query": "runtime-role-probe", "include_all": true}
+			if verb == "find_facts_visible" {
+				args["project"] = project
+			} else if project != "" {
+				args["scope_type"], args["scope_value"] = "project", project
+			}
+			encoded, _ := json.Marshal(args)
+			r := command(verb, string(encoded), true)
+			rows := r["facts"].([]any)
+			if project == "" {
+				if len(rows) != 0 {
+					t.Fatalf("%s leaked project records: %v", verb, rows)
+				}
+			} else if len(rows) != 1 || rows[0].(map[string]any)["content"] != project {
+				t.Fatal(verb, project, rows)
+			}
+		}
+	}
 	stored := command("store", `{"key":"runtime-public#v123","content":"original","authority":"user","tier":"L2","scope_context":true,"project":"runtime-project-a"}`, true)
 	oldID := int64(stored["id"].(float64))
 	checkAudit(oldID, caller.Principal, "user")
