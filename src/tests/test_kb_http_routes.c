@@ -1674,15 +1674,6 @@ double db2_demotion_score(int64_t row_id, int window_size, double half_life_days
    return row_id == 101 ? 0.20 : 0.80;
 }
 
-int db2_memory_get(int64_t memory_id, memory_t *out)
-{
-   assert(out != NULL);
-   memset(out, 0, sizeof(*out));
-   out->id = memory_id;
-   snprintf(out->kind, sizeof(out->kind), "%s", "fact");
-   return 0;
-}
-
 int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
                               const char *scope_id, char *buf, size_t len)
 {
@@ -4621,6 +4612,16 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
 {
    if (strcmp(method, "memory.runtime") == 0)
    {
+      if (strcmp(jo_cstr(args, "operation"), "record") == 0)
+      {
+         *result = cJSON_CreateObject();
+         cJSON_AddStringToObject(*result, "status", "ok");
+         cJSON *record = cJSON_AddObjectToObject(*result, "memory");
+         cJSON_AddNumberToObject(
+             record, "id", cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "id")));
+         cJSON_AddStringToObject(record, "kind", "fact");
+         return 1;
+      }
       assert(strcmp(jo_cstr(args, "operation"), "fusion-state") == 0);
       *result = cJSON_CreateObject();
       cJSON_AddBoolToObject(*result, "enabled", instance_fusion_enabled);

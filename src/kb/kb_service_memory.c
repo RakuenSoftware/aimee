@@ -6,12 +6,12 @@
 
 #include "aimee.h"
 #include "cJSON.h"
-#include "json_fluent.h" /* jo_ok */
+#include "json_fluent.h"
+#include "module_commands.h" /* jo_ok */
 #include "config.h"
 #include "modules/db2/c/kb_service_backend.h"
 #include "modules/db2/c/bandit.h"
 #include "modules/db2/c/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
-#include "modules/db2/c/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
 #include "modules/db2/c/evidence_lifecycle.h" /* P5 outcome history on provenance export */
 #include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/memory_scope_query.h"
@@ -521,9 +521,20 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
           * used to store the id, so the round-trip is lossless for the values
           * actually persisted. */
          int64_t id = (int64_t)e->valuedouble;
-         char kind[64] = "", source[128] = "", version[64] = "";
-         int found = db2_memory_provenance_by_id(id, kind, sizeof kind, source, sizeof source,
-                                                 version, sizeof version);
+         cJSON *record_args = cJSON_CreateObject(), *record_reply = NULL;
+         cJSON_AddStringToObject(record_args, "operation", "record");
+         cJSON_AddNumberToObject(record_args, "id", (double)id);
+         int fetched =
+             aimee_module_commands_dispatch_internal("memory.runtime", record_args, &record_reply);
+         cJSON_Delete(record_args);
+         const cJSON *record = cJSON_GetObjectItemCaseSensitive(record_reply, "memory");
+         int found = fetched == 1 && strcmp(jo_cstr(record_reply, "status"), "ok") == 0 &&
+                             cJSON_IsObject(record)
+                         ? 1
+                     : fetched == 1 && strcmp(jo_cstr(record_reply, "kind"), "not_found") == 0 ? 0
+                                                                                               : -1;
+         const char *kind = jo_cstr(record, "kind"), *source = jo_cstr(record, "source_session"),
+                    *version = jo_cstr(record, "updated_at");
          cJSON *src = cJSON_CreateObject();
          cJSON_AddNumberToObject(src, "id", (double)id);
          cJSON_AddStringToObject(src, "kind", kind);
@@ -559,6 +570,7 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
          cJSON_AddBoolToObject(src, "drifted",
                                turn_version[0] && found == 1 && strcmp(turn_version, version) != 0);
          cJSON_AddItemToArray(sources, src);
+         cJSON_Delete(record_reply);
       }
       /* auditable-correctness P1.5 (D3): resolve typed CODE refs from the unified
        * surfaced_refs. Each {type:"code", ref:"code:<project>:<file_path>", v} is

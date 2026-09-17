@@ -18,8 +18,18 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	if operation == "learning-apply" {
 		return handleLearningMutation(options, invocation, args)
 	}
+	if operation == "record" && options.placement == PlacementKB {
+		return handleRecordCommand(options, invocation, "get", args)
+	}
 	request := DataRequest{IncludeAll: true}
 	switch operation {
+	case "record":
+		request.Operation = "get"
+		var valid bool
+		request.ID, valid = args.positiveID("id")
+		if !valid {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
 	case "directive-create":
 		request.Operation = "directive-create"
 		request.Question, request.Topic = args.stringOr("question", ""), args.stringOr("topic", "")
@@ -56,6 +66,14 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInternal
 	}
 	switch operation {
+	case "record":
+		if len(response.Records) == 0 {
+			return commandResult(commandError("not_found", "memory not found"))
+		}
+		if len(response.Records) != 1 {
+			return nil, bus.ModuleStatusInternal
+		}
+		return commandResult(map[string]any{"status": "ok", "memory": response.Records[0]})
 	case "directive-create":
 		if len(response.Directives) != 1 {
 			return nil, bus.ModuleStatusInternal

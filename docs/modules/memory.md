@@ -384,3 +384,10 @@ relation; workflow reinforcement uses canonical scoped writes, model provenance,
 a 0.8 confidence ceiling and rejection checks. Workflow identity updates are
 serialized per scope/key. Go packaged-schema replay replaces the old mutation
 fixtures; the native proposal-consumer test checks routing and failure handling.
+
+Native record readers now consume Go records through generic host dispatch.
+Demotion, learning targets, benchmark diagnostics and retrieval provenance no
+longer use the fixed memory ABI. Reference capture retains the stored version
+and provenance retains source_session; both fields were being discarded by
+the legacy adapter. The CLI cognifier reads full content through the authenticated
+KB transport. Session pruning also invokes the shared Go maintenance command.

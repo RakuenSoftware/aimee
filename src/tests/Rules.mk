@@ -650,8 +650,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-cmd-onboard \
                $(TESTPREFIX)/unit-test-session-start-util \
                $(TESTPREFIX)/unit-test-memory-bus-context \
-               $(TESTPREFIX)/unit-test-memory-data-bus \
                $(TESTPREFIX)/unit-test-learning-memory-transport \
+               $(TESTPREFIX)/unit-test-memory-reference-transport \
                $(TESTPREFIX)/unit-test-server-memory-get \
                $(TESTPREFIX)/unit-test-session-brief \
                $(TESTPREFIX)/unit-test-learning-eval-synthesis \
@@ -7898,8 +7898,6 @@ $(OBJDIR)/aimee-providers-fixture: $(wildcard ../server-go/modules/providers/*.g
 	@mkdir -p $(dir $@)
 	cd ../server-go && go build -o ../src/$@ ./modules/providers/testdata/nativefixture
 
-$(TESTPREFIX)/unit-test-memory-data-bus: $(OBJDIR)/tests/test_memory_data_bus.o $(OBJDIR)/modules/memory/memory_data_bus.o $(OBJDIR)/vendor/cJSON.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 
 $(OBJDIR)/tests/test_module_commands.o: C_FLAGS += -Icore/event_bus/include
@@ -7920,4 +7918,7 @@ $(TESTPREFIX)/unit-test-mcp-directive-transport: $(OBJDIR)/tests/test_mcp_direct
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-learning-memory-transport: $(OBJDIR)/tests/test_learning_memory_transport.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-memory-reference-transport: $(OBJDIR)/tests/test_memory_reference_transport.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

@@ -314,10 +314,7 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
                                const char *key, const char *content, const char *use_cases,
                                double confidence, const char *session_id,
                                memory_authority_t authority, memory_t *out);
-int memory_get(int64_t id, memory_t *out);
 /* Same transport read with 0=found, 1=missing, -1=unavailable/malformed. */
-int memory_get_result(int64_t id, memory_t *out);
-int memory_get_as_of_result(int64_t id, const char *as_of, memory_t *out);
 int memory_touch(int64_t id);
 /* Batch memory_touch, for the recall path: one statement per chunk of ids
  * rather than one UPDATE per memory injected into a turn. */
@@ -473,7 +470,6 @@ int memory_promote(void);
 int memory_promote_delegation_patterns(void);
 int memory_demote(void);
 int memory_expire(void);
-int memory_run_maintenance(int *promoted, int *demoted, int *expired);
 
 /* Health metrics: record maintenance cycle stats and prune old data. */
 void memory_record_health(int promotions, int demotions, int expirations);

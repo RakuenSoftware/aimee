@@ -382,9 +382,18 @@ static void learning_fill_target_key(learning_signal_input_t *input)
    if (input->target_key[0] || input->target_memory_id <= 0)
       return;
 
-   memory_t memory;
-   if (memory_get(input->target_memory_id, &memory) == 0)
-      snprintf(input->target_key, sizeof(input->target_key), "%s", memory.key);
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "record");
+   cJSON_AddNumberToObject(args, "id", (double)input->target_memory_id);
+   if (aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) == 1)
+   {
+      const cJSON *record = cJSON_GetObjectItemCaseSensitive(reply, "memory");
+      const char *key = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "key"));
+      if (key)
+         snprintf(input->target_key, sizeof(input->target_key), "%s", key);
+   }
+   cJSON_Delete(reply);
+   cJSON_Delete(args);
 }
 
 int learning_router_record_signal(const learning_signal_input_t *raw_input,

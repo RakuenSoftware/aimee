@@ -106,7 +106,6 @@ static void test_memory_rejection_governance(void)
       /* Application-side filtering remains authoritative even for an owner or
        * superuser connection that PostgreSQL permits to bypass RLS. */
       db2_memory_scope_context_set("", "other-project", 0);
-      assert(db2_memory_get(rejected.id, &replay) == -1);
       db2_memory_review_row_t review[8];
       assert(db2_memory_review_list("", 8, review, 8) == 0);
       assert(db2_memory_reject(rejected.id, "cross-project rejection") == -1);
@@ -387,7 +386,15 @@ int main(void)
       assert(model.confidence <= 0.800001);
       assert(db2_memory_merge_update_ex(model.id, model.content, "", 1.0, 2, 2, 0.8, 0.5, 0.5,
                                         "2026-08-25T00:00:00Z") == 0);
-      assert(memory_get(model.id, &model) == 0);
+      char confidence_sql[128], confidence_err[128] = "";
+      snprintf(confidence_sql, sizeof(confidence_sql),
+               "SELECT confidence FROM memories WHERE id=%lld", (long long)model.id);
+      aimee_pg_stmt_t *confidence_stmt =
+          aimee_pg_prepare(db2_conn(), confidence_sql, confidence_err, sizeof(confidence_err));
+      assert(confidence_stmt && aimee_pg_step(confidence_stmt, confidence_err,
+                                              sizeof(confidence_err)) == AIMEE_PG_ROW);
+      model.confidence = aimee_pg_column_double(confidence_stmt, 0);
+      aimee_pg_finalize(confidence_stmt);
       assert(model.confidence <= 0.800001);
 
       assert(memory_insert(TIER_L5, KIND_FACT, "ceiling-inference", "synthesized inference", 1.0,
@@ -1476,11 +1483,17 @@ int main(void)
          assert(memory_transition_lifecycle(m.id, MEMORY_LIFECYCLE_STATE_ACTIVE, NULL) == -1);
          assert(memory_transition_lifecycle(m.id, MEMORY_LIFECYCLE_STATE_PENDING, NULL) == -1);
 
-         /* Archived memories are still fetchable via memory_get — archival
-          * is metadata, not truncation. */
-         memory_t got;
-         assert(memory_get(m.id, &got) == 0);
-         assert(strcmp(got.key, "sm:active") == 0);
+         /* Archival retains the stored row. Public historical-read parity is
+          * exercised through the Go command fixture. */
+         char archived_sql[128], archived_err[128] = "";
+         snprintf(archived_sql, sizeof(archived_sql), "SELECT key FROM memories WHERE id=%lld",
+                  (long long)m.id);
+         aimee_pg_stmt_t *archived_stmt =
+             aimee_pg_prepare(db2_conn(), archived_sql, archived_err, sizeof(archived_err));
+         assert(archived_stmt &&
+                aimee_pg_step(archived_stmt, archived_err, sizeof(archived_err)) == AIMEE_PG_ROW);
+         assert(strcmp(aimee_pg_column_text(archived_stmt, 0), "sm:active") == 0);
+         aimee_pg_finalize(archived_stmt);
 
          /* Recall must hide archived rows even with the archival feature flags
           * at their default-off values. History/get remains available above. */
@@ -2281,7 +2294,15 @@ int main(void)
                            &probe) == 0);
       assert(memory_transition_lifecycle(probe.id, MEMORY_LIFECYCLE_STATE_ARCHIVED, "fmt") == 0);
       memory_t after;
-      assert(memory_get(probe.id, &after) == 0);
+      char stamp_sql[128], stamp_err[128] = "";
+      snprintf(stamp_sql, sizeof(stamp_sql), "SELECT updated_at FROM memories WHERE id=%lld",
+               (long long)probe.id);
+      aimee_pg_stmt_t *stamp_stmt =
+          aimee_pg_prepare(db2_conn(), stamp_sql, stamp_err, sizeof(stamp_err));
+      assert(stamp_stmt && aimee_pg_step(stamp_stmt, stamp_err, sizeof(stamp_err)) == AIMEE_PG_ROW);
+      snprintf(after.updated_at, sizeof(after.updated_at), "%s",
+               aimee_pg_column_text(stamp_stmt, 0));
+      aimee_pg_finalize(stamp_stmt);
       assert(strlen(after.updated_at) == 20);
       assert(after.updated_at[10] == 'T');
       assert(after.updated_at[19] == 'Z');

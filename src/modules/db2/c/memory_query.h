@@ -768,7 +768,6 @@ extern "C"
    int db2_memory_touch_many(const int64_t *ids, int n);
 
    /* Single-row SELECT into memory_t. Returns 0 on hit, -1 on miss. */
-   int db2_memory_get(int64_t memory_id, memory_t *out);
 
    int db2_retrieval_shortcut_lookup(const char *normalized_query, int64_t *ids, int max,
                                      int *promoted_out, int64_t *hit_count_out);

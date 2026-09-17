@@ -940,11 +940,17 @@ void mem_cognify(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   /* Load the memory */
-   memory_t m;
-   if (memory_get(unit_id, &m) != 0)
+   cJSON *get_args = cJSON_CreateObject();
+   cJSON_AddNumberToObject(get_args, "id", (double)unit_id);
+   kb_client_memory_scope_context_apply(get_args);
+   char *get_raw = kb_v1_action_request("memory.get", get_args);
+   cJSON *get_reply = get_raw ? cJSON_Parse(get_raw) : NULL;
+   free(get_raw);
+   const cJSON *record = cJSON_GetObjectItemCaseSensitive(get_reply, "memory");
+   if (strcmp(jo_cstr(get_reply, "status"), "ok") != 0 || !cJSON_IsObject(record))
    {
-      fprintf(stderr, "error: memory %lld not found\n", (long long)unit_id);
+      fprintf(stderr, "error: memory %lld unavailable\n", (long long)unit_id);
+      cJSON_Delete(get_reply);
       return;
    }
 
@@ -952,11 +958,13 @@ void mem_cognify(app_ctx_t *ctx, int argc, char **argv)
    {
       fprintf(stderr,
               "error: cognification disabled (set memory.cognify.enabled=true in config)\n");
+      cJSON_Delete(get_reply);
       return;
    }
 
    memory_cognify_result_t result;
-   int rc = memory_cognify_unit(unit_id, m.content, &result);
+   int rc = memory_cognify_unit(unit_id, jo_cstr(record, "content"), &result);
+   cJSON_Delete(get_reply);
    if (rc != 0)
    {
       fprintf(stderr, "error: cognification failed for unit %lld\n", (long long)unit_id);

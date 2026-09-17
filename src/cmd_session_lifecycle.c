@@ -724,11 +724,11 @@ void prune_stale_sessions(void)
       /* Expire session directives */
       kb_client_directive_expire_session();
 
-      /* Legacy monolithic command path. Shipped client requests route through
-       * aimee-server; the server RPC port must split DB1 reads from DB2 writes
-       * before this maintenance can be exposed through shipped surfaces. */
-      int promoted = 0, demoted = 0, expired = 0;
-      memory_run_maintenance(&promoted, &demoted, &expired);
+      cJSON *maintenance_args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(maintenance_args, "modes", 1);
+      cJSON_AddBoolToObject(maintenance_args, "force", 1);
+      char *maintenance_reply = kb_v1_action_request("memory.maintenance_run", maintenance_args);
+      free(maintenance_reply);
 
       /* Extract anti-patterns */
       kb_client_anti_pattern_extract_from_feedback();

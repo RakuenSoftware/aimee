@@ -1,6 +1,8 @@
 /* kb_intel_payload.c: shared JSON payloads for intelligence readiness/export. */
 
 #include "aimee.h"
+#include "module_commands.h"
+#include "json_fluent.h"
 #include "cJSON.h"
 #include "config.h"
 #include "modules/db2/c/bandit.h"
@@ -68,13 +70,22 @@ cJSON *kb_intel_demote_check_response(void)
                                         config_demotion_half_life_days(), config_demotion_n_min());
       if (isnan(score))
          continue;
-      memory_t mem;
-      memset(&mem, 0, sizeof(mem));
-      if (db2_memory_get(candidates[i].row_id, &mem) != 0 || !mem.kind[0])
+      cJSON *args = cJSON_CreateObject(), *reply = NULL;
+      cJSON_AddStringToObject(args, "operation", "record");
+      cJSON_AddNumberToObject(args, "id", (double)candidates[i].row_id);
+      int fetched = aimee_module_commands_dispatch_internal("memory.runtime", args, &reply);
+      cJSON_Delete(args);
+      const cJSON *record = cJSON_GetObjectItemCaseSensitive(reply, "memory");
+      const char *kind = jo_cstr(record, "kind");
+      if (fetched != 1 || strcmp(jo_cstr(reply, "status"), "ok") != 0 || !kind[0])
+      {
+         cJSON_Delete(reply);
          continue;
-      snprintf(rows[n_scored].kind, sizeof(rows[n_scored].kind), "%s", mem.kind);
+      }
+      snprintf(rows[n_scored].kind, sizeof(rows[n_scored].kind), "%s", kind);
       rows[n_scored].score = score;
       n_scored++;
+      cJSON_Delete(reply);
    }
    free(candidates);
 

@@ -18,6 +18,13 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
       return 0;
    *result = cJSON_CreateObject();
    cJSON_AddStringToObject(*result, "status", reply_status);
+   if (strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
+              "record") == 0 &&
+       strcmp(reply_status, "ok") == 0)
+   {
+      cJSON *record = cJSON_AddObjectToObject(*result, "memory");
+      cJSON_AddStringToObject(record, "key", "learning-target-key");
+   }
    return 1;
 }
 int db2_collab_rules_propose(const char *text, const char *reason, const char *source)
@@ -71,6 +78,14 @@ int main(void)
    }
    snprintf(proposal.action_json, sizeof(proposal.action_json), "malformed");
    assert(learning_apply_sink(&proposal) == -1);
+   learning_signal_input_t input = {0};
+   input.target_memory_id = 77;
+   learning_fill_target_key(&input);
+   assert(strcmp(input.target_key, "learning-target-key") == 0);
+   input.target_key[0] = 0;
+   available = 0;
+   learning_fill_target_key(&input);
+   assert(input.target_key[0] == 0);
    cJSON_Delete(last_request);
    return 0;
 }

@@ -3,6 +3,8 @@
 
 #include "kb_demote.h"
 #include "aimee.h"
+#include "module_commands.h"
+#include "json_fluent.h"
 #include "modules/db2/c/artifacts.h"
 #include "modules/db2/c/demotion.h"
 #include "modules/db2/c/memory_promotion.h"
@@ -105,19 +107,26 @@ int kb_demote_run(void)
          continue;
 
       /* Look up the memory kind for this row. */
-      memory_t mem;
-      memset(&mem, 0, sizeof(mem));
-      int rc = db2_memory_get(candidates[i].row_id, &mem);
-      if (rc != 0 || !mem.kind[0])
+      cJSON *args = cJSON_CreateObject(), *reply = NULL;
+      cJSON_AddStringToObject(args, "operation", "record");
+      cJSON_AddNumberToObject(args, "id", (double)candidates[i].row_id);
+      int fetched = aimee_module_commands_dispatch_internal("memory.runtime", args, &reply);
+      cJSON_Delete(args);
+      const cJSON *record = cJSON_GetObjectItemCaseSensitive(reply, "memory");
+      const char *kind = jo_cstr(record, "kind");
+      if (fetched != 1 || strcmp(jo_cstr(reply, "status"), "ok") != 0 || !kind[0])
+      {
+         cJSON_Delete(reply);
          continue;
-
+      }
       rows[n_scored].row_id = candidates[i].row_id;
-      snprintf(rows[n_scored].kind, sizeof(rows[n_scored].kind), "%s", mem.kind);
+      snprintf(rows[n_scored].kind, sizeof(rows[n_scored].kind), "%s", kind);
       rows[n_scored].score = score;
       n_scored++;
 
       aimee_log(LOG_DEBUG, "demotion", "row=%lld kind=%s score=%.4f",
-                (long long)candidates[i].row_id, mem.kind, score);
+                (long long)candidates[i].row_id, kind, score);
+      cJSON_Delete(reply);
    }
 
    /* Group scores by memory class and write one demotion_profile per class. */

@@ -56,6 +56,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:memory_get(?:_as_of_result|_result)?|db2_memory_get|db2_memory_provenance_by_id|memory_run_maintenance)\b(?=\s*\()|"
     r"\bmemory_(?:apply_feedback|upsert_workflow|supersede)\b(?=\s*\()|"
     r"\b(?:memory_fold_session|kb_client_memory_fold_session|db2_kb_service_memory_fold_session_json)\b(?=\s*\()|"
     r"\b(?:db2_memory_scene\w+|db2_kb_service_scene_\w+|kb_client_memory_scene_\w+)\b(?=\s*\()|"

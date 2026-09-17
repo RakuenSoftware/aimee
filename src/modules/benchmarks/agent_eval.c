@@ -878,7 +878,19 @@ void mem_eval_print_miss_report(FILE *fp, mem_eval_case_t *cases, int n_cases, i
       }
       else if (expected_id > 0)
       {
-         (void)memory_get(expected_id, &expected_mem);
+         cJSON *get_args = cJSON_CreateObject(), *get_reply = NULL;
+         cJSON_AddStringToObject(get_args, "operation", "record");
+         cJSON_AddNumberToObject(get_args, "id", (double)expected_id);
+         if (aimee_module_commands_dispatch_internal("memory.runtime", get_args, &get_reply) == 1)
+         {
+            const cJSON *record = cJSON_GetObjectItemCaseSensitive(get_reply, "memory");
+            expected_mem.id = expected_id;
+            snprintf(expected_mem.key, sizeof(expected_mem.key), "%s", jo_cstr(record, "key"));
+            snprintf(expected_mem.content, sizeof(expected_mem.content), "%s",
+                     jo_cstr(record, "content"));
+         }
+         cJSON_Delete(get_reply);
+         cJSON_Delete(get_args);
       }
 
       cJSON_Delete(reply);

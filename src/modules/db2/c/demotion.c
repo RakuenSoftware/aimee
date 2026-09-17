@@ -5,8 +5,9 @@
 #include "artifacts.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
-#include "memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
 #include "aimee.h"
+#include "module_commands.h"
+#include "json_fluent.h"
 
 #include <cJSON.h>
 #include <math.h>
@@ -37,10 +38,18 @@ static cJSON *make_memory_ref(int64_t id)
       return NULL;
    cJSON_AddStringToObject(r, "type", "memory");
    cJSON_AddNumberToObject(r, "id", (double)id);
-   char version[64] = "";
-   if (db2_memory_provenance_by_id(id, NULL, 0, NULL, 0, version, sizeof(version)) == 1 &&
-       version[0])
-      cJSON_AddStringToObject(r, "v", version);
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "record");
+   cJSON_AddNumberToObject(args, "id", (double)id);
+   if (aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) == 1)
+   {
+      const cJSON *record = cJSON_GetObjectItemCaseSensitive(reply, "memory");
+      const char *version = jo_cstr(record, "updated_at");
+      if (strcmp(jo_cstr(reply, "status"), "ok") == 0 && version[0])
+         cJSON_AddStringToObject(r, "v", version);
+   }
+   cJSON_Delete(reply);
+   cJSON_Delete(args);
    return r;
 }
 

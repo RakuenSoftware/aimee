@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "ffe13c89ebc5a53cf45a7e50bbe3456b71bc18f3",
-  "source_fingerprint": "196651af99345971781830ccb9d9eac935c154f3aa4c9cc5ea2f006bdec89ae8",
+  "source_revision": "a3d4c43ba9f2a16dd8a0fcc407a321200f071ede",
+  "source_fingerprint": "6b93e971f888432e052da831a7f2d8c1f086d4facab03f49f1b657ddaf71aa90",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -1915,6 +1915,7 @@
     {
       "symbol": "aimee_module_commands_dispatch_internal",
       "references": [
+        "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/kb_service_backend.c"
       ],
       "disposition": "portable-core-promotion",
@@ -1972,14 +1973,6 @@
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "db2_memory_provenance_by_id",
-      "references": [
-        "src/modules/db2/c/demotion.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
       "symbol": "db2_memory_scope_bind_current",
@@ -3071,15 +3064,15 @@
   "summary": {
     "translation_units": 123,
     "descriptor_support_units": 19,
-    "unresolved_symbols": 145,
+    "unresolved_symbols": 144,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 4,
+      "injected-module-contract": 3,
       "portable-core-promotion": 1,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 140
     }
   },
-  "fingerprint": "ece950d24fcb366b312a6b546258a48f824c031d4048a8b9864afc3ca1c16dee"
+  "fingerprint": "a0f91780c0bd22061f4fe71a06cb01f52e542c21ce10c1d96140193163c1dead"
 }

@@ -49,19 +49,6 @@ const char *memory_ontology_node_kind_to_text(memory_node_kind_t kind)
    }
 }
 
-int db2_memory_provenance_by_id(int64_t memory_id, char *kind_out, int kind_len, char *source_out,
-                                int source_len, char *version_out, int version_len)
-{
-   (void)memory_id;
-   if (kind_out && kind_len > 0)
-      kind_out[0] = '\0';
-   if (source_out && source_len > 0)
-      source_out[0] = '\0';
-   if (version_out && version_len > 0)
-      version_out[0] = '\0';
-   return 0;
-}
-
 int64_t db2_memory_count(void)
 {
    return 0;
@@ -80,4 +67,18 @@ int db2_memory_count_l3(void)
 int db2_memory_count_orphaned_l0(void)
 {
    return 0;
+}
+
+/* Unconfigured module transport for legacy DB2-only fixtures. Consumer-specific
+ * tests supply a strong transport mock and assert the Go response contract. */
+__attribute__((weak)) int aimee_module_commands_dispatch_internal(const char *method,
+                                                                  const cJSON *args, cJSON **result)
+{
+   (void)args;
+   if (strcmp(method, "memory.runtime") != 0)
+      return 0;
+   *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(*result, "status", "error");
+   cJSON_AddStringToObject(*result, "kind", "not_found");
+   return 1;
 }
