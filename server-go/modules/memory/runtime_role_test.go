@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -135,6 +136,65 @@ has_schema_privilege(current_user,'public','CREATE') OR
 		}
 	}
 
+	// Exercise public writes with the packaged audit triggers and the real
+	// restricted store role, not only the minimal command fixtures.
+	caller := bus.CommandContext{Authenticated: true, Principal: "user:runtime-probe", TransportIdentity: "cert:runtime-probe", UserAuthority: true}
+	command := func(verb, args string, verified bool) map[string]any {
+		t.Helper()
+		context := bus.CommandContext{}
+		if verified {
+			context = caller
+		}
+		r, status := invokeContextCommand(t, handler, 0, context, verb, args)
+		if status != bus.ModuleStatusOK || r["status"] != "ok" {
+			t.Fatalf("%s: %v status=%d", verb, r, status)
+		}
+		return r
+	}
+	checkAudit := func(id int64, principal, authority string) {
+		t.Helper()
+		var count int
+		err := tx.QueryRow(ctx, `SELECT count(*) FROM fact_graph_changes c JOIN fact_graph_commits g USING(commit_id)
+WHERE c.object_kind='memory' AND c.object_key=$1 AND g.actor_principal=$2 AND g.actor_role=$3 AND g.status='applied'`, fmt.Sprint(id), principal, authority).Scan(&count)
+		if err != nil || count == 0 {
+			t.Fatalf("missing audit for %d actor=%s authority=%s: count=%d err=%v", id, principal, authority, count, err)
+		}
+	}
+	stored := command("store", `{"key":"runtime-public#v123","content":"original","authority":"user","tier":"L2","scope_context":true,"project":"runtime-project-a"}`, true)
+	oldID := int64(stored["id"].(float64))
+	checkAudit(oldID, caller.Principal, "user")
+	if _, err := tx.Exec(ctx, `INSERT INTO memory_scopes(memory_id,scope_type,scope_value) VALUES ($1,'workspace','runtime-team')`, oldID); err != nil {
+		t.Fatal(err)
+	}
+	updated := command("update", fmt.Sprintf(`{"id":%d,"content":"model replacement","scope_context":true,"project":"runtime-project-a"}`, oldID), true)
+	newID := int64(updated["id"].(float64))
+	if newID == oldID || updated["superseded"] != true {
+		t.Fatal(updated)
+	}
+	checkAudit(newID, caller.Principal, "model")
+	var key, provenance, actor, role string
+	var ceiling float64
+	var inherited, interval, link bool
+	err = tx.QueryRow(ctx, `SELECT n.key,n.provenance_category,n.confidence_ceiling,a.actor_principal,a.actor_role,
+o.valid_until=n.valid_from AND n.valid_from<>'',
+EXISTS(SELECT 1 FROM memory_scopes WHERE memory_id=n.id AND scope_value='runtime-team'),
+EXISTS(SELECT 1 FROM memory_links WHERE source_id=n.id AND target_id=o.id AND relation='supersedes')
+FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memories o WHERE n.id=$1 AND o.id=$2`, newID, oldID).
+		Scan(&key, &provenance, &ceiling, &actor, &role, &interval, &inherited, &link)
+	if err != nil || key != "runtime-public#v123" || provenance != "agent_message" || ceiling != 0.8 || actor != "system:model-inference" || role != "model" || !interval || !inherited || !link {
+		t.Fatalf("replacement: %s %s %g %s %s interval=%v scope=%v link=%v err=%v", key, provenance, ceiling, actor, role, interval, inherited, link, err)
+	}
+	command("update", fmt.Sprintf(`{"id":%d,"content":"operator correction","authority":"user","scope_context":true,"project":"runtime-project-a"}`, newID), true)
+	checkAudit(newID, caller.Principal, "user")
+	if err := tx.QueryRow(ctx, `SELECT m.provenance_category,m.confidence_ceiling,a.actor_principal,a.actor_role FROM memories m JOIN memory_fact_actors a ON a.memory_id=m.id WHERE m.id=$1`, newID).Scan(&provenance, &ceiling, &actor, &role); err != nil || provenance != "user_stated" || ceiling != 1 || actor != caller.Principal || role != "user" {
+		t.Fatal(provenance, ceiling, actor, role, err)
+	}
+	forged := command("store", `{"key":"runtime-forged","content":"model note","authority":"user","actor":"user:forged","authenticated":true}`, false)
+	checkAudit(int64(forged["id"].(float64)), "system:model-inference", "model")
+	command("reject", fmt.Sprintf(`{"id":%d}`, newID), true)
+	command("restore", fmt.Sprintf(`{"id":%d}`, newID), true)
+	command("delete", fmt.Sprintf(`{"id":%d,"authority":"user"}`, newID), true)
+
 	// Calls use nested transactions in this fixture; releasing a savepoint
 	// retains SET LOCAL until the enclosing transaction ends. Production store
 	// transactions are top-level, so inspect reset at that same boundary.
@@ -142,7 +202,9 @@ has_schema_privilege(current_user,'public','CREATE') OR
 		t.Fatal(err)
 	}
 	var retained string
-	if err := conn.QueryRow(ctx, `SELECT COALESCE(current_setting('aimee.memory_scope_value',true),'')`).Scan(&retained); err != nil || retained != "" {
-		t.Fatalf("request scope retained after transaction: %q %v", retained, err)
+	for _, setting := range []string{"aimee.memory_scope_value", "aimee.principal", "aimee.authority", "aimee.transport_identity", "aimee.correlation_id"} {
+		if err := conn.QueryRow(ctx, `SELECT COALESCE(current_setting($1,true),'')`, setting).Scan(&retained); err != nil || retained != "" {
+			t.Fatalf("request setting %s retained after transaction: %q %v", setting, retained, err)
+		}
 	}
 }

@@ -25,6 +25,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 		}
 		request.Operation = map[string]string{"delete": "delete-as", "update": "update-as", "touch": "touch", "reject": "reject", "restore": "restore"}[verb]
 		if verb == "update" {
+			options.publicWrite = true
 			request.Content = args.stringOr("content", "")
 			if request.Content == "" {
 				return invalid("missing content")

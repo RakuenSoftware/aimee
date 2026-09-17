@@ -78,6 +78,10 @@ CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text DEFAUL
  valid_from text DEFAULT '',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_rejection_tombstones(id bigserial PRIMARY KEY,object_kind text,memory_key text,memory_content text,scope_type text,scope_value text,reason text,active int DEFAULT 1,rejected_at text DEFAULT pg_now_text(),rejected_by text DEFAULT '',restored_at text DEFAULT '',restored_by text DEFAULT '');
 CREATE UNIQUE INDEX tomb_unique ON memory_rejection_tombstones(memory_key,memory_content,scope_type,scope_value) WHERE object_kind='memory' AND active=1;
+CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text,UNIQUE(memory_id,scope_type,scope_value));
+CREATE TEMP TABLE memory_links(id bigserial PRIMARY KEY,source_id bigint,target_id bigint,relation text);
+CREATE TEMP TABLE memory_fact_actors(memory_id bigint PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,actor_principal text,actor_role text,authority_rank int,authenticated int,transport_identity text,captured_at text DEFAULT pg_now_text());
+CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id bigint,project text,status text,updated_at text,UNIQUE(kind,document_id));
 INSERT INTO memories(key) SELECT 'record-'||i FROM generate_series(1,8) i;
 UPDATE memories SET epistemic_kind='experience' WHERE id=7;
 UPDATE memories SET epistemic_kind='policy' WHERE id=8;`)

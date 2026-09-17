@@ -1030,14 +1030,31 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 				return nil, bus.ModuleStatusInternal
 			}
 			defer transaction.Rollback(context.Background())
+			principal, authority, transport := "system:model-inference", "model", "internal"
+			if caller := options.commandContext; caller != nil && caller.Authenticated {
+				principal, transport = caller.Principal, caller.TransportIdentity
+				if transport == "" {
+					transport = principal
+				}
+				// The initiator and the content's authority are separate. Merely
+				// authenticating a model request never upgrades its content.
+				if (request.Authority == AuthorityUser && caller.UserAuthority) || request.Operation == "restore" {
+					authority = "user"
+				}
+			}
 			_, err = transaction.Exec(ctx, `SELECT
 set_config('aimee.memory_scope_type',$1,true),
 set_config('aimee.memory_scope_value',$2,true),
 set_config('aimee.memory_workspace',$3,true),
 set_config('aimee.memory_project',$4,true),
-set_config('aimee.memory_scope_all',$5,true)`,
+set_config('aimee.memory_scope_all',$5,true),
+set_config('aimee.principal',$6,true),
+set_config('aimee.authority',$7,true),
+set_config('aimee.transport_identity',$8,true),
+set_config('aimee.correlation_id',$9,true)`,
 				string(scope.Type), scope.Value, request.Workspace, request.Project,
-				map[bool]string{false: "0", true: "1"}[request.IncludeAll])
+				map[bool]string{false: "0", true: "1"}[request.IncludeAll],
+				principal, authority, transport, strconv.FormatUint(invocation.TraceID, 10))
 			if err != nil {
 				return nil, bus.ModuleStatusInternal
 			}
@@ -1237,9 +1254,16 @@ set_config('aimee.memory_scope_all',$5,true)`,
 				(request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
+			if options.publicWrite && transaction == nil {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
 			var code int
 			var newID int64
 			code, newID, err = mutations.UpdateAs(ctx, request.ID, request.Content, request.Authority)
+			if err == nil && code == MutationOK && options.publicWrite {
+				backend := options.data.(*postgresDataStore)
+				err = backend.captureStoredFactActor(ctx, newID, request.Authority, options.commandContext)
+			}
 			if errors.Is(err, ErrMemoryNotFound) {
 				code, err = -1, nil
 			}

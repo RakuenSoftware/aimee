@@ -88,7 +88,8 @@ func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content stri
 		return -1, 0, err
 	}
 	var epistemic string
-	if err := s.db.QueryRow(ctx, `SELECT epistemic_kind FROM memories WHERE id=$1`, id).Scan(&epistemic); err != nil {
+	var confidence float64
+	if err := s.db.QueryRow(ctx, `SELECT epistemic_kind,confidence FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&epistemic, &confidence); err != nil {
 		if store.IsNoRows(err) {
 			return -1, 0, ErrMemoryNotFound
 		}
@@ -101,8 +102,11 @@ func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content stri
 		return MutationRequiresReplacement, id, nil
 	}
 	if authority == AuthorityUser {
-		updated, err := s.UpdateContent(ctx, id, content)
-		if !updated && err == nil {
+		tag, err := s.db.Exec(ctx, `UPDATE memories SET content=$2,provenance_category='user_stated',
+confidence_ceiling=CASE WHEN tier='L5' THEN 0.5 ELSE 1.0 END,
+confidence=LEAST(confidence,CASE WHEN tier='L5' THEN 0.5 ELSE 1.0 END),updated_at=pg_now_text()
+WHERE id=$1 AND lifecycle_state='active'`, id, content)
+		if err == nil && tag.RowsAffected() == 0 {
 			return -1, 0, ErrMemoryNotFound
 		}
 		return MutationOK, id, err
@@ -110,23 +114,8 @@ func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content stri
 	if authority != AuthorityModel {
 		return -1, 0, errors.New("memory: invalid authority")
 	}
-	var newID int64
-	err := s.db.QueryRow(ctx, `WITH old AS (
- UPDATE memories SET key=key||'#v'||id::text,lifecycle_state='superseded',valid_until=pg_now_text(),
- archive_reason='superseded by model edit',activation_suppressed=1,updated_at=pg_now_text()
- WHERE id=$1 AND lifecycle_state='active'
- RETURNING tier,kind,epistemic_kind,regexp_replace(key,'#v[0-9]+$','') AS key,use_cases,
- confidence,confidence_ceiling,source_session,provenance_category,scope_type,scope_value
-), fresh AS (
- INSERT INTO memories(tier,kind,epistemic_kind,key,content,use_cases,confidence,confidence_ceiling,
- source_session,provenance_category,scope_type,scope_value,lifecycle_state)
- SELECT tier,kind,epistemic_kind,key,$2,use_cases,confidence,confidence_ceiling,source_session,
- provenance_category,scope_type,scope_value,'active' FROM old RETURNING id
-) SELECT id FROM fresh`, id, content).Scan(&newID)
-	if store.IsNoRows(err) {
-		return -1, 0, ErrMemoryNotFound
-	}
-	return MutationOK, newID, err
+	record, err := s.supersedeKB(ctx, id, content, confidence, "")
+	return MutationOK, record.ID, err
 }
 
 // DeleteAs hard-deletes only under explicit user authority. Model authority

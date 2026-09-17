@@ -93,6 +93,27 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 		t.Fatal(user)
 	}
 	checkActor(user["id"], "user:alice", 30, 1)
+	// A failed model edit must roll back the closed interval, replacement,
+	// lineage, and extraction actor together.
+	if _, err := tx.Exec(ctx, `ALTER TABLE kb_async_jobs ADD CONSTRAINT update_enqueue_failure CHECK (document_id<0) NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	edit := fmt.Sprintf(`{"id":%.0f,"content":"failed replacement"}`, user["id"])
+	if r := runPublicCommand(t, client, "update", edit); r["kind"] != "unavailable" {
+		t.Fatal(r)
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state='active' AND valid_until='' AND content='verified note' FROM memories WHERE id=$1`, int64(user["id"].(float64))).Scan(&active); err != nil || !active {
+		t.Fatal(active, err)
+	}
+	checkActor(user["id"], "user:alice", 30, 1)
+	var leaked int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE content='failed replacement'`).Scan(&leaked); err != nil || leaked != 0 {
+		t.Fatal(leaked, err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE kb_async_jobs DROP CONSTRAINT update_enqueue_failure`); err != nil {
+		t.Fatal(err)
+	}
 	// Reusing a key for model text must replace stale, higher extraction authority.
 	replaced := put(`{"key":"user-note","content":"model replacement","scope_context":true,"project":"app"}`, true)
 	if replaced["status"] != "ok" || replaced["id"] != user["id"] {
