@@ -205,7 +205,6 @@ if(WIN32)
     )
     set(PLATFORM_DATA_SRCS
         ${AIMEE_SRC_DIR}/windows/history.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/windows/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -249,7 +248,6 @@ elseif(APPLE)
     )
     set(PLATFORM_DATA_SRCS
         ${AIMEE_SRC_DIR}/posix/history.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -310,7 +308,6 @@ else()
     )
     set(PLATFORM_DATA_SRCS
         ${AIMEE_SRC_DIR}/posix/history.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -380,7 +377,6 @@ if(WIN32)
     )
     set(KB_PLATFORM_EXTRA_SRCS
         ${AIMEE_SRC_DIR}/windows/cli_client.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/windows/agent_bridge.c
         ${AIMEE_SRC_DIR}/windows/web_egress.c
     )
@@ -404,7 +400,6 @@ elseif(APPLE)
     )
     set(KB_PLATFORM_EXTRA_SRCS
         ${AIMEE_SRC_DIR}/posix/cli_client.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
     )
 else()
@@ -427,7 +422,6 @@ else()
     )
     set(KB_PLATFORM_EXTRA_SRCS
         ${AIMEE_SRC_DIR}/posix/cli_client.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
     )
 endif()

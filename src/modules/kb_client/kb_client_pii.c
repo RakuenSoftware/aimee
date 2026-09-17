@@ -2,51 +2,50 @@
  * crossing aimee-server -> aimee-kb. See kb_client_pii.h for the contract and
  * for why the screen lives here rather than at each call site. */
 #include "kb_client_pii.h"
+#include "module_commands.h"
 
 #include <stdlib.h>
 #include <string.h>
-
-/* gate_check_sensitive is the platform secret/PII classifier, implemented in
- * posix/memory.c and windows/memory.c -- platform files, not inside the memory
- * module. Its only header lives at modules/memory/memory_platform.h, which is
- * module-internal and deliberately not on this translation unit's include path:
- * the memory module publishes a bus wire contract, not a C surface. Declaring
- * the prototype here keeps the boundary intact while still calling the one
- * canonical classifier rather than growing a second, divergent one. */
-int gate_check_sensitive(const char *content, char *redacted, size_t redacted_cap);
 
 int kb_client_pii_screen(const char *text, char **out)
 {
    *out = NULL;
    if (!text || !text[0])
       return 0;
-   /* Sized so the prefix plus the [REDACTED] marker always fits; the classifier
-    * only reports 2 for a span it could not locate, never for a small buffer. */
-   size_t cap = strlen(text) + 32;
-   char *buf = malloc(cap);
-   if (!buf)
-      return -1;
-   int verdict = gate_check_sensitive(text, buf, cap);
-   if (verdict == 1)
+   cJSON *request = cJSON_CreateObject(), *response = NULL;
+   if (!request || !cJSON_AddStringToObject(request, "content", text))
    {
-      *out = buf;
-      return 0;
+      cJSON_Delete(request);
+      return -1;
    }
-   free(buf);
-   return verdict == 0 ? 0 : -1;
+   int dispatched = aimee_module_commands_dispatch("memory.screen_content", request, &response);
+   cJSON_Delete(request);
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+   const char *verdict =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "verdict"));
+   int rc = -1;
+   if (dispatched == 1 && status && strcmp(status, "ok") == 0 && verdict)
+   {
+      if (strcmp(verdict, "allow") == 0)
+         rc = 0;
+      else if (strcmp(verdict, "redact") == 0)
+      {
+         const char *redacted =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "redacted"));
+         if (redacted && (*out = strdup(redacted)))
+            rc = 0;
+      }
+   }
+   cJSON_Delete(response);
+   return rc;
 }
 
 int kb_client_pii_identifier_sensitive(const char *ident)
 {
-   if (!ident || !ident[0])
-      return 0;
-   size_t cap = strlen(ident) + 32;
-   char *buf = malloc(cap);
-   if (!buf)
-      return 1;
-   int verdict = gate_check_sensitive(ident, buf, cap);
-   free(buf);
-   return verdict != 0;
+   char *redacted = NULL;
+   int sensitive = kb_client_pii_screen(ident, &redacted) != 0 || redacted != NULL;
+   free(redacted);
+   return sensitive;
 }
 
 static int kbc_pii_add(cJSON *obj, const char *field, const char *text, int required)

@@ -12,7 +12,6 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/memory/gw_stage_memory.c",
-    "src/modules/memory/memory_content_gate_bus.c",
     "src/modules/memory/memory_embed_bus.c",
     "src/modules/memory/memory_data_bus.c",
     "src/modules/memory/memory_domain_bus.c",
@@ -115,7 +114,6 @@
     "src/modules/memory/memory_fact_gate.h",
     "src/modules/memory/memory_graph_fusion.h",
     "src/modules/memory/memory_ontology.h",
-    "src/modules/memory/memory_platform.h",
     "src/modules/memory/memory_profile_pack.h"
   ],
   "tests": [

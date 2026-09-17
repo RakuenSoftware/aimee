@@ -107,6 +107,11 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
+	for _, route := range sharedCommandRoutes {
+		if route.verb == verb {
+			return route.handler(options, invocation, verb, args)
+		}
+	}
 	if options.placement == PlacementKB {
 		for _, route := range kbCommandRoutes {
 			if route.verb == verb {

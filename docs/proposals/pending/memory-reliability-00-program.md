@@ -120,7 +120,9 @@ including reminder/directive dashboards and session-start rendering. The native
 CRUD adapters and duplicate directive SQL are removed. Their PostgreSQL tests
 cover lifecycle, deduplication, list caps, matching, and dry-run scheduling.
 Unused background-embedding C hooks and their suppression state are retired.
-The current inventory is seven C sources and nine headers; the table above
+Content screening is shared by both Go placements; the native content-gate
+source, header and platform build entries are removed.
+The current inventory is six C sources and eight headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.

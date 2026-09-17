@@ -273,7 +273,7 @@ ifeq ($(OS),Windows_NT)
         windows/cli_client.c windows/cli_main.c \
         windows/events.c windows/cmd_infra.c \
         windows/cmd_agent_delegate.c windows/cmd_describe.c \
-        windows/cmd_hooks.c modules/memory/memory_content_gate_bus.c windows/server_compute.c \
+        windows/cmd_hooks.c windows/server_compute.c \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \
         windows/agent_runtime.c windows/agent_bridge.c windows/web_egress.c
@@ -288,7 +288,7 @@ else ifeq ($(UNAME_S),Darwin)
         posix/cli_client.c posix/cli_main.c \
         posix/events.c posix/cmd_infra.c \
         posix/cmd_agent_delegate.c posix/cmd_describe.c \
-        posix/cmd_hooks.c modules/memory/memory_content_gate_bus.c posix/server_compute.c \
+        posix/cmd_hooks.c posix/server_compute.c \
         posix/agent_shell_claude.c posix/agent_shell_claude_pty.c posix/agent_shell_codex.c  \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \
@@ -304,7 +304,7 @@ else
         posix/cli_client.c posix/cli_main.c \
         posix/events.c posix/cmd_infra.c \
         posix/cmd_agent_delegate.c posix/cmd_describe.c \
-        posix/cmd_hooks.c modules/memory/memory_content_gate_bus.c posix/server_compute.c \
+        posix/cmd_hooks.c posix/server_compute.c \
         posix/agent_shell_claude.c posix/agent_shell_claude_pty.c posix/agent_shell_codex.c  \
         $(UI_PLATFORM_SRCS)
     PLATFORM_AGENT_SRCS = \

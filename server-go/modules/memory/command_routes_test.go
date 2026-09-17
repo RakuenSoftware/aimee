@@ -19,12 +19,6 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			t.Fatal(stage)
 		}
 		count := int(binary.LittleEndian.Uint32(response[8:]))
-		if placement == PlacementServer {
-			if count != 0 {
-				t.Fatal("private commands shadowed the shared KB surface")
-			}
-			continue
-		}
 		seen := map[string]bool{}
 		offset := 16
 		for i := 0; i < count; i++ {
@@ -44,7 +38,13 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			}
 			seen[verb] = true
 		}
-		if offset != len(response) || len(seen) != 63 {
+		if placement == PlacementServer {
+			if offset != len(response) || len(seen) != 1 || !seen["screen_content"] {
+				t.Fatal("private commands shadowed shared KB commands", seen)
+			}
+			continue
+		}
+		if offset != len(response) || len(seen) != 64 {
 			t.Fatalf("routes=%d bytes=%d/%d", len(seen), offset, len(response))
 		}
 		for _, verb := range []string{"recall", "directive_create", "prospective_match", "list_unused_l2", "stats"} {

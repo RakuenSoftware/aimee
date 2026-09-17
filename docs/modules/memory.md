@@ -174,7 +174,7 @@ Authenticated admission and the server-to-KB transport remain native callers.
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host
 directories. Passing a pure-Go process/client build does not complete G0 while
-those C paths remain. The module currently retains seven C sources and nine
+those C paths remain. The module currently retains six C sources and eight
 headers. The descriptor's `ownership_complete` flag verifies the declared file
 inventory; it does not assert that the Go migration is complete.
 
@@ -230,8 +230,7 @@ An expired call still fails rather than retrying indefinitely or changing stores
 
 The remaining C transport and host integration is migration debt:
 
-- `memory_data_bus.c`, `memory_domain_bus.c`, `memory_domain_runtime_bus.c`, `memory_embed_bus.c`,
-  and `memory_content_gate_bus.c` encode/decode bounded event-bus
+- `memory_data_bus.c`, `memory_domain_bus.c`, `memory_domain_runtime_bus.c` and `memory_embed_bus.c` encode/decode bounded event-bus
   messages. `memory_scope_connection.c` only binds caller scope to an already
   prepared connection request.
 - `gw_stage_memory.c` connects the gateway IR stage to the module.
@@ -246,12 +245,12 @@ The remaining C transport and host integration is migration debt:
   grounding, relation canonicalization, kind selection, and provenance are in
   `memory_facts.go`.
 
-`scripts/check_memory_c_boundary.py` reduces that boundary: only the seven named
+`scripts/check_memory_c_boundary.py` reduces that boundary: only the six named
 bus/integration translation units may exist under the memory module, none may
 include a DB client, and DB2 may not regain a `memory_*.c` implementation.
 The same check prevents the former POSIX/Windows regex-policy files and the
 retired in-process C query rewriter from returning; those gates now use
-`content_gate.go` through the bus adapter.
+`content_gate.go` through the generic command route.
 It also rejects restoring or relocating the deleted native gate, extraction and
 context-assembly APIs, including declarations and macro aliases.
 
@@ -314,3 +313,9 @@ scopes, exclude previous generated cards and commit their lineage with the paren
 Exports retain full content and scope metadata, page through records, and publish
 a private output file only after every read and write succeeds. The native export
 allocation API, export header and conversation-search adapter are retired.
+
+Content screening is a stateless Go command shared by Server and KB. KB client
+transmission and trajectory export consume its allow/redact/reject result through
+generic module routing; missing or malformed responses fail closed. Screening
+redacts all credential spans, rejects PEM private-key bodies and refuses truncated
+redactions. The native gate function, source file and private header are removed.

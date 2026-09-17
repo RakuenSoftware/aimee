@@ -65,15 +65,20 @@ func main() {
 // fixed; deriving it from the implementation would hide wire/domain drift.
 func probeDecisions(ctx context.Context, client *memory.Client, caller memory.StageCaller) error {
 	declaration, err := caller.Call(ctx, 6143, bus.StageDescribeCommands, 2112, time.Second, []byte{'D', 'C', 'M', 'D', 2, 0, 0, 0})
-	wantCommands := uint32(0)
+	wantCommands := uint32(1)
 	if os.Getenv("AIMEE_TEST_MEMORY_PLACEMENT") == "kb" {
-		wantCommands = 63
+		wantCommands = 64
 	}
 	if err != nil || len(declaration) < 16 || string(declaration[:4]) != "DCMR" ||
 		binary.LittleEndian.Uint32(declaration[4:]) != 2 ||
 		binary.LittleEndian.Uint32(declaration[8:]) != wantCommands ||
 		binary.LittleEndian.Uint32(declaration[12:]) != memory.StageCommand {
 		return fmt.Errorf("public command discovery: %x %v", declaration, err)
+	}
+	screen, err := client.Command(ctx, 2114, "screen_content", json.RawMessage(`{"content":"token=first password=second"}`))
+	var screened map[string]any
+	if err != nil || json.Unmarshal(screen, &screened) != nil || screened["verdict"] != "redact" || screened["redacted"] != "[REDACTED] [REDACTED]" {
+		return fmt.Errorf("shared content screening: %s %v", screen, err)
 	}
 	// This independently admitted process cannot impersonate the authenticating
 	// host, even with a valid contextual command frame.

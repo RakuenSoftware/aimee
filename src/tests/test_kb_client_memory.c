@@ -12,6 +12,7 @@
 #endif
 
 #include "kb_client.h"
+#include "kb_client_pii.h"
 #include "runtime_secret.h"
 #include "db1_client/user_memory.h"
 #include "db1_client/caches.h"
@@ -25,11 +26,24 @@
 
 /* The classifier itself belongs to the memory module. This suite exercises the
  * client-side no-transmit boundary with a deterministic module answer. */
-int gate_check_sensitive(const char *content, char *redacted, size_t redacted_cap)
+static const char *screen_reply;
+static int screen_transport = 1;
+int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
 {
-   (void)redacted;
-   (void)redacted_cap;
-   return content && (strstr(content, "password") || strstr(content, "hunter2trustno1")) ? 2 : 0;
+   assert(strcmp(method, "memory.screen_content") == 0);
+   if (screen_reply || screen_transport != 1)
+   {
+      *result = screen_reply ? cJSON_Parse(screen_reply) : NULL;
+      return screen_transport;
+   }
+   const char *content = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "content"));
+   *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(*result, "status", "ok");
+   cJSON_AddStringToObject(
+       *result, "verdict",
+       content && (strstr(content, "password") || strstr(content, "hunter2trustno1")) ? "reject"
+                                                                                      : "allow");
+   return 1;
 }
 
 static int activation_writes;
@@ -659,8 +673,35 @@ static void test_every_content_wrapper_screens(void)
    printf("  PASS: test_every_content_wrapper_screens\n");
 }
 
+static void test_screen_failures(void)
+{
+   const char *replies[] = {"{}", "{\"status\":\"error\",\"verdict\":\"allow\"}",
+                            "{\"status\":\"ok\",\"verdict\":\"unknown\"}",
+                            "{\"status\":\"ok\",\"verdict\":\"redact\"}"};
+   for (size_t i = 0; i < sizeof(replies) / sizeof(replies[0]); i++)
+   {
+      screen_reply = replies[i];
+      char *out = NULL;
+      assert(kb_client_pii_screen("fixture", &out) == -1 && out == NULL);
+      assert(kb_client_pii_identifier_sensitive("fixture") == 1);
+   }
+   screen_reply = NULL;
+   screen_transport = -1;
+   char *out = NULL;
+   assert(kb_client_pii_screen("fixture", &out) == -1 && out == NULL);
+   screen_transport = 0;
+   assert(kb_client_pii_screen("fixture", &out) == -1 && out == NULL);
+   screen_transport = 1;
+   screen_reply = "{\"status\":\"ok\",\"verdict\":\"redact\",\"redacted\":\"[REDACTED]\"}";
+   assert(kb_client_pii_screen("fixture", &out) == 0 && strcmp(out, "[REDACTED]") == 0);
+   free(out);
+   assert(kb_client_pii_identifier_sensitive("fixture") == 1);
+   screen_reply = NULL;
+}
+
 int main(void)
 {
+   test_screen_failures();
    /* A configured kb URL routes kb_client_v1_post_json through agent_http_post
     * (mocked) rather than the unix-socket / spawn path. */
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);

@@ -10,6 +10,10 @@ type commandRoute struct {
 	public        bool
 }
 
+var sharedCommandRoutes = []commandRoute{
+	{"screen_content", "Screen content before transmission or export.", handleScreenCommand, true},
+}
+
 var kbCommandRoutes = []commandRoute{
 	{"search", "Search conversation memories.", handleRuntimeCommand, true},
 	{"episode_card_generate", "Build a scoped session episode card.", handleRuntimeCommand, true},
@@ -94,11 +98,13 @@ func describeCommandRoutes(options handlerOptions, invocation bus.ModuleInvocati
 	commands := []bus.CommandDefinition{}
 	// The Server's shared-KB transport is still being migrated. Do not shadow
 	// those handlers with private-only commands under the same public name.
+	routes := sharedCommandRoutes
 	if options.placement == PlacementKB {
-		for _, r := range kbCommandRoutes {
-			if r.public {
-				commands = append(commands, bus.CommandDefinition{Group: "memory", Verb: r.verb, Summary: r.summary, Surfaces: SurfaceRPC, Visibility: MCPDiscoverable})
-			}
+		routes = append(append([]commandRoute{}, sharedCommandRoutes...), kbCommandRoutes...)
+	}
+	for _, r := range routes {
+		if r.public {
+			commands = append(commands, bus.CommandDefinition{Group: "memory", Verb: r.verb, Summary: r.summary, Surfaces: SurfaceRPC, Visibility: MCPDiscoverable})
 		}
 	}
 	response, err := bus.EncodeCommandDeclaration(request, StageCommand, commands)
