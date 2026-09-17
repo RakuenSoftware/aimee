@@ -42,31 +42,6 @@ type DriftResult struct {
 	Message   string `json:"message"`
 }
 
-func (s *postgresDataStore) RebuildDerivedIndexes(ctx context.Context, limit int) (int, error) {
-	if s.placement != PlacementKB {
-		return 0, errors.New("memory: derived indexes belong to KB placement")
-	}
-	if limit <= 0 || limit > 100000 {
-		limit = 100000
-	}
-	var count int
-	err := s.db.QueryRow(ctx, `WITH candidates AS (
- SELECT id,scope_type,scope_value FROM memories ORDER BY id LIMIT $1
-), scopes AS (
- INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
- SELECT id,scope_type,scope_value FROM candidates
- ON CONFLICT DO NOTHING RETURNING 1
-), queued AS (
- INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
- SELECT c.id,'memory',c.id,'pending',0,'',pg_now_text() FROM candidates c
- WHERE NOT EXISTS (SELECT 1 FROM memory_embeddings e WHERE e.point_id=c.id)
- ON CONFLICT (point_id) DO UPDATE SET status='pending',last_error='',updated_at=pg_now_text()
- RETURNING 1
-)
-SELECT (SELECT count(*) FROM scopes)+(SELECT count(*) FROM queued)`, limit).Scan(&count)
-	return count, err
-}
-
 func (s *postgresDataStore) LegacySearch(ctx context.Context, clusters []string, limit int) ([]LegacySearchResult, error) {
 	query := strings.TrimSpace(strings.Join(clusters, " "))
 	if limit <= 0 || limit > 64 {

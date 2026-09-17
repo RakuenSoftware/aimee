@@ -205,6 +205,13 @@ sampling; automatic retrieval honors promoted limits, bounded sidecar output and
 the exploration budget. Policy telemetry uses savepoints so failures cannot abort
 retrieval. Reward closure and posterior updates are atomic and idempotent.
 
+Derived text indexing now rebuilds aliases, entities, temporal references,
+headlines, event frames and overlapping chunks in Go. Reindex preserves authored
+summaries/events, applies request scope, skips retired parents and rolls back all
+index replacement when any write fails. Chunks advance across UTF-8 boundaries;
+relative dates use UTC and month abbreviations map to their calendar month.
+Graph-unit, relation, coreference and unit-vector rebuild parity remains open.
+
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

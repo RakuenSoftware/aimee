@@ -17680,6 +17680,7 @@ BEGIN
     'entity_aliases','entity_edges','entity_registry',
     'epistemic_directives','fact_graph_changes','fact_graph_commits',
     'kb_async_jobs','kb_meta','memories','memory_conflicts',
+    'memory_aliases','memory_chunks','memory_event_frames','memory_temporal_refs',
     'memory_embeddings','memory_entities','memory_episodes','memory_evidence_events','memory_fact_actors',
     'memory_health','memory_lineage','memory_links','memory_provenance',
     'memory_rejection_tombstones','memory_relations','memory_scene_members',
@@ -17701,7 +17702,7 @@ BEGIN
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id) ON artifacts TO aimee_store_runtime;
   GRANT SELECT ON bandit_promotions, tasks, fact_evidence, docs, evidence_lifecycle_settings,
-    memory_event_frames, memory_temporal_refs, memory_active_embedder, kb_embeddings, kb_documents,
+    memory_active_embedder, kb_embeddings, kb_documents,
     document_versions, derivation_policy_versions TO aimee_store_runtime;
   GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT),
     kb_fact_commit_worm_seal(TEXT,TEXT) TO aimee_store_runtime;

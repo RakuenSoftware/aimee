@@ -20,6 +20,7 @@ func handleVectorCommand(options handlerOptions, invocation bus.ModuleInvocation
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	commandScope(args, &request)
 	body, _ := json.Marshal(request)
 	reply, status := handleData(options, invocation, body)
 	if status != bus.ModuleStatusOK {
