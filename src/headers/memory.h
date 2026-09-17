@@ -538,7 +538,6 @@ void add_provenance(int64_t memory_id, const char *session_id, const char *actio
  * checkpoint. Returns the number of source rows folded, 0 when empty, or -1
  * when the source set is over the bound, recursively refused, or cannot be
  * persisted completely. `summary_out` is published only on success. */
-int memory_fold_session(const char *session_id, char *summary_out, size_t summary_out_len);
 
 /* --- Search --- */
 int memory_find_facts(const char *query, int limit, memory_t *out, int max);

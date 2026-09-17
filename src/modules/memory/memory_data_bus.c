@@ -395,31 +395,3 @@ int memory_insert(const char *tier, const char *kind, const char *key, const cha
    return memory_insert_ex(tier, kind, key, content, "", confidence, session_id,
                            MEMORY_AUTHORITY_MODEL, out);
 }
-
-int memory_fold_session(const char *session_id, char *summary_out, size_t summary_out_len)
-{
-   if (summary_out && summary_out_len > 0)
-      summary_out[0] = '\0';
-   if (!session_id || !session_id[0])
-      return -1;
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "fold-session") ||
-       !cJSON_AddStringToObject(request, "session_id", session_id))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = memory_data_call(request);
-   const cJSON *count = response ? cJSON_GetObjectItemCaseSensitive(response, "count") : NULL;
-   const cJSON *block = response ? cJSON_GetObjectItemCaseSensitive(response, "block") : NULL;
-   if (!cJSON_IsNumber(count) || !cJSON_IsString(block) || !block->valuestring)
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int result = count->valueint;
-   if (result >= 0 && summary_out && summary_out_len > 0)
-      snprintf(summary_out, summary_out_len, "%s", block->valuestring);
-   cJSON_Delete(response);
-   return result;
-}

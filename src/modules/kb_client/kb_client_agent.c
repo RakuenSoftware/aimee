@@ -561,15 +561,6 @@ int kb_client_anti_pattern_delete(int64_t id)
    return rc;
 }
 
-int kb_client_memory_fold_session(const char *session_id)
-{
-   if (!session_id || !session_id[0])
-      return -1;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "session_id", session_id);
-   return kb_client_v1_simple_count_request("maintenance.fold_session", req);
-}
-
 int kb_client_rules_delete(int id)
 {
    cJSON *req = cJSON_CreateObject();

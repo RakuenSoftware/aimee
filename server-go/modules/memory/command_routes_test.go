@@ -39,7 +39,7 @@ func TestPublicCommandDiscovery(t *testing.T) {
 				wantGroup = "relations"
 			}
 			switch verb {
-			case "anti_pattern_extract_from_feedback", "anti_pattern_extract_from_failures", "anti_pattern_escalate", "memory_learn_style", "scan_conversations":
+			case "fold_session", "anti_pattern_extract_from_feedback", "anti_pattern_extract_from_failures", "anti_pattern_escalate", "memory_learn_style", "scan_conversations":
 				wantGroup = "maintenance"
 			}
 			if group != wantGroup || (surfaces != SurfaceRPC && !((verb == "embed" || verb == "runtime") && surfaces == 0)) || seen[verb] {
@@ -53,7 +53,7 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			}
 			continue
 		}
-		if offset != len(response) || len(seen) != 85 {
+		if offset != len(response) || len(seen) != 86 {
 			t.Fatalf("routes=%d bytes=%d/%d", len(seen), offset, len(response))
 		}
 		for _, verb := range []string{"recall", "directive_create", "prospective_match", "list_unused_l2", "stats"} {

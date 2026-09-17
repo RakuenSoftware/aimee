@@ -472,12 +472,6 @@ int kb_client_anti_pattern_check(const char *file_path, const char *command, ant
  * db2_anti_pattern_bump(). */
 int kb_client_anti_pattern_bump(int64_t id);
 
-/* Session-prune helpers wrapped on the kb side so prune_stale_sessions
- * (CLI-fork) actually runs the maintenance work.  Each returns the
- * count of rows acted on, or -1 if kb is unreachable.  Mirrors
- * memory_fold_session(). */
-int kb_client_memory_fold_session(const char *session_id);
-
 /* Rules + feedback CRUD via aimee-kb (the DB2 owner).  Mirrors the
  * local db2_* signatures.  rules.delete / update_directive_type
  * return 0 on success, -1 on failure; feedback.record returns the

@@ -16,6 +16,7 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"maintenance", "fold_session", "Fold a scoped session and capture learning evidence.", handleRuntimeCommand, true},
 	{"memory", "scene_list", "List visible memory scenes.", handleDomainCommand, true},
 	{"memory", "scene_show", "List visible scene members.", handleDomainCommand, true},
 	{"memory", "verify", "Verify deployed memory vectors and indexing health.", handleVerifyCommand, true},

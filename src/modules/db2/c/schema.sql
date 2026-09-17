@@ -17698,6 +17698,8 @@ BEGIN
       END IF;
     END LOOP;
   END LOOP;
+  GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
+  GRANT UPDATE(id) ON artifacts TO aimee_store_runtime;
   GRANT SELECT ON tasks, fact_evidence, docs, evidence_lifecycle_settings,
     memory_event_frames, memory_temporal_refs, memory_active_embedder, kb_embeddings, kb_documents,
     document_versions, derivation_policy_versions TO aimee_store_runtime;

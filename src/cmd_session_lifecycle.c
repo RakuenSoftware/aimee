@@ -700,7 +700,10 @@ void prune_stale_sessions(void)
          continue;
 
       /* Fold this session's L0 memories into L1 (runs inside aimee-kb). */
-      kb_client_memory_fold_session(stale_sid);
+      cJSON *fold_request = cJSON_CreateObject();
+      cJSON_AddStringToObject(fold_request, "session_id", stale_sid);
+      char *fold_response = kb_v1_action_request("maintenance.fold_session", fold_request);
+      free(fold_response);
       did_maintenance = 1;
 
       /* Remove worktrees for this session */

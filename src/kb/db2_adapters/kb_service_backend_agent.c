@@ -20,7 +20,6 @@
 #include "modules/db2/c/db_postgres.h"
 #include "modules/db2/c/entity_edges.h"
 #include "modules/db2/c/db2_learning.h"
-#include "modules/learning/learning_evidence.h" /* learning_evidence_write_event — session_summary emission */
 #include "modules/learning/learning_implicit.h"
 #include "memory.h"
 #include "modules/db2/c/mining.h"
@@ -932,31 +931,6 @@ cJSON *db2_kb_service_anti_pattern_delete_json(int64_t id)
       return resp;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_fold_session_json(const char *session_id)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   char summary[256] = "";
-   int rc = memory_fold_session(session_id ? session_id : "", summary, sizeof(summary));
-
-   /* Surface the folded session digest as a `session_summary` evidence artifact
-    * so the idle-reflection scheduler and the evidence-synth drain have a real
-    * candidate stream to work over — this is the producer that was otherwise
-    * missing. Cheap (one artifact write from the digest already computed, no LLM
-    * on this path), idempotent via content-hash dedup, and emitted unconditionally
-    * like other evidence capture; the LLM-heavy consumers are separately gated. */
-   if (rc >= 0 && summary[0])
-      learning_evidence_write_event("session_summary", "session", session_id ? session_id : "",
-                                    summary, "kb.fold_session", NULL, 0);
-
-   cJSON_AddStringToObject(resp, "status", rc < 0 ? "error" : "ok");
-   if (rc < 0)
-      cJSON_AddStringToObject(resp, "message", "session fold was refused or incomplete");
-   cJSON_AddNumberToObject(resp, "count", rc < 0 ? 0 : rc);
    return resp;
 }
 

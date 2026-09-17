@@ -480,13 +480,6 @@
       "reason": "The cJSON fact-search response does not cross the typed ABI; a bounded query returns structured matches and truncation evidence."
     },
     {
-      "symbol": "db2_kb_service_memory_fold_session_json",
-      "signature_sha256": "68f5de45d2cab8368b0b61cbdb90b0b1c619bf86ac3bdc47b8e1cb742d0ac07a",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON session-fold wrapper cannot define or split the transaction; a typed memory.session_fold operation owns checkpoint creation and L0 cleanup before replying."
-    },
-    {
       "symbol": "db2_kb_service_note_create_json",
       "signature_sha256": "b38f3d397de14bdd287340a701dad79c0a8d60ef73e6b0d66c505fa0a2c96b50",
       "disposition": "private-db2",

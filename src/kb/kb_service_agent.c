@@ -335,16 +335,6 @@ int kb_handle_anti_pattern_delete(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to delete anti-pattern");
 }
 
-int kb_handle_memory_fold_session(int fd, cJSON *req)
-{
-   cJSON *sid_j = cJSON_GetObjectItemCaseSensitive(req, "session_id");
-   if (!cJSON_IsString(sid_j))
-      return kb_send_error(fd, "maintenance.fold_session requires session_id");
-
-   cJSON *resp = db2_kb_service_memory_fold_session_json(sid_j->valuestring);
-   return kb_reply_or_error(fd, resp, "failed to fold session");
-}
-
 int kb_handle_rules_delete(int fd, cJSON *req)
 {
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");

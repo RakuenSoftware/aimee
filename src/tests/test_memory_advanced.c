@@ -154,40 +154,6 @@ static int64_t insert_raw_fact(const char *key, const char *content)
    return id;
 }
 
-static int64_t insert_raw_l0(const char *session_id, const char *key, const char *content)
-{
-   char err[128] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
-       "INSERT INTO memories(tier,kind,key,content,confidence,confidence_ceiling,source_session)"
-       " VALUES('L0','episode',?1,?2,0.8,0.8,?3) RETURNING id",
-       err, sizeof(err));
-   assert(st != NULL);
-   aimee_pg_bind_text(st, "?1", key);
-   aimee_pg_bind_text(st, "?2", content);
-   aimee_pg_bind_text(st, "?3", session_id);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-   int64_t id = aimee_pg_column_int64(st, 0);
-   aimee_pg_finalize(st);
-   assert(id > 0);
-   return id;
-}
-
-static int count_session_tier(const char *session_id, const char *tier)
-{
-   char err[128] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT COUNT(*) FROM memories WHERE source_session=?1 AND tier=?2", err,
-       sizeof(err));
-   assert(st != NULL);
-   aimee_pg_bind_text(st, "?1", session_id);
-   aimee_pg_bind_text(st, "?2", tier);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-   int count = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return count;
-}
-
 /* The file-static legacy_config_record this suite used to share is gone. It existed because
  * ten block-scoped ~750 KiB copies in this one long main() pushed GCC past the
  * default 8 MiB stack and the optimized binary segfaulted before reaching the
@@ -2362,66 +2328,6 @@ int main(void)
       assert(db2_memory_valid_at(sup_src.id, spaced_after) == 0);
 
       printf("  bitemporal_rows: ok\n");
-   }
-
-   /* --- session folding is bounded, recursively gated, and fully traced --- */
-   {
-      const char *success_session = "fold-complete";
-      int64_t source_ids[3];
-      source_ids[0] = insert_raw_l0(success_session, "fold-source-a", "alpha checkpoint");
-      source_ids[1] = insert_raw_l0(success_session, "fold-source-b", "beta checkpoint");
-      source_ids[2] = insert_raw_l0(success_session, "fold-source-c", "gamma checkpoint");
-      char summary[256] = "not-cleared";
-      assert(memory_fold_session(success_session, summary, sizeof(summary)) == 3);
-      assert(summary[0] != '\0');
-      assert(count_session_tier(success_session, TIER_L0) == 0);
-      assert(count_session_tier(success_session, TIER_L1) == 1);
-
-      char err[128] = "";
-      aimee_pg_stmt_t *q =
-          aimee_pg_prepare(db2_conn(), "SELECT id FROM memories WHERE key='session:fold-complete'",
-                           err, sizeof(err));
-      assert(q != NULL);
-      assert(aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW);
-      int64_t episode_id = aimee_pg_column_int64(q, 0);
-      aimee_pg_finalize(q);
-      memory_lineage_t lineage[4];
-      assert(memory_lineage_get("memory", episode_id, lineage, 4) == 3);
-      for (int i = 0; i < 3; i++)
-      {
-         char expected[48];
-         snprintf(expected, sizeof(expected), "memory:%lld", (long long)source_ids[i]);
-         int found = 0;
-         for (int j = 0; j < 3; j++)
-            if (strcmp(lineage[j].source_kind, "memory") == 0 &&
-                strcmp(lineage[j].source_ref, expected) == 0)
-               found = 1;
-         assert(found);
-      }
-
-      const char *refused_session = "fold-refused";
-      int64_t refused = insert_raw_l0(refused_session, "fold-refused-source", "retired source");
-      assert(memory_transition_lifecycle(refused, MEMORY_LIFECYCLE_STATE_ARCHIVED,
-                                         "fold refusal fixture") == 0);
-      snprintf(summary, sizeof(summary), "not-cleared");
-      assert(memory_fold_session(refused_session, summary, sizeof(summary)) == -1);
-      assert(summary[0] == '\0');
-      assert(count_session_tier(refused_session, TIER_L0) == 1);
-      assert(count_session_tier(refused_session, TIER_L1) == 0);
-
-      const char *bounded_session = "fold-over-cap";
-      for (int i = 0; i < 65; i++)
-      {
-         char key[64], content[64];
-         snprintf(key, sizeof(key), "fold-bounded-%02d", i);
-         snprintf(content, sizeof(content), "bounded checkpoint %02d", i);
-         (void)insert_raw_l0(bounded_session, key, content);
-      }
-      snprintf(summary, sizeof(summary), "not-cleared");
-      assert(memory_fold_session(bounded_session, summary, sizeof(summary)) == -1);
-      assert(summary[0] == '\0');
-      assert(count_session_tier(bounded_session, TIER_L0) == 65);
-      assert(count_session_tier(bounded_session, TIER_L1) == 0);
    }
 
    /* ONE WAY TO WRITE A TIMESTAMP.

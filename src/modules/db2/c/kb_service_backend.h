@@ -152,7 +152,6 @@ extern "C"
    cJSON *db2_kb_service_anti_pattern_check_json(const char *file_path, const char *command,
                                                  int max);
    cJSON *db2_kb_service_anti_pattern_bump_json(int64_t id);
-   cJSON *db2_kb_service_memory_fold_session_json(const char *session_id);
    cJSON *db2_kb_service_rules_delete_json(int id);
    cJSON *db2_kb_service_rules_update_directive_type_json(int id, const char *directive_type);
    cJSON *db2_kb_service_feedback_record_json(const char *polarity, const char *title,

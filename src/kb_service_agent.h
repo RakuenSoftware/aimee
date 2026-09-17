@@ -33,7 +33,6 @@ int kb_handle_anti_pattern_insert(int fd, cJSON *req);
 int kb_handle_anti_pattern_delete(int fd, cJSON *req);
 int kb_handle_anti_pattern_check(int fd, cJSON *req);
 int kb_handle_anti_pattern_bump(int fd, cJSON *req);
-int kb_handle_memory_fold_session(int fd, cJSON *req);
 int kb_handle_rules_delete(int fd, cJSON *req);
 int kb_handle_rules_update_directive_type(int fd, cJSON *req);
 int kb_handle_feedback_record(int fd, cJSON *req);

@@ -179,6 +179,12 @@ Scene listing and member lookup now use the public Go owner and generic CLI
 transport. Visible active parents are filtered before limits, full member keys
 are preserved, and member lookup is capped at 512. The native scene handlers,
 DB2 JSON builders, typed clients and obsolete scene API header are removed.
+
+Session folding now runs entirely in Go, including learning-evidence capture
+and embedding/synthesis queue writes. Sources retain their scope; mixed scopes,
+non-active sources and sessions above 64 rows are refused. Checkpoint, lineage,
+evidence and source removal share one SQL statement. Restricted-role replay
+covers complete digests, refusal and rollback when a queue write fails.
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

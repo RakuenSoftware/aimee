@@ -916,7 +916,6 @@ static const struct
     {"anti_pattern.delete", kb_handle_anti_pattern_delete},
     {"anti_pattern.check", kb_handle_anti_pattern_check},
     {"anti_pattern.bump", kb_handle_anti_pattern_bump},
-    {"maintenance.fold_session", kb_handle_memory_fold_session},
     {"rules.delete", kb_handle_rules_delete},
     {"rules.update_directive_type", kb_handle_rules_update_directive_type},
     {"feedback.record", kb_handle_feedback_record},

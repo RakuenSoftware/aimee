@@ -13,6 +13,13 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		return commandResult(commandError("invalid_argument", message))
 	}
 	switch verb {
+	case "fold_session":
+		request.Operation, request.SessionID = "fold-session", args.stringOr("session_id", "")
+		if strings.TrimSpace(request.SessionID) == "" {
+			return invalid("missing session_id")
+		}
+		options.publicWrite = true
+		scoped = commandScope(args, &request)
 	case "anti_pattern_extract_from_feedback", "anti_pattern_extract_from_failures", "anti_pattern_escalate", "memory_learn_style", "scan_conversations":
 		request.Operation = map[string]string{
 			"anti_pattern_extract_from_feedback": "anti-pattern-feedback",
@@ -125,6 +132,15 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	}
 	result := map[string]any{"status": "ok"}
 	switch verb {
+	case "fold_session":
+		if response.Count == nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		if *response.Count < 0 {
+			result["status"], result["count"], result["message"] = "error", 0, "session fold was refused or incomplete"
+		} else {
+			result["count"] = *response.Count
+		}
 	case "episode_cards":
 		if json.Unmarshal(response.Payload, &result) != nil {
 			return nil, bus.ModuleStatusInternal
