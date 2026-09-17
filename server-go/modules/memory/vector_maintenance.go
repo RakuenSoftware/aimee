@@ -80,6 +80,13 @@ func (s *postgresDataStore) clearVectorCollection(ctx context.Context, dim int) 
 	if !exists {
 		return errors.New("memory: vector index unavailable; schema-owner maintenance is required")
 	}
+	var allScopes bool
+	if err = s.db.QueryRow(ctx, `SELECT COALESCE(current_setting('aimee.memory_scope_all',true),'')='1'`).Scan(&allScopes); err != nil {
+		return err
+	}
+	if !allScopes {
+		return errors.New("memory: vector collection reset requires all-scope maintenance")
+	}
 	_, err = s.db.Exec(ctx, `DELETE FROM memory_embeddings`)
 	return err
 }
@@ -106,10 +113,13 @@ func (s *postgresDataStore) RebuildVectorIndex(ctx context.Context, version stri
 		}
 		if err := bound.db.QueryRow(ctx, `WITH q AS (
  INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
- SELECT id,'memory',id,'pending',0,'',pg_now_text() FROM memories WHERE lifecycle_state='active'
+ SELECT point_id,'memory',memory_id,'pending',0,'',pg_now_text() FROM (
+ SELECT id AS point_id,id AS memory_id FROM memories WHERE lifecycle_state='active'
+ UNION ALL SELECT $1+u.id,u.memory_id FROM memory_units u JOIN memories m ON m.id=u.memory_id
+ WHERE m.lifecycle_state='active') points
  ON CONFLICT(point_id) DO UPDATE SET collection=EXCLUDED.collection,memory_id=EXCLUDED.memory_id,
  status='pending',attempts=0,last_error='',updated_at=pg_now_text()
- RETURNING 1) SELECT count(*) FROM q`).Scan(&queued); err != nil {
+ RETURNING 1) SELECT count(*) FROM q`, unitPointOffset).Scan(&queued); err != nil {
 			return err
 		}
 		_, err = bound.db.Exec(ctx, `INSERT INTO kb_meta(key,value) VALUES('vector_schema_version',$2),('memory_vector_rebuild_version',$1)

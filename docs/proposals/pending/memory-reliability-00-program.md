@@ -212,6 +212,15 @@ index replacement when any write fails. Chunks advance across UTF-8 boundaries;
 relative dates use UTC and month abbreviations map to their calendar month.
 Graph-unit, relation, coreference and unit-vector rebuild parity remains open.
 
+Derived graph units and edges are now Go-owned. Reindex reuses unchanged unit
+IDs, preserves episode cards and lineage, removes stale unit points/jobs and
+limits session/supersession links to matching parent scopes. Unit vectors use
+the existing scoped Go repair path, including retained vectors on failed writes
+and retry limits. Collection rebuild queues parents and units; a partial scope
+cannot reset the whole collection. Runtime grants expose only identity/version
+columns needed by dependency freshness checks, not file or outcome content.
+Episode-relation and coreference rebuild parity remains open.
+
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

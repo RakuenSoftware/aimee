@@ -78,7 +78,9 @@ func (s *postgresDataStore) prepareVectorRepair(ctx context.Context, request Dat
 		response.IDs, err = s.FailedEmbeddingIDs(ctx, request.Limit)
 		return response, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT id FROM memories WHERE lifecycle_state='active' ORDER BY updated_at DESC,id DESC LIMIT $1`, request.Limit)
+	rows, err := s.db.Query(ctx, `SELECT point FROM (SELECT id AS point,updated_at FROM memories WHERE lifecycle_state='active'
+ UNION ALL SELECT $2+u.id,m.updated_at FROM memory_units u JOIN memories m ON m.id=u.memory_id
+ WHERE m.lifecycle_state='active') points ORDER BY updated_at DESC,point DESC LIMIT $1`, request.Limit, unitPointOffset)
 	if err != nil {
 		return DataResponse{}, err
 	}
@@ -97,6 +99,10 @@ func (s *postgresDataStore) prepareVectorRepair(ctx context.Context, request Dat
 // the caller can then persist a retry diagnostic. Both vector and work-queue
 // updates commit together; a failure of either rolls the pair back.
 func (s *postgresDataStore) UpsertEmbedding(ctx context.Context, record Record, vector []float32) error {
+	return s.withEmbeddingWrite(ctx, func(bound *postgresDataStore) error { return bound.upsertEmbedding(ctx, record, vector) })
+}
+
+func (s *postgresDataStore) withEmbeddingWrite(ctx context.Context, write func(*postgresDataStore) error) error {
 	if s.placement != PlacementKB {
 		return errors.New("personal vectors require the owner-selected serving identity")
 	}
@@ -108,7 +114,7 @@ func (s *postgresDataStore) UpsertEmbedding(ctx context.Context, record Record, 
 		defer tx.Rollback(context.Background())
 		bound := *s
 		bound.db = tx
-		if err := bound.UpsertEmbedding(ctx, record, vector); err != nil {
+		if err := bound.withEmbeddingWrite(ctx, write); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
@@ -119,7 +125,7 @@ func (s *postgresDataStore) UpsertEmbedding(ctx context.Context, record Record, 
 	if _, err := s.db.Exec(ctx, `SAVEPOINT memory_embedding_write`); err != nil {
 		return err
 	}
-	err := s.upsertEmbedding(ctx, record, vector)
+	err := write(s)
 	if err != nil {
 		// Rollback must still run if the embedding request was cancelled.
 		_, _ = s.db.Exec(context.Background(), `ROLLBACK TO SAVEPOINT memory_embedding_write`)

@@ -36,6 +36,21 @@ func (r runtimeRoleRow) Scan(dest ...any) error {
 	return err
 }
 
+func (tx runtimeRoleTx) Exec(ctx context.Context, sql string, args ...any) (store.Tag, error) {
+	tag, err := tx.evalQueryer.Exec(ctx, sql, args...)
+	if err != nil {
+		tx.t.Logf("runtime SQL exec: %v", err)
+	}
+	return tag, err
+}
+func (tx runtimeRoleTx) Query(ctx context.Context, sql string, args ...any) (store.Rows, error) {
+	rows, err := tx.evalQueryer.Query(ctx, sql, args...)
+	if err != nil {
+		tx.t.Logf("runtime SQL query: %v", err)
+	}
+	return rows, err
+}
+
 func (tx runtimeRoleTx) QueryRow(ctx context.Context, sql string, args ...any) store.Row {
 	return runtimeRoleRow{tx.evalQueryer.QueryRow(ctx, sql, args...), tx.t}
 }
@@ -97,6 +112,8 @@ GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
 	if err := tx.QueryRow(ctx, `SELECT
 has_table_privilege(current_user,'kb_vault_control','UPDATE') OR
 has_table_privilege(current_user,'org_vault_secret','SELECT') OR
+has_column_privilege(current_user,'files','path','SELECT') OR
+has_column_privilege(current_user,'work_outcomes','resulting_action','SELECT') OR
 has_schema_privilege(current_user,'public','CREATE') OR
 (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user)`).Scan(&forbidden); err != nil || forbidden {
 		t.Fatalf("runtime gained owner/secret privileges: forbidden=%v err=%v", forbidden, err)
@@ -225,6 +242,7 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 	exerciseRuntimeRecordReplay(t, ctx, tx, handler)
 	exerciseRetrievalPolicyReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseDerivedTextReplay(t, ctx, tx, backend.(*postgresDataStore))
+	exerciseDerivedUnitsReplay(t, ctx, tx, backend.(*postgresDataStore))
 
 	// Calls use nested transactions in this fixture; releasing a savepoint
 	// retains SET LOCAL until the enclosing transaction ends. Production store

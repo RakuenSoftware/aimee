@@ -345,6 +345,9 @@ func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, 
 	if data == nil || memoryID <= 0 {
 		return EmbedResponse{Error: "embed: memory store or id is unavailable"}
 	}
+	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB && memoryID >= unitPointOffset {
+		return backend.embedUnit(ctx, traceID, executor, memoryID, command, maxDim)
+	}
 	record, err := data.Get(ctx, Scope{}, memoryID)
 	if err != nil {
 		return EmbedResponse{Error: "embed: memory record unavailable"}

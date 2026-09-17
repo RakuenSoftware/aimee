@@ -549,8 +549,8 @@ func (s *postgresDataStore) FailedEmbeddingIDs(ctx context.Context, limit int) (
 	if limit <= 0 || limit > 256 {
 		limit = 256
 	}
-	rows, err := s.db.Query(ctx, `SELECT DISTINCT memory_id FROM vector_index_ops
-WHERE status='failed' AND attempts < $2 AND memory_id IS NOT NULL ORDER BY memory_id LIMIT $1`, limit, vectorRetryLimit())
+	rows, err := s.db.Query(ctx, `SELECT v.point_id FROM vector_index_ops v JOIN memories m ON m.id=v.memory_id
+WHERE v.status='failed' AND v.attempts < $2 AND m.lifecycle_state='active' ORDER BY v.point_id LIMIT $1`, limit, vectorRetryLimit())
 	if err != nil {
 		return nil, err
 	}
@@ -571,10 +571,12 @@ func (s *postgresDataStore) MarkEmbeddingFailure(ctx context.Context, id int64, 
 		return errors.New("memory: vector maintenance belongs to KB placement")
 	}
 	if len(detail) > 1024 {
-		detail = detail[:1024]
+		detail = textBound(detail, 1024)
 	}
 	_, err := s.db.Exec(ctx, `INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
-VALUES($1,'memory',$1,'failed',1,$2,pg_now_text()) ON CONFLICT(point_id) DO UPDATE SET
-status='failed',attempts=vector_index_ops.attempts+1,last_error=EXCLUDED.last_error,updated_at=pg_now_text()`, id, detail)
+SELECT $1,'memory',id,'failed',1,$2,pg_now_text() FROM memories WHERE id=CASE WHEN $1::bigint >= $3::bigint
+ THEN (SELECT memory_id FROM memory_units WHERE id=$1::bigint-$3::bigint) ELSE $1::bigint END AND lifecycle_state='active'
+ ON CONFLICT(point_id) DO UPDATE SET
+status='failed',attempts=vector_index_ops.attempts+1,last_error=EXCLUDED.last_error,updated_at=pg_now_text()`, id, detail, unitPointOffset)
 	return err
 }

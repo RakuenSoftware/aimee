@@ -17684,7 +17684,7 @@ BEGIN
     'memory_embeddings','memory_entities','memory_episodes','memory_evidence_events','memory_fact_actors',
     'memory_health','memory_lineage','memory_links','memory_provenance',
     'memory_rejection_tombstones','memory_relations','memory_scene_members',
-    'memory_scenes','memory_scopes','memory_summaries','memory_units',
+    'memory_scenes','memory_scopes','memory_summaries','memory_units','memory_unit_edges',
     'prospective_memories','rules','vector_index_ops','recall_traces','recall_trace_results'
   ] LOOP
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO aimee_store_runtime', relation_name);
@@ -17699,6 +17699,10 @@ BEGIN
       END IF;
     END LOOP;
   END LOOP;
+  -- Dependency freshness checks run as the caller. They need identity/version
+  -- columns for every input kind, never indexed file contents or outcome bodies.
+  GRANT SELECT(id,hash,generation) ON files TO aimee_store_runtime;
+  GRANT SELECT(outcome_id) ON work_outcomes TO aimee_store_runtime;
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id) ON artifacts TO aimee_store_runtime;
   GRANT SELECT ON bandit_promotions, tasks, fact_evidence, docs, evidence_lifecycle_settings,

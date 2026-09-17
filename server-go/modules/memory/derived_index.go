@@ -59,6 +59,9 @@ func (s *postgresDataStore) RebuildDerivedIndexes(ctx context.Context, limit int
 		if err = s.replaceDerivedText(ctx, id, deriveText(key, content, created)); err != nil {
 			return 0, err
 		}
+		if err = s.replaceDerivedUnits(ctx, id); err != nil {
+			return 0, err
+		}
 		if _, err = s.db.Exec(ctx, `INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
  SELECT id,scope_type,scope_value FROM memories WHERE id=$1 ON CONFLICT DO NOTHING`, id); err != nil {
 			return 0, err

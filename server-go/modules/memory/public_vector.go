@@ -21,6 +21,9 @@ func handleVectorCommand(options handlerOptions, invocation bus.ModuleInvocation
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	commandScope(args, &request)
+	if verb == "rebuild" && !request.IncludeAll {
+		return commandResult(commandError("invalid_argument", "vector rebuild requires all-scope maintenance"))
+	}
 	body, _ := json.Marshal(request)
 	reply, status := handleData(options, invocation, body)
 	if status != bus.ModuleStatusOK {
@@ -47,6 +50,7 @@ func handleRepairCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	request := DataRequest{Operation: "vector-repair-prepare", IncludeAll: true, ID: memoryID,
 		Limit: args.limit("limit", 1024, 1024), FailedOnly: failedOnly, ResetStuck: reset}
+	commandScope(args, &request)
 	call := func(request DataRequest) (DataResponse, bus.ModuleStatus) {
 		body, _ := json.Marshal(request)
 		reply, status := handleData(options, invocation, body)
@@ -85,7 +89,10 @@ func handleRepairCommand(options handlerOptions, invocation bus.ModuleInvocation
 		if invocation.Cancelled() || invocation.Remaining(embedHTTPTimeout()) <= 0 {
 			return nil, bus.ModuleStatusCancelled
 		}
-		result, status := call(DataRequest{Operation: "vector-repair-record", IncludeAll: true, ID: id, Command: command, Dimension: prepared.Dimension})
+		recordRequest := request
+		recordRequest.Limit = 0
+		recordRequest.Operation, recordRequest.ID, recordRequest.Command, recordRequest.Dimension = "vector-repair-record", id, command, prepared.Dimension
+		result, status := call(recordRequest)
 		if status != bus.ModuleStatusOK {
 			return nil, status
 		}

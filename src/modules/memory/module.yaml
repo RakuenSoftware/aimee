@@ -80,7 +80,9 @@
     "server-go/modules/memory/answer.go",
     "server-go/modules/memory/public_answer.go",
     "server-go/modules/memory/derived_index.go",
-    "server-go/modules/memory/derived_text.go"
+    "server-go/modules/memory/derived_text.go",
+    "server-go/modules/memory/derived_units.go",
+    "server-go/modules/memory/unit_vectors.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -132,7 +134,8 @@
     "server-go/modules/memory/derived_text_test.go",
     "server-go/modules/memory/runtime_learning_test.go",
     "server-go/modules/memory/runtime_record_test.go",
-    "server-go/modules/memory/retrieval_policy_test.go"
+    "server-go/modules/memory/retrieval_policy_test.go",
+    "server-go/modules/memory/derived_units_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"
