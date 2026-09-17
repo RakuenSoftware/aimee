@@ -446,60 +446,6 @@ cJSON *db2_kb_service_memory_search_json(const cJSON *clusters_arr, int limit)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_assemble_context_json(const char *task_hint)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   char *body = memory_assemble_context(task_hint);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "context", body ? body : "");
-   free(body);
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_compact_windows_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int summaries = 0, facts = 0;
-   memory_compact_windows(&summaries, &facts);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "summaries", summaries);
-   cJSON_AddNumberToObject(resp, "facts", facts);
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_query_edges_json(const char *entity, int max)
-{
-   if (max < 1)
-      max = 128;
-   if (max > 256)
-      max = 256;
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "edges") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   edge_t edges[256];
-   int n = memory_query_edges(entity ? entity : "", edges, max);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      cJSON_AddNumberToObject(obj, "id", (double)edges[i].id);
-      cJSON_AddStringToObject(obj, "source", edges[i].source);
-      cJSON_AddStringToObject(obj, "relation", edges[i].relation);
-      cJSON_AddStringToObject(obj, "target", edges[i].target);
-      cJSON_AddNumberToObject(obj, "weight", edges[i].weight);
-      cJSON_AddItemToArray(arr, obj);
-   }
-   return resp;
-}
-
 cJSON *db2_kb_service_memory_delete_json(int64_t id, int authority)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -607,17 +553,6 @@ cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const c
    }
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddNumberToObject(resp, "id", (double)id);
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_alerts_json(const char *since)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   cJSON *bundle = memory_alerts(since);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddItemToObject(resp, "alerts", bundle ? bundle : cJSON_CreateObject());
    return resp;
 }
 
@@ -737,24 +672,6 @@ cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const ch
    return resp;
 }
 
-cJSON *db2_kb_service_memory_briefing_json(int limit_tokens)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-
-   cJSON *briefing = memory_briefing(limit_tokens);
-   if (!briefing)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "memory_briefing failed");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddItemToObject(resp, "briefing", briefing);
-   return resp;
-}
-
 cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *block_type,
                                                 int limit, fact_authority_t authority)
 {
@@ -853,29 +770,6 @@ cJSON *db2_kb_service_memory_supersede_json(int64_t old_id, const char *new_cont
    cJSON *obj = kbs_memory_row_to_json(&out);
    if (obj)
       cJSON_AddItemToObject(resp, "memory", obj);
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_check_drift_json(int64_t task_id, const char *file_path,
-                                              const char *command)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   drift_result_t r;
-   memset(&r, 0, sizeof(r));
-   int rc = memory_check_drift(task_id, file_path ? file_path : "", command ? command : "", &r);
-   if (rc != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "task not found");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddBoolToObject(resp, "drifted", r.drifted);
-   cJSON_AddNumberToObject(resp, "task_id", (double)r.task_id);
-   cJSON_AddStringToObject(resp, "task_title", r.task_title);
-   cJSON_AddStringToObject(resp, "message", r.message);
    return resp;
 }
 

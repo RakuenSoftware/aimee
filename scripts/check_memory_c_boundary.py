@@ -63,6 +63,7 @@ RETIRED_NATIVE_SYMBOLS = re.compile(
     r"assemble_token_bits|context_recency_from_age_days|context_apply_recency|"
     r"context_xml_tag_for_header|memory_recall_activated|db2_kb_service_memory_recall_json|"
     r"db2_kb_service_memory_prospective_\w+|"
+    r"db2_kb_service_memory_(?:briefing|alerts|assemble_context|compact_windows|query_edges|check_drift)_json|"
     r"db2_kb_service_memory_(?:get|list|fact_history|top_l2_facts|load_eval_corpus|list_session_scope_priority|list_session_scope_priority_like|search_facts_patterns_by_keyword|scope_visibility_rank|tag_workspace|tag_scope)_json|"
     r"db2_kb_service_memory_(?:key_exists|find_id_by_key_kind|list_low_effectiveness|list_unused_l2|list_superseded_keys|review_list|set_artifact|effectiveness_stats)_json|"
     r"db2_kb_service_memory_(?:lint|maintenance_run|entity_profile|entity_edges|search_graph|search_graph_as_of|get_episode|get_provenance|link_query|link_create|link_delete|list_conflicts|query_health|stats)_json|"

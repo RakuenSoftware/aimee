@@ -540,17 +540,6 @@ int kb_handle_memory_search(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to search memory windows");
 }
 
-int kb_handle_memory_assemble_context(int fd, cJSON *req)
-{
-   cJSON *t_j = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
-   const char *task = (cJSON_IsString(t_j) && t_j->valuestring[0]) ? t_j->valuestring : NULL;
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_assemble_context_json(task);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to assemble context");
-}
-
 int kb_handle_memory_assemble_typed_context(int fd, cJSON *req)
 {
    cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
@@ -561,24 +550,6 @@ int kb_handle_memory_assemble_typed_context(int fd, cJSON *req)
    cJSON *resp = db2_kb_service_memory_assemble_typed_context_json(req);
    kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to assemble typed context");
-}
-
-int kb_handle_memory_compact_windows(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_memory_compact_windows_json();
-   return kb_reply_or_error(fd, resp, "failed to compact windows");
-}
-
-int kb_handle_memory_query_edges(int fd, cJSON *req)
-{
-   cJSON *ent_j = cJSON_GetObjectItemCaseSensitive(req, "entity");
-   cJSON *max_j = cJSON_GetObjectItemCaseSensitive(req, "max");
-   if (!cJSON_IsString(ent_j))
-      return kb_send_error(fd, "missing entity");
-   int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 128;
-   cJSON *resp = db2_kb_service_memory_query_edges_json(ent_j->valuestring, max);
-   return kb_reply_or_error(fd, resp, "failed to query memory edges");
 }
 
 /* Read the request's destructive-edit authority. Only the exact string "user"
@@ -690,18 +661,6 @@ int kb_handle_memory_upsert_workflow(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to upsert workflow memory");
 }
 
-int kb_handle_memory_alerts(int fd, cJSON *req)
-{
-   cJSON *since_j = cJSON_GetObjectItemCaseSensitive(req, "since");
-   const char *since =
-       (cJSON_IsString(since_j) && since_j->valuestring[0]) ? since_j->valuestring : NULL;
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_alerts_json(since);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to render memory alerts");
-}
-
 int kb_handle_session_briefing_commitments(int fd, cJSON *req)
 {
    return kb_handle_session_briefing_section(fd, req,
@@ -714,18 +673,6 @@ int kb_handle_session_briefing_directives(int fd, cJSON *req)
    return kb_handle_session_briefing_section(fd, req,
                                              db2_kb_service_session_briefing_directives_json,
                                              "failed to render session-briefing directives");
-}
-
-int kb_handle_memory_briefing(int fd, cJSON *req)
-{
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit_tokens");
-   int limit_tokens = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 0;
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_briefing_json(limit_tokens);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to build memory briefing");
 }
 
 int kb_handle_memory_context_block(int fd, cJSON *req)
@@ -1296,20 +1243,6 @@ int kb_handle_entities_unmerge(int fd, cJSON *req)
 
    cJSON *resp = db2_kb_service_entities_unmerge_json((int64_t)mid_j->valuedouble);
    return kb_reply_or_error(fd, resp, "failed to unmerge entities");
-}
-
-int kb_handle_memory_check_drift(int fd, cJSON *req)
-{
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "task_id");
-   cJSON *path_j = cJSON_GetObjectItemCaseSensitive(req, "file_path");
-   cJSON *cmd_j = cJSON_GetObjectItemCaseSensitive(req, "command");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "memory.check_drift requires task_id");
-   const char *path = cJSON_IsString(path_j) ? path_j->valuestring : "";
-   const char *cmd = cJSON_IsString(cmd_j) ? cmd_j->valuestring : "";
-
-   cJSON *resp = db2_kb_service_memory_check_drift_json((int64_t)id_j->valuedouble, path, cmd);
-   return kb_reply_or_error(fd, resp, "failed to check drift");
 }
 
 int kb_handle_task_create(int fd, cJSON *req)

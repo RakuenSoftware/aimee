@@ -11,6 +11,13 @@ type commandRoute struct {
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"briefing", "Briefing memories.", handleRuntimeCommand, true},
+	{"alerts", "Alerts memories.", handleRuntimeCommand, true},
+	{"assemble_context", "Assemble context memories.", handleRuntimeCommand, true},
+	{"compact_windows", "Compact windows memories.", handleRuntimeCommand, true},
+	{"query_edges", "Query edges memories.", handleRuntimeCommand, true},
+	{"check_drift", "Check drift memories.", handleRuntimeCommand, true},
+
 	{"get", "Get memories.", handleRecordCommand, true},
 	{"list", "List memories.", handleRecordCommand, true},
 	{"fact_history", "Fact history memories.", handleRecordCommand, true},

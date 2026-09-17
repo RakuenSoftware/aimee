@@ -263,7 +263,11 @@ func (s *postgresDataStore) CheckDrift(ctx context.Context, taskID int64, filePa
 		}
 		terms = append(terms, driftTokens(sub)...)
 	}
+	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return DriftResult{}, err
+	}
 	target := strings.ToLower(filePath + " " + command)
 	inScope := filePath == "" && command == ""
 	for _, term := range terms {

@@ -44,7 +44,7 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			}
 			seen[verb] = true
 		}
-		if offset != len(response) || len(seen) != 45 {
+		if offset != len(response) || len(seen) != 51 {
 			t.Fatalf("routes=%d bytes=%d/%d", len(seen), offset, len(response))
 		}
 		for _, verb := range []string{"recall", "directive_create", "prospective_match", "list_unused_l2", "stats"} {

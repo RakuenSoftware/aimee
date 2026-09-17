@@ -294,7 +294,8 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
 	}
 	activities := make([]briefingActivity, 0)
 	rows, err := s.db.Query(ctx, `SELECT source_session,episode_text,reference_time,created_at
-FROM memory_episodes ORDER BY reference_time DESC,created_at DESC LIMIT $1`, limit/3+1)
+FROM memory_episodes WHERE memory_id IN (SELECT id FROM memories)
+ORDER BY reference_time DESC,created_at DESC LIMIT $1`, limit/3+1)
 	if err != nil {
 		return nil, err
 	}
@@ -400,6 +401,10 @@ func (s *postgresDataStore) AssembleContext(ctx context.Context, scope Scope, qu
 	if err != nil {
 		return "", err
 	}
+	return renderMemoryContext(records, blockType), nil
+}
+
+func renderMemoryContext(records []Record, blockType string) string {
 	var out strings.Builder
 	out.WriteString("# Memory Context\n")
 	if blockType != "" {
@@ -411,7 +416,7 @@ func (s *postgresDataStore) AssembleContext(ctx context.Context, scope Scope, qu
 	if len(records) > 0 {
 		out.WriteByte('\n')
 	}
-	return out.String(), nil
+	return out.String()
 }
 
 func diagnosticFor(record Record, query string) Diagnostic {

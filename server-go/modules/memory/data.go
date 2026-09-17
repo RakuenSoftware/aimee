@@ -797,7 +797,7 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	}
 	maxLimit := 100
 	switch request.Operation {
-	case "prospective-list", "directive-list", "lint", "conflict-list", "low-effectiveness", "unused-l2", "superseded-keys":
+	case "prospective-list", "directive-list", "lint", "conflict-list", "low-effectiveness", "unused-l2", "superseded-keys", "entity-edges":
 		maxLimit = 256
 	}
 	if request.Limit < 1 || request.Limit > maxLimit || len(request.Kind) > 64 ||
@@ -1110,6 +1110,10 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			}
 			var drift DriftResult
 			drift, err = legacy.CheckDrift(ctx, request.ID, request.Path, request.Command)
+			if store.IsNoRows(err) {
+				err = nil
+				break
+			}
 			response.Drift = &drift
 		case "anti-pattern-feedback":
 			var count int
@@ -1790,7 +1794,13 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			response.Payload, err = retrieval.AlertsBundle(ctx, request.AsOf)
 		case "assemble-context", "context-block":
 			var block string
-			block, err = retrieval.AssembleContext(ctx, scope, request.Query, request.BlockType, request.Limit)
+			if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
+				var records []Record
+				records, err = backend.SearchVisible(ctx, request)
+				block = renderMemoryContext(records, request.BlockType)
+			} else {
+				block, err = retrieval.AssembleContext(ctx, scope, request.Query, request.BlockType, request.Limit)
+			}
 			response.Block = &block
 		case "diagnose":
 			response.Diagnostics, err = retrieval.Diagnose(ctx, scope, request.Query, request.Limit)

@@ -216,48 +216,6 @@ int db2_memory_decisions_export_jsonl(const char *path)
    return count;
 }
 
-int memory_query_edges(const char *entity, edge_t *out, int max)
-{
-   if (!entity || !entity[0] || !out || max <= 0)
-      return -1;
-   cJSON *request = domain_request("entity-edges");
-   if (!request || !cJSON_AddStringToObject(request, "entity", entity) ||
-       !cJSON_AddNumberToObject(request, "limit", max))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *items = response ? cJSON_GetObjectItemCaseSensitive(response, "relations") : NULL;
-   if (!cJSON_IsArray(items))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(items);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-   {
-      const cJSON *item = cJSON_GetArrayItem(items, i);
-      const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
-      const cJSON *weight = cJSON_GetObjectItemCaseSensitive(item, "weight");
-      memset(&out[i], 0, sizeof(out[i]));
-      if (!cJSON_IsNumber(id) || !cJSON_IsNumber(weight) ||
-          domain_copy(out[i].source, sizeof(out[i].source), item, "source") ||
-          domain_copy(out[i].relation, sizeof(out[i].relation), item, "relation") ||
-          domain_copy(out[i].target, sizeof(out[i].target), item, "target"))
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-      out[i].id = (int64_t)id->valuedouble;
-      out[i].weight = (int)weight->valuedouble;
-   }
-   cJSON_Delete(response);
-   return n;
-}
-
 static int fusion_state_call(const char *operation, const char *state)
 {
    cJSON *request = domain_request(operation);
@@ -498,23 +456,6 @@ int memory_search(char **clusters, int cluster_count, int limit, search_result_t
    return n;
 }
 
-int memory_compact_windows(int *summary_count, int *fact_count)
-{
-   cJSON *response =
-       domain_call_with_timeout(domain_request("compact-legacy"), DOMAIN_MAINTENANCE_TIMEOUT_MS);
-   int summaries = 0, facts = 0;
-   int valid = domain_number(response, "summary_count", &summaries) == 0 &&
-               domain_number(response, "fact_count", &facts) == 0;
-   cJSON_Delete(response);
-   if (!valid)
-      return -1;
-   if (summary_count)
-      *summary_count = summaries;
-   if (fact_count)
-      *fact_count = facts;
-   return 0;
-}
-
 int memory_scan_conversations(char dirs[][MAX_PATH_LEN], int dir_count)
 {
    if (dir_count < 0 || dir_count > 8)
@@ -534,37 +475,6 @@ int memory_scan_conversations(char dirs[][MAX_PATH_LEN], int dir_count)
    (void)domain_number(response, "count", &count);
    cJSON_Delete(response);
    return count;
-}
-
-int memory_check_drift(int64_t task_id, const char *file_path, const char *command,
-                       drift_result_t *out)
-{
-   if (!out || task_id <= 0)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   cJSON *request = domain_request("check-drift");
-   if (!request || !cJSON_AddNumberToObject(request, "id", (double)task_id) ||
-       !cJSON_AddStringToObject(request, "path", file_path ? file_path : "") ||
-       !cJSON_AddStringToObject(request, "command", command ? command : ""))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *drift = response ? cJSON_GetObjectItemCaseSensitive(response, "drift") : NULL;
-   const cJSON *drifted = drift ? cJSON_GetObjectItemCaseSensitive(drift, "drifted") : NULL;
-   const cJSON *id = drift ? cJSON_GetObjectItemCaseSensitive(drift, "task_id") : NULL;
-   if (!cJSON_IsObject(drift) || !cJSON_IsBool(drifted) || !cJSON_IsNumber(id))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   out->drifted = cJSON_IsTrue(drifted);
-   out->task_id = (int64_t)id->valuedouble;
-   (void)domain_copy(out->task_title, sizeof(out->task_title), drift, "task_title");
-   (void)domain_copy(out->message, sizeof(out->message), drift, "message");
-   cJSON_Delete(response);
-   return 0;
 }
 
 int anti_pattern_extract_from_feedback(void)

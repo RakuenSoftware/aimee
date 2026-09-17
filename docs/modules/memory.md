@@ -279,3 +279,9 @@ separate from the source visibility context. PostgreSQL tests exercise these
 commands as a non-owner role, including historical validity, hidden records,
 empty results and bounded lists. The retired native list/get adapters and
 full-content ABI helpers are removed.
+
+Briefing, alerts, context assembly, graph-edge queries, conversation compaction,
+and task-drift responses are also Go-owned public commands. Briefing episodes
+must have a visible parent memory, and context assembly searches the visible
+project/workspace/global set rather than silently dropping shared context.
+Failures remain distinct from successful empty results.

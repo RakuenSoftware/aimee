@@ -663,7 +663,6 @@ int memory_find_facts_visible_ex(const char *query, const char *workspace, const
 int memory_scan_conversations(char dirs[][MAX_PATH_LEN], int dir_count);
 
 /* --- Window Compaction --- */
-int memory_compact_windows(int *summary_count, int *fact_count);
 
 /* --- Workspace Scoping --- */
 typedef enum
@@ -1008,9 +1007,6 @@ typedef struct
    char message[512];
 } drift_result_t;
 
-int memory_check_drift(int64_t task_id, const char *file_path, const char *command,
-                       drift_result_t *out);
-
 /* --- Style Learning --- */
 int memory_learn_style(void);
 
@@ -1032,7 +1028,6 @@ typedef struct
 
 int memory_extract_edges(int64_t window_id, char **file_refs, int file_count, char **terms,
                          int term_count);
-int memory_query_edges(const char *entity, edge_t *out, int max);
 
 /* Graph-powered related memory retrieval: given seed memory keys, walk
  * co_discussed edges (1-hop) and return related memory IDs scored by weight.

@@ -197,8 +197,6 @@ extern "C"
    /* §3 entity merge/unmerge. merge returns the audit id needed to reverse it. */
    cJSON *db2_kb_service_entities_merge_json(int64_t from_id, int64_t into_id);
    cJSON *db2_kb_service_entities_unmerge_json(int64_t merge_id);
-   cJSON *db2_kb_service_memory_check_drift_json(int64_t task_id, const char *file_path,
-                                                 const char *command);
    cJSON *db2_kb_service_directive_expire_session_json(void);
    cJSON *db2_kb_service_memory_scan_conversations_json(const cJSON *dirs);
    /* Dashboard endpoints that walk DB2 tables.  Each returns
@@ -212,7 +210,6 @@ extern "C"
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
    cJSON *db2_kb_service_memory_episode_card_generate_json(const char *source_session);
-   cJSON *db2_kb_service_memory_alerts_json(const char *since);
    cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
                                                      const char *rule, double observed_confidence,
                                                      const char *session_id);
@@ -234,9 +231,6 @@ extern "C"
    cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority);
    cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason);
    cJSON *db2_kb_service_memory_restore_json(int64_t id, const char *actor);
-   cJSON *db2_kb_service_memory_query_edges_json(const char *entity, int max);
-   cJSON *db2_kb_service_memory_compact_windows_json(void);
-   cJSON *db2_kb_service_memory_assemble_context_json(const char *task_hint);
    cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
    cJSON *db2_kb_service_memory_search_json(const cJSON *clusters_arr, int limit);
    cJSON *db2_kb_service_memory_find_facts_visible_json(const char *query, const char *workspace,
@@ -264,7 +258,6 @@ extern "C"
                                                          const char *key, const char *content,
                                                          const char *use_cases, double confidence,
                                                          const char *session_id, int authority);
-   cJSON *db2_kb_service_memory_briefing_json(int limit_tokens);
    /* `authority` is the typed-fact write authority for the §4 retraction this
     * turn may perform; the RPC handler derives it from the request's
     * authenticated actor, never from the request body. See db2_typed_fact_ingress
