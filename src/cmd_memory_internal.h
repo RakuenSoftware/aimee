@@ -23,8 +23,6 @@ int cmd_memory_find_facts(const opt_parsed_t *opts, const char *query, int limit
                           int max);
 int cmd_memory_diagnose_query(const opt_parsed_t *opts, const char *query, int limit,
                               memory_diagnostic_t *rows, int max);
-int cmd_memory_ask(const opt_parsed_t *opts, const char *query, int limit,
-                   memory_answer_result_t *out);
 void cmd_memory_require_runtime(int rc, const char *op);
 
 /* Formats the per-score breakdown into a JSON object (defined in

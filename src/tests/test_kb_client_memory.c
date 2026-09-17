@@ -285,7 +285,6 @@ static void test_ordered_readers_propagate_active_project_context(void)
    memory_diagnostic_t diagnostics[2];
    memory_relation_t relations[8];
    memory_entity_profile_t profile;
-   memory_answer_result_t answer;
 
    scoped_request_count = 0;
    mock_agent_http_set_post_handler(scoped_ok_post_handler);
@@ -312,7 +311,11 @@ static void test_ordered_readers_propagate_active_project_context(void)
    (void)kb_client_memory_get_entity_edges("entity", 8, relations, 8);
    (void)kb_client_memory_search_graph("entity", 8, relations, 8);
    (void)kb_client_memory_search_graph_as_of("entity", "2026-07-29", 8, relations, 8);
-   (void)kb_client_memory_ask("q", NULL, NULL, 8, &answer);
+   cJSON *ask = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(ask);
+   cJSON_AddStringToObject(ask, "query", "q");
+   json = kb_v1_action_request("memory.ask", ask);
+   free(json);
    json = kb_client_memory_context_block("q", "general", 8);
    free(json);
    (void)kb_client_memory_diagnose("q", 2, diagnostics, 2);

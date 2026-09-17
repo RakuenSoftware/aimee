@@ -92,16 +92,6 @@ int cmd_memory_diagnose_query(const opt_parsed_t *opts, const char *query, int l
                                            cmd_memory_scope_value(opts), limit, rows, max);
 }
 
-int cmd_memory_ask(const opt_parsed_t *opts, const char *query, int limit,
-                   memory_answer_result_t *out)
-{
-   int rc = kb_client_memory_ask(query, cmd_memory_scope_type(opts), cmd_memory_scope_value(opts),
-                                 limit, out);
-   if (rc == 0 && out)
-      dogfood_log_moment_live("memory_ask", query, out->citation_ids, out->citation_count, NULL);
-   return rc;
-}
-
 void cmd_memory_require_runtime(int rc, const char *op)
 {
    if (rc < 0)

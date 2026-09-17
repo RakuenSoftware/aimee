@@ -378,6 +378,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-kb-client-index-remote \
                $(TESTPREFIX)/unit-test-kb-client-docs \
                $(TESTPREFIX)/unit-test-kb-client-search \
+               $(TESTPREFIX)/unit-test-mcp-memory-answer \
                $(TESTPREFIX)/unit-test-kb-client-memory \
                $(TESTPREFIX)/unit-test-kb-graph \
                $(TESTPREFIX)/unit-test-kb-rrf \
@@ -7910,4 +7911,7 @@ unit-test-module-commands: $(TESTPREFIX)/unit-test-module-commands
 	$<
 
 $(TESTPREFIX)/unit-test-trajectory-screen: $(OBJDIR)/tests/test_trajectory_screen.o $(OBJDIR)/trajectory_export.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-mcp-memory-answer: $(OBJDIR)/tests/test_mcp_memory_answer.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

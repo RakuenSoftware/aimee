@@ -55,46 +55,6 @@ static int domain_number(const cJSON *response, const char *key, int *out)
    return 0;
 }
 
-const char *memory_answer_evidence_decision_str(const memory_answer_evidence_t *trace)
-{
-   if (!trace)
-      return "abstain";
-   switch (trace->decision)
-   {
-   case MEMORY_ANSWER_DECISION_ANSWERABLE:
-      return "answerable";
-   case MEMORY_ANSWER_DECISION_EXEMPT:
-      return "exempt";
-   default:
-      return "abstain";
-   }
-}
-
-const char *memory_answer_evidence_reason_str(const memory_answer_evidence_t *trace)
-{
-   if (!trace)
-      return "db_unavailable";
-   switch (trace->reason)
-   {
-   case MEMORY_ANSWER_REASON_OK:
-      return "ok";
-   case MEMORY_ANSWER_REASON_STRUCTURAL_EMPTY:
-      return "structural_empty";
-   case MEMORY_ANSWER_REASON_STRUCTURAL_NO_EXTRACT:
-      return "structural_no_extract";
-   case MEMORY_ANSWER_REASON_CITATION_REQUIRED:
-      return "citation_required";
-   case MEMORY_ANSWER_REASON_GROUNDING_LOW:
-      return "grounding_low";
-   case MEMORY_ANSWER_REASON_CHUNK_FLOOR:
-      return "chunk_floor";
-   case MEMORY_ANSWER_REASON_CURATED_EXEMPT:
-      return "curated_exempt";
-   default:
-      return "db_unavailable";
-   }
-}
-
 int64_t memory_episode_card_generate(const char *source_session)
 {
    if (!source_session || !source_session[0])

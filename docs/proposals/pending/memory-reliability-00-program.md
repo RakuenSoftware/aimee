@@ -145,6 +145,11 @@ derived vectors, queues replacements and records the version. Runtime callers
 perform no DDL or TRUNCATE. Restricted-role replay covers competing rebuilds,
 dimension mismatch and rollback after a late failure; native rebuild adapters
 are removed. Historical generation cutover remains later MR-11 work.
+CLI and MCP answer consumers now read the Go result through the existing generic
+authenticated KB transport. The native answer decoder, structs and enum formatters
+are removed; MCP preserves long answers and new trace fields without truncation.
+A native presentation test covers scoped requests, abstention, malformed replies
+and unavailable transport without duplicating the Go answer policy.
 The current inventory is five C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

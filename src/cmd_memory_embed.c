@@ -416,52 +416,53 @@ void mem_answer(app_ctx_t *ctx, int argc, char **argv)
    memory_filter_t filter;
    cmd_memory_build_filter(&opts, &filter);
 
-   memory_answer_result_t result;
-   memset(&result, 0, sizeof(result));
-   int rc = cmd_memory_ask(&opts, query_buf, limit, &result);
-   if (rc < 0)
-      fatal("%s", result.error[0] ? result.error : "memory ask failed");
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "query", query_buf);
+   cJSON_AddNumberToObject(request, "limit", limit);
+   const char *scope_type = cmd_memory_scope_type(&opts);
+   const char *scope_value = cmd_memory_scope_value(&opts);
+   if (scope_type && scope_type[0])
+      cJSON_AddStringToObject(request, "scope_type", scope_type);
+   if (scope_value && scope_value[0])
+      cJSON_AddStringToObject(request, "scope_value", scope_value);
+   cJSON *result = mem_rpc_unwrap(kb_v1_action_request("memory.ask", request), "memory ask failed");
+   cJSON *citation_ids = cJSON_GetObjectItemCaseSensitive(result, "citation_ids");
+   if (!cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "answer")) ||
+       !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(result, "no_answer")) ||
+       !cJSON_IsArray(citation_ids))
+   {
+      cJSON_Delete(result);
+      fatal("memory ask returned an invalid answer");
+   }
+   int64_t surfaced_ids[4];
+   int surfaced_count = 0;
+   cJSON *id;
+   cJSON_ArrayForEach(id, citation_ids) if (cJSON_IsNumber(id) && surfaced_count < 4)
+       surfaced_ids[surfaced_count++] = (int64_t)id->valuedouble;
+   dogfood_log_moment_live("memory_ask", query_buf, surfaced_ids, surfaced_count, NULL);
 
    if (ctx->json_output)
    {
       cJSON *obj = cJSON_CreateObject();
       jo_add_str(obj, "query", query_buf);
-      jo_add_str(obj, "answer", result.answer);
-      cJSON_AddNumberToObject(obj, "confidence", result.confidence);
-      cJSON_AddBoolToObject(obj, "no_answer", result.no_answer);
-      cJSON_AddBoolToObject(obj, "low_confidence", result.low_confidence);
-      cJSON *trace = cJSON_AddObjectToObject(obj, "evidence_trace");
+      jo_add_str(obj, "answer", jo_cstr(result, "answer"));
+      cJSON_AddNumberToObject(obj, "confidence", jo_num(result, "confidence", 0));
+      cJSON_AddBoolToObject(obj, "no_answer", jo_bool(result, "no_answer", 0));
+      cJSON_AddBoolToObject(obj, "low_confidence", jo_bool(result, "low_confidence", 0));
+      cJSON *trace = cJSON_DetachItemFromObjectCaseSensitive(result, "evidence_trace");
       if (trace)
-      {
-         cJSON_AddStringToObject(trace, "decision",
-                                 memory_answer_evidence_decision_str(&result.evidence));
-         cJSON_AddStringToObject(trace, "reason",
-                                 memory_answer_evidence_reason_str(&result.evidence));
-         cJSON *ids = cJSON_AddArrayToObject(trace, "candidate_ids");
-         for (int i = 0; ids && i < result.evidence.candidate_id_count; i++)
-            cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)result.evidence.candidate_ids[i]));
-         cJSON_AddNumberToObject(trace, "ranked_count", result.evidence.ranked_count);
-         cJSON_AddNumberToObject(trace, "anchor_id", (double)result.evidence.anchor_id);
-         cJSON_AddNumberToObject(trace, "anchor_rank", result.evidence.anchor_rank);
-         cJSON_AddNumberToObject(trace, "topk_grounding", result.evidence.topk_grounding);
-         cJSON_AddNumberToObject(trace, "anchor_coverage", result.evidence.anchor_coverage);
-         cJSON_AddNumberToObject(trace, "cluster_coverage", result.evidence.cluster_coverage);
-         cJSON_AddNumberToObject(trace, "threshold", result.evidence.threshold);
-         cJSON_AddNumberToObject(trace, "chunk_floor", result.evidence.chunk_floor);
-         cJSON_AddBoolToObject(trace, "structural", result.evidence.structural);
-         cJSON_AddBoolToObject(trace, "exempt", result.evidence.exempt);
-         cJSON_AddBoolToObject(trace, "trace_truncated", result.evidence.trace_truncated);
-      }
+         cJSON_AddItemToObject(obj, "evidence_trace", trace);
       cJSON *citations = cJSON_AddArrayToObject(obj, "citations");
-      for (int i = 0; i < result.citation_count; i++)
+      for (int i = 0; i < surfaced_count; i++)
       {
          cJSON *citation = cJSON_CreateObject();
-         cJSON_AddNumberToObject(citation, "memory_id", (double)result.citation_ids[i]);
+         cJSON_AddNumberToObject(citation, "memory_id", (double)surfaced_ids[i]);
          if (explain)
          {
             memory_t mem;
             memset(&mem, 0, sizeof(mem));
-            if (kb_client_memory_get(result.citation_ids[i], &mem) == 0)
+            if (kb_client_memory_get(surfaced_ids[i], &mem) == 0)
                cJSON_AddNumberToObject(citation, "effective_importance",
                                        memory_effective_importance(&mem, 0));
          }
@@ -473,10 +474,10 @@ void mem_answer(app_ctx_t *ctx, int argc, char **argv)
    }
    else
    {
-      if (result.no_answer)
+      if (jo_bool(result, "no_answer", 0))
          printf("No confident answer for \"%s\"\n", query_buf);
       else
-         printf("%s\n", result.answer);
+         printf("%s\n", jo_cstr(result, "answer"));
       if (explain)
       {
          cJSON *fc = memory_filter_to_json(&filter);
@@ -489,6 +490,7 @@ void mem_answer(app_ctx_t *ctx, int argc, char **argv)
          }
       }
    }
+   cJSON_Delete(result);
 }
 
 /* --- reflect ---

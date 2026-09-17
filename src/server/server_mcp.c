@@ -563,82 +563,55 @@ cJSON *tool_memory_mutate(cJSON *args)
 cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
 {
    cJSON *jq = cJSON_GetObjectItemCaseSensitive(args, "query");
-   cJSON *jl = cJSON_GetObjectItemCaseSensitive(args, "limit");
    if (!cJSON_IsString(jq))
       return text_content("error: missing 'query' parameter");
-
-   memory_answer_result_t result;
-   memset(&result, 0, sizeof(result));
-   int limit = cJSON_IsNumber(jl) ? jl->valueint : 5;
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);
-   int ask_rc = kb_client_memory_ask(jq->valuestring, NULL, NULL, limit, &result);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "query", jq->valuestring);
+   cJSON_AddNumberToObject(request, "limit", jo_int(args, "limit", 5));
+   char *raw = kb_v1_action_request("memory.ask", request);
    mcp_memory_scope_end();
-   if (ask_rc != 0)
-      return kb_last_result_content(result.error[0] ? result.error : "memory_ask failed");
-
-   cJSON *structured = cJSON_CreateObject();
-   if (!structured)
-      return text_content("error: out of memory");
-   cJSON_AddStringToObject(structured, "status", result.no_answer ? "abstained" : "ok");
-   cJSON_AddStringToObject(structured, "query", jq->valuestring);
-   cJSON_AddStringToObject(structured, "answer", result.answer);
-   cJSON_AddNumberToObject(structured, "confidence", result.confidence);
-   cJSON_AddStringToObject(structured, "evidence_mode", result.evidence_mode);
-   cJSON_AddBoolToObject(structured, "no_answer", result.no_answer);
-   cJSON_AddBoolToObject(structured, "low_confidence", result.low_confidence);
-   cJSON_AddBoolToObject(structured, "active_context_missing", active_context_missing);
-   cJSON *trace = cJSON_AddObjectToObject(structured, "evidence_trace");
-   if (trace)
+   cJSON *result = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   if (!result || strcmp(jo_cstr(result, "status"), "ok") != 0)
    {
-      const char *decision =
-          result.evidence.decision == MEMORY_ANSWER_DECISION_ANSWERABLE ? "answerable"
-          : result.evidence.decision == MEMORY_ANSWER_DECISION_ABSTAIN  ? "abstain"
-                                                                        : "exempt";
-      static const char *const reasons[] = {"ok",
-                                            "structural_empty",
-                                            "structural_no_extract",
-                                            "citation_required",
-                                            "grounding_low",
-                                            "chunk_floor",
-                                            "curated_exempt",
-                                            "db_unavailable"};
-      int reason_index = (int)result.evidence.reason;
-      const char *reason =
-          reason_index >= 0 && reason_index < (int)(sizeof(reasons) / sizeof(reasons[0]))
-              ? reasons[reason_index]
-              : "unknown";
-      cJSON_AddStringToObject(trace, "decision", decision);
-      cJSON_AddStringToObject(trace, "reason", reason);
-      cJSON *ids = cJSON_AddArrayToObject(trace, "candidate_ids");
-      for (int i = 0; ids && i < result.evidence.candidate_id_count; i++)
-         cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)result.evidence.candidate_ids[i]));
-      cJSON_AddNumberToObject(trace, "ranked_count", result.evidence.ranked_count);
-      cJSON_AddNumberToObject(trace, "anchor_id", (double)result.evidence.anchor_id);
-      cJSON_AddNumberToObject(trace, "anchor_rank", result.evidence.anchor_rank);
-      cJSON_AddNumberToObject(trace, "topk_grounding", result.evidence.topk_grounding);
-      cJSON_AddNumberToObject(trace, "anchor_coverage", result.evidence.anchor_coverage);
-      cJSON_AddNumberToObject(trace, "cluster_coverage", result.evidence.cluster_coverage);
-      cJSON_AddNumberToObject(trace, "threshold", result.evidence.threshold);
-      cJSON_AddNumberToObject(trace, "chunk_floor", result.evidence.chunk_floor);
-      cJSON_AddBoolToObject(trace, "structural", result.evidence.structural);
-      cJSON_AddBoolToObject(trace, "exempt", result.evidence.exempt);
-      cJSON_AddBoolToObject(trace, "trace_truncated", result.evidence.trace_truncated);
+      cJSON *error = kb_last_result_content(
+          jo_cstr(result, "message")[0] ? jo_cstr(result, "message") : "memory_ask failed");
+      cJSON_Delete(result);
+      return error;
    }
-   cJSON *citations = cJSON_AddArrayToObject(structured, "citations");
-   for (int i = 0; i < result.citation_count; i++)
+   cJSON *ids = cJSON_DetachItemFromObjectCaseSensitive(result, "citation_ids");
+   if (!cJSON_IsArray(ids) || !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "answer")) ||
+       !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(result, "no_answer")))
    {
+      cJSON_Delete(ids);
+      cJSON_Delete(result);
+      return text_content("error: memory ask returned an invalid answer");
+   }
+   int no_answer = jo_bool(result, "no_answer", 0);
+   cJSON_ReplaceItemInObjectCaseSensitive(result, "status",
+                                          cJSON_CreateString(no_answer ? "abstained" : "ok"));
+   cJSON_AddStringToObject(result, "query", jq->valuestring);
+   cJSON_DeleteItemFromObjectCaseSensitive(result, "active_context_missing");
+   cJSON_AddBoolToObject(result, "active_context_missing", active_context_missing);
+   cJSON *citations = cJSON_AddArrayToObject(result, "citations");
+   cJSON *id;
+   cJSON_ArrayForEach(id, ids)
+   {
+      if (!cJSON_IsNumber(id))
+         continue;
       cJSON *citation = cJSON_CreateObject();
-      cJSON_AddNumberToObject(citation, "memory_id", (double)result.citation_ids[i]);
+      cJSON_AddNumberToObject(citation, "memory_id", id->valuedouble);
       cJSON_AddItemToArray(citations, citation);
    }
-   *structured_out = structured;
-
+   cJSON_Delete(ids);
+   *structured_out = result;
+   if (!no_answer)
+      return text_content(jo_cstr(result, "answer"));
    char summary[2048];
-   if (result.no_answer)
-      snprintf(summary, sizeof(summary), "No confident answer for \"%s\"", jq->valuestring);
-   else
-      snprintf(summary, sizeof(summary), "%s", result.answer);
+   snprintf(summary, sizeof(summary), "No confident answer for \"%s\"", jq->valuestring);
    return text_content(summary);
 }
 

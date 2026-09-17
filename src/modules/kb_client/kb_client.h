@@ -1053,12 +1053,9 @@ int kb_client_memory_search_graph_as_of(const char *query, const char *as_of, in
  * 1 for a valid missing episode, or -1 when the service/result is unavailable. */
 int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out);
 
-/* Run the memory Q&A pipeline via aimee-kb (the DB2 owner).  Returns
- * 0 on success (|out| filled) or -1 if kb is unreachable or
- * memory_ask_query failed (out->error has the message).  Mirrors
- * memory_ask_query(). */
-int kb_client_memory_ask(const char *query, const char *scope_type, const char *scope_value,
-                         int limit, memory_answer_result_t *out);
+/* Invoke an action through the authenticated KB transport. Takes ownership of
+ * req; the caller frees the returned JSON, including non-success envelopes. */
+char *kb_v1_action_request(const char *action, cJSON *req);
 
 /* Fetch learning proposals via the aimee-kb sidecar.  Sends
  * `learning.list_proposals` with {state, sink, limit} and returns the
