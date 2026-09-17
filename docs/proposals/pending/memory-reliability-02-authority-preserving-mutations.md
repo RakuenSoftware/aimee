@@ -1,0 +1,62 @@
+# MR-02: Authority-preserving memory mutations
+
+- **State:** Proposed
+- **Priority:** P0: durable correctness
+- **Owner:** Memory admission and DB2
+- **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) for shared authorization vocabulary; admission fixes can begin immediately
+- **Delivery:** Three implementation slices
+
+## Problem and intended result
+
+Insert/upsert and edit currently have different history semantics. A same-key insert can overwrite active content in place, while a model replacement can inherit provenance and confidence limits from the prior row. The durable result must describe who authored the new content and what evidence supports it, regardless of which API verb was used.
+
+Implement one mutation admission operation for create, propose, correct, supersede, reject, retire and explicitly authorized destructive deletion. Route compatibility entry points through it.
+
+## Existing integration points
+
+`server-go/modules/memory/mutations.go` contains `InsertEpistemic`, `UpdateAs` and `DeleteAs`. Preserve existing episode/experience immutability, instruction/policy replacement rules, rejection tombstones and fact changesets. Extend the current schema and audit mechanism instead of adding a parallel write service.
+
+## Mutation contract
+
+The authenticated host supplies `actor_ref`, `actor_class`, `operation`, `target_id`, `expected_version`, `content_digest`, `source_event_ref`, `scope` and an idempotency key. Authority does not come from text claiming to be a user correction.
+
+Separate `origin_authority`, `revision_authority` and `review_authority`. A model may draft a proposal derived from a user statement; the resulting draft is still model-authored. User approval is a separate event that identifies the reviewed content digest. Copying source attribution must not copy author identity or an old confidence ceiling onto new prose.
+
+| Attempt | Required result |
+|---|---|
+| Model corrects an authoritative user assertion | Preserve current assertion; create linked proposal unless explicit governing policy permits another transition |
+| Model edits its own active hypothesis | Create a new version and supersession link; retain old version |
+| Same-key insert conflicts with an immutable episode | Reject or record a distinct new episode; never overwrite |
+| Same-key insert conflicts with instruction/policy | Use the reviewed replacement path |
+| Authorized user correction | Create a new version with user correction provenance and explicit effective time |
+| Replay of rejected material | Enforce applicable tombstone before activation |
+| Retry with identical idempotency key and different bytes | Reject with `idempotency_conflict` |
+
+Tombstone matching must have a documented canonical identity and scope. Exact-text tombstones and semantic rejection policies are different controls; do not claim exact hashing detects paraphrased reintroduction.
+
+## Transactions and history
+
+Resolve conflict identity under a transaction, compare the expected version, admit the transition, write the new version, append audit intent and invalidate derived dependants atomically where they share the durable owner. Other owners receive an idempotent invalidation event. Never delete the old row first and hope the replacement succeeds.
+
+User authority alone does not bypass the configured deletion/retention policy. A destructive operation must be explicit and auditable. Correction should be the normal path when historical evidence remains useful.
+
+## Implementation slices
+
+1. Add transition rules and concurrency/idempotency tests; make all same-key conflict handling call the same admission function.
+2. Version model/user edits consistently and add new-author provenance plus confidence recomputation. Backfill only facts supported by existing records; legacy authorship remains `unknown` where necessary.
+3. Add durable guards for critical invariants, derived invalidation and compatibility-adapter parity. Expose conflict/review-required results to callers without silently retrying as a more privileged operation.
+
+## Acceptance gates
+
+- User assertion → model upsert and user assertion → model edit cannot silently become active model-authored truth bearing user provenance.
+- Episode and policy protections hold for insert conflicts, updates, bulk import and maintenance writers.
+- Concurrent corrections yield one admitted expected-version transition; the losing caller receives an actionable conflict.
+- A crash cannot leave the old version retired with no valid replacement or duplicate a correction on retry.
+- Rejected content, changed idempotency payloads and forged actor metadata fail consistently.
+- Audit records identify previous/new versions, author/reviewer, effective time and the exact approved content.
+
+## Rollout and rollback
+
+Add schema fields before switching writers. Detect legacy same-key conflicts and make the migration explicit rather than silently choosing a winner. Keep a compatibility reader for old versions. Rollback must retain created history and guards; it cannot re-enable destructive model upserts.
+
+[Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)

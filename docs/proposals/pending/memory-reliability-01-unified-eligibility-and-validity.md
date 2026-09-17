@@ -1,0 +1,61 @@
+# MR-01: Unified retrieval eligibility and validity
+
+- **State:** Proposed
+- **Priority:** P0: correctness foundation
+- **Owner:** Memory and DB2, with authenticated transport integration
+- **Depends on:** None; use the fixture harness in [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) from the first change
+- **Delivery:** Three reviewable implementation slices
+
+## Problem and intended result
+
+Memory search, visible search, bundle recall, fact recall and graph expansion currently apply different combinations of suppression, lifecycle and time checks. A record can be relevant to a query while being invalid for its requested time or unauthorized for its caller. A ranking score must never repair an eligibility failure.
+
+Provide one versioned eligibility decision for every memory-bearing surface. Personal and shared stores retain their existing ownership; each implements the same behavioral contract over its own schema. Current-state, historical and explicitly diagnostic reads have separate, declared semantics.
+
+## Existing integration points
+
+Start in `server-go/modules/memory/{data.go,visibility_search.go,retrieval.go,fact_recall.go,fusion.go}` and the typed context backend `src/kb/db2_adapters/kb_service_backend_context.c`. Reuse `memory_row_scope_visible`, transaction-local request scope and existing semantic-assertion filters in `src/modules/db2/c/schema.sql`. A memory-row policy does not automatically protect fact edges, aliases, derived rows or cached projections; inventory those paths explicitly.
+
+## Contract
+
+Add an internal `EligibilityContext` supplied by the authenticated host: principal reference, authorized audience, workspace/project, purpose, query mode, valid-at time, believed-at time, policy version and revocation generation. Model text cannot supply principal authority or grant `include_all`.
+
+Return an `EligibilityDecision` with `eligible`, `reason_codes`, `lifecycle`, `temporal_applicability`, `evidence_state`, `authority_class` and the checked record version. The user-facing validity projection may display `valid`, `historical`, `stale`, `superseded`, `expired`, `provisional`, `quarantined` or `unknown`; retain the underlying dimensions rather than compressing every failure into one scalar multiplier.
+
+Apply rules in this order:
+
+1. Authenticate scope and purpose. Filter unauthorized candidates before ranking or metadata exposure.
+2. Enforce deletion, rejection, quarantine and explicit suppression policy. A historical request does not bypass authorization, erasure or quarantine.
+3. Evaluate lifecycle and half-open time intervals: `from <= requested_time < until`, with explicit handling of open endpoints. World-time and belief-time remain independent.
+4. Check required evidence availability and contradiction state. Unknown evidence is explicit; it is not silently treated as validated.
+5. Apply the ordinary-serving horizon from [MR-10](memory-reliability-10-deterministic-utility-horizons.md) when enabled for this record category and request purpose.
+6. Recheck after graph expansion and at context release. Every traversed node/edge and returned target must satisfy the applicable policy.
+
+Capture the request clock once. Normalize legacy timestamp representations at the storage adapter; reject malformed governed-time values rather than comparing inconsistent text formats. Diagnostic access to excluded records requires its own authorized purpose and must return no more metadata than that purpose permits.
+
+## Implementation slices
+
+**1. Contract and storage predicates.** Implement the shared types, reason vocabulary and SQL predicate builders or views. Bind scope to transactions under non-owner runtime roles. Pin `include_all` to a privileged capability instead of trusting a request boolean.
+
+**2. Serving parity.** Route search, visible search, bundles, facts, previews, typed channels and graph legs through the same policy. Make legacy activation/workspace parameters effective or reject/deprecate them explicitly. Return `unsupported_mode` where an adapter cannot provide believed-at reconstruction.
+
+**3. Release and diagnostics.** Add `aimee memory validity <id> --mode current|historical` as a projection of the real serving decision. Join final release to the checked record version and revocation generation; [MR-16](memory-reliability-16-evidence-bound-actions-and-composition.md) defines action-time use.
+
+## Acceptance gates
+
+- One fixture includes current, future, expired, suppressed, superseded, archived, quarantined, deleted, revoked and cross-scope records. All advertised endpoints return the expected eligible set.
+- Historical recall returns an authorized old version at the requested time while excluding erased and unauthorized content.
+- Graph traversal cannot expose a permitted target through an unauthorized intermediate node or reveal that node's identity.
+- Concurrent pooled requests cannot inherit each other's transaction scope. Owner/superuser tests cannot substitute for the non-owner runtime test.
+- An edit or revocation after candidate retrieval invalidates release or forces a new decision; the earlier decision is retained as history.
+- Pure lexical, dense-only and graph-only candidates receive the same hard gates.
+
+## Rollout and rollback
+
+Compare old/new decisions on authorized fixtures and sampled shadow requests. Ship confirmed eligibility corrections independently of ranking experiments. After enforcement is enabled for a surface, a rollback may restore the previous ranking policy but must preserve the corrected access/lifecycle gates. Measure exclusions by reason, false exclusions on historical fixtures and query latency.
+
+## Boundaries
+
+This proposal does not change canonical taxonomy, turn confidence into probability or make all stores share one database. No numeric relevance boost can override an ineligible decision.
+
+[Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
