@@ -982,10 +982,6 @@
     },
     {
       "classification": "private-implementation-test",
-      "path": "src/tests/test_memory_embed_dim_guard.c"
-    },
-    {
-      "classification": "private-implementation-test",
       "path": "src/tests/test_memory_filter.c"
     },
     {
@@ -2185,8 +2181,7 @@
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_fidelity.c",
         "src/tests/test_kb_http_routes.c",
-        "src/tests/test_kb_tenancy_shim_guard.c",
-        "src/tests/test_memory_embed_dim_guard.c"
+        "src/tests/test_kb_tenancy_shim_guard.c"
       ],
       "locations": [
         {
@@ -16920,7 +16915,8 @@
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_memory.c",
-        "src/kb/kb_main.c"
+        "src/kb/kb_main.c",
+        "src/kb/kb_service.c"
       ],
       "locations": [
         {
@@ -19438,7 +19434,6 @@
         "src/tests/db2_test_template.c",
         "src/tests/test_db2.c",
         "src/tests/test_kb_audit_worm_pg.c",
-        "src/tests/test_memory_embed_dim_guard.c",
         "src/tests/test_pgvec.c",
         "src/tests/test_pgvec_generation_pg.c",
         "src/tests/test_pgvec_neardup.c"
@@ -20620,7 +20615,6 @@
         "src/tests/test_learning_version.c",
         "src/tests/test_memory_advanced.c",
         "src/tests/test_memory_audit_hook.c",
-        "src/tests/test_memory_embed_dim_guard.c",
         "src/tests/test_memory_filter.c",
         "src/tests/test_notes.c",
         "src/tests/test_ontology_evolution.c",
@@ -23395,7 +23389,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_kb_service.h",
-          "line": 41
+          "line": 38
         }
       ],
       "review": {
@@ -23415,7 +23409,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_kb_service.h",
-          "line": 36
+          "line": 33
         }
       ],
       "review": {
@@ -23436,7 +23430,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_kb_service.h",
-          "line": 35
+          "line": 32
         }
       ],
       "review": {
@@ -23512,33 +23506,13 @@
     },
     {
       "consumers": [
-        "src/kb/kb_service.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/pgvec_kb_service.h",
-          "line": 29
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "index",
-        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-      },
-      "signature": "int pgvec_kb_service_search_memory_points ( const char * record_type , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
-      "signature_sha256": "7efc1baf6ea4b77cb09f179f7c740d83bbd9d0087c658519de1cb3275294365f",
-      "status": "reviewed",
-      "symbol": "pgvec_kb_service_search_memory_points"
-    },
-    {
-      "consumers": [
         "src/modules/benchmarks/agent_eval_benchmarks.c",
         "src/tests/test_kb.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/pgvec_kb_service.h",
-          "line": 31
+          "line": 28
         }
       ],
       "review": {
@@ -24000,7 +23974,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 49
+          "line": 47
         }
       ],
       "review": {
@@ -24018,7 +23992,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 31
+          "line": 29
         }
       ],
       "review": {
@@ -24036,7 +24010,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 30
+          "line": 28
         }
       ],
       "review": {
@@ -24050,32 +24024,11 @@
       "symbol": "pgvec_memory_vector_scope_hint_set"
     },
     {
-      "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
-        "src/tests/test_memory_embed_dim_guard.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 25
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "index",
-        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-      },
-      "signature": "int pgvec_memory_vector_search_record_type ( const char * record_type , const float * vec , int dim , int limit , int64_t * ids , double * scores , int max )",
-      "signature_sha256": "5162275eb78ab6fe04703289917cf9e4879000392e43d8a8781bc98b20f20c1c",
-      "status": "reviewed",
-      "symbol": "pgvec_memory_vector_search_record_type"
-    },
-    {
       "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 27
+          "line": 25
         }
       ],
       "review": {
@@ -24090,7 +24043,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_memory_embed_dim_guard.c",
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
@@ -24500,15 +24452,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "09fe57203af6a03d92666c07650be2ecfa54f91229ce3e75c3838689eb5a1bce",
+  "fingerprint": "07bf693933a88a77ef751eb7313a0ce11e8e651d2eabfd603714cb72193097e9",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 486,
-    "declarations": 1399,
+    "declarations": 1397,
     "headers": 141,
     "internal_unconsumed": 366,
     "private_test_only": 326,
-    "reviewed": 221
+    "reviewed": 219
   }
 }

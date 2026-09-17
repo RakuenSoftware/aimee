@@ -66,7 +66,6 @@ UNBUILT_SOURCES = {
     "test_learning_regret.c",
     "test_memory_advanced.c",
     "test_memory_candidate_fusion.c",
-    "test_memory_embed_dim_guard.c",
     "test_memory_embed_http_auth.c",
     "test_memory_filter.c",
     "test_memory_lane_outcome.c",

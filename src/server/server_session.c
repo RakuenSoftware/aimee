@@ -23,7 +23,14 @@ int handle_session_close(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* Generate episode card before removing the session record.  aimee-kb
     * loads its own config and short-circuits if summarisation is disabled. */
-   int64_t uid = kb_client_memory_episode_card_generate(sid);
+   cJSON *card_args = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(card_args);
+   cJSON_AddStringToObject(card_args, "source_session", sid);
+   char *card_raw = kb_v1_action_request("memory.episode_card_generate", card_args);
+   cJSON *card = card_raw ? cJSON_Parse(card_raw) : NULL;
+   free(card_raw);
+   int64_t uid = strcmp(jo_cstr(card, "status"), "ok") == 0 ? jo_i64(card, "memory_unit_id", 0) : 0;
+   cJSON_Delete(card);
    if (uid <= 0)
       aimee_log(LOG_WARN, "session_close", "episode card generation produced no row for session %s",
                 sid);

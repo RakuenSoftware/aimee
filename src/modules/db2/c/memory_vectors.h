@@ -22,8 +22,6 @@ int pgvec_memory_vector_delete_point(int64_t point_id);
  * are being replaced. Returns embedding rows removed, or -1 on a bad call / no
  * connection. Call while the memory_units rows still exist. */
 int pgvec_memory_vector_delete_points_for_memory(int64_t memory_id, int include_base);
-int pgvec_memory_vector_search_record_type(const char *record_type, const float *vec, int dim,
-                                           int limit, int64_t *ids, double *scores, int max);
 int pgvec_memory_vector_search_with_kinds(const float *vec, int dim, const char *const *kinds,
                                           int n_kinds, int limit, int64_t *ids, double *scores,
                                           int max);

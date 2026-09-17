@@ -170,28 +170,6 @@ int kb_client_memory_prospective_sweep_expired(void)
    return n;
 }
 
-int64_t kb_client_memory_episode_card_generate(const char *source_session)
-{
-   if (!source_session || !source_session[0])
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "source_session", source_session);
-   char *json = kb_v1_action_request("memory.episode_card_generate", req);
-   if (!json)
-      return 0;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return 0;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *uid_j = cJSON_GetObjectItemCaseSensitive(resp, "memory_unit_id");
-   int64_t uid = 0;
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsNumber(uid_j))
-      uid = (int64_t)uid_j->valuedouble;
-   cJSON_Delete(resp);
-   return uid;
-}
-
 int kb_client_memory_scope_visibility_rank(const int64_t *ids, int id_count, const char *workspace,
                                            const char *project, int *out_ranks)
 {

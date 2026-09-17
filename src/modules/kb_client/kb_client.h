@@ -614,12 +614,6 @@ int kb_client_memory_get_provenance(int64_t memory_id, provenance_entry_t *out, 
 int kb_client_memory_tag_workspace(int64_t memory_id, const char *workspace);
 int kb_client_memory_tag_scope(int64_t memory_id, const char *scope_type, const char *scope_value);
 
-/* Generate (and store) an episode card summarising one session via aimee-kb.
- * Returns the new memory_unit row id on success, 0 on failure or when
- * episode summarisation is disabled in config.  Mirrors
- * memory_episode_card_generate(). */
-int64_t kb_client_memory_episode_card_generate(const char *source_session);
-
 /* Compute the scope-visibility rank (0-3) for each memory id in `ids`
  * (length `id_count`), filling `out_ranks` with the per-id rank.  Returns
  * the number of ranks filled (0 if kb is unreachable).  Mirrors per-id

@@ -14,7 +14,6 @@
     "src/modules/memory/gw_stage_memory.c",
     "src/modules/memory/memory_data_bus.c",
     "src/modules/memory/memory_domain_bus.c",
-    "src/modules/memory/memory_domain_runtime_bus.c",
     "src/modules/memory/memory_scope_connection.c"
   ],
   "go_sources": [
@@ -72,6 +71,7 @@
     "server-go/modules/memory/runtime_command.go",
     "server-go/modules/memory/vector_maintenance.go",
     "server-go/modules/memory/vector_repair.go",
+    "server-go/modules/memory/episode_card.go",
     "server-go/modules/memory/public_vector.go",
     "server-go/modules/memory/answer.go",
     "server-go/modules/memory/public_answer.go"
@@ -117,6 +117,8 @@
     "server-go/modules/memory/runtime_command_test.go",
     "server-go/modules/memory/vector_maintenance_test.go",
     "server-go/modules/memory/vector_repair_test.go",
+    "server-go/modules/memory/vector_search_test.go",
+    "server-go/modules/memory/episode_card_test.go",
     "server-go/modules/memory/answer_test.go"
   ],
   "public_headers": [

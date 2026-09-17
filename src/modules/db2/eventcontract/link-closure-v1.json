@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "d258e9cd78eb13dcf508713e735913fa03a0c1b7",
-  "source_fingerprint": "fda6214bd0ef5ed04353d1353d8f14bb222410265cff477376cc90b7bb6b2bdb",
+  "source_revision": "e95c17662bdef98f1616ac9e786c544467e28521",
+  "source_fingerprint": "4171469218bc419d5e489e00e87e1f03041704cc18d069831b5485213849f722",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -2298,14 +2298,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "pgvec_memory_vector_search_record_type",
-      "references": [
-        "src/modules/db2/c/pgvec_kb_service.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "poll",
       "references": [
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
@@ -3097,15 +3089,15 @@
   "summary": {
     "translation_units": 125,
     "descriptor_support_units": 19,
-    "unresolved_symbols": 147,
+    "unresolved_symbols": 146,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 7,
+      "injected-module-contract": 6,
       "portable-core-promotion": 0,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 140
     }
   },
-  "fingerprint": "72d077abf874b41df8944d47ce4fac0a1569a370cdbaec56ed1e3dd201acdf0d"
+  "fingerprint": "a6bcfffe0a6500b00552caa1845d1b2ca04fc855d10c8433cb5f924c976ab8c3"
 }

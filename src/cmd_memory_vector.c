@@ -1111,18 +1111,22 @@ void mem_episode(app_ctx_t *ctx, int argc, char **argv)
 
    if (do_generate)
    {
-      if (!config_memory_episode_summaries_enabled())
-      {
-         fprintf(stderr, "error: episode summaries disabled"
-                         " (set memory.episode_summaries.enabled=true in config)\n");
-         return;
-      }
-      int64_t uid = memory_episode_card_generate(session_id);
+      cJSON *args = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(args);
+      cJSON_AddStringToObject(args, "source_session", session_id);
+      char *raw = kb_v1_action_request("memory.episode_card_generate", args);
+      cJSON *result = raw ? cJSON_Parse(raw) : NULL;
+      free(raw);
+      int64_t uid =
+          strcmp(jo_cstr(result, "status"), "ok") == 0 ? jo_i64(result, "memory_unit_id", 0) : 0;
       if (uid <= 0)
       {
-         fprintf(stderr, "error: episode card generation failed for session '%s'\n", session_id);
+         fprintf(stderr, "error: episode card generation failed: %s\n",
+                 jo_str(result, "message", "knowledge service unavailable"));
+         cJSON_Delete(result);
          return;
       }
+      cJSON_Delete(result);
       if (ctx->json_output)
       {
          cJSON *obj = cJSON_CreateObject();
@@ -1138,46 +1142,38 @@ void mem_episode(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   /* Show existing episode cards */
-   char *cards[16];
-   int n = memory_episode_cards_query(session_id, cards, 16);
-   if (n == 0)
+   cJSON *args = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(args);
+   cJSON_AddStringToObject(args, "source_session", session_id);
+   cJSON_AddNumberToObject(args, "limit", 16);
+   char *raw = kb_v1_action_request("memory.episode_cards", args);
+   cJSON *result = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   cJSON *cards = cJSON_GetObjectItemCaseSensitive(result, "cards");
+   if (strcmp(jo_cstr(result, "status"), "ok") != 0 || !cJSON_IsArray(cards))
    {
-      if (ctx->json_output)
-      {
-         cJSON *obj = cJSON_CreateObject();
-         cJSON_AddStringToObject(obj, "session_id", session_id);
-         cJSON *arr = cJSON_AddArrayToObject(obj, "cards");
-         (void)arr;
-         emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         printf("No episode cards found for session '%s'\n", session_id);
-      }
+      fprintf(stderr, "error: episode cards unavailable: %s\n",
+              jo_str(result, "message", "knowledge service unavailable"));
+      cJSON_Delete(result);
       return;
    }
-
    if (ctx->json_output)
    {
       cJSON *obj = cJSON_CreateObject();
       cJSON_AddStringToObject(obj, "session_id", session_id);
-      cJSON *arr = cJSON_AddArrayToObject(obj, "cards");
-      for (int i = 0; i < n; i++)
-      {
-         cJSON_AddItemToArray(arr, cJSON_CreateString(cards[i]));
-         free(cards[i]);
-      }
+      cJSON_AddItemToObject(obj, "cards", cJSON_Duplicate(cards, 1));
       emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
    }
+   else if (cJSON_GetArraySize(cards) == 0)
+      printf("No episode cards found for session '%s'\n", session_id);
    else
    {
-      for (int i = 0; i < n; i++)
-      {
-         printf("--- Episode Card %d ---\n%s\n\n", i + 1, cards[i]);
-         free(cards[i]);
-      }
+      cJSON *card;
+      int i = 0;
+      cJSON_ArrayForEach(card, cards) if (cJSON_IsString(card))
+          printf("--- Episode Card %d ---\n%s\n\n", ++i, card->valuestring);
    }
+   cJSON_Delete(result);
 }
 
 /* --- mem_assemble: show assembled context (optionally with --explain) --- */

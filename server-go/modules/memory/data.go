@@ -409,12 +409,13 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
-	settings      func() (map[string]any, error)
-	fusionEnabled bool
-	code          codeIndexState
-	personal      *personalVectors
-	db            store.Queryer
-	placement     Placement
+	episodeCommand func(context.Context, string, []byte) ([]byte, error)
+	settings       func() (map[string]any, error)
+	fusionEnabled  bool
+	code           codeIndexState
+	personal       *personalVectors
+	db             store.Queryer
+	placement      Placement
 }
 
 func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, error) {
@@ -1002,7 +1003,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}
 	budget := dataTimeout
-	if request.Operation == "vector-repair-record" {
+	if request.Operation == "vector-repair-record" || request.Operation == "episode-card-generate" {
 		budget = embedHTTPTimeout()
 	}
 	timeout := invocation.Remaining(budget)
@@ -1074,6 +1075,20 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
+	case "episode-cards":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.SessionID == "" {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var cards []string
+		cards, err = backend.episodeCards(ctx, request.SessionID, request.Limit)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"cards": cards})
+		}
+
 	case "vector-repair-prepare":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok {
@@ -1177,6 +1192,12 @@ set_config('aimee.correlation_id',$9,true)`,
 			switch {
 			case errors.Is(err, ErrMemoryNotFound):
 				err = nil
+			case errors.Is(err, errEpisodeDisabled):
+				code := -3
+				response.Code, err = &code, nil
+			case errors.Is(err, errEpisodeCapacity):
+				code := -4
+				response.Code, err = &code, nil
 			case errors.Is(err, errEpisodeMixedScope):
 				code := -2
 				response.Code = &code
@@ -1192,8 +1213,13 @@ set_config('aimee.correlation_id',$9,true)`,
 			err = legacy.RecreateVectorCollection(ctx, request.Dimension)
 			response.Updated = err == nil
 		case "vector-search":
-			response.VectorHits, err = legacy.SearchVectors(ctx, request.Vector, request.RecordType,
-				request.Workspace, request.Project, request.IncludeAll, request.MaxResults)
+			if backend, ok := options.data.(*postgresDataStore); ok && explicitScope {
+				response.VectorHits, err = backend.searchVectors(ctx, request.Vector, request.RecordType,
+					request.Workspace, request.Project, request.IncludeAll, request.MaxResults, scope)
+			} else {
+				response.VectorHits, err = legacy.SearchVectors(ctx, request.Vector, request.RecordType,
+					request.Workspace, request.Project, request.IncludeAll, request.MaxResults)
+			}
 		case "vector-rebuild":
 			var rebuilt int
 			if request.Version == "" {

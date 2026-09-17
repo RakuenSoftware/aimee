@@ -174,7 +174,7 @@ Authenticated admission and the server-to-KB transport remain native callers.
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host
 directories. Passing a pure-Go process/client build does not complete G0 while
-those C paths remain. The module currently retains five C sources and seven
+those C paths remain. The module currently retains four C sources and seven
 headers. The descriptor's `ownership_complete` flag verifies the declared file
 inventory; it does not assert that the Go migration is complete.
 
@@ -230,7 +230,7 @@ An expired call still fails rather than retrying indefinitely or changing stores
 
 The remaining C transport and host integration is migration debt:
 
-- `memory_data_bus.c`, `memory_domain_bus.c`, `memory_domain_runtime_bus.c` and `memory_embed_bus.c` encode/decode bounded event-bus
+- `memory_data_bus.c` and `memory_domain_bus.c` encode/decode bounded event-bus
   messages. `memory_scope_connection.c` only binds caller scope to an already
   prepared connection request.
 - `gw_stage_memory.c` connects the gateway IR stage to the module.
@@ -344,3 +344,11 @@ configured-program dimension probes, breaker state, and per-response authorizati
 status. Batches issue one governed HTTP request and reject malformed rows without
 publishing partial vectors. Batch HTTP timeouts default to 120 seconds and accept
 `AIMEE_EMBED_HTTP_TIMEOUT_MS` overrides from 1 through 120000 milliseconds.
+
+Episode cards now honor the configured cognifier and enable flag, enforce source
+and subprocess output bounds, and retain parent/unit lineage and summary links.
+CLI and session-close callers consume the Go command directly; card listing stays
+inside the request's visibility scope. The runtime C adapter is deleted. Vector
+search runs through the host-only Go command and applies explicit scope filters;
+PostgreSQL coverage includes both 1024- and 2560-dimensional columns and rejects
+mismatched writes without losing the previous vector.

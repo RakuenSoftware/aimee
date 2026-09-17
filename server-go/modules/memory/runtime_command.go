@@ -17,6 +17,14 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	operation := args.stringOr("operation", "")
 	request := DataRequest{IncludeAll: true}
 	switch operation {
+	case "vector-search":
+		request.Operation = operation
+		request.RecordType = args.stringOr("record_type", "")
+		request.MaxResults = args.limit("max_results", 16, 256)
+		if json.Unmarshal(args["vector"], &request.Vector) != nil || len(request.Vector) == 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		request.Scope = Scope{Type: args.stringOr("scope_type", ""), Value: args.stringOr("scope_value", "")}
 	case "fusion-state":
 		request.Operation = "fusion-state-get"
 	case "recall-metrics":
@@ -39,6 +47,11 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInternal
 	}
 	switch operation {
+	case "vector-search":
+		if response.VectorHits == nil {
+			response.VectorHits = []VectorHit{}
+		}
+		return commandResult(map[string]any{"hits": response.VectorHits})
 	case "fusion-state":
 		if response.Allowed == nil {
 			return nil, bus.ModuleStatusInternal

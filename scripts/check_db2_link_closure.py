@@ -159,9 +159,6 @@ MEMORY_ADAPTER_IMPORTS = {
     ],
     "memory_pii_turn_requests_sensitive": [
         "src/modules/db2/c/fact_ingest.c"
-    ],
-    "pgvec_memory_vector_search_record_type": [
-        "src/modules/db2/c/pgvec_kb_service.c"
     ]
 }
 CJSON_DEFINES = [

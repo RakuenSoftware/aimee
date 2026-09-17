@@ -917,69 +917,6 @@ int main(void)
       unlink(path);
    }
 
-   /* --- memory_episode_card_parse: valid episode card JSON --- */
-   {
-      const char *json = "{"
-                         "\"session_id\": \"sess_abc\","
-                         "\"title\": \"Camping trip with family\","
-                         "\"participants\": [\"Caroline\", \"Melanie\"],"
-                         "\"places\": [\"Yosemite\"],"
-                         "\"events\": [\"arrived May 1\", \"hiked Half Dome May 2\"],"
-                         "\"outcomes\": [\"everyone safe\"],"
-                         "\"open_threads\": [\"Caroline mentioned returning in fall\"]"
-                         "}";
-      memory_episode_card_t card;
-      int rc = memory_episode_card_parse(json, &card);
-      assert(rc == 0);
-      assert(strcmp(card.session_id, "sess_abc") == 0);
-      assert(strcmp(card.title, "Camping trip with family") == 0);
-      assert(strstr(card.participants, "Caroline") != NULL);
-      assert(strstr(card.participants, "Melanie") != NULL);
-      assert(strstr(card.places, "Yosemite") != NULL);
-      assert(strstr(card.events, "arrived May 1") != NULL);
-      assert(strstr(card.outcomes, "everyone safe") != NULL);
-      assert(strstr(card.open_threads, "fall") != NULL);
-   }
-
-   /* --- memory_episode_card_parse: rejects malformed JSON --- */
-   {
-      memory_episode_card_t card;
-      assert(memory_episode_card_parse("not json", &card) != 0);
-   }
-
-   /* --- memory_episode_card_parse: rejects JSON missing title --- */
-   {
-      const char *json = "{\"participants\": [\"Alice\"]}";
-      memory_episode_card_t card;
-      assert(memory_episode_card_parse(json, &card) != 0);
-   }
-
-   /* --- memory_episode_card_generate: disabled when episode_summaries_enabled=0 ---
-    *
-    * These two cases used to zero a local legacy_config_record to express "disabled". Now that
-    * the function reads live config, the precondition has to be written to the
-    * config file the test owns — otherwise the case silently reads whatever the
-    * developer's real aimee.yaml says and stops testing the disabled path. */
-   {
-      write_test_config("memory:\n  episode_summaries:\n    enabled: false\n");
-      int64_t uid = memory_episode_card_generate("sess_test_disabled");
-      assert(uid == 0);
-   }
-
-   /* --- memory_episode_card_generate: disabled when cognify command is empty --- */
-   {
-      write_test_config("memory:\n  episode_summaries:\n    enabled: true\n");
-      int64_t uid = memory_episode_card_generate("sess_test_nocmd");
-      assert(uid == 0);
-   }
-
-   /* --- memory_episode_cards_query: returns 0 when session has no cards --- */
-   {
-      char *cards[4];
-      int n = memory_episode_cards_query("nonexistent_session_xyz", cards, 4);
-      assert(n == 0);
-   }
-
    /* --- memory_classify_deriver_shape: quantitative keywords --- */
    {
       assert(memory_classify_deriver_shape("how many times did we discuss deployment?") ==

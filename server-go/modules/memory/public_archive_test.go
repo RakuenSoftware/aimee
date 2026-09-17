@@ -36,11 +36,12 @@ CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text,tier t
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text);
 CREATE TEMP TABLE memory_units(id bigserial PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,weight double precision,memory_kind text,is_episode_card int DEFAULT 0);
 CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text,confidence double precision);
+CREATE TEMP TABLE memory_relations(memory_id bigint,src_entity text,relation text,dst_entity text,fact_text text);
 INSERT INTO memories(key,content,scope_type,scope_value,artifact_ref) VALUES ('common','shared conventions','global','_global','README.md'),('app','project details','project','app','main.go'),('private','secret source','project','private','');
 INSERT INTO memory_scopes VALUES (2,'workspace','team');
 CREATE ROLE memory_archive_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA archive_command_test TO memory_archive_test;
-GRANT SELECT,INSERT ON memories,memory_scopes,memory_units,memory_lineage TO memory_archive_test;
+GRANT SELECT,INSERT ON memories,memory_scopes,memory_units,memory_lineage,memory_relations TO memory_archive_test;
 GRANT USAGE,SELECT ON SEQUENCE memories_id_seq,memory_units_id_seq TO memory_archive_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY test_visibility ON memories USING (scope_type='global' OR current_setting('aimee.memory_scope_all',true)='1' OR (scope_type=current_setting('aimee.memory_scope_type',true) AND scope_value=current_setting('aimee.memory_scope_value',true)));
@@ -48,13 +49,34 @@ SET LOCAL ROLE memory_archive_test;`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB})))
+	backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB,
+		settings: func() (map[string]any, error) {
+			return map[string]any{"memory_episode_summaries_enabled": true, "memory_cognify_command": "fixture"}, nil
+		},
+		episodeCommand: func(_ context.Context, command string, input []byte) ([]byte, error) {
+			if command != "fixture" {
+				t.Fatal(command)
+			}
+			var request struct {
+				Turns     []episodeTurn `json:"turns"`
+				SessionID string        `json:"session_id"`
+			}
+			if err := json.Unmarshal(input, &request); err != nil {
+				return nil, err
+			}
+			card := episodeCard{SessionID: request.SessionID, Title: "Session " + request.SessionID}
+			for _, turn := range request.Turns {
+				card.Events = append(card.Events, turn.Text)
+			}
+			return json.Marshal(card)
+		}}
+	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, backend)))
 	run := func(verb string, args map[string]any) map[string]any {
 		t.Helper()
 		data, _ := json.Marshal(args)
 		return runPublicCommand(t, client, verb, string(data))
 	}
-	for _, verb := range []string{"episode_card_generate", "export_jsonl", "decisions_export_jsonl"} {
+	for _, verb := range []string{"episode_cards", "episode_card_generate", "export_jsonl", "decisions_export_jsonl"} {
 		if r := run(verb, map[string]any{}); r["kind"] != "invalid_argument" {
 			t.Fatal(verb, r)
 		}
@@ -78,6 +100,26 @@ SET LOCAL ROLE memory_archive_test;`)
 	if again["memory_unit_id"] != private["memory_unit_id"] {
 		t.Fatal(again, private)
 	}
+
+	for _, listing := range []struct {
+		args map[string]any
+		want int
+	}{
+		{map[string]any{"source_session": "session", "scope_context": true}, 1},
+		{map[string]any{"source_session": "session", "scope_context": true, "project": "app"}, 2},
+		{map[string]any{"source_session": "absent", "scope_context": true}, 0},
+	} {
+		result := run("episode_cards", listing.args)
+		cards, ok := result["cards"].([]any)
+		if !ok || len(cards) != listing.want {
+			t.Fatal(result)
+		}
+		for _, card := range cards {
+			if strings.Contains(card.(string), "secret") {
+				t.Fatal(result)
+			}
+		}
+	}
 	// Return to fixture owner to inspect all scopes; the public call used RLS.
 	if _, err = tx.Exec(ctx, `RESET ROLE`); err != nil {
 		t.Fatal(err)
@@ -88,8 +130,21 @@ SET LOCAL ROLE memory_archive_test;`)
 	if err != nil || scope != "app" || strings.Contains(content, "secret") || !strings.Contains(content, "project details") || !strings.Contains(content, "shared conventions") || epistemic != "episode" {
 		t.Fatal(scope, content, epistemic, err)
 	}
-	if err = tx.QueryRow(ctx, `SELECT count(*) FROM memory_lineage WHERE object_id=$1`, int64(private["memory_unit_id"].(float64))).Scan(&lineage); err != nil || lineage != 2 {
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM memory_lineage WHERE object_type='memory_unit' AND object_id=$1`, int64(private["memory_unit_id"].(float64))).Scan(&lineage); err != nil || lineage != 2 {
 		t.Fatal(lineage, err)
+	}
+	var links int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_relations r JOIN memory_units u ON u.memory_id=r.memory_id WHERE u.id=$1 AND r.relation='REL_SUMMARISES'`, int64(private["memory_unit_id"].(float64))).Scan(&links); err != nil || links != 2 {
+		t.Fatal(links, err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO memories(key,content,source_session) SELECT 'capacity-'||n,'source','capacity' FROM generate_series(1,201)n; SET LOCAL ROLE memory_archive_test`); err != nil {
+		t.Fatal(err)
+	}
+	if r := run("episode_card_generate", map[string]any{"source_session": "capacity", "scope_context": true}); r["kind"] != "capacity_exceeded" {
+		t.Fatal(r)
+	}
+	if _, err := tx.Exec(ctx, `RESET ROLE`); err != nil {
+		t.Fatal(err)
 	}
 	// Failed lineage capture must not leave an orphan parent or unit.
 	_, err = tx.Exec(ctx, `INSERT INTO memories(key,content,source_session,scope_type,scope_value) VALUES ('failure','rollback source','failure','project','app');

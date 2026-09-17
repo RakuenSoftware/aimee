@@ -36,6 +36,12 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 				}
 			}
 		}
+	case "episode_cards":
+		request.Operation, request.SessionID, request.Limit = "episode-cards", args.stringOr("source_session", ""), args.limit("limit", 16, 64)
+		if strings.TrimSpace(request.SessionID) == "" {
+			return invalid("missing source_session")
+		}
+		scoped = commandScope(args, &request)
 	case "episode_card_generate":
 		request.Operation, request.SessionID = "episode-card-generate", args.stringOr("source_session", "")
 		if strings.TrimSpace(request.SessionID) == "" {
@@ -119,8 +125,19 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	}
 	result := map[string]any{"status": "ok"}
 	switch verb {
+	case "episode_cards":
+		if json.Unmarshal(response.Payload, &result) != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		result["status"] = "ok"
 	case "episode_card_generate":
 		if response.Code != nil {
+			if *response.Code == -3 {
+				return commandResult(commandError("disabled", errEpisodeDisabled.Error()))
+			}
+			if *response.Code == -4 {
+				return commandResult(commandError("capacity_exceeded", errEpisodeCapacity.Error()))
+			}
 			return commandResult(commandError("conflict", errEpisodeMixedScope.Error()))
 		}
 		if len(response.IDs) == 0 {

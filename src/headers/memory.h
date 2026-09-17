@@ -1155,35 +1155,6 @@ int memory_cognify_queue_status(memory_cognify_queue_stats_t *out);
  * Returns 0 on success, -1 on fatal error. */
 int memory_cognify_drain(int timeout_secs, memory_cognify_queue_stats_t *out);
 
-/* --- Per-Session Episode Cards --- */
-
-/* Structured episode card returned by the LLM cognifier for a closed session. */
-typedef struct
-{
-   char session_id[128];
-   char title[256];
-   char participants[512]; /* comma-separated list */
-   char places[256];       /* comma-separated list */
-   char events[1024];      /* newline-separated list */
-   char outcomes[512];     /* newline-separated list */
-   char open_threads[512]; /* newline-separated list */
-} memory_episode_card_t;
-
-/* Generate a structured episode card for |source_session| by calling the
- * cognifier command with the session's memories as input.  If generation
- * succeeds the card is stored as a memory_unit with is_episode_card=1 and
- * REL_SUMMARISES edges pointing to each constituent memory.
- * Returns the new memory_unit id on success, 0 on error or if disabled. */
-int64_t memory_episode_card_generate(const char *source_session);
-
-/* Parse a raw episode-card JSON string into a memory_episode_card_t.
- * Returns 0 on success, -1 on parse error or missing title. */
-int memory_episode_card_parse(const char *json, memory_episode_card_t *out);
-
-/* Query episode cards for |source_session|.  Fills |out| with up to |max|
- * records (memory content).  Returns number of records written. */
-int memory_episode_cards_query(const char *source_session, char **out, int max);
-
 /* --- Scene Clustering --- */
 
 /* K-means clustering of memory unit embeddings.

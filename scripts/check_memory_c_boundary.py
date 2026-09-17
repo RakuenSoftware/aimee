@@ -13,7 +13,6 @@ ALLOWED_C = {
     "src/modules/memory/gw_stage_memory.c",
     "src/modules/memory/memory_data_bus.c",
     "src/modules/memory/memory_domain_bus.c",
-    "src/modules/memory/memory_domain_runtime_bus.c",
     "src/modules/memory/memory_scope_connection.c",
 }
 
@@ -26,6 +25,7 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/memory/memory_domain_runtime_bus.c",
     "src/modules/memory/memory_embed_bus.c",
     "src/modules/memory/memory_profile_pack.h",
     "src/modules/memory/memory_content_gate_bus.c",
@@ -54,6 +54,8 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:pgvec_memory_vector_search_record_type|pgvec_kb_service_search_memory_points)\b(?=\s*\()|"
+    r"\b(?:(?:kb_client_)?memory_episode_card_(?:generate|parse)|memory_episode_cards_query)\b(?=\s*\()|"
     r"\b(?:memory_repair_vector_index(?:_failed_only)?|db2_kb_service_reset_stuck_vector_ops|db2_kb_service_list_memory_ids_by_updated)\b(?=\s*\()|"
     r"\b(?:kb_client_memory_ask|cmd_memory_ask|memory_answer_evidence_(?:decision|reason)_str)\b(?=\s*\()|"
     r"\b(?:memory_rebuild_derived_indexes|memory_rebuild_vector_index_for_version)\b(?=\s*\()|"

@@ -403,10 +403,14 @@ func (s *postgresDataStore) GenerateEpisodeCard(ctx context.Context, session str
 	if strings.TrimSpace(session) == "" {
 		return 0, errors.New("memory: episode card needs a session")
 	}
+	command, err := s.episodeCognifier()
+	if err != nil {
+		return 0, err
+	}
 	rows, err := s.db.Query(ctx, `SELECT id,key,content,scope_type,scope_value FROM memories m
 WHERE source_session=$1 AND lifecycle_state='active'
  AND NOT EXISTS (SELECT 1 FROM memory_units u WHERE u.memory_id=m.id AND u.is_episode_card=1)
-ORDER BY id LIMIT 64`, session)
+ORDER BY id LIMIT 201`, session)
 	if err != nil {
 		return 0, err
 	}
@@ -429,6 +433,9 @@ ORDER BY id LIMIT 64`, session)
 	if err != nil {
 		return 0, err
 	}
+	if len(sources) > episodeMaxSources {
+		return 0, errEpisodeCapacity
+	}
 	if len(sources) == 0 {
 		return 0, ErrMemoryNotFound
 	}
@@ -444,14 +451,31 @@ ORDER BY id LIMIT 64`, session)
 		}
 		scope = item.scope
 	}
-	events := make([]string, 0, len(sources))
+	turns := make([]episodeTurn, 0, len(sources))
+	size := 0
 	for _, item := range sources {
-		events = append(events, item.key+": "+item.content)
+		size += len(item.content)
+		if size > episodeMaxInput {
+			return 0, errEpisodeCapacity
+		}
+		turns = append(turns, episodeTurn{ID: item.id, Text: item.content})
 	}
-	card, _ := json.Marshal(map[string]any{
-		"session_id": session, "title": "Session " + session, "events": events,
-		"participants": []string{}, "places": []string{}, "outcomes": []string{}, "open_threads": []string{},
-	})
+	input, err := json.Marshal(map[string]any{"task": "episode_card", "session_id": session, "turns": turns})
+	if err != nil || len(input) > episodeMaxInput {
+		return 0, errEpisodeCapacity
+	}
+	run := s.episodeCommand
+	if run == nil {
+		run = runEpisodeCommand
+	}
+	raw, err := run(ctx, command, input)
+	if err != nil {
+		return 0, err
+	}
+	card, err := parseEpisodeCard(raw)
+	if err != nil {
+		return 0, err
+	}
 	var unitID int64
 	var created bool
 	err = s.db.QueryRow(ctx, `WITH existing AS (
@@ -469,7 +493,7 @@ ORDER BY id LIMIT 64`, session)
  SELECT id,'episode_card',$3,$2,1.0,'episodic',1 FROM parent RETURNING id
 )
 SELECT id,false FROM existing UNION ALL SELECT id,true FROM created LIMIT 1`,
-		"episode-card:"+session, string(card), session, scope.Type, scope.Value).Scan(&unitID, &created)
+		"episode-card:"+session, card.text(), session, scope.Type, scope.Value).Scan(&unitID, &created)
 	if err != nil {
 		return 0, err
 	}
@@ -482,6 +506,16 @@ SELECT 'memory_unit',$1,'memory',$2,0.8 WHERE NOT EXISTS(
  SELECT 1 FROM memory_lineage WHERE object_type='memory_unit' AND object_id=$1
    AND source_kind='memory' AND source_ref=$2)`, unitID, fmt.Sprintf("memory:%d", item.id))
 		if err != nil {
+			return 0, err
+		}
+		if _, err := s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref,confidence)
+ SELECT 'memory',u.memory_id,'memory',$2,0.8 FROM memory_units u WHERE u.id=$1
+ AND NOT EXISTS(SELECT 1 FROM memory_lineage l WHERE l.object_type='memory' AND l.object_id=u.memory_id AND l.source_kind='memory' AND l.source_ref=$2)`, unitID, fmt.Sprintf("memory:%d", item.id)); err != nil {
+			return 0, err
+		}
+		if _, err := s.db.Exec(ctx, `INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text)
+ SELECT m.id,m.key,'REL_SUMMARISES',$2,$3 FROM memories m JOIN memory_units u ON u.memory_id=m.id WHERE u.id=$1
+ AND NOT EXISTS(SELECT 1 FROM memory_relations r WHERE r.memory_id=m.id AND r.relation='REL_SUMMARISES' AND r.dst_entity=$2)`, unitID, fmt.Sprintf("memory:%d", item.id), card.Title); err != nil {
 			return 0, err
 		}
 	}
@@ -501,6 +535,11 @@ func vectorText(vector []float64) (string, error) {
 
 func (s *postgresDataStore) SearchVectors(ctx context.Context, vector []float64, recordType,
 	workspace, project string, includeAll bool, limit int) ([]VectorHit, error) {
+	return s.searchVectors(ctx, vector, recordType, workspace, project, includeAll, limit, Scope{})
+}
+
+func (s *postgresDataStore) searchVectors(ctx context.Context, vector []float64, recordType,
+	workspace, project string, includeAll bool, limit int, exact Scope) ([]VectorHit, error) {
 	encoded, err := vectorText(vector)
 	if err != nil {
 		return nil, err
@@ -511,8 +550,11 @@ func (s *postgresDataStore) SearchVectors(ctx context.Context, vector []float64,
 	rows, err := s.db.Query(ctx, `SELECT e.point_id,1-(e.embedding <=> $1::vector) AS score
 FROM memory_embeddings e WHERE e.record_type=$2 AND ($5 OR
  e.primary_scope='global' OR e.workspace='_shared' OR ($3<>'' AND e.workspace=$3) OR
- ($4<>'' AND e.project=$4)) ORDER BY e.embedding <=> $1::vector LIMIT $6`,
-		encoded, recordType, workspace, project, includeAll, limit)
+ ($4<>'' AND e.project=$4))
+ AND ($7='' OR (e.primary_scope=$7 AND
+ (($7='global' AND $8='_global') OR ($7='workspace' AND e.workspace=$8) OR ($7='project' AND e.project=$8))))
+ ORDER BY e.embedding <=> $1::vector,e.point_id LIMIT $6`,
+		encoded, recordType, workspace, project, includeAll, limit, exact.Type, exact.Value)
 	if err != nil {
 		return nil, err
 	}

@@ -1,3 +1,4 @@
+#include "memory_scope_query.h"
 #include "module_commands.h"
 #include "json_fluent.h"
 #include "aimee.h"
@@ -206,11 +207,33 @@ static int kb_handle_memory_verify(int fd, cJSON *req)
          cJSON_Delete(embed_1_reply);
          if (qdim <= 0)
             continue;
-         int64_t ids[8];
-         double scores[8];
          struct timespec t_start, t_end;
          clock_gettime(CLOCK_MONOTONIC, &t_start);
-         int hits = pgvec_kb_service_search_memory_points("memory", qvec, qdim, 5, ids, scores, 8);
+         db2_memory_scope_context_t vector_scope;
+         memset(&vector_scope, 0, sizeof(vector_scope));
+         db2_memory_scope_context_get(&vector_scope);
+         cJSON *vector_args = cJSON_CreateObject(), *vector_reply = NULL;
+         cJSON_AddStringToObject(vector_args, "operation", "vector-search");
+         cJSON_AddStringToObject(vector_args, "record_type", "memory");
+         cJSON_AddNumberToObject(vector_args, "max_results", 5);
+         cJSON_AddBoolToObject(vector_args, "scope_context", 1);
+         cJSON_AddStringToObject(vector_args, "workspace", vector_scope.workspace);
+         cJSON_AddStringToObject(vector_args, "project", vector_scope.project);
+         cJSON_AddBoolToObject(vector_args, "include_all", vector_scope.include_all);
+         if (vector_scope.scope_type[0])
+         {
+            cJSON_AddStringToObject(vector_args, "scope_type", vector_scope.scope_type);
+            cJSON_AddStringToObject(vector_args, "scope_value", vector_scope.scope_value);
+         }
+         cJSON *vector_values = cJSON_AddArrayToObject(vector_args, "vector");
+         for (int v = 0; v < qdim; ++v)
+            cJSON_AddItemToArray(vector_values, cJSON_CreateNumber(qvec[v]));
+         (void)aimee_module_commands_dispatch_internal("memory.runtime", vector_args,
+                                                       &vector_reply);
+         cJSON_Delete(vector_args);
+         const cJSON *vector_hits = cJSON_GetObjectItemCaseSensitive(vector_reply, "hits");
+         int hits = cJSON_IsArray(vector_hits) ? cJSON_GetArraySize(vector_hits) : -1;
+         cJSON_Delete(vector_reply);
          clock_gettime(CLOCK_MONOTONIC, &t_end);
          if (hits < 0)
             continue;

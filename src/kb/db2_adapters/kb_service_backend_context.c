@@ -147,8 +147,45 @@ static int kbs_semantic_assertion_hybrid(const char *query, const char *valid_at
    int vector_n = 0;
    if (qdim > 0 && qdim == db2_embedding_dim())
    {
-      vector_n = pgvec_memory_vector_search_record_type("semantic_assertion", qvec, qdim, gather,
-                                                        vector_ids, vector_scores, 64);
+      db2_memory_scope_context_t vector_scope;
+      memset(&vector_scope, 0, sizeof(vector_scope));
+      db2_memory_scope_context_get(&vector_scope);
+      cJSON *vector_args = cJSON_CreateObject(), *vector_reply = NULL;
+      cJSON_AddStringToObject(vector_args, "operation", "vector-search");
+      cJSON_AddStringToObject(vector_args, "record_type", "semantic_assertion");
+      cJSON_AddNumberToObject(vector_args, "max_results", gather);
+      cJSON_AddBoolToObject(vector_args, "scope_context", 1);
+      cJSON_AddStringToObject(vector_args, "workspace", vector_scope.workspace);
+      cJSON_AddStringToObject(vector_args, "project", vector_scope.project);
+      cJSON_AddBoolToObject(vector_args, "include_all", vector_scope.include_all);
+      if (vector_scope.scope_type[0])
+      {
+         cJSON_AddStringToObject(vector_args, "scope_type", vector_scope.scope_type);
+         cJSON_AddStringToObject(vector_args, "scope_value", vector_scope.scope_value);
+      }
+      cJSON *vector_values = cJSON_AddArrayToObject(vector_args, "vector");
+      for (int v = 0; v < qdim; ++v)
+         cJSON_AddItemToArray(vector_values, cJSON_CreateNumber(qvec[v]));
+      (void)aimee_module_commands_dispatch_internal("memory.runtime", vector_args, &vector_reply);
+      cJSON_Delete(vector_args);
+      const cJSON *vector_hits = cJSON_GetObjectItemCaseSensitive(vector_reply, "hits");
+      vector_n = cJSON_IsArray(vector_hits) ? cJSON_GetArraySize(vector_hits) : -1;
+      if (vector_n > 64)
+         vector_n = 64;
+      for (int v = 0; v < vector_n; ++v)
+      {
+         const cJSON *hit = cJSON_GetArrayItem(vector_hits, v);
+         const cJSON *id = cJSON_GetObjectItemCaseSensitive(hit, "id");
+         const cJSON *score = cJSON_GetObjectItemCaseSensitive(hit, "score");
+         if (!cJSON_IsNumber(id) || !cJSON_IsNumber(score))
+         {
+            vector_n = -1;
+            break;
+         }
+         vector_ids[v] = (int64_t)id->valuedouble;
+         vector_scores[v] = score->valuedouble;
+      }
+      cJSON_Delete(vector_reply);
       if (vector_n >= 0)
          *vector_available = 1;
    }

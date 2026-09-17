@@ -155,7 +155,14 @@ retry configuration and stuck memory/code-job reset. Per-record transactions
 preserve progress; vector-write savepoints retain the prior vector on SQL failure
 while recording retry diagnostics. Successful jobs use the existing `ok` state.
 The native repair handler, wrappers and backend enumeration helpers are removed.
-The current inventory is five C sources and seven headers; the table above
+Episode cards now honor the configured cognifier and enable flag, enforce source
+and subprocess output bounds, and retain parent/unit lineage and summary links.
+CLI and session-close callers consume the Go command directly; card listing stays
+inside the request's visibility scope. The runtime C adapter is deleted. Vector
+search runs through the host-only Go command and applies explicit scope filters;
+PostgreSQL coverage includes both 1024- and 2560-dimensional columns and rejects
+mismatched writes without losing the previous vector.
+The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.
