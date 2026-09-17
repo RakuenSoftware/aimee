@@ -23,8 +23,9 @@ import (
 //     memory_extract_patterns — under the bounds the production caller uses
 //     (a 128-byte attribute buffer, 16 triples).
 //
-// Regenerate with scripts/gen-memory-pattern-fixtures.c (its header carries the
-// exact build and run lines), never by editing the files.
+// These are frozen outputs captured before the Go migration. The retired C
+// fixture generator is gone; do not regenerate expectations from the Go code
+// under test. Add independently reviewed cases when behavior changes.
 
 // unescapeField reverses the dumper's escaping, which keeps one case on one row.
 func unescapeField(field string) string {

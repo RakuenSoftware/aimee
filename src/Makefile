@@ -620,7 +620,7 @@ SERVER_SRCS += server/obs_bus_adapter.c
 SERVER_SRCS += server/provider_settable.c
 SERVER_SRCS += server/module_routing_adapter.c
 SERVER_SRCS += server/module_stage_adapters.c
-SERVER_SRCS += modules/memory/memory_fact_gate.c modules/memory/memory_extract_patterns.c modules/memory/memory_pii_gate.c modules/memory/memory_embed_bus.c modules/memory/memory_data_bus.c
+SERVER_SRCS += modules/memory/memory_pii_gate.c modules/memory/memory_embed_bus.c modules/memory/memory_data_bus.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \

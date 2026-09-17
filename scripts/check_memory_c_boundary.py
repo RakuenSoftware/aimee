@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Enforce that C at the memory-module boundary is transport/integration only."""
+"""Freeze remaining native memory debt and prevent retired C clients returning."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 
@@ -16,8 +17,6 @@ ALLOWED_C = {
     "src/modules/memory/memory_domain_runtime_bus.c",
     "src/modules/memory/memory_scope_connection.c",
     "src/modules/memory/memory_embed_bus.c",
-    "src/modules/memory/memory_extract_patterns.c",
-    "src/modules/memory/memory_fact_gate.c",
     "src/modules/memory/memory_pii_gate.c",
 }
 
@@ -30,6 +29,10 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/memory/memory_assemble_util.h",
+    "src/modules/memory/memory_extract_patterns.c",
+    "src/modules/memory/memory_extract_patterns.h",
+    "src/modules/memory/memory_fact_gate.c",
     "src/posix/memory.c",
     "src/windows/memory.c",
     "src/modules/db2/c/prospective_memories.c",
@@ -38,6 +41,19 @@ RETIRED_POLICY_C = (
     "src/modules/memory/memory_legacy_bus.c",
     "src/kb/fact_grounding.c",
     "src/kb/fact_grounding.h",
+)
+
+# These callbacks have no production consumers. The Go client and handler now
+# cover their wire/domain fixtures. Reject relocation as well as restoration;
+# the remaining C inventory is unfinished G0 work, not permission to add a shim.
+RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:memory_fact_gate_check|memory_fact_gate_register_checker|"
+    r"memory_fact_gate_checker_fn|memory_extract_patterns|memory_pattern_scan_turn|"
+    r"memory_extract_register_extractor|memory_extract_register_turn_scanner|"
+    r"memory_pattern_extractor_fn|memory_pattern_turn_scanner_fn|"
+    r"pattern_triple_t|memory_pattern_turn_t|assemble_texts_near_duplicate|"
+    r"assemble_token_bits|context_recency_from_age_days|context_apply_recency|"
+    r"context_xml_tag_for_header)\b"
 )
 
 FORBIDDEN_STORE_CALLS = (
@@ -109,6 +125,19 @@ def validate(root: Path) -> None:
         raise BoundaryError(
             f"rule=retired-platform-memory-policy files={returned_policy}"
         )
+
+    for path in sorted((root / "src").rglob("*")):
+        if path.suffix not in {".c", ".h"} or "build" in path.relative_to(root).parts:
+            continue
+        # Ignore historical comments; declarations, calls and macro aliases
+        # must not reintroduce a retired memory client in another native owner.
+        source = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(encoding="utf-8"), flags=re.S)
+        match = RETIRED_NATIVE_SYMBOLS.search(source)
+        if match:
+            raise BoundaryError(
+                f"rule=retired-memory-native-client file={path.relative_to(root)} "
+                f"symbol={match.group(0)}"
+            )
 
     missing_connections = [relative for relative in KB_CONNECTION_C if not (root / relative).exists()]
     if missing_connections:

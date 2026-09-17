@@ -102,11 +102,20 @@ The live `aimee-memory-bus-probe` now uses this client. Its principal remains
 test-only and requires an explicit probe grant. The client borrows the connection;
 its owner must drain the concurrent bus caller before detaching.
 
-This is the first G0 implementation slice from the memory reliability proposals.
+The first G0 implementation slice from the memory reliability proposals supplies
+the Go client. The next slice removes the unused native fact-gate and extraction
+callbacks, their Server registrations, and the obsolete C fixture generator.
+It also deletes the unused inline context-assembly helpers and their C-only test.
+The Go client/handler conformance tests retain the frozen historical fixtures;
+DB2 ingest tests inject candidates directly into their commit-path fixture.
+The remaining fact-gate header contains only legacy DB2 result codes.
+
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host
 directories. Passing a pure-Go process/client build does not complete G0 while
-those C paths remain.
+those C paths remain. The module currently retains eight C sources and twelve
+headers. The descriptor's `ownership_complete` flag verifies the declared file
+inventory; it does not assert that the Go migration is complete.
 
 ## Data and migrations
 
@@ -158,11 +167,10 @@ An expired call still fails rather than retrying indefinitely or changing stores
 
 ## Compatibility
 
-C is restricted to transport and host integration:
+The remaining C transport and host integration is migration debt:
 
 - `memory_data_bus.c`, `memory_domain_bus.c`, `memory_domain_runtime_bus.c`, `memory_embed_bus.c`,
-  `memory_extract_patterns.c`, `memory_content_gate_bus.c`,
-  `memory_fact_gate.c`, and `memory_pii_gate.c` encode/decode bounded event-bus
+  `memory_content_gate_bus.c`, and `memory_pii_gate.c` encode/decode bounded event-bus
   messages. `memory_scope_connection.c` only binds caller scope to an already
   prepared connection request.
 - `gw_stage_memory.c` connects the gateway IR stage to the module.
@@ -177,12 +185,14 @@ C is restricted to transport and host integration:
   grounding, relation canonicalization, kind selection, and provenance are in
   `memory_facts.go`.
 
-`scripts/check_memory_c_boundary.py` freezes that boundary: only the ten named
+`scripts/check_memory_c_boundary.py` reduces that boundary: only the eight named
 bus/integration translation units may exist under the memory module, none may
 include a DB client, and DB2 may not regain a `memory_*.c` implementation.
 The same check prevents the former POSIX/Windows regex-policy files and the
 retired in-process C query rewriter from returning; those gates now use
 `content_gate.go` through the bus adapter.
+It also rejects restoring or relocating the deleted native gate, extraction and
+context-assembly APIs, including declarations and macro aliases.
 
 There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report

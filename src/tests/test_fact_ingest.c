@@ -9,7 +9,6 @@
 #include "../modules/db2/c/ontology_evolution.h"
 #include "../modules/db2/c/db2_test_shim.h"
 #include "../headers/kb_identity.h"
-#include "modules/memory/memory_extract_patterns.h"
 #include "support/memory_policy_stub.h"
 #include <assert.h>
 #include <stdio.h>
@@ -58,17 +57,9 @@ static int semantic_count(const char *entity)
    return db2_entity_edges_semantic_by_entity(entity, e, 64);
 }
 
-_Static_assert(sizeof(((db2_fact_candidate_t *)0)->subject) ==
-                   sizeof(((pattern_triple_t *)0)->subject),
-               "test extractor subject capacity must match DB2");
-_Static_assert(sizeof(((db2_fact_candidate_t *)0)->rel_type) ==
-                   sizeof(((pattern_triple_t *)0)->rel_type),
-               "test extractor relation capacity must match DB2");
-_Static_assert(sizeof(((db2_fact_candidate_t *)0)->object) ==
-                   sizeof(((pattern_triple_t *)0)->object),
-               "test extractor object capacity must match DB2");
-
-static int module_extract_patterns(const char *text, pattern_triple_t *out, int max, int *count)
+/* DB2 commit-path fixture only. Extraction/scan conformance belongs to the
+ * Go memory client tests; no native memory callback or decoder is involved. */
+static int extract_facts(const char *text, db2_fact_candidate_t *out, int max, int *count)
 {
    if (!text || !out || max <= 0 || !count)
       return -1;
@@ -99,42 +90,6 @@ static int module_extract_patterns(const char *text, pattern_triple_t *out, int 
    return 0;
 }
 
-static int module_scan_turn(const char *text, memory_pattern_turn_t *out)
-{
-   if (!text || !out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   out->is_retraction = strstr(text, "forget") != NULL;
-   const char *attribute = strstr(text, "my ");
-   if (attribute)
-   {
-      attribute += 3;
-      out->has_attr = 1;
-      snprintf(out->attr, sizeof(out->attr), "%s", attribute);
-   }
-   return 0;
-}
-
-static int extract_facts(const char *text, db2_fact_candidate_t *out, int max, int *count)
-{
-   if (!text || !out || max <= 0 || max > 32 || !count)
-      return -1;
-   pattern_triple_t triples[32] = {0};
-   int found = memory_extract_patterns(text, triples, max);
-   if (found < 0)
-      return -1;
-   for (int i = 0; i < found; ++i)
-   {
-      memcpy(out[i].subject, triples[i].subject, sizeof(out[i].subject));
-      memcpy(out[i].rel_type, triples[i].rel_type, sizeof(out[i].rel_type));
-      memcpy(out[i].object, triples[i].object, sizeof(out[i].object));
-      out[i].subject_kind = (int)triples[i].subject_kind;
-      out[i].object_kind = (int)triples[i].object_kind;
-   }
-   *count = found;
-   return 0;
-}
-
 static int failing_extract(const char *text, db2_fact_candidate_t *out, int max, int *count)
 {
    (void)text;
@@ -155,12 +110,12 @@ static int invalid_extract_count(const char *text, db2_fact_candidate_t *out, in
 static int scan_fact_turn(const char *text, int *is_retraction, int *has_attr,
                           char attr[DB2_FACT_ATTR_MAX])
 {
-   memory_pattern_turn_t scan;
-   if (memory_pattern_scan_turn(text, &scan) != 0)
+   if (!text || !is_retraction || !has_attr || !attr)
       return -1;
-   *is_retraction = scan.is_retraction;
-   *has_attr = scan.has_attr;
-   memcpy(attr, scan.attr, DB2_FACT_ATTR_MAX);
+   *is_retraction = strstr(text, "forget") != NULL;
+   const char *attribute = strstr(text, "my ");
+   *has_attr = attribute != NULL;
+   snprintf(attr, DB2_FACT_ATTR_MAX, "%s", attribute ? attribute + 3 : "");
    return 0;
 }
 
@@ -200,8 +155,6 @@ int main(void)
 {
    db2_test_shim_open();
    test_memory_policy_register();
-   memory_extract_register_extractor(module_extract_patterns);
-   memory_extract_register_turn_scanner(module_scan_turn);
    assert(db2_rel_types_ensure_seed() == 0);
 
    /* Extraction is authoritative: absence, failure, or an invalid count cannot

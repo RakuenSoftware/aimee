@@ -911,8 +911,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/memory/gw_stage_memory.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_embed_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_extract_patterns.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_fact_gate.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_pii_gate.c
     ${AIMEE_SRC_DIR}/server/obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/server/module_routing_adapter.c

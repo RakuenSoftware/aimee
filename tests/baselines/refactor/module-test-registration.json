@@ -530,12 +530,6 @@
       "test": "src/tests/test_gw_stage_memory.c"
     },
     {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_fact_gate.c"
-    },
-    {
       "ctest": true,
       "make": true,
       "module": "module-runtime",

@@ -68,6 +68,36 @@ class MemoryCBoundaryTest(unittest.TestCase):
         with self.assertRaises(BoundaryError):
             validate(root)
 
+    def test_rejects_retired_gate_or_extraction_file(self) -> None:
+        for name in ("memory_fact_gate.c", "memory_extract_patterns.c",
+                     "memory_extract_patterns.h", "memory_assemble_util.h"):
+            with self.subTest(name=name):
+                root = self.fixture()
+                (root / "src/modules/memory" / name).write_text("/* retired */\n", encoding="utf-8")
+                with self.assertRaises(BoundaryError):
+                    validate(root)
+
+    def test_rejects_relocated_native_client_or_declaration(self) -> None:
+        for suffix, declaration in (
+            ("c", "int memory_extract_patterns(void) { return 0; }"),
+            ("h", "void memory_fact_gate_register_checker(void *checker);"),
+            ("h", "#define memory_pattern_scan_turn host_scan"),
+            ("h", "static inline int assemble_texts_near_duplicate(void) { return 1; }"),
+        ):
+            with self.subTest(declaration=declaration):
+                root = self.fixture()
+                target = root / "src/server" / ("moved_memory." + suffix)
+                target.parent.mkdir(parents=True)
+                target.write_text(declaration, encoding="utf-8")
+                with self.assertRaisesRegex(BoundaryError, "retired-memory-native-client"):
+                    validate(root)
+
+    def test_allows_historical_comment_without_native_client(self) -> None:
+        root = self.fixture()
+        target = root / "src/history.c"
+        target.write_text("/* memory_extract_patterns was removed. */\nint history;\n", encoding="utf-8")
+        validate(root)
+
     def test_rejects_direct_storage_include(self) -> None:
         root = self.fixture()
         target = root / next(iter(ALLOWED_C))

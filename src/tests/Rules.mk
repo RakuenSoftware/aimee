@@ -229,7 +229,7 @@ TEST_FACT_MUTATION_MIN_OBJS = $(OBJDIR)/db2/fact_mutation.o $(OBJDIR)/db2/fact_i
                               $(OBJDIR)/modules/workflows/wfe_canonical.o \
                               $(OBJDIR)/aimee_sha256.o
 
-TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/tests/support/memory_migration_stub.o $(OBJDIR)/rel_types.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/delegate_exit_classify.o $(OBJDIR)/diagnose_render.o $(OBJDIR)/clarify_render.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_regret.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
+TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/tests/support/memory_migration_stub.o $(OBJDIR)/rel_types.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/delegate_exit_classify.o $(OBJDIR)/diagnose_render.o $(OBJDIR)/clarify_render.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_regret.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
                  $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/modules/memory/memory_content_gate_bus.o \
                  $(OBJDIR)/workflow_learn.o \
                  $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o \
@@ -509,7 +509,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-delegate-ensemble \
                $(TESTPREFIX)/unit-test-rel-types \
                $(TESTPREFIX)/unit-test-fact-identity \
-               $(TESTPREFIX)/unit-test-memory-fact-gate \
                $(TESTPREFIX)/unit-test-rel-types-store \
                $(TESTPREFIX)/unit-test-entity-registry \
                $(TESTPREFIX)/unit-test-fact-lifecycle \
@@ -649,7 +648,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-dogfood \
                $(TESTPREFIX)/unit-test-cmd-onboard \
                $(TESTPREFIX)/unit-test-session-start-util \
-               $(TESTPREFIX)/unit-test-memory-assemble-util \
                $(TESTPREFIX)/unit-test-memory-bus-context \
                $(TESTPREFIX)/unit-test-memory-data-bus \
                $(TESTPREFIX)/unit-test-kb-memory-list \
@@ -1315,7 +1313,6 @@ $(TESTPREFIX)/unit-test-typed-facts: \
                                        $(OBJDIR)/db2/entity_registry.o \
                                        $(OBJDIR)/db2/ontology_evolution.o \
                                        $(OBJDIR)/db2/fact_lifecycle.o \
-                                       $(OBJDIR)/modules/memory/memory_fact_gate.o \
                                        $(OBJDIR)/rel_types.o \
                                        $(OBJDIR)/modules/memory/memory_pii_gate.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
@@ -1415,8 +1412,6 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/db2/entity_edges.o \
                                        $(OBJDIR)/db2/entity_registry.o \
                                        $(OBJDIR)/db2/ontology_evolution.o \
-                                       $(OBJDIR)/modules/memory/memory_extract_patterns.o \
-                                       $(OBJDIR)/modules/memory/memory_fact_gate.o \
                                        $(OBJDIR)/modules/memory/memory_pii_gate.o \
                                        $(OBJDIR)/rel_types.o \
                                        $(OBJDIR)/index.o $(OBJDIR)/cochange.o \
@@ -4443,10 +4438,6 @@ $(TESTPREFIX)/unit-test-fact-identity: $(OBJDIR)/tests/test_fact_identity.o \
                                $(OBJDIR)/modules/db2/c/fact_identity_unicode.o $(OBJDIR)/rel_types.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-memory-fact-gate: $(OBJDIR)/tests/test_memory_fact_gate.o \
-                               $(OBJDIR)/modules/memory/memory_fact_gate.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
 # typed-fact P1b: DB2 store + commit path, against the sqlite shim.
 $(TESTPREFIX)/unit-test-rel-types-store: $(OBJDIR)/tests/test_rel_types_store.o \
                                $(TEST_DATA_OBJS_MOCK)
@@ -6252,11 +6243,6 @@ unit-test-memory-audit-hook: $(TESTPREFIX)/unit-test-memory-audit-hook
 # only cJSON.o is needed at link time.
 $(TESTPREFIX)/unit-test-session-start-util: $(OBJDIR)/tests/test_session_start_util.o \
                      $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-# Pure string helpers extracted from memory_assemble.c; header is static-inline
-# so the test links nothing extra.
-$(TESTPREFIX)/unit-test-memory-assemble-util: $(OBJDIR)/tests/test_memory_assemble_util.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-session-brief: $(OBJDIR)/tests/test_session_brief.o \
