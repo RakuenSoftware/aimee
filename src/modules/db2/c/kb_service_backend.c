@@ -103,28 +103,6 @@ static void db2_kb_learning_archive_expired(void)
        err, sizeof(err));
 }
 
-int db2_kb_service_collect_memory_verify(int include_failed_detail, int max_attempts,
-                                         db2_kb_service_memory_verify_t *out)
-{
-   if (!out)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-
-   if (db2_vector_index_ops_summary(max_attempts, &out->ops) != 0)
-      return -1;
-
-   if (include_failed_detail)
-      out->failed_detail_count = db2_vector_index_ops_list_failed(
-          out->failed_detail, (int)(sizeof(out->failed_detail) / sizeof(out->failed_detail[0])));
-
-   (void)db2_kb_runtime_state_get("vector_schema_version", out->stored_schema_ver,
-                                  sizeof(out->stored_schema_ver));
-   out->rebuild_lock_held = db2_kb_runtime_state_vector_rebuild_lock_held();
-
-   return 0;
-}
-
 int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out)
 {
    if (!out)
@@ -718,45 +696,6 @@ int db2_kb_service_clear_current_project(const char *project)
    int deleted = aimee_pg_stmt_changes(stmt);
    aimee_pg_finalize(stmt);
    return rc == AIMEE_PG_DONE ? deleted : -1;
-}
-
-int db2_kb_service_collect_verify_snapshot(db2_kb_service_verify_snapshot_t *out)
-{
-   if (!out)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *s = aimee_pg_prepare(conn, "SELECT COUNT(*) FROM memories", err, sizeof(err));
-   if (s && aimee_pg_step(s, err, sizeof(err)) == AIMEE_PG_ROW)
-      out->mem_rows = aimee_pg_column_int64(s, 0);
-   aimee_pg_finalize(s);
-
-   s = aimee_pg_prepare(conn, "SELECT COUNT(*) FROM memory_units", err, sizeof(err));
-   if (s && aimee_pg_step(s, err, sizeof(err)) == AIMEE_PG_ROW)
-      out->unit_rows = aimee_pg_column_int64(s, 0);
-   aimee_pg_finalize(s);
-
-   s = aimee_pg_prepare(conn, "SELECT COUNT(*) FROM kb_documents", err, sizeof(err));
-   if (s && aimee_pg_step(s, err, sizeof(err)) == AIMEE_PG_ROW)
-      out->kb_rows = aimee_pg_column_int64(s, 0);
-   aimee_pg_finalize(s);
-
-   aimee_pg_stmt_t *avs = aimee_pg_prepare(
-       conn, "SELECT version FROM memory_active_embedder WHERE id = 1", err, sizeof(err));
-   if (avs && aimee_pg_step(avs, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *v = aimee_pg_column_text(avs, 0);
-      if (v)
-         snprintf(out->active_ver, sizeof(out->active_ver), "%s", v);
-   }
-   aimee_pg_finalize(avs);
-
-   return 0;
 }
 
 int db2_kb_service_get_active_embedder_version(char *out, size_t out_len)

@@ -1153,7 +1153,6 @@ char *kb_client_memory_repair_json(int limit, int failed_only, int reset_stuck, 
  *   index_ops{ok, pending, failed, stuck},
  *   failed_ops[] (when detail=1), timings{trials,total_us,max_us} (when
  *   timings=1).  On any failure {"status":"error","message":"..."}. */
-char *kb_client_memory_verify_json(int detail, int timings, const char *embedding_command);
 
 /* Embed one memory (memory_id>0) or all stale L1/L2 memories (all=1).  For
  * batch mode the caller must pass `version` — the active embedder version —

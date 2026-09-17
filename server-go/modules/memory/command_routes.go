@@ -16,6 +16,7 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "verify", "Verify deployed memory vectors and indexing health.", handleVerifyCommand, true},
 	{"memory", "episode_cards", "Read scoped session episode cards.", handleRuntimeCommand, true},
 	{"memory", "repair", "Repair memory vectors and retry failed indexing.", handleRepairCommand, true},
 	{"memory", "rebuild", "Rebuild the memory vector index.", handleVectorCommand, true},

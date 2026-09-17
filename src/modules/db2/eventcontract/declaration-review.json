@@ -1495,13 +1495,6 @@
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
     },
     {
-      "symbol": "pgvec_schema_version",
-      "signature_sha256": "10ae2794b5c396967b625a66f50f1fe1a586f7d48ae86ef11eb53142f16d97ff",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
       "symbol": "pgvec_scroll",
       "signature_sha256": "4e4db41e8e3a16ec6163ad90b0ce9c6714474e421f1f5175e9b41c87fba3d4c3",
       "disposition": "private-db2",
@@ -1518,20 +1511,6 @@
     {
       "symbol": "pgvec_vector_status_json",
       "signature_sha256": "6f6e2d213226a72f8e8a1252f95f3140a7af7c5b7b91a4b7e818d0f2b5c8926f",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_verify_snapshot",
-      "signature_sha256": "a2df700d9d2e82cc3776c9d842485aa8ed35be287ddfd6c61a058a6adbd64e3f",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_verify_snapshot_cleanup",
-      "signature_sha256": "9a63ecd2682eab302576a2d023d3dd00dd2a4b4c2d3e779213dda9a9fb7857fa",
       "disposition": "private-db2",
       "family": "index",
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."

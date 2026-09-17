@@ -515,7 +515,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_transport.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_vectors.c
     ${AIMEE_SRC_DIR}/modules/db2/c/vector_status.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_verify.c
     ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_kb_service.c
 )
 

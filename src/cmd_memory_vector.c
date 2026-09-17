@@ -1,3 +1,4 @@
+#include "json_fluent.h"
 /* cmd_memory_vector.c: pgvector subcommand handlers (reindex, repair,
  * reconcile, rebuild, verify, profile) plus the higher-level improve /
  * cognify / episode / assemble / cite / scene / ontology workflows. */
@@ -6,8 +7,6 @@
 #include "commands.h"
 #include "entity_edges.h"
 #include "platform_process.h"
-#include "config_database.h" /* config_embedder_dims_current — the one width declaration */
-#include "modules/db2/c/vector_verify.h"
 #include "kb.h"
 #include "kb_client.h"
 #include <ctype.h>
@@ -290,6 +289,8 @@ void mem_rebuild(app_ctx_t *ctx, int argc, char **argv)
       fatal("%s", msg);
    }
 
+   const cJSON *schema_j = cJSON_GetObjectItemCaseSensitive(resp, "schema_version");
+   const char *schema_version = cJSON_IsString(schema_j) ? schema_j->valuestring : "unknown";
    const char *resolved_version = "";
    int rebuilt = 0;
    int failed = 0;
@@ -309,7 +310,7 @@ void mem_rebuild(app_ctx_t *ctx, int argc, char **argv)
       cJSON_AddStringToObject(j, "version", resolved_version);
       cJSON_AddNumberToObject(j, "rebuilt", rebuilt);
       cJSON_AddNumberToObject(j, "failed", failed);
-      cJSON_AddStringToObject(j, "schema_version", pgvec_schema_version());
+      cJSON_AddStringToObject(j, "schema_version", schema_version);
       emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
    }
    else
@@ -318,7 +319,7 @@ void mem_rebuild(app_ctx_t *ctx, int argc, char **argv)
              rebuilt);
       if (failed)
          printf(" (%d failed)", failed);
-      printf("\nSchema version stamped: %s\n", pgvec_schema_version());
+      printf("\nSchema version stamped: %s\n", schema_version);
    }
    cJSON_Delete(resp);
 }
@@ -403,7 +404,7 @@ static void mem_verify_run_repair(app_ctx_t *ctx, const char *embed_cmd,
 typedef struct
 {
    const char *server_version;
-   int embedder_dim, embedder_dim_matches;
+   int embedder_dim, expected_dim, embedder_dim_matches;
    const char *mem_coll, *kb_coll;
    int mem_exists, kb_exists;
    int64_t mem_points, kb_points;
@@ -421,77 +422,6 @@ typedef struct
    int64_t expected_mem, drift_mem, drift_kb;
    int overall_ok;
 } mem_verify_report_t;
-
-static void mem_verify_emit_json(const mem_verify_report_t *r, app_ctx_t *ctx, int do_detail,
-                                 int do_timings)
-{
-   cJSON *j = cJSON_CreateObject();
-   cJSON_AddBoolToObject(j, "ok", r->overall_ok);
-   if (r->server_version[0])
-      cJSON_AddStringToObject(j, "r->server_version", r->server_version);
-   cJSON *emb = cJSON_AddObjectToObject(j, "embedder");
-   cJSON_AddNumberToObject(emb, "dim", r->embedder_dim);
-   cJSON_AddNumberToObject(emb, "expected_dim", config_embedder_dims_current());
-   cJSON_AddBoolToObject(emb, "ok", r->embedder_dim_matches);
-   cJSON *mem = cJSON_AddObjectToObject(j, "memory");
-   cJSON_AddStringToObject(mem, "collection", r->mem_coll);
-   cJSON_AddBoolToObject(mem, "collection_exists", r->mem_exists > 0);
-   cJSON_AddNumberToObject(mem, "db2_memories", (double)r->mem_rows);
-   cJSON_AddNumberToObject(mem, "db2_units", (double)r->unit_rows);
-   cJSON_AddNumberToObject(mem, "expected_points", (double)r->expected_mem);
-   cJSON_AddNumberToObject(mem, "vector_points", (double)r->mem_points);
-   cJSON_AddNumberToObject(mem, "drift", (double)r->drift_mem);
-   cJSON *kb = cJSON_AddObjectToObject(j, "kb");
-   cJSON_AddStringToObject(kb, "collection", r->kb_coll);
-   cJSON_AddBoolToObject(kb, "collection_exists", r->kb_exists > 0);
-   cJSON_AddNumberToObject(kb, "db2_chunks", (double)r->kb_rows);
-   cJSON_AddNumberToObject(kb, "vector_points", (double)r->kb_points);
-   cJSON_AddNumberToObject(kb, "drift", (double)r->drift_kb);
-   cJSON *ops = cJSON_AddObjectToObject(j, "index_ops");
-   cJSON_AddNumberToObject(ops, "ok", (double)r->ops_summary.ok_ops);
-   cJSON_AddNumberToObject(ops, "pending", (double)r->ops_summary.pending_ops);
-   cJSON_AddNumberToObject(ops, "failed", (double)r->ops_summary.failed_ops);
-   cJSON_AddNumberToObject(ops, "stuck", (double)r->ops_summary.stuck_ops);
-   cJSON *sch = cJSON_AddObjectToObject(j, "schema");
-   cJSON_AddStringToObject(sch, "expected", r->expected_ver);
-   cJSON_AddStringToObject(sch, "stored", r->stored_ver);
-   cJSON_AddBoolToObject(sch, "match", r->schema_match);
-   cJSON_AddBoolToObject(j, "rebuild_lock_held", r->lock_held);
-   cJSON *idx = cJSON_AddObjectToObject(j, "payload_indexes");
-   cJSON_AddNumberToObject(idx, "memory_missing", (double)r->mem_missing);
-   cJSON_AddNumberToObject(idx, "r->kb_missing", (double)r->kb_missing);
-   if (r->mem_indexed)
-      cJSON_AddStringToObject(idx, "memory_present", r->mem_indexed);
-   if (r->kb_indexed)
-      cJSON_AddStringToObject(idx, "kb_present", r->kb_indexed);
-   if (do_timings)
-   {
-      cJSON *tim = cJSON_AddObjectToObject(j, "timings");
-      cJSON_AddNumberToObject(tim, "trials", r->timings_trials);
-      if (r->timings_trials > 0)
-      {
-         cJSON_AddNumberToObject(tim, "avg_ms",
-                                 (double)r->timings_total_us / r->timings_trials / 1000.0);
-         cJSON_AddNumberToObject(tim, "max_ms", (double)r->timings_max_us / 1000.0);
-      }
-   }
-   if (do_detail)
-   {
-      cJSON *fails = cJSON_AddArrayToObject(j, "failed_ops");
-      for (int i = 0; i < r->failed_detail_count; i++)
-      {
-         cJSON *row = cJSON_CreateObject();
-         cJSON_AddNumberToObject(row, "point_id", (double)r->failed_detail[i].point_id);
-         cJSON_AddStringToObject(row, "collection", r->failed_detail[i].collection);
-         cJSON_AddNumberToObject(row, "memory_id", (double)r->failed_detail[i].memory_id);
-         cJSON_AddNumberToObject(row, "attempts", r->failed_detail[i].attempts);
-         cJSON_AddStringToObject(row, "last_error", r->failed_detail[i].last_error);
-         cJSON_AddStringToObject(row, "updated_at", r->failed_detail[i].updated_at);
-         cJSON_AddItemToArray(fails, row);
-      }
-   }
-   emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
-}
 
 static void mem_verify_emit_text(const mem_verify_report_t *r, app_ctx_t *ctx, int do_detail)
 {
@@ -516,7 +446,7 @@ static void mem_verify_emit_text(const mem_verify_report_t *r, app_ctx_t *ctx, i
           r->stored_ver[0] ? r->stored_ver : "(none)", r->schema_match ? "match" : "MISMATCH");
    printf("  rebuild lock: %s\n", r->lock_held ? "HELD" : "free");
    printf("  payload indexes: memory_missing=%d r->kb_missing=%d\n", r->mem_missing, r->kb_missing);
-   printf("  embedder: dim=%d expected=%d (%s)\n", r->embedder_dim, config_embedder_dims_current(),
+   printf("  embedder: dim=%d expected=%d (%s)\n", r->embedder_dim, r->expected_dim,
           r->embedder_dim_matches ? "ok" : "MISMATCH");
 
    if (do_detail && r->ops_summary.failed_ops > 0)
@@ -578,7 +508,11 @@ void mem_verify(app_ctx_t *ctx, int argc, char **argv)
 
    const char *embed_cmd = config_embedder_command_current(NULL);
 
-   char *verify_json = kb_client_memory_verify_json(do_detail, do_timings, embed_cmd);
+   cJSON *verify_args = cJSON_CreateObject();
+   cJSON_AddBoolToObject(verify_args, "detail", do_detail);
+   cJSON_AddBoolToObject(verify_args, "timings", do_timings);
+   cJSON_AddStringToObject(verify_args, "embedding_command", embed_cmd);
+   char *verify_json = kb_v1_action_request("memory.verify", verify_args);
    cJSON *resp = verify_json ? cJSON_Parse(verify_json) : NULL;
    free(verify_json);
    cJSON *status_j = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;
@@ -611,7 +545,7 @@ void mem_verify(app_ctx_t *ctx, int argc, char **argv)
       if (cJSON_IsNumber(d))
          embedder_dim = (int)d->valuedouble;
    }
-   int embedder_dim_matches = (embedder_dim == config_embedder_dims_current());
+   int embedder_dim_matches = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(emb_obj, "ok"));
 
    cJSON *mem_obj = cJSON_GetObjectItemCaseSensitive(resp, "memory");
    cJSON *kb_obj = cJSON_GetObjectItemCaseSensitive(resp, "kb");
@@ -737,7 +671,7 @@ void mem_verify(app_ctx_t *ctx, int argc, char **argv)
     * benign; when the corpus is populated but `stored_ver` is empty the
     * version is unknown, which IS a mismatch. */
    char stored_ver[64] = "";
-   const char *expected_ver = pgvec_schema_version();
+   const char *expected_ver = "unknown";
    cJSON *sch_obj = cJSON_GetObjectItemCaseSensitive(resp, "schema");
    if (sch_obj)
    {
@@ -748,40 +682,24 @@ void mem_verify(app_ctx_t *ctx, int argc, char **argv)
       if (cJSON_IsString(v) && v->valuestring && v->valuestring[0])
          expected_ver = v->valuestring;
    }
-   int has_corpus = (mem_rows > 0) || (unit_rows > 0) || (kb_rows > 0);
-   int schema_match = stored_ver[0] ? (strcmp(stored_ver, expected_ver) == 0) : !has_corpus;
+   int schema_match = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sch_obj, "match"));
 
    cJSON *lock_j = cJSON_GetObjectItemCaseSensitive(resp, "rebuild_lock_held");
    int lock_held = cJSON_IsTrue(lock_j) ? 1 : 0;
 
-   /* Payload indexes arrived with the verify RPC payload — use them straight. */
-   const char *req_mem[] = {"record_type", "primary_scope", "project",    "workspace", "tier",
-                            "memory_id",   "created_at",    "updated_at", NULL};
-   const char *req_kb[] = {"record_type", "project", "file_path", "document_id", NULL};
-   int mem_missing = 0, kb_missing = 0;
-   for (int i = 0; req_mem[i]; i++)
-      if (!mem_indexed || !strstr(mem_indexed, req_mem[i]))
-         mem_missing++;
-   for (int i = 0; req_kb[i]; i++)
-      if (!kb_indexed || !strstr(kb_indexed, req_kb[i]))
-         kb_missing++;
-
-   /* Expected memory-collection points ≈ memory rows + unit rows (one point each). */
-   int64_t expected_mem = mem_rows + unit_rows;
-   int64_t drift_mem = mem_points >= 0 ? (mem_points - expected_mem) : 0;
-   int64_t drift_kb = kb_points >= 0 ? (kb_points - kb_rows) : 0;
-
-   /* overall_ok: true when every check passes.  CI pipelines and
-    * automation can gate on this single boolean rather than
-    * reconstructing it from the sub-fields. */
-   int overall_ok = (mem_exists > 0) && (kb_exists > 0) && (drift_mem == 0) && (drift_kb == 0) &&
-                    (ops_summary.failed_ops == 0) && (ops_summary.stuck_ops == 0) && schema_match &&
-                    embedder_dim_matches;
+   const cJSON *indexes = cJSON_GetObjectItemCaseSensitive(resp, "payload_indexes");
+   int mem_missing = jo_int((cJSON *)indexes, "memory_missing", 0);
+   int kb_missing = jo_int((cJSON *)indexes, "kb_missing", 0);
+   int64_t expected_mem = (int64_t)jo_num(mem_obj, "expected_points", 0);
+   int64_t drift_mem = (int64_t)jo_num(mem_obj, "drift", 0);
+   int64_t drift_kb = (int64_t)jo_num(kb_obj, "drift", 0);
+   int overall_ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "ok"));
 
    mem_verify_report_t r;
    memset(&r, 0, sizeof(r));
    r.server_version = server_version;
    r.embedder_dim = embedder_dim;
+   r.expected_dim = jo_int(emb_obj, "expected_dim", 0);
    r.embedder_dim_matches = embedder_dim_matches;
    r.mem_coll = mem_coll;
    r.kb_coll = kb_coll;
@@ -812,7 +730,7 @@ void mem_verify(app_ctx_t *ctx, int argc, char **argv)
    r.overall_ok = overall_ok;
 
    if (ctx->json_output)
-      mem_verify_emit_json(&r, ctx, do_detail, do_timings);
+      emit_json_ctx(cJSON_Duplicate(resp, 1), ctx->json_fields, ctx->response_profile);
    else
       mem_verify_emit_text(&r, ctx, do_detail);
 

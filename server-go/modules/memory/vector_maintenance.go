@@ -112,8 +112,8 @@ func (s *postgresDataStore) RebuildVectorIndex(ctx context.Context, version stri
  RETURNING 1) SELECT count(*) FROM q`).Scan(&queued); err != nil {
 			return err
 		}
-		_, err = bound.db.Exec(ctx, `INSERT INTO kb_meta(key,value) VALUES('vector_schema_version','v4'),('memory_vector_rebuild_version',$1)
- ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, version)
+		_, err = bound.db.Exec(ctx, `INSERT INTO kb_meta(key,value) VALUES('vector_schema_version',$2),('memory_vector_rebuild_version',$1)
+ ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, version, vectorSchemaVersion)
 		return err
 	})
 	if err != nil {

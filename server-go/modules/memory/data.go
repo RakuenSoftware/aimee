@@ -29,6 +29,8 @@ const (
 )
 
 type DataRequest struct {
+	Detail     bool              `json:"detail,omitempty"`
+	Timings    bool              `json:"timings,omitempty"`
 	FailedOnly bool              `json:"failed_only,omitempty"`
 	ResetStuck bool              `json:"reset_stuck,omitempty"`
 	TagScope   *Scope            `json:"tag_scope,omitempty"`
@@ -1003,6 +1005,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}
 	budget := dataTimeout
+	if request.Operation == "vector-verify" {
+		budget = 30 * time.Second
+	}
 	if request.Operation == "vector-repair-record" || request.Operation == "episode-card-generate" {
 		budget = embedHTTPTimeout()
 	}
@@ -1088,6 +1093,13 @@ set_config('aimee.correlation_id',$9,true)`,
 		if err == nil {
 			response.Payload, err = json.Marshal(map[string]any{"cards": cards})
 		}
+
+	case "vector-verify":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.verifyVectors(ctx, invocation.TraceID, options.executor, request)
 
 	case "vector-repair-prepare":
 		backend, ok := options.data.(*postgresDataStore)

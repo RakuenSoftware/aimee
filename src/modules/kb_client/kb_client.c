@@ -1507,21 +1507,6 @@ char *kb_client_memory_repair_json(int limit, int failed_only, int reset_stuck, 
                                        kb_error_json);
 }
 
-/* Verify runs a pgvector snapshot + DB2 scan; 30s is plenty for the normal
- * path and still under any reasonable timings budget. */
-#define KB_CLIENT_MEMORY_VERIFY_TIMEOUT_MS (30 * 1000)
-
-char *kb_client_memory_verify_json(int detail, int timings, const char *embedding_command)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddBoolToObject(req, "detail", detail ? 1 : 0);
-   cJSON_AddBoolToObject(req, "timings", timings ? 1 : 0);
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   return kb_v1_action_request_timeout("memory.verify", req, KB_CLIENT_MEMORY_VERIFY_TIMEOUT_MS,
-                                       kb_error_json);
-}
-
 /* Embed paths are batch-heavy (reembed_start walks every stale memory).
  * Share the 10-minute budget used by repair/rebuild. */
 #define KB_CLIENT_MEMORY_EMBED_TIMEOUT_MS (10 * 60 * 1000)

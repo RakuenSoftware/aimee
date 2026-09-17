@@ -219,6 +219,7 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 	exerciseAnswerReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseVectorMaintenanceReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseVectorRepairReplay(t, ctx, tx, backend.(*postgresDataStore))
+	exerciseVectorVerifyReplay(t, ctx, tx, backend.(*postgresDataStore))
 
 	// Calls use nested transactions in this fixture; releasing a savepoint
 	// retains SET LOCAL until the enclosing transaction ends. Production store

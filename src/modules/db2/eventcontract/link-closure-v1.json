@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "e95c17662bdef98f1616ac9e786c544467e28521",
-  "source_fingerprint": "4171469218bc419d5e489e00e87e1f03041704cc18d069831b5485213849f722",
+  "source_revision": "044dc9c44baaa4594db58b5131d9de509b58dcf2",
+  "source_fingerprint": "0585aac7344841805a66e69d99995cb866f9a313a1158e094e2c5f5d50b473e2",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -119,7 +119,6 @@
     "src/modules/db2/c/org_vault_rotation.c",
     "src/modules/db2/c/pgvec_kb_service.c",
     "src/modules/db2/c/pgvec_transport.c",
-    "src/modules/db2/c/pgvec_verify.c",
     "src/modules/db2/c/project.c",
     "src/modules/db2/c/rel_types_store.c",
     "src/modules/db2/c/report_enrichments.c",
@@ -2127,7 +2126,6 @@
         "src/modules/db2/c/learning.c",
         "src/modules/db2/c/org_vault_rewrap.c",
         "src/modules/db2/c/pgvec_transport.c",
-        "src/modules/db2/c/pgvec_verify.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
@@ -2759,7 +2757,6 @@
         "src/modules/db2/c/kb_maintenance.c",
         "src/modules/db2/c/kb_service_backend.c",
         "src/modules/db2/c/pgvec_transport.c",
-        "src/modules/db2/c/pgvec_verify.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/shadow_delta.c",
         "src/modules/db2/c/tasks.c",
@@ -2791,7 +2788,6 @@
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend_ingest.c",
-        "src/modules/db2/c/pgvec_verify.c",
         "src/modules/db2/c/rules.c"
       ],
       "disposition": "system-link",
@@ -3087,7 +3083,7 @@
     }
   ],
   "summary": {
-    "translation_units": 125,
+    "translation_units": 124,
     "descriptor_support_units": 19,
     "unresolved_symbols": 146,
     "dispositions": {
@@ -3099,5 +3095,5 @@
       "system-link": 140
     }
   },
-  "fingerprint": "a6bcfffe0a6500b00552caa1845d1b2ca04fc855d10c8433cb5f924c976ab8c3"
+  "fingerprint": "2327f8f405ed99d8bcfc966b0d2877ade6987ace7a3fff76e10e2ca6ccf099de"
 }

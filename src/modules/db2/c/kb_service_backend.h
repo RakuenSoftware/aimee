@@ -15,23 +15,6 @@ extern "C"
 
    typedef struct
    {
-      db2_vector_index_ops_summary_t ops;
-      db2_vector_index_op_failed_t failed_detail[20];
-      int failed_detail_count;
-      char stored_schema_ver[64];
-      int rebuild_lock_held;
-   } db2_kb_service_memory_verify_t;
-
-   typedef struct
-   {
-      int64_t mem_rows;
-      int64_t unit_rows;
-      int64_t kb_rows;
-      char active_ver[256];
-   } db2_kb_service_verify_snapshot_t;
-
-   typedef struct
-   {
       char target_version[256];
       int last_id;
       int total;
@@ -82,9 +65,6 @@ extern "C"
       db2_kb_service_async_queue_stats_t queue;
    } db2_kb_service_project_status_t;
 
-   int db2_kb_service_collect_memory_verify(int include_failed_detail, int max_attempts,
-                                            db2_kb_service_memory_verify_t *out);
-   int db2_kb_service_collect_verify_snapshot(db2_kb_service_verify_snapshot_t *out);
    int db2_kb_service_get_active_embedder_version(char *out, size_t out_len);
    int db2_kb_service_set_active_embedder_version(const char *version, const char *updated_at);
    int db2_kb_service_collect_reembed_status(db2_kb_service_reembed_status_t *out);

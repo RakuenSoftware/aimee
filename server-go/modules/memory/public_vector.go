@@ -31,7 +31,7 @@ func handleVectorCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	result := map[string]any{"status": "ok", "rebuilt": *response.Count}
 	if verb == "rebuild" {
-		result["version"], result["failed"] = response.Version, response.Failed
+		result["version"], result["failed"], result["schema_version"] = response.Version, response.Failed, vectorSchemaVersion
 	}
 	return commandResult(result)
 }

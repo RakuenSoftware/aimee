@@ -162,6 +162,11 @@ inside the request's visibility scope. The runtime C adapter is deleted. Vector
 search runs through the host-only Go command and applies explicit scope filters;
 PostgreSQL coverage includes both 1024- and 2560-dimensional columns and rejects
 mismatched writes without losing the previous vector.
+Vector verification is Go-owned too. It reads the same advisory lock and schema
+metadata as rebuild, reports actual catalog indexes, preserves unmeasured lag,
+and bounds configured-embedder timing probes. Scoped failed-job details exclude
+other projects. CLI JSON preserves the complete Go response; native verification
+handlers, collectors, schema-version helper and snapshot source/header are retired.
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 
