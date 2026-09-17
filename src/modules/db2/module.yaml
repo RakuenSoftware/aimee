@@ -266,7 +266,6 @@
     "src/modules/db2/c/membership.h",
     "src/modules/db2/c/memory_payload.h",
     "src/modules/db2/c/memory_query.h",
-    "src/modules/db2/c/memory_scenes.h",
     "src/modules/db2/c/memory_scope_query.h",
     "src/modules/db2/c/memory_vectors.h",
     "src/modules/db2/c/mining.h",

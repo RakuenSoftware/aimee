@@ -1491,19 +1491,6 @@ char *kb_client_memory_reembed_rollback_json(const char *version)
    return kb_v1_memory_embed_action_request("memory.reembed_rollback", req);
 }
 
-char *kb_client_memory_scene_list_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_memory_embed_action_request("memory.scene_list", req);
-}
-
-char *kb_client_memory_scene_show_json(int64_t scene_id)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "scene_id", (double)scene_id);
-   return kb_v1_memory_embed_action_request("memory.scene_show", req);
-}
-
 /* Search may embed a query and hit pgvector; be generous but bounded so
  * a hung sidecar doesn't wedge the CLI indefinitely. */
 #define KB_CLIENT_SEARCH_TIMEOUT_MS (2 * 60 * 1000)

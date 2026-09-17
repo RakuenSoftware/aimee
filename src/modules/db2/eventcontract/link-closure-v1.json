@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "de5a62c6b2ed66ed2738b71c886b354fa4a08fdf",
-  "source_fingerprint": "6dc81cf8c9a36b341c955c84120af4abd97eac81ffb6574152b990f1a8fb3bc9",
+  "source_revision": "3fa641176f9d542bc6ed3dde04d48aff97bfccdf",
+  "source_fingerprint": "196651af99345971781830ccb9d9eac935c154f3aa4c9cc5ea2f006bdec89ae8",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -1982,22 +1982,6 @@
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
-      "symbol": "db2_memory_scene_members",
-      "references": [
-        "src/modules/db2/c/kb_service_backend.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "db2_memory_scenes_list_recent",
-      "references": [
-        "src/modules/db2/c/kb_service_backend.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
       "symbol": "db2_memory_scope_bind_current",
       "references": [
         "src/modules/db2/c/pgvec_transport.c",
@@ -3087,15 +3071,15 @@
   "summary": {
     "translation_units": 123,
     "descriptor_support_units": 19,
-    "unresolved_symbols": 147,
+    "unresolved_symbols": 145,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 6,
+      "injected-module-contract": 4,
       "portable-core-promotion": 1,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 140
     }
   },
-  "fingerprint": "b95a39afe4cc28ddb57549dd4e2c2f04ce4558c91de1d8467c47eb8b64e34f67"
+  "fingerprint": "41a86c844f94b9a9ab9d1abba05356d8a731f1f88eacfc34546de34646bc88d7"
 }

@@ -1246,7 +1246,8 @@ static cJSON *scene_rpc_unwrap(char *resp_json, const char *what)
 
 static void mem_scene_list(app_ctx_t *ctx, int argc, char **argv)
 {
-   cJSON *resp = scene_rpc_unwrap(kb_client_memory_scene_list_json(), "memory scene list failed");
+   cJSON *resp = scene_rpc_unwrap(kb_v1_action_request("memory.scene_list", cJSON_CreateObject()),
+                                  "memory scene list failed");
    cJSON *arr_src = cJSON_GetObjectItemCaseSensitive(resp, "scenes");
    int n = cJSON_IsArray(arr_src) ? cJSON_GetArraySize(arr_src) : 0;
 
@@ -1286,8 +1287,10 @@ static void mem_scene_show(app_ctx_t *ctx, int argc, char **argv)
    if (scene_id <= 0)
       fatal("memory scene show: invalid scene ID '%s'", argv[1]);
 
-   cJSON *resp =
-       scene_rpc_unwrap(kb_client_memory_scene_show_json(scene_id), "memory scene show failed");
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddNumberToObject(args, "scene_id", (double)scene_id);
+   cJSON *resp = scene_rpc_unwrap(kb_v1_action_request("memory.scene_show", args),
+                                  "memory scene show failed");
    cJSON *arr_src = cJSON_GetObjectItemCaseSensitive(resp, "members");
    int n = cJSON_IsArray(arr_src) ? cJSON_GetArraySize(arr_src) : 0;
 

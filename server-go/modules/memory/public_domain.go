@@ -42,6 +42,17 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		return commandResult(commandError("invalid_argument", message))
 	}
 	switch verb {
+	case "scene_list":
+		request.Operation, request.Limit = "scenes", args.limit("limit", 100, 100)
+		scoped = commandScope(args, &request)
+	case "scene_show":
+		var valid bool
+		request.ID, valid = args.positiveID("scene_id")
+		if !valid {
+			return invalid("missing or invalid scene_id")
+		}
+		request.Operation, request.Limit = "scene-members", args.limit("limit", 512, 512)
+		scoped = commandScope(args, &request)
 	case "entity_profile", "entity_edges":
 		var ok bool
 		request.Entity, ok = args.stringValue("entity")
@@ -123,6 +134,16 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	result := map[string]any{"status": "ok"}
 	switch verb {
+	case "scene_list":
+		if response.Scenes == nil {
+			response.Scenes = []MemoryScene{}
+		}
+		result["scenes"] = response.Scenes
+	case "scene_show":
+		if response.SceneMembers == nil {
+			response.SceneMembers = []SceneMember{}
+		}
+		result["scene_id"], result["members"] = request.ID, response.SceneMembers
 	case "get_episode":
 		if len(response.Episodes) == 0 {
 			return commandResult(commandError("not_found", "episode not found"))

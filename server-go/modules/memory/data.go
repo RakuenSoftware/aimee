@@ -806,6 +806,8 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	}
 	maxLimit := 100
 	switch request.Operation {
+	case "scene-members":
+		maxLimit = 512
 	case "vector-repair-prepare":
 		maxLimit = 1024
 	case "rebuild-derived":

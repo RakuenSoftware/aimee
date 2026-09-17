@@ -14,7 +14,6 @@
 #include "vector_index_ops.h"
 #include "code_index_ops.h"
 #include "db_postgres.h"
-#include "memory_scenes.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -1533,88 +1532,4 @@ cJSON *db2_kb_service_learning_reject_json(int id)
    }
 
    return db2_kb_service_learning_get_json(id);
-}
-
-cJSON *db2_kb_service_scene_list_json(int max_rows)
-{
-   if (max_rows < 1)
-      return NULL;
-
-   db2_memory_scene_row_t rows[100];
-   if (max_rows > (int)(sizeof(rows) / sizeof(rows[0])))
-      max_rows = (int)(sizeof(rows) / sizeof(rows[0]));
-
-   int n = db2_memory_scenes_list_recent(rows, max_rows);
-   if (n < 0)
-      return NULL;
-
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON *arr = cJSON_AddArrayToObject(resp, "scenes");
-   if (!arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      if (!obj)
-      {
-         cJSON_Delete(resp);
-         return NULL;
-      }
-      cJSON_AddNumberToObject(obj, "id", (double)rows[i].id);
-      cJSON_AddStringToObject(obj, "workspace_id", rows[i].workspace_id);
-      cJSON_AddNumberToObject(obj, "turn_count", rows[i].turn_count);
-      cJSON_AddStringToObject(obj, "created_at", rows[i].created_at);
-      cJSON_AddItemToArray(arr, obj);
-   }
-
-   return resp;
-}
-
-cJSON *db2_kb_service_scene_members_json(int64_t scene_id, int max_rows)
-{
-   if (max_rows < 1)
-      return NULL;
-
-   db2_memory_scene_member_t rows[512];
-   if (max_rows > (int)(sizeof(rows) / sizeof(rows[0])))
-      max_rows = (int)(sizeof(rows) / sizeof(rows[0]));
-
-   int n = db2_memory_scene_members(scene_id, rows, max_rows);
-   if (n < 0)
-      return NULL;
-
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "scene_id", (double)scene_id);
-   cJSON *arr = cJSON_AddArrayToObject(resp, "members");
-   if (!arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      if (!obj)
-      {
-         cJSON_Delete(resp);
-         return NULL;
-      }
-      cJSON_AddNumberToObject(obj, "memory_id", (double)rows[i].memory_id);
-      cJSON_AddStringToObject(obj, "key", rows[i].key);
-      cJSON_AddNumberToObject(obj, "membership_strength", rows[i].membership_strength);
-      cJSON_AddItemToArray(arr, obj);
-   }
-
-   return resp;
 }

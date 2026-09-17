@@ -366,3 +366,8 @@ transmission. The native directive decoder and formatter are removed, fixing
 CLI rejection of valid public responses and preserving additional JSON fields.
 Native consumer tests cover promotion audit, screening, unavailable screening,
 and response preservation; public caller evidence remains ignored.
+
+Scene listing and member lookup now use the public Go owner and generic CLI
+transport. Visible active parents are filtered before limits, full member keys
+are preserved, and member lookup is capped at 512. The native scene handlers,
+DB2 JSON builders, typed clients and obsolete scene API header are removed.

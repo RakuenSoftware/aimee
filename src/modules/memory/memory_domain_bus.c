@@ -14,7 +14,6 @@
 #include "cJSON.h"
 #include "memory_ontology.h"
 #include "memory_query.h"
-#include "memory_scenes.h"
 #include "memory_scope_query.h"
 #include "memory_bus_context.h"
 
@@ -722,87 +721,6 @@ int db2_memory_summaries_list(int64_t memory_id, int limit, db2_memory_summary_r
       memset(&out[i], 0, sizeof(out[i]));
       domain_copy(out[i].scope, sizeof(out[i].scope), item, "scope");
       domain_copy(out[i].summary, sizeof(out[i].summary), item, "summary");
-   }
-   cJSON_Delete(response);
-   return n;
-}
-
-int db2_memory_scenes_list_recent(db2_memory_scene_row_t *rows, int max)
-{
-   if (!rows || max <= 0)
-      return -1;
-   cJSON *request = domain_request("scenes");
-   if (!request || !cJSON_AddNumberToObject(request, "limit", max))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *items = response ? cJSON_GetObjectItemCaseSensitive(response, "scenes") : NULL;
-   if (!cJSON_IsArray(items))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(items);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-   {
-      const cJSON *item = cJSON_GetArrayItem(items, i);
-      const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
-      const cJSON *turns = cJSON_GetObjectItemCaseSensitive(item, "turn_count");
-      if (!cJSON_IsNumber(id) || !cJSON_IsNumber(turns))
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-      memset(&rows[i], 0, sizeof(rows[i]));
-      rows[i].id = (int64_t)id->valuedouble;
-      rows[i].turn_count = turns->valueint;
-      domain_copy(rows[i].workspace_id, sizeof(rows[i].workspace_id), item, "workspace_id");
-      domain_copy(rows[i].created_at, sizeof(rows[i].created_at), item, "created_at");
-   }
-   cJSON_Delete(response);
-   return n;
-}
-
-int db2_memory_scene_members(int64_t scene_id, db2_memory_scene_member_t *rows, int max)
-{
-   if (!rows || max <= 0)
-      return -1;
-   cJSON *request = domain_request("scene-members");
-   if (!request || !cJSON_AddNumberToObject(request, "id", (double)scene_id) ||
-       !cJSON_AddNumberToObject(request, "limit", max))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *items =
-       response ? cJSON_GetObjectItemCaseSensitive(response, "scene_members") : NULL;
-   if (!cJSON_IsArray(items))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(items);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-   {
-      const cJSON *item = cJSON_GetArrayItem(items, i);
-      const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "memory_id");
-      const cJSON *strength = cJSON_GetObjectItemCaseSensitive(item, "membership_strength");
-      if (!cJSON_IsNumber(id) || !cJSON_IsNumber(strength))
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-      memset(&rows[i], 0, sizeof(rows[i]));
-      rows[i].memory_id = (int64_t)id->valuedouble;
-      rows[i].membership_strength = strength->valuedouble;
-      domain_copy(rows[i].key, sizeof(rows[i].key), item, "key");
    }
    cJSON_Delete(response);
    return n;

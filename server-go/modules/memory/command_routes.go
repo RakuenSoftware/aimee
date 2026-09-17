@@ -16,6 +16,8 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "scene_list", "List visible memory scenes.", handleDomainCommand, true},
+	{"memory", "scene_show", "List visible scene members.", handleDomainCommand, true},
 	{"memory", "verify", "Verify deployed memory vectors and indexing health.", handleVerifyCommand, true},
 	{"memory", "episode_cards", "Read scoped session episode cards.", handleRuntimeCommand, true},
 	{"memory", "repair", "Repair memory vectors and retry failed indexing.", handleRepairCommand, true},

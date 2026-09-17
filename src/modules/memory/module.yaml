@@ -104,6 +104,7 @@
     "server-go/modules/memory/public_directives_test.go",
     "server-go/modules/memory/public_maintenance_test.go",
     "server-go/modules/memory/public_domain_test.go",
+    "server-go/modules/memory/public_scenes_test.go",
     "server-go/modules/memory/public_queries_test.go",
     "server-go/modules/memory/command_routes_test.go",
     "server-go/modules/memory/public_records_test.go",

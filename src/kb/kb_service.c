@@ -430,27 +430,6 @@ static int kb_handle_memory_reembed_start(int fd, cJSON *req)
    return srv_rc;
 }
 
-#define KB_SCENE_LIST_MAX    100
-#define KB_SCENE_MEMBERS_MAX 512
-
-static int kb_handle_memory_scene_list(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_scene_list_json(KB_SCENE_LIST_MAX);
-   return kb_reply_or_error(fd, resp, "failed to query scenes");
-}
-
-static int kb_handle_memory_scene_show(int fd, cJSON *req)
-{
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "scene_id");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "missing scene_id");
-   int64_t scene_id = (int64_t)id_j->valuedouble;
-
-   cJSON *resp = db2_kb_service_scene_members_json(scene_id, KB_SCENE_MEMBERS_MAX);
-   return kb_reply_or_error(fd, resp, "failed to query scene members");
-}
-
 static int kb_handle_curiosity_list(int fd, cJSON *req)
 {
    cJSON *state_j = cJSON_GetObjectItemCaseSensitive(req, "state");
@@ -899,8 +878,6 @@ static const struct
     {"memory.reembed_status", kb_handle_memory_reembed_status},
     {"memory.reembed_cutover", kb_handle_memory_reembed_cutover},
     {"memory.reembed_rollback", kb_handle_memory_reembed_rollback},
-    {"memory.scene_list", kb_handle_memory_scene_list},
-    {"memory.scene_show", kb_handle_memory_scene_show},
     {"curiosity.list", kb_handle_curiosity_list},
     {"curiosity.create", kb_handle_curiosity_create},
     {"curiosity.sweep", kb_handle_curiosity_sweep},

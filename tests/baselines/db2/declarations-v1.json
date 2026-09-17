@@ -11870,46 +11870,6 @@
     },
     {
       "consumers": [
-        "src/kb/kb_service.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 272
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "The cJSON scene-list facade is process-local presentation code; the existing fixed scene rows define a bounded memory operation reply instead."
-      },
-      "signature": "cJSON * db2_kb_service_scene_list_json ( int max_rows )",
-      "signature_sha256": "2593262bb0b8ddccaebf5907e9a3ce393db0c84dcbbb4774755d90d4a4b447dd",
-      "status": "reviewed",
-      "symbol": "db2_kb_service_scene_list_json"
-    },
-    {
-      "consumers": [
-        "src/kb/kb_service.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 273
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "The cJSON scene-member facade stays out of the transport contract; DB2 returns a bounded array of fixed member records and the caller renders JSON."
-      },
-      "signature": "cJSON * db2_kb_service_scene_members_json ( int64_t scene_id , int max_rows )",
-      "signature_sha256": "cd890d7fc480daa25fe93685549bc47d2276d1d33417392b425f6240f65f00da",
-      "status": "reviewed",
-      "symbol": "db2_kb_service_scene_members_json"
-    },
-    {
-      "consumers": [
         "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_service_memory.c"
       ],
@@ -16606,58 +16566,6 @@
       "signature_sha256": "de78809fdd631d91ea77d8459db864e2672c99ec225f4cc1540687b8dee46786",
       "status": "reviewed",
       "symbol": "db2_memory_row_insert_ex"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_scenes.h",
-          "line": 54
-        }
-      ],
-      "signature": "int db2_memory_scene_member_exists ( int64_t memory_id , int64_t scene_id )",
-      "signature_sha256": "714a801435c0781369ab2ec4f23d4462f2a9ad7d9a9a0e2d910df0eab7fde703",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_scene_member_exists"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_scenes.h",
-          "line": 38
-        }
-      ],
-      "signature": "int db2_memory_scene_members ( int64_t scene_id , db2_memory_scene_member_t * rows , int max )",
-      "signature_sha256": "9a0b7ab697e04e211ef05d2e8d1c729c5453da41950eeac333d0d7bfe471ae2b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_scene_members"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_scenes.h",
-          "line": 49
-        }
-      ],
-      "signature": "int db2_memory_scene_memberships_for_memory ( int64_t memory_id , db2_memory_scene_membership_t * rows , int max )",
-      "signature_sha256": "9b32133fe4bb756d375465b49f59d0fe3c413962da8b3cd8b06e2035f9d2d324",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_scene_memberships_for_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_scenes.h",
-          "line": 34
-        }
-      ],
-      "signature": "int db2_memory_scenes_list_recent ( db2_memory_scene_row_t * rows , int max )",
-      "signature_sha256": "e5de64a47ab451774ffb83d0beaa3983767ac80fd0407f23d69e0c84e17c3d9f",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_scenes_list_recent"
     },
     {
       "consumers": [],
@@ -24188,15 +24096,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "073f3b937af1449f13ae549a847a1027c0bed3b2b081a0ca0a476346007c7569",
+  "fingerprint": "993999856d0b71754dea340ea4d016c79f5a3c3d2121e87e4469fa301b514cf6",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 483,
-    "declarations": 1379,
-    "headers": 139,
-    "internal_unconsumed": 354,
+    "declarations": 1373,
+    "headers": 138,
+    "internal_unconsumed": 350,
     "private_test_only": 326,
-    "reviewed": 216
+    "reviewed": 214
   }
 }

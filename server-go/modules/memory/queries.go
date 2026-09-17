@@ -267,8 +267,9 @@ WHERE memory_id=$1 ORDER BY id LIMIT $2`, id, limit)
 }
 
 func (s *postgresDataStore) Scenes(ctx context.Context, limit int) ([]MemoryScene, error) {
-	rows, err := s.db.Query(ctx, `SELECT id,workspace_id,turn_count,created_at FROM memory_scenes
-ORDER BY created_at DESC,id DESC LIMIT $1`, limit)
+	rows, err := s.db.Query(ctx, `SELECT s.id,s.workspace_id,s.turn_count,s.created_at FROM memory_scenes s
+WHERE EXISTS(SELECT 1 FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=s.id AND m.lifecycle_state='active')
+ORDER BY s.created_at DESC,s.id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +287,7 @@ ORDER BY created_at DESC,id DESC LIMIT $1`, limit)
 
 func (s *postgresDataStore) SceneMembers(ctx context.Context, sceneID int64, limit int) ([]SceneMember, error) {
 	rows, err := s.db.Query(ctx, `SELECT sm.memory_id,m.key,sm.membership_strength
-FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=$1
+FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=$1 AND m.lifecycle_state='active'
 ORDER BY sm.membership_strength DESC,sm.memory_id LIMIT $2`, sceneID, limit)
 	if err != nil {
 		return nil, err

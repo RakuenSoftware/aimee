@@ -1173,11 +1173,9 @@ char *kb_client_memory_reembed_rollback_json(const char *version);
 
 /* List the 100 most recent scenes (memory_scenes).  Returns
  * {"status":"ok","scenes":[{id, workspace_id, turn_count, created_at}, ...]}. */
-char *kb_client_memory_scene_list_json(void);
 
 /* List members of a single scene.  Returns
  * {"status":"ok","scene_id","members":[{memory_id,key,membership_strength}, ...]}. */
-char *kb_client_memory_scene_show_json(int64_t scene_id);
 
 /* --- Canonical index thin-client RPCs --------------------------------
  *

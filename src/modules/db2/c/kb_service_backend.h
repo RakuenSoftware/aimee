@@ -269,9 +269,6 @@ extern "C"
    cJSON *db2_kb_service_learning_get_json(int id);
    cJSON *db2_kb_service_learning_reject_json(int id);
 
-   cJSON *db2_kb_service_scene_list_json(int max_rows);
-   cJSON *db2_kb_service_scene_members_json(int64_t scene_id, int max_rows);
-
 #ifdef __cplusplus
 }
 #endif

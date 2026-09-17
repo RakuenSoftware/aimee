@@ -557,20 +557,6 @@
       "reason": "The cJSON directive-type update is a legacy facade; a typed learning mutation validates the closed type and returns structured status."
     },
     {
-      "symbol": "db2_kb_service_scene_list_json",
-      "signature_sha256": "2593262bb0b8ddccaebf5907e9a3ce393db0c84dcbbb4774755d90d4a4b447dd",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON scene-list facade is process-local presentation code; the existing fixed scene rows define a bounded memory operation reply instead."
-    },
-    {
-      "symbol": "db2_kb_service_scene_members_json",
-      "signature_sha256": "cd890d7fc480daa25fe93685549bc47d2276d1d33417392b425f6240f65f00da",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON scene-member facade stays out of the transport contract; DB2 returns a bounded array of fixed member records and the caller renders JSON."
-    },
-    {
       "symbol": "db2_kb_service_session_briefing_commitments_json",
       "signature_sha256": "6b84e7bbd668fe80cef231f81decc14104b8a440cf8b6eb64325fffcc114f044",
       "disposition": "private-db2",
