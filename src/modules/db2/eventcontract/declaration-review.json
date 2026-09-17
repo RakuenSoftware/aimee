@@ -249,27 +249,6 @@
       "reason": "The legacy cJSON delete facade is not a wire shape; the typed learning mutation owns deletion and exposes only its closed result."
     },
     {
-      "symbol": "db2_kb_service_anti_pattern_escalate_json",
-      "signature_sha256": "e0abc48fb7f50c91363ea18c9aeb5af9adc28c4373dadbc7b83df024cf0e90f1",
-      "disposition": "private-db2",
-      "family": "learning",
-      "reason": "The cJSON escalation report stays with the caller; DB2 applies the bounded threshold atomically and returns typed aggregate evidence."
-    },
-    {
-      "symbol": "db2_kb_service_anti_pattern_extract_from_failures_json",
-      "signature_sha256": "d2b6aeefc0f79c3a4dc5d8ea66ce6f96c5c6f390919bcf510813808a89dcddb8",
-      "disposition": "private-db2",
-      "family": "learning",
-      "reason": "The cJSON maintenance response is not a transport contract; one typed learning operation owns failure extraction and returns bounded counts."
-    },
-    {
-      "symbol": "db2_kb_service_anti_pattern_extract_from_feedback_json",
-      "signature_sha256": "fcbfac0cf16e32c1fa5154bda3ede046d27dc871a16f8ebde3a9ce8fee83212b",
-      "disposition": "private-db2",
-      "family": "learning",
-      "reason": "The cJSON maintenance response remains local presentation; one typed learning operation owns feedback extraction and returns bounded counts."
-    },
-    {
       "symbol": "db2_kb_service_anti_pattern_insert_json",
       "signature_sha256": "e571c9d7b6d62f8c1380232f59312c0eaf67d3abcf2bdc4c95be22d96ec0d55f",
       "disposition": "private-db2",
@@ -494,20 +473,6 @@
       "reason": "The context-block cJSON envelope is caller presentation; a typed bounded query returns the context block and provenance fields."
     },
     {
-      "symbol": "db2_kb_service_memory_diagnose_scoped_json",
-      "signature_sha256": "241e4fe67ce20019b8d5d990cd9592b14d123a0abc9e3cd2aea974f7927c233b",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The scoped-diagnostic cJSON document remains a compatibility view; a typed operation validates explicit bounded scope and returns structured findings."
-    },
-    {
-      "symbol": "db2_kb_service_memory_explain_match_json",
-      "signature_sha256": "6dcce6804d5a516ea5841a2830eaf583e30619c8d5d77c7bd76b46fa9564a7a1",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The match-explanation cJSON document is caller rendering; typed bounded scoring evidence forms the stable memory reply."
-    },
-    {
       "symbol": "db2_kb_service_memory_facts_json",
       "signature_sha256": "f53ea5067a8a2713878057ac5b889ef937a03a61afcc78ba880b80f254e7bc31",
       "disposition": "private-db2",
@@ -527,20 +492,6 @@
       "disposition": "private-db2",
       "family": "memory",
       "reason": "The cJSON session-fold wrapper cannot define or split the transaction; a typed memory.session_fold operation owns checkpoint creation and L0 cleanup before replying."
-    },
-    {
-      "symbol": "db2_kb_service_memory_learn_style_json",
-      "signature_sha256": "d410aa57cfd1f5ab7fbbb134dacc1fedf7fb792d9d3a95cf9874d5f6fa29d665",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON style-learning result is caller presentation; a typed operation validates bounded evidence and returns structured learning status."
-    },
-    {
-      "symbol": "db2_kb_service_memory_scan_conversations_json",
-      "signature_sha256": "f5d42bc8b000d6446ce51a38b54afb803af6f6410476657fa3e38073f213b1cb",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The conversation-scan cJSON input and report are compatibility presentation; a typed operation validates bounded directories and returns structured counts."
     },
     {
       "symbol": "db2_kb_service_note_create_json",

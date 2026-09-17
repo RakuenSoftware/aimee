@@ -679,12 +679,6 @@ static int diagnostic_call(const char *operation, const char *query, const char 
    return n;
 }
 
-int memory_diagnose_scoped(const char *query, const char *scope_type, const char *scope_value,
-                           int limit, memory_diagnostic_t *out, int max)
-{
-   return diagnostic_call("diagnose", query, scope_type, scope_value, 0, limit, out, max);
-}
-
 int memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic_t *out)
 {
    return diagnostic_call("explain", query, NULL, NULL, memory_id, 1, out, 1) == 1 ? 0 : -1;

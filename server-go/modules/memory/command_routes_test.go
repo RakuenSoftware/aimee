@@ -38,18 +38,22 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			if verb == "schema_list" {
 				wantGroup = "relations"
 			}
+			switch verb {
+			case "anti_pattern_extract_from_feedback", "anti_pattern_extract_from_failures", "anti_pattern_escalate", "memory_learn_style", "scan_conversations":
+				wantGroup = "maintenance"
+			}
 			if group != wantGroup || surfaces != SurfaceRPC || seen[verb] {
 				t.Fatalf("bad route %s.%s mask=%d", group, verb, surfaces)
 			}
 			seen[verb] = true
 		}
 		if placement == PlacementServer {
-			if offset != len(response) || len(seen) != 1 || !seen["screen_content"] {
+			if offset != len(response) || len(seen) != 2 || !seen["screen_content"] || !seen["pack"] {
 				t.Fatal("private commands shadowed shared KB commands", seen)
 			}
 			continue
 		}
-		if offset != len(response) || len(seen) != 67 {
+		if offset != len(response) || len(seen) != 75 {
 			t.Fatalf("routes=%d bytes=%d/%d", len(seen), offset, len(response))
 		}
 		for _, verb := range []string{"recall", "directive_create", "prospective_match", "list_unused_l2", "stats"} {

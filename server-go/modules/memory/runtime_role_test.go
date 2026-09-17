@@ -214,6 +214,8 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 	command("reject", fmt.Sprintf(`{"id":%d}`, newID), true)
 	command("restore", fmt.Sprintf(`{"id":%d}`, newID), true)
 	command("delete", fmt.Sprintf(`{"id":%d,"authority":"user"}`, newID), true)
+	exerciseMaintenanceReplay(t, ctx, tx, handler)
+	exerciseDiagnosticReplay(t, ctx, tx, handler)
 
 	// Calls use nested transactions in this fixture; releasing a savepoint
 	// retains SET LOCAL until the enclosing transaction ends. Production store

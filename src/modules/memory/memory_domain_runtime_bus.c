@@ -46,15 +46,6 @@ static cJSON *domain_request(const char *operation)
    return request;
 }
 
-static int domain_copy(char *out, size_t cap, const cJSON *obj, const char *key)
-{
-   const cJSON *value = cJSON_GetObjectItemCaseSensitive(obj, key);
-   if (!out || cap == 0 || !cJSON_IsString(value) || !value->valuestring)
-      return -1;
-   snprintf(out, cap, "%s", value->valuestring);
-   return 0;
-}
-
 static int domain_bool(const cJSON *response, const char *key)
 {
    const cJSON *value = response ? cJSON_GetObjectItemCaseSensitive(response, key) : NULL;
@@ -155,53 +146,6 @@ void memory_recall_metrics(int64_t *assemblies, int64_t *starts, double *average
    cJSON_Delete(metrics);
 }
 
-static void recall_trace_event(const char *operation)
-{
-   cJSON *response = domain_call(domain_request(operation));
-   cJSON_Delete(response);
-}
-
-void memory_recall_trace_capture_begin(void)
-{
-   recall_trace_event("recall-trace-begin");
-}
-void memory_recall_trace_capture_end(void)
-{
-   recall_trace_event("recall-trace-end");
-}
-
-int memory_recall_trace_rejections(memory_recall_rejection_t *out, int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   cJSON *response = domain_call(domain_request("recall-trace-list"));
-   const cJSON *items =
-       response ? cJSON_GetObjectItemCaseSensitive(response, "recall_rejections") : NULL;
-   if (!cJSON_IsArray(items))
-   {
-      cJSON_Delete(response);
-      return 0;
-   }
-   int n = cJSON_GetArraySize(items);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-   {
-      const cJSON *item = cJSON_GetArrayItem(items, i);
-      const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "memory_id");
-      memset(&out[i], 0, sizeof(out[i]));
-      if (!cJSON_IsNumber(id) || domain_copy(out[i].lane, sizeof(out[i].lane), item, "lane") ||
-          domain_copy(out[i].gate, sizeof(out[i].gate), item, "gate"))
-      {
-         cJSON_Delete(response);
-         return 0;
-      }
-      out[i].memory_id = (int64_t)id->valuedouble;
-   }
-   cJSON_Delete(response);
-   return n;
-}
-
 const char *memory_answer_evidence_decision_str(const memory_answer_evidence_t *trace)
 {
    if (!trace)
@@ -242,26 +186,6 @@ const char *memory_answer_evidence_reason_str(const memory_answer_evidence_t *tr
    }
 }
 
-static int domain_count_operation(const char *operation, const char *string_key,
-                                  const char *string_value, int number, const char *number_key)
-{
-   cJSON *request = domain_request(operation);
-   if (!request ||
-       (string_key &&
-        !cJSON_AddStringToObject(request, string_key, string_value ? string_value : "")) ||
-       (number_key && !cJSON_AddNumberToObject(request, number_key, number)))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   int count = -1;
-   if (domain_number(response, "count", &count) != 0)
-      count = -1;
-   cJSON_Delete(response);
-   return count;
-}
-
 int memory_rebuild_derived_indexes(int limit)
 {
    cJSON *request = domain_request("rebuild-derived");
@@ -275,48 +199,6 @@ int memory_rebuild_derived_indexes(int limit)
    (void)domain_number(response, "count", &count);
    cJSON_Delete(response);
    return count;
-}
-
-int memory_scan_conversations(char dirs[][MAX_PATH_LEN], int dir_count)
-{
-   if (dir_count < 0 || dir_count > 8)
-      return -1;
-   cJSON *request = domain_request("scan-conversations");
-   cJSON *array = request ? cJSON_AddArrayToObject(request, "directories") : NULL;
-   if (!array)
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   for (int i = 0; i < dir_count; ++i)
-      if (dirs[i][0])
-         cJSON_AddItemToArray(array, cJSON_CreateString(dirs[i]));
-   cJSON *response = domain_call_with_timeout(request, DOMAIN_MAINTENANCE_TIMEOUT_MS);
-   int count = -1;
-   (void)domain_number(response, "count", &count);
-   cJSON_Delete(response);
-   return count;
-}
-
-int anti_pattern_extract_from_feedback(void)
-{
-   return domain_count_operation("anti-pattern-feedback", NULL, NULL, 0, NULL);
-}
-
-int anti_pattern_extract_from_failures(void)
-{
-   return domain_count_operation("anti-pattern-failures", NULL, NULL, 0, NULL);
-}
-
-int anti_pattern_escalate(int hit_threshold)
-{
-   return domain_count_operation("anti-pattern-escalate", NULL, NULL, hit_threshold,
-                                 "hit_threshold");
-}
-
-int memory_learn_style(void)
-{
-   return domain_count_operation("learn-style", NULL, NULL, 0, NULL);
 }
 
 int64_t memory_episode_card_generate(const char *source_session)

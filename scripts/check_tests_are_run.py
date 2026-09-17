@@ -71,7 +71,6 @@ UNBUILT_SOURCES = {
     "test_memory_embed_http_auth.c",
     "test_memory_filter.c",
     "test_memory_lane_outcome.c",
-    "test_memory_profiles.c",
     "test_memory_ranker_boundary.c",
     "test_memory_recall_pivot.c",
     "test_memory_retrieval_eval.c",

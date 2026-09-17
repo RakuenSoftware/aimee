@@ -324,23 +324,6 @@ int main(void)
       assert(count == 1);
    }
 
-   /* --- anti_pattern_extract_from_failures reads DB1 decision_log --- */
-   {
-      assert(db2_decision_log_insert(0, "A, B", "rm -rf /tmp", "destructive shortcut", "", NULL,
-                                     NULL) == 0);
-      db2_decision_log_row_t failed[8];
-      int count = db2_decision_log_list(NULL, 8, failed, 8);
-      assert(count >= 1);
-      assert(db2_decision_log_set_outcome(failed[0].id, "failure") == 0);
-
-      int extracted = anti_pattern_extract_from_failures();
-      assert(extracted >= 1);
-
-      anti_pattern_t matches[8];
-      int found = db2_anti_pattern_check("", "rm -rf /tmp/project", matches, 8);
-      assert(found >= 1);
-   }
-
    /* --- memory_detect_conflict --- */
    {
       memory_t m1, m2;

@@ -17676,7 +17676,7 @@ BEGIN
     RETURN;
   END IF;
   FOREACH relation_name IN ARRAY ARRAY[
-    'anti_patterns','decision_log','derived_memory_registry','derived_rederivation_queue',
+    'anti_patterns','decision_log','derived_memory_registry','derived_memory_dependencies','derived_rederivation_queue',
     'entity_aliases','entity_edges','entity_registry',
     'epistemic_directives','fact_graph_changes','fact_graph_commits',
     'kb_async_jobs','kb_meta','memories','memory_conflicts',
@@ -17684,7 +17684,7 @@ BEGIN
     'memory_health','memory_lineage','memory_links','memory_provenance',
     'memory_rejection_tombstones','memory_relations','memory_scene_members',
     'memory_scenes','memory_scopes','memory_summaries','memory_units',
-    'prospective_memories','rules','vector_index_ops'
+    'prospective_memories','rules','vector_index_ops','recall_traces','recall_trace_results'
   ] LOOP
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO aimee_store_runtime', relation_name);
     FOR sequence_name IN
@@ -17698,7 +17698,7 @@ BEGIN
       END IF;
     END LOOP;
   END LOOP;
-  GRANT SELECT ON tasks, fact_evidence, derived_memory_dependencies, docs,
+  GRANT SELECT ON tasks, fact_evidence, docs, evidence_lifecycle_settings,
     document_versions, derivation_policy_versions TO aimee_store_runtime;
   GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT),
     kb_fact_commit_worm_seal(TEXT,TEXT) TO aimee_store_runtime;

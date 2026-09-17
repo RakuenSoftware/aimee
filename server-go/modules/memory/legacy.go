@@ -371,6 +371,10 @@ WHERE polarity IN ('positive','negative') ORDER BY id DESC LIMIT 256`)
 			}
 		}
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
 	rows.Close()
 	learned := 0
 	for i, dimension := range styleDimensions {

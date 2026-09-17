@@ -164,7 +164,7 @@ lists, artifact updates, and memory review (including the operator console).
 Review reasons are matched to the memory's exact scope. Diagnostic list caps are
 validated consistently through the 256-row transport limit; PostgreSQL tests
 exercise the actual unused-memory interval binding and public response fields.
-Go declares and dispatches its 34 migrated public KB commands from one route
+Go declares and dispatches its migrated public KB commands from one route
 table. Fixed modules opt into stage 255 using DCMD/DCMR version 2, which carries
 the invocation stage; host dispatch takes a route snapshot before waiting on the
 bus. Internal dashboard and briefing builders are not declared as RPC actions.
@@ -174,7 +174,7 @@ Authenticated admission and the server-to-KB transport remain native callers.
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host
 directories. Passing a pure-Go process/client build does not complete G0 while
-those C paths remain. The module currently retains six C sources and eight
+those C paths remain. The module currently retains six C sources and seven
 headers. The descriptor's `ownership_complete` flag verifies the declared file
 inventory; it does not assert that the Go migration is complete.
 
@@ -326,3 +326,12 @@ and wildcard discussion edges. This repairs an earlier port that incorrectly
 used the identity-fact vocabulary and published only supersedes. Response order
 is deterministic. The native schema and validation adapters and unused native
 authority-edit, workspace-tag and keyword-search wrappers are removed.
+
+Maintenance learning, scoped diagnostics, and profile packs now run in Go.
+Diagnostics keep trace features local to each request and persist traces after
+successful retrieval, using verified caller scope and identity. A failed trace
+write cannot discard the retrieval result. Runtime-role tests cover trace
+persistence, feature reconstruction, scope fallback, and write failure.
+Profile packs share one Go implementation across server and KB, including bounded
+validation, directory selection, and atomic activation. Native pack policy and
+its header are removed; the CLI renders the shared command's response.

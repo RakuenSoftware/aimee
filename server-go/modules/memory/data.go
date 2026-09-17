@@ -193,15 +193,15 @@ type DataResponse struct {
 	Maintenance        *MaintenanceSummary  `json:"maintenance,omitempty"`
 	ExportRecords      []ExportRecord       `json:"export_records,omitempty"`
 	Metrics            *RuntimeMetrics      `json:"metrics,omitempty"`
-	RecallRejections   []RecallRejection    `json:"recall_rejections,omitempty"`
-	LegacyResults      []LegacySearchResult `json:"legacy_results,omitempty"`
-	VectorHits         []VectorHit          `json:"vector_hits,omitempty"`
-	Drift              *DriftResult         `json:"drift,omitempty"`
-	SummaryCount       int                  `json:"summary_count,omitempty"`
-	FactCount          int                  `json:"fact_count,omitempty"`
-	Failed             int                  `json:"failed,omitempty"`
-	FactWork           *MemoryFactWork      `json:"fact_work,omitempty"`
-	FactCandidates     []FactCandidate      `json:"fact_candidates,omitempty"`
+
+	LegacyResults  []LegacySearchResult `json:"legacy_results,omitempty"`
+	VectorHits     []VectorHit          `json:"vector_hits,omitempty"`
+	Drift          *DriftResult         `json:"drift,omitempty"`
+	SummaryCount   int                  `json:"summary_count,omitempty"`
+	FactCount      int                  `json:"fact_count,omitempty"`
+	Failed         int                  `json:"failed,omitempty"`
+	FactWork       *MemoryFactWork      `json:"fact_work,omitempty"`
+	FactCandidates []FactCandidate      `json:"fact_candidates,omitempty"`
 }
 
 // recallGateDecision owns the inexpensive turn-level recall policy. Keeping it
@@ -943,20 +943,6 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 			metrics = recallMetrics()
 		}
 		encoded, marshalErr := json.Marshal(DataResponse{Metrics: &metrics})
-		if marshalErr != nil {
-			return nil, bus.ModuleStatusInternal
-		}
-		return encoded, bus.ModuleStatusOK
-	}
-	if request.Operation == "recall-trace-begin" || request.Operation == "recall-trace-end" ||
-		request.Operation == "recall-trace-list" {
-		switch request.Operation {
-		case "recall-trace-begin":
-			recallTraceBegin()
-		case "recall-trace-end":
-			recallTraceEnd()
-		}
-		encoded, marshalErr := json.Marshal(DataResponse{RecallRejections: recallTraceSnapshot()})
 		if marshalErr != nil {
 			return nil, bus.ModuleStatusInternal
 		}
@@ -1892,6 +1878,16 @@ set_config('aimee.correlation_id',$9,true)`,
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {
 			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Operation == "diagnose" || request.Operation == "explain" {
+			for i := range response.Diagnostics {
+				d := &response.Diagnostics[i]
+				response.Records = append(response.Records, d.Memory)
+				d.EpistemicKind, err = backend.EpistemicKind(ctx, d.Memory.ID)
+				if err != nil {
+					return nil, bus.ModuleStatusInternal
+				}
+			}
 		}
 		response.PublicRecords, err = backend.publicRecords(ctx, response.Records)
 		if err != nil {

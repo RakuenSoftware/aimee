@@ -722,56 +722,12 @@ cJSON *db2_kb_service_learning_record_application_json(const cJSON *req)
    return resp;
 }
 
-cJSON *db2_kb_service_anti_pattern_extract_from_feedback_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int n = anti_pattern_extract_from_feedback();
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", n);
-   return resp;
-}
-
-cJSON *db2_kb_service_anti_pattern_extract_from_failures_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int n = anti_pattern_extract_from_failures();
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", n);
-   return resp;
-}
-
-cJSON *db2_kb_service_anti_pattern_escalate_json(int hit_threshold)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int n = anti_pattern_escalate(hit_threshold);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", n);
-   return resp;
-}
-
 cJSON *db2_kb_service_rules_decay_json(void)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
    int n = db2_rules_decay();
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", n);
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_learn_style_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int n = memory_learn_style();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddNumberToObject(resp, "count", n);
    return resp;
@@ -1062,33 +1018,6 @@ cJSON *db2_kb_service_directive_expire_session_json(void)
       return NULL;
    (void)db2_rules_delete_by_directive_type("session");
    cJSON_AddStringToObject(resp, "status", "ok");
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_scan_conversations_json(const cJSON *dirs)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   if (!cJSON_IsArray(dirs))
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "missing dirs array");
-      return resp;
-   }
-   char buf[8][MAX_PATH_LEN];
-   int n = 0;
-   const cJSON *d;
-   cJSON_ArrayForEach(d, dirs)
-   {
-      if (n >= 8)
-         break;
-      if (cJSON_IsString(d))
-         snprintf(buf[n++], MAX_PATH_LEN, "%s", d->valuestring);
-   }
-   int rc = memory_scan_conversations(buf, n);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", rc);
    return resp;
 }
 

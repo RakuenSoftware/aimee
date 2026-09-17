@@ -46,7 +46,6 @@
     "server-go/modules/memory/redirect.go",
     "server-go/modules/memory/scope.go",
     "server-go/modules/memory/session.go",
-    "server-go/modules/memory/trace.go",
     "server-go/modules/memory/visibility_search.go",
     "server-go/modules/memory/personal_vectors.go",
     "server-go/modules/memory/code_index.go",
@@ -67,7 +66,9 @@
     "server-go/modules/memory/public_scope.go",
     "server-go/modules/memory/public_runtime.go",
     "server-go/modules/memory/public_mutations.go",
-    "server-go/modules/memory/public_store.go"
+    "server-go/modules/memory/public_store.go",
+    "server-go/modules/memory/profile_pack.go",
+    "server-go/modules/memory/public_diagnostics.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -102,7 +103,10 @@
     "server-go/modules/memory/public_runtime_test.go",
     "server-go/modules/memory/public_mutations_test.go",
     "server-go/modules/memory/public_store_test.go",
-    "server-go/modules/memory/public_archive_test.go"
+    "server-go/modules/memory/public_archive_test.go",
+    "server-go/modules/memory/profile_pack_test.go",
+    "server-go/modules/memory/public_diagnostics_test.go",
+    "server-go/modules/memory/public_learning_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"
@@ -113,8 +117,7 @@
     "src/modules/memory/memory_core_internal.h",
     "src/modules/memory/memory_fact_gate.h",
     "src/modules/memory/memory_graph_fusion.h",
-    "src/modules/memory/memory_ontology.h",
-    "src/modules/memory/memory_profile_pack.h"
+    "src/modules/memory/memory_ontology.h"
   ],
   "tests": [
     "src/tests/test_gw_stage_memory.c"

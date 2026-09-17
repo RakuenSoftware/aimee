@@ -13,6 +13,29 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		return commandResult(commandError("invalid_argument", message))
 	}
 	switch verb {
+	case "anti_pattern_extract_from_feedback", "anti_pattern_extract_from_failures", "anti_pattern_escalate", "memory_learn_style", "scan_conversations":
+		request.Operation = map[string]string{
+			"anti_pattern_extract_from_feedback": "anti-pattern-feedback",
+			"anti_pattern_extract_from_failures": "anti-pattern-failures",
+			"anti_pattern_escalate":              "anti-pattern-escalate", "memory_learn_style": "learn-style",
+			"scan_conversations": "scan-conversations",
+		}[verb]
+		request.HitThreshold = args.integer("hit_threshold", 5)
+		if verb == "scan_conversations" {
+			var dirs []json.RawMessage
+			if raw, ok := args["dirs"]; !ok || string(raw) == "null" || json.Unmarshal(raw, &dirs) != nil {
+				return invalid("missing dirs array")
+			}
+			for _, raw := range dirs {
+				var dir string
+				if json.Unmarshal(raw, &dir) == nil && dir != "" {
+					request.Directories = append(request.Directories, dir)
+				}
+				if len(request.Directories) == 8 {
+					break
+				}
+			}
+		}
 	case "episode_card_generate":
 		request.Operation, request.SessionID = "episode-card-generate", args.stringOr("source_session", "")
 		if strings.TrimSpace(request.SessionID) == "" {
@@ -107,7 +130,7 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			return nil, bus.ModuleStatusInternal
 		}
 		result["memory_unit_id"] = response.IDs[0]
-	case "export_jsonl", "decisions_export_jsonl":
+	case "export_jsonl", "decisions_export_jsonl", "anti_pattern_extract_from_feedback", "anti_pattern_extract_from_failures", "anti_pattern_escalate", "memory_learn_style", "scan_conversations":
 		if response.Count == nil {
 			return nil, bus.ModuleStatusInternal
 		}

@@ -108,22 +108,6 @@ typedef struct
    memory_score_parts_t parts;
 } memory_diagnostic_t;
 
-#define MEMORY_RECALL_TRACE_MAX_REJECTIONS 64
-typedef struct
-{
-   int64_t memory_id;
-   char lane[24];
-   char gate[64];
-} memory_recall_rejection_t;
-
-/* Per-thread, opt-in capture of candidates rejected by the real recall gates.
- * Capture observes the live path and never participates in scoring. */
-void memory_recall_trace_capture_begin(void);
-void memory_recall_trace_capture_reset(void);
-void memory_recall_trace_capture_end(void);
-void memory_recall_trace_reject(int64_t memory_id, const char *lane, const char *gate);
-int memory_recall_trace_rejections(memory_recall_rejection_t *out, int max);
-
 #define MEMORY_ANSWER_MAX_CITATIONS 4
 #define MEMORY_ANSWER_TRACE_MAX_IDS 16
 
@@ -433,8 +417,6 @@ int memory_repair_vector_index(int64_t memory_id, const char *command);
 int memory_repair_vector_index_failed_only(const char *command, int limit, int *failed_out);
 int memory_rebuild_vector_index_for_version(const char *version, int *failed_out);
 int memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max);
-int memory_diagnose_scoped(const char *query, const char *scope_type, const char *scope_value,
-                           int limit, memory_diagnostic_t *out, int max);
 int memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic_t *out);
 int memory_ask_query(const char *query, int limit, memory_answer_result_t *out);
 int memory_ask_query_scoped(const char *query, const char *scope_type, const char *scope_value,
@@ -636,7 +618,6 @@ int memory_find_facts_visible_ex(const char *query, const char *workspace, const
                                  int include_all, int limit, memory_t *out, int max);
 
 /* --- Conversation Scanning --- */
-int memory_scan_conversations(char dirs[][MAX_PATH_LEN], int dir_count);
 
 /* --- Window Compaction --- */
 
@@ -954,11 +935,8 @@ int memory_synthesize_failure_episodes(void);
  * Storage primitives (insert/list/check/bump/delete/exists_*) live in
  * db2/anti_patterns.{h,c} as db2_anti_pattern_*. The high-level extraction
  * and escalation passes below are implemented in memory_advanced.c. */
-int anti_pattern_extract_from_feedback(void);
-int anti_pattern_extract_from_failures(void);
 
 /* Escalate high-hit anti-patterns to hard directive rules. */
-int anti_pattern_escalate(int hit_threshold);
 
 /* --- Temporal Facts --- */
 /* Returns -2 when an episode/experience must be annotated and -3 when an
@@ -984,7 +962,6 @@ typedef struct
 } drift_result_t;
 
 /* --- Style Learning --- */
-int memory_learn_style(void);
 
 /* --- Graph --- */
 

@@ -261,41 +261,11 @@ int kb_handle_agent_hint_consume(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to consume agent hint");
 }
 
-int kb_handle_anti_pattern_extract_from_feedback(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_anti_pattern_extract_from_feedback_json();
-   return kb_reply_or_error(fd, resp, "failed to extract anti-patterns from feedback");
-}
-
-int kb_handle_anti_pattern_extract_from_failures(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_anti_pattern_extract_from_failures_json();
-   return kb_reply_or_error(fd, resp, "failed to extract anti-patterns from failures");
-}
-
-int kb_handle_anti_pattern_escalate(int fd, cJSON *req)
-{
-   cJSON *th_j = cJSON_GetObjectItemCaseSensitive(req, "hit_threshold");
-   int hit = cJSON_IsNumber(th_j) ? (int)th_j->valuedouble : 5;
-
-   cJSON *resp = db2_kb_service_anti_pattern_escalate_json(hit);
-   return kb_reply_or_error(fd, resp, "failed to escalate anti-patterns");
-}
-
 int kb_handle_rules_decay(int fd, cJSON *req)
 {
    (void)req;
    cJSON *resp = db2_kb_service_rules_decay_json();
    return kb_reply_or_error(fd, resp, "failed to decay rules");
-}
-
-int kb_handle_memory_learn_style(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_memory_learn_style_json();
-   return kb_reply_or_error(fd, resp, "failed to learn style");
 }
 
 int kb_handle_decision_log_insert(int fd, cJSON *req)
@@ -433,13 +403,6 @@ int kb_handle_directive_expire_session(int fd, cJSON *req)
    (void)req;
    cJSON *resp = db2_kb_service_directive_expire_session_json();
    return kb_reply_or_error(fd, resp, "failed to expire session directives");
-}
-
-int kb_handle_memory_scan_conversations(int fd, cJSON *req)
-{
-   cJSON *dirs_j = cJSON_GetObjectItemCaseSensitive(req, "dirs");
-   cJSON *resp = db2_kb_service_memory_scan_conversations_json(dirs_j);
-   return kb_reply_or_error(fd, resp, "failed to scan conversations");
 }
 
 int kb_handle_anti_pattern_check(int fd, cJSON *req)

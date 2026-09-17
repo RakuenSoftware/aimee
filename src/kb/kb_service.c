@@ -1206,18 +1206,14 @@ static const struct
     {"learning.record_application", kb_handle_learning_record_application},
     {"agent.outcome_record", kb_handle_agent_outcome_record},
     {"agent.hint_consume", kb_handle_agent_hint_consume},
-    {"maintenance.anti_pattern_extract_from_feedback",
-     kb_handle_anti_pattern_extract_from_feedback},
-    {"maintenance.anti_pattern_extract_from_failures",
-     kb_handle_anti_pattern_extract_from_failures},
-    {"maintenance.anti_pattern_escalate", kb_handle_anti_pattern_escalate},
+
     {"maintenance.rules_decay", kb_handle_rules_decay},
     {"maintenance.calibrate_promotions", kb_handle_maintenance_calibrate_promotions},
     {"maintenance.compute_demotions", kb_handle_maintenance_compute_demotions},
     {"memory.record_retrieval_outcome", kb_handle_memory_record_retrieval_outcome},
     {"ranker.emit_event", kb_handle_ranker_emit_event},
     {"ranker.record_outcome", kb_handle_ranker_record_outcome},
-    {"maintenance.memory_learn_style", kb_handle_memory_learn_style},
+
     {"decision_log.insert", kb_handle_decision_log_insert},
     {"decision_log.list", kb_handle_decision_log_list},
     {"anti_pattern.list", kb_handle_anti_pattern_list},
@@ -1230,7 +1226,7 @@ static const struct
     {"rules.update_directive_type", kb_handle_rules_update_directive_type},
     {"feedback.record", kb_handle_feedback_record},
     {"maintenance.expire_session_directives", kb_handle_directive_expire_session},
-    {"maintenance.scan_conversations", kb_handle_memory_scan_conversations},
+
     {"dashboard.memory_stats", kb_handle_dashboard_memory_stats},
     {"dashboard.logs", kb_handle_dashboard_logs},
     {"dashboard.reminders", kb_handle_dashboard_reminders},
@@ -1245,8 +1241,6 @@ static const struct
     {"tool_registry.snapshot", kb_handle_tool_registry_snapshot},
     {"tool_registry.lookup", kb_handle_tool_registry_lookup},
     {"mcp.call", kb_handle_mcp_call},
-    {"memory.diagnose_scoped", kb_handle_memory_diagnose_scoped},
-    {"memory.explain_match", kb_handle_memory_explain_match},
     {"graph.sync_code", kb_handle_graph_sync_code},
     {"graph.explain", kb_handle_graph_explain},
     {"code.audit", kb_handle_code_audit},
@@ -1306,6 +1300,12 @@ static cJSON *kb_command_context(void)
    cJSON_AddBoolToObject(context, "user_authority", user_authority);
    cJSON_AddStringToObject(context, "principal", authenticated ? principal : "");
    cJSON_AddStringToObject(context, "transport_identity", authenticated ? transport : "");
+   const char *scope_kind = NULL, *scope_id = NULL;
+   if (authenticated && kb_reqctx_verified_scope(&scope_kind, &scope_id))
+   {
+      cJSON_AddStringToObject(context, "scope_kind", scope_kind ? scope_kind : "");
+      cJSON_AddStringToObject(context, "scope_id", scope_id ? scope_id : "");
+   }
    return context;
 }
 

@@ -9,18 +9,33 @@ import (
 )
 
 type Diagnostic struct {
-	Memory Record          `json:"memory"`
-	Parts  DiagnosticParts `json:"parts"`
+	Memory        Record          `json:"memory"`
+	Parts         DiagnosticParts `json:"parts"`
+	EpistemicKind string          `json:"epistemic_kind,omitempty"`
 }
 
 type DiagnosticParts struct {
-	Lexical      float64 `json:"lexical"`
-	Coverage     float64 `json:"coverage"`
-	Confidence   float64 `json:"confidence"`
-	Salience     float64 `json:"salience"`
-	HybridTotal  float64 `json:"hybrid_total"`
-	BlendedTotal float64 `json:"blended_total"`
-	Total        float64 `json:"total"`
+	Entity        float64 `json:"entity"`
+	Temporal      float64 `json:"temporal"`
+	Evidence      float64 `json:"evidence"`
+	Semantic      float64 `json:"semantic"`
+	State         float64 `json:"state"`
+	Intent        float64 `json:"intent"`
+	Surprise      float64 `json:"surprise"`
+	PageRank      float64 `json:"pagerank"`
+	GraphScore    float64 `json:"graph_score"`
+	GraphWeight   float64 `json:"graph_weight"`
+	CodeProximity float64 `json:"code_proximity"`
+	Utility       float64 `json:"utility"`
+	Outcome       float64 `json:"outcome"`
+	SourceFusion  float64 `json:"source_fusion"`
+	Lexical       float64 `json:"lexical"`
+	Coverage      float64 `json:"coverage"`
+	Confidence    float64 `json:"confidence"`
+	Salience      float64 `json:"salience"`
+	HybridTotal   float64 `json:"hybrid_total"`
+	BlendedTotal  float64 `json:"blended_total"`
+	Total         float64 `json:"total"`
 }
 
 type AnswerResult struct {

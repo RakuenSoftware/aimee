@@ -161,11 +161,7 @@ extern "C"
    /* Wrappers around memory_advanced.c maintenance routines so daemon
     * and CLI-fork callers run them inside aimee-kb where DB2 is
     * initialized.  Each returns {"status":"ok","count":N}. */
-   cJSON *db2_kb_service_anti_pattern_extract_from_feedback_json(void);
-   cJSON *db2_kb_service_anti_pattern_extract_from_failures_json(void);
-   cJSON *db2_kb_service_anti_pattern_escalate_json(int hit_threshold);
    cJSON *db2_kb_service_rules_decay_json(void);
-   cJSON *db2_kb_service_memory_learn_style_json(void);
    cJSON *db2_kb_service_decision_log_insert_json(int64_t task_id, const char *options,
                                                   const char *chosen, const char *rationale,
                                                   const char *assumptions);
@@ -193,7 +189,6 @@ extern "C"
    cJSON *db2_kb_service_entities_merge_json(int64_t from_id, int64_t into_id);
    cJSON *db2_kb_service_entities_unmerge_json(int64_t merge_id);
    cJSON *db2_kb_service_directive_expire_session_json(void);
-   cJSON *db2_kb_service_memory_scan_conversations_json(const cJSON *dirs);
    /* Dashboard endpoints that walk DB2 tables.  Each returns
     * {"status":"ok","payload":<api_* output>}. */
    cJSON *db2_kb_service_dashboard_memory_stats_json(void);
@@ -205,9 +200,6 @@ extern "C"
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
    cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
-   cJSON *db2_kb_service_memory_diagnose_scoped_json(const char *query, const char *scope_type,
-                                                     const char *scope_value, int limit);
-   cJSON *db2_kb_service_memory_explain_match_json(const char *query, int64_t memory_id);
    /* `authority` is the typed-fact write authority for the §4 retraction this
     * turn may perform; the RPC handler derives it from the request's
     * authenticated actor, never from the request body. See db2_typed_fact_ingress

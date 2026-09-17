@@ -9,7 +9,7 @@ import (
 )
 
 func TestCommandContextWire(t *testing.T) {
-	caller := CommandContext{Authenticated: true, Principal: "user:alice", TransportIdentity: "cert:server", UserAuthority: true}
+	caller := CommandContext{Authenticated: true, Principal: "user:alice", TransportIdentity: "cert:server", UserAuthority: true, ScopeKind: "project", ScopeID: "app"}
 	frame, err := EncodeCommandWithContext("delete", json.RawMessage(`{"id":7,"principal":"forged"}`), caller)
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestCommandContextWire(t *testing.T) {
 			t.Fatalf("accepted %x", bad)
 		}
 	}
-	for _, c := range []CommandContext{{UserAuthority: true}, {Authenticated: true}, {Principal: strings.Repeat("x", 577)}, {Principal: "user\x00forged"}} {
+	for _, c := range []CommandContext{{UserAuthority: true}, {Authenticated: true}, {Principal: strings.Repeat("x", 577)}, {Principal: "user\x00forged"}, {ScopeID: "app"}, {ScopeKind: "project"}, {Authenticated: true, Principal: "alice", ScopeKind: strings.Repeat("x", 65)}, {Authenticated: true, Principal: "alice", ScopeKind: "project", ScopeID: "app\x00forged"}} {
 		if _, err := EncodeCommandWithContext("get", nil, c); err == nil {
 			t.Fatal(c)
 		}

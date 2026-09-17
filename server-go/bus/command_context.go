@@ -17,6 +17,8 @@ type CommandContext struct {
 	Principal         string `json:"principal"`
 	TransportIdentity string `json:"transport_identity"`
 	UserAuthority     bool   `json:"user_authority"`
+	ScopeKind         string `json:"scope_kind,omitempty"`
+	ScopeID           string `json:"scope_id,omitempty"`
 }
 
 const commandContextMax = 4096
@@ -24,7 +26,10 @@ const commandContextMax = 4096
 func (c CommandContext) valid() bool {
 	return len(c.Principal) <= 576 && len(c.TransportIdentity) <= 576 &&
 		!strings.ContainsRune(c.Principal, '\x00') && !strings.ContainsRune(c.TransportIdentity, '\x00') &&
-		(!c.Authenticated || c.Principal != "") && (!c.UserAuthority || c.Authenticated)
+		(!c.Authenticated || c.Principal != "") && (!c.UserAuthority || c.Authenticated) &&
+		len(c.ScopeKind) <= 64 && len(c.ScopeID) <= 1024 &&
+		!strings.ContainsRune(c.ScopeKind, '\x00') && !strings.ContainsRune(c.ScopeID, '\x00') &&
+		(c.ScopeKind != "" || c.ScopeID == "") && (c.ScopeKind == "" || c.Authenticated)
 }
 
 // Version two adds a bounded context length after the ordinary header. The
