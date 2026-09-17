@@ -1717,14 +1717,7 @@ struct cJSON *memory_alerts(const char *since);
 #define MEMORY_RECALL_MIN_LIMIT_TOKENS             64
 #define MEMORY_RECALL_MAX_LIMIT_TOKENS             8192
 
-struct memory_activation;
 struct cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start);
-/* Production recall receives the per-user activation snapshot from aimee-server.
- * aimee-kb cannot load DB1 itself: it is the shared DB2 process, while DB1 is
- * user-local. A NULL/unloaded snapshot preserves the pre-activation path. */
-struct cJSON *memory_recall_activated(const char *task_hint, int limit_tokens, int session_start,
-                                      const struct memory_activation *activation);
-
 /* Topic-pivot detection between consecutive user turns.  Pure
  * function — no DB access — so callers can invoke it cheaply and
  * decide whether the per-turn recall block should be re-keyed on the

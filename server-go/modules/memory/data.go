@@ -28,8 +28,9 @@ const (
 )
 
 type DataRequest struct {
-	FactWrite *FactWriteRequest `json:"fact_write,omitempty"`
-	CodeIndex *CodeIndexRequest `json:"code_index,omitempty"`
+	Activation json.RawMessage   `json:"activation,omitempty"`
+	FactWrite  *FactWriteRequest `json:"fact_write,omitempty"`
+	CodeIndex  *CodeIndexRequest `json:"code_index,omitempty"`
 	// Accepted for old callers, but never used to override instance configuration.
 	GraphCodeFusionState  string    `json:"graph_code_fusion_state,omitempty"`
 	Operation             string    `json:"operation"`
@@ -1738,7 +1739,16 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		}
 		switch request.Operation {
 		case "recall-bundle":
-			response.Payload, err = retrieval.RecallBundle(ctx, request.Query, request.LimitTokens, request.SessionStart)
+			if activated, ok := retrieval.(interface {
+				RecallBundleWithActivation(context.Context, string, int, bool, json.RawMessage) (json.RawMessage, error)
+			}); ok {
+				response.Payload, err = activated.RecallBundleWithActivation(ctx, request.Query, request.LimitTokens, request.SessionStart, request.Activation)
+			} else {
+				if options.placement == PlacementKB && parseActivation(request.Activation) != nil {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				response.Payload, err = retrieval.RecallBundle(ctx, request.Query, request.LimitTokens, request.SessionStart)
+			}
 		case "briefing-bundle":
 			response.Payload, err = retrieval.BriefingBundle(ctx, request.LimitTokens)
 		case "alerts-bundle":

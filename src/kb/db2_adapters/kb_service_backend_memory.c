@@ -959,18 +959,6 @@ cJSON *db2_kb_service_memory_alerts_json(const char *since)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_recall_json(const char *task_hint, int limit_tokens, int session_start,
-                                         const struct memory_activation *activation)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   cJSON *bundle = memory_recall_activated(task_hint, limit_tokens, session_start, activation);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddItemToObject(resp, "recall", bundle ? bundle : cJSON_CreateObject());
-   return resp;
-}
-
 cJSON *db2_kb_service_memory_maintenance_run_json(unsigned int modes, int force, int dry_run)
 {
    cJSON *resp = cJSON_CreateObject();

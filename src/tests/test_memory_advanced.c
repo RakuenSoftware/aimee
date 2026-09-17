@@ -16,7 +16,6 @@
 #include "modules/db2/c/memory_scope_query.h"
 #include "modules/memory/memory_ontology.h"
 #include "modules/memory/memory_platform.h"
-#include "modules/memory/memory_activation.h"
 #include "../modules/db2/c/bandit.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
@@ -1974,41 +1973,7 @@ int main(void)
       assert(cJSON_IsArray(reminders));
       assert(cJSON_IsArray(directives));
 
-      /* The production recall selector consumes a snapshot loaded by the
-       * user-local server. Cooldown and delay must be applied before the
-       * section cap, allowing the next eligible row to backfill the section. */
-      memory_activation_t activation = {0};
-      activation.loaded = 1;
-      activation.current_turn = 2;
-      activation.count = 2;
-      activation.rows[0].memory_id = pref_cooldown_id;
-      activation.rows[0].last_turn = 1;
-      activation.rows[1].memory_id = pref_control_id;
-      activation.rows[1].last_turn = 1;
-      cJSON *activated = memory_recall_activated("routine edit", 0, 0, &activation);
-      assert(activated != NULL);
-      cJSON *activated_prefs = cJSON_GetObjectItemCaseSensitive(activated, "preferences");
-      int saw_control = 0, saw_cooldown = 0, saw_delayed = 0;
-      int saw_sticky_reason = 0;
-      cJSON *activated_it = NULL;
-      cJSON_ArrayForEach(activated_it, activated_prefs)
-      {
-         int64_t id = (int64_t)cJSON_GetNumberValue(
-             cJSON_GetObjectItemCaseSensitive(activated_it, "memory_id"));
-         saw_control |= id == pref_control_id;
-         saw_cooldown |= id == pref_cooldown_id;
-         saw_delayed |= id == pref_delayed_id;
-         const char *why =
-             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(activated_it, "why"));
-         saw_sticky_reason |= id == pref_control_id && why && strcmp(why, "sticky activation") == 0;
-      }
-      assert(saw_control);
-      assert(saw_sticky_reason);
-      assert(!saw_cooldown);
-      assert(!saw_delayed);
-      cJSON *held = cJSON_GetObjectItemCaseSensitive(activated, "activation_held");
-      assert(cJSON_IsNumber(held) && held->valuedouble >= 2.0);
-      cJSON_Delete(activated);
+      /* Activation selection/backfill coverage lives in Go activation_test.go. */
 
       /* Telemetry fields for operator inspection. */
       cJSON *approx = cJSON_GetObjectItemCaseSensitive(bundle, "approx_tokens");

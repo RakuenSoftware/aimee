@@ -28,6 +28,7 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/memory/memory_activation.h",
     "src/modules/memory/memory_pii_gate.c",
     "src/modules/memory/memory_pii_gate.h",
     "src/modules/memory/include/aimee/memory/pii_provider.h",
@@ -56,7 +57,8 @@ RETIRED_NATIVE_SYMBOLS = re.compile(
     r"pattern_triple_t|memory_pattern_turn_t|assemble_texts_near_duplicate|"
     r"memory_pii_(?:register_\w+|turn_requests_sensitive|rel_sensitivity(?:_batch)?|should_inject)|"
     r"assemble_token_bits|context_recency_from_age_days|context_apply_recency|"
-    r"context_xml_tag_for_header)\b"
+    r"context_xml_tag_for_header|memory_recall_activated|db2_kb_service_memory_recall_json|"
+    r"memory_activation_(?:t|row_t|load|last_loaded|last_turn|in_cooldown|is_sticky|is_delayed|record))\b"
 )
 
 FORBIDDEN_STORE_CALLS = (

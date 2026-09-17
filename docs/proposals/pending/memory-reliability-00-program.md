@@ -111,7 +111,11 @@ Gate/PII binary framing and live decision smoke coverage now have Go callers.
 Private-memory public commands now validate arguments and shape replies in Go
 through the shared command dispatcher. Explicit shared-KB routing and its native
 client remain pending; the command registry has not replaced that surface.
-The current inventory is seven C sources and ten headers; the table above
+KB recall now decodes activation snapshots and applies cooldown, delay, sticky
+relevance, suppression, and graph backfill in Go. PostgreSQL regressions exercise
+both the selector and the public command. The native activation contract and
+its discarded-snapshot wrapper are removed; DB1 still owns persisted turn state.
+The current inventory is seven C sources and nine headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.

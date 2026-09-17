@@ -37,6 +37,8 @@ type AnswerResult struct {
 // RecallRecord retains the record API fields and the prompt-consumer aliases.
 // A scoped handle makes a recalled numeric ID unambiguous on a later get.
 type RecallRecord struct {
+	ActivationManaged bool   `json:"activation_managed,omitempty"`
+	Why               string `json:"why,omitempty"`
 	Record
 	MemoryID int64  `json:"memory_id"`
 	Text     string `json:"text"`
@@ -58,6 +60,7 @@ func recallItems(records []Record) []RecallRecord {
 }
 
 type recallBundle struct {
+	ActivationHeld  int            `json:"activation_held"`
 	Identity        []RecallRecord `json:"identity"`
 	Preferences     []RecallRecord `json:"preferences"`
 	ActiveContext   []RecallRecord `json:"active_context"`
@@ -116,6 +119,10 @@ func (s *postgresDataStore) recallRecords(ctx context.Context, where string, lim
 FROM %s WHERE lifecycle_state='active' AND activation_suppressed=0 AND (%s)
 ORDER BY confidence DESC,use_count DESC,updated_at DESC,id DESC LIMIT $%d`, s.recallSource(), where, len(args)+1)
 	args = append(args, limit)
+	return s.readRecallRecords(ctx, query, args...)
+}
+
+func (s *postgresDataStore) readRecallRecords(ctx context.Context, query string, args ...any) ([]Record, error) {
 	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -134,19 +141,44 @@ ORDER BY confidence DESC,use_count DESC,updated_at DESC,id DESC LIMIT $%d`, s.re
 }
 
 func (s *postgresDataStore) RecallBundle(ctx context.Context, query string, tokens int, sessionStart bool) (json.RawMessage, error) {
+	return s.recallBundleActivated(ctx, query, tokens, sessionStart, nil)
+}
+
+func (s *postgresDataStore) RecallBundleWithActivation(ctx context.Context, query string, tokens int, sessionStart bool, raw json.RawMessage) (json.RawMessage, error) {
+	var snapshot *ActivationSnapshot
+	if s.placement == PlacementKB {
+		snapshot = parseActivation(raw)
+	}
+	return s.recallBundleActivated(ctx, query, tokens, sessionStart, snapshot)
+}
+
+func (s *postgresDataStore) recallBundleActivated(ctx context.Context, query string, tokens int, sessionStart bool, snapshot *ActivationSnapshot) (json.RawMessage, error) {
 	started := time.Now()
 	defer runtimeMetricState.recallCalls.observe(started)
 	limit := retrievalLimit(tokens, sessionStart)
-	identity, err := s.recallRecords(ctx, `kind='fact' AND tier IN ('L2','L3','L4','L5') AND
-(key ILIKE '%name%' OR key ILIKE '%role%' OR key ILIKE '%identity%')`, limit/4+1)
+	held := 0
+	reasons := make(map[int64]string)
+	fetch := func(where string, limit int, sticky bool, args ...any) ([]Record, error) {
+		if snapshot == nil {
+			return s.recallRecords(ctx, where, limit, args...)
+		}
+		records, why, count, err := s.recallActivated(ctx, snapshot, where, limit, sticky, false, args...)
+		held += count
+		for id, reason := range why {
+			reasons[id] = reason
+		}
+		return records, err
+	}
+	identity, err := fetch(`kind='fact' AND tier IN ('L2','L3','L4','L5') AND
+(key ILIKE '%name%' OR key ILIKE '%role%' OR key ILIKE '%identity%')`, limit/4+1, false)
 	if err != nil {
 		return nil, err
 	}
-	preferences, err := s.recallRecords(ctx, `kind='preference' AND tier IN ('L2','L3','L4','L5')`, limit/4+1)
+	preferences, err := fetch(`kind='preference' AND tier IN ('L2','L3','L4','L5')`, limit/4+1, false)
 	if err != nil {
 		return nil, err
 	}
-	active, err := s.recallRecords(ctx, `$1='' OR key ILIKE '%'||$1||'%' OR content ILIKE '%'||$1||'%'`, limit/2+1, query)
+	active, err := fetch(`$1='' OR key ILIKE '%'||$1||'%' OR content ILIKE '%'||$1||'%'`, limit/2+1, true, query)
 	if err != nil {
 		return nil, err
 	}
@@ -157,28 +189,37 @@ func (s *postgresDataStore) RecallBundle(ctx context.Context, query string, toke
 		}
 	}
 	if s.placement == PlacementKB && query != "" {
+		lexical := active
 		active, err = s.fuseMemoryGraph(ctx, DataRequest{Query: query, IncludeAll: true, Limit: limit/2 + 1}, false, active)
 		if err != nil {
 			return nil, err
 		}
-	}
-	rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
-FROM `+s.recallSource()+` WHERE lifecycle_state='pending' ORDER BY updated_at DESC,id DESC LIMIT $1`, limit/4+1)
-	if err != nil {
-		return nil, err
-	}
-	commitments := make([]Record, 0)
-	for rows.Next() {
-		var item Record
-		if scanErr := rows.Scan(&item.ID, &item.Scope.Type, &item.Scope.Value, &item.Tier,
-			&item.Kind, &item.Key, &item.Content, &item.Confidence); scanErr != nil {
-			rows.Close()
-			return nil, scanErr
+		if snapshot != nil {
+			var why map[int64]string
+			var count int
+			active, why, count, err = s.activationAfterFusion(ctx, snapshot, active, lexical, limit/2+1)
+			if err != nil {
+				return nil, err
+			}
+			held += count
+			for id, reason := range why {
+				reasons[id] = reason
+			}
 		}
-		commitments = append(commitments, item)
 	}
-	err = rows.Err()
-	rows.Close()
+	var commitments []Record
+	if snapshot != nil {
+		var why map[int64]string
+		var count int
+		commitments, why, count, err = s.recallActivated(ctx, snapshot, "true", limit/4+1, false, true)
+		held += count
+		for id, reason := range why {
+			reasons[id] = reason
+		}
+	} else {
+		commitments, err = s.readRecallRecords(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
+FROM `+s.recallSource()+` WHERE lifecycle_state='pending' ORDER BY updated_at DESC,id DESC LIMIT $1`, limit/4+1)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +247,15 @@ FROM `+s.recallSource()+` WHERE lifecycle_state='pending' ORDER BY updated_at DE
 	bundle := recallBundle{Identity: recallItems(identity), Preferences: recallItems(preferences), ActiveContext: recallItems(active),
 		OpenCommitments: recallItems(commitments), Reminders: reminders, Directives: directives,
 		LimitTokens: tokens, SessionStart: sessionStart, Explain: []any{}}
+	bundle.ActivationHeld = held
+	if snapshot != nil {
+		for _, section := range [][]RecallRecord{bundle.Identity, bundle.Preferences, bundle.ActiveContext, bundle.OpenCommitments} {
+			for i := range section {
+				section[i].ActivationManaged = true
+				section[i].Why = reasons[section[i].ID]
+			}
+		}
+	}
 	bundle.UsedTokens = approximateTokens(identity, preferences, active, commitments)
 	encoded, err := json.Marshal(bundle)
 	if err == nil {

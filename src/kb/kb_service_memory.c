@@ -24,7 +24,8 @@
 #include "kb_reqctx.h"            /* kb_reqctx_actor — authenticated caller for write authority */
 #include "kb_service_memory.h"
 #include "log.h"
-#include "modules/memory/memory_activation.h"
+#include "module_commands.h"
+#include "aimee/memory/module_api.h"
 #include "modules/memory/memory_graph_fusion.h"
 
 #include <stdlib.h>
@@ -35,38 +36,6 @@
 int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
-
-/* Activation belongs to the user's conversation in DB1, which aimee-kb must
- * never open. The 1:1 server reads it once and carries this bounded snapshot
- * across the existing recall request. Missing or malformed state fails open. */
-static int kb_memory_activation_from_request(const cJSON *req, memory_activation_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   const cJSON *obj = cJSON_GetObjectItemCaseSensitive(req, "activation");
-   if (!cJSON_IsObject(obj))
-      return 0;
-   const cJSON *turn = cJSON_GetObjectItemCaseSensitive(obj, "current_turn");
-   if (!cJSON_IsNumber(turn) || turn->valuedouble <= 0.0)
-      return 0;
-   out->current_turn = (int64_t)turn->valuedouble;
-   const cJSON *rows = cJSON_GetObjectItemCaseSensitive(obj, "rows");
-   const cJSON *row = NULL;
-   cJSON_ArrayForEach(row, rows)
-   {
-      if (out->count >= MEMORY_ACTIVATION_MAX_ROWS)
-         break;
-      const cJSON *mid = cJSON_GetObjectItemCaseSensitive(row, "memory_id");
-      const cJSON *last = cJSON_GetObjectItemCaseSensitive(row, "last_turn");
-      if (!cJSON_IsNumber(mid) || !cJSON_IsNumber(last) || mid->valuedouble <= 0.0 ||
-          last->valuedouble <= 0.0 || last->valuedouble > turn->valuedouble)
-         continue;
-      out->rows[out->count].memory_id = (int64_t)mid->valuedouble;
-      out->rows[out->count].last_turn = (int64_t)last->valuedouble;
-      out->count++;
-   }
-   out->loaded = 1;
-   return 1;
-}
 
 static unsigned long long kb_trace_fingerprint(const char *s)
 {
@@ -1075,22 +1044,8 @@ int kb_handle_memory_alerts(int fd, cJSON *req)
 
 int kb_handle_memory_recall(int fd, cJSON *req)
 {
-   cJSON *task_j = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit_tokens");
-   cJSON *start_j = cJSON_GetObjectItemCaseSensitive(req, "session_start");
-   const char *task_hint =
-       (cJSON_IsString(task_j) && task_j->valuestring[0]) ? task_j->valuestring : NULL;
-   int limit_tokens = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 0;
-   int session_start = cJSON_IsBool(start_j) ? (cJSON_IsTrue(start_j) ? 1 : 0) : 0;
-   memory_activation_t activation;
-   const memory_activation_t *activation_ptr =
-       kb_memory_activation_from_request(req, &activation) ? &activation : NULL;
-   /* Fusion follows this KB instance's configuration. */
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp =
-       db2_kb_service_memory_recall_json(task_hint, limit_tokens, session_start, activation_ptr);
-   kb_memory_scope_end(resp, scope_active, missing);
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "recall", req);
    return kb_reply_or_error(fd, resp, "failed to render memory recall");
 }
 

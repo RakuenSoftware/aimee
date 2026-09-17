@@ -1249,13 +1249,6 @@ cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start)
                               session_start);
 }
 
-cJSON *memory_recall_activated(const char *task_hint, int limit_tokens, int session_start,
-                               const struct memory_activation *activation)
-{
-   (void)activation;
-   return memory_recall(task_hint, limit_tokens, session_start);
-}
-
 cJSON *memory_briefing(int limit_tokens)
 {
    return domain_payload_call("briefing-bundle", NULL, NULL, limit_tokens, 0);

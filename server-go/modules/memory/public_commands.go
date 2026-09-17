@@ -103,6 +103,9 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
+	if options.placement == PlacementKB && verb == "recall" {
+		return handleRecallCommand(options, invocation, args)
+	}
 	if options.placement != PlacementServer {
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}
@@ -256,6 +259,40 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 			return commandResult(commandError("unavailable", "user memory module unavailable"))
 		}
 		result["stats"] = response.Stats
+	}
+	return commandResult(result)
+}
+
+// Recall accepts a bounded activation snapshot from the authenticated appliance.
+// Scope fields are decoded here rather than in the native KB request adapter.
+func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+	request := DataRequest{Operation: "recall-bundle", Query: args.stringOr("task_hint", ""), Activation: args["activation"], IncludeAll: true}
+	if value, ok := args.number("limit_tokens"); ok {
+		request.LimitTokens = int(math.Max(math.Min(value, math.MaxInt32), math.MinInt32))
+	}
+	_ = json.Unmarshal(args["session_start"], &request.SessionStart)
+	var scoped bool
+	_ = json.Unmarshal(args["scope_context"], &scoped)
+	if scoped {
+		request.Workspace, request.Project = args.stringOr("workspace", ""), args.stringOr("project", "")
+		request.IncludeAll = false
+		_ = json.Unmarshal(args["include_all"], &request.IncludeAll)
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	data, status := handleData(options, invocation, encoded)
+	if status != bus.ModuleStatusOK {
+		return nil, status
+	}
+	var response DataResponse
+	if json.Unmarshal(data, &response) != nil || len(response.Payload) == 0 {
+		return nil, bus.ModuleStatusInternal
+	}
+	result := map[string]any{"status": "ok", "recall": response.Payload}
+	if scoped {
+		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}
 	return commandResult(result)
 }

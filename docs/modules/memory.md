@@ -123,15 +123,27 @@ The server's private-memory public commands now pass their argument objects
 through the shared module command dispatcher to stage 8. Go validates arguments,
 supplies the user scope, applies defaults, and builds the complete public reply.
 The server only selects the explicit user/KB destination and applies its HTTP
-error classification. Shared-KB commands still use the native KB client; stage 8
-rejects them and is not yet registered as a replacement for that shared surface.
+error classification. Shared-KB commands still use the native KB client. The KB recall endpoint now
+passes its complete argument object to stage 8; other KB verbs are not yet
+registered as replacements for that shared surface.
 The command wire tests cover the existing CMPQ/CMPS frame, while Go tests cover
 private scope isolation, mutation defaults, missing records, and typed failures.
+
+KB recall decodes conversation activation snapshots in Go. Cooldown, delay, and
+suppression are applied before each section cap; sticky state can preserve
+relevance but cannot override cooldown. Graph-expanded candidates pass the same
+gate and eligible lexical candidates backfill held rows. Missing conversation
+state fails open, while stored suppression remains effective. Recall does not
+advance the DB1 conversation turn or write reinforcement signals. PostgreSQL
+regressions cover the selector, graph backfill, public command, malformed state,
+and sticky/cooldown boundaries; DB1 owner tests cover persisted turns and events.
+The native activation header, snapshot parser, and discarded-snapshot wrapper
+are deleted. The local PostgreSQL fixture runs with `AIMEE_MEMORY_EVAL_URL`.
 
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host
 directories. Passing a pure-Go process/client build does not complete G0 while
-those C paths remain. The module currently retains seven C sources and ten
+those C paths remain. The module currently retains seven C sources and nine
 headers. The descriptor's `ownership_complete` flag verifies the declared file
 inventory; it does not assert that the Go migration is complete.
 

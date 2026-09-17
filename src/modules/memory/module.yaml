@@ -55,7 +55,8 @@
     "server-go/modules/memory/code_vectors.go",
     "server-go/modules/memory/client.go",
     "server-go/modules/memory/fact_write.go",
-    "server-go/modules/memory/public_commands.go"
+    "server-go/modules/memory/public_commands.go",
+    "server-go/modules/memory/activation.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -78,14 +79,14 @@
     "server-go/modules/memory/code_index_test.go",
     "server-go/modules/memory/client_test.go",
     "server-go/modules/memory/fact_write_test.go",
-    "server-go/modules/memory/public_commands_test.go"
+    "server-go/modules/memory/public_commands_test.go",
+    "server-go/modules/memory/activation_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"
   ],
   "private_headers": [
     "src/modules/memory/gw_stage_memory.h",
-    "src/modules/memory/memory_activation.h",
     "src/modules/memory/memory_bus_context.h",
     "src/modules/memory/memory_core_internal.h",
     "src/modules/memory/memory_fact_gate.h",
