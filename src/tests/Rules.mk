@@ -793,6 +793,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-kb-management-action \
                $(TESTPREFIX)/unit-test-aws-eventstream
 TEST_TARGETS += $(TESTPREFIX)/unit-test-command-registry
+TEST_TARGETS += $(TESTPREFIX)/unit-test-module-commands
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-ready
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-dispatch
 TEST_TARGETS += $(TESTPREFIX)/unit-test-token-audit-load
@@ -7902,3 +7903,11 @@ $(TESTPREFIX)/unit-test-memory-data-bus: $(OBJDIR)/tests/test_memory_data_bus.o 
 
 $(TESTPREFIX)/unit-test-kb-memory-list: $(OBJDIR)/tests/test_kb_memory_list.o $(OBJDIR)/kb/db2_adapters/kb_service_backend_memory.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(OBJDIR)/tests/test_module_commands.o: C_FLAGS += -Icore/event_bus/include
+$(TESTPREFIX)/unit-test-module-commands: $(OBJDIR)/tests/test_module_commands.o \
+    $(OBJDIR)/module_commands.o $(OBJDIR)/command_registry.o $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+unit-test-module-commands: $(TESTPREFIX)/unit-test-module-commands
+	$<

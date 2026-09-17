@@ -124,8 +124,9 @@ through the shared module command dispatcher to stage 8. Go validates arguments,
 supplies the user scope, applies defaults, and builds the complete public reply.
 The server only selects the explicit user/KB destination and applies its HTTP
 error classification. Shared-KB commands still use the native KB client. The KB recall endpoint now
-passes its complete argument object to stage 8; other KB verbs are not yet
-registered as replacements for that shared surface.
+passes its complete argument object to stage 8. Migrated KB verbs are declared
+by Go at the common discovery stage (255) and invoked by the generic host
+dispatcher; the remaining verbs still use their native handlers.
 The command wire tests cover the existing CMPQ/CMPS frame, while Go tests cover
 private scope isolation, mutation defaults, missing records, and typed failures.
 
@@ -163,6 +164,11 @@ lists, artifact updates, and memory review (including the operator console).
 Review reasons are matched to the memory's exact scope. Diagnostic list caps are
 validated consistently through the 256-row transport limit; PostgreSQL tests
 exercise the actual unused-memory interval binding and public response fields.
+Go declares and dispatches its 34 migrated public KB commands from one route
+table. Fixed modules opt into stage 255 using DCMD/DCMR version 2, which carries
+the invocation stage; host dispatch takes a route snapshot before waiting on the
+bus. Internal dashboard and briefing builders are not declared as RPC actions.
+The legacy plugin version-1 admission and invocation protocol remains compatible.
 Authenticated admission and the server-to-KB transport remain native callers.
 
 Production C memory clients, native headers and gateway integration still need

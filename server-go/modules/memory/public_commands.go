@@ -104,26 +104,11 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 		return nil, bus.ModuleStatusCancelled
 	}
 	if options.placement == PlacementKB {
-		switch verb {
-		case "key_exists", "find_id_by_key_kind", "list_low_effectiveness", "list_unused_l2",
-			"list_superseded_keys", "review_list", "review_console", "set_artifact", "effectiveness_stats":
-			return handleQueryCommand(options, invocation, verb, args)
-		case "entity_profile", "entity_edges", "search_graph", "search_graph_as_of", "get_episode",
-			"get_provenance", "link_query", "link_create", "link_delete", "list_conflicts", "query_health", "stats", "stats_dashboard":
-			return handleDomainCommand(options, invocation, verb, args)
+		for _, route := range kbCommandRoutes {
+			if route.verb == verb {
+				return route.handler(options, invocation, verb, args)
+			}
 		}
-	}
-	if options.placement == PlacementKB && (verb == "maintenance_run" || verb == "lint") {
-		return handleMaintenanceCommand(options, invocation, verb, args)
-	}
-	if options.placement == PlacementKB && strings.HasPrefix(verb, "directive_") {
-		return handleDirectiveCommand(options, invocation, verb, args)
-	}
-	if options.placement == PlacementKB && strings.HasPrefix(verb, "prospective_") {
-		return handleProspectiveCommand(options, invocation, verb, args)
-	}
-	if options.placement == PlacementKB && verb == "recall" {
-		return handleRecallCommand(options, invocation, args)
 	}
 	if options.placement != PlacementServer {
 		return nil, bus.ModuleStatusCapabilityAbsent

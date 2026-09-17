@@ -24,8 +24,6 @@
 #include "kb_reqctx.h"            /* kb_reqctx_actor — authenticated caller for write authority */
 #include "kb_service_memory.h"
 #include "log.h"
-#include "module_commands.h"
-#include "aimee/memory/module_api.h"
 #include "modules/memory/memory_graph_fusion.h"
 
 #include <stdlib.h>
@@ -449,55 +447,6 @@ static int kb_handle_session_briefing_section(int fd, cJSON *req, cJSON *(*fn)(i
    return srv_rc;
 }
 
-int kb_handle_memory_prospective_list(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "prospective_list", req);
-   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
-}
-
-int kb_handle_memory_prospective_create(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "prospective_create", req);
-   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
-}
-
-int kb_handle_directive_create(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "directive_create", req);
-   return kb_reply_or_error(fd, resp, "memory directive module unavailable");
-}
-
-int kb_handle_directive_resolve(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "directive_resolve", req);
-   return kb_reply_or_error(fd, resp, "memory directive module unavailable");
-}
-
-int kb_handle_directive_suppress(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "directive_suppress", req);
-   return kb_reply_or_error(fd, resp, "memory directive module unavailable");
-}
-
-int kb_handle_directive_sweep_expired(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "directive_sweep_expired", req);
-   return kb_reply_or_error(fd, resp, "memory directive module unavailable");
-}
-
-int kb_handle_directive_list(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "directive_list", req);
-   return kb_reply_or_error(fd, resp, "memory directive module unavailable");
-}
-
 int kb_handle_memory_episode_card_generate(int fd, cJSON *req)
 {
    cJSON *sid_j = cJSON_GetObjectItemCaseSensitive(req, "source_session");
@@ -559,41 +508,6 @@ int kb_handle_memory_tag_scope(int fd, cJSON *req)
                                                       sv_j->valuestring);
    kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to tag scope");
-}
-
-int kb_handle_memory_get_provenance(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "get_provenance", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_prospective_match(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "prospective_match", req);
-   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
-}
-
-int kb_handle_memory_prospective_mark_triggered(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "prospective_mark_triggered", req);
-   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
-}
-
-int kb_handle_memory_list_conflicts(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "list_conflicts", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_query_health(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "query_health", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_diagnose_scoped(int fd, cJSON *req)
@@ -686,13 +600,6 @@ int kb_handle_memory_decisions_export_jsonl(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "decisions export failed");
 }
 
-int kb_handle_memory_key_exists(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "key_exists", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
 int kb_handle_memory_search(int fd, cJSON *req)
 {
    cJSON *clusters_j = cJSON_GetObjectItemCaseSensitive(req, "clusters");
@@ -744,13 +651,6 @@ int kb_handle_memory_query_edges(int fd, cJSON *req)
    int max = cJSON_IsNumber(max_j) ? (int)max_j->valuedouble : 128;
    cJSON *resp = db2_kb_service_memory_query_edges_json(ent_j->valuestring, max);
    return kb_reply_or_error(fd, resp, "failed to query memory edges");
-}
-
-int kb_handle_memory_effectiveness_stats(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "effectiveness_stats", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 /* Read the request's destructive-edit authority. Only the exact string "user"
@@ -842,41 +742,6 @@ int kb_handle_memory_restore(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to restore memory");
 }
 
-int kb_handle_memory_review_list(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "review_list", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_stats(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "stats", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_link_create(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "link_create", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_link_query(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "link_query", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_link_delete(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "link_delete", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
 int kb_handle_memory_upsert_workflow(int fd, cJSON *req)
 {
    cJSON *ws_j = cJSON_GetObjectItemCaseSensitive(req, "workspace");
@@ -907,41 +772,6 @@ int kb_handle_memory_alerts(int fd, cJSON *req)
    cJSON *resp = db2_kb_service_memory_alerts_json(since);
    kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to render memory alerts");
-}
-
-int kb_handle_memory_recall(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "recall", req);
-   return kb_reply_or_error(fd, resp, "failed to render memory recall");
-}
-
-int kb_handle_memory_prospective_sweep_expired(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "prospective_sweep_expired", req);
-   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
-}
-
-int kb_handle_memory_maintenance_run(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "maintenance_run", req);
-   return kb_reply_or_error(fd, resp, "memory maintenance module unavailable");
-}
-
-int kb_handle_memory_lint(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "lint", req);
-   return kb_reply_or_error(fd, resp, "memory maintenance module unavailable");
-}
-
-int kb_handle_memory_prospective_complete(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "prospective_complete", req);
-   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
 }
 
 int kb_handle_session_briefing_commitments(int fd, cJSON *req)
@@ -1431,34 +1261,6 @@ int kb_handle_evidence_fidelity(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to read fidelity report");
 }
 
-int kb_handle_memory_entity_profile(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "entity_profile", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_entity_edges(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "entity_edges", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_search_graph(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "search_graph", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_search_graph_as_of(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "search_graph_as_of", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
 int kb_handle_memory_search_assertions(int fd, cJSON *req)
 {
    cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
@@ -1491,13 +1293,6 @@ int kb_handle_memory_search_assertions(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to search semantic assertions");
 }
 
-int kb_handle_memory_get_episode(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "get_episode", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
 int kb_handle_memory_ask(int fd, cJSON *req)
 {
    cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
@@ -1515,13 +1310,6 @@ int kb_handle_memory_ask(int fd, cJSON *req)
    cJSON *resp = db2_kb_service_memory_ask_json(query_j->valuestring, st, sv, limit);
    kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to answer query");
-}
-
-int kb_handle_memory_find_id_by_key_kind(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "find_id_by_key_kind", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_search_facts_patterns_by_keyword(int fd, cJSON *req)
@@ -1654,34 +1442,6 @@ int kb_handle_memory_list_session_scope_priority(int fd, cJSON *req)
    cJSON *resp = db2_kb_service_memory_list_session_scope_priority_json(max);
    kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to list session-scope memories");
-}
-
-int kb_handle_memory_list_low_effectiveness(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "list_low_effectiveness", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_list_unused_l2(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "list_unused_l2", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_list_superseded_keys(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "list_superseded_keys", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
-}
-
-int kb_handle_memory_set_artifact(int fd, cJSON *req)
-{
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "set_artifact", req);
-   return kb_reply_or_error(fd, resp, "memory module unavailable");
 }
 
 int kb_handle_memory_list_session_scope_priority_like(int fd, cJSON *req)

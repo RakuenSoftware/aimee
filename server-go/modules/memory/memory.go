@@ -92,6 +92,8 @@ func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHan
 			return handleRetrieve(invocation, request)
 		case StageEmbed:
 			return handleEmbed(executor, options, invocation, request)
+		case bus.StageDescribeCommands:
+			return describeCommandRoutes(options, invocation, request)
 		case StageDeclareCommands:
 			return handleDeclareCommands(invocation, request)
 		case StageData:

@@ -1,6 +1,5 @@
 #include "aimee.h"
 #include "module_commands.h"
-#include "aimee/memory/module_api.h"
 #include "config.h" /* legacy_config_read — reembed default embedder */
 #include "kb_background.h"
 #include "kb_service.h"
@@ -953,8 +952,8 @@ static curiosity_evidence_t kb_curiosity_probe(const char *gap_type, const char 
    cJSON *args = cJSON_CreateObject();
    cJSON_AddStringToObject(args, "query", subject);
    cJSON_AddNumberToObject(args, "limit", 3);
-   cJSON *found = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                            "search_graph", args);
+   cJSON *found = NULL;
+   (void)aimee_module_commands_dispatch("memory.search_graph", args, &found);
    cJSON_Delete(args);
    if (!found)
       return CURIOSITY_EVIDENCE_UNKNOWN;
@@ -1182,11 +1181,6 @@ static const struct
     {"memory.reembed_rollback", kb_handle_memory_reembed_rollback},
     {"memory.scene_list", kb_handle_memory_scene_list},
     {"memory.scene_show", kb_handle_memory_scene_show},
-    {"memory.directive_create", kb_handle_directive_create},
-    {"memory.directive_resolve", kb_handle_directive_resolve},
-    {"memory.directive_suppress", kb_handle_directive_suppress},
-    {"memory.directive_sweep_expired", kb_handle_directive_sweep_expired},
-    {"memory.directive_list", kb_handle_directive_list},
     {"curiosity.list", kb_handle_curiosity_list},
     {"curiosity.create", kb_handle_curiosity_create},
     {"curiosity.sweep", kb_handle_curiosity_sweep},
@@ -1247,32 +1241,17 @@ static const struct
     {"memory.top_l2_facts", kb_handle_memory_top_l2_facts},
     {"session_briefing.commitments", kb_handle_session_briefing_commitments},
     {"session_briefing.directives", kb_handle_session_briefing_directives},
-    {"memory.prospective_list", kb_handle_memory_prospective_list},
-    {"memory.prospective_create", kb_handle_memory_prospective_create},
-    {"memory.prospective_complete", kb_handle_memory_prospective_complete},
-    {"memory.prospective_match", kb_handle_memory_prospective_match},
-    {"memory.prospective_mark_triggered", kb_handle_memory_prospective_mark_triggered},
-    {"memory.get_provenance", kb_handle_memory_get_provenance},
     {"memory.tag_workspace", kb_handle_memory_tag_workspace},
     {"memory.scope_visibility_rank", kb_handle_memory_scope_visibility_rank},
     {"memory.episode_card_generate", kb_handle_memory_episode_card_generate},
     {"memory.tag_scope", kb_handle_memory_tag_scope},
-    {"memory.prospective_sweep_expired", kb_handle_memory_prospective_sweep_expired},
-    {"memory.maintenance_run", kb_handle_memory_maintenance_run},
-    {"memory.lint", kb_handle_memory_lint},
     {"memory.alerts", kb_handle_memory_alerts},
-    {"memory.recall", kb_handle_memory_recall},
     {"memory.upsert_workflow", kb_handle_memory_upsert_workflow},
     {"memory.delete", kb_handle_memory_delete},
     {"memory.touch", kb_handle_memory_touch},
     {"memory.update", kb_handle_memory_update},
     {"memory.reject", kb_handle_memory_reject},
     {"memory.restore", kb_handle_memory_restore},
-    {"memory.review_list", kb_handle_memory_review_list},
-    {"memory.stats", kb_handle_memory_stats},
-    {"memory.list_conflicts", kb_handle_memory_list_conflicts},
-    {"memory.query_health", kb_handle_memory_query_health},
-    {"memory.effectiveness_stats", kb_handle_memory_effectiveness_stats},
     {"memory.query_edges", kb_handle_memory_query_edges},
     {"memory.compact_windows", kb_handle_memory_compact_windows},
     {"memory.assemble_context", kb_handle_memory_assemble_context},
@@ -1280,7 +1259,6 @@ static const struct
     {"memory.search", kb_handle_memory_search},
     {"memory.export_jsonl", kb_handle_memory_export_jsonl},
     {"memory.decisions_export_jsonl", kb_handle_memory_decisions_export_jsonl},
-    {"memory.key_exists", kb_handle_memory_key_exists},
     {"rules.export_jsonl", kb_handle_rules_export_jsonl},
     {"rules.insert", kb_handle_rules_insert},
     {"tool_registry.snapshot", kb_handle_tool_registry_snapshot},
@@ -1294,11 +1272,7 @@ static const struct
     {"graph.sync_code", kb_handle_graph_sync_code},
     {"graph.explain", kb_handle_graph_explain},
     {"code.audit", kb_handle_code_audit},
-    {"memory.link_create", kb_handle_memory_link_create},
-    {"memory.link_query", kb_handle_memory_link_query},
-    {"memory.link_delete", kb_handle_memory_link_delete},
     {"memory.store", kb_handle_memory_store},
-    {"memory.find_id_by_key_kind", kb_handle_memory_find_id_by_key_kind},
     {"memory.search_facts_patterns_by_keyword", kb_handle_memory_search_facts_patterns_by_keyword},
     {"memory.supersede", kb_handle_memory_supersede},
     {"memory.fact_history", kb_handle_memory_fact_history},
@@ -1308,10 +1282,6 @@ static const struct
     {"memory.check_drift", kb_handle_memory_check_drift},
     {"memory.list_session_scope_priority", kb_handle_memory_list_session_scope_priority},
     {"memory.list_session_scope_priority_like", kb_handle_memory_list_session_scope_priority_like},
-    {"memory.list_low_effectiveness", kb_handle_memory_list_low_effectiveness},
-    {"memory.list_unused_l2", kb_handle_memory_list_unused_l2},
-    {"memory.list_superseded_keys", kb_handle_memory_list_superseded_keys},
-    {"memory.set_artifact", kb_handle_memory_set_artifact},
     {"task.list", kb_handle_task_list},
     {"task.create", kb_handle_task_create},
     {"task.update_state", kb_handle_task_update_state},
@@ -1327,12 +1297,7 @@ static const struct
     {"evidence.provenance_retrieval_event", kb_handle_evidence_provenance},
     {"evidence.fidelity_retrieval_event", kb_handle_evidence_fidelity},
     {"css.signals", kb_handle_css_signals},
-    {"memory.entity_profile", kb_handle_memory_entity_profile},
-    {"memory.entity_edges", kb_handle_memory_entity_edges},
-    {"memory.search_graph", kb_handle_memory_search_graph},
-    {"memory.search_graph_as_of", kb_handle_memory_search_graph_as_of},
     {"memory.search_assertions", kb_handle_memory_search_assertions},
-    {"memory.get_episode", kb_handle_memory_get_episode},
     {"memory.ask", kb_handle_memory_ask},
     {"artifacts.list_proposed", kb_handle_artifacts_list_proposed},
     {"artifacts.set_state", kb_handle_artifacts_set_state},
@@ -1383,6 +1348,11 @@ static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
    for (size_t i = 0; i < sizeof(kb_rpc_table) / sizeof(kb_rpc_table[0]); i++)
       if (strcmp(method->valuestring, kb_rpc_table[i].method) == 0)
          return kb_rpc_table[i].fn(fd, req);
+
+   cJSON *module_response = NULL;
+   int dispatched = aimee_module_commands_dispatch(method->valuestring, req, &module_response);
+   if (dispatched)
+      return kb_reply_or_error(fd, module_response, "command module unavailable");
 
    if (strcmp(method->valuestring, "learning.get_proposal") == 0)
       return kb_handle_learning_mutate(fd, req, "get");

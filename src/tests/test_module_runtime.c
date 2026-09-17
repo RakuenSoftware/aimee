@@ -157,7 +157,8 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *kind = 4096u + *principal_ref * 256u + 1u;
       for (uint32_t stage = 1; stage <= 8; ++stage)
          served[stage - 1] = 4096u + *principal_ref * 256u + stage;
-      *serve_count = 8;
+      served[8] = 4096u + *principal_ref * 256u + 255u;
+      *serve_count = 9;
       return 0;
    }
    if (strcmp(name, "learning") == 0)

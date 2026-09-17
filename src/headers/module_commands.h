@@ -1,26 +1,10 @@
-/* module_commands.h: pull command declarations off the module bus into THE
- * command registry.
+/* module_commands.h: collect command declarations from the module bus.
+ * Fixed modules opt into common discovery stage 255 (DCMD/DCMR version 2),
+ * declaring their invocation stage and public commands. Plugin instances use
+ * their existing stage-2 declaration/admission protocol (version 1).
  *
- * command_registry.h states the invariant -- "a capability is registered ONCE,
- * here, by the module that owns it" -- and server-go/modules/memory/commands.go
- * has answered the declaration request since it was written. This file is the
- * MIDDLE that was missing: before it, nothing in the running server ever called
- * aimee_command_register (only src/tests/test_command_registry.c did), so the
- * declaration was answered by nobody and the registry stayed empty in
- * production.
- *
- * Two kinds of declarant:
- *
- *   - Fixed modules, whose declaration event kind is a compile-time constant
- *     (memory is 5894).
- *   - PLUGIN instances, whose kinds are allocated per instance at provisioning,
- *     because bus_host_serve_kind() binds one kind to exactly one serving slot.
- *     They are discovered by probing the reserved plugin range; the probe is an
- *     in-memory slot check (obs_bus_module_available), not I/O.
- *
- * A plugin command's handler dispatches back over the bus to that instance's
- * invoke stage. The registry holds borrowed string pointers, so this module owns
- * the decoded strings and frees them when the commands are withdrawn. */
+ * The host owns framing, registration lifetime, and route snapshots. Each
+ * module owns its argument validation, behavior, and response construction. */
 #ifndef DEC_MODULE_COMMANDS_H
 #define DEC_MODULE_COMMANDS_H 1
 
@@ -40,6 +24,9 @@
 /* Stage ids inside a plugin module. MUST match server-go/modules/mcp/mcp.go. */
 #define AIMEE_PLUGIN_STAGE_INVOKE  1u
 #define AIMEE_PLUGIN_STAGE_DECLARE 2u
+
+/* Optional common discovery stage for fixed modules (DCMD/DCMR version 2). */
+#define AIMEE_MODULE_STAGE_DESCRIBE_COMMANDS 255u
 
 /* A plugin instance's event kinds are derived from its principal ref by the
  * canonical module rule, 4096 + ref*256 + stage (docs/modules/README.md). The
@@ -65,6 +52,10 @@ cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const c
  * usable. A module that is absent, refuses, or answers malformed is skipped with
  * a log line -- one bad module must not cost every other module its commands. */
 int aimee_module_commands_collect(void);
+
+/* Refresh declarations and dispatch a public RPC from a copied route. Returns
+ * 0 if undeclared, 1 with an owned JSON result, -1 for a transport failure. */
+int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result);
 
 /* Collect again only if the last collect is older than ttl_ms.
  *

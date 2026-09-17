@@ -133,6 +133,13 @@
           "durability": "ledger",
           "durability_reason": "public memory commands perform scoped reads and state transitions",
           "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 255,
+          "name": "public-command-discovery",
+          "event_kind": 6143,
+          "durability": "capture",
+          "durability_reason": "public command routing metadata; invocation is audited at its declared execution stage"
         }
       ]
     },
