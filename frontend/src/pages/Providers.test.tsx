@@ -111,3 +111,15 @@ it("discovers models from the selected connection", async () => {
   expect((screen.getByLabelText("Model ID") as HTMLInputElement).value).toBe("offered-model");
   expect(screen.getByText("context not published")).toBeTruthy();
 });
+
+it.each(["execution_error", "execution_message"])("shows the model probe's %s", async (field) => {
+  const model = { name: "codex", provider: "chatgpt", model: "test-model", endpoint: "https://chatgpt.com/backend-api/codex", enabled: true };
+  vi.stubGlobal("fetch", vi.fn(async (path: string) => reply(
+    path === "/api/models" ? { models: [model] } :
+    path === "/api/models/probe" ? { execution_ok: false, [field]: "provider returned HTTP 403" } : { status: "ok" }
+  )));
+  render(<Models />);
+  fireEvent.click(await screen.findByText("Probe all"));
+  await screen.findByText("provider returned HTTP 403");
+  expect(screen.getByText("unavailable")).toBeTruthy();
+});

@@ -111,7 +111,20 @@ func (m *Manager) Manage(ctx context.Context, req Request) (object, error) {
 		read = len(pos) == 1 && opts["reset"] != "true"
 	}
 	if req.Operation == "provider.connection_models" || req.Operation == "model.probe" {
-		return m.inspect(ctx, req)
+		reply, err := m.inspect(ctx, req)
+		if req.Operation == "model.probe" && reply != nil {
+			// Preserve the probe fields consumed by released native clients.
+			if message := str(reply, "execution_error"); message != "" {
+				reply["execution_message"] = message
+			}
+			if slots, ok := reply["slots"]; ok {
+				reply["detected_slots"] = slots
+			}
+			if window, ok := reply["context_window"]; ok {
+				reply["detected_context_window"] = window
+			}
+		}
+		return reply, err
 	}
 	changes := []credentialChange{}
 	req.credentials = &changes

@@ -135,7 +135,7 @@ func validHTTPHeaders(purpose string, headers map[string]string, credentialPrese
 		switch lower {
 		case "authorization":
 			return false
-		case "anthropic-version":
+		case "anthropic-version", "chatgpt-account-id", "originator":
 			if purpose != "provider" {
 				return false
 			}
