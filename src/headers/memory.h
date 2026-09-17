@@ -650,7 +650,6 @@ void add_provenance(int64_t memory_id, const char *session_id, const char *actio
 int memory_fold_session(const char *session_id, char *summary_out, size_t summary_out_len);
 
 /* --- Search --- */
-int memory_search(char **clusters, int cluster_count, int limit, search_result_t *out, int max);
 int memory_find_facts(const char *query, int limit, memory_t *out, int max);
 int memory_find_facts_scoped(const char *query, const char *scope_type, const char *scope_value,
                              int limit, memory_t *out, int max);

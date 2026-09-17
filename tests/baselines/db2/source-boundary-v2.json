@@ -4,12 +4,12 @@
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 125,
-    "headers": 142,
+    "headers": 141,
     "sql_files": 6,
     "consumer_files": 288,
     "production_consumers": 133,
     "test_consumers": 155,
-    "include_directives": 871,
+    "include_directives": 870,
     "outbound_dependency_rows": 163,
     "outbound_include_directives": 163
   },
@@ -234,7 +234,6 @@
       "src/modules/db2/c/membership.h",
       "src/modules/db2/c/memory_briefing.h",
       "src/modules/db2/c/memory_conflicts.h",
-      "src/modules/db2/c/memory_export.h",
       "src/modules/db2/c/memory_health.h",
       "src/modules/db2/c/memory_lifecycle.h",
       "src/modules/db2/c/memory_lint.h",
@@ -563,10 +562,6 @@
         },
         {
           "header": "modules/db2/c/kb_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_export.h",
           "count": 1
         },
         {
@@ -6651,5 +6646,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "e32239f64a06f1dc9b15eeca758ee7775fe8fb5d2ae58ab9d062bb04f714171f"
+  "fingerprint": "2ba9f12752971e291e07299f7417de12deefbf496837f0420aa4f044bef0e466"
 }

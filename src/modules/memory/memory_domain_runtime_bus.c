@@ -7,7 +7,6 @@
 #include <aimee/memory/module_api.h>
 
 #include "cJSON.h"
-#include "memory_export.h"
 #include "memory_query.h"
 #include "memory_scope_query.h"
 #include "memory_bus_context.h"
@@ -98,122 +97,6 @@ cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *su
    cJSON_AddNumberToObject(out, "memory_count_before", (double)summary->memory_count_before);
    cJSON_AddNumberToObject(out, "memory_count_after", (double)summary->memory_count_after);
    return out;
-}
-
-void db2_memory_export_row_free(db2_memory_export_row_t *row)
-{
-   if (!row)
-      return;
-   free(row->key);
-   free(row->content);
-   free(row->source_session);
-   free(row->created_at);
-   free(row->updated_at);
-   memset(row, 0, sizeof(*row));
-}
-
-static int export_string_dup(const cJSON *item, const char *key, char **out)
-{
-   const cJSON *value = cJSON_GetObjectItemCaseSensitive(item, key);
-   if (!cJSON_IsString(value) || !value->valuestring)
-      return -1;
-   *out = strdup(value->valuestring);
-   return *out ? 0 : -1;
-}
-
-int db2_memory_export_alloc_all(db2_memory_export_row_t **out, size_t *count)
-{
-   if (!out || !count)
-      return -1;
-   *out = NULL;
-   *count = 0;
-   int64_t after_id = 0;
-   for (;;)
-   {
-      cJSON *request = domain_request("export-records");
-      if (!request || !cJSON_AddNumberToObject(request, "after_id", (double)after_id) ||
-          !cJSON_AddNumberToObject(request, "limit", 1))
-      {
-         cJSON_Delete(request);
-         goto fail;
-      }
-      cJSON *response = domain_call(request);
-      const cJSON *items =
-          response ? cJSON_GetObjectItemCaseSensitive(response, "export_records") : NULL;
-      const cJSON *item = cJSON_IsArray(items) ? cJSON_GetArrayItem(items, 0) : NULL;
-      if (!cJSON_IsArray(items))
-      {
-         cJSON_Delete(response);
-         goto fail;
-      }
-      if (!item)
-      {
-         cJSON_Delete(response);
-         return 0;
-      }
-      const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
-      const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(item, "confidence");
-      const cJSON *use_count = cJSON_GetObjectItemCaseSensitive(item, "use_count");
-      if (!cJSON_IsNumber(id) || !cJSON_IsNumber(confidence) || !cJSON_IsNumber(use_count) ||
-          id->valuedouble <= after_id)
-      {
-         cJSON_Delete(response);
-         goto fail;
-      }
-      db2_memory_export_row_t *grown = realloc(*out, (*count + 1) * sizeof(**out));
-      if (!grown)
-      {
-         cJSON_Delete(response);
-         goto fail;
-      }
-      *out = grown;
-      db2_memory_export_row_t *row = &grown[*count];
-      memset(row, 0, sizeof(*row));
-      row->id = (int64_t)id->valuedouble;
-      row->confidence = confidence->valuedouble;
-      row->use_count = use_count->valueint;
-      if (domain_copy(row->tier, sizeof(row->tier), item, "tier") ||
-          domain_copy(row->kind, sizeof(row->kind), item, "kind") ||
-          export_string_dup(item, "key", &row->key) ||
-          export_string_dup(item, "content", &row->content) ||
-          export_string_dup(item, "source_session", &row->source_session) ||
-          export_string_dup(item, "created_at", &row->created_at) ||
-          export_string_dup(item, "updated_at", &row->updated_at))
-      {
-         db2_memory_export_row_free(row);
-         cJSON_Delete(response);
-         goto fail;
-      }
-      after_id = row->id;
-      (*count)++;
-      cJSON_Delete(response);
-   }
-
-fail:
-   for (size_t i = 0; i < *count; ++i)
-      db2_memory_export_row_free(&(*out)[i]);
-   free(*out);
-   *out = NULL;
-   *count = 0;
-   return -1;
-}
-
-int db2_memory_decisions_export_jsonl(const char *path)
-{
-   if (!path || !path[0])
-      return -1;
-   cJSON *request = domain_request("export-decisions-jsonl");
-   if (!request || !cJSON_AddStringToObject(request, "path", path))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   int count = -1;
-   if (domain_number(response, "count", &count) != 0)
-      count = -1;
-   cJSON_Delete(response);
-   return count;
 }
 
 static int fusion_state_call(const char *operation, const char *state)
@@ -392,68 +275,6 @@ int memory_rebuild_derived_indexes(int limit)
    (void)domain_number(response, "count", &count);
    cJSON_Delete(response);
    return count;
-}
-
-int memory_search(char **clusters, int cluster_count, int limit, search_result_t *out, int max)
-{
-   if (!out || max <= 0 || cluster_count < 0)
-      return 0;
-   if (limit <= 0 || limit > max)
-      limit = max;
-   if (limit > 64)
-      limit = 64;
-   cJSON *request = domain_request("legacy-search");
-   cJSON *items = request ? cJSON_AddArrayToObject(request, "clusters") : NULL;
-   if (!items || !cJSON_AddNumberToObject(request, "limit", limit))
-   {
-      cJSON_Delete(request);
-      return 0;
-   }
-   for (int i = 0; i < cluster_count && i < 64; ++i)
-      if (clusters && clusters[i] && clusters[i][0])
-         cJSON_AddItemToArray(items, cJSON_CreateString(clusters[i]));
-   cJSON *response = domain_call(request);
-   const cJSON *results =
-       response ? cJSON_GetObjectItemCaseSensitive(response, "legacy_results") : NULL;
-   if (!cJSON_IsArray(results))
-   {
-      cJSON_Delete(response);
-      return 0;
-   }
-   int n = cJSON_GetArraySize(results);
-   if (n > limit)
-      n = limit;
-   for (int i = 0; i < n; ++i)
-   {
-      const cJSON *row = cJSON_GetArrayItem(results, i);
-      const cJSON *seq = cJSON_GetObjectItemCaseSensitive(row, "seq");
-      const cJSON *start = cJSON_GetObjectItemCaseSensitive(row, "start_line");
-      const cJSON *end = cJSON_GetObjectItemCaseSensitive(row, "end_line");
-      const cJSON *score = cJSON_GetObjectItemCaseSensitive(row, "score");
-      const cJSON *files = cJSON_GetObjectItemCaseSensitive(row, "files");
-      memset(&out[i], 0, sizeof(out[i]));
-      (void)domain_copy(out[i].session_id, sizeof(out[i].session_id), row, "session_id");
-      (void)domain_copy(out[i].file_path, sizeof(out[i].file_path), row, "file_path");
-      (void)domain_copy(out[i].summary, sizeof(out[i].summary), row, "summary");
-      out[i].seq = cJSON_IsNumber(seq) ? seq->valueint : 0;
-      out[i].start_line = cJSON_IsNumber(start) ? start->valueint : 0;
-      out[i].end_line = cJSON_IsNumber(end) ? end->valueint : 0;
-      out[i].score = cJSON_IsNumber(score) ? score->valuedouble : 0.0;
-      if (cJSON_IsArray(files))
-      {
-         int nf = cJSON_GetArraySize(files);
-         if (nf > 32)
-            nf = 32;
-         for (int f = 0; f < nf; ++f)
-         {
-            const cJSON *file = cJSON_GetArrayItem(files, f);
-            if (cJSON_IsString(file) && file->valuestring)
-               snprintf(out[i].files[out[i].file_count++], MAX_PATH_LEN, "%s", file->valuestring);
-         }
-      }
-   }
-   cJSON_Delete(response);
-   return n;
 }
 
 int memory_scan_conversations(char dirs[][MAX_PATH_LEN], int dir_count)

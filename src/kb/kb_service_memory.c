@@ -429,15 +429,6 @@ static int kb_handle_session_briefing_section(int fd, cJSON *req, cJSON *(*fn)(i
    return srv_rc;
 }
 
-int kb_handle_memory_episode_card_generate(int fd, cJSON *req)
-{
-   cJSON *sid_j = cJSON_GetObjectItemCaseSensitive(req, "source_session");
-   if (!cJSON_IsString(sid_j) || !sid_j->valuestring[0])
-      return kb_send_error(fd, "missing source_session");
-   cJSON *resp = db2_kb_service_memory_episode_card_generate_json(sid_j->valuestring);
-   return kb_reply_or_error(fd, resp, "failed to generate episode card");
-}
-
 int kb_handle_memory_diagnose_scoped(int fd, cJSON *req)
 {
    cJSON *q = cJSON_GetObjectItemCaseSensitive(req, "query");
@@ -508,36 +499,6 @@ int kb_handle_memory_find_facts_scoped(int fd, cJSON *req)
    cJSON *resp =
        db2_kb_service_memory_find_facts_scoped_json(q->valuestring, scope_type, scope_value, limit);
    return kb_reply_or_error(fd, resp, "failed to find scoped facts");
-}
-
-int kb_handle_memory_export_jsonl(int fd, cJSON *req)
-{
-   cJSON *path_j = cJSON_GetObjectItemCaseSensitive(req, "path");
-   if (!cJSON_IsString(path_j) || !path_j->valuestring[0])
-      return kb_send_error(fd, "missing path");
-   cJSON *resp = db2_kb_service_memory_export_jsonl_json(path_j->valuestring);
-   return kb_reply_or_error(fd, resp, "memory export failed");
-}
-
-int kb_handle_memory_decisions_export_jsonl(int fd, cJSON *req)
-{
-   cJSON *path_j = cJSON_GetObjectItemCaseSensitive(req, "path");
-   if (!cJSON_IsString(path_j) || !path_j->valuestring[0])
-      return kb_send_error(fd, "missing path");
-   cJSON *resp = db2_kb_service_memory_decisions_export_jsonl_json(path_j->valuestring);
-   return kb_reply_or_error(fd, resp, "decisions export failed");
-}
-
-int kb_handle_memory_search(int fd, cJSON *req)
-{
-   cJSON *clusters_j = cJSON_GetObjectItemCaseSensitive(req, "clusters");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_search_json(clusters_j, limit);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to search memory windows");
 }
 
 int kb_handle_memory_assemble_typed_context(int fd, cJSON *req)
@@ -1042,25 +1003,6 @@ int kb_handle_memory_ask(int fd, cJSON *req)
    cJSON *resp = db2_kb_service_memory_ask_json(query_j->valuestring, st, sv, limit);
    kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to answer query");
-}
-
-int kb_handle_memory_supersede(int fd, cJSON *req)
-{
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "old_id");
-   cJSON *content_j = cJSON_GetObjectItemCaseSensitive(req, "new_content");
-   cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(req, "confidence");
-   cJSON *sid_j = cJSON_GetObjectItemCaseSensitive(req, "session_id");
-   if (!cJSON_IsNumber(id_j) || !cJSON_IsString(content_j))
-      return kb_send_error(fd, "memory.supersede requires old_id and new_content");
-   double conf = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 1.0;
-   const char *sid = cJSON_IsString(sid_j) ? sid_j->valuestring : "";
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_supersede_json((int64_t)id_j->valuedouble,
-                                                      content_j->valuestring, conf, sid);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to supersede memory");
 }
 
 /* §4 retraction: withdraw a typed fact the layer got wrong. `target` is optional

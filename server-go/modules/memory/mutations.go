@@ -149,3 +149,56 @@ updated_at=pg_now_text() WHERE id=$1 AND lifecycle_state='active'`
 	tag, err := s.db.Exec(ctx, query, id)
 	return err == nil && tag.RowsAffected() > 0, err
 }
+
+var (
+	errImmutableExperience = errors.New("memory: episode and experience memories require annotation")
+	errRequiresRevocation  = errors.New("memory: instruction and policy memories require revocation")
+)
+
+// supersedeKB closes the old interval and opens the replacement at the same
+// instant. The locked source retains its content and scope; model replacement
+// cannot inherit a user's provenance or exceed the source's confidence ceiling.
+func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content string, confidence float64, session string) (Record, error) {
+	var epistemic string
+	if err := s.db.QueryRow(ctx, `SELECT epistemic_kind FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&epistemic); err != nil {
+		if store.IsNoRows(err) {
+			return Record{}, ErrMemoryNotFound
+		}
+		return Record{}, err
+	}
+	switch epistemic {
+	case "episode", "experience":
+		return Record{}, errImmutableExperience
+	case "instruction", "policy":
+		return Record{}, errRequiresRevocation
+	}
+	var r Record
+	err := s.db.QueryRow(ctx, `WITH candidate AS MATERIALIZED (
+ SELECT *,pg_now_text() AS boundary FROM memories WHERE id=$1 AND lifecycle_state='active'
+ AND NOT EXISTS (SELECT 1 FROM memory_rejection_tombstones t WHERE t.object_kind='memory' AND t.active=1
+  AND t.memory_key=memories.key AND t.memory_content=$2 AND t.scope_type=memories.scope_type AND t.scope_value=memories.scope_value)
+), closed AS (
+ UPDATE memories m SET key=c.key||'#v'||m.id::text,lifecycle_state='superseded',valid_until=c.boundary,
+ activation_suppressed=1,archive_reason='superseded by model replacement',updated_at=c.boundary
+ FROM candidate c WHERE m.id=c.id RETURNING c.*
+), fresh AS (
+ INSERT INTO memories(tier,kind,epistemic_kind,key,content,use_cases,confidence,confidence_ceiling,
+ source_session,provenance_category,scope_type,scope_value,lifecycle_state,valid_from)
+ SELECT tier,kind,epistemic_kind,key,$2,use_cases,LEAST($3,confidence_ceiling,0.8,CASE WHEN tier='L5' THEN 0.5 ELSE 1.0 END),
+ LEAST(confidence_ceiling,0.8,CASE WHEN tier='L5' THEN 0.5 ELSE 1.0 END),
+ CASE WHEN $4='' THEN source_session ELSE $4 END,'agent_message',scope_type,scope_value,'active',boundary
+ FROM closed RETURNING id,scope_type,scope_value,tier,kind,key,content,confidence
+), scopes AS (
+ INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
+ SELECT fresh.id,s.scope_type,s.scope_value FROM fresh CROSS JOIN memory_scopes s WHERE s.memory_id=$1
+ ON CONFLICT DO NOTHING
+), links AS (
+ INSERT INTO memory_links(source_id,target_id,relation) SELECT id,$1,'supersedes' FROM fresh
+)
+SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM fresh`, id, content, confidence, session).
+		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
+	if store.IsNoRows(err) {
+		return Record{}, ErrMemoryNotFound
+	}
+	return r, err
+}

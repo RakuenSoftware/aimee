@@ -301,3 +301,16 @@ write. Verified host context is required for user provenance, and replacement
 of a key with model-authored text resets captured authority. Learning promotion
 and import consume the generic command route. Import applies its workspace
 before writing and reports module failures instead of counting them as imported.
+
+Supersede closes the previous validity interval and opens its replacement at the
+same instant, preserving source scope, metadata, secondary scope tags and a
+supersedes link. New model text cannot inherit user provenance. Episode and
+experience corrections require annotation; instructions and policies require
+revocation. Public replacement and extraction enqueueing share one transaction.
+
+Episode-card creation, conversation search and JSONL exports also use the Go
+command owner. Cards inherit the source scope, reject incompatible private
+scopes, exclude previous generated cards and commit their lineage with the parent.
+Exports retain full content and scope metadata, page through records, and publish
+a private output file only after every read and write succeeds. The native export
+allocation API, export header and conversation-search adapter are retired.

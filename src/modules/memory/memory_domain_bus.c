@@ -13,7 +13,6 @@
 
 #include "cJSON.h"
 #include "memory_ontology.h"
-#include "memory_export.h"
 #include "memory_query.h"
 #include "memory_scenes.h"
 #include "memory_scope_query.h"

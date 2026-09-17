@@ -132,8 +132,6 @@ extern "C"
    cJSON *db2_kb_service_tool_registry_snapshot_json(void);
    cJSON *db2_kb_service_tool_registry_lookup_json(const char *name);
    cJSON *db2_kb_service_relations_schema_list_json(void);
-   cJSON *db2_kb_service_memory_export_jsonl_json(const char *path);
-   cJSON *db2_kb_service_memory_decisions_export_jsonl_json(const char *path);
    cJSON *db2_kb_service_collab_rules_propose_json(const char *text, const char *reason,
                                                    const char *proposed_by);
    cJSON *db2_kb_service_collab_rules_list_json(void);
@@ -186,8 +184,6 @@ extern "C"
    cJSON *db2_kb_service_rules_update_directive_type_json(int id, const char *directive_type);
    cJSON *db2_kb_service_feedback_record_json(const char *polarity, const char *title,
                                               const char *description, int weight);
-   cJSON *db2_kb_service_memory_supersede_json(int64_t old_id, const char *new_content,
-                                               double confidence, const char *session_id);
    /* Typed-fact §4 correction surface. `target` NULL/empty retracts every current
     * value of (source, relation); `authority` is "user" or "model" (anything else
     * reads as model). Reports the number of edges affected, so a request that
@@ -209,9 +205,7 @@ extern "C"
    cJSON *db2_kb_service_memory_find_facts_json(const char *query, int limit);
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
-   cJSON *db2_kb_service_memory_episode_card_generate_json(const char *source_session);
    cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
-   cJSON *db2_kb_service_memory_search_json(const cJSON *clusters_arr, int limit);
    cJSON *db2_kb_service_memory_find_facts_visible_json(const char *query, const char *workspace,
                                                         const char *project, int limit);
    cJSON *db2_kb_service_memory_find_facts_scoped_json(const char *query, const char *scope_type,

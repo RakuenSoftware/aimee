@@ -855,10 +855,6 @@ extern "C"
     * to skip duplicates before promoting a chunk to L3/L4. */
    int db2_memory_key_exists_in_tier_pair(const char *key, const char *tier_a, const char *tier_b);
 
-   /* Memories export helpers (cJSON serialization, heap-allocated row
-    * type) live in db2/memory_export.h to keep this file under the
-    * line-check budget. */
-
    /* Top-N L2 fact memories ordered by request scope, then use_count and
     * confidence. Fills |id|, |key|, and |content| (other fields are zeroed);
     * used by the session-briefing "Key Facts" panel. Returns rows written. */

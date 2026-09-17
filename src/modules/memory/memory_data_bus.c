@@ -244,19 +244,26 @@ int db2_memory_provenance_by_id(int64_t memory_id, char *kind_out, int kind_len,
 int memory_supersede(int64_t old_id, const char *new_content, double confidence,
                      const char *session_id, memory_t *out)
 {
-   (void)session_id;
    if (old_id <= 0 || !new_content || !new_content[0])
       return -1;
    cJSON *request = cJSON_CreateObject();
    if (!request || !cJSON_AddStringToObject(request, "operation", "supersede") ||
        !cJSON_AddNumberToObject(request, "id", (double)old_id) ||
        !cJSON_AddStringToObject(request, "content", new_content) ||
-       !cJSON_AddNumberToObject(request, "confidence", confidence))
+       !cJSON_AddNumberToObject(request, "confidence", confidence) ||
+       !cJSON_AddStringToObject(request, "session_id", session_id ? session_id : ""))
    {
       cJSON_Delete(request);
       return -1;
    }
    cJSON *response = memory_data_call(request);
+   const cJSON *code = cJSON_GetObjectItemCaseSensitive(response, "code");
+   if (cJSON_IsNumber(code) && (code->valueint == -2 || code->valueint == -3))
+   {
+      int rc = code->valueint;
+      cJSON_Delete(response);
+      return rc;
+   }
    memory_t ignored;
    int count = records_from_response(response, out ? out : &ignored, 1);
    cJSON_Delete(response);

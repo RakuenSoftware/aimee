@@ -3,6 +3,7 @@ package memory
 import (
 	"encoding/json"
 	"github.com/JBailes/aimee/server-go/bus"
+	"strings"
 )
 
 func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
@@ -12,6 +13,38 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		return commandResult(commandError("invalid_argument", message))
 	}
 	switch verb {
+	case "episode_card_generate":
+		request.Operation, request.SessionID = "episode-card-generate", args.stringOr("source_session", "")
+		if strings.TrimSpace(request.SessionID) == "" {
+			return invalid("missing source_session")
+		}
+		options.publicWrite = true
+		scoped = commandScope(args, &request)
+	case "export_jsonl", "decisions_export_jsonl":
+		request.Operation = map[string]string{"export_jsonl": "export-jsonl", "decisions_export_jsonl": "export-decisions-jsonl"}[verb]
+		request.Path = args.stringOr("path", "")
+		if strings.TrimSpace(request.Path) == "" {
+			return invalid("missing path")
+		}
+		scoped = commandScope(args, &request)
+	case "search":
+		request.Operation, request.Limit = "legacy-search", args.limit("limit", 10, 64)
+		if raw, exists := args["clusters"]; exists {
+			var clusters []json.RawMessage
+			if json.Unmarshal(raw, &clusters) != nil {
+				return invalid("clusters must be an array")
+			}
+			for _, raw := range clusters {
+				var cluster string
+				if json.Unmarshal(raw, &cluster) == nil && cluster != "" {
+					request.Clusters = append(request.Clusters, cluster)
+				}
+				if len(request.Clusters) == 64 {
+					break
+				}
+			}
+		}
+		scoped = commandScope(args, &request)
 	case "briefing":
 		request.Operation, request.LimitTokens = "briefing-bundle", args.integer("limit_tokens", 0)
 		if request.LimitTokens < 0 {
@@ -63,6 +96,33 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	}
 	result := map[string]any{"status": "ok"}
 	switch verb {
+	case "episode_card_generate":
+		if response.Code != nil {
+			return commandResult(commandError("conflict", errEpisodeMixedScope.Error()))
+		}
+		if len(response.IDs) == 0 {
+			return commandResult(commandError("not_found", "episode card generation produced no row"))
+		}
+		if len(response.IDs) != 1 || response.IDs[0] <= 0 {
+			return nil, bus.ModuleStatusInternal
+		}
+		result["memory_unit_id"] = response.IDs[0]
+	case "export_jsonl", "decisions_export_jsonl":
+		if response.Count == nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		result["count"] = *response.Count
+	case "search":
+		rows := response.LegacyResults
+		if rows == nil {
+			rows = []LegacySearchResult{}
+		}
+		for i := range rows {
+			if rows[i].Files == nil {
+				rows[i].Files = []string{}
+			}
+		}
+		result["results"] = rows
 	case "briefing", "alerts":
 		if len(response.Payload) == 0 {
 			return nil, bus.ModuleStatusInternal

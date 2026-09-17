@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 
@@ -45,6 +46,9 @@ CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text,tier t
  scope_type text,scope_value text,confidence double precision,confidence_ceiling double precision,use_count int DEFAULT 0,
  lifecycle_state text,activation_suppressed int DEFAULT 0,archive_reason text DEFAULT '',use_cases text DEFAULT '',last_used_at text DEFAULT '',source_session text DEFAULT '',provenance_category text DEFAULT '',
  valid_from text DEFAULT '',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
+CREATE UNIQUE INDEX memory_key_scope ON memories(kind,key,scope_type,scope_value);
+CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text,UNIQUE(memory_id,scope_type,scope_value));
+CREATE TEMP TABLE memory_links(id bigserial PRIMARY KEY,source_id bigint,target_id bigint,relation text);
 CREATE TEMP TABLE memory_rejection_tombstones(object_kind text,memory_key text,memory_content text,scope_type text,scope_value text,active int DEFAULT 1);
 CREATE TEMP TABLE memory_summaries(id bigserial PRIMARY KEY,memory_id bigint,scope text,summary text);
 CREATE TEMP TABLE memory_fact_actors(memory_id bigint PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,actor_principal text,actor_role text,authority_rank int,authenticated int,transport_identity text,captured_at text DEFAULT pg_now_text());
@@ -131,5 +135,91 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	var scope string
 	if err := tx.QueryRow(ctx, `SELECT scope_value FROM memories WHERE id=$1`, int64(user["id"].(float64))).Scan(&scope); err != nil || scope != "app" {
 		t.Fatal(scope, err)
+	}
+
+	// Replacement preserves history and scope while lowering inherited authority.
+	original := put(`{"key":"version#v123","content":"original","authority":"user","tier":"L2","use_cases":"context","session_id":"before","scope_context":true,"project":"app"}`, true)
+	oldID := int64(original["id"].(float64))
+	if _, err := tx.Exec(ctx, `INSERT INTO memory_scopes VALUES ($1,'workspace','team')`, oldID); err != nil {
+		t.Fatal(err)
+	}
+	replacementArgs := fmt.Sprintf(`{"old_id":%d,"new_content":"replacement","confidence":1,"session_id":"after","scope_context":true,"project":"app"}`, oldID)
+	replacement := runPublicCommand(t, client, "supersede", replacementArgs)
+	if replacement["status"] != "ok" {
+		t.Fatal(replacement)
+	}
+	fresh := replacement["memory"].(map[string]any)
+	newID := int64(fresh["id"].(float64))
+	if newID == oldID || fresh["key"] != "version#v123" || fresh["source_session"] != "after" || fresh["use_cases"] != "context" || fresh["confidence"] != 0.8 || fresh["provenance_category"] != "agent_message" {
+		t.Fatal(replacement)
+	}
+	checkActor(fresh["id"], "system:model-inference", 10, 0)
+	var boundary, state, oldKey string
+	var equal bool
+	err = tx.QueryRow(ctx, `SELECT o.key,o.lifecycle_state,o.valid_until,o.valid_until=n.valid_from FROM memories o,memories n WHERE o.id=$1 AND n.id=$2`, oldID, newID).Scan(&oldKey, &state, &boundary, &equal)
+	if err != nil || !equal || boundary == "" || state != "superseded" || oldKey != fmt.Sprintf("version#v123#v%d", oldID) {
+		t.Fatal(oldKey, state, boundary, equal, err)
+	}
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_links WHERE source_id=$1 AND target_id=$2 AND relation='supersedes'`, newID, oldID).Scan(&count); err != nil || count != 1 {
+		t.Fatal(count, err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_scopes WHERE memory_id=$1 AND scope_value='team'`, newID).Scan(&count); err != nil || count != 1 {
+		t.Fatal(count, err)
+	}
+	for _, id := range []int64{oldID, newID} {
+		args, _ := json.Marshal(map[string]any{"id": id, "as_of": boundary})
+		historical := runPublicCommand(t, client, "get", string(args))
+		if historical["status"] != "ok" || historical["valid_at"] != (id == newID) {
+			t.Fatal(historical)
+		}
+	}
+	// The same source cannot be superseded twice.
+	if r := runPublicCommand(t, client, "supersede", replacementArgs); r["kind"] != "not_found" {
+		t.Fatal(r)
+	}
+	for _, kind := range []string{"episode", "experience", "instruction", "policy"} {
+		args, _ := json.Marshal(map[string]any{"key": kind, "content": "immutable", "epistemic_kind": kind})
+		item := put(string(args), false)
+		args, _ = json.Marshal(map[string]any{"old_id": item["id"], "new_content": "changed"})
+		if r := runPublicCommand(t, client, "supersede", string(args)); r["kind"] != "conflict" {
+			t.Fatal(kind, r)
+		}
+	}
+	// A failed extraction enqueue must roll back closing the source and all derived rows.
+	if _, err := tx.Exec(ctx, `ALTER TABLE kb_async_jobs ADD CONSTRAINT fail_replacement CHECK (document_id<0) NOT VALID`); err != nil {
+		t.Fatal(err)
+	}
+	args := fmt.Sprintf(`{"old_id":%d,"new_content":"must roll back"}`, newID)
+	if r := runPublicCommand(t, client, "supersede", args); r["kind"] != "unavailable" {
+		t.Fatal(r)
+	}
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state FROM memories WHERE id=$1`, newID).Scan(&state); err != nil || state != "active" {
+		t.Fatal(state, err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE content='must roll back'`).Scan(&count); err != nil || count != 0 {
+		t.Fatal(count, err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE kb_async_jobs DROP CONSTRAINT fail_replacement`); err != nil {
+		t.Fatal(err)
+	}
+	// Replacement under a non-owner role cannot reach a different project's source.
+	_, err = tx.Exec(ctx, `CREATE ROLE memory_store_test NOINHERIT NOBYPASSRLS;
+GRANT USAGE ON SCHEMA store_command_test TO memory_store_test;
+GRANT SELECT,UPDATE,DELETE,INSERT ON memories,memory_rejection_tombstones,memory_links,memory_scopes,memory_summaries,memory_fact_actors,kb_async_jobs TO memory_store_test;
+GRANT USAGE,SELECT ON SEQUENCE memories_id_seq,memory_links_id_seq,kb_async_jobs_id_seq TO memory_store_test;
+ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
+CREATE POLICY test_visibility ON memories USING (scope_type='global' OR current_setting('aimee.memory_scope_all',true)='1' OR (scope_type=current_setting('aimee.memory_scope_type',true) AND scope_value=current_setting('aimee.memory_scope_value',true)));
+SET LOCAL ROLE memory_store_test;`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args = fmt.Sprintf(`{"old_id":%d,"new_content":"hidden","scope_context":true,"project":"other"}`, newID)
+	if r := runPublicCommand(t, client, "supersede", args); r["kind"] != "not_found" {
+		t.Fatal(r)
+	}
+	args = fmt.Sprintf(`{"old_id":%d,"new_content":"visible","scope_context":true,"project":"app"}`, newID)
+	if r := runPublicCommand(t, client, "supersede", args); r["status"] != "ok" {
+		t.Fatal(r)
 	}
 }

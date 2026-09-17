@@ -494,13 +494,6 @@
       "reason": "The context-block cJSON envelope is caller presentation; a typed bounded query returns the context block and provenance fields."
     },
     {
-      "symbol": "db2_kb_service_memory_decisions_export_jsonl_json",
-      "signature_sha256": "f687bb7a84ff8076e271adef8de2cddb7a818b1fa3e5657779d794630e9386fe",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON export-status wrapper is local presentation; a declared export operation validates its destination policy and returns a typed row count."
-    },
-    {
       "symbol": "db2_kb_service_memory_diagnose_scoped_json",
       "signature_sha256": "241e4fe67ce20019b8d5d990cd9592b14d123a0abc9e3cd2aea974f7927c233b",
       "disposition": "private-db2",
@@ -508,25 +501,11 @@
       "reason": "The scoped-diagnostic cJSON document remains a compatibility view; a typed operation validates explicit bounded scope and returns structured findings."
     },
     {
-      "symbol": "db2_kb_service_memory_episode_card_generate_json",
-      "signature_sha256": "24295ef8a045390f4a6bab2eb84dfc6c43f1cf98af925956e39ced5980259bc4",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The episode-card cJSON response is presentation-only; a complete typed memory operation owns generation and returns bounded card fields."
-    },
-    {
       "symbol": "db2_kb_service_memory_explain_match_json",
       "signature_sha256": "6dcce6804d5a516ea5841a2830eaf583e30619c8d5d77c7bd76b46fa9564a7a1",
       "disposition": "private-db2",
       "family": "memory",
       "reason": "The match-explanation cJSON document is caller rendering; typed bounded scoring evidence forms the stable memory reply."
-    },
-    {
-      "symbol": "db2_kb_service_memory_export_jsonl_json",
-      "signature_sha256": "6b34336bc9b69bfef2e49e7ec128b512e072fd94130e9a68b8cb6372ee634e8e",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON export-status wrapper stays local presentation; a typed export operation owns destination validation and returns its bounded row count."
     },
     {
       "symbol": "db2_kb_service_memory_facts_json",
@@ -576,20 +555,6 @@
       "disposition": "private-db2",
       "family": "memory",
       "reason": "The conversation-scan cJSON input and report are compatibility presentation; a typed operation validates bounded directories and returns structured counts."
-    },
-    {
-      "symbol": "db2_kb_service_memory_search_json",
-      "signature_sha256": "46f1050929505ea123cb546043465fd326da5fc268390e041ecc6b5b66c5dd38",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The general search cJSON response cannot cross the typed ABI; a bounded operation returns structured matches and explicit truncation."
-    },
-    {
-      "symbol": "db2_kb_service_memory_supersede_json",
-      "signature_sha256": "8f92a5522f742371116ff11f1f45696293536f69bfe035c07749d703c6821cb5",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The supersede cJSON wrapper cannot define or split the transaction; a typed memory.supersede operation owns version closure, replacement insert, provenance, and result."
     },
     {
       "symbol": "db2_kb_service_note_create_json",

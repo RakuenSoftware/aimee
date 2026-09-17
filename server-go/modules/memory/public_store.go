@@ -84,3 +84,56 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	}
 	return commandResult(result)
 }
+
+func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+	id, ok := args.positiveID("old_id")
+	content := args.stringOr("new_content", "")
+	if !ok || strings.TrimSpace(content) == "" {
+		return commandResult(commandError("invalid_argument", "memory.supersede requires old_id and new_content"))
+	}
+	confidence := 1.0
+	if _, exists := args["confidence"]; exists {
+		confidence, ok = args.number("confidence")
+		if !ok || confidence < 0 || confidence > 1 {
+			return commandResult(commandError("invalid_argument", "confidence must be between zero and one"))
+		}
+	}
+	request := DataRequest{Operation: "supersede", ID: id, Content: content, Confidence: &confidence, SessionID: args.stringOr("session_id", ""), PublicView: true, IncludeAll: true}
+	scoped := commandScope(args, &request)
+	options.publicWrite = true
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	data, status := handleData(options, invocation, encoded)
+	if status != bus.ModuleStatusOK {
+		if status == bus.ModuleStatusInternal || status == bus.ModuleStatusCapabilityAbsent {
+			return commandResult(commandError("unavailable", "failed to supersede memory"))
+		}
+		return nil, status
+	}
+	var response DataResponse
+	if json.Unmarshal(data, &response) != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	if response.Code != nil {
+		if *response.Code == MutationImmutableExperience {
+			return commandResult(commandError("conflict", errImmutableExperience.Error()))
+		}
+		if *response.Code == MutationRequiresReplacement {
+			return commandResult(commandError("conflict", errRequiresRevocation.Error()))
+		}
+		return nil, bus.ModuleStatusInternal
+	}
+	if len(response.PublicRecords) == 0 {
+		return commandResult(commandError("not_found", "memory not found or replacement refused"))
+	}
+	if len(response.PublicRecords) != 1 {
+		return nil, bus.ModuleStatusInternal
+	}
+	result := map[string]any{"status": "ok", "memory": response.PublicRecords[0]}
+	if scoped {
+		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
+	}
+	return commandResult(result)
+}

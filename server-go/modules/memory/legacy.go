@@ -27,7 +27,7 @@ type LegacySearchResult struct {
 	EndLine   int      `json:"end_line"`
 	Summary   string   `json:"summary"`
 	Score     float64  `json:"score"`
-	Files     []string `json:"files,omitempty"`
+	Files     []string `json:"files"`
 }
 
 type VectorHit struct {
@@ -393,31 +393,52 @@ WHERE polarity IN ('positive','negative') ORDER BY id DESC LIMIT 256`)
 	return learned, nil
 }
 
+var errEpisodeMixedScope = errors.New("memory: episode sources have incompatible scopes; select one scope")
+
 func (s *postgresDataStore) GenerateEpisodeCard(ctx context.Context, session string) (int64, error) {
 	if strings.TrimSpace(session) == "" {
 		return 0, errors.New("memory: episode card needs a session")
 	}
-	rows, err := s.db.Query(ctx, `SELECT id,key,content FROM memories
-WHERE source_session=$1 AND lifecycle_state='active' ORDER BY id LIMIT 64`, session)
+	rows, err := s.db.Query(ctx, `SELECT id,key,content,scope_type,scope_value FROM memories m
+WHERE source_session=$1 AND lifecycle_state='active'
+ AND NOT EXISTS (SELECT 1 FROM memory_units u WHERE u.memory_id=m.id AND u.is_episode_card=1)
+ORDER BY id LIMIT 64`, session)
 	if err != nil {
 		return 0, err
 	}
 	type source struct {
 		id           int64
 		key, content string
+		scope        Scope
 	}
 	var sources []source
 	for rows.Next() {
 		var item source
-		if err := rows.Scan(&item.id, &item.key, &item.content); err != nil {
+		if err := rows.Scan(&item.id, &item.key, &item.content, &item.scope.Type, &item.scope.Value); err != nil {
 			rows.Close()
 			return 0, err
 		}
 		sources = append(sources, item)
 	}
+	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return 0, err
+	}
 	if len(sources) == 0 {
 		return 0, ErrMemoryNotFound
+	}
+	// Shared/global inputs may contribute to a private card. Different private
+	// scopes cannot be combined into one card without widening disclosure.
+	scope := Scope{Type: ScopeGlobal, Value: "_global"}
+	for _, item := range sources {
+		if item.scope.Type == ScopeGlobal {
+			continue
+		}
+		if scope.Type != ScopeGlobal && scope != item.scope {
+			return 0, errEpisodeMixedScope
+		}
+		scope = item.scope
 	}
 	events := make([]string, 0, len(sources))
 	for _, item := range sources {
@@ -428,29 +449,37 @@ WHERE source_session=$1 AND lifecycle_state='active' ORDER BY id LIMIT 64`, sess
 		"participants": []string{}, "places": []string{}, "outcomes": []string{}, "open_threads": []string{},
 	})
 	var unitID int64
+	var created bool
 	err = s.db.QueryRow(ctx, `WITH existing AS (
  SELECT u.id FROM memory_units u JOIN memories m ON m.id=u.memory_id
  WHERE m.key=$1 AND m.source_session=$3 AND m.lifecycle_state='active'
    AND u.unit_type='episode_card' AND u.unit_key=$3 AND u.is_episode_card=1
+ AND m.scope_type=$4 AND m.scope_value=$5
  ORDER BY u.id LIMIT 1
 ), parent AS (
- INSERT INTO memories(tier,kind,key,content,confidence,source_session,scope_type,scope_value,lifecycle_state)
- SELECT 'L1','episode',$1,$2,0.8,$3,'global','_global','active'
+ INSERT INTO memories(tier,kind,epistemic_kind,key,content,confidence,source_session,scope_type,scope_value,lifecycle_state)
+ SELECT 'L1','episode','episode',$1,$2,0.8,$3,$4,$5,'active'
  WHERE NOT EXISTS(SELECT 1 FROM existing) RETURNING id
 ), created AS (
  INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text,weight,memory_kind,is_episode_card)
  SELECT id,'episode_card',$3,$2,1.0,'episodic',1 FROM parent RETURNING id
 )
-SELECT id FROM existing UNION ALL SELECT id FROM created LIMIT 1`,
-		"episode-card:"+session, string(card), session).Scan(&unitID)
+SELECT id,false FROM existing UNION ALL SELECT id,true FROM created LIMIT 1`,
+		"episode-card:"+session, string(card), session, scope.Type, scope.Value).Scan(&unitID, &created)
 	if err != nil {
 		return 0, err
 	}
+	if !created {
+		return unitID, nil
+	}
 	for _, item := range sources {
-		_, _ = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref,confidence)
+		_, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref,confidence)
 SELECT 'memory_unit',$1,'memory',$2,0.8 WHERE NOT EXISTS(
  SELECT 1 FROM memory_lineage WHERE object_type='memory_unit' AND object_id=$1
    AND source_kind='memory' AND source_ref=$2)`, unitID, fmt.Sprintf("memory:%d", item.id))
+		if err != nil {
+			return 0, err
+		}
 	}
 	return unitID, nil
 }

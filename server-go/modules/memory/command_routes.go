@@ -11,6 +11,11 @@ type commandRoute struct {
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"search", "Search conversation memories.", handleRuntimeCommand, true},
+	{"episode_card_generate", "Build a scoped session episode card.", handleRuntimeCommand, true},
+	{"export_jsonl", "Export memories with their scopes.", handleRuntimeCommand, true},
+	{"decisions_export_jsonl", "Export memory decisions.", handleRuntimeCommand, true},
+	{"supersede", "Replace a memory while preserving history.", handleSupersedeCommand, true},
 	{"store", "Store a memory and schedule fact extraction.", handleStoreCommand, true},
 	{"delete", "Delete memories.", handleMutationCommand, true},
 	{"update", "Update memories.", handleMutationCommand, true},

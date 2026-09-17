@@ -358,6 +358,7 @@ type maintenanceDataStore interface {
 type exportDataStore interface {
 	ExportRecords(context.Context, int64, int) ([]ExportRecord, error)
 	ExportDecisionsJSONL(context.Context, string) (int, error)
+	ExportJSONL(context.Context, string, bool) (int, error)
 }
 
 type sessionDataStore interface {
@@ -514,18 +515,7 @@ RETURNING id,tier,kind,key,content,confidence`, id, content, confidence).
 		}
 		return r, err
 	}
-	old, err := s.Get(ctx, scope, id)
-	if err != nil {
-		return Record{}, err
-	}
-	if old.Scope.Type != "" {
-		scope = old.Scope
-	}
-	if _, err = s.Delete(ctx, scope, id); err != nil {
-		return Record{}, err
-	}
-	old.ID, old.Content, old.Confidence = 0, content, confidence
-	return s.Put(ctx, scope, old)
+	return s.supersedeKB(ctx, id, content, confidence, "")
 }
 
 func (s *postgresDataStore) Feedback(ctx context.Context, scope Scope, ids []int64, success bool) error {
@@ -1135,8 +1125,20 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			response.Count = &count
 		case "episode-card-generate":
 			var id int64
+			if options.publicWrite && transaction == nil {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
 			id, err = legacy.GenerateEpisodeCard(ctx, request.SessionID)
-			response.IDs = []int64{id}
+			switch {
+			case errors.Is(err, ErrMemoryNotFound):
+				err = nil
+			case errors.Is(err, errEpisodeMixedScope):
+				code := -2
+				response.Code = &code
+				err = nil
+			default:
+				response.IDs = []int64{id}
+			}
 		case "vector-collection-exists":
 			var exists bool
 			exists, err = legacy.VectorCollectionExists(ctx)
@@ -1164,7 +1166,7 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		var block string
 		count, block, err = sessions.FoldSession(ctx, request.SessionID)
 		response.Count, response.Block = &count, &block
-	case "export-records", "export-decisions-jsonl":
+	case "export-records", "export-decisions-jsonl", "export-jsonl":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
@@ -1179,7 +1181,7 @@ set_config('aimee.memory_scope_all',$5,true)`,
 				return nil, bus.ModuleStatusInvalidRequest
 			}
 			var count int
-			count, err = exporter.ExportDecisionsJSONL(ctx, request.Path)
+			count, err = exporter.ExportJSONL(ctx, request.Path, request.Operation == "export-decisions-jsonl")
 			response.Count = &count
 		}
 	case "effectiveness-stats", "lint", "scheduled-maintenance":
@@ -1357,12 +1359,29 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		if !ok {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
+		if options.publicWrite && transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
 		var record Record
-		record, err = advanced.Supersede(ctx, scope, request.ID, request.Content, *request.Confidence)
-		if errors.Is(err, ErrMemoryNotFound) {
+		if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB {
+			record, err = backend.supersedeKB(ctx, request.ID, request.Content, *request.Confidence, request.SessionID)
+			if err == nil && options.publicWrite {
+				err = backend.captureStoredFactActor(ctx, record.ID, AuthorityModel, nil)
+			}
+		} else {
+			record, err = advanced.Supersede(ctx, scope, request.ID, request.Content, *request.Confidence)
+		}
+		switch {
+		case errors.Is(err, ErrMemoryNotFound):
 			err = nil
 			response.Records = []Record{}
-		} else {
+		case errors.Is(err, errImmutableExperience), errors.Is(err, errRequiresRevocation):
+			code := MutationImmutableExperience
+			if errors.Is(err, errRequiresRevocation) {
+				code = MutationRequiresReplacement
+			}
+			response.Code, err = &code, nil
+		default:
 			response.Records = []Record{record}
 		}
 	case "feedback":

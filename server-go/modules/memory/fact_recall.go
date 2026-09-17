@@ -10,7 +10,7 @@ import (
 
 func parseMemoryTime(value string) (time.Time, error) {
 	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999Z07:00",
-		"2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05", "2006-01-02"} {
+		"2006-01-02 15:04:05.999999999Z07", "2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05", "2006-01-02"} {
 		if parsed, err := time.Parse(layout, value); err == nil {
 			return parsed, nil
 		}
