@@ -225,7 +225,9 @@ func handleSensitivity(invocation bus.ModuleInvocation, request []byte) ([]byte,
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	count := int(binary.LittleEndian.Uint32(request[8:12]))
-	if count <= 0 {
+	// Each relation needs at least its two-byte length. Bound the peer-supplied
+	// count before allocating a response, including on 32-bit hosts.
+	if count <= 0 || count > (len(request)-sensRequestHeaderLen)/2 {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
