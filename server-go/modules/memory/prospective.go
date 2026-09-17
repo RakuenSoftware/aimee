@@ -146,12 +146,11 @@ WHERE state='armed' AND (valid_until='' OR
   rtrim(replace(valid_until,'T',' '),'Z') >= rtrim(replace(pg_now_text(),'T',' '),'Z'))
 AND (($2<>'' AND lower(anchor_entity)=lower($2)) OR
      ($3<>'' AND lower(anchor_file)=lower($3)) OR
-     ($1<>'' AND (lower($1) LIKE '%'||lower(trigger_text)||'%' OR
-                  lower(trigger_text) LIKE '%'||lower($1)||'%' OR
-                  lower(action_text) LIKE '%'||lower($1)||'%')))
+     ($1<>'' AND (tsvector_to_array(to_tsvector('english', $1)) &&
+                  tsvector_to_array(to_tsvector('english', trigger_text||' '||action_text)))))
 ORDER BY CASE WHEN $2<>'' AND lower(anchor_entity)=lower($2) THEN 3
               WHEN $3<>'' AND lower(anchor_file)=lower($3) THEN 2 ELSE 1 END DESC,
-         trigger_count ASC, created_at DESC LIMIT $4`, turn, entity, file, limit)
+         trigger_count ASC, created_at DESC, id DESC LIMIT $4`, turn, entity, file, limit)
 	if err != nil {
 		return nil, err
 	}

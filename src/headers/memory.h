@@ -1191,11 +1191,6 @@ int memory_link_delete(int64_t link_id);
 #define SCAN_REDACT   1 /* persist with value masked */
 #define SCAN_CLASSIFY 2 /* persist but mark sensitive */
 
-/* Scan content for sensitive data. Returns sensitivity class ("normal", "sensitive", "restricted").
- * If action is SCAN_BLOCK, returns NULL (caller must reject).
- * If action is SCAN_REDACT, modifies content in-place. */
-const char *memory_scan_content(char *content, size_t content_len);
-
 /* Enforce retention policies: delete expired sensitive/restricted memories */
 int memory_enforce_retention(void);
 

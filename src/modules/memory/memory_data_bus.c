@@ -388,37 +388,6 @@ int memory_run_maintenance(int *promoted, int *demoted, int *expired)
    return 0;
 }
 
-int memory_prospective_count_by_state(int *armed, int *triggered, int *completed, int *expired)
-{
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "prospective-count"))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = memory_data_call(request);
-   const cJSON *a = response ? cJSON_GetObjectItemCaseSensitive(response, "armed") : NULL;
-   const cJSON *t = response ? cJSON_GetObjectItemCaseSensitive(response, "triggered") : NULL;
-   const cJSON *c = response ? cJSON_GetObjectItemCaseSensitive(response, "completed") : NULL;
-   const cJSON *e =
-       response ? cJSON_GetObjectItemCaseSensitive(response, "prospective_expired") : NULL;
-   if (!cJSON_IsNumber(a) || !cJSON_IsNumber(t) || !cJSON_IsNumber(c) || !cJSON_IsNumber(e))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   if (armed)
-      *armed = a->valueint;
-   if (triggered)
-      *triggered = t->valueint;
-   if (completed)
-      *completed = c->valueint;
-   if (expired)
-      *expired = e->valueint;
-   cJSON_Delete(response);
-   return 0;
-}
-
 int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,
                                const char *key, const char *content, const char *use_cases,
                                double confidence, const char *session_id,

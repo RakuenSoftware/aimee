@@ -8,7 +8,6 @@
 
 #include "cJSON.h"
 #include "memory_export.h"
-#include "memory_lint.h"
 #include "memory_query.h"
 #include "memory_scope_query.h"
 #include "memory_bus_context.h"
@@ -73,15 +72,6 @@ static int domain_number(const cJSON *response, const char *key, int *out)
    return 0;
 }
 
-static int maintenance_copy_int(const cJSON *obj, const char *key, int *out)
-{
-   const cJSON *value = cJSON_GetObjectItemCaseSensitive(obj, key);
-   if (!cJSON_IsNumber(value))
-      return -1;
-   *out = value->valueint;
-   return 0;
-}
-
 cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *summary)
 {
    if (!summary)
@@ -108,62 +98,6 @@ cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *su
    cJSON_AddNumberToObject(out, "memory_count_before", (double)summary->memory_count_before);
    cJSON_AddNumberToObject(out, "memory_count_after", (double)summary->memory_count_after);
    return out;
-}
-
-int memory_maintenance_run(unsigned int modes, int force, int dry_run,
-                           memory_maintenance_summary_t *out)
-{
-   if (!out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   cJSON *request = domain_request("scheduled-maintenance");
-   if (!request || !cJSON_AddNumberToObject(request, "modes", modes) ||
-       !cJSON_AddBoolToObject(request, "force", force != 0) ||
-       !cJSON_AddBoolToObject(request, "dry_run", dry_run != 0))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *item = response ? cJSON_GetObjectItemCaseSensitive(response, "maintenance") : NULL;
-   const cJSON *skipped = item ? cJSON_GetObjectItemCaseSensitive(item, "skipped") : NULL;
-   const cJSON *dry = item ? cJSON_GetObjectItemCaseSensitive(item, "dry_run") : NULL;
-   const cJSON *elapsed = item ? cJSON_GetObjectItemCaseSensitive(item, "elapsed_ms") : NULL;
-   const cJSON *before =
-       item ? cJSON_GetObjectItemCaseSensitive(item, "memory_count_before") : NULL;
-   const cJSON *after = item ? cJSON_GetObjectItemCaseSensitive(item, "memory_count_after") : NULL;
-   if (!cJSON_IsObject(item) || !cJSON_IsBool(skipped) || !cJSON_IsBool(dry) ||
-       !cJSON_IsNumber(elapsed) || !cJSON_IsNumber(before) || !cJSON_IsNumber(after) ||
-       maintenance_copy_int(item, "modes_run", &out->modes_run) ||
-       maintenance_copy_int(item, "promoted", &out->promoted) ||
-       maintenance_copy_int(item, "demoted", &out->demoted) ||
-       maintenance_copy_int(item, "expired", &out->expired) ||
-       maintenance_copy_int(item, "lifecycle_archived", &out->lifecycle_archived) ||
-       maintenance_copy_int(item, "reminders_expired", &out->reminders_expired) ||
-       maintenance_copy_int(item, "directives_expired", &out->directives_expired) ||
-       maintenance_copy_int(item, "rescored", &out->rescored) ||
-       maintenance_copy_int(item, "profile_cards_refreshed", &out->profile_cards_refreshed) ||
-       maintenance_copy_int(item, "merged", &out->merged) ||
-       maintenance_copy_int(item, "summarized", &out->summarized) ||
-       maintenance_copy_int(item, "drift_candidates", &out->drift_candidates) ||
-       maintenance_copy_int(item, "drift_requeued", &out->drift_requeued))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   out->skipped = cJSON_IsTrue(skipped);
-   out->dry_run = cJSON_IsTrue(dry);
-   out->elapsed_ms = elapsed->valuedouble;
-   out->memory_count_before = (int64_t)before->valuedouble;
-   out->memory_count_after = (int64_t)after->valuedouble;
-   cJSON *summary = memory_maintenance_summary_to_json(out);
-   char *encoded = summary ? cJSON_PrintUnformatted(summary) : NULL;
-   if (encoded)
-      snprintf(out->summary_json, sizeof(out->summary_json), "%s", encoded);
-   free(encoded);
-   cJSON_Delete(summary);
-   cJSON_Delete(response);
-   return 0;
 }
 
 void db2_memory_export_row_free(db2_memory_export_row_t *row)
@@ -372,46 +306,6 @@ static double metric_double(const cJSON *metrics, const char *key)
 {
    const cJSON *value = metrics ? cJSON_GetObjectItemCaseSensitive(metrics, key) : NULL;
    return cJSON_IsNumber(value) ? value->valuedouble : 0.0;
-}
-
-void memory_directive_metrics(int64_t *created, int64_t *resolved, int64_t *expired,
-                              int64_t *surfaced, int64_t *calls, double *average, double *maximum)
-{
-   cJSON *metrics = runtime_metrics_call("directive-metrics");
-   if (created)
-      *created = metric_i64(metrics, "created");
-   if (resolved)
-      *resolved = metric_i64(metrics, "resolved");
-   if (expired)
-      *expired = metric_i64(metrics, "expired");
-   if (surfaced)
-      *surfaced = metric_i64(metrics, "surfaced");
-   if (calls)
-      *calls = metric_i64(metrics, "calls");
-   if (average)
-      *average = metric_double(metrics, "average_ms");
-   if (maximum)
-      *maximum = metric_double(metrics, "maximum_ms");
-   cJSON_Delete(metrics);
-}
-
-void memory_prospective_metrics(int64_t *triggered, int64_t *completed, int64_t *expired,
-                                int64_t *calls, double *average, double *maximum)
-{
-   cJSON *metrics = runtime_metrics_call("prospective-metrics");
-   if (triggered)
-      *triggered = metric_i64(metrics, "triggered");
-   if (completed)
-      *completed = metric_i64(metrics, "completed");
-   if (expired)
-      *expired = metric_i64(metrics, "expired");
-   if (calls)
-      *calls = metric_i64(metrics, "calls");
-   if (average)
-      *average = metric_double(metrics, "average_ms");
-   if (maximum)
-      *maximum = metric_double(metrics, "maximum_ms");
-   cJSON_Delete(metrics);
 }
 
 void memory_recall_metrics(int64_t *assemblies, int64_t *starts, double *average, double *maximum)

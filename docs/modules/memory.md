@@ -140,6 +140,19 @@ and sticky/cooldown boundaries; DB1 owner tests cover persisted turns and events
 The native activation header, snapshot parser, and discarded-snapshot wrapper
 are deleted. The local PostgreSQL fixture runs with `AIMEE_MEMORY_EVAL_URL`.
 
+The public KB prospective-memory and directive commands now validate and shape
+their replies in Go, including dashboard cards and session-start Markdown.
+The native KB adapters and memory CRUD wrappers for those operations are retired. PostgreSQL tests
+cover create/list/match/trigger/complete/expire, directive deduplication,
+priority zero, terminal states, 256-row lists, dashboards, and briefing filters.
+Reminder matching uses PostgreSQL text search so morphological matches survive
+the migration. Directive metrics count actual inserts, not duplicate requests.
+Maintenance and lint commands also render their complete results in Go. A
+maintenance dry run no longer writes the last-run timestamp and delays the next
+real cycle. Unused native background-embedding hooks and their suppression state
+are deleted; the Go embedding worker and explicit embedding operations remain.
+Authenticated admission and the server-to-KB transport remain native callers.
+
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host
 directories. Passing a pure-Go process/client build does not complete G0 while

@@ -7,7 +7,6 @@
 
 #include "aimee.h"
 #include "log.h" /* aimee_log — a failed recall must not read as an empty one */
-#include "modules/db2/c/memory_lint.h"
 #include "config.h"
 #include "modules/db2/c/entity_registry.h" /* db2_entity_merge / db2_entity_unmerge */
 #include "modules/db2/c/fact_ingest.h"     /* db2_typed_fact_ingress */
@@ -143,77 +142,6 @@ cJSON *db2_kb_service_memory_list_json(const char *tier, const char *kind, int l
       }
       cJSON_AddItemToArray(arr, obj);
    }
-   return resp;
-}
-
-static cJSON *kbs_prospective_to_json(const memory_prospective_t *r)
-{
-   cJSON *j = cJSON_CreateObject();
-   if (!j)
-      return NULL;
-   cJSON_AddNumberToObject(j, "id", (double)r->id);
-   cJSON_AddStringToObject(j, "trigger_text", r->trigger_text);
-   cJSON_AddStringToObject(j, "action_text", r->action_text);
-   cJSON_AddStringToObject(j, "anchor_entity", r->anchor_entity);
-   cJSON_AddStringToObject(j, "anchor_file", r->anchor_file);
-   cJSON_AddStringToObject(j, "recurrence", r->recurrence);
-   cJSON_AddStringToObject(j, "state", r->state);
-   cJSON_AddStringToObject(j, "valid_until", r->valid_until);
-   cJSON_AddNumberToObject(j, "trigger_count", r->trigger_count);
-   cJSON_AddStringToObject(j, "last_triggered_at", r->last_triggered_at);
-   cJSON_AddStringToObject(j, "created_at", r->created_at);
-   cJSON_AddStringToObject(j, "updated_at", r->updated_at);
-   return j;
-}
-
-cJSON *db2_kb_service_memory_prospective_list_json(const char *state, int max)
-{
-   if (max < 1)
-      max = 50;
-   if (max > 256)
-      max = 256;
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "prospectives") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   memory_prospective_t rows[256];
-   int n = memory_prospective_list(state, rows, max);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *r = kbs_prospective_to_json(&rows[i]);
-      if (r)
-         cJSON_AddItemToArray(arr, r);
-   }
-   return resp;
-}
-
-cJSON *
-db2_kb_service_memory_prospective_create_json(const char *trigger_text, const char *action_text,
-                                              const char *anchor_entity, const char *anchor_file,
-                                              const char *recurrence, const char *valid_until)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   memory_prospective_t row;
-   int rc =
-       memory_prospective_create(trigger_text ? trigger_text : "", action_text ? action_text : "",
-                                 anchor_entity ? anchor_entity : "", anchor_file ? anchor_file : "",
-                                 recurrence, valid_until ? valid_until : "", "", &row);
-   if (rc != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "create failed (check recurrence value)");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON *j = kbs_prospective_to_json(&row);
-   if (j)
-      cJSON_AddItemToObject(resp, "prospective", j);
    return resp;
 }
 
@@ -959,48 +887,6 @@ cJSON *db2_kb_service_memory_alerts_json(const char *since)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_maintenance_run_json(unsigned int modes, int force, int dry_run)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   memory_maintenance_summary_t summary;
-   memory_maintenance_run(modes, force, dry_run, &summary);
-   cJSON *summary_j = memory_maintenance_summary_to_json(&summary);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   if (summary_j)
-      cJSON_AddItemToObject(resp, "summary", summary_j);
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_prospective_sweep_expired_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int n = memory_prospective_sweep_expired();
-   if (n < 0)
-      n = 0;
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "expired", n);
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_prospective_complete_json(int64_t id)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   if (memory_prospective_complete(id) != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "could not complete (terminal or missing)");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   return resp;
-}
-
 cJSON *db2_kb_service_memory_episode_card_generate_json(const char *source_session)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -1083,45 +969,6 @@ cJSON *db2_kb_service_memory_get_provenance_json(int64_t memory_id, int max)
       cJSON_AddStringToObject(r, "created_at", rows[i].created_at);
       cJSON_AddItemToArray(arr, r);
    }
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_prospective_match_json(const char *turn_text,
-                                                    const char *active_entity,
-                                                    const char *active_file, int max)
-{
-   if (max < 1)
-      max = 3;
-   if (max > MEMORY_PROSPECTIVE_MAX_MATCHES)
-      max = MEMORY_PROSPECTIVE_MAX_MATCHES;
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "matches") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   memory_prospective_t rows[MEMORY_PROSPECTIVE_MAX_MATCHES];
-   int n = memory_prospective_match(turn_text, active_entity, active_file, rows, max);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *r = kbs_prospective_to_json(&rows[i]);
-      if (r)
-         cJSON_AddItemToArray(arr, r);
-   }
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_prospective_mark_triggered_json(int64_t id)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int rc = memory_prospective_mark_triggered(id);
-   cJSON_AddStringToObject(resp, "status", rc == 0 ? "ok" : "error");
-   if (rc != 0)
-      cJSON_AddStringToObject(resp, "message", "mark_triggered failed");
    return resp;
 }
 
@@ -2134,31 +1981,6 @@ cJSON *db2_kb_service_memory_ask_json(const char *query, const char *scope_type,
       cJSON_AddBoolToObject(trace, "structural", result.evidence.structural);
       cJSON_AddBoolToObject(trace, "exempt", result.evidence.exempt);
       cJSON_AddBoolToObject(trace, "trace_truncated", result.evidence.trace_truncated);
-   }
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_lint_json(void)
-{
-   memory_lint_issue_t issues[MEMORY_LINT_MAX_ISSUES];
-   int n = memory_lint_run(issues, MEMORY_LINT_MAX_ISSUES);
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "issue_count", n);
-   cJSON *arr = cJSON_AddArrayToObject(resp, "issues");
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *iss = cJSON_CreateObject();
-      if (!iss)
-         break;
-      cJSON_AddStringToObject(iss, "type", issues[i].type);
-      if (issues[i].memory_id)
-         cJSON_AddNumberToObject(iss, "memory_id", (double)issues[i].memory_id);
-      cJSON_AddStringToObject(iss, "key", issues[i].key);
-      cJSON_AddStringToObject(iss, "message", issues[i].message);
-      cJSON_AddItemToArray(arr, iss);
    }
    return resp;
 }

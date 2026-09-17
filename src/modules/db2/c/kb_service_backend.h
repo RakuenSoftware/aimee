@@ -101,16 +101,6 @@ extern "C"
    int db2_kb_service_list_memory_ids_by_updated(int limit, int64_t *ids, int max_ids);
    int db2_kb_service_memory_record_exists(int64_t record_id);
    int db2_kb_service_kb_document_exists(int64_t document_id);
-   int db2_kb_service_directive_create(const char *question, const char *topic,
-                                       const char *anchor_entity, const char *anchor_file,
-                                       const char *cause, int priority, int64_t memory_a_id,
-                                       int64_t memory_b_id, const char *evidence,
-                                       const char *source_session, const char *valid_until,
-                                       int *dedup_out, cJSON **directive_out);
-   int db2_kb_service_directive_resolve(int64_t id, int64_t resolution_memory_id, const char *note);
-   int db2_kb_service_directive_suppress(int64_t id);
-   int db2_kb_service_directive_sweep_expired(void);
-   cJSON *db2_kb_service_directive_list_json(const char *state, const char *cause, int max_rows);
    /* Graph-derived code-health audit: dead exports, import cycles, clones. */
    int db2_code_audit_edge_target_like(const char *relation, const char *project, char *out,
                                        size_t cap);
@@ -237,15 +227,6 @@ extern "C"
    cJSON *db2_kb_service_memory_top_l2_facts_json(int max);
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
-   cJSON *db2_kb_service_memory_prospective_list_json(const char *state, int max);
-   cJSON *
-   db2_kb_service_memory_prospective_create_json(const char *trigger_text, const char *action_text,
-                                                 const char *anchor_entity, const char *anchor_file,
-                                                 const char *recurrence, const char *valid_until);
-   cJSON *db2_kb_service_memory_prospective_complete_json(int64_t id);
-   cJSON *db2_kb_service_memory_prospective_match_json(const char *turn_text,
-                                                       const char *active_entity,
-                                                       const char *active_file, int max);
    cJSON *db2_kb_service_memory_get_provenance_json(int64_t memory_id, int max);
    cJSON *db2_kb_service_memory_scope_visibility_rank_json(const int64_t *ids, int id_count,
                                                            const char *workspace,
@@ -254,9 +235,6 @@ extern "C"
    cJSON *db2_kb_service_memory_tag_workspace_json(int64_t memory_id, const char *workspace);
    cJSON *db2_kb_service_memory_tag_scope_json(int64_t memory_id, const char *scope_type,
                                                const char *scope_value);
-   cJSON *db2_kb_service_memory_prospective_mark_triggered_json(int64_t id);
-   cJSON *db2_kb_service_memory_prospective_sweep_expired_json(void);
-   cJSON *db2_kb_service_memory_maintenance_run_json(unsigned int modes, int force, int dry_run);
    cJSON *db2_kb_service_memory_alerts_json(const char *since);
    cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
                                                      const char *rule, double observed_confidence,
@@ -419,8 +397,6 @@ extern "C"
 
    cJSON *db2_kb_service_scene_list_json(int max_rows);
    cJSON *db2_kb_service_scene_members_json(int64_t scene_id, int max_rows);
-
-   cJSON *db2_kb_service_memory_lint_json(void);
 
 #ifdef __cplusplus
 }

@@ -61,6 +61,7 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
  (1,1,3,0,0),(2,0.99,1,3,0),(3,0.98,1,0,1),(4,0.8,1,0,0),(5,0.82,1,0,0);
  INSERT INTO memories(id,kind,key,confidence) VALUES(6,'fact','unrelated',0.7);
  INSERT INTO memories(id,lifecycle_state,activation_delay_turns) VALUES(7,'pending',3),(8,'pending',0);
+ INSERT INTO memories(id,lifecycle_state,activation_suppressed) VALUES(9,'pending',1);
  CREATE TEMP TABLE prospective_memories(id bigint,trigger_text text,action_text text,anchor_entity text,
  anchor_file text,recurrence text,state text,valid_until text,source_session text,trigger_count bigint,
  last_triggered_at text,created_at text,updated_at text);
@@ -100,7 +101,7 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 		t.Fatalf("graph bypass/backfill=%v %d %v", ids(records), held, err)
 	}
 	records, _, held, err = s.recallActivated(ctx, snapshot, "true", 5, false, true)
-	if err != nil || !reflect.DeepEqual(ids(records), []int64{8}) || held != 1 {
+	if err != nil || !reflect.DeepEqual(ids(records), []int64{8}) || held != 2 {
 		t.Fatalf("commitments=%v %d %v", ids(records), held, err)
 	}
 	// Current turn comes from the persisted conversation, even if no memory
@@ -171,6 +172,11 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 		bundle = recallBundle{}
 		if json.Unmarshal(reply.Payload, &bundle) != nil || bundle.Preferences[0].ID != 1 || bundle.Preferences[0].ActivationManaged {
 			t.Fatal("missing state did not fail open")
+		}
+		for _, item := range bundle.OpenCommitments {
+			if item.ID == 9 {
+				t.Fatal("missing state bypassed stored suppression")
+			}
 		}
 	}
 }

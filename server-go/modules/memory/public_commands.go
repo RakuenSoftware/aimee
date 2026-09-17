@@ -103,6 +103,15 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
+	if options.placement == PlacementKB && (verb == "maintenance_run" || verb == "lint") {
+		return handleMaintenanceCommand(options, invocation, verb, args)
+	}
+	if options.placement == PlacementKB && strings.HasPrefix(verb, "directive_") {
+		return handleDirectiveCommand(options, invocation, verb, args)
+	}
+	if options.placement == PlacementKB && strings.HasPrefix(verb, "prospective_") {
+		return handleProspectiveCommand(options, invocation, verb, args)
+	}
 	if options.placement == PlacementKB && verb == "recall" {
 		return handleRecallCommand(options, invocation, args)
 	}

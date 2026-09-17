@@ -11,6 +11,9 @@
 #include "aimee.h"
 #include "memory.h"
 #include "session_briefing.h"
+#include "module_commands.h"
+#include "aimee/memory/module_api.h"
+#include "cJSON.h"
 #include <aimee/skills/skill.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,87 +85,34 @@ static int sb_appendf(sb_str_t *s, const char *fmt, ...)
 
 char *session_briefing_render_commitments(int limit)
 {
-   if (limit <= 0)
-      limit = SESSION_BRIEFING_COMMITMENTS_DEFAULT_LIMIT;
-   if (limit > 32)
-      limit = 32;
-
-   memory_prospective_t rows[32];
-   int n = memory_prospective_list(MEMORY_PROSPECTIVE_STATE_ARMED, rows, limit);
-   if (n <= 0)
+   cJSON *args = cJSON_CreateObject();
+   if (!args)
       return NULL;
-
-   sb_str_t s = {0};
-   if (sb_appendf(&s, "# Open Commitments\n") != 0)
-   {
-      free(s.buf);
-      return NULL;
-   }
-   for (int i = 0; i < n; i++)
-   {
-      const char *trig = rows[i].trigger_text[0] ? rows[i].trigger_text : "(no trigger)";
-      const char *act = rows[i].action_text[0] ? rows[i].action_text : "(no action)";
-      if (rows[i].valid_until[0])
-      {
-         if (sb_appendf(&s, "- when `%.120s` → %.200s  [until %s]\n", trig, act,
-                        rows[i].valid_until) != 0)
-            break;
-      }
-      else
-      {
-         if (sb_appendf(&s, "- when `%.120s` → %.200s\n", trig, act) != 0)
-            break;
-      }
-   }
-   if (sb_appendf(&s, "\n") != 0)
-   {
-      free(s.buf);
-      return NULL;
-   }
-   return s.buf;
+   cJSON_AddNumberToObject(args, "limit", limit);
+   cJSON *response = aimee_module_command_call(
+       AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND, "prospective_briefing", args);
+   cJSON_Delete(args);
+   const char *block =
+       response ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block")) : NULL;
+   char *result = block && block[0] ? strdup(block) : NULL;
+   cJSON_Delete(response);
+   return result;
 }
 
 char *session_briefing_render_directives(int limit)
 {
-   if (limit <= 0)
-      limit = SESSION_BRIEFING_DIRECTIVES_DEFAULT_LIMIT;
-   if (limit > 32)
-      limit = 32;
-
-   /* memory_directive_list orders by priority DESC, created DESC — top
-    * of the list is the most urgent open question. */
-   memory_directive_t rows[32];
-   int n = memory_directive_list("open", NULL, rows, limit);
-   if (n <= 0)
+   cJSON *args = cJSON_CreateObject();
+   if (!args)
       return NULL;
-
-   sb_str_t s = {0};
-   if (sb_appendf(&s, "# Open Questions\n") != 0)
-   {
-      free(s.buf);
-      return NULL;
-   }
-   for (int i = 0; i < n; i++)
-   {
-      const char *q = rows[i].question[0] ? rows[i].question : "(unnamed)";
-      const char *cause = rows[i].cause[0] ? rows[i].cause : "";
-      if (cause[0])
-      {
-         if (sb_appendf(&s, "- [p%d · %s] %.300s\n", rows[i].priority, cause, q) != 0)
-            break;
-      }
-      else
-      {
-         if (sb_appendf(&s, "- [p%d] %.300s\n", rows[i].priority, q) != 0)
-            break;
-      }
-   }
-   if (sb_appendf(&s, "\n") != 0)
-   {
-      free(s.buf);
-      return NULL;
-   }
-   return s.buf;
+   cJSON_AddNumberToObject(args, "limit", limit);
+   cJSON *response = aimee_module_command_call(
+       AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND, "directive_briefing", args);
+   cJSON_Delete(args);
+   const char *block =
+       response ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block")) : NULL;
+   char *result = block && block[0] ? strdup(block) : NULL;
+   cJSON_Delete(response);
+   return result;
 }
 
 char *session_briefing_render_skill_index(const char *project_root, int limit)

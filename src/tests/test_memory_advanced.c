@@ -15,7 +15,6 @@
 #include "modules/db2/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
 #include "modules/db2/c/memory_scope_query.h"
 #include "modules/memory/memory_ontology.h"
-#include "modules/memory/memory_platform.h"
 #include "../modules/db2/c/bandit.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
@@ -216,13 +215,6 @@ int main(void)
 
    /* DB1 is required by the maintenance cycle (maintenance_state table). */
    assert(db1_init(":memory:") == 0);
-
-   /* This suite exercises memory state transitions, not the asynchronous
-    * embedder. Leaving background embedding enabled makes every insert fork a
-    * detached KB RPC worker even though no service exists in this fixture. On
-    * the real-Postgres shard those children can outlive their test cases and
-    * obscure the suite's runtime. Embedding has dedicated coverage elsewhere. */
-   int background_embed_was_suppressed = platform_memory_background_embed_set_suppressed(1);
 
    /* DB2 backed by an in-memory sqlite shim. Test seeds use aimee_pg_*
     * against db2_conn() — same surface production code uses. */
@@ -2656,7 +2648,6 @@ int main(void)
    test_memory_rejection_governance();
    test_long_content_survives_store_and_merge();
    db2_test_shim_close();
-   platform_memory_background_embed_set_suppressed(background_embed_was_suppressed);
    db1_shutdown();
 
    printf("all tests passed\n");

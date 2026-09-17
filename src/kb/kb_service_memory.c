@@ -451,153 +451,51 @@ static int kb_handle_session_briefing_section(int fd, cJSON *req, cJSON *(*fn)(i
 
 int kb_handle_memory_prospective_list(int fd, cJSON *req)
 {
-   cJSON *state_j = cJSON_GetObjectItemCaseSensitive(req, "state");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   const char *state =
-       (cJSON_IsString(state_j) && state_j->valuestring[0]) ? state_j->valuestring : NULL;
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 50;
-   cJSON *resp = db2_kb_service_memory_prospective_list_json(state, limit);
-   return kb_reply_or_error(fd, resp, "failed to list prospective memories");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "prospective_list", req);
+   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
 }
 
 int kb_handle_memory_prospective_create(int fd, cJSON *req)
 {
-   cJSON *t = cJSON_GetObjectItemCaseSensitive(req, "trigger_text");
-   cJSON *a = cJSON_GetObjectItemCaseSensitive(req, "action_text");
-   if (!cJSON_IsString(t) || !t->valuestring[0])
-      return kb_send_error(fd, "missing trigger_text");
-   if (!cJSON_IsString(a) || !a->valuestring[0])
-      return kb_send_error(fd, "missing action_text");
-   cJSON *ae = cJSON_GetObjectItemCaseSensitive(req, "anchor_entity");
-   cJSON *af = cJSON_GetObjectItemCaseSensitive(req, "anchor_file");
-   cJSON *re = cJSON_GetObjectItemCaseSensitive(req, "recurrence");
-   cJSON *vu = cJSON_GetObjectItemCaseSensitive(req, "valid_until");
-   const char *ae_s = cJSON_IsString(ae) ? ae->valuestring : "";
-   const char *af_s = cJSON_IsString(af) ? af->valuestring : "";
-   const char *re_s = cJSON_IsString(re) ? re->valuestring : NULL;
-   const char *vu_s = cJSON_IsString(vu) ? vu->valuestring : "";
-   cJSON *resp = db2_kb_service_memory_prospective_create_json(t->valuestring, a->valuestring, ae_s,
-                                                               af_s, re_s, vu_s);
-   return kb_reply_or_error(fd, resp, "failed to create prospective memory");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "prospective_create", req);
+   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
 }
 
 int kb_handle_directive_create(int fd, cJSON *req)
 {
-   cJSON *q = cJSON_GetObjectItemCaseSensitive(req, "question");
-   cJSON *topic = cJSON_GetObjectItemCaseSensitive(req, "topic");
-   cJSON *entity = cJSON_GetObjectItemCaseSensitive(req, "entity");
-   cJSON *file = cJSON_GetObjectItemCaseSensitive(req, "file");
-   cJSON *cause = cJSON_GetObjectItemCaseSensitive(req, "cause");
-   cJSON *pri = cJSON_GetObjectItemCaseSensitive(req, "priority");
-   cJSON *session = cJSON_GetObjectItemCaseSensitive(req, "session");
-   cJSON *valid_until = cJSON_GetObjectItemCaseSensitive(req, "valid_until");
-   if (!cJSON_IsString(q) || !q->valuestring[0])
-      return kb_send_error(fd, "missing question");
-
-   const char *question = q->valuestring;
-   const char *topic_s = (cJSON_IsString(topic) && topic->valuestring[0]) ? topic->valuestring : "";
-   const char *entity_s =
-       (cJSON_IsString(entity) && entity->valuestring[0]) ? entity->valuestring : "";
-   const char *file_s = (cJSON_IsString(file) && file->valuestring[0]) ? file->valuestring : "";
-   const char *cause_s = (cJSON_IsString(cause) && cause->valuestring[0])
-                             ? cause->valuestring
-                             : MEMORY_DIRECTIVE_CAUSE_USER_FOLLOW_UP;
-   int priority = cJSON_IsNumber(pri) ? (int)pri->valuedouble : 50;
-   const char *session_s =
-       (cJSON_IsString(session) && session->valuestring[0]) ? session->valuestring : "";
-   const char *valid_s =
-       (cJSON_IsString(valid_until) && valid_until->valuestring[0]) ? valid_until->valuestring : "";
-
-   int dedup = 0;
-   cJSON *directive = NULL;
-   int rc = db2_kb_service_directive_create(question, topic_s, entity_s, file_s, cause_s, priority,
-                                            0, 0, "", session_s, valid_s, &dedup, &directive);
-   if (rc != 0)
-      return kb_send_error(fd, "memory directive create failed");
-
-   cJSON *resp = jo_ok();
-   cJSON_AddBoolToObject(resp, "dedup", dedup ? 1 : 0);
-   if (directive)
-      cJSON_AddItemToObject(resp, "directive", directive);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "directive_create", req);
+   return kb_reply_or_error(fd, resp, "memory directive module unavailable");
 }
 
 int kb_handle_directive_resolve(int fd, cJSON *req)
 {
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
-   cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(req, "with_memory");
-   cJSON *note_j = cJSON_GetObjectItemCaseSensitive(req, "note");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "missing id");
-   int64_t id = (int64_t)id_j->valuedouble;
-   int64_t with_memory = cJSON_IsNumber(mem_j) ? (int64_t)mem_j->valuedouble : 0;
-   const char *note =
-       (cJSON_IsString(note_j) && note_j->valuestring[0]) ? note_j->valuestring : NULL;
-
-   int rc = db2_kb_service_directive_resolve(id, with_memory, note);
-
-   if (rc != 0)
-      return kb_send_error(fd, "could not resolve directive (not open or missing)");
-
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "id", (double)id);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "directive_resolve", req);
+   return kb_reply_or_error(fd, resp, "memory directive module unavailable");
 }
 
 int kb_handle_directive_suppress(int fd, cJSON *req)
 {
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "missing id");
-   int64_t id = (int64_t)id_j->valuedouble;
-
-   int rc = db2_kb_service_directive_suppress(id);
-
-   if (rc != 0)
-      return kb_send_error(fd, "could not suppress directive (not open or missing)");
-
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "id", (double)id);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "directive_suppress", req);
+   return kb_reply_or_error(fd, resp, "memory directive module unavailable");
 }
 
 int kb_handle_directive_sweep_expired(int fd, cJSON *req)
 {
-   (void)req;
-   int n = db2_kb_service_directive_sweep_expired();
-   if (n < 0)
-      return kb_send_error(fd, "failed to sweep expired directives");
-
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "expired", n);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "directive_sweep_expired", req);
+   return kb_reply_or_error(fd, resp, "memory directive module unavailable");
 }
 
 int kb_handle_directive_list(int fd, cJSON *req)
 {
-   cJSON *state_j = cJSON_GetObjectItemCaseSensitive(req, "state");
-   cJSON *cause_j = cJSON_GetObjectItemCaseSensitive(req, "cause");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   const char *state =
-       (cJSON_IsString(state_j) && state_j->valuestring[0]) ? state_j->valuestring : NULL;
-   const char *cause =
-       (cJSON_IsString(cause_j) && cause_j->valuestring[0]) ? cause_j->valuestring : NULL;
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 50;
-   if (limit < 1)
-      limit = 1;
-   if (limit > 256)
-      limit = 256;
-
-   cJSON *resp = db2_kb_service_directive_list_json(state, cause, limit);
-   return kb_reply_or_error(fd, resp, "failed to list directives");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "directive_list", req);
+   return kb_reply_or_error(fd, resp, "memory directive module unavailable");
 }
 
 int kb_handle_memory_episode_card_generate(int fd, cJSON *req)
@@ -676,25 +574,16 @@ int kb_handle_memory_get_provenance(int fd, cJSON *req)
 
 int kb_handle_memory_prospective_match(int fd, cJSON *req)
 {
-   cJSON *t = cJSON_GetObjectItemCaseSensitive(req, "turn_text");
-   cJSON *ae = cJSON_GetObjectItemCaseSensitive(req, "active_entity");
-   cJSON *af = cJSON_GetObjectItemCaseSensitive(req, "active_file");
-   cJSON *m = cJSON_GetObjectItemCaseSensitive(req, "max");
-   const char *t_s = cJSON_IsString(t) ? t->valuestring : NULL;
-   const char *ae_s = cJSON_IsString(ae) ? ae->valuestring : NULL;
-   const char *af_s = cJSON_IsString(af) ? af->valuestring : NULL;
-   int max = cJSON_IsNumber(m) ? (int)m->valuedouble : 3;
-   cJSON *resp = db2_kb_service_memory_prospective_match_json(t_s, ae_s, af_s, max);
-   return kb_reply_or_error(fd, resp, "failed to match prospective memories");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "prospective_match", req);
+   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
 }
 
 int kb_handle_memory_prospective_mark_triggered(int fd, cJSON *req)
 {
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "missing id");
-   cJSON *resp = db2_kb_service_memory_prospective_mark_triggered_json((int64_t)id_j->valuedouble);
-   return kb_reply_or_error(fd, resp, "failed to mark prospective triggered");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "prospective_mark_triggered", req);
+   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
 }
 
 int kb_handle_memory_list_conflicts(int fd, cJSON *req)
@@ -1051,37 +940,30 @@ int kb_handle_memory_recall(int fd, cJSON *req)
 
 int kb_handle_memory_prospective_sweep_expired(int fd, cJSON *req)
 {
-   (void)req;
-   cJSON *resp = db2_kb_service_memory_prospective_sweep_expired_json();
-   return kb_reply_or_error(fd, resp, "failed to sweep prospective memories");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "prospective_sweep_expired", req);
+   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
 }
 
 int kb_handle_memory_maintenance_run(int fd, cJSON *req)
 {
-   cJSON *modes_j = cJSON_GetObjectItemCaseSensitive(req, "modes");
-   cJSON *force_j = cJSON_GetObjectItemCaseSensitive(req, "force");
-   cJSON *dry_j = cJSON_GetObjectItemCaseSensitive(req, "dry_run");
-   unsigned int modes = cJSON_IsNumber(modes_j) ? (unsigned int)modes_j->valuedouble : 0;
-   int force = cJSON_IsBool(force_j) ? (cJSON_IsTrue(force_j) ? 1 : 0) : 0;
-   int dry_run = cJSON_IsBool(dry_j) ? (cJSON_IsTrue(dry_j) ? 1 : 0) : 0;
-   cJSON *resp = db2_kb_service_memory_maintenance_run_json(modes, force, dry_run);
-   return kb_reply_or_error(fd, resp, "failed to run memory maintenance");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "maintenance_run", req);
+   return kb_reply_or_error(fd, resp, "memory maintenance module unavailable");
 }
 
 int kb_handle_memory_lint(int fd, cJSON *req)
 {
-   (void)req;
-   cJSON *resp = db2_kb_service_memory_lint_json();
-   return kb_reply_or_error(fd, resp, "failed to run memory lint");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "lint", req);
+   return kb_reply_or_error(fd, resp, "memory maintenance module unavailable");
 }
 
 int kb_handle_memory_prospective_complete(int fd, cJSON *req)
 {
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "missing id");
-   cJSON *resp = db2_kb_service_memory_prospective_complete_json((int64_t)id_j->valuedouble);
-   return kb_reply_or_error(fd, resp, "failed to complete prospective memory");
+   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
+                                           "prospective_complete", req);
+   return kb_reply_or_error(fd, resp, "prospective memory module unavailable");
 }
 
 int kb_handle_session_briefing_commitments(int fd, cJSON *req)

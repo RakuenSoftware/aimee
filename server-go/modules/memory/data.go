@@ -131,6 +131,7 @@ type Record struct {
 }
 
 type DataResponse struct {
+	Deduplicated       bool                 `json:"deduplicated,omitempty"`
 	FactWrite          *FactWriteDecision   `json:"fact_write,omitempty"`
 	Records            []Record             `json:"records"`
 	Deleted            bool                 `json:"deleted,omitempty"`
@@ -791,7 +792,11 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	if request.Limit == 0 {
 		request.Limit = 20
 	}
-	if request.Limit < 1 || request.Limit > 100 || len(request.Kind) > 64 ||
+	maxLimit := 100
+	if request.Operation == "prospective-list" || request.Operation == "directive-list" || request.Operation == "lint" {
+		maxLimit = 256
+	}
+	if request.Limit < 1 || request.Limit > maxLimit || len(request.Kind) > 64 ||
 		len(request.Tier) > 16 || len(request.Key) > 4096 || len(request.Query) > 16384 ||
 		len(request.Content) > 512*1024 || len(request.Workspace) > 1024 ||
 		len(request.Project) > 1024 || len(request.SignalType) > 64 || len(request.Rule) > 512*1024 ||
@@ -1432,7 +1437,13 @@ set_config('aimee.memory_scope_all',$5,true)`,
 				return nil, bus.ModuleStatusInvalidRequest
 			}
 			var item Directive
-			item, err = directives.DirectiveCreate(ctx, request)
+			if creator, ok := directives.(interface {
+				DirectiveCreateWithOutcome(context.Context, DataRequest) (Directive, bool, error)
+			}); ok {
+				item, response.Deduplicated, err = creator.DirectiveCreateWithOutcome(ctx, request)
+			} else {
+				item, err = directives.DirectiveCreate(ctx, request)
+			}
 			response.Directives = []Directive{item}
 		case "directive-list":
 			response.Directives, err = directives.DirectiveList(ctx, request.State, request.Cause, request.Limit)

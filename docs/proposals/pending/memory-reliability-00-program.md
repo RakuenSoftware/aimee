@@ -115,6 +115,11 @@ KB recall now decodes activation snapshots and applies cooldown, delay, sticky
 relevance, suppression, and graph backfill in Go. PostgreSQL regressions exercise
 both the selector and the public command. The native activation contract and
 its discarded-snapshot wrapper are removed; DB1 still owns persisted turn state.
+Prospective-memory, directive, lint, and maintenance command handling is now Go,
+including reminder/directive dashboards and session-start rendering. The native
+CRUD adapters and duplicate directive SQL are removed. Their PostgreSQL tests
+cover lifecycle, deduplication, list caps, matching, and dry-run scheduling.
+Unused background-embedding C hooks and their suppression state are retired.
 The current inventory is seven C sources and nine headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

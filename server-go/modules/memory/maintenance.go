@@ -167,6 +167,9 @@ WHERE lifecycle_state='active' AND tier IN ('L0','L1') AND updated_at<pg_now_tex
 		return out, err
 	}
 	out.ElapsedMS = float64(time.Since(started).Microseconds()) / 1000
+	if dryRun {
+		return out, nil
+	}
 	encoded, err := json.Marshal(out)
 	if err != nil {
 		return out, err

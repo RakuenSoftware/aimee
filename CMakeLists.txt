@@ -1141,7 +1141,6 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/http/kb_http_releases.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_reflections.c
     ${AIMEE_SRC_DIR}/kb/kb_ingest_normalize.c
-    ${AIMEE_SRC_DIR}/kb/kb_memory_embed.c
 )
 set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/integrity_ingress.c

@@ -64,7 +64,6 @@ UNBUILT_SOURCES = {
     "test_kb_mgmt_token_authority_daemon_stop.c",
     "test_learning_metrics.c",
     "test_learning_regret.c",
-    "test_memory_activation.c",
     "test_memory_advanced.c",
     "test_memory_candidate_fusion.c",
     "test_memory_embed_batch.c",
