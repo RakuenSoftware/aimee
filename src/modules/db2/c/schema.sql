@@ -17676,7 +17676,7 @@ BEGIN
     RETURN;
   END IF;
   FOREACH relation_name IN ARRAY ARRAY[
-    'anti_patterns','code_index_ops','decision_log','derived_memory_registry','derived_memory_dependencies','derived_rederivation_queue',
+    'anti_patterns','bandit_decisions','bandit_arm_stats','code_index_ops','decision_log','derived_memory_registry','derived_memory_dependencies','derived_rederivation_queue',
     'entity_aliases','entity_edges','entity_registry',
     'epistemic_directives','fact_graph_changes','fact_graph_commits',
     'kb_async_jobs','kb_meta','memories','memory_conflicts',
@@ -17700,7 +17700,7 @@ BEGIN
   END LOOP;
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id) ON artifacts TO aimee_store_runtime;
-  GRANT SELECT ON tasks, fact_evidence, docs, evidence_lifecycle_settings,
+  GRANT SELECT ON bandit_promotions, tasks, fact_evidence, docs, evidence_lifecycle_settings,
     memory_event_frames, memory_temporal_refs, memory_active_embedder, kb_embeddings, kb_documents,
     document_versions, derivation_policy_versions TO aimee_store_runtime;
   GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT),

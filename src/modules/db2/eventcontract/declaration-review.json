@@ -473,13 +473,6 @@
       "reason": "The cJSON facts response is a compatibility view; a bounded typed memory query returns canonical fact records."
     },
     {
-      "symbol": "db2_kb_service_memory_find_facts_json",
-      "signature_sha256": "da7b66ffc25d1c4e1e7ca54f65dfffb2968441f2d56186bf7d7d3fef2a3a3df2",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON fact-search response does not cross the typed ABI; a bounded query returns structured matches and truncation evidence."
-    },
-    {
       "symbol": "db2_kb_service_note_create_json",
       "signature_sha256": "b38f3d397de14bdd287340a701dad79c0a8d60ef73e6b0d66c505fa0a2c96b50",
       "disposition": "private-db2",

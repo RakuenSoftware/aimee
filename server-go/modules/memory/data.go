@@ -29,15 +29,16 @@ const (
 )
 
 type DataRequest struct {
-	Detail     bool              `json:"detail,omitempty"`
-	Timings    bool              `json:"timings,omitempty"`
-	FailedOnly bool              `json:"failed_only,omitempty"`
-	ResetStuck bool              `json:"reset_stuck,omitempty"`
-	TagScope   *Scope            `json:"tag_scope,omitempty"`
-	PublicView bool              `json:"public_view,omitempty"`
-	Activation json.RawMessage   `json:"activation,omitempty"`
-	FactWrite  *FactWriteRequest `json:"fact_write,omitempty"`
-	CodeIndex  *CodeIndexRequest `json:"code_index,omitempty"`
+	AutomaticLimit bool              `json:"automatic_limit,omitempty"`
+	Detail         bool              `json:"detail,omitempty"`
+	Timings        bool              `json:"timings,omitempty"`
+	FailedOnly     bool              `json:"failed_only,omitempty"`
+	ResetStuck     bool              `json:"reset_stuck,omitempty"`
+	TagScope       *Scope            `json:"tag_scope,omitempty"`
+	PublicView     bool              `json:"public_view,omitempty"`
+	Activation     json.RawMessage   `json:"activation,omitempty"`
+	FactWrite      *FactWriteRequest `json:"fact_write,omitempty"`
+	CodeIndex      *CodeIndexRequest `json:"code_index,omitempty"`
 	// Accepted for old callers, but never used to override instance configuration.
 	GraphCodeFusionState  string    `json:"graph_code_fusion_state,omitempty"`
 	Operation             string    `json:"operation"`
@@ -1400,6 +1401,12 @@ set_config('aimee.correlation_id',$9,true)`,
 		} else {
 			response.Records, err = options.data.Search(ctx, scope, query, request.Kind, request.Tier, request.Limit)
 		}
+	case "adaptive-search":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Records, err = backend.adaptiveSearch(ctx, request)
 	case "visible-search":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusInvalidRequest

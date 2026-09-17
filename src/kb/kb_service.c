@@ -926,7 +926,6 @@ static const struct
     {"dashboard.reminders", kb_handle_dashboard_reminders},
     {"dashboard.recall", kb_handle_dashboard_recall},
     {"dashboard.directives", kb_handle_dashboard_directives},
-    {"memory.find_facts", kb_handle_memory_find_facts},
     {"session_briefing.commitments", kb_handle_session_briefing_commitments},
     {"session_briefing.directives", kb_handle_session_briefing_directives},
     {"memory.assemble_typed_context", kb_handle_memory_assemble_typed_context},

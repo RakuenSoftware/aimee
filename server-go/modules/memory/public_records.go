@@ -88,6 +88,16 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 		return commandResult(commandError("invalid_argument", message))
 	}
 	switch verb {
+	case "find_facts":
+		var ok bool
+		request.Query, ok = args.stringValue("query")
+		if !ok {
+			return invalid("memory.find_facts requires query")
+		}
+		request.Operation, request.Limit = "adaptive-search", args.limit("limit", 20, 64)
+		_, explicit := args.number("limit")
+		request.AutomaticLimit = !explicit
+		scoped = commandScope(args, &request)
 	case "find_facts_visible", "find_facts_scoped":
 		var ok bool
 		request.Query, ok = args.stringValue("query")
@@ -190,7 +200,7 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 		if verb == "fact_history" {
 			key = "history"
 		}
-		if verb == "find_facts_visible" || verb == "find_facts_scoped" {
+		if verb == "find_facts" || verb == "find_facts_visible" || verb == "find_facts_scoped" {
 			key = "facts"
 		}
 		if response.PublicRecords == nil {

@@ -391,3 +391,8 @@ longer use the fixed memory ABI. Reference capture retains the stored version
 and provenance retains source_session; both fields were being discarded by
 the legacy adapter. The CLI cognifier reads full content through the authenticated
 KB transport. Session pruning also invokes the shared Go maintenance command.
+
+Default fact search and adaptive limits now run in Go. Explicit limits bypass
+sampling; automatic retrieval honors promoted limits, bounded sidecar output and
+the exploration budget. Policy telemetry uses savepoints so failures cannot abort
+retrieval. Reward closure and posterior updates are atomic and idempotent.

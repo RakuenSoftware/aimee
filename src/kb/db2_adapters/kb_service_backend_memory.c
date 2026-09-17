@@ -15,97 +15,11 @@
 #include "modules/db2/c/kb_payload.h"      /* db2_kb_async_enqueue */
 #include "modules/db2/c/decision_log.h"
 #include "memory.h"
-#include <aimee/memory/module_api.h> /* memory_content_dup / memory_valid_at */
-#include "modules/db2/c/memory_payload.h"
-#include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/memory_scope_query.h"
 #include "session_briefing.h"
 #include "modules/db2/c/tasks.h"
 
 #include <stdlib.h>
 #include <string.h>
-
-static cJSON *kbs_memory_row_to_json(const memory_t *m)
-{
-   cJSON *obj = cJSON_CreateObject();
-   if (!obj)
-      return NULL;
-   cJSON_AddNumberToObject(obj, "id", (double)m->id);
-   cJSON_AddStringToObject(obj, "tier", m->tier);
-   cJSON_AddStringToObject(obj, "kind", m->kind);
-   cJSON_AddStringToObject(obj, "key", m->key);
-   db2_memory_summary_row_t summaries[4];
-   int summary_n = db2_memory_summaries_list(m->id, 4, summaries, 4);
-   const char *headline = "";
-   for (int i = 0; i < summary_n; i++)
-      if (strcmp(summaries[i].scope, "headline") == 0 && summaries[i].summary[0])
-      {
-         headline = summaries[i].summary;
-         break;
-      }
-   if (!headline[0] && summary_n > 0)
-      headline = summaries[0].summary;
-   cJSON_AddStringToObject(obj, "headline", headline);
-   cJSON_AddStringToObject(obj, "content", m->content);
-   cJSON_AddStringToObject(obj, "use_cases", m->use_cases);
-   cJSON_AddNumberToObject(obj, "confidence", m->confidence);
-   cJSON_AddNumberToObject(obj, "use_count", m->use_count);
-   cJSON_AddStringToObject(obj, "last_used_at", m->last_used_at);
-   cJSON_AddStringToObject(obj, "created_at", m->created_at);
-   cJSON_AddStringToObject(obj, "updated_at", m->updated_at);
-   cJSON_AddStringToObject(obj, "source_session", m->source_session);
-   cJSON_AddStringToObject(obj, "provenance_category", m->provenance_category);
-   cJSON_AddNumberToObject(obj, "retrieval_score", m->retrieval_score);
-   cJSON_AddNumberToObject(obj, "hybrid_rank", m->hybrid_rank);
-   return obj;
-}
-
-/* memory_t intentionally remains a bounded ranking/working-set value, but a
- * read-by-id response is an audit surface and must return the row verbatim.
- * Fetch content separately so this one JSON path does not inherit the
- * memory_t.content[2048] cap. The same scope predicate as db2_memory_get keeps
- * the second query from widening visibility. */
-cJSON *db2_kb_service_memory_find_facts_json(const char *query, int limit)
-{
-   if (limit < 1)
-      limit = 20;
-   if (limit > 64)
-      limit = 64;
-
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "facts") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-
-   memory_t facts[64];
-   db2_memory_scope_context_t scope;
-   db2_memory_scope_context_get(&scope);
-   int n = scope.active
-               ? memory_find_facts_visible_ex(query ? query : "", scope.workspace, scope.project,
-                                              scope.include_all, limit, facts, 64)
-               : memory_find_facts(query ? query : "", limit, facts, 64);
-   if (n < 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "memory retrieval index unavailable");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = kbs_memory_row_to_json(&facts[i]);
-      if (!obj)
-      {
-         cJSON_Delete(resp);
-         return NULL;
-      }
-      cJSON_AddItemToArray(arr, obj);
-   }
-   return resp;
-}
 
 cJSON *db2_kb_service_session_briefing_commitments_json(int limit)
 {

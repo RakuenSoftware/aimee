@@ -6,7 +6,6 @@
 
 #include "cJSON.h"
 
-int kb_handle_memory_find_facts(int fd, cJSON *req);
 int kb_handle_session_briefing_commitments(int fd, cJSON *req);
 int kb_handle_session_briefing_directives(int fd, cJSON *req);
 int kb_handle_memory_assemble_typed_context(int fd, cJSON *req);

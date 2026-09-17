@@ -988,18 +988,6 @@ extern "C"
    /* DELETE FROM memory_episodes WHERE memory_id = ?. Best-effort. */
    void db2_memory_episodes_delete_for_memory(int64_t memory_id);
 
-   /* (scope, summary) row from memory_summaries. */
-   typedef struct
-   {
-      char scope[64];
-      char summary[2048];
-   } db2_memory_summary_row_t;
-
-   /* List memory_summaries rows for a memory_id, ORDER BY id ASC.
-    * limit <= 0 means unlimited (still capped by `max`). */
-   int db2_memory_summaries_list(int64_t memory_id, int limit, db2_memory_summary_row_t *out,
-                                 int max);
-
    /* INSERT OR UPDATE memory_summaries(memory_id, scope, summary).
     * Empty `scope` defaults to "headline". Best-effort; no return. */
    void db2_memory_summary_upsert(int64_t memory_id, const char *scope, const char *summary);

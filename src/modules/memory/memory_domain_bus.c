@@ -691,37 +691,3 @@ int db2_memory_restore(int64_t memory_id, const char *actor)
    cJSON_Delete(response);
    return updated ? 0 : -1;
 }
-
-int db2_memory_summaries_list(int64_t memory_id, int limit, db2_memory_summary_row_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   if (limit <= 0 || limit > max)
-      limit = max;
-   cJSON *request = domain_request("summaries");
-   if (!request || !cJSON_AddNumberToObject(request, "id", (double)memory_id) ||
-       !cJSON_AddNumberToObject(request, "limit", limit))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *items = response ? cJSON_GetObjectItemCaseSensitive(response, "summaries") : NULL;
-   if (!cJSON_IsArray(items))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(items);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-   {
-      const cJSON *item = cJSON_GetArrayItem(items, i);
-      memset(&out[i], 0, sizeof(out[i]));
-      domain_copy(out[i].scope, sizeof(out[i].scope), item, "scope");
-      domain_copy(out[i].summary, sizeof(out[i].summary), item, "summary");
-   }
-   cJSON_Delete(response);
-   return n;
-}

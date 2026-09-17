@@ -73,6 +73,8 @@
     "server-go/modules/memory/workflow.go",
     "server-go/modules/memory/runtime_learning_test.go",
     "server-go/modules/memory/runtime_record_test.go",
+    "server-go/modules/memory/retrieval_policy.go",
+    "server-go/modules/memory/retrieval_policy_test.go",
     "server-go/modules/memory/vector_maintenance.go",
     "server-go/modules/memory/vector_repair.go",
     "server-go/modules/memory/vector_verify.go",
