@@ -508,6 +508,14 @@ jobs:
             done
           done
           GOPROXY='https://proxy.golang.org|direct' make -C src go-unit-tests
+      - name: Build memory process and Go client without cgo
+        working-directory: server-go
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go build -o "$RUNNER_TEMP/aimee-module-memory" ./cmd/aimee-module
+          go build -o "$RUNNER_TEMP/aimee-memory-bus-probe" ./modules/memory/cmd/aimee-memory-bus-probe
+          test -z "$(go list -deps -f '{{if .CgoFiles}}{{.ImportPath}}{{end}}' ./cmd/aimee-module ./modules/memory/cmd/aimee-memory-bus-probe)"
       - name: Routing live-gate contract
         run: python3 -I scripts/tests/test_live_routing.py
       - name: Install govulncheck

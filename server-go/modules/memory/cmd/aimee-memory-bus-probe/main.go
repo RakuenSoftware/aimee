@@ -32,8 +32,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "caller: %v\n", err)
 		os.Exit(1)
 	}
-	reply, err := caller.Call(ctx, memory.EventData, memory.StageData, 0, 15*time.Second,
-		[]byte(os.Args[2]))
+	memoryClient, err := memory.NewClient(caller, 15*time.Second)
+	if err != nil {
+		caller.CloseAndWait()
+		client.Detach()
+		fmt.Fprintf(os.Stderr, "memory client: %v\n", err)
+		os.Exit(1)
+	}
+	reply, err := memoryClient.DataJSON(ctx, 0, []byte(os.Args[2]))
 	caller.CloseAndWait()
 	client.Detach()
 	if err != nil {

@@ -89,6 +89,25 @@ local embedding, personal vector persistence, and local-model inference.
 Structured reminders and directives remain KB-placement operations requiring
 the shared schema; personal recall does not imply those shared operations are local.
 
+## Go caller migration
+
+`server-go/modules/memory/client.go` implements the Go caller for all seven
+stages using the existing module bus. It shares wire constants and request/result
+types with the handler, bounds requests and replies, and preserves transport
+errors without retries or local memory decisions. The caller supplies its admitted
+bus connection and trace ID. Scope travels unchanged to the placement owner for
+validation. A request context can shorten the configured call deadline.
+
+The live `aimee-memory-bus-probe` now uses this client. Its principal remains
+test-only and requires an explicit probe grant. The client borrows the connection;
+its owner must drain the concurrent bus caller before detaching.
+
+This is the first G0 implementation slice from the memory reliability proposals.
+Production C memory clients, native headers and gateway integration still need
+replacement by Go callers. They must be deleted at cutover, not moved into host
+directories. Passing a pure-Go process/client build does not complete G0 while
+those C paths remain.
+
 ## Data and migrations
 
 The Server placement persists private rows in `user_memories`; the KB placement

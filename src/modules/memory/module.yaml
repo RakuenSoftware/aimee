@@ -55,7 +55,8 @@
     "server-go/modules/memory/personal_vectors.go",
     "server-go/modules/memory/code_index.go",
     "server-go/modules/memory/code_query.go",
-    "server-go/modules/memory/code_vectors.go"
+    "server-go/modules/memory/code_vectors.go",
+    "server-go/modules/memory/client.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -75,7 +76,8 @@
     "server-go/modules/memory/redirect_test.go",
     "server-go/modules/memory/retrieval_eval_test.go",
     "server-go/modules/memory/runtime_role_test.go",
-    "server-go/modules/memory/code_index_test.go"
+    "server-go/modules/memory/code_index_test.go",
+    "server-go/modules/memory/client_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h",
