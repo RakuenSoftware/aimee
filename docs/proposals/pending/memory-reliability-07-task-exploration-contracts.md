@@ -22,6 +22,8 @@ The attention guard and execution-policy source-discovery check must consume the
 
 Persist a host-owned contract in existing task/session state. A local read-only reference or protected cache may expose it to hooks; the agent cannot author the authoritative file. Include contract ID/revision, task/session/principal, project/worktree generation, plan/receipt digest, requirement coverage, confidence provenance, supported tool classes, creation/expiry time and supplementary limits.
 
+Consume coverage, index freshness and recovery-gap results from the Go memory contract. Task runtime owns contract issuance and execution policy owns enforcement; neither duplicates memory eligibility or sufficiency in a C hook or tool wrapper. Bind each consumed result to its memory plan/source versions so a module restart or incompatible result forces refresh or observe mode under baseline policy.
+
 Use typed limits: `enabled: false` disables the adaptive contract; a missing ceiling inherits operator policy; an explicit nonnegative number is a literal allowance. Normalize an absent operator ceiling to unbounded internally, not integer zero. Effective allowance is the minimum of remaining operator allowance and remaining contract allowance. Keep units and reset scopes separate: a session ceiling is not reset when a task revision changes.
 
 Budgets may cover raw scan invocations, distinct supplementary files, graph expansions and returned bytes/tokens. Reopening one file is not a new distinct file, but still consumes applicable read-byte/operation budgets. Recommended-file reads and indexed expansions remain subject to operator access and total work ceilings.

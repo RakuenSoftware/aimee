@@ -2,7 +2,7 @@
 
 - **State:** Proposed
 - **Priority:** P1 for candidate parity; P2 for fitted routing and exposure control
-- **Owner:** Retrieval and context selection
+- **Owner:** Go memory retrieval and context selection
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md); evaluate with [MR-08](memory-reliability-08-retrieval-health-telemetry.md)/[MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md)
 - **Delivery:** Four independently gated slices
 
@@ -14,7 +14,7 @@ Provide bounded independent arm pools, explicit fusion, limited prior influence 
 
 ## Integration points
 
-Use `server-go/modules/memory/{data.go,visibility_search.go,personal_vectors.go,fusion.go}` and `kbs_semantic_assertion_hybrid` in the typed context backend. Publish capabilities per endpoint: lexical, dense, graph, code, temporal mode, index readiness and fallback. An unavailable arm must not silently satisfy an endpoint's semantic-retrieval promise.
+Implement collection/fusion in `server-go/modules/memory/{data.go,visibility_search.go,personal_vectors.go,fusion.go}`. Migrate the memory semantics of `kbs_semantic_assertion_hybrid` from the typed context backend to that Go owner and switch its C callers to the shared contract. Publish capabilities per endpoint and placement: lexical, dense, graph, code, temporal mode, index readiness and fallback. An unavailable arm must not silently satisfy an endpoint's semantic-retrieval promise.
 
 ## Candidate collection and fusion
 

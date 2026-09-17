@@ -2,7 +2,7 @@
 
 - **State:** Proposed
 - **Priority:** P0: durable correctness
-- **Owner:** Memory admission and DB2
+- **Owner:** Go memory mutation admission, with PostgreSQL durable guards
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) for shared authorization vocabulary; admission fixes can begin immediately
 - **Delivery:** Three implementation slices
 
@@ -36,7 +36,13 @@ Tombstone matching must have a documented canonical identity and scope. Exact-te
 
 ## Transactions and history
 
-Resolve conflict identity under a transaction, compare the expected version, admit the transition, write the new version, append audit intent and invalidate derived dependants atomically where they share the durable owner. Other owners receive an idempotent invalidation event. Never delete the old row first and hope the replacement succeeds.
+Resolve conflict identity under a transaction, compare the expected version, admit the transition, write the new version, append audit intent and invalidate derived dependants atomically where they share the durable owner. For other owners, commit an invalidation outbox entry in that same transaction, or use an equivalent durable change log with the mutation's commit position. Publication after commit alone is insufficient. Never delete the old row first and hope the replacement succeeds.
+
+The producer retries delivery after restart until consumers have durably applied the event. Bind event identity to the source owner, record/version and change position. Consumers atomically apply invalidation and advance their replay position; duplicates and older events cannot restore freshness. Retain events until required consumers have acknowledged them, or require a full resynchronization after a retention gap. The mutation response confirms canonical commit; it does not claim that every derivative has caught up.
+
+Advance the affected scoped collection generation in the mutation transaction, including inserts that have no existing dependants. This supplies [MR-12](memory-reliability-12-served-memory-views-and-claim-cards.md)'s query-cache invalidation contract; it does not require that view implementation to exist first.
+
+A lagging consumer must obtain a current owner check before releasing affected derived content, or return unavailable. A stale local generation cannot certify its own freshness. [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) applies this delivery contract to lineage, caches and erasure coverage.
 
 User authority alone does not bypass the configured deletion/retention policy. A destructive operation must be explicit and auditable. Correction should be the normal path when historical evidence remains useful.
 
@@ -44,7 +50,7 @@ User authority alone does not bypass the configured deletion/retention policy. A
 
 1. Add transition rules and concurrency/idempotency tests; make all same-key conflict handling call the same admission function.
 2. Version model/user edits consistently and add new-author provenance plus confidence recomputation. Backfill only facts supported by existing records; legacy authorship remains `unknown` where necessary.
-3. Add durable guards for critical invariants, derived invalidation and compatibility-adapter parity. Expose conflict/review-required results to callers without silently retrying as a more privileged operation.
+3. Add durable guards for critical invariants, transactional invalidation publication, consumer replay and compatibility-adapter parity. Expose conflict/review-required results to callers without silently retrying as a more privileged operation.
 
 ## Acceptance gates
 
@@ -52,6 +58,8 @@ User authority alone does not bypass the configured deletion/retention policy. A
 - Episode and policy protections hold for insert conflicts, updates, bulk import and maintenance writers.
 - Concurrent corrections yield one admitted expected-version transition; the losing caller receives an actionable conflict.
 - A crash cannot leave the old version retired with no valid replacement or duplicate a correction on retry.
+- A crash after mutation commit but before publication still delivers the invalidation after restart. Duplicate or reordered delivery cannot mark an obsolete derivative fresh.
+- Consumer restart and retention gaps preserve or rebuild replay progress; a lagging consumer cannot release revoked content using its old local generation.
 - Rejected content, changed idempotency payloads and forged actor metadata fail consistently.
 - Audit records identify previous/new versions, author/reviewer, effective time and the exact approved content.
 

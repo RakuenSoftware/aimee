@@ -2,7 +2,7 @@
 
 - **State:** Proposed
 - **Priority:** P0: correctness foundation
-- **Owner:** Memory and DB2, with authenticated transport integration
+- **Owner:** Go memory module, with PostgreSQL storage and authenticated transport integration
 - **Depends on:** None; use the fixture harness in [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) from the first change
 - **Delivery:** Three reviewable implementation slices
 
@@ -14,7 +14,7 @@ Provide one versioned eligibility decision for every memory-bearing surface. Per
 
 ## Existing integration points
 
-Start in `server-go/modules/memory/{data.go,visibility_search.go,retrieval.go,fact_recall.go,fusion.go}` and the typed context backend `src/kb/db2_adapters/kb_service_backend_context.c`. Reuse `memory_row_scope_visible`, transaction-local request scope and existing semantic-assertion filters in `src/modules/db2/c/schema.sql`. A memory-row policy does not automatically protect fact edges, aliases, derived rows or cached projections; inventory those paths explicitly.
+Implement the shared eligibility decision in `server-go/modules/memory` and use it from `{data.go,visibility_search.go,retrieval.go,fact_recall.go,fusion.go}`. Migrate memory eligibility decisions from the typed context backend `src/kb/db2_adapters/kb_service_backend_context.c` behind that Go contract; the C caller retains framing and host integration. Reuse `memory_row_scope_visible`, transaction-local request scope and existing semantic-assertion filters in `src/modules/db2/c/schema.sql` through the storage owner. A memory-row policy does not automatically protect fact edges, aliases, derived rows or cached projections; inventory those paths explicitly.
 
 ## Contract
 
@@ -37,7 +37,7 @@ Capture the request clock once. Normalize legacy timestamp representations at th
 
 **1. Contract and storage predicates.** Implement the shared types, reason vocabulary and SQL predicate builders or views. Bind scope to transactions under non-owner runtime roles. Pin `include_all` to a privileged capability instead of trusting a request boolean.
 
-**2. Serving parity.** Route search, visible search, bundles, facts, previews, typed channels and graph legs through the same policy. Make legacy activation/workspace parameters effective or reject/deprecate them explicitly. Return `unsupported_mode` where an adapter cannot provide believed-at reconstruction.
+**2. Serving parity.** Route search, visible search, bundles, facts, previews, typed channels and graph legs through the Go memory decision, in both supported placements. Convert confirmed C callers and remove their duplicate memory predicates when the corresponding Go operation lands. Make legacy activation/workspace parameters effective or reject/deprecate them explicitly. Return `unsupported_mode` where an adapter cannot provide believed-at reconstruction.
 
 **3. Release and diagnostics.** Add `aimee memory validity <id> --mode current|historical` as a projection of the real serving decision. Join final release to the checked record version and revocation generation; [MR-16](memory-reliability-16-evidence-bound-actions-and-composition.md) defines action-time use.
 
@@ -49,6 +49,7 @@ Capture the request clock once. Normalize legacy timestamp representations at th
 - Concurrent pooled requests cannot inherit each other's transaction scope. Owner/superuser tests cannot substitute for the non-owner runtime test.
 - An edit or revocation after candidate retrieval invalidates release or forces a new decision; the earlier decision is retained as history.
 - Pure lexical, dense-only and graph-only candidates receive the same hard gates.
+- Actual Server and KB memory processes return equivalent domain decisions for equivalent authorized fixtures. A disconnected module cannot activate a C eligibility fallback; boundary checks cover migrated typed adapters.
 
 ## Rollout and rollback
 

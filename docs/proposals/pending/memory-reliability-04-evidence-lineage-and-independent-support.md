@@ -2,7 +2,7 @@
 
 - **State:** Proposed
 - **Priority:** P1: evidence foundation
-- **Owner:** Memory derivation, provenance and DB2
+- **Owner:** Go memory lineage and freshness, with existing provenance/storage owners
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md)
 - **Delivery:** Four implementation slices
 
@@ -15,6 +15,8 @@ Extend existing dependency tracking with claim-level origin families and complet
 ## Existing integration points
 
 Reuse `derived_memory_registry`, `derived_memory_dependencies`, `derived_rederivation_queue`, current freshness/reconciliation functions and learning-observation evidence tables in `src/modules/db2/c/schema.sql`. Ingestion/extraction, summary, observation, reviewed-procedure and embedding producers must declare their actual inputs. This is an extension of the current dependency owner.
+
+Implement memory lineage projection, producer registration and invalidation consumption in the Go memory module through its existing storage contract. Learning and other producers retain ownership of their canonical artifacts and publish dependency/version changes over declared contracts. Do not add direct feature-module imports or copy their admission rules into memory.
 
 ## Data and independence rules
 
@@ -43,7 +45,11 @@ Do not define confidence as a multiplication of uncalibrated numbers. Expose sup
 
 Derivatives inherit the intersection of permitted audiences/purposes of their required inputs. Scopes are not a universal numeric hierarchy: disjoint audiences may yield no permissible release. A multi-source derivative cannot reveal an unauthorized parent's existence through family IDs or counts. Apply scoped projection to lineage queries.
 
-Correction, supersession, revocation and deletion emit idempotent invalidation events containing input identity/version and the new generation. Mark dependent records `stale`, `unsupported` or `dependencies_unknown`; serving policy decides whether to suppress or show a warning. Authority-bearing/current assertions require usable supporting evidence.
+Correction, supersession, revocation and deletion commit invalidation events containing input identity/version and the new generation through [MR-02](memory-reliability-02-authority-preserving-mutations.md)'s transactional outbox or equivalent durable change log. Apply events with durable consumer progress and idempotent replay. Mark dependent records `stale`, `unsupported` or `dependencies_unknown`; serving policy decides whether to suppress or show a warning. Authority-bearing/current assertions require usable supporting evidence. Revocation and erasure cannot be downgraded to warnings because a consumer is behind.
+
+Record each derived owner's applied watermark and resynchronization state. Lost delivery, consumer downtime and retention gaps must be distinguishable from an empty queue. Release checks require current source-owner evidence when local progress is insufficient; otherwise block release. Erasure completion requires verified coverage from every required owner, including offline owners after recovery, rather than successful event publication alone.
+
+Query-derived views also depend on the eligible collection they searched, including empty results. Track scoped collection changes for inserts, newly applicable evidence and newly visible records as specified in [MR-12](memory-reliability-12-served-memory-views-and-claim-cards.md). Selected-parent edges alone cannot invalidate a view when an unrelated new record supplies a constraint or contradiction.
 
 Erasure covers derived text, indexes, embeddings, prompt caches, task projections and retained exports under their documented policy. Keep rejection/deletion intent independently of restorable content snapshots; restoration must replay the intent log before serving. Audit digests do not recreate erased payloads, but they still require access controls and retention. A process may only claim the erasure coverage it actually verifies.
 
@@ -51,7 +57,7 @@ Erasure covers derived text, indexes, embeddings, prompt caches, task projection
 
 1. Add versioned origin/family references and dependency edge semantics. Backfill deterministic links; mark the remainder unknown.
 2. Compute scoped support projections and conservative independent counts. Detect cycles and bound traversal; incomplete traversal returns explicit partial lineage.
-3. Make every producer declare inputs and join correction/revocation to invalidation/rederivation. Add a coverage inventory to prevent unregistered producers.
+3. Make every producer declare inputs and collection dependencies; join correction/revocation to durable invalidation/rederivation with consumer watermarks. Add a coverage inventory to prevent unregistered producers.
 4. Exercise deletion and restore across derived stores; add `aimee memory evidence <id> --json` with counts, states and authorized evidence references.
 
 ## Acceptance gates
@@ -60,6 +66,8 @@ Erasure covers derived text, indexes, embeddings, prompt caches, task projection
 - A composite derived from A+B does not become a third independent witness. Unknown sources stay unknown.
 - Missing, cyclic or truncated lineage is observable and cannot silently become fully supported.
 - Revoking an input suppresses release of a derivative that requires it, including cached task context.
+- Producer/consumer crashes and duplicate delivery preserve invalidation progress. An offline owner prevents a claim of complete erasure until its retained copies are verified removed.
+- A newly inserted contradiction invalidates an earlier empty query-derived view without requiring a change to any previously selected parent.
 - Cross-scope lineage queries reveal neither text nor hidden parent IDs/counts.
 - Restoring an old content snapshot cannot resurrect a record whose surviving deletion intent prohibits serving.
 

@@ -2,7 +2,7 @@
 
 - **State:** Proposed
 - **Priority:** P0 for honest sufficiency; P1 for recovery
-- **Owner:** Context planner and memory retrieval
+- **Owner:** Go memory requirements and coverage, with host-governed recovery execution
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md); [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) for independence requirements
 - **Delivery:** Three implementation slices
 
@@ -32,9 +32,9 @@ Unavailable indexing and no matching evidence are distinct states. An unresolved
 
 ## Existing integration points and slices
 
-1. Replace sufficiency assignment in `src/kb/db2_adapters/kb_service_backend_context.c` and the combined-answer confidence shortcut in `server-go/modules/memory/retrieval.go`. Preserve compatibility fields while adding reasoned coverage and an explicit `requirements_version`.
+1. Implement a shared coverage evaluator in the Go memory module, replacing the combined-answer confidence shortcut in `server-go/modules/memory/retrieval.go`. Convert `src/kb/db2_adapters/kb_service_backend_context.c` to consume that result and remove its count-based sufficiency decision. Preserve compatibility fields while adding reasoned coverage and an explicit `requirements_version`.
 2. Add deterministic task templates for current-state, temporal change, comparison and procedure application. Join source-family/episode data and final packer selection. Unknown task shapes remain unknown rather than defaulting to complete.
-3. Add one bounded recovery planner over existing memory, source-span and indexed-code tools. Record attempted expansions, results and remaining gaps. [MR-07](memory-reliability-07-task-exploration-contracts.md) uses these outcomes to govern supplementary exploration.
+3. Add one bounded memory recovery planner in Go that proposes expansions over existing memory, source-span and indexed-code tools. The host admits tool work under its existing task/access budgets and returns authenticated outcomes for coverage reevaluation. Record attempted expansions, results and remaining gaps. [MR-07](memory-reliability-07-task-exploration-contracts.md) uses these outcomes to govern supplementary exploration.
 
 ## Acceptance gates
 

@@ -2,7 +2,7 @@
 
 - **State:** Proposed
 - **Priority:** P1; instrument and establish baseline during the foundation wave
-- **Owner:** Memory diagnostics and observability
+- **Owner:** Go memory diagnostics and existing observability
 - **Depends on:** [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) for actual final selection; [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) for family metrics
 - **Delivery:** Three implementation slices
 
@@ -23,6 +23,8 @@ Sample at the invocation level and retain sampling probability, policy and windo
 ## Metric definitions
 
 Define the population by scope, purpose, query class, time window and serving stage. Default “served” means dispatched model input; assembled-but-unsent is a separate population. A network-uncertain dispatch is explicitly classified. Count each record once per invocation for concentration, even if represented twice in the payload; [MR-03](memory-reliability-03-final-payload-context-budgets.md) separately flags that duplicate rendering defect.
+
+An admitted attempt recovered without observed dispatch evidence belongs to an unknown-dispatch population. Do not silently count it as either delivered or unsent. Report its size alongside measured exposure; late reconciliation updates that attempt idempotently under [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md).
 
 Let `c_i` be delivered occurrences of record i, `C = sum(c_i)` and `p_i = c_i/C`. Top-k share is the sum of the k largest `p_i`, not “the fraction ranked at position k”. HHI is `sum(p_i²)`; Simpson diversity is `1 − HHI`; entropy is `−sum(p_i log2 p_i)`. Normalized entropy requires more than one distinct record. Empty populations return null with counts, not a perfect score.
 

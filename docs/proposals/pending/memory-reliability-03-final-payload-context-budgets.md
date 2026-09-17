@@ -2,7 +2,7 @@
 
 - **State:** Proposed
 - **Priority:** P0: context correctness
-- **Owner:** Context assembly, ingress and economizer
+- **Owner:** Go memory projection, with host/provider assembly and economizer accounting
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) for eligible candidates
 - **Delivery:** Three implementation slices
 
@@ -14,7 +14,9 @@ Use a single model-facing projection and verify the final request budget after e
 
 ## Existing integration points
 
-Change `RecallBundle` and `AssembleContext` in `server-go/modules/memory/retrieval.go`; typed packing/rendering in `src/kb/db2_adapters/kb_service_backend_context.c`; and `ingress_render_block` in `src/server/ingress_preinject.c`. Reuse the exact-count and provenance requirements in `server-go/modules/economizer`.
+Change `RecallBundle` and `AssembleContext` in `server-go/modules/memory/retrieval.go`. Move memory-specific typed selection/projection from `src/kb/db2_adapters/kb_service_backend_context.c` into the Go memory owner, exposed through the versioned memory-data contract. `ingress_render_block` in `src/server/ingress_preinject.c` and provider adapters retain outer host packing and final request accounting. Reuse the exact-count and provenance requirements in `server-go/modules/economizer`.
+
+The host reports final retained memory IDs/spans and projection identity to Go memory for coverage evaluation after any outer trim or transform. Bind that result to the exact plan revision; do not let C reconstruct memory sufficiency from item counts. The Go projection and host request share explicit budget/count provenance while each owner enforces its own boundary.
 
 ## Budget contract
 
@@ -40,7 +42,7 @@ Preserve user constraints, negation, numerical bounds, deadlines, required ident
 ## Implementation slices
 
 1. Introduce the projection/result types and provider-bound counting adapters. Add byte-accounting coverage for every component.
-2. Replace bundle row heuristics as a budget enforcement mechanism and remove duplicate typed-procedure rendering. Return retained/omitted IDs from the outer packer.
+2. Replace bundle row heuristics as a budget enforcement mechanism, migrate typed memory projection into Go and remove duplicate typed-procedure rendering. Return retained/omitted IDs from the outer packer through the shared contract; remove converted C selection policy.
 3. Add protected-content validation, full-request recount after economizer/provider adaptation and bounded overflow handling.
 
 ## Acceptance gates

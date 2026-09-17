@@ -4,9 +4,11 @@ This matrix assigns each required concept to concrete proposal and test ownershi
 
 | Requirement | Primary proposal | Integration / acceptance ownership |
 |---|---|---|
+| Golang-only memory module; C clients owned by external hosts | [Program integration contract and G0 extraction](memory-reliability-00-program.md#go-memory-module-integration) | [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) zero-C/header/descriptor gate, `CGO_ENABLED=0` build, host registration and process/placement parity; no forwarding or cgo exceptions |
 | Consistent current/historical lifecycle, suppression and authorization | [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) | [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) cross-surface/non-owner-role fixtures |
 | World-time and belief-time correctness | [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) | [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) coherent requirements; [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) interval/correction cases |
 | Authority-preserving create/upsert/update/delete | [MR-02](memory-reliability-02-authority-preserving-mutations.md) | Durable transition, concurrency and tombstone tests |
+| Durable cross-owner invalidation and collection generations | [MR-02](memory-reliability-02-authority-preserving-mutations.md) | [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) replay progress, lagging release and verified erasure; [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) commit/publication and consumer-crash barriers |
 | Actual serialized context byte/token caps | [MR-03](memory-reliability-03-final-payload-context-budgets.md) | Final provider-shaped request capture in [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) |
 | Protected constraints and transformation integrity | [MR-03](memory-reliability-03-final-payload-context-budgets.md) | Existing economizer admission plus negation/limit fixtures |
 | Independent evidence families and no self-corroboration | [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) | Duplicate, composite, unknown-origin and hidden-parent fixtures |
@@ -16,6 +18,7 @@ This matrix assigns each required concept to concrete proposal and test ownershi
 | Actual arm/fusion/prior ranking explanation | [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) | [MR-09](memory-reliability-09-fair-hybrid-ranking-and-exposure.md) score semantics; concurrent/nested trace tests |
 | Retained versus retrieved versus sent evidence | [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) | Exact final retained IDs and staged dispatch/acknowledgement |
 | Pre-inference durable receipt | [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) | Preparation survives crash; unavailable durability blocks governed send |
+| Dispatch admission versus observed transport and crash uncertainty | [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) | [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) handoff/acknowledgement crash matrix; [MR-08](memory-reliability-08-retrieval-health-telemetry.md) unknown-dispatch population |
 | Evidence strength and honest replay limits | [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) | Independent verification states; digest-only cannot reconstruct |
 | Binding retrieval/context exploration contract | [MR-07](memory-reliability-07-task-exploration-contracts.md) | Host issuance, task identity, typed budgets and dual-guard parity |
 | Confidence calibration and no false trust in similarity | [MR-07](memory-reliability-07-task-exploration-contracts.md) | [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) requirement coverage; [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) calibration/false restriction |
@@ -32,10 +35,12 @@ This matrix assigns each required concept to concrete proposal and test ownershi
 | Deterministic type/domain utility horizons | [MR-10](memory-reliability-10-deterministic-utility-horizons.md) | Authenticated anchor/override; serving does not renew usefulness |
 | Historical access after horizon expiry | [MR-10](memory-reliability-10-deterministic-utility-horizons.md) | Only horizon restriction bypassed; access/erasure still enforced |
 | Embedding identity and safe same-dimension change | [MR-11](memory-reliability-11-embedding-generations-and-index-freshness.md) | Generation migration/cutover/rollback fixtures |
+| Index admission distinct from temporal serving eligibility | [MR-11](memory-reliability-11-embedding-generations-and-index-freshness.md) | Historical coverage after rebuild, future-valid activation without writes and query-time [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) release checks |
 | Bounded read latency and indexing freshness | [MR-11](memory-reliability-11-embedding-generations-and-index-freshness.md) | Cold/backlog tests; honest lag/fallback state |
 | Named briefings/current state/constraints/decisions/failures/procedures | [MR-12](memory-reliability-12-served-memory-views-and-claim-cards.md) | Shared view API, minimal projection and adapter parity |
 | Open contradiction and historical views | [MR-12](memory-reliability-12-served-memory-views-and-claim-cards.md) | No hidden-side disclosure; explicit temporal purpose |
 | Evidence-backed claim cards and operator correction | [MR-12](memory-reliability-12-served-memory-views-and-claim-cards.md) | Canonical expected-version writes; cache invalidation |
+| Complete cache request identity and query-collection dependencies | [MR-12](memory-reliability-12-served-memory-views-and-claim-cards.md) | New constraints/contradictions, empty results, temporal boundaries, changed query/view/budgets and current-owner watermark fixtures |
 | Task-scoped non-authoritative working models | [MR-13](memory-reliability-13-disposable-task-projections.md) | Audience intersection, versioning, expiry and promotion gates |
 | Bounded proposal-only memory hygiene | [MR-14](memory-reliability-14-proposal-only-memory-hygiene.md) | Narrow privileges, review-bound diffs, rejection deduplication |
 | Deterministic safe maintenance only | [MR-14](memory-reliability-14-proposal-only-memory-hygiene.md) | Disposable cleanup/job queuing cannot rewrite canonical facts |

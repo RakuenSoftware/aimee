@@ -1,6 +1,6 @@
 # Aimee Memory Reliability: Proposal Series
 
-**State:** Proposed · **Revision:** 1 · **Date:** 17 September 2026
+**State:** Proposed · **Revision:** 2 · **Date:** 17 September 2026
 
 ## Decision requested
 
@@ -46,6 +46,8 @@ These definitions apply to every proposal. Individual files restate their critic
 | Derived projection | Rebuildable state carrying declared input versions and inherited access; no independent authority |
 | Valid time / belief time | Separate temporal coordinates, with explicit support or rejection by each endpoint |
 | Eligibility | Hard policy decision before ranking and again at release; similarity cannot override it |
+| Index admission | Permission to process and retain a version in an index; query-time eligibility still controls serving |
+| Collection dependency | Scoped query input population, including absent matches and time-driven applicability changes |
 | Utility horizon | Ordinary-serving policy for usefulness, separate from truth, validity, retention and erasure |
 | Evidence family | Established common origin/dependency group; distinct identifiers alone do not prove independence |
 | Sufficiency | Coverage of declared task requirements by the final retained evidence; separate from answer correctness |
@@ -59,6 +61,44 @@ Keep policy artifacts versioned and atomically switchable. Record the effective 
 A budget's identity includes its unit and reset scope. Token, byte, candidate, file, raw-scan, graph-work, time and monetary budgets are separate. Concurrent operations reserve against the relevant task/session ceiling atomically. Refund only under a defined outcome that proves the charged work was not admitted/executed; network uncertainty is not such proof.
 
 Trace metadata and model context are separate projections. IDs, hashes and family links remain potentially sensitive. Keep authorized audience/purpose and retention on diagnostics, caches and audit records. Required action/context receipts cannot be replaced by sampled health events.
+
+## Go memory module integration
+
+Make the memory module Golang-only: its implementation, tests and executable belong to `server-go/modules/memory` and the supervised `aimee-module-memory` process. No C source or header may remain in the memory module directory or its declared implementation inventory, including transport-only adapters. Strengthen the shared Go implementation across Server/private and KB/shared placements. Keep placement validation, scoped record identities and the PostgreSQL bus boundary; do not merge personal/shared stores or introduce a second memory service. The [module descriptor](../../../src/modules/memory/module.yaml) and [process contracts](../../../src/modules/process-contracts.json) remain the source of the shipped inventory and wire surface.
+
+| Responsibility | Implementation boundary |
+|---|---|
+| Eligibility, temporal rules, mutation admission and utility horizons | Go memory domain functions used by all data operations; PostgreSQL migrations, constraints and transactional storage enforce durable invariants through the existing storage owner. |
+| Candidate collection/fusion, memory requirements, evidence lineage, memory projection and named views | Go memory implementation over placement-specific adapters. Migrate matching memory policy from the typed C backend into this owner as the relevant slice lands. |
+| Memory indexing and collection/dependency freshness | Go memory owns admission, jobs and serving decisions for its records; coordinate storage/index generation operations with existing DB2/PostgreSQL owners over declared contracts. |
+| Task state, exploration limits and action admission | Existing task/execution-policy owners consume versioned Go memory evidence and freshness decisions. Memory cannot grant tool permission or own external effects. |
+| Procedure review and verified outcomes | Existing learning owner remains authoritative; memory serves governed projections and references, without acquiring a second promotion/reward engine. |
+| Final provider serialization, full-request caps and dispatch receipts | Existing host/provider, economizer and audit owners consume the Go memory projection. Return final retained IDs/spans for Go memory coverage evaluation; provider-specific wrappers and credentials stay at the host boundary. |
+
+Extend the existing memory-data contract with bounded, versioned request/result types for eligibility, mutations, projections, lineage and views. Factor domain functions out of transport dispatch and storage adapters; do not grow `handleData` into a second implementation of those rules. Adapters validate wire shape and preserve domain reason codes, effective limits, source versions and capability status. Govern new calls with the existing authenticated invocation, deadline, cancellation and payload limits. Unknown schema versions or unsupported placement capabilities return explicit errors.
+
+Memory does not gain direct database connections or in-process imports of other feature modules to implement this series. Use existing bus/storage contracts and host-supplied, authenticated inputs at ownership boundaries; declare any necessary contract extension. Carry learning/task evidence with its original authority and dependencies. Preserve the memory module's dependency direction.
+
+Treat `src/kb/db2_adapters/kb_service_backend_context.c`, CLI/MCP/HTTP handlers and legacy memory ABIs as migration entry points. Necessary C transport, connection binding and host/provider integration live under their receiving host owners outside the memory module. Once a memory semantic path moves into Go, switch all confirmed callers and remove that C policy/SQL path in the same slice; retain only explicit compatibility translation outside the module. Moving policy to another C directory does not satisfy the migration. A temporary host adapter must name its disposition and removal gate. A missing Go owner must not activate a fallback C memory policy engine.
+
+Each slice adds Go domain tests and exercises the actual memory process in both placements where supported, including restart/cancellation and unavailable-module behavior. C tests belong to the receiving host and cover framing and host integration. Update the descriptor, process schema and maintained memory guide with the implementation. Replace [check_memory_c_boundary.py](../../../scripts/check_memory_c_boundary.py)'s in-module C allowlist with a zero-C gate, retain checks against policy in external adapters, and run descriptor/bus-boundary checks so later work cannot restore duplicate memory policy outside Go. MR-18 records these ownership gates alongside behavioral parity.
+
+### G0: Extract the remaining C from the module
+
+The pinned source inventory contains 10 `.c` files and 14 `.h` files under `src/modules/memory`, including its public include tree. This is remaining migration work even where the descriptor currently says `ownership_complete`. G0 is a foundation slice within this program, not an additional feature proposal. Assign every file and exported symbol a Go port, host relocation or deletion disposition before moving it.
+
+| Existing files under `src/modules/memory` | Required disposition |
+|---|---|
+| `gw_stage_memory.c`, `gw_stage_memory.h` | Move IR/gateway wiring to its host owner; port any memory classification, selection or recall policy to Go before removing the original files. |
+| `memory_data_bus.c`, `memory_domain_bus.c`, `memory_domain_runtime_bus.c`, `memory_bus_context.h` | Move required process-client framing and legacy ABI translation to host-owned adapters. Audit every helper for memory policy and port that behavior to Go. |
+| `memory_content_gate_bus.c`, `memory_embed_bus.c`, `memory_extract_patterns.c`, `memory_fact_gate.c`, `memory_pii_gate.c`, `memory_extract_patterns.h`, `memory_fact_gate.h`, `memory_pii_gate.h` | Relocate necessary wire clients and their declarations to consuming hosts; memory gates, extraction and embedding decisions remain Go operations. |
+| `memory_scope_connection.c` | Move authenticated connection binding to the KB/storage host integration owner; keep scope eligibility in Go and durable enforcement in PostgreSQL. |
+| `include/aimee/memory/module_api.h`, `include/aimee/memory/pii_provider.h` | Relocate required C wire/client declarations outside the module under host ownership. Update all includes; leave no forwarding headers in the memory module. |
+| `memory_activation.h`, `memory_assemble_util.h`, `memory_core_internal.h`, `memory_graph_fusion.h`, `memory_ontology.h`, `memory_platform.h`, `memory_profile_pack.h` | Inventory live declarations and inline implementations. Port memory behavior and its tests to Go, relocate only required host ABI declarations, and delete obsolete helpers. |
+
+Update receiving-owner inventories, all production/test includes, Make/CMake registration, installed header packaging and module-bus allowlists together. Remove C sources, public/private C headers and host C tests from the memory descriptor; schema/descriptor resources may remain. Do not keep symlinks, forwarding headers, copied implementations or cgo wrappers to satisfy old paths. Preserve supported host ABIs through external adapters only where required.
+
+G0 completion requires no C/header files in either memory implementation tree, no C entries in the memory descriptor, and a memory executable built with `CGO_ENABLED=0`. Exercise both placements and the host clients, then run source/descriptor/bus checks. Keep ownership closeout pending until these gates pass; an allowlisted C shim inside memory is not an exception. Later feature slices must preserve this boundary.
 
 ## Serving sequence
 
@@ -75,12 +115,29 @@ Trace metadata and model context are separate projections. IDs, hashes and famil
 
 This is a logical order across existing owners. It does not require a new process, database or synchronous external audit service at every stage. Where durability is required, the existing audit/WORM pipeline must acknowledge its specified durable boundary before dispatch.
 
+## Initial serving-surface inventory
+
+This source inventory is pinned to PR revision `b6c2cfa58c8f301b3a422cb8bf1592ea575c8473`. It identifies existing entry points and review obligations; it is not a passing conformance report. The [memory module guide](../../modules/memory.md) defines personal Server and shared KB placement ownership. MR-18 slice 1 expands these rows into operation/placement cases and records unsupported or unverified capabilities explicitly.
+
+| Surface | Existing entry point / owner | Baseline behavior and required parity work |
+|---|---|---|
+| CLI | [cmd_memory_core.c](../../../src/cmd_memory_core.c), `mem_recall` and memory command handlers | Recall consumes a client envelope and renders sections. Pin store selection, scope/activation parameters, temporal modes and retained IDs per command. |
+| MCP | [server_mcp_call_table.c](../../../src/server/server_mcp_call_table.c), `mcph_memory_recall`; [server_mcp.c](../../../src/server/server_mcp.c), search and briefing tools | Recall selects personal memory by default or shared memory explicitly. Test each tool's authenticated scope and declared capabilities; transport parity does not imply provider dispatch. |
+| HTTP | [server_api.c](../../../src/server/server_api.c), `memory_recall_handler` | Personal recall is the default; `store=kb` selects shared recall. Pin effective token limits, scope derivation, invalid parameters and unavailable-store responses. |
+| Memory event bus | [memory_data_bus.c](../../../src/modules/memory/memory_data_bus.c) and [data.go](../../../server-go/modules/memory/data.go) | The memory-data stage dispatches to the Go placement owner. Cover get/search/visible-search/bundles/facts and mutations separately under actual runtime credentials. |
+| Shared KB RPC and compatibility APIs | [kb_service_memory.c](../../../src/kb/kb_service_memory.c) and [kb_service_backend_context.c](../../../src/kb/db2_adapters/kb_service_backend_context.c) | Shared recall, graph/as-of and assertion valid/belief-time requests have distinct handlers. Pin supported time modes, lexical/dense/graph arms and parameter behavior for each. |
+| Typed context and ingress | [kb_service_backend_context.c](../../../src/kb/db2_adapters/kb_service_backend_context.c), typed assembly; [ingress_preinject.c](../../../src/server/ingress_preinject.c), `ingress_render_block` | Typed channels use summary estimates; outer ingress applies an envelope. MR-03/MR-05/MR-06 must agree on actual retained evidence after final packing. |
+| Provider-bound context | [server_provider.c](../../../src/server_provider.c) and [model_provider.c](../../../src/server/model_provider.c), with economizer/provider adapters | Inventory every enabled dispatch route and retry transformation before assigning a final-byte guarantee. Capture exact payloads and durable preparation/admission/observed-dispatch stages per route. |
+| Maintenance and legacy runtime adapter | [maintenance.go](../../../server-go/modules/memory/maintenance.go) and [memory_domain_runtime_bus.c](../../../src/modules/memory/memory_domain_runtime_bus.c), `memory_maintenance_run` | Existing maintenance can promote, retire and otherwise change records. Apply MR-02 admission/invalidation parity; MR-14's new proposal-only path does not certify existing modes as read-only. |
+
+Each conformance row records owner/store namespace, authenticated identity source, query modes, arm readiness, requested/effective parameters, budget units and receipt stage. CLI/MCP/HTTP retrieval responses may establish assembly but cannot claim a model received the evidence. Provider dispatch is verified at its own boundary. Unknown current guarantees remain unknown until the authenticated integration fixture runs.
+
 ## Delivery waves and dependencies
 
 | Wave | Work | Exit condition |
 |---|---|---|
-| 0: Baseline and contracts | Start [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md); inventory current serving surfaces and parameter semantics; prepare [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md)/[MR-08](memory-reliability-08-retrieval-health-telemetry.md) event schemas | Fixed fixtures, honest baseline and identified owners/defaults |
-| 1: Boundary correctness | [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md); deterministic [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) requirements and [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) final-payload receipts | Eligibility/history/caps are enforced; incomplete context and unsent attempts are labeled correctly |
+| 0: Baseline and contracts | Start [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md); expand the initial serving inventory into per-operation parameter cases; prepare [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md)/[MR-08](memory-reliability-08-retrieval-health-telemetry.md) event schemas | Fixed fixtures, honest baseline and identified owners/defaults |
+| 1: Boundary correctness | G0 C extraction; [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md); deterministic [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) requirements and [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) final-payload receipts | Memory is Golang-only; eligibility/history/caps are enforced; incomplete context and unsent attempts are labeled correctly |
 | 2: Evidence and retrieval | [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-08](memory-reliability-08-retrieval-health-telemetry.md), candidate/prior slices of [MR-09](memory-reliability-09-fair-hybrid-ranking-and-exposure.md), [MR-10](memory-reliability-10-deterministic-utility-horizons.md), [MR-11](memory-reliability-11-embedding-generations-and-index-freshness.md), [MR-12](memory-reliability-12-served-memory-views-and-claim-cards.md); complete [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md)/[MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) integration | Independent support, lineage, fair candidates, readiness and views are inspectable |
 | 3: Governed efficiency and effects | [MR-07](memory-reliability-07-task-exploration-contracts.md) observe then canary; reward-correction/attribution slices of [MR-15](memory-reliability-15-procedure-outcomes-and-task-cost.md); [MR-16](memory-reliability-16-evidence-bound-actions-and-composition.md) | Fewer redundant reads without starvation; current evidence governs exact effects |
 | 4: Derived continuity and maintenance | [MR-13](memory-reliability-13-disposable-task-projections.md), [MR-14](memory-reliability-14-proposal-only-memory-hygiene.md), [MR-17](memory-reliability-17-clean-retry-context.md); measured experience/exposure/routing extensions | Temporary state stays non-authoritative; hygiene/retries preserve canonical and external history |
@@ -88,6 +145,29 @@ This is a logical order across existing owners. It does not require a new proces
 [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) runs in every wave. [MR-16](memory-reliability-16-evidence-bound-actions-and-composition.md) moves earlier for any automated external-write workflow that already relies on remembered evidence. Health collection can start with existing final-selection events; any unavailable dimensions must be labeled missing until their producing proposal lands.
 
 Implementation work may proceed in parallel once interfaces are fixed, but deployment dependencies remain explicit. In particular, restrictive [MR-07](memory-reliability-07-task-exploration-contracts.md) enforcement waits for truthful [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) coverage and [MR-03](memory-reliability-03-final-payload-context-budgets.md)/[MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md) final context evidence. Independent-support requirements wait for [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md); simpler deterministic requirements can ship earlier.
+
+### Slice-level deployment gates
+
+`MR-NN/Sn` names the numbered implementation slice in that proposal. These gates refine the proposal-level dependencies: interfaces can be designed earlier, but a consuming slice cannot advertise a guarantee until its producer and applicable MR-18 tests pass. References to later consumers do not make those consumers prerequisites for the shared foundation.
+
+| Deployable slice or group | Required predecessor / exit evidence |
+|---|---|
+| MR-18/S1; MR-06/S1 and MR-08/S1 schema work | No feature prerequisite for fixtures or schema design. Record baseline omissions explicitly; do not synthesize missing lineage or dispatch evidence. |
+| G0 extraction and Go memory integration in every slice | MR-18/S1 file/symbol dispositions first. Extract all C/headers from the memory module, port memory behavior to Go, transfer necessary clients to host owners and pass zero-C/`CGO_ENABLED=0` gates before ownership closeout. Version contracts and test both placements in each later slice. |
+| MR-01/S1–S3; MR-02/S1–S3 | MR-18/S1 fixtures first; MR-02 consumes MR-01 authorization vocabulary. MR-02/S3 delivers durable invalidation and scoped collection-change tracking before dependent caches/indexes are enabled. |
+| MR-03/S1–S3 | MR-01 eligible-candidate contract; final-request capture from MR-18/S2 before endpoint cap enforcement. |
+| MR-05/S1–S2 deterministic coverage | MR-01 decisions and MR-03 final retained IDs/spans. Independence requirements remain unavailable until MR-04/S1–S2. |
+| MR-06/S2–S4 final receipts | MR-03 final bytes and MR-05 coverage; MR-18/S2 crash/handoff capture. Full family/index diagnostics join as MR-04/MR-11 land, with unavailable dimensions labeled meanwhile. |
+| MR-04/S1–S4 | MR-01 release checks and MR-02 durable mutations/invalidation. Parent lineage and collection dependencies precede cross-owner erasure claims. |
+| MR-05/S3 bounded recovery | MR-05/S1–S2 coverage and host task/access budgets; MR-04 support projections before recovery promises independent corroboration. Record final plan revisions for MR-06. |
+| MR-08/S1–S3 collection and reports | MR-06 observed selection/dispatch; MR-04 for family metrics. Unknown-dispatch attempts remain a separate population. |
+| MR-09/S1–S3; MR-10/S1–S2; MR-11/S1–S4 | Their declared foundation contracts and MR-18 fixtures. MR-11 temporal coverage and durable replay precede generation cutover; MR-10 enforcement must preserve historical recall. |
+| MR-12/S1–S3 | MR-01/MR-03/MR-05/MR-06 plus MR-04 evidence projections. Cache activation additionally requires MR-02 collection generations and current-owner checks. |
+| MR-07/S1–S3, then S4 | Observe/expansion follows final coverage and receipts; enforcement waits for MR-18/S3 completion, efficiency and starvation evidence. |
+| MR-15/S1–S3; MR-16/S1–S4 | Declared evidence/receipt dependencies. Reward proxy correction can precede fitting; external-write admission and uncertain-effect recovery precede automated effects that rely on those guarantees. |
+| MR-13/S1–S3; MR-14/S1–S3; MR-17/S1–S3 | MR-13 follows MR-12; MR-14 follows MR-13 and uses MR-11 admission before enabling rebuild queuing; MR-17 follows MR-13 and MR-16 reconciliation. |
+| MR-09/S4, MR-10/S3, MR-15/S4 and other fitted policies | MR-18/S3 held-out quality/cost evidence plus their earlier slices; promote each optional policy independently. |
+| MR-18/S4 | Applicable invariant tests become required with each feature rollout; do not wait for all 18 proposals to finish. |
 
 ## Proposed configuration and compatibility
 

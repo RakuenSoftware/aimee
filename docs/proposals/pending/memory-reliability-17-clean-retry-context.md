@@ -12,6 +12,8 @@ Failed speculative reasoning can pollute later attempts. Resetting the prompt ca
 
 Build retry context from a verified pre-attempt baseline plus current authoritative changes, a bounded failure summary and the durable action journal. Keep context isolation separate from workspace restore and external-effect reconciliation.
 
+The turn runtime coordinates retry and action reconciliation; it requests current eligibility, evidence views and coverage from the Go memory module using the same contracts as first-attempt assembly. Cached snapshots cannot introduce a second memory reader or C-only validity path. Module unavailability produces an explicit reconstruction gap under the existing task policy.
+
 ## Snapshot and retry contract
 
 At attempt start, record a baseline context/plan reference, source versions, current user constraints, task projection revision, policy/scope generation, renderer version and receipt binding. Store content only under the existing governed replay/retention policy; a digest-only snapshot cannot promise reconstruction.

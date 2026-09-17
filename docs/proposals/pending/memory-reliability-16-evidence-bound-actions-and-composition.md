@@ -18,6 +18,8 @@ Create a host-issued intent with action/request/task/attempt IDs, authenticated 
 
 The tool registry supplies effect class and resource semantics. Agent text cannot label a publish operation as a harmless read. Existing operator and tool authorization always applies; possession of a context receipt grants no additional access.
 
+Obtain memory source-version and freshness decisions through the Go memory contract. Execution policy consumes that evidence and owns action admission; it must not recreate memory eligibility in the host or grant memory the authority to dispatch tools. Missing required memory-owner evidence blocks admission under the freshness rule below.
+
 Immediately before durable dispatch admission, revalidate required source versions, current authority, destination and policy. Define the admission linearization point: the transaction or equivalent atomic host decision that commits this exact intent for dispatch. A revocation committed before that point must block admission or force a new plan. A revocation after an external effect has started cannot be promised to undo it; attempt cancellation/reconciliation and record the ordering honestly.
 
 When relevant generations span owners, require current checks or bounded, authenticated freshness leases under explicit policy. Do not claim a cross-system atomic snapshot without implementing it. Missing required freshness blocks the governed action.

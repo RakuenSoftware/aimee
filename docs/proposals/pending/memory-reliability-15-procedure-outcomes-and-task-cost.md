@@ -16,6 +16,8 @@ Extend existing outcome attribution with exact delivered/applied evidence, evide
 
 Reuse `learning_application_events`, current learning/outcome records, the retrieval outcome bridge and KB bandit integration in `src/kb/kb_service_memory.c` and `src/kb/kb_bandit.c`. Join each event to procedure ID/version, task/attempt, context receipt, applicability/environment, relevant tools/actions and verifier outcome.
 
+Go memory emits versioned retrieval/selection/coverage evidence through its existing process contract. Migrate memory-specific exposure bookkeeping out of C adapters while keeping reward attribution and procedure review with learning, and full-task pricing with economizer. Those owners return governed outcome references for memory experience projections; they do not require direct feature-module imports into Go memory.
+
 Separate states: retrieved, delivered, selected-for-use, applied, verified-success, verified-failure, abandoned and outcome-unknown. Only host-observed execution or explicitly attributed user feedback can establish application/outcome. A model claiming it followed a procedure is an unverified signal.
 
 The derived experience envelope exposes application counts, success/failure/unknown counts, last verified success, known counterexamples, observed environments, applicability gaps, task cost/latency and evidence references. Counts are by defined application/trial identity, not number of repeated events or source summaries. Report attempts and terminal task outcomes separately to avoid hiding repair failures or double-counting retries.

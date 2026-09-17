@@ -16,6 +16,8 @@ Introduce a task-scoped, versioned, rebuildable projection over existing evidenc
 
 Use existing task/working-state ownership and dependency registration. A projection contains task/session/principal references, revision, input versions, requirement gaps, relevant component identities, hypothesis status, source-chain references, policy version, audience intersection, creation/expiry time and an explicit non-authoritative class.
 
+Task runtime owns task revision/lease state; the Go memory module supplies memory eligibility, dependency freshness and bounded evidence projection through the shared contract. Register those dependencies with the same Go lineage owner used by served views. Do not introduce task-local memory SQL, an independent canonical store or a C reconstruction of memory validity.
+
 Separate verified observations from working hypotheses and planned actions. A tool result is an observation of that particular execution; a planned edit is not evidence that an edit occurred. Projection text must preserve those labels through summaries and budget transformations.
 
 Revision creation is atomic and uses expected-revision compare-and-swap. Parallel delegates propose changes to the host; they cannot overwrite each other's working state or mint authoritative revisions. Each revision identifies the events incorporated and the unresolved merge/conflict state.

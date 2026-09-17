@@ -2,7 +2,7 @@
 
 - **State:** Proposed
 - **Priority:** P1: after shared validity enforcement
-- **Owner:** Memory lifecycle policy
+- **Owner:** Go memory lifecycle policy
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-06](memory-reliability-06-ranking-traces-and-context-receipts.md); measure with [MR-08](memory-reliability-08-retrieval-health-telemetry.md)/[MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md)
 - **Delivery:** Three implementation slices
 
@@ -32,7 +32,7 @@ A historical/diagnostic override bypasses only the utility-horizon filter. It ca
 
 ## Implementation
 
-Implement the horizon evaluator as a pure function of record version, authenticated anchor, request purpose/time and policy artifact. Integrate it through [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) instead of adding per-endpoint age SQL. Handle absent/malformed anchors explicitly: return unknown policy applicability and use the declared conservative serving rule; do not substitute current time.
+Implement the horizon evaluator in the Go memory module as a pure function of record version, authenticated anchor, request purpose/time and policy artifact. Integrate it through [MR-01](memory-reliability-01-unified-eligibility-and-validity.md)'s shared Go decision instead of adding per-endpoint age SQL or C policy. Handle absent/malformed anchors explicitly: return unknown policy applicability and use the declared conservative serving rule; do not substitute current time.
 
 Expose the decision in `memory validity`, actual selection traces and health reports. Distinguish `utility_horizon_elapsed`, domain validity expiry and physical retention deletion. A policy change creates a new versioned decision and invalidates affected cached projections without rewriting historical records.
 

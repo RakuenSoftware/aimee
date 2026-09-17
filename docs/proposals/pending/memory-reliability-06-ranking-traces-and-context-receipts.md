@@ -2,7 +2,7 @@
 
 - **State:** Proposed
 - **Priority:** P0 for receipt correctness; P1 for complete diagnostics
-- **Owner:** Retrieval, ingress/provider adapter and audit
+- **Owner:** Go memory traces, with host/provider dispatch and audit receipts
 - **Depends on:** [MR-03](memory-reliability-03-final-payload-context-budgets.md); joins [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) and [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) outputs
 - **Delivery:** Four implementation slices
 
@@ -31,11 +31,16 @@ Use a versioned canonical metadata encoding and a separate digest of the exact f
 | `retrieved` | Candidate collection completed or explicitly degraded |
 | `assembled` | Final projection and packing decisions exist |
 | `prepared` | Exact request binding durably appended to the governed audit/WORM pipeline before network dispatch |
+| `dispatch_admitted` | Durable intent for one transport attempt; bytes may or may not have been sent |
 | `dispatch_started` | A concrete transport attempt began |
 | `acknowledged` | Provider returned an identifiable acknowledgement/response |
 | `failed` / `outcome_unknown` | Failure is known, or transport uncertainty prevents claiming a result |
 
 The prepared stage must survive a crash. If the required durable append is unavailable, governed dispatch waits/fails; it does not proceed with an in-memory promise to log later. Existing transactional outbox acceptance may serve as that durable boundary if its durability contract is explicit. Local acceptance, chain sealing and external checkpoint delivery remain separate statuses. Optional sampled health telemetry is never the sole required receipt.
+
+Persist `dispatch_admitted` before handing bytes to the transport, with one host-owned attempt identity and dispatch ownership. Recovery may call an attempt unsent only when it remained `prepared` without admission and no dispatcher can still admit it. After admission, a missing `dispatch_started` or acknowledgement record does not prove that no bytes were sent. Record `outcome_unknown` unless independent transport/provider evidence resolves the attempt. A crash after receipt of a response but before its durable acknowledgement has the same uncertainty rule.
+
+Transport handoff and network effects are not atomic with the receipt store. Do not rename durable intent as observed dispatch to hide that gap. Retry decisions preserve the unresolved attempt, allocate a distinct attempt identity and account for potentially executed work under the existing budget policy. Governed external effects additionally follow [MR-16](memory-reliability-16-evidence-bound-actions-and-composition.md)'s reconciliation/idempotency rules.
 
 ## Verification and retention
 
@@ -45,9 +50,9 @@ Support two explicit retention modes. `commitment_only` allows verification agai
 
 ## Existing integration points and slices
 
-1. Extend `recall_traces`/`recall_trace_results`, request-scoped Go tracing and typed packing traces with actual ranking contributions.
+1. Extend `recall_traces`/`recall_trace_results` and request-scoped Go memory tracing with actual ranking and memory projection contributions. Return bounded versioned trace references through the bus; remove retrospective C reconstruction for migrated paths.
 2. Make `ingress_render_block` return retained IDs and dispositions; emit final assembly evidence after packing for ordinary memory, code, facts, observations and procedures.
-3. Add a durable pre-dispatch receipt at the final provider-request boundary and append dispatch/acknowledgement events idempotently. Reuse existing audit/WORM writers.
+3. Add durable preparation and dispatch admission at the final provider-request boundary, followed by idempotent observed dispatch/acknowledgement events and crash recovery. Reuse existing audit/WORM writers.
 4. Add `aimee memory receipt <request-id> --json` and receipt verification with explicit retained-input/evidence states.
 
 ## Acceptance gates
@@ -55,7 +60,8 @@ Support two explicit retention modes. `commitment_only` allows verification agai
 - A tiny envelope distinguishes retrieved-but-omitted items from delivered items across every channel.
 - Dense-only and graph-promoted results show the actual contribution that affected ordering.
 - Concurrent/nested calls cannot contaminate trace IDs or candidate lists.
-- Crash after preparation but before send yields prepared-without-dispatch, never a successful invocation.
+- Crash after preparation but before durable dispatch admission yields prepared-without-dispatch once dispatch ownership is resolved, never a successful invocation.
+- Crash after admission but before handoff, after send but before dispatch logging, or after response receipt but before acknowledgement persistence preserves uncertainty unless independent evidence resolves it. Absence of a log record never proves non-dispatch after admission.
 - Timeout after send records uncertainty and does not invent a provider acknowledgement.
 - A changed request body, source version, renderer or policy cannot verify against the prior binding.
 - Commitment-only receipts cannot claim replay; deletion of replay inputs does not erase the distinction between replay and inclusion.

@@ -31,9 +31,11 @@ The minimum corpus includes these case groups, each with successful and failing 
 | Scope | Cross-user/project retrieval; pooled connection reuse; unauthorized graph intermediates; hidden parent/family metadata; task-fork audience conflicts |
 | Independence | Thirty duplicates; summary corroborating its own parent; low-trust source copied into many derivatives; composite A+B counted as a third witness; unknown lineage |
 | Retrieval and selection | Dense-only relevant hit after full lexical pool; lexical distractor; misleading graph proximity; capped priors; sole-support displacement; mandatory floor conflict; exposure feedback loop |
-| Packing and receipts | Long metadata/Unicode/escapes; duplicate procedures; required evidence dropped at final pack; trace truncation; concurrent traces; crash before send; changed payload; commitment-only replay claim |
+| Packing and receipts | Long metadata/Unicode/escapes; duplicate procedures; required evidence dropped at final pack; trace truncation; concurrent traces; crash before admission, after admission before handoff, after send before dispatch logging, and after response before acknowledgement persistence; changed payload; commitment-only replay claim |
 | Contracts and task state | Wrong complete/high-confidence plan; starvation/expansion; zero versus disabled budget; concurrent delegate spending; stale contract; temporary hypothesis promotion; expired projection |
-| Lifecycle and operations | Same-dimension embedding drift; backlog deadline; delete during backfill; restore after erasure; stale review preview; failed hygiene proposal; rejected proposal repetition |
+| Lifecycle and operations | Same-dimension embedding drift; backlog deadline; delete during backfill; historical semantic recall after rebuild; future-valid activation without a write; restore after erasure; commit-before-publication crash; duplicate/reordered invalidations; consumer restart/retention gap; stale review preview; failed hygiene proposal; rejected proposal repetition |
+| Query caches | New constraint after cached briefing; new contradiction after empty result; distinct task/view/time/budget identities; clock-only applicability transition; newly visible record; lagging consumer with unchanged local watermark |
+| Go memory ownership | No C/header files or C descriptor entries in memory; `CGO_ENABLED=0` memory build; same domain decision through CLI/MCP/HTTP/bus adapters; Server/KB placement isolation; unsupported contract version; cancellation/deadline propagation; module restart/unavailability; rejected attempt to restore C shims or migrated C policy |
 | Effects and retries | Revoke before admission; changed destination; duplicate external write; unknown effect outcome; forbidden action composition; clean retry preserving real effects |
 | Injection and answerability | Imported imperative instructions; forged source/authority metadata; same-channel instruction confusion; canary leakage; unanswerable and conflicting-evidence tasks |
 
@@ -55,13 +57,17 @@ Run ablations in dependency order: eligibility, mutation, packing, fair candidat
 
 ## Serving-surface parity
 
-Maintain a checked-in matrix for CLI, MCP, HTTP, event bus, ingress, scheduled maintenance and compatibility APIs. Columns include owner, supported query modes, authenticated scope, dense/graph capability, index state, activation/workspace parameters, final budget and receipt stage. Intentionally unsupported behavior is explicit; ignored advertised parameters fail conformance.
+Expand the [initial serving-surface inventory](memory-reliability-00-program.md#initial-serving-surface-inventory) into a checked-in matrix for CLI, MCP, HTTP, event bus, ingress, provider dispatch, scheduled maintenance and compatibility APIs. Columns include owner/store namespace, supported query modes, authenticated scope, dense/graph capability, index state, activation/workspace parameters, final budget and receipt stage. Intentionally unsupported behavior is explicit; ignored advertised parameters fail conformance. Pin source revision and distinguish source inspection from exercised guarantees.
 
 Exercise a real non-owner PostgreSQL role and the current C/Go processes in integration CI. Capture the final provider-shaped request with a controlled fake transport; verify exact selected IDs, protected bytes and receipt binding without requiring a paid model call. Keep separate small live-model quality runs where they materially test reading behavior.
 
+Use deterministic barriers at mutation commit/publication, consumer apply/checkpoint, dispatch admission/handoff and response/acknowledgement persistence. Restart the affected process and assert durable states, current release decisions and replay progress. Missing dispatch evidence after admission must remain unknown; successful publication alone cannot satisfy complete erasure. Advance a controlled clock for future-valid indexing and cache boundaries without modifying source content.
+
+Apply the [Go memory integration contract](memory-reliability-00-program.md#go-memory-module-integration) and G0 extraction gate to every implementation slice. Run domain tests in `server-go/modules/memory`, a `CGO_ENABLED=0` memory executable build, real process/placement conformance and host-owned C framing tests. Change `scripts/check_memory_c_boundary.py` to reject all C sources/headers in the memory trees and descriptor, and check each relocated external adapter for copied memory policy. Validate receiving-owner descriptors, module-bus boundaries, Make/CMake source registration and installed header paths. A slice cannot pass by keeping transport shims inside memory, forwarding old module headers, wrapping C with cgo or adding direct store/feature-module access. Rollback keeps a compatible Golang-only memory module or reports the capability unavailable.
+
 ## Implementation slices and rollout
 
-1. Add manifest/exclusion/answerability schemas, deterministic fixture groups and metric unit tests; record the current baseline.
+1. Add manifest/exclusion/answerability schemas, deterministic fixture groups and metric unit tests; record the current baseline and per-operation Go ownership/migration dispositions from the program inventory.
 2. Add cross-surface authenticated integration tests and final-request capture, including failure/restart cases.
 3. Add paired quality/cost/routing/contract experiments and sensitivity reports with fixed thresholds.
 4. Make applicable invariant tests required in CI, reconcile stale implementation/proposal documentation and publish a versioned release report. Retain raw per-case evidence under its access/retention policy.

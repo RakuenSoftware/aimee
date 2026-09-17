@@ -2,7 +2,7 @@
 
 - **State:** Proposed
 - **Priority:** P2: operational maintenance
-- **Owner:** Memory maintenance and reviewed-learning owner
+- **Owner:** Go memory maintenance/proposal generation, with the reviewed-learning owner
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md), [MR-08](memory-reliability-08-retrieval-health-telemetry.md), [MR-13](memory-reliability-13-disposable-task-projections.md)
 - **Delivery:** Three implementation slices
 
@@ -15,6 +15,8 @@ Add a bounded hygiene job that detects problems and creates reviewable proposals
 ## Existing integration points
 
 Reuse `server-go/modules/memory/maintenance.go`, existing lint/drift functions, `learning_proposals` and current review/commit machinery. Inventory existing automatic promotion, merge, prune and summarize behavior before attaching the hygiene scheduler. The proposal-only guarantee applies to this new path and must be enforced at its mutation boundary.
+
+Implement detectors and memory finding projection in the Go memory owner, reusing its eligibility, lineage and mutation contracts. Scheduling supplies bounded work over the bus; the existing learning owner retains review/commit authority. C maintenance commands remain adapters and cannot call a local mutation path when the Go module is unavailable.
 
 ## Job and finding model
 
