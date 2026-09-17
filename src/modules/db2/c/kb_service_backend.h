@@ -131,7 +131,6 @@ extern "C"
                                            const char *description, int weight);
    cJSON *db2_kb_service_tool_registry_snapshot_json(void);
    cJSON *db2_kb_service_tool_registry_lookup_json(const char *name);
-   cJSON *db2_kb_service_relations_schema_list_json(void);
    cJSON *db2_kb_service_collab_rules_propose_json(const char *text, const char *reason,
                                                    const char *proposed_by);
    cJSON *db2_kb_service_collab_rules_list_json(void);

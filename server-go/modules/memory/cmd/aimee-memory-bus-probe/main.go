@@ -67,7 +67,7 @@ func probeDecisions(ctx context.Context, client *memory.Client, caller memory.St
 	declaration, err := caller.Call(ctx, 6143, bus.StageDescribeCommands, 2112, time.Second, []byte{'D', 'C', 'M', 'D', 2, 0, 0, 0})
 	wantCommands := uint32(1)
 	if os.Getenv("AIMEE_TEST_MEMORY_PLACEMENT") == "kb" {
-		wantCommands = 64
+		wantCommands = 65
 	}
 	if err != nil || len(declaration) < 16 || string(declaration[:4]) != "DCMR" ||
 		binary.LittleEndian.Uint32(declaration[4:]) != 2 ||

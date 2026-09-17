@@ -156,9 +156,6 @@ extern "C"
     * widening a row whose identity belongs to another scope. */
    int db2_memory_scope_replace(int64_t memory_id, const char *scope_type, const char *scope_value);
 
-   /* INSERT OR IGNORE into memory_workspaces. Best-effort. */
-   void db2_memory_workspace_tag_insert(int64_t memory_id, const char *workspace);
-
    /* List memory_episodes rows whose key/text/source_session contains `query`
     * (or all rows when `query` is empty). Ordered by exact-key match,
     * has-reference-time, then created_at DESC. Up to min(limit, max) rows.
@@ -874,13 +871,6 @@ extern "C"
     * test_local_first_applies_before_limits_across_memory_surfaces. Returns
     * rows written. */
    int db2_memory_list_session_scope_priority_like(const char *pattern, memory_t *out, int max);
-
-   /* Substring-keyword search over L2/L3/L5 fact/pattern memories.
-    * Matches when LOWER(content) or LOWER(key) contains LOWER(keyword).
-    * Ordered by confidence DESC, use_count DESC. Fills only the |key|
-    * and |content| fields of each row (other fields are zeroed); used
-    * by the agent-runtime relevance injector. Returns rows written. */
-   int db2_memory_search_facts_patterns_by_keyword(const char *keyword, memory_t *out, int max);
 
    /* (tier, kind, count) tuple from a `GROUP BY tier, kind` over the
     * memories table.  Used by the dashboard's tier/kind panel. */

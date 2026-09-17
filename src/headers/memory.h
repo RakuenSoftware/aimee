@@ -400,32 +400,9 @@ int memory_reject(int64_t id, const char *reason);
 int memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max);
 int memory_stats(memory_stats_t *out);
 
-/* Replace a memory's content.
- *
- * memory_update_content_as() with MEMORY_AUTHORITY_MODEL routes to
- * memory_supersede(), preserving the prior content as `key#vN` and linking the
- * two; `new_id_out` (optional) receives the id of the row now holding the
- * current value. With MEMORY_AUTHORITY_USER it overwrites in place, and
- * new_id_out receives `id` unchanged.
- *
- * memory_update_content() is the USER-authority spelling, kept for the CLI /
- * operator callers that predate the split. */
-/* Returns -2 for immutable episode/experience content (annotate instead) and
- * -3 for instruction/policy content (revoke and replace instead). */
-int memory_update_content_as(int64_t id, const char *content, memory_authority_t authority,
-                             int64_t *new_id_out);
+/* Legacy direct mutation consumers; public authority-preserving edits are
+ * memory.update and memory.delete commands owned by Go. */
 int memory_update_content(int64_t id, const char *content);
-
-/* Remove a memory.
- *
- * memory_delete_as() with MEMORY_AUTHORITY_MODEL routes to memory_retire() — the
- * row survives under `key#vN` with valid_until stamped, so it stops answering
- * recall for `key` but stays readable through memory_fact_history(). With
- * MEMORY_AUTHORITY_USER it hard-deletes the row and its provenance, which is
- * irreversible: the audit event carries the id only, never the content.
- *
- * memory_delete() is the USER-authority spelling. */
-int memory_delete_as(int64_t id, memory_authority_t authority);
 int memory_delete(int64_t id);
 
 /* Audit hook: notified after each memory MUTATION at the store — insert, an

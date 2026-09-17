@@ -785,59 +785,6 @@ const char *memory_ontology_node_kind_to_text(memory_node_kind_t kind)
    return domain_policy_name("ontology-node-name", NULL, NULL, "subject_kind", (int)kind);
 }
 
-int memory_ontology_validate(memory_node_kind_t subject_kind, memory_relation_kind_t relation,
-                             memory_node_kind_t object_kind)
-{
-   cJSON *request = domain_request("ontology-validate");
-   if (!request || !cJSON_AddNumberToObject(request, "subject_kind", (int)subject_kind) ||
-       !cJSON_AddNumberToObject(request, "relation_code", (int)relation) ||
-       !cJSON_AddNumberToObject(request, "object_kind", (int)object_kind))
-   {
-      cJSON_Delete(request);
-      return 0;
-   }
-   cJSON *response = domain_call(request);
-   int allowed = domain_bool(response, "allowed");
-   cJSON_Delete(response);
-   return allowed;
-}
-
-int memory_ontology_rules(const memory_ontology_rule_t **out)
-{
-   static __thread memory_ontology_rule_t rules[512];
-   if (!out)
-      return -1;
-   *out = NULL;
-   cJSON *response = domain_call(domain_request("ontology-rules"));
-   const cJSON *rows = response ? cJSON_GetObjectItemCaseSensitive(response, "rules") : NULL;
-   if (!cJSON_IsArray(rows))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(rows);
-   if (n > (int)(sizeof(rules) / sizeof(rules[0])))
-      n = (int)(sizeof(rules) / sizeof(rules[0]));
-   for (int i = 0; i < n; ++i)
-   {
-      const cJSON *row = cJSON_GetArrayItem(rows, i);
-      const cJSON *subject = cJSON_GetObjectItemCaseSensitive(row, "subject_kind");
-      const cJSON *relation = cJSON_GetObjectItemCaseSensitive(row, "relation");
-      const cJSON *object = cJSON_GetObjectItemCaseSensitive(row, "object_kind");
-      if (!cJSON_IsNumber(subject) || !cJSON_IsNumber(relation) || !cJSON_IsNumber(object))
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-      rules[i].sk = (memory_node_kind_t)subject->valueint;
-      rules[i].rel = (memory_relation_kind_t)relation->valueint;
-      rules[i].ok = (memory_node_kind_t)object->valueint;
-   }
-   cJSON_Delete(response);
-   *out = rules;
-   return n;
-}
-
 static int domain_query_records(const char *mode, const char *pattern, int days, memory_t *out,
                                 int max)
 {
@@ -894,11 +841,6 @@ int db2_memory_list_session_scope_priority_like(const char *pattern, memory_t *o
    return domain_query_records("session-priority", pattern ? pattern : "", 0, out, max);
 }
 
-int db2_memory_search_facts_patterns_by_keyword(const char *keyword, memory_t *out, int max)
-{
-   return domain_query_records("facts-patterns", keyword ? keyword : "", 0, out, max);
-}
-
 int db2_memory_key_exists(const char *key)
 {
    if (!key || !key[0])
@@ -935,11 +877,6 @@ int db2_memory_epistemic_kind(int64_t memory_id, char *out, size_t out_cap)
 void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type, const char *scope_value)
 {
    (void)memory_tag_scope(memory_id, scope_type, scope_value);
-}
-
-void db2_memory_workspace_tag_insert(int64_t memory_id, const char *workspace)
-{
-   (void)memory_tag_workspace(memory_id, workspace);
 }
 
 int db2_memory_promotion_demote_id(int64_t memory_id)

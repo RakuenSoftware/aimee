@@ -14,7 +14,6 @@ int kb_handle_rules_insert(int fd, cJSON *req);
 int kb_handle_tool_registry_snapshot(int fd, cJSON *req);
 int kb_handle_tool_registry_lookup(int fd, cJSON *req);
 int kb_handle_mcp_call(int fd, cJSON *req);
-int kb_handle_relations_schema_list(int fd, cJSON *req);
 int kb_handle_collab_rules_propose(int fd, cJSON *req);
 int kb_handle_collab_rules_list(int fd, cJSON *req);
 int kb_handle_collab_rules_list_active(int fd, cJSON *req);

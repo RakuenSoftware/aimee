@@ -396,60 +396,6 @@ int memory_insert(const char *tier, const char *kind, const char *key, const cha
                            MEMORY_AUTHORITY_MODEL, out);
 }
 
-int memory_update_content_as(int64_t id, const char *content, memory_authority_t authority,
-                             int64_t *new_id_out)
-{
-   if (id <= 0 || !content || !content[0] ||
-       (authority != MEMORY_AUTHORITY_MODEL && authority != MEMORY_AUTHORITY_USER))
-      return -1;
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "update-as") ||
-       !cJSON_AddNumberToObject(request, "id", (double)id) ||
-       !cJSON_AddStringToObject(request, "content", content) ||
-       !cJSON_AddNumberToObject(request, "authority", authority))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = memory_data_call(request);
-   const cJSON *code = response ? cJSON_GetObjectItemCaseSensitive(response, "code") : NULL;
-   const cJSON *ids = response ? cJSON_GetObjectItemCaseSensitive(response, "ids") : NULL;
-   const cJSON *new_id = cJSON_IsArray(ids) ? cJSON_GetArrayItem(ids, 0) : NULL;
-   if (!cJSON_IsNumber(code) || !cJSON_IsNumber(new_id))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   if (new_id_out)
-      *new_id_out = (int64_t)new_id->valuedouble;
-   int result = code->valueint;
-   cJSON_Delete(response);
-   if (result == 0)
-      memory_audit_emit("memory.update", id, NULL, NULL, NULL, 0.0, NULL);
-   return result;
-}
-
-int memory_delete_as(int64_t id, memory_authority_t authority)
-{
-   if (id <= 0 || (authority != MEMORY_AUTHORITY_MODEL && authority != MEMORY_AUTHORITY_USER))
-      return -1;
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "delete-as") ||
-       !cJSON_AddNumberToObject(request, "id", (double)id) ||
-       !cJSON_AddNumberToObject(request, "authority", authority))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = memory_data_call(request);
-   const cJSON *deleted = response ? cJSON_GetObjectItemCaseSensitive(response, "deleted") : NULL;
-   int result = cJSON_IsBool(deleted) && cJSON_IsTrue(deleted) ? 0 : -1;
-   cJSON_Delete(response);
-   if (result == 0)
-      memory_audit_emit("memory.delete", id, NULL, NULL, NULL, 0.0, NULL);
-   return result;
-}
-
 int memory_fold_session(const char *session_id, char *summary_out, size_t summary_out_len)
 {
    if (summary_out && summary_out_len > 0)

@@ -130,13 +130,6 @@ int kb_handle_mcp_call(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "mcp call failed");
 }
 
-int kb_handle_relations_schema_list(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_relations_schema_list_json();
-   return kb_reply_or_error(fd, resp, "relations schema list failed");
-}
-
 int kb_handle_rules_insert(int fd, cJSON *req)
 {
    cJSON *pol = cJSON_GetObjectItemCaseSensitive(req, "polarity");

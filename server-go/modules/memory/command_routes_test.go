@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -33,7 +34,11 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			}
 			group, verb := string(response[offset:offset+groupLen]), string(response[offset+groupLen:offset+groupLen+verbLen])
 			offset += groupLen + verbLen + summaryLen
-			if group != "memory" || surfaces != SurfaceRPC || seen[verb] {
+			wantGroup := "memory"
+			if verb == "schema_list" {
+				wantGroup = "relations"
+			}
+			if group != wantGroup || surfaces != SurfaceRPC || seen[verb] {
 				t.Fatalf("bad route %s.%s mask=%d", group, verb, surfaces)
 			}
 			seen[verb] = true
@@ -44,7 +49,7 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			}
 			continue
 		}
-		if offset != len(response) || len(seen) != 64 {
+		if offset != len(response) || len(seen) != 65 {
 			t.Fatalf("routes=%d bytes=%d/%d", len(seen), offset, len(response))
 		}
 		for _, verb := range []string{"recall", "directive_create", "prospective_match", "list_unused_l2", "stats"} {
@@ -56,6 +61,51 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			if seen[verb] {
 				t.Fatal("premature/internal route exposed", verb)
 			}
+		}
+	}
+}
+
+// Retains the native schema/validation regressions at the enforcing Go owner.
+func TestPublicEnforcedOntology(t *testing.T) {
+	handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
+	client := clientForHandler(t, handler)
+	result := runPublicCommand(t, client, "schema_list", `{}`)
+	if result["status"] != "ok" {
+		t.Fatal(result)
+	}
+	rows := result["rows"].([]any)
+	if len(rows) != 18 {
+		t.Fatal("incomplete graph schema", len(rows))
+	}
+	foundFixes := false
+	previous := [3]int{-1, -1, -1}
+	for _, item := range rows {
+		row := item.(map[string]any)
+		order := [3]int{int(row["relation_id"].(float64)), int(row["subject_kind"].(float64)), int(row["object_kind"].(float64))}
+		if order[0] < previous[0] || (order[0] == previous[0] && (order[1] < previous[1] || order[1] == previous[1] && order[2] < previous[2])) {
+			t.Fatal("unstable schema ordering", row)
+		}
+		previous = order
+		if row["relation"] == "fixes" && row["subject"] == "commit" && row["object"] == "bug" {
+			foundFixes = true
+			if order != [3]int{2, 5, 4} {
+				t.Fatal(row)
+			}
+		}
+	}
+	if !foundFixes {
+		t.Fatal("missing commit fixes bug schema")
+	}
+	for _, tt := range []struct {
+		subject, relation, object int
+		allowed                   bool
+	}{
+		{5, 2, 4, true}, {0, 12, 8, true}, {0, 99, 3, true}, {1, 2, 4, false},
+	} {
+		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{Operation: "ontology-validate", SubjectKind: tt.subject, RelationCode: tt.relation, ObjectKind: tt.object}))
+		var response DataResponse
+		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &response) != nil || response.Allowed == nil || *response.Allowed != tt.allowed {
+			t.Fatal(tt, string(raw), status)
 		}
 	}
 }

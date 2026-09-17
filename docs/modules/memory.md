@@ -319,3 +319,10 @@ transmission and trajectory export consume its allow/redact/reject result throug
 generic module routing; missing or malformed responses fail closed. Screening
 redacts all credential spans, rejects PEM private-key bodies and refuses truncated
 redactions. The native gate function, source file and private header are removed.
+
+The Go module also declares `relations.schema_list`. Publication and graph
+validation share the original 18-rule graph schema, including commit/fixes/bug
+and wildcard discussion edges. This repairs an earlier port that incorrectly
+used the identity-fact vocabulary and published only supersedes. Response order
+is deterministic. The native schema and validation adapters and unused native
+authority-edit, workspace-tag and keyword-search wrappers are removed.

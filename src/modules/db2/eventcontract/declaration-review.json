@@ -578,13 +578,6 @@
       "reason": "The cJSON note-search response cannot define the wire shape; DB2 returns bounded typed matches for caller-owned serialization."
     },
     {
-      "symbol": "db2_kb_service_relations_schema_list_json",
-      "signature_sha256": "97fdaec26b95aad3cb59d23df19b3a449e39853ad7813f696c38c77835db3dae",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The relation-schema cJSON list is caller presentation; a typed bounded query returns canonical relation definitions and truncation state."
-    },
-    {
       "symbol": "db2_kb_service_rules_decay_json",
       "signature_sha256": "83366f3f71f8923c3a1d9d6fc71e1747a7bc34e671b9288a409d146ffdc84a67",
       "disposition": "private-db2",

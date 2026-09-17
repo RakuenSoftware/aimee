@@ -1108,22 +1108,6 @@ int main(void)
       assert(memory_ontology_node_kind_from_text(NULL) == NODE_OTHER);
    }
 
-   /* --- memory_ontology_validate: valid triples --- */
-   {
-      /* commit FIXES bug */
-      assert(memory_ontology_validate(NODE_COMMIT, REL_FIXES, NODE_BUG) == 1);
-      /* any CO_DISCUSSED any */
-      assert(memory_ontology_validate(NODE_FILE, REL_CO_DISCUSSED, NODE_CONCEPT) == 1);
-      /* REL_OTHER always allowed */
-      assert(memory_ontology_validate(NODE_FILE, REL_OTHER, NODE_MODULE) == 1);
-   }
-
-   /* --- memory_ontology_validate: invalid triple --- */
-   {
-      /* function FIXES bug: not in schema (commit should fix bugs) */
-      assert(memory_ontology_validate(NODE_FUNCTION, REL_FIXES, NODE_BUG) == 0);
-   }
-
    /* --- memory_graph_walk: empty DB returns 0 entries --- */
    {
       graph_walk_entry_t entries[16];
