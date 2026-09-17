@@ -2,7 +2,11 @@ package egress
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/JBailes/aimee/server-go/bus"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -61,5 +65,39 @@ func TestProviderCredentialBindsAccountOriginPortAndCaller(t *testing.T) {
 	if p, err := broker.decrypt(now.Add(time.Minute), inv, request, "http://127.0.0.1:18765"); err == nil {
 		clear(p)
 		t.Fatal("expired key accepted")
+	}
+}
+
+func TestCodexProbeHeadersAndSealedTokenReachProvider(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/codex/responses" || r.Header.Get("Authorization") != "Bearer fixture-token" || r.Header.Get("ChatGPT-Account-ID") != "account-a" || r.Header.Get("originator") != "codex_cli_rs" {
+			t.Error("provider did not receive its OAuth request")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\"}\n\n"))
+	}))
+	defer upstream.Close()
+	broker, err := newCredentialBroker()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, _ := NewBusAuthorizer(providerKeyCaller{broker})
+	target := upstream.URL + "/codex/responses"
+	envelope, err := client.SealProviderCredential(context.Background(), 0, target, "codex", "bearer", []byte("fixture-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"model":"fixture","stream":true,"store":false}`)
+	request := HTTPRequest{Request: Request{TargetURL: target, Purpose: "provider", Method: "POST", CredentialPresent: true, RequestSHA256: RequestDigest("POST", target, body, true)},
+		Headers: map[string]string{"ChatGPT-Account-ID": "account-a", "originator": "codex_cli_rs", "Accept": "text/event-stream"},
+		Body:    body, CredentialHandle: "provider", CredentialScope: "bearer", CredentialResource: "codex", Credential: envelope, MaxResponseBytes: 4096, TimeoutMS: 1000}
+	wire, _ := json.Marshal(request)
+	p := policy{resolver: fixedResolver{{IP: net.ParseIP("127.0.0.1")}}, credentials: broker}
+	encoded, status := p.handleHTTP(bus.ModuleInvocation{PrincipalClass: 1, PrincipalRef: ProvidersClientRef, StageID: StageHTTP}, wire)
+	response, err := decodeHTTPResponse(encoded)
+	if status != bus.ModuleStatusOK || err != nil || response.Status != 200 || !strings.Contains(string(response.Body), "response.completed") {
+		t.Fatal(status, response, err)
 	}
 }

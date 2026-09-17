@@ -38,6 +38,18 @@ providers use the isolated probe worker. Validate the credential scheme and
 model availability before selecting a connection for use. Owner unavailability
 is surfaced to management callers rather than replaced with a second writer.
 
+HTTP probes follow the serving protocol: OpenAI chat completions, versioned
+Anthropic Messages (including path-prefixed compatible endpoints), or Codex
+Responses. Codex uses the selected connection's Vault OAuth token/account or
+OAuth document, seals the bearer for egress, and requires completed inference
+with final text. Streamed output items count even when the completion envelope
+omits them; partial or failed streams do not. Model-list discovery is skipped
+for Codex probes, where inference supplies the availability result.
+
+Probe failures expose `execution_error` and the legacy `execution_message`
+alias. The GUI accepts both. Discovery failures remain separate from inference
+success, and `--no-run` never sends an inference request.
+
 ## Configuration and activation
 
 - `runtime_toggle.supported`: `false`; providers is required within its declared placement.
