@@ -96,8 +96,12 @@ func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHan
 			return handleDeclareCommands(invocation, request)
 		case StageData:
 			return handleData(options, invocation, request)
+		case StageCommand:
+			return handleCommand(options, invocation, request)
+		case StageRerank:
+			return handleRerank(invocation, request)
 		}
-		return handleRerank(invocation, request)
+		return nil, bus.ModuleStatusInvalidRequest
 	}
 }
 

@@ -207,9 +207,10 @@ fact_gate_verdict_t db2_fact_commit_with_actor(const char *source, memory_node_k
    int verdict = -1;
    int commit_allowed = -1;
    if (!g_fact_gate_provider ||
-       g_fact_gate_provider((int)head_kind, rel_type, (int)tail_kind, &verdict, &commit_allowed) != 0 ||
-       (commit_allowed != 0 && commit_allowed != 1) ||
-       verdict < DB2_FACT_GATE_ACCEPT || verdict > DB2_FACT_GATE_BADARG)
+       g_fact_gate_provider((int)head_kind, rel_type, (int)tail_kind, &verdict, &commit_allowed) !=
+           0 ||
+       (commit_allowed != 0 && commit_allowed != 1) || verdict < DB2_FACT_GATE_ACCEPT ||
+       verdict > DB2_FACT_GATE_BADARG)
       verdict = -1;
    fact_gate_verdict_t v = FACT_GATE_DEFER;
    switch (verdict)

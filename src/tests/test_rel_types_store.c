@@ -58,8 +58,8 @@ static int failing_fact_gate(int head_kind, const char *rel_type, int tail_kind,
    return -1;
 }
 
-static int missing_commit_decision(int head_kind, const char *rel_type, int tail_kind,
-                                    int *verdict, int *commit_allowed)
+static int missing_commit_decision(int head_kind, const char *rel_type, int tail_kind, int *verdict,
+                                   int *commit_allowed)
 {
    (void)head_kind;
    (void)rel_type;

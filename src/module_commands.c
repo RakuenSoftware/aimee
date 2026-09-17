@@ -4,6 +4,7 @@
 #endif
 
 #include "headers/module_commands.h"
+#include <aimee/core/event_bus/module_protocol.h>
 
 #include "aimee/audit/obs_bus.h"
 #include "aimee_sha256.h"
@@ -64,7 +65,7 @@
 #define INVOKE_RESPONSE_MAGIC  0x53504d43u /* "CMPS" */
 #define INVOKE_REQUEST_HEADER  16u
 #define INVOKE_RESPONSE_HEADER 12u
-#define INVOKE_MAX_RESPONSE    (1024u * 1024u)
+#define INVOKE_MAX_RESPONSE    AIMEE_MODULE_MESSAGE_MAX_BODY
 #define INVOKE_TIMEOUT_MS      60000
 
 /* One registered command's owned backing.
@@ -173,17 +174,15 @@ static void wr_u16(unsigned char *p, uint16_t v)
    p[1] = (unsigned char)((v >> 8) & 0xff);
 }
 
-/* --- plugin command dispatch ------------------------------------------------ */
+/* --- shared command dispatch ------------------------------------------------ */
 
-/* Handler for a command that lives in a plugin module.
- *
- * Encodes the invoke frame, calls the instance's invoke stage, and returns the
- * plugin's MCP result object. Returns NULL on any failure; the surface that
- * called decides what that means, exactly as module_json_call.c does. */
-static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
+/* Encodes the shared invoke frame and returns the owner's JSON result.
+ * Fixed modules use their declared stage; plugins retain their stage-1 route. Returns NULL on any
+ * failure; the surface that called decides what that means, exactly as module_json_call.c does. */
+cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                 const cJSON *args)
 {
-   const owned_command_t *cmd = (const owned_command_t *)ud;
-   if (!cmd || cmd->invoke_kind == 0)
+   if (!event_kind || !stage_id || !verb || !verb[0] || strlen(verb) > 127)
       return NULL;
 
    char *args_json = NULL;
@@ -196,8 +195,13 @@ static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
       args_len = strlen(args_json);
    }
 
-   size_t verb_len = strlen(cmd->verb_wire);
+   size_t verb_len = strlen(verb);
    size_t request_len = INVOKE_REQUEST_HEADER + verb_len + args_len;
+   if (request_len > AIMEE_MODULE_MESSAGE_MAX_BODY)
+   {
+      free(args_json);
+      return NULL;
+   }
    unsigned char *request = malloc(request_len);
    if (!request)
    {
@@ -209,7 +213,7 @@ static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
    wr_u16(request + 8, (uint16_t)verb_len);
    wr_u16(request + 10, 0);
    wr_u32(request + 12, (uint32_t)args_len);
-   memcpy(request + INVOKE_REQUEST_HEADER, cmd->verb_wire, verb_len);
+   memcpy(request + INVOKE_REQUEST_HEADER, verb, verb_len);
    if (args_len)
       memcpy(request + INVOKE_REQUEST_HEADER + verb_len, args_json, args_len);
    free(args_json);
@@ -222,14 +226,13 @@ static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
    }
    uint32_t response_len = 0;
    aimee_module_call_result_t rc = obs_bus_module_call(
-       cmd->invoke_kind, AIMEE_PLUGIN_STAGE_INVOKE, 0,
-       aimee_module_call_deadline_ns(INVOKE_TIMEOUT_MS), request, (uint32_t)request_len, response,
-       INVOKE_MAX_RESPONSE, &response_len, NULL, NULL);
+       event_kind, stage_id, 0, aimee_module_call_deadline_ns(INVOKE_TIMEOUT_MS), request,
+       (uint32_t)request_len, response, INVOKE_MAX_RESPONSE, &response_len, NULL, NULL);
    free(request);
 
    if (rc != AIMEE_MODULE_CALL_OK)
    {
-      LOG_WARN("commands", "%s.%s: plugin invoke failed: %s", cmd->group, cmd->verb,
+      LOG_WARN("commands", "command %s: invoke failed: %s", verb,
                aimee_module_call_result_name(rc));
       free(response);
       return NULL;
@@ -237,21 +240,29 @@ static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
    if (response_len < INVOKE_RESPONSE_HEADER || rd_u32(response) != INVOKE_RESPONSE_MAGIC ||
        rd_u32(response + 4) != DECL_WIRE_VERSION)
    {
-      LOG_WARN("commands", "%s.%s: plugin returned a malformed frame", cmd->group, cmd->verb);
+      LOG_WARN("commands", "command %s: malformed frame", verb);
       free(response);
       return NULL;
    }
    uint32_t body_len = rd_u32(response + 8);
    if ((uint64_t)INVOKE_RESPONSE_HEADER + body_len != response_len)
    {
-      LOG_WARN("commands", "%s.%s: plugin frame length disagrees with its header", cmd->group,
-               cmd->verb);
+      LOG_WARN("commands", "command %s: frame length disagrees with its header", verb);
       free(response);
       return NULL;
    }
    cJSON *parsed = cJSON_ParseWithLength((const char *)response + INVOKE_RESPONSE_HEADER, body_len);
    free(response);
    return parsed;
+}
+
+static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
+{
+   const owned_command_t *cmd = ud;
+   if (!cmd)
+      return NULL;
+   return aimee_module_command_call(cmd->invoke_kind, AIMEE_PLUGIN_STAGE_INVOKE, cmd->verb_wire,
+                                    args);
 }
 
 /* --- owned-string bookkeeping ---------------------------------------------- */

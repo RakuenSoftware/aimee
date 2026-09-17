@@ -6,7 +6,7 @@
 #include "rel_types_store.h"  /* db2_fact_commit */
 #include "../headers/aimee.h" /* legacy_config_record */
 #include "../support/db2_runtime_config.h"
-#include "../support/db2_log.h"             /* LOG_WARN */
+#include "../support/db2_log.h" /* LOG_WARN */
 
 #define FI_MAX_TRIPLES 16
 

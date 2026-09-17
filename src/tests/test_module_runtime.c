@@ -155,9 +155,9 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    {
       *principal_ref = 7;
       *kind = 4096u + *principal_ref * 256u + 1u;
-      for (uint32_t stage = 1; stage <= 7; ++stage)
+      for (uint32_t stage = 1; stage <= 8; ++stage)
          served[stage - 1] = 4096u + *principal_ref * 256u + stage;
-      *serve_count = 7;
+      *serve_count = 8;
       return 0;
    }
    if (strcmp(name, "learning") == 0)
@@ -266,7 +266,7 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       served[4] = AIMEE_EGRESS_EVENT_SSE_RECV;
       served[5] = AIMEE_EGRESS_EVENT_SSE_CLOSE;
       served[6] = AIMEE_EGRESS_EVENT_CREDENTIAL_KEY;
-      *serve_count = 7;
+      *serve_count = 8;
       return 0;
    }
    else if (strcmp(name, "providers") == 0)
@@ -843,8 +843,10 @@ int main(int argc, char **argv)
                                           .backlog = 8,
                                           .stale_after_ns = 5000000000ULL,
                                           .grants = grants,
-                                          .grant_count =
-                                              argc == 4 ? 4 : (memory_process || provider_process) ? 3 : 2};
+                                          .grant_count = argc == 4 ? 4
+                                                         : (memory_process || provider_process)
+                                                             ? 3
+                                                             : 2};
    bus_runtime_t *runtime = bus_runtime_start(&host, &host_lock, &runtime_config);
    assert(runtime != NULL);
 

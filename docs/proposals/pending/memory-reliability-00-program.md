@@ -108,6 +108,9 @@ The Go client retains gate/extraction conformance against historical fixtures.
 The next live cutover also removes the PII callback layer: Go now supplies a
 combined fact-write decision and classifies queries inside typed-fact recall.
 Gate/PII binary framing and live decision smoke coverage now have Go callers.
+Private-memory public commands now validate arguments and shape replies in Go
+through the shared command dispatcher. Explicit shared-KB routing and its native
+client remain pending; the command registry has not replaced that surface.
 The current inventory is seven C sources and ten headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

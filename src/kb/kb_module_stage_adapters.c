@@ -253,8 +253,8 @@ static int score_mdl(const char *candidate, const char *evidence, double *l_cand
    return 0;
 }
 
-static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind,
-                           int *verdict, int *commit_allowed)
+static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict,
+                           int *commit_allowed)
 {
    if (!verdict || !commit_allowed)
       return -1;
@@ -276,9 +276,11 @@ static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind,
    }
    cJSON *response = kb_module_memory_data(request);
    cJSON_Delete(request);
-   const cJSON *decision = response ? cJSON_GetObjectItemCaseSensitive(response, "fact_write") : NULL;
+   const cJSON *decision =
+       response ? cJSON_GetObjectItemCaseSensitive(response, "fact_write") : NULL;
    const cJSON *code = decision ? cJSON_GetObjectItemCaseSensitive(decision, "verdict") : NULL;
-   const cJSON *allowed = decision ? cJSON_GetObjectItemCaseSensitive(decision, "commit_allowed") : NULL;
+   const cJSON *allowed =
+       decision ? cJSON_GetObjectItemCaseSensitive(decision, "commit_allowed") : NULL;
    int rc = -1;
    if (cJSON_IsNumber(code) && code->valuedouble >= AIMEE_DB2_FACT_GATE_ACCEPT &&
        code->valuedouble <= AIMEE_DB2_FACT_GATE_BADARG &&

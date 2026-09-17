@@ -9,11 +9,11 @@
 #include "log.h" /* aimee_log — a failed recall must not read as an empty one */
 #include "modules/db2/c/memory_lint.h"
 #include "config.h"
-#include "modules/db2/c/entity_registry.h"  /* db2_entity_merge / db2_entity_unmerge */
-#include "modules/db2/c/fact_ingest.h"      /* db2_typed_fact_ingress */
-#include "modules/db2/c/fact_lifecycle.h"   /* db2_fact_retract, FACT_RETRACT_IMMUTABLE */
-#include "modules/db2/c/fact_recall.h"      /* db2_fact_recall_in_query */
-#include "modules/db2/c/kb_payload.h"       /* db2_kb_async_enqueue */
+#include "modules/db2/c/entity_registry.h" /* db2_entity_merge / db2_entity_unmerge */
+#include "modules/db2/c/fact_ingest.h"     /* db2_typed_fact_ingress */
+#include "modules/db2/c/fact_lifecycle.h"  /* db2_fact_retract, FACT_RETRACT_IMMUTABLE */
+#include "modules/db2/c/fact_recall.h"     /* db2_fact_recall_in_query */
+#include "modules/db2/c/kb_payload.h"      /* db2_kb_async_enqueue */
 #include "modules/db2/c/decision_log.h"
 #include "memory.h"
 #include "modules/db2/c/memory_export.h"
@@ -1450,8 +1450,7 @@ cJSON *db2_kb_service_memory_facts_json(const char *query)
        *
        * Still a soft failure: the turn proceeds without facts rather than
        * erroring, which is the right trade for a read. It must not be silent. */
-      int fr = db2_fact_recall_in_query(query, facts,
-                                        sizeof(facts));
+      int fr = db2_fact_recall_in_query(query, facts, sizeof(facts));
       if (fr < 0)
          aimee_log(LOG_WARN, "memory",
                    "typed-fact recall failed (db2 unavailable?); answering with no facts");

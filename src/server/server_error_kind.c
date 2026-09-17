@@ -8,6 +8,9 @@
 #include "cJSON.h"
 #include "server.h"
 #include "server_error_kind.h"
+#include "module_commands.h"
+#include <stdlib.h>
+#include <string.h>
 
 static server_error_http_status_provider_fn g_http_status_provider;
 
@@ -73,6 +76,35 @@ cJSON *server_error_kind_json(const char *kind, const char *message, const char 
    if (request_id)
       cJSON_AddStringToObject(resp, "request_id", request_id);
    return resp;
+}
+
+/* Modules return the complete public envelope. The host only supplies its
+ * existing HTTP error classification, which belongs to the server transport. */
+cJSON *server_invoke_module_command(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                    const cJSON *args, const char *unavailable_message)
+{
+   cJSON *reply = aimee_module_command_call(event_kind, stage_id, verb, args);
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
+   if (!cJSON_IsObject(reply) || !status ||
+       (strcmp(status, "ok") != 0 && strcmp(status, "error") != 0))
+   {
+      cJSON_Delete(reply);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, unavailable_message, NULL);
+   }
+   const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "kind"));
+   if (kind)
+   {
+      /* Applying the classification replaces the kind member. */
+      char *owned_kind = strdup(kind);
+      if (!owned_kind)
+      {
+         cJSON_Delete(reply);
+         return server_error_kind_json(SERVER_ERR_UNAVAILABLE, unavailable_message, NULL);
+      }
+      server_error_kind_apply(reply, owned_kind);
+      free(owned_kind);
+   }
+   return reply;
 }
 
 int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,

@@ -29,8 +29,9 @@ SRC = ROOT / "src"
 # Every entry here is consumed by db2 code, which links only into aimee-kb, so
 # each must be registered by a kb source.
 DB2_CONSUMED_SEAMS = {
-    "memory_pii_register_turn_classifier": "memory_pii_turn_requests_sensitive",
-    "memory_pii_register_sensitivity_batch": "memory_pii_rel_sensitivity",
+    # The Go owner returns type and credential decisions together; the two
+    # former PII callback seams have been retired.
+    "aimee_db2_register_fact_gate_provider": "db2_fact_commit_with_actor",
 }
 
 KB = SRC / "kb"

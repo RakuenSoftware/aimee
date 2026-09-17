@@ -405,6 +405,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: memory.EventRerank, StageID: memory.StageRerank},
 			{EventKind: memory.EventDeclareCommands, StageID: memory.StageDeclareCommands},
 			{EventKind: memory.EventData, StageID: memory.StageData},
+			{EventKind: memory.EventCommand, StageID: memory.StageCommand},
 		}
 		// moduleConfig() calls this with a nil context to inspect the static
 		// registry in tests. A running module always has a context and must name

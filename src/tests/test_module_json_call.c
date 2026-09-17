@@ -11,6 +11,8 @@
  */
 #include "headers/module_json_call.h"
 #include "module_stage_adapters.h"
+#include "module_commands.h"
+#include "log.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -22,7 +24,17 @@ static int g_required_budget_ms;
 static uint64_t g_deadline;
 static char g_body[8192];
 static const char *g_reply = "{\"ok\":true}";
+static const void *g_reply_frame;
+static size_t g_reply_frame_len;
+static uint32_t g_event, g_stage, g_request_len;
 static aimee_module_call_result_t g_result = AIMEE_MODULE_CALL_OK;
+
+void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
+{
+   (void)level;
+   (void)module;
+   (void)fmt;
+}
 
 int obs_bus_module_available(uint32_t event_kind)
 {
@@ -38,6 +50,9 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
 {
    (void)event_kind, (void)stage_id, (void)trace_id, (void)cancelled, (void)cancel_context;
    g_calls++;
+   g_event = event_kind;
+   g_stage = stage_id;
+   g_request_len = request_len;
    g_deadline = deadline_ns;
    assert(request_len < sizeof g_body);
    memcpy(g_body, request_body, request_len);
@@ -46,9 +61,9 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
    if (g_result != AIMEE_MODULE_CALL_OK)
       return g_result;
-   size_t n = strlen(g_reply);
+   size_t n = g_reply_frame ? g_reply_frame_len : strlen(g_reply);
    assert(n <= response_capacity);
-   memcpy(response_body, g_reply, n);
+   memcpy(response_body, g_reply_frame ? g_reply_frame : g_reply, n);
    *response_len = (uint32_t)n;
    return AIMEE_MODULE_CALL_OK;
 }
@@ -189,6 +204,31 @@ int main(void)
    cJSON_Delete(memory_request);
    printf("  ok    code publication and retrieval have separate bounded budgets\n");
 
+   /* The same command framing serves plugins and fixed Go modules. Stage IDs
+    * must reach the owner unchanged, and malformed replies cannot become JSON. */
+   const unsigned char command_reply[] = "CMPS\1\0\0\0\17\0\0\0{\"status\":\"ok\"}";
+   const unsigned char command_request[] = "CMPQ\1\0\0\0\3\0\0\0\11\0\0\0get{\"id\":42}";
+   g_reply_frame = command_reply;
+   g_reply_frame_len = sizeof(command_reply) - 1;
+   g_required_budget_ms = 0;
+   cJSON *args = cJSON_Parse("{\"id\":42}");
+   reply = aimee_module_command_call(5896, 8, "get", args);
+   assert(reply && strcmp(cJSON_GetObjectItem(reply, "status")->valuestring, "ok") == 0);
+   assert(g_event == 5896 && g_stage == 8);
+   assert(g_request_len == sizeof(command_request) - 1);
+   assert(memcmp(g_body, command_request, g_request_len) == 0);
+   assert(cJSON_GetObjectItem(args, "id")->valueint == 42); /* borrowed */
+   cJSON_Delete(reply);
+   for (size_t n = 0; n < sizeof(command_reply) - 1; n++)
+   {
+      g_reply_frame_len = n;
+      assert(!aimee_module_command_call(5896, 8, "get", args));
+   }
+   int before = g_calls;
+   assert(!aimee_module_command_call(5896, 8, "", args));
+   assert(g_calls == before);
+   cJSON_Delete(args);
+   printf("  ok    shared command framing preserves stages and rejects truncated replies\n");
    printf("module_json_call: all tests passed\n");
    return 0;
 }

@@ -7,31 +7,33 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_MEMORY_EVENT_EXTRACT_INDEX 5889u
-#define AIMEE_MEMORY_EVENT_WRITE         5890u
-#define AIMEE_MEMORY_EVENT_EMBED         5891u
-#define AIMEE_MEMORY_EVENT_RETRIEVE      5892u
-#define AIMEE_MEMORY_EVENT_RERANK        5893u
+#define AIMEE_MEMORY_EVENT_EXTRACT_INDEX    5889u
+#define AIMEE_MEMORY_EVENT_WRITE            5890u
+#define AIMEE_MEMORY_EVENT_EMBED            5891u
+#define AIMEE_MEMORY_EVENT_RETRIEVE         5892u
+#define AIMEE_MEMORY_EVENT_RERANK           5893u
 #define AIMEE_MEMORY_EVENT_DECLARE_COMMANDS 5894u
-#define AIMEE_MEMORY_EVENT_DATA          5895u
-#define AIMEE_MEMORY_STAGE_EXTRACT_INDEX 1u
-#define AIMEE_MEMORY_STAGE_WRITE         2u
-#define AIMEE_MEMORY_STAGE_EMBED         3u
-#define AIMEE_MEMORY_STAGE_RETRIEVE      4u
-#define AIMEE_MEMORY_STAGE_RERANK        5u
+#define AIMEE_MEMORY_EVENT_DATA             5895u
+#define AIMEE_MEMORY_EVENT_COMMAND          5896u
+#define AIMEE_MEMORY_STAGE_EXTRACT_INDEX    1u
+#define AIMEE_MEMORY_STAGE_WRITE            2u
+#define AIMEE_MEMORY_STAGE_EMBED            3u
+#define AIMEE_MEMORY_STAGE_RETRIEVE         4u
+#define AIMEE_MEMORY_STAGE_RERANK           5u
 #define AIMEE_MEMORY_STAGE_DECLARE_COMMANDS 6u
-#define AIMEE_MEMORY_STAGE_DATA          7u
+#define AIMEE_MEMORY_STAGE_DATA             7u
+#define AIMEE_MEMORY_STAGE_COMMAND          8u
 
 /* Dashboard transport. The count is computed by the Go KB placement. */
 int memory_prospective_count_by_state(int *armed, int *triggered, int *completed, int *expired);
 /* Allocates the full, untruncated content returned by stage 7. Caller frees. */
 char *memory_content_dup(int64_t memory_id);
 int memory_valid_at(int64_t memory_id, const char *as_of);
-#define AIMEE_MEMORY_REQUEST_MAGIC      0x4b4e524du /* "MRNK" */
-#define AIMEE_MEMORY_RESPONSE_MAGIC     0x464e434du /* "MCNF" */
-#define AIMEE_MEMORY_WIRE_VERSION       1u
-#define AIMEE_MEMORY_REQUEST_LEN        16u
-#define AIMEE_MEMORY_RESPONSE_LEN       8u
+#define AIMEE_MEMORY_REQUEST_MAGIC  0x4b4e524du /* "MRNK" */
+#define AIMEE_MEMORY_RESPONSE_MAGIC 0x464e434du /* "MCNF" */
+#define AIMEE_MEMORY_WIRE_VERSION   1u
+#define AIMEE_MEMORY_REQUEST_LEN    16u
+#define AIMEE_MEMORY_RESPONSE_LEN   8u
 
 /* EMBED uses the module's bounded JSON envelope because its vector is variable
  * width. Request fields are base_url:string, input_type:"document"|"query",
@@ -89,7 +91,7 @@ static inline int aimee_memory_request_encode(int64_t score_micros, uint8_t *out
 }
 
 static inline int aimee_memory_response_decode(const uint8_t *in, size_t len,
-                                                aimee_memory_confidence_t *confidence)
+                                               aimee_memory_confidence_t *confidence)
 {
    if (!in || len != AIMEE_MEMORY_RESPONSE_LEN || !confidence ||
        aimee_memory_get_u32(in) != AIMEE_MEMORY_RESPONSE_MAGIC)
@@ -109,9 +111,9 @@ static inline void aimee_memory_put_u16(uint8_t *p, uint16_t v)
 
 /* Pattern-first extraction (stage EXTRACT_INDEX). Its own magics again, so a
  * request routed to the wrong stage is rejected rather than misparsed. */
-#define AIMEE_MEMORY_EXTRACT_REQUEST_MAGIC  0x51525458u /* "XTRQ" */
-#define AIMEE_MEMORY_EXTRACT_RESPONSE_MAGIC 0x53525458u /* "XTRS" */
-#define AIMEE_MEMORY_EXTRACT_REQUEST_HEADER_LEN 16u
+#define AIMEE_MEMORY_EXTRACT_REQUEST_MAGIC       0x51525458u /* "XTRQ" */
+#define AIMEE_MEMORY_EXTRACT_RESPONSE_MAGIC      0x53525458u /* "XTRS" */
+#define AIMEE_MEMORY_EXTRACT_REQUEST_HEADER_LEN  16u
 #define AIMEE_MEMORY_EXTRACT_RESPONSE_HEADER_LEN 8u
 
 /* Field capacities of one extracted triple, mirroring pattern_triple_t's
@@ -125,8 +127,8 @@ static inline void aimee_memory_put_u16(uint8_t *p, uint16_t v)
 /* Wire size of one triple at its largest: two kinds, three length prefixes and
  * three fields at capacity (the stored NUL is not carried). */
 #define AIMEE_MEMORY_TRIPLE_WIRE_MAX                                                               \
-   (8u + 12u + (AIMEE_MEMORY_TRIPLE_SUBJECT_MAX - 1u) +                                            \
-    (AIMEE_MEMORY_TRIPLE_REL_TYPE_MAX - 1u) + (AIMEE_MEMORY_TRIPLE_OBJECT_MAX - 1u))
+   (8u + 12u + (AIMEE_MEMORY_TRIPLE_SUBJECT_MAX - 1u) + (AIMEE_MEMORY_TRIPLE_REL_TYPE_MAX - 1u) +  \
+    (AIMEE_MEMORY_TRIPLE_OBJECT_MAX - 1u))
 
 /* Response capacity for a request that asked for at most `max` triples. */
 #define AIMEE_MEMORY_EXTRACT_RESPONSE_MAX(max)                                                     \
@@ -206,13 +208,12 @@ static inline int aimee_memory_extract_response_decode(const uint8_t *in, size_t
       out[i].subject_kind = aimee_memory_get_u32(in + offset);
       out[i].object_kind = aimee_memory_get_u32(in + offset + 4u);
       offset += 8u;
-      size_t used = aimee_memory_extract_field(in, len, offset, out[i].subject,
-                                               sizeof(out[i].subject));
+      size_t used =
+          aimee_memory_extract_field(in, len, offset, out[i].subject, sizeof(out[i].subject));
       if (!used)
          return -1;
       offset += used;
-      used = aimee_memory_extract_field(in, len, offset, out[i].rel_type,
-                                        sizeof(out[i].rel_type));
+      used = aimee_memory_extract_field(in, len, offset, out[i].rel_type, sizeof(out[i].rel_type));
       if (!used)
          return -1;
       offset += used;
@@ -232,8 +233,8 @@ static inline int aimee_memory_extract_response_decode(const uint8_t *in, size_t
 /* Retraction scan (stage EXTRACT_INDEX, second shape). Answers both halves of
  * the §4 correction pre-scan in one call, because its caller asks them together
  * once per turn. Shares the stage with extraction, told apart by its magic. */
-#define AIMEE_MEMORY_SCAN_REQUEST_MAGIC  0x51525452u /* "RTRQ" */
-#define AIMEE_MEMORY_SCAN_RESPONSE_MAGIC 0x53525452u /* "RTRS" */
+#define AIMEE_MEMORY_SCAN_REQUEST_MAGIC       0x51525452u /* "RTRQ" */
+#define AIMEE_MEMORY_SCAN_RESPONSE_MAGIC      0x53525452u /* "RTRS" */
 #define AIMEE_MEMORY_SCAN_REQUEST_HEADER_LEN  12u
 #define AIMEE_MEMORY_SCAN_RESPONSE_HEADER_LEN 16u
 /* Mirrors the attribute buffer the production caller uses; checked against

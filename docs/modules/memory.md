@@ -27,6 +27,7 @@ the scoped memory data API.
 | `reranking` | 5893 | confidence-band decision |
 | `command-declaration` | 5894 | canonical command inventory |
 | `memory-data` | 5895 | scoped CRUD/search, typed-fact extraction and recall, temporal checks, feedback, and maintenance |
+| `command-execution` | 5896 | public private-memory get, store, list, search, delete, supersede, and stats |
 
 The data stage reaches PostgreSQL over the module bus with the storage-only
 principal 73. It owns neither a DSN nor a database connection. Both placements
@@ -91,8 +92,8 @@ the shared schema; personal recall does not imply those shared operations are lo
 
 ## Go caller migration
 
-`server-go/modules/memory/client.go` implements the Go caller for all seven
-stages using the existing module bus. It shares wire constants and request/result
+`server-go/modules/memory/client.go` and `public_commands.go` implement the Go
+caller for all eight stages using the existing module bus. It shares wire constants and request/result
 types with the handler, bounds requests and replies, and preserves transport
 errors without retries or local memory decisions. The caller supplies its admitted
 bus connection and trace ID. Scope travels unchanged to the placement owner for
@@ -117,6 +118,15 @@ Query-scoped typed-fact recall classifies the query in Go rather than accepting
 a native caller's PII flag. The native PII callbacks, their headers and their
 binary gate/PII encoders are deleted. The live process smoke test uses the Go
 client in both placements, including concurrent calls and version rejection.
+
+The server's private-memory public commands now pass their argument objects
+through the shared module command dispatcher to stage 8. Go validates arguments,
+supplies the user scope, applies defaults, and builds the complete public reply.
+The server only selects the explicit user/KB destination and applies its HTTP
+error classification. Shared-KB commands still use the native KB client; stage 8
+rejects them and is not yet registered as a replacement for that shared surface.
+The command wire tests cover the existing CMPQ/CMPS frame, while Go tests cover
+private scope isolation, mutation defaults, missing records, and typed failures.
 
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host

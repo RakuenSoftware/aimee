@@ -8910,8 +8910,8 @@
           "line": 41
         }
       ],
-      "signature": "int db2_fact_recall_in_query ( const char * query , int turn_requests_sensitive , char * out , size_t cap )",
-      "signature_sha256": "c864371d3808b265f70d10bfab427eeef37deab3924eebf6313551f61ef102f3",
+      "signature": "int db2_fact_recall_in_query ( const char * query , char * out , size_t cap )",
+      "signature_sha256": "30613e79f49935225625575d9ccd2da842ccb7177df7f57d6a373388ac2dd68b",
       "status": "audit-pending",
       "symbol": "db2_fact_recall_in_query"
     },
@@ -26230,7 +26230,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "049e2ee76ab0b988f5da970fca4cd99cd4528eb3c06598a7182a9a059ce05009",
+  "fingerprint": "1e47ff68ca18a4666244b4b2379b877a54654a3188433848e4ca96b94dda4d28",
   "module": "db2",
   "schema_version": 1,
   "summary": {

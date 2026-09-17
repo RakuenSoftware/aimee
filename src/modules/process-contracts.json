@@ -125,6 +125,14 @@
           "durability": "ledger",
           "durability_reason": "scoped memory reads and state transitions require a durable access record",
           "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 8,
+          "name": "command-execution",
+          "event_kind": 5896,
+          "durability": "ledger",
+          "durability_reason": "public memory commands perform scoped reads and state transitions",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },

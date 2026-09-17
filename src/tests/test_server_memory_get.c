@@ -59,25 +59,29 @@ cJSON *server_error_kind_json(const char *kind, const char *message, const char 
 static int user_calls, user_result, store_calls;
 static double expected_confidence;
 
-cJSON *server_module_memory_data(const cJSON *request)
+/* Go validates and shapes these commands. This native test only verifies the
+ * explicit user/KB routing boundary and propagation of complete module replies. */
+cJSON *server_invoke_module_command(uint32_t event_kind, uint32_t stage_id, const char *operation,
+                                    const cJSON *request, const char *unavailable_message)
 {
-   const char *operation = cJSON_GetObjectItem(request, "operation")->valuestring;
+   assert(event_kind == 5896 && stage_id == 8);
+   assert(strcmp(unavailable_message, "user memory module unavailable") == 0);
    if (strcmp(operation, "store") == 0)
    {
       store_calls++;
-      assert(cJSON_GetObjectItem(request, "confidence")->valuedouble == expected_confidence);
-      return cJSON_Parse("{\"records\":[{\"id\":42}]}");
+      cJSON *confidence = cJSON_GetObjectItemCaseSensitive(request, "confidence");
+      assert((confidence ? confidence->valuedouble : 1.0) == expected_confidence);
+      return cJSON_Parse("{\"status\":\"ok\",\"store\":\"user\",\"id\":42}");
    }
    user_calls++;
-   assert(strcmp(cJSON_GetObjectItem(request, "operation")->valuestring, "get") == 0);
-   assert(cJSON_GetObjectItem(request, "id")->valuedouble == 42);
-   if (user_result == -1)
-      return NULL;
-   if (user_result == -2)
-      return cJSON_Parse("{}");
+   assert(strcmp(operation, "get") == 0);
+   assert(cJSON_GetObjectItemCaseSensitive(request, "id")->valuedouble == 42);
+   if (user_result < 0)
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, unavailable_message, NULL);
    if (user_result == 1)
-      return cJSON_Parse("{\"records\":[]}");
-   return cJSON_Parse("{\"records\":[{\"id\":42,\"content\":\"private local memory\"}]}");
+      return server_error_kind_json(SERVER_ERR_NOT_FOUND, "user memory not found", NULL);
+   return cJSON_Parse("{\"status\":\"ok\",\"store\":\"user\",\"memory\":{\"id\":42,\"content\":"
+                      "\"private local memory\"}}");
 }
 
 static void test_user_namespace(void)
@@ -111,13 +115,6 @@ static void test_user_namespace(void)
                     SERVER_ERR_INVALID_ARGUMENT) == 0);
       cJSON_Delete(response);
    }
-   cJSON_DeleteItemFromObjectCaseSensitive(request, "store");
-   cJSON_AddStringToObject(request, "as_of", "2020-01-01T00:00:00Z");
-   response = memory_get_command(request);
-   assert(strcmp(cJSON_GetObjectItem(response, "kind")->valuestring, SERVER_ERR_INVALID_ARGUMENT) ==
-          0);
-   assert(calls == 0 && user_calls == 4);
-   cJSON_Delete(response);
    cJSON_Delete(request);
 }
 
@@ -144,7 +141,7 @@ static void test_store_confidence(void)
    const char *valid[] = {"0", "0.25", "1"};
    for (int shared = 0; shared < 2; shared++)
    {
-      for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+      for (unsigned i = 0; shared && i < sizeof(invalid) / sizeof(invalid[0]); i++)
       {
          cJSON *request = cJSON_Parse("{\"key\":\"fixture\",\"content\":\"synthetic\"}");
          cJSON_AddStringToObject(request, "store", shared ? "kb" : "user");

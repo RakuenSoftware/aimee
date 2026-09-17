@@ -757,7 +757,7 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 149)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 147)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
@@ -766,7 +766,7 @@ class LinkClosureTest(unittest.TestCase):
             contract["summary"]["dispositions"]["portable-core-promotion"], 0
         )
         self.assertEqual(
-            contract["summary"]["dispositions"]["injected-module-contract"], 9
+            contract["summary"]["dispositions"]["injected-module-contract"], 7
         )
         self.assertFalse(any(
             row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
@@ -804,9 +804,10 @@ class LinkClosureTest(unittest.TestCase):
             row["symbol"] == "code_match_line" for row in contract["unresolved"]
         ))
         unresolved = {row["symbol"]: row["disposition"] for row in contract["unresolved"]}
+        self.assertNotIn("memory_pii_rel_sensitivity", unresolved)
+        self.assertNotIn("memory_pii_turn_requests_sensitive", unresolved)
         for symbol in {
-            "memory_ontology_node_kind_to_text", "memory_pii_rel_sensitivity",
-            "memory_pii_turn_requests_sensitive",
+            "memory_ontology_node_kind_to_text",
         }:
             self.assertEqual(unresolved[symbol], "injected-module-contract")
         self.assertNotIn("memory_pii_should_inject", unresolved)

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -114,6 +115,21 @@ func probeDecisions(ctx context.Context, client *memory.Client, caller memory.St
 	if err != nil || len(commands) != 7 {
 		return fmt.Errorf("command discovery: %d %v", len(commands), err)
 	}
+	// Public commands validate inside Go before any database access.
+	command, commandErr := client.Command(ctx, 2111, "get", json.RawMessage(`{"id":0}`))
+	if os.Getenv("AIMEE_TEST_MEMORY_PLACEMENT") == "kb" {
+		var status *bus.ModuleCallStatusError
+		if !errors.As(commandErr, &status) || status.Status != bus.ModuleStatusCapabilityAbsent {
+			return fmt.Errorf("private command on KB: %s %v", command, commandErr)
+		}
+	} else {
+		var reply struct{ Status, Kind, Message string }
+		if commandErr != nil || json.Unmarshal(command, &reply) != nil || reply.Status != "error" ||
+			reply.Kind != "invalid_argument" || reply.Message != "memory.get requires a positive integer id" {
+			return fmt.Errorf("public command validation: %s %v", command, commandErr)
+		}
+	}
+
 	// An unsupported protocol version must fail across the real process boundary.
 	frame := make([]byte, 8)
 	binary.LittleEndian.PutUint32(frame, 0x444d4344)

@@ -24,7 +24,7 @@ func (f clientCallFunc) Call(ctx context.Context, event, stage uint32, trace uin
 func clientForHandler(t *testing.T, handler bus.ModuleHandler) *Client {
 	t.Helper()
 	client, err := NewClient(clientCallFunc(func(ctx context.Context, event, stage uint32, trace uint64, timeout time.Duration, body []byte) ([]byte, error) {
-		if event != 5888+stage || stage < 1 || stage > 7 {
+		if event != 5888+stage || stage < 1 || stage > 8 {
 			t.Errorf("wrong event/stage: %d/%d", event, stage)
 		}
 		if trace != 73 || timeout <= 0 || timeout > time.Second {

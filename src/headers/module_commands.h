@@ -50,6 +50,12 @@
  * Deriving from the ref makes that class of collision impossible. */
 #define AIMEE_PLUGIN_KIND(ref, stage) (4096u + (uint32_t)(ref) * 256u + (uint32_t)(stage))
 
+/* Invoke a command through the shared CMPQ/CMPS contract. Fixed modules and
+ * plugin modules use the same framing; this layer never interprets arguments.
+ * The caller owns the returned JSON object. NULL denotes a transport failure. */
+cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                 const cJSON *args);
+
 /* Ask every attached declaring module for its commands and register them.
  *
  * Idempotent by construction: each declarant's previous commands are withdrawn
