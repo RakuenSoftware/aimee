@@ -6766,177 +6766,6 @@
       "symbol": "db2_dim_source"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 48
-        }
-      ],
-      "signature": "int db2_directive_counts_by_state ( int64_t * open , int64_t * suppressed , int64_t * resolved , int64_t * expired )",
-      "signature_sha256": "b1c8fe1ca0f2c9a73b232f6a6019d6c14859f30e9cd978f827f8d6822be35d7b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_counts_by_state"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 40
-        }
-      ],
-      "signature": "int db2_directive_find_by_cause_topic ( const char * cause , const char * topic , memory_directive_t * out )",
-      "signature_sha256": "4e860a2c1fbd4df68e9ab254b8656b9daafaae9a18cb79a0888992cafdc90bfc",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_find_by_cause_topic"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 36
-        }
-      ],
-      "signature": "int db2_directive_get ( int64_t id , memory_directive_t * out )",
-      "signature_sha256": "3fcde884044ee6a24903c612a2fe09780d591c25418bfd9a0b20637551fa51f1",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_get"
-    },
-    {
-      "consumers": [
-        "src/modules/learning/learning_evidence.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 28
-        }
-      ],
-      "signature": "int db2_directive_insert_ignore ( const char * question , const char * topic , const char * anchor_entity , const char * anchor_file , const char * cause , int priority , int64_t memory_a_id , int64_t memory_b_id , const char * evidence , const char * source_session , const char * valid_until , int64_t * out_id , int * out_existed )",
-      "signature_sha256": "ac218be7e159cebeb0437f5850e74e12ce24910afdbe0111376c456e0dcad328",
-      "status": "audit-pending",
-      "symbol": "db2_directive_insert_ignore"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 45
-        }
-      ],
-      "signature": "int db2_directive_list ( const char * state , const char * cause , memory_directive_t * out , int max )",
-      "signature_sha256": "3791fe548397ab907e377149fc10b284a7024f37099edbc2c82d92ebeec66028",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_list"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 66
-        }
-      ],
-      "signature": "int db2_directive_match_by_entity ( const char * entity_lc , memory_directive_t * out , int max )",
-      "signature_sha256": "1dfd16d68e1245e9f69fbede1c02b6c0423c233dd16a0cb72d1ca2e54c113901",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_match_by_entity"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 69
-        }
-      ],
-      "signature": "int db2_directive_match_by_file ( const char * file , memory_directive_t * out , int max )",
-      "signature_sha256": "2a96dac6857a3b6e1e2610174d48a5d762e12d84897fecd907a0575a06d4e4b6",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_match_by_file"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 74
-        }
-      ],
-      "signature": "int db2_directive_match_by_lexical ( const char * match_clause , memory_directive_t * out , int max )",
-      "signature_sha256": "8f0f4a7ba49f6ad32abfa6bb07eec9ade4b7c3afa9d9cf93b39051b0d9ff2049",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_match_by_lexical"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 63
-        }
-      ],
-      "signature": "int db2_directive_record_surface ( int64_t id )",
-      "signature_sha256": "3159c3262d33f6bd45c8978d70c55072b7af1a5fe03882b902a87553773fc008",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_record_surface"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 54
-        }
-      ],
-      "signature": "int db2_directive_resolve ( int64_t id , int64_t resolution_memory_id )",
-      "signature_sha256": "b89ee801e6742c47e935d7c2cf55937a4b8d4a9b17de9f108cc935c008eeb71c",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_resolve"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 78
-        }
-      ],
-      "signature": "int db2_directive_resolve_contradiction ( int64_t memory_a_id , int64_t memory_b_id , int64_t resolution_memory_id )",
-      "signature_sha256": "47937e7ca65730ca8cd38ed95244839ed33ab8b093beb5c2c813a8db52563ea6",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_resolve_contradiction"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 55
-        }
-      ],
-      "signature": "int db2_directive_suppress ( int64_t id )",
-      "signature_sha256": "e39bdc3089eab0be1e0f2af41d17d6836e67ec6b2a5132d61d7af7ef4951bd2e",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_suppress"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/epistemic_directives.h",
-          "line": 59
-        }
-      ],
-      "signature": "int db2_directive_sweep_expired ( void )",
-      "signature_sha256": "7a61bc9ef65700d4345680f65dcbb28b9f858a29b7433cfae16b369e6aeae62b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_directive_sweep_expired"
-    },
-    {
       "consumers": [
         "src/tests/test_embedding_dim.c"
       ],
@@ -24359,14 +24188,14 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "fba80c6ee6dd879de7b72f9da60def1c735137226d31a79e2759b57484951b90",
+  "fingerprint": "073f3b937af1449f13ae549a847a1027c0bed3b2b081a0ca0a476346007c7569",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 484,
-    "declarations": 1392,
-    "headers": 140,
-    "internal_unconsumed": 366,
+    "audit_pending": 483,
+    "declarations": 1379,
+    "headers": 139,
+    "internal_unconsumed": 354,
     "private_test_only": 326,
     "reviewed": 216
   }

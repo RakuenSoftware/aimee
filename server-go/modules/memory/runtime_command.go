@@ -17,6 +17,12 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	operation := args.stringOr("operation", "")
 	request := DataRequest{IncludeAll: true}
 	switch operation {
+	case "directive-create":
+		request.Operation = "directive-create"
+		request.Question, request.Topic = args.stringOr("question", ""), args.stringOr("topic", "")
+		request.Cause, request.AnchorEntity = args.stringOr("cause", "user_follow_up"), args.stringOr("entity", "")
+		request.Priority = args.integer("priority", 50)
+		request.Evidence, request.SessionID = args.stringOr("evidence", ""), args.stringOr("session", "")
 	case "vector-search":
 		request.Operation = operation
 		request.RecordType = args.stringOr("record_type", "")
@@ -47,6 +53,11 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInternal
 	}
 	switch operation {
+	case "directive-create":
+		if len(response.Directives) != 1 {
+			return nil, bus.ModuleStatusInternal
+		}
+		return commandResult(map[string]any{"status": "ok", "directive": response.Directives[0], "dedup": response.Deduplicated})
 	case "vector-search":
 		if response.VectorHits == nil {
 			response.VectorHits = []VectorHit{}

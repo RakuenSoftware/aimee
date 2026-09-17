@@ -288,26 +288,18 @@ char *kb_client_memory_rebuild_json(const char *version);
  * {"status":"ok","dedup":0|1,"directive":{...}} on success.  dedup=1
  * means the server rejected as duplicate of an existing row (no
  * directive object returned).  Caller frees. */
-char *kb_client_memory_directive_create_json(const char *question, const char *topic,
-                                             const char *entity, const char *file,
-                                             const char *cause, int priority, const char *session,
-                                             const char *valid_until);
 
 /* Transition an open directive to resolved.  Sends
  * `memory.directive_resolve` with {id, with_memory, note}.  Caller frees. */
-char *kb_client_memory_directive_resolve_json(int64_t id, int64_t with_memory, const char *note);
 
 /* Mark an open directive as suppressed.  Sends
  * `memory.directive_suppress` with {id}.  Caller frees. */
-char *kb_client_memory_directive_suppress_json(int64_t id);
 
 /* Sweep expired directives.  Returns {"status":"ok","expired":N}.  Caller
  * frees. */
-char *kb_client_memory_directive_sweep_expired_json(void);
 
 /* List directives filtered by state/cause with a cap of `limit` rows.
  * Returns {"status":"ok","directives":[...]} on success.  Caller frees. */
-char *kb_client_memory_directive_list_json(const char *state, const char *cause, int limit);
 
 /* Fetch curiosity items via the aimee-kb sidecar. Sends `curiosity.list`
  * with {state, limit} and returns the heap-allocated JSON response

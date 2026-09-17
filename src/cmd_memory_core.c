@@ -1,3 +1,4 @@
+#include "modules/kb_client/kb_client_pii.h"
 /* cmd_memory_core.c: CRUD + stats + task/decision + link/tag subcommand
  * handlers for `aimee memory`. Extracted from cmd_memory.c so each bucket
  * can be read in isolation. Shared helpers and globals live in
@@ -1361,12 +1362,29 @@ void mem_directive(app_ctx_t *ctx, int argc, char **argv)
    if (!question || !question[0])
       fatal("memory directive requires --question \"<text>\"");
 
-   cJSON *resp = directive_rpc_unwrap(
-       kb_client_memory_directive_create_json(question, topic, entity, file, cause, priority,
-                                              session, valid_until),
-       "memory directive create failed: check cause "
-       "(contradiction|retrieval_failure|missing_config|user_follow_up) "
-       "and required fields");
+   cJSON *directive_args = cJSON_CreateObject();
+   if (kb_client_pii_identifier_sensitive(entity) || kb_client_pii_identifier_sensitive(file) ||
+       kb_client_pii_add_string_required(directive_args, "question", question) != 0 ||
+       kb_client_pii_add_string(directive_args, "topic", topic) != 0 ||
+       kb_client_pii_add_string(directive_args, "cause", cause) != 0)
+   {
+      cJSON_Delete(directive_args);
+      fatal("withheld_pii: content was not sent to aimee-kb");
+   }
+   if (entity && entity[0])
+      cJSON_AddStringToObject(directive_args, "entity", entity);
+   if (file && file[0])
+      cJSON_AddStringToObject(directive_args, "file", file);
+   cJSON_AddNumberToObject(directive_args, "priority", priority);
+   if (session && session[0])
+      cJSON_AddStringToObject(directive_args, "session", session);
+   if (valid_until && valid_until[0])
+      cJSON_AddStringToObject(directive_args, "valid_until", valid_until);
+   cJSON *resp =
+       directive_rpc_unwrap(kb_v1_action_request("memory.directive_create", directive_args),
+                            "memory directive create failed: check cause "
+                            "(contradiction|retrieval_failure|missing_config|user_follow_up) "
+                            "and required fields");
 
    cJSON *dedup_j = cJSON_GetObjectItemCaseSensitive(resp, "dedup");
    if (cJSON_IsTrue(dedup_j))
@@ -1377,18 +1395,18 @@ void mem_directive(app_ctx_t *ctx, int argc, char **argv)
    }
 
    cJSON *d = cJSON_GetObjectItemCaseSensitive(resp, "directive");
-   memory_directive_t row;
-   if (!d || memory_directive_from_json(d, &row) != 0)
+   if (!cJSON_IsObject(d) || jo_i64(d, "id", 0) <= 0 ||
+       !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(d, "question")))
    {
       cJSON_Delete(resp);
       fatal("memory directive create: unexpected response");
    }
 
    if (ctx->json_output)
-      emit_json_ctx(memory_directive_to_json(&row), ctx->json_fields, ctx->response_profile);
+      emit_json_ctx(cJSON_Duplicate(d, 1), ctx->json_fields, ctx->response_profile);
    else
-      printf("Opened directive #%lld [%s, p%d]: %s\n", (long long)row.id, row.cause, row.priority,
-             row.question);
+      printf("Opened directive #%lld [%s, p%d]: %s\n", (long long)jo_i64(d, "id", 0),
+             jo_str(d, "cause", ""), jo_int(d, "priority", 0), jo_str(d, "question", ""));
    cJSON_Delete(resp);
 }
 
@@ -1412,8 +1430,17 @@ void mem_directives(app_ctx_t *ctx, int argc, char **argv)
       char err[96];
       snprintf(err, sizeof(err), "could not resolve directive %lld (not open or missing)",
                (long long)id);
-      cJSON *resp =
-          directive_rpc_unwrap(kb_client_memory_directive_resolve_json(id, with_memory, note), err);
+      cJSON *directive_args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(directive_args, "id", (double)id);
+      if (with_memory > 0)
+         cJSON_AddNumberToObject(directive_args, "with_memory", (double)with_memory);
+      if (kb_client_pii_add_string(directive_args, "note", note) != 0)
+      {
+         cJSON_Delete(directive_args);
+         fatal("withheld_pii: content was not sent to aimee-kb");
+      }
+      cJSON *resp = directive_rpc_unwrap(
+          kb_v1_action_request("memory.directive_resolve", directive_args), err);
       cJSON_Delete(resp);
       if (ctx->json_output)
       {
@@ -1433,7 +1460,10 @@ void mem_directives(app_ctx_t *ctx, int argc, char **argv)
       char err[96];
       snprintf(err, sizeof(err), "could not suppress directive %lld (not open or missing)",
                (long long)id);
-      cJSON *resp = directive_rpc_unwrap(kb_client_memory_directive_suppress_json(id), err);
+      cJSON *directive_args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(directive_args, "id", (double)id);
+      cJSON *resp = directive_rpc_unwrap(
+          kb_v1_action_request("memory.directive_suppress", directive_args), err);
       cJSON_Delete(resp);
       if (ctx->json_output)
       {
@@ -1448,8 +1478,9 @@ void mem_directives(app_ctx_t *ctx, int argc, char **argv)
    }
    if (opt_get_flag(&opts, "expire-sweep"))
    {
-      cJSON *resp = directive_rpc_unwrap(kb_client_memory_directive_sweep_expired_json(),
-                                         "directive sweep failed");
+      cJSON *resp = directive_rpc_unwrap(
+          kb_v1_action_request("memory.directive_sweep_expired", cJSON_CreateObject()),
+          "directive sweep failed");
       cJSON *n_j = cJSON_GetObjectItemCaseSensitive(resp, "expired");
       int n = cJSON_IsNumber(n_j) ? (int)n_j->valuedouble : 0;
       cJSON_Delete(resp);
@@ -1472,43 +1503,46 @@ void mem_directives(app_ctx_t *ctx, int argc, char **argv)
    if (limit > 256)
       limit = 256;
 
-   cJSON *resp = directive_rpc_unwrap(kb_client_memory_directive_list_json(state, cause, limit),
+   cJSON *directive_args = cJSON_CreateObject();
+   if (state && state[0])
+      cJSON_AddStringToObject(directive_args, "state", state);
+   if (cause && cause[0])
+      cJSON_AddStringToObject(directive_args, "cause", cause);
+   cJSON_AddNumberToObject(directive_args, "limit", limit);
+   cJSON *resp = directive_rpc_unwrap(kb_v1_action_request("memory.directive_list", directive_args),
                                       "directive list failed");
    cJSON *arr_src = cJSON_GetObjectItemCaseSensitive(resp, "directives");
-   int count = cJSON_IsArray(arr_src) ? cJSON_GetArraySize(arr_src) : 0;
-   memory_directive_t rows[256];
-   int n = 0;
-   for (int i = 0; i < count && n < 256; i++)
+   if (!cJSON_IsArray(arr_src))
    {
-      cJSON *item = cJSON_GetArrayItem(arr_src, i);
-      if (memory_directive_from_json(item, &rows[n]) == 0)
-         n++;
+      cJSON_Delete(resp);
+      fatal("directive list: unexpected response");
    }
-   cJSON_Delete(resp);
-
+   int n = cJSON_GetArraySize(arr_src);
    if (ctx->json_output)
    {
-      cJSON *arr = cJSON_CreateArray();
-      for (int i = 0; i < n; i++)
-         cJSON_AddItemToArray(arr, memory_directive_to_json(&rows[i]));
-      emit_json_ctx(arr, ctx->json_fields, ctx->response_profile);
-      return;
+      emit_json_ctx(cJSON_Duplicate(arr_src, 1), ctx->json_fields, ctx->response_profile);
    }
-   if (n == 0)
+   else if (n == 0)
    {
       printf("No directives%s%s.\n", state && state[0] ? " in state " : "",
              state && state[0] ? state : "");
-      return;
    }
-   printf("%d directive(s):\n", n);
-   for (int i = 0; i < n; i++)
+   else
    {
-      printf("  #%lld [%s, %s, p%d] %s\n", (long long)rows[i].id, rows[i].state, rows[i].cause,
-             rows[i].priority, rows[i].question);
-      if (rows[i].topic[0])
-         printf("        topic=%s surfaced=%d%s%s\n", rows[i].topic, rows[i].surfaced_count,
-                rows[i].valid_until[0] ? " valid_until=" : "", rows[i].valid_until);
+      printf("%d directive(s):\n", n);
+      cJSON *row;
+      cJSON_ArrayForEach(row, arr_src)
+      {
+         printf("  #%lld [%s, %s, p%d] %s\n", (long long)jo_i64(row, "id", 0),
+                jo_str(row, "state", ""), jo_str(row, "cause", ""), jo_int(row, "priority", 0),
+                jo_str(row, "question", ""));
+         const char *topic = jo_str(row, "topic", ""), *until = jo_str(row, "valid_until", "");
+         if (topic[0])
+            printf("        topic=%s surfaced=%d%s%s\n", topic, jo_int(row, "surfaced_count", 0),
+                   until[0] ? " valid_until=" : "", until);
+      }
    }
+   cJSON_Delete(resp);
 }
 
 void mem_task(app_ctx_t *ctx, int argc, char **argv)

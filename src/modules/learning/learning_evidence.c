@@ -8,7 +8,6 @@
 #include "modules/db2/c/anti_patterns.h"
 #include "modules/db2/c/workflow_patterns.h"
 #include "modules/db2/c/rules.h"
-#include "modules/db2/c/epistemic_directives.h"
 #include "modules/db2/c/entity_nodes.h"
 #include "modules/db2/c/evidence_vectors.h"
 #include "modules/db2/c/learning_synth_ops.h"
@@ -334,10 +333,19 @@ static int promote_epistemic_directive(const db2_artifact_row_t *art, int flagge
    if (!topic[0])
       snprintf(topic, sizeof(topic), "%s", art->scope_id);
 
-   int64_t dir_id = 0;
-   int existed = 0;
-   if (db2_directive_insert_ignore(question, topic, "", "", "promoted_directive", 50, 0, 0, "", "",
-                                   "", &dir_id, &existed) != 0)
+   cJSON *args = cJSON_CreateObject(), *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "directive-create");
+   cJSON_AddStringToObject(args, "question", question);
+   cJSON_AddStringToObject(args, "topic", topic);
+   cJSON_AddStringToObject(args, "cause", "promoted_directive");
+   cJSON_AddNumberToObject(args, "priority", 50);
+   int dispatched = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   cJSON_Delete(args);
+   const cJSON *directive = cJSON_GetObjectItemCaseSensitive(response, "directive");
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(directive, "id");
+   int64_t dir_id = cJSON_IsNumber(id) ? (int64_t)id->valuedouble : 0;
+   cJSON_Delete(response);
+   if (dispatched != 1 || dir_id <= 0)
       return -1;
    char target_id[32];
    snprintf(target_id, sizeof(target_id), "%lld", (long long)dir_id);

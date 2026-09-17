@@ -1204,7 +1204,7 @@ static void test_action_wrappers_use_v1_api_when_configured(void)
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
 
    g_route_case = 33;
-   char *resp = kb_client_memory_directive_sweep_expired_json();
+   char *resp = kb_v1_action_request("memory.directive_sweep_expired", cJSON_CreateObject());
    assert(resp);
    assert(strstr(resp, "\"expired\":1") != NULL);
    free(resp);

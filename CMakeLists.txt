@@ -464,7 +464,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c
     ${AIMEE_SRC_DIR}/modules/db2/c/evidence_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/db2/c/entity_profiles.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/epistemic_directives.c
     ${AIMEE_SRC_DIR}/modules/db2/c/failed_queries.c
     ${AIMEE_SRC_DIR}/modules/db2/c/feedback.c
     ${AIMEE_SRC_DIR}/modules/db2/c/notes.c

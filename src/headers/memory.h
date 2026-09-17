@@ -1377,8 +1377,6 @@ int memory_directive_sweep_expired(void);
  * cmd_memory_core directive handlers, and dashboard code).  to_json returns
  * a heap-allocated cJSON the caller owns; from_json populates `out` from an
  * object of the same shape and returns 0 on success, -1 on malformed input. */
-struct cJSON *memory_directive_to_json(const memory_directive_t *d);
-int memory_directive_from_json(const struct cJSON *obj, memory_directive_t *out);
 
 /* Match-on-turn: pick the most relevant open directives for the supplied
  * turn text / active anchors.  Three stages:

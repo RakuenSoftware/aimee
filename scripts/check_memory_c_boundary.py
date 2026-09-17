@@ -25,6 +25,8 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/db2/c/epistemic_directives.c",
+    "src/modules/db2/c/epistemic_directives.h",
     "src/modules/memory/memory_domain_runtime_bus.c",
     "src/modules/memory/memory_embed_bus.c",
     "src/modules/memory/memory_profile_pack.h",
@@ -54,6 +56,8 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\bkb_client_memory_directive_\w+\b(?=\s*\()|"
+    r"\b(?:db2_directive_\w+|memory_directive_(?:to_json|from_json))\b(?=\s*\()|"
     r"\b(?:kb_client_memory_verify_json|db2_kb_service_collect_memory_verify|db2_kb_service_collect_verify_snapshot|pgvec_verify_snapshot(?:_cleanup)?|pgvec_schema_version)\b(?=\s*\()|"
     r"\b(?:pgvec_memory_vector_search_record_type|pgvec_kb_service_search_memory_points)\b(?=\s*\()|"
     r"\b(?:(?:kb_client_)?memory_episode_card_(?:generate|parse)|memory_episode_cards_query)\b(?=\s*\()|"

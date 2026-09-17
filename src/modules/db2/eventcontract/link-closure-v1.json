@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "044dc9c44baaa4594db58b5131d9de509b58dcf2",
-  "source_fingerprint": "0585aac7344841805a66e69d99995cb866f9a313a1158e094e2c5f5d50b473e2",
+  "source_revision": "de5a62c6b2ed66ed2738b71c886b354fa4a08fdf",
+  "source_fingerprint": "6dc81cf8c9a36b341c955c84120af4abd97eac81ffb6574152b990f1a8fb3bc9",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -64,7 +64,6 @@
     "src/modules/db2/c/entity_nodes.c",
     "src/modules/db2/c/entity_profiles.c",
     "src/modules/db2/c/entity_registry.c",
-    "src/modules/db2/c/epistemic_directives.c",
     "src/modules/db2/c/evidence_lifecycle.c",
     "src/modules/db2/c/evidence_vectors.c",
     "src/modules/db2/c/fact_identity.c",
@@ -1817,7 +1816,6 @@
         "src/modules/db2/c/curator_terms.c",
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/entity_registry.c",
-        "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
         "src/modules/db2/c/typed_facts.c",
@@ -1834,7 +1832,6 @@
         "src/modules/db2/c/corpus_structural.c",
         "src/modules/db2/c/css_insights.c",
         "src/modules/db2/c/entity_registry.c",
-        "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
         "src/modules/db2/c/typed_facts.c",
@@ -1914,6 +1911,14 @@
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "aimee_module_commands_dispatch_internal",
+      "references": [
+        "src/modules/db2/c/kb_service_backend.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
       "symbol": "atoi",
@@ -2530,7 +2535,6 @@
         "src/modules/db2/c/entity_nodes.c",
         "src/modules/db2/c/entity_profiles.c",
         "src/modules/db2/c/entity_registry.c",
-        "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/evidence_lifecycle.c",
         "src/modules/db2/c/evidence_vectors.c",
         "src/modules/db2/c/fact_identity.c",
@@ -2689,7 +2693,6 @@
         "src/modules/db2/c/enrollments.c",
         "src/modules/db2/c/entity_edges.c",
         "src/modules/db2/c/entity_registry.c",
-        "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/feedback.c",
@@ -2833,7 +2836,6 @@
         "src/modules/db2/c/db_schema.c",
         "src/modules/db2/c/enrollments.c",
         "src/modules/db2/c/entity_nodes.c",
-        "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/evidence_lifecycle.c",
         "src/modules/db2/c/fact_identity.c",
         "src/modules/db2/c/kb_audit_worm.c",
@@ -3083,17 +3085,17 @@
     }
   ],
   "summary": {
-    "translation_units": 124,
+    "translation_units": 123,
     "descriptor_support_units": 19,
-    "unresolved_symbols": 146,
+    "unresolved_symbols": 147,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
       "injected-module-contract": 6,
-      "portable-core-promotion": 0,
+      "portable-core-promotion": 1,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 140
     }
   },
-  "fingerprint": "2327f8f405ed99d8bcfc966b0d2877ade6987ace7a3fff76e10e2ca6ccf099de"
+  "fingerprint": "b95a39afe4cc28ddb57549dd4e2c2f04ce4558c91de1d8467c47eb8b64e34f67"
 }

@@ -124,6 +124,11 @@ func TestDirectivePublicPostgresLifecycle(t *testing.T) {
 	if len(list["directives"].([]any)) != 256 {
 		t.Fatal("list cap changed")
 	}
+	promoted := runHostRuntime(t, NewHandler(nil, WithDataStore(PlacementKB, s)), `{"operation":"directive-create","question":"Promoted finding?","cause":"promoted_directive","evidence":"artifact:123","priority":1}`)["directive"].(map[string]any)
+	if promoted["cause"] != "promoted_directive" || promoted["evidence"] != "artifact:123" {
+		t.Fatal(promoted)
+	}
+
 }
 
 func TestDirectivePublicValidation(t *testing.T) {

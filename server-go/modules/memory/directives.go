@@ -74,7 +74,7 @@ func (s *postgresDataStore) requireKBDirective() error {
 
 func validDirectiveCause(cause string) bool {
 	switch cause {
-	case "contradiction", "retrieval_failure", "missing_config", "user_follow_up":
+	case "contradiction", "retrieval_failure", "missing_config", "user_follow_up", "promoted_directive":
 		return true
 	}
 	return false

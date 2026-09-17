@@ -44,6 +44,20 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
    return 1;
 }
 
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+{
+   assert(strcmp(method, "memory.runtime") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
+                 "directive-create") == 0);
+
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "cause")),
+                 "promoted_directive") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "question")), "q1") ==
+          0);
+   *result = cJSON_Parse("{\"status\":\"ok\",\"directive\":{\"id\":4243}}");
+   return 1;
+}
+
 /* Stub the DB1 working-profile observer (weak in learning_evidence.c) so the
  * working_profile promotion dispatch is exercisable without linking DB1. */
 static int g_wp_observe_calls;

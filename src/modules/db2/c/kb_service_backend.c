@@ -1,3 +1,4 @@
+#include "module_commands.h"
 /* db2/kb_service_backend.c: kb-service backend SQL primitives — Postgres via libpq. */
 
 #include "kb_service_backend.h"
@@ -5,7 +6,6 @@
 #include "aimee.h"
 #include "../support/db2_runtime_config.h"
 #include "curiosity.h"
-#include "epistemic_directives.h"
 #include "notes.h"
 #include "db2_internal.h"
 #include "kb_payload.h"
@@ -1249,12 +1249,22 @@ cJSON *db2_kb_service_curiosity_route_top_json(int limit, const char *source_ses
       if (priority > 100)
          priority = 100;
 
-      int64_t new_id = 0;
-      int existed = 0;
-      int rc = db2_directive_insert_ignore(
-          question, it->target_topic, it->target_entity, "", cause, priority, 0, 0, it->evidence,
-          source_session ? source_session : "", "", &new_id, &existed);
-      /* rc == 0 means inserted; existed != 0 means deduped. Both
+      cJSON *args = cJSON_CreateObject(), *response = NULL;
+      cJSON_AddStringToObject(args, "operation", "directive-create");
+      cJSON_AddStringToObject(args, "question", question);
+      cJSON_AddStringToObject(args, "topic", it->target_topic);
+      cJSON_AddStringToObject(args, "entity", it->target_entity);
+      cJSON_AddStringToObject(args, "cause", cause);
+      cJSON_AddNumberToObject(args, "priority", priority);
+      cJSON_AddStringToObject(args, "evidence", it->evidence);
+      cJSON_AddStringToObject(args, "session", source_session ? source_session : "");
+      int dispatched = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+      cJSON_Delete(args);
+      const char *status =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+      int rc = dispatched == 1 && status && strcmp(status, "ok") == 0 ? 0 : -1;
+      cJSON_Delete(response);
+      /* A successful Go result may be inserted or deduplicated. Both
        * count as successfully routed for the purposes of moving
        * the curiosity item along. */
       if (rc == 0)

@@ -358,3 +358,11 @@ metadata as rebuild, reports actual catalog indexes, preserves unmeasured lag,
 and bounds configured-embedder timing probes. Scoped failed-job details exclude
 other projects. CLI JSON preserves the complete Go response; native verification
 handlers, collectors, schema-version helper and snapshot source/header are retired.
+
+Directive promotion and curiosity routing now use the host-only Go owner;
+the duplicate DB2 directive store and header are deleted. CLI and MCP use the
+generic authenticated transport while retaining the Go-backed screen before
+transmission. The native directive decoder and formatter are removed, fixing
+CLI rejection of valid public responses and preserving additional JSON fields.
+Native consumer tests cover promotion audit, screening, unavailable screening,
+and response preservation; public caller evidence remains ignored.

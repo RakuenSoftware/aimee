@@ -1,3 +1,4 @@
+#include "modules/kb_client/kb_client_pii.h"
 /* server_mcp_call_table.c: split from server_mcp.c into a real translation unit
  * (was server_mcp_call_table.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
@@ -408,7 +409,13 @@ static cJSON *mcph_list_epistemic_directives(struct mcp_call *c)
       limit = 1;
    if (limit > 256)
       limit = 256;
-   char *envelope = kb_client_memory_directive_list_json(state, cause, limit);
+   cJSON *directive_args = cJSON_CreateObject();
+   if (state && state[0])
+      cJSON_AddStringToObject(directive_args, "state", state);
+   if (cause && cause[0])
+      cJSON_AddStringToObject(directive_args, "cause", cause);
+   cJSON_AddNumberToObject(directive_args, "limit", limit);
+   char *envelope = kb_v1_action_request("memory.directive_list", directive_args);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *directives = resp ? cJSON_GetObjectItemCaseSensitive(resp, "directives") : NULL;
@@ -455,8 +462,24 @@ static cJSON *mcph_create_epistemic_directive(struct mcp_call *c)
    if (!cause)
       cause = MEMORY_DIRECTIVE_CAUSE_USER_FOLLOW_UP;
 
-   char *envelope = kb_client_memory_directive_create_json(question, topic, entity, file, cause,
-                                                           priority, "", valid_until);
+   cJSON *directive_args = cJSON_CreateObject();
+   if (kb_client_pii_identifier_sensitive(entity) || kb_client_pii_identifier_sensitive(file) ||
+       kb_client_pii_add_string_required(directive_args, "question", question) != 0 ||
+       kb_client_pii_add_string(directive_args, "topic", topic) != 0 ||
+       kb_client_pii_add_string(directive_args, "cause", cause) != 0)
+   {
+      cJSON_Delete(directive_args);
+      return text_content("error: withheld_pii: content was not sent to aimee-kb");
+   }
+   if (entity && entity[0])
+      cJSON_AddStringToObject(directive_args, "entity", entity);
+   if (file && file[0])
+      cJSON_AddStringToObject(directive_args, "file", file);
+   cJSON_AddNumberToObject(directive_args, "priority", priority);
+
+   if (valid_until && valid_until[0])
+      cJSON_AddStringToObject(directive_args, "valid_until", valid_until);
+   char *envelope = kb_v1_action_request("memory.directive_create", directive_args);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *res = cJSON_CreateObject();
@@ -509,7 +532,11 @@ static cJSON *mcph_resolve_epistemic_directive(struct mcp_call *c)
       suppress = cJSON_IsTrue(jsp) ? 1 : 0;
    char *envelope;
    if (suppress)
-      envelope = kb_client_memory_directive_suppress_json(id);
+   {
+      cJSON *directive_args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(directive_args, "id", (double)id);
+      envelope = kb_v1_action_request("memory.directive_suppress", directive_args);
+   }
    else
    {
       int64_t resm = 0;
@@ -520,7 +547,16 @@ static cJSON *mcph_resolve_epistemic_directive(struct mcp_call *c)
       cJSON *jn = cJSON_GetObjectItemCaseSensitive(jargs, "note");
       if (cJSON_IsString(jn))
          note = jn->valuestring;
-      envelope = kb_client_memory_directive_resolve_json(id, resm, note);
+      cJSON *directive_args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(directive_args, "id", (double)id);
+      if (resm > 0)
+         cJSON_AddNumberToObject(directive_args, "with_memory", (double)resm);
+      if (kb_client_pii_add_string(directive_args, "note", note) != 0)
+      {
+         cJSON_Delete(directive_args);
+         return text_content("error: withheld_pii: content was not sent to aimee-kb");
+      }
+      envelope = kb_v1_action_request("memory.directive_resolve", directive_args);
    }
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
