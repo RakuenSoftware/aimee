@@ -724,8 +724,9 @@ WHERE id = $1 AND scope_type = $2 AND scope_value = $3 AND lifecycle_state = 'ac
 }
 
 type handlerOptions struct {
-	placement Placement
-	data      DataStore
+	placement      Placement
+	data           DataStore
+	commandContext *bus.CommandContext
 }
 
 type HandlerOption func(*handlerOptions)
@@ -817,7 +818,7 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		len(request.LifecycleState) > 31 || len(request.ArchiveReason) > 1024 ||
 		len(request.BlockType) > 64 || request.LimitTokens < 0 || request.LimitTokens > 8192 ||
 		len(request.ArtifactType) > 128 || len(request.ArtifactRef) > 4096 ||
-		len(request.ArtifactHash) > 256 || len(request.Actor) > 256 ||
+		len(request.ArtifactHash) > 256 || len(request.Actor) > 576 ||
 		len(request.Mode) > 64 || len(request.Pattern) > 16384 ||
 		len(request.EpistemicKind) > 32 || len(request.UseCases) > 65536 ||
 		len(request.RecordType) > 64 || len(request.Version) > 256 ||
@@ -1226,6 +1227,9 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			var code int
 			var newID int64
 			code, newID, err = mutations.UpdateAs(ctx, request.ID, request.Content, request.Authority)
+			if errors.Is(err, ErrMemoryNotFound) {
+				code, err = -1, nil
+			}
 			response.Code = &code
 			response.IDs = []int64{newID}
 		case "delete-as":

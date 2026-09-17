@@ -285,3 +285,12 @@ and task-drift responses are also Go-owned public commands. Briefing episodes
 must have a visible parent memory, and context assembly searches the visible
 project/workspace/global set rather than silently dropping shared context.
 Failures remain distinct from successful empty results.
+
+KB delete, update, touch, reject, restore and workflow-upsert commands execute
+in Go. Destructive user edits require both an explicit request and verified
+host authority. Restore records the verified actor, never an actor supplied in
+arguments. The generic CMPQ v2 request adds a context length at byte 16 and sends
+verb, arguments and verifier context separately; CMPS responses remain v1.
+Memory accepts verifier context only from the host's reserved bus principal.
+External grants cannot claim that principal and the bus stamps sender identity.
+Plugins retain their v1 invocation and receive no verifier context.

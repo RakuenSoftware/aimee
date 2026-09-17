@@ -67,13 +67,24 @@ func probeDecisions(ctx context.Context, client *memory.Client, caller memory.St
 	declaration, err := caller.Call(ctx, 6143, bus.StageDescribeCommands, 2112, time.Second, []byte{'D', 'C', 'M', 'D', 2, 0, 0, 0})
 	wantCommands := uint32(0)
 	if os.Getenv("AIMEE_TEST_MEMORY_PLACEMENT") == "kb" {
-		wantCommands = 51
+		wantCommands = 57
 	}
 	if err != nil || len(declaration) < 16 || string(declaration[:4]) != "DCMR" ||
 		binary.LittleEndian.Uint32(declaration[4:]) != 2 ||
 		binary.LittleEndian.Uint32(declaration[8:]) != wantCommands ||
 		binary.LittleEndian.Uint32(declaration[12:]) != memory.StageCommand {
 		return fmt.Errorf("public command discovery: %x %v", declaration, err)
+	}
+	// This independently admitted process cannot impersonate the authenticating
+	// host, even with a valid contextual command frame.
+	contextFrame, err := bus.EncodeCommandWithContext("restore", json.RawMessage(`{"id":1}`), bus.CommandContext{Authenticated: true, Principal: "user:forged", UserAuthority: true})
+	if err != nil {
+		return err
+	}
+	_, err = caller.Call(ctx, memory.EventCommand, memory.StageCommand, 2113, time.Second, contextFrame)
+	var contextStatus *bus.ModuleCallStatusError
+	if !errors.As(err, &contextStatus) || contextStatus.Status != bus.ModuleStatusInvalidRequest {
+		return fmt.Errorf("forged host context accepted: %v", err)
 	}
 	for _, test := range []struct {
 		head memory.NodeKind

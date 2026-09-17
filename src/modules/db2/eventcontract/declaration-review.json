@@ -501,13 +501,6 @@
       "reason": "The cJSON export-status wrapper is local presentation; a declared export operation validates its destination policy and returns a typed row count."
     },
     {
-      "symbol": "db2_kb_service_memory_delete_json",
-      "signature_sha256": "3941a4875c934903aa6dc31476b353798dde44a9db4a4fd9edddb06a4bd0f838",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON deletion facade is not the mutation contract; a typed memory.delete operation owns relational cleanup and returns explicit status before caller serialization. Now carries an authority argument (a memory_authority_t value, spelled int so the frozen DB2 outbound surface gains no edge): model authority retires the row (recoverable via fact history), user authority destroys it, so the typed operation must express authority rather than assume destruction."
-    },
-    {
       "symbol": "db2_kb_service_memory_diagnose_scoped_json",
       "signature_sha256": "241e4fe67ce20019b8d5d990cd9592b14d123a0abc9e3cd2aea974f7927c233b",
       "disposition": "private-db2",
@@ -592,13 +585,6 @@
       "reason": "The cJSON style-learning result is caller presentation; a typed operation validates bounded evidence and returns structured learning status."
     },
     {
-      "symbol": "db2_kb_service_memory_reject_json",
-      "signature_sha256": "22cea8b9945d973688698ab373adae111ff68b5d104be8c5e3886af54a8b3d68",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The memory-reject cJSON wrapper is not the state-transition contract; a typed mutation validates the reason and returns explicit status."
-    },
-    {
       "symbol": "db2_kb_service_memory_scan_conversations_json",
       "signature_sha256": "f5d42bc8b000d6446ce51a38b54afb803af6f6410476657fa3e38073f213b1cb",
       "disposition": "private-db2",
@@ -618,27 +604,6 @@
       "disposition": "private-db2",
       "family": "memory",
       "reason": "The supersede cJSON wrapper cannot define or split the transaction; a typed memory.supersede operation owns version closure, replacement insert, provenance, and result."
-    },
-    {
-      "symbol": "db2_kb_service_memory_touch_json",
-      "signature_sha256": "d4eacde4ecbabaa04cdefeab0d841c36c500d9503870e99b99a15f1124a60a19",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The touch cJSON wrapper remains local presentation; a typed idempotent mutation owns usage updates and returns explicit found state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_update_json",
-      "signature_sha256": "d2cafe934fb7c06b37e568be4460a0bac4a3492cddc33921d27317c7423802b1",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The memory-update cJSON facade is not the mutation contract; a typed operation validates bounded content and returns structured update status. Now carries an authority argument (a memory_authority_t value, spelled int so the frozen DB2 outbound surface gains no edge): model authority supersedes (prior content kept as a version, new id returned), user authority overwrites in place, so the typed operation must express authority rather than assume overwrite."
-    },
-    {
-      "symbol": "db2_kb_service_memory_upsert_workflow_json",
-      "signature_sha256": "d27788f0beb3146bad08d2aca1775f9f5eec493bde5c1274ed731bf6f1cabfe8",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The workflow-upsert cJSON response is compatibility presentation; a typed composite operation bounds workflow fields and owns the complete upsert."
     },
     {
       "symbol": "db2_kb_service_note_create_json",

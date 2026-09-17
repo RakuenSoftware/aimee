@@ -180,8 +180,8 @@ static void wr_u16(unsigned char *p, uint16_t v)
 /* Encodes the shared invoke frame and returns the owner's JSON result.
  * Fixed modules use their declared stage; plugins retain their stage-1 route. Returns NULL on any
  * failure; the surface that called decides what that means, exactly as module_json_call.c does. */
-cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const char *verb,
-                                 const cJSON *args)
+cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                         const cJSON *args, const cJSON *context)
 {
    if (!event_kind || !stage_id || !verb || !verb[0] || strlen(verb) > 127)
       return NULL;
@@ -196,27 +196,42 @@ cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const c
       args_len = strlen(args_json);
    }
 
-   size_t verb_len = strlen(verb);
-   size_t request_len = INVOKE_REQUEST_HEADER + verb_len + args_len;
-   if (request_len > AIMEE_MODULE_MESSAGE_MAX_BODY)
+   char *context_json = context && cJSON_IsObject(context) ? cJSON_PrintUnformatted(context) : NULL;
+   if (context && !context_json)
    {
+      free(args_json);
+      return NULL;
+   }
+   size_t context_len = context_json ? strlen(context_json) : 0;
+   size_t header_len = context ? 20 : INVOKE_REQUEST_HEADER;
+   size_t verb_len = strlen(verb);
+   size_t request_len = header_len + verb_len + args_len + context_len;
+   if (request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || context_len > 4096)
+   {
+      free(context_json);
       free(args_json);
       return NULL;
    }
    unsigned char *request = malloc(request_len);
    if (!request)
    {
+      free(context_json);
       free(args_json);
       return NULL;
    }
    wr_u32(request, INVOKE_REQUEST_MAGIC);
-   wr_u32(request + 4, DECL_WIRE_VERSION);
+   wr_u32(request + 4, context ? 2 : DECL_WIRE_VERSION);
    wr_u16(request + 8, (uint16_t)verb_len);
    wr_u16(request + 10, 0);
    wr_u32(request + 12, (uint32_t)args_len);
-   memcpy(request + INVOKE_REQUEST_HEADER, verb, verb_len);
+   if (context)
+      wr_u32(request + 16, (uint32_t)context_len);
+   memcpy(request + header_len, verb, verb_len);
    if (args_len)
-      memcpy(request + INVOKE_REQUEST_HEADER + verb_len, args_json, args_len);
+      memcpy(request + header_len + verb_len, args_json, args_len);
+   if (context_len)
+      memcpy(request + header_len + verb_len + args_len, context_json, context_len);
+   free(context_json);
    free(args_json);
 
    unsigned char *response = malloc(INVOKE_MAX_RESPONSE);
@@ -255,6 +270,12 @@ cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const c
    cJSON *parsed = cJSON_ParseWithLength((const char *)response + INVOKE_RESPONSE_HEADER, body_len);
    free(response);
    return parsed;
+}
+
+cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                 const cJSON *args)
+{
+   return aimee_module_command_call_context(event_kind, stage_id, verb, args, NULL);
 }
 
 static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
@@ -767,13 +788,15 @@ int aimee_module_commands_refresh(int ttl_ms)
    return registered;
 }
 
-int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
+int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
+                                           const cJSON *context, cJSON **result)
 {
    if (!method || !result)
       return 0;
    *result = NULL;
    (void)aimee_module_commands_refresh(2000);
    uint32_t kind = 0, stage = 0;
+   int fixed = 0;
    char verb[128] = "";
    pthread_mutex_lock(&g_collect_lock);
    const aimee_command_t *command = aimee_command_find_method(method);
@@ -782,6 +805,7 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
       const owned_command_t *owned = command->ud;
       kind = owned->invoke_kind;
       stage = owned->invoke_stage;
+      fixed = strncmp(owned->module, "module:", 7) == 0;
       snprintf(verb, sizeof verb, "%s", owned->verb_wire);
    }
    pthread_mutex_unlock(&g_collect_lock);
@@ -789,8 +813,13 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
       return 0;
    /* A refresh may replace the registry while this call waits on the bus; only
     * the copied route crosses that wait, never a borrowed registry pointer. */
-   *result = aimee_module_command_call(kind, stage, verb, args);
+   *result = aimee_module_command_call_context(kind, stage, verb, args, fixed ? context : NULL);
    return *result ? 1 : -1;
+}
+
+int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
+{
+   return aimee_module_commands_dispatch_context(method, args, NULL, result);
 }
 
 void aimee_module_commands_reset(void)

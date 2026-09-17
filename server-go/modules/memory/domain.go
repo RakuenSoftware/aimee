@@ -126,7 +126,7 @@ func (s *postgresDataStore) Touch(ctx context.Context, ids []int64) (int, error)
 		return 0, err
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE memories SET use_count=use_count+1,
-last_used_at=pg_now_text(), updated_at=pg_now_text() WHERE id=ANY($1)`, ids)
+last_used_at=pg_now_text(), updated_at=pg_now_text() WHERE id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 	if err != nil {
 		return 0, err
 	}

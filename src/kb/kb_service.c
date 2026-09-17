@@ -1,5 +1,7 @@
 #include "aimee.h"
 #include "module_commands.h"
+#include "kb_reqctx.h"
+#include "kb/kb_login_throttle.h"
 #include "config.h" /* legacy_config_read — reembed default embedder */
 #include "kb_background.h"
 #include "kb_service.h"
@@ -1238,12 +1240,6 @@ static const struct
     {"session_briefing.commitments", kb_handle_session_briefing_commitments},
     {"session_briefing.directives", kb_handle_session_briefing_directives},
     {"memory.episode_card_generate", kb_handle_memory_episode_card_generate},
-    {"memory.upsert_workflow", kb_handle_memory_upsert_workflow},
-    {"memory.delete", kb_handle_memory_delete},
-    {"memory.touch", kb_handle_memory_touch},
-    {"memory.update", kb_handle_memory_update},
-    {"memory.reject", kb_handle_memory_reject},
-    {"memory.restore", kb_handle_memory_restore},
     {"memory.assemble_typed_context", kb_handle_memory_assemble_typed_context},
     {"memory.search", kb_handle_memory_search},
     {"memory.export_jsonl", kb_handle_memory_export_jsonl},
@@ -1297,6 +1293,31 @@ static const struct
     {"learning.policy_select", kb_handle_learning_policy_select},
 };
 
+/* Only verifier-owned request state becomes command context. User arguments
+ * remain a separate field on the wire and cannot replace this identity. */
+static cJSON *kb_command_context(void)
+{
+   cJSON *context = cJSON_CreateObject();
+   if (!context)
+      return NULL;
+   const kb_principal_t *actor = kb_reqctx_actor();
+   char principal[577] = "", transport[577] = "";
+   int authenticated =
+       actor && actor->authenticated && kb_identity_key(actor, principal, sizeof(principal)) == 0;
+   int user_authority =
+       authenticated && (actor->kind != KB_PRIN_OWNER || kb_login_throttle_peer_is_loopback());
+   const kb_request_context_t *resolved = kb_reqctx_resolved();
+   if (authenticated && resolved && resolved->has_transport)
+      (void)kb_identity_key(&resolved->transport, transport, sizeof(transport));
+   if (!transport[0])
+      snprintf(transport, sizeof(transport), "%s", principal);
+   cJSON_AddBoolToObject(context, "authenticated", authenticated);
+   cJSON_AddBoolToObject(context, "user_authority", user_authority);
+   cJSON_AddStringToObject(context, "principal", authenticated ? principal : "");
+   cJSON_AddStringToObject(context, "transport_identity", authenticated ? transport : "");
+   return context;
+}
+
 static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
 {
    ctx->last_session_rpc_ts = (long)time(NULL);
@@ -1333,7 +1354,12 @@ static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
          return kb_rpc_table[i].fn(fd, req);
 
    cJSON *module_response = NULL;
-   int dispatched = aimee_module_commands_dispatch(method->valuestring, req, &module_response);
+   cJSON *command_context = kb_command_context();
+   if (!command_context)
+      return kb_send_error(fd, "command context unavailable");
+   int dispatched = aimee_module_commands_dispatch_context(method->valuestring, req,
+                                                           command_context, &module_response);
+   cJSON_Delete(command_context);
    if (dispatched)
       return kb_reply_or_error(fd, module_response, "command module unavailable");
 

@@ -210,9 +210,6 @@ extern "C"
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
    cJSON *db2_kb_service_memory_episode_card_generate_json(const char *source_session);
-   cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
-                                                     const char *rule, double observed_confidence,
-                                                     const char *session_id);
    /* `authority` decides destructiveness, not permission — the caller's
     * capability was already checked at the entry point. It carries a
     * memory_authority_t value: 0 (MEMORY_AUTHORITY_MODEL, and the default for a
@@ -226,11 +223,6 @@ extern "C"
     * memory_authority.h and is used either side of this seam; only the frozen
     * header spells it as int. Note that 0 is the SAFE value, so a caller that
     * passes nothing meaningful still gets the non-destructive path. */
-   cJSON *db2_kb_service_memory_delete_json(int64_t id, int authority);
-   cJSON *db2_kb_service_memory_touch_json(int64_t id);
-   cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority);
-   cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason);
-   cJSON *db2_kb_service_memory_restore_json(int64_t id, const char *actor);
    cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
    cJSON *db2_kb_service_memory_search_json(const cJSON *clusters_arr, int limit);
    cJSON *db2_kb_service_memory_find_facts_visible_json(const char *query, const char *workspace,

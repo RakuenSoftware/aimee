@@ -12,6 +12,7 @@
 
 static int fixed_present = 1, malformed, empty, reset_during_call;
 static uint32_t last_kind, last_stage;
+static int expect_context;
 static void put32(unsigned char *out, uint32_t v)
 {
    out[0] = v;
@@ -77,8 +78,16 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
          --*result_len;
       return AIMEE_MODULE_CALL_OK;
    }
-   assert(get32(req) == 0x51504d43u && get32(req + 4) == 1);
-   assert(body_len >= 21 && memcmp(req + 16, "stats", 5) == 0);
+   assert(get32(req) == 0x51504d43u && get32(req + 4) == (expect_context ? 2u : 1u));
+   unsigned header = expect_context ? 20 : 16;
+   assert(body_len >= header + 5 && memcmp(req + header, "stats", 5) == 0);
+   if (expect_context)
+   {
+      const char expected[] = "{\"authenticated\":true,\"principal\":\"user:alice\"}";
+      assert(get32(req + 16) == sizeof(expected) - 1);
+      assert(body_len == header + 5 + get32(req + 12) + sizeof(expected) - 1);
+      assert(memcmp(req + header + 5 + get32(req + 12), expected, sizeof(expected) - 1) == 0);
+   }
    last_kind = kind;
    last_stage = stage;
    if (reset_during_call)
@@ -122,6 +131,14 @@ int main(void)
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status")), "ok") ==
           0);
    cJSON_Delete(reply);
+   cJSON *context = cJSON_Parse("{\"authenticated\":true,\"principal\":\"user:alice\"}");
+   expect_context = 1;
+   assert(aimee_module_commands_dispatch_context("memory.stats", args, context, &reply) == 1);
+   cJSON_Delete(reply);
+   expect_context = 0;
+   assert(aimee_module_commands_dispatch_context("plugin.stats", args, context, &reply) == 1);
+   cJSON_Delete(reply);
+   cJSON_Delete(context);
    assert(aimee_module_commands_dispatch("plugin.stats", args, &reply) == 1);
    assert(last_kind == AIMEE_PLUGIN_KIND(201, 1) && last_stage == 1);
    cJSON_Delete(reply);

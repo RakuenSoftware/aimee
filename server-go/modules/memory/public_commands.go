@@ -92,10 +92,14 @@ func commandResult(value any) ([]byte, bus.ModuleStatus) {
 // including project, workspace, authority, or scope fields in their arguments.
 // Shared-KB dispatch remains at the server boundary until its client is ported.
 func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
-	verb, body, err := bus.DecodeCommand(frame)
+	verb, body, caller, err := bus.DecodeCommandWithContext(frame)
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if caller != nil && invocation.PrincipalRef != 0 {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	options.commandContext = caller
 	var args commandArgs
 	if json.Unmarshal(body, &args) != nil || args == nil {
 		return nil, bus.ModuleStatusInvalidRequest

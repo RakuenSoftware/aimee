@@ -11,6 +11,13 @@ type commandRoute struct {
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"delete", "Delete memories.", handleMutationCommand, true},
+	{"update", "Update memories.", handleMutationCommand, true},
+	{"touch", "Touch memories.", handleMutationCommand, true},
+	{"reject", "Reject memories.", handleMutationCommand, true},
+	{"restore", "Restore memories.", handleMutationCommand, true},
+	{"upsert_workflow", "Upsert workflow memories.", handleMutationCommand, true},
+
 	{"briefing", "Briefing memories.", handleRuntimeCommand, true},
 	{"alerts", "Alerts memories.", handleRuntimeCommand, true},
 	{"assemble_context", "Assemble context memories.", handleRuntimeCommand, true},

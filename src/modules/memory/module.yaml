@@ -66,7 +66,8 @@
     "server-go/modules/memory/command_routes.go",
     "server-go/modules/memory/public_records.go",
     "server-go/modules/memory/public_scope.go",
-    "server-go/modules/memory/public_runtime.go"
+    "server-go/modules/memory/public_runtime.go",
+    "server-go/modules/memory/public_mutations.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -98,7 +99,8 @@
     "server-go/modules/memory/public_queries_test.go",
     "server-go/modules/memory/command_routes_test.go",
     "server-go/modules/memory/public_records_test.go",
-    "server-go/modules/memory/public_runtime_test.go"
+    "server-go/modules/memory/public_runtime_test.go",
+    "server-go/modules/memory/public_mutations_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"
