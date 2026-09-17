@@ -368,62 +368,6 @@ cJSON *db2_kb_service_task_list_json(const char *state, const char *session_id, 
    return resp;
 }
 
-cJSON *db2_kb_service_memory_ask_json(const char *query, const char *scope_type,
-                                      const char *scope_value, int limit)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-
-   memory_answer_result_t result;
-   memset(&result, 0, sizeof(result));
-   int rc;
-   if (scope_type && scope_type[0])
-      rc = memory_ask_query_scoped(query ? query : "", scope_type, scope_value,
-                                   limit > 0 ? limit : 5, &result);
-   else
-      rc = memory_ask_query(query ? query : "", limit > 0 ? limit : 5, &result);
-   if (rc != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message",
-                              result.error[0] ? result.error : "memory_ask failed");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "answer", result.answer);
-   cJSON_AddNumberToObject(resp, "confidence", result.confidence);
-   cJSON_AddStringToObject(resp, "evidence_mode", result.evidence_mode);
-   cJSON_AddBoolToObject(resp, "no_answer", result.no_answer);
-   cJSON_AddBoolToObject(resp, "low_confidence", result.low_confidence);
-   cJSON_AddNumberToObject(resp, "retrieval_count", result.retrieval_count);
-   cJSON *citations = cJSON_AddArrayToObject(resp, "citation_ids");
-   for (int i = 0; i < result.citation_count; i++)
-      cJSON_AddItemToArray(citations, cJSON_CreateNumber((double)result.citation_ids[i]));
-   cJSON *trace = cJSON_AddObjectToObject(resp, "evidence_trace");
-   if (trace)
-   {
-      cJSON_AddStringToObject(trace, "decision",
-                              memory_answer_evidence_decision_str(&result.evidence));
-      cJSON_AddStringToObject(trace, "reason", memory_answer_evidence_reason_str(&result.evidence));
-      cJSON *ids = cJSON_AddArrayToObject(trace, "candidate_ids");
-      for (int i = 0; ids && i < result.evidence.candidate_id_count; i++)
-         cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)result.evidence.candidate_ids[i]));
-      cJSON_AddNumberToObject(trace, "ranked_count", result.evidence.ranked_count);
-      cJSON_AddNumberToObject(trace, "anchor_id", (double)result.evidence.anchor_id);
-      cJSON_AddNumberToObject(trace, "anchor_rank", result.evidence.anchor_rank);
-      cJSON_AddNumberToObject(trace, "topk_grounding", result.evidence.topk_grounding);
-      cJSON_AddNumberToObject(trace, "anchor_coverage", result.evidence.anchor_coverage);
-      cJSON_AddNumberToObject(trace, "cluster_coverage", result.evidence.cluster_coverage);
-      cJSON_AddNumberToObject(trace, "threshold", result.evidence.threshold);
-      cJSON_AddNumberToObject(trace, "chunk_floor", result.evidence.chunk_floor);
-      cJSON_AddBoolToObject(trace, "structural", result.evidence.structural);
-      cJSON_AddBoolToObject(trace, "exempt", result.evidence.exempt);
-      cJSON_AddBoolToObject(trace, "trace_truncated", result.evidence.trace_truncated);
-   }
-   return resp;
-}
-
 /* --- Typed-fact §4 retraction and §3 entity merge/unmerge ---
  *
  * These three primitives were built, tested, and left with no production caller:

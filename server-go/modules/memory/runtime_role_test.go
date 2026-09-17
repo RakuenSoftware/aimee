@@ -216,6 +216,7 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 	command("delete", fmt.Sprintf(`{"id":%d,"authority":"user"}`, newID), true)
 	exerciseMaintenanceReplay(t, ctx, tx, handler)
 	exerciseDiagnosticReplay(t, ctx, tx, handler)
+	exerciseAnswerReplay(t, ctx, tx, backend.(*postgresDataStore))
 
 	// Calls use nested transactions in this fixture; releasing a savepoint
 	// retains SET LOCAL until the enclosing transaction ends. Production store

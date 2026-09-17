@@ -39,14 +39,15 @@ type DiagnosticParts struct {
 }
 
 type AnswerResult struct {
-	Answer         string  `json:"answer"`
-	Confidence     float64 `json:"confidence"`
-	NoAnswer       bool    `json:"no_answer"`
-	LowConfidence  bool    `json:"low_confidence"`
-	EvidenceMode   string  `json:"evidence_mode"`
-	RetrievalCount int     `json:"retrieval_count"`
-	CitationIDs    []int64 `json:"citation_ids"`
-	Error          string  `json:"error"`
+	Evidence       AnswerEvidence `json:"evidence_trace"`
+	Answer         string         `json:"answer"`
+	Confidence     float64        `json:"confidence"`
+	NoAnswer       bool           `json:"no_answer"`
+	LowConfidence  bool           `json:"low_confidence"`
+	EvidenceMode   string         `json:"evidence_mode"`
+	RetrievalCount int            `json:"retrieval_count"`
+	CitationIDs    []int64        `json:"citation_ids"`
+	Error          string         `json:"error"`
 }
 
 // RecallRecord retains the record API fields and the prompt-consumer aliases.
@@ -434,17 +435,34 @@ func renderMemoryContext(records []Record, blockType string) string {
 	return out.String()
 }
 
-func diagnosticFor(record Record, query string) Diagnostic {
+// Confidence is display metadata and cannot cross the ranking input boundary.
+type rankingInput struct{ Key, Content string }
+
+func rankText(input rankingInput, query string) DiagnosticParts {
 	lower := strings.ToLower(query)
-	lexical := 0.0
-	if lower != "" && (strings.Contains(strings.ToLower(record.Key), lower) ||
-		strings.Contains(strings.ToLower(record.Content), lower)) {
-		lexical = 1
+	p := DiagnosticParts{}
+	if lower != "" && (strings.Contains(strings.ToLower(input.Key), lower) || strings.Contains(strings.ToLower(input.Content), lower)) {
+		p.Lexical = 0.65
 	}
-	total := 0.65*lexical + 0.35*record.Confidence
-	return Diagnostic{Memory: record, Parts: DiagnosticParts{Lexical: lexical, Coverage: lexical,
-		Confidence: record.Confidence, Salience: record.Confidence, HybridTotal: total,
-		BlendedTotal: total, Total: total}}
+	terms := answerTerms(query)
+	covered := 0
+	for _, term := range terms {
+		if strings.Contains(strings.ToLower(input.Key), term) || strings.Contains(strings.ToLower(input.Content), term) {
+			covered++
+		}
+	}
+	if len(terms) > 0 {
+		p.Coverage = 0.35 * float64(covered) / float64(len(terms))
+	}
+	p.Total = p.Lexical + p.Coverage
+	p.HybridTotal, p.BlendedTotal = p.Total, p.Total
+	return p
+}
+
+func diagnosticFor(record Record, query string) Diagnostic {
+	parts := rankText(rankingInput{record.Key, record.Content}, query)
+	parts.Confidence = record.Confidence
+	return Diagnostic{Memory: record, Parts: parts}
 }
 
 func (s *postgresDataStore) Diagnose(ctx context.Context, scope Scope, query string, limit int) ([]Diagnostic, error) {
@@ -465,31 +483,4 @@ func (s *postgresDataStore) Explain(ctx context.Context, scope Scope, query stri
 		return Diagnostic{}, err
 	}
 	return diagnosticFor(record, query), nil
-}
-
-func (s *postgresDataStore) Ask(ctx context.Context, scope Scope, query string, limit int) (AnswerResult, error) {
-	records, err := s.Search(ctx, scope, query, "", "", limit)
-	if err != nil {
-		return AnswerResult{}, err
-	}
-	result := AnswerResult{NoAnswer: len(records) == 0, EvidenceMode: "memory", RetrievalCount: len(records)}
-	if len(records) == 0 {
-		return result, nil
-	}
-	var answer strings.Builder
-	maxConfidence := 0.0
-	for i, item := range records {
-		if i > 0 {
-			answer.WriteString(" ")
-		}
-		fmt.Fprintf(&answer, "%s [#%d]", item.Content, item.ID)
-		result.CitationIDs = append(result.CitationIDs, item.ID)
-		if item.Confidence > maxConfidence {
-			maxConfidence = item.Confidence
-		}
-	}
-	result.Answer = answer.String()
-	result.Confidence = maxConfidence
-	result.LowConfidence = maxConfidence < 0.5
-	return result, nil
 }

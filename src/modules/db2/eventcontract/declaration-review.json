@@ -459,13 +459,6 @@
       "reason": "The legacy cJSON mutation wrapper is retired at the process boundary; DB2 performs rejection and returns the bounded typed proposal before any caller-specific JSON encoding."
     },
     {
-      "symbol": "db2_kb_service_memory_ask_json",
-      "signature_sha256": "6f96ef961d233c1eb21cf47d9d163742f5a217928bca62ec138aac7f583e4f53",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON memory-question facade is local serialization; a typed operation validates bounded query and scope fields and returns structured answer evidence."
-    },
-    {
       "symbol": "db2_kb_service_memory_context_block_json",
       "signature_sha256": "8c9ed979ae2752b963bdb0ea04561b2590970bc66a458d9dd6c6f21cb31d87a0",
       "disposition": "private-db2",

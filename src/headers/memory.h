@@ -417,13 +417,7 @@ int memory_repair_vector_index(int64_t memory_id, const char *command);
 int memory_repair_vector_index_failed_only(const char *command, int limit, int *failed_out);
 int memory_rebuild_vector_index_for_version(const char *version, int *failed_out);
 int memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max);
-int memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic_t *out);
-int memory_ask_query(const char *query, int limit, memory_answer_result_t *out);
-int memory_ask_query_scoped(const char *query, const char *scope_type, const char *scope_value,
-                            int limit, memory_answer_result_t *out);
-char *memory_answer_query(const char *query, int limit);
-char *memory_answer_query_scoped(const char *query, const char *scope_type, const char *scope_value,
-                                 int limit);
+
 /* Returns 1 if answer contains at least one citation marker ([#N]). */
 int memory_citation_gate_check(const char *answer);
 int memory_list_episodes(const char *query, int limit, memory_episode_t *out, int max);

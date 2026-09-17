@@ -73,7 +73,7 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
  WHERE w.hops>0 GROUP BY me.memory_id
 )
 SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence
-FROM ranked r JOIN visible m ON m.id=r.memory_id ORDER BY r.score DESC,m.confidence DESC,m.id LIMIT $11`,
+FROM ranked r JOIN visible m ON m.id=r.memory_id ORDER BY r.score DESC,m.id LIMIT $11`,
 		exact, req.Scope.Type, req.Scope.Value, req.IncludeAll, req.Project, req.Workspace, req.Kind, req.Tier, "{"+strings.Join(ids, ",")+"}", req.Query, req.Limit)
 	if err != nil {
 		return nil, err

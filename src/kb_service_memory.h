@@ -24,7 +24,7 @@ int kb_handle_evidence_provenance(int fd, cJSON *req);
 int kb_handle_evidence_fidelity(int fd, cJSON *req);
 int kb_handle_css_signals(int fd, cJSON *req);
 int kb_handle_memory_search_assertions(int fd, cJSON *req);
-int kb_handle_memory_ask(int fd, cJSON *req);
+
 /* Typed-fact §4 correction + §3 entity merge/unmerge surface. */
 int kb_handle_facts_retract(int fd, cJSON *req);
 int kb_handle_entities_merge(int fd, cJSON *req);

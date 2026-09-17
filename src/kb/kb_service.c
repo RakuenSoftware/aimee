@@ -1282,7 +1282,6 @@ static const struct
     {"evidence.fidelity_retrieval_event", kb_handle_evidence_fidelity},
     {"css.signals", kb_handle_css_signals},
     {"memory.search_assertions", kb_handle_memory_search_assertions},
-    {"memory.ask", kb_handle_memory_ask},
     {"artifacts.list_proposed", kb_handle_artifacts_list_proposed},
     {"artifacts.set_state", kb_handle_artifacts_set_state},
     {"roadmap.create_from_decomposition", kb_handle_roadmap_create_from_decomposition},

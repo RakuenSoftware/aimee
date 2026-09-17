@@ -214,8 +214,7 @@ extern "C"
                                                        const char *believed_at,
                                                        int include_historical, int max_hops,
                                                        int limit);
-   cJSON *db2_kb_service_memory_ask_json(const char *query, const char *scope_type,
-                                         const char *scope_value, int limit);
+
    typedef struct
    {
       int64_t id;

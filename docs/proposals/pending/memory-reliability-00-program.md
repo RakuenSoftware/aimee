@@ -128,6 +128,13 @@ tests exercise these commands under the restricted runtime role.
 Model edits preserve history, scope tags and lineage without inheriting user
 provenance. Public edits capture extraction authority in the same transaction;
 audit triggers receive the verified initiator and the effective content authority.
+The public KB `memory.ask` handler now runs in Go, including session-cluster
+selection, citations, event/temporal extraction, abstention and curated exemptions.
+Restricted-role replay verifies project isolation and the configured gate. Answer
+counters are owned by the Go process and included in recall metrics. Confidence
+is display metadata and no longer changes the Go text-ranking score or ordering.
+Native ask and diagnostic decoding adapters and their backend handlers are removed;
+the benchmark reads diagnostic JSON through the generic command dispatcher.
 The current inventory is five C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

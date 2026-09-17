@@ -404,6 +404,7 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
+	settings      func() (map[string]any, error)
 	fusionEnabled bool
 	code          codeIndexState
 	personal      *personalVectors
@@ -422,7 +423,13 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 	if err != nil {
 		return nil, err
 	}
-	return &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled}, nil
+	backend := &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled}
+	if configured, ok := db.(interface {
+		MemorySettings() (map[string]any, error)
+	}); ok {
+		backend.settings = configured.MemorySettings
+	}
+	return backend, nil
 }
 
 func (s *postgresDataStore) Get(ctx context.Context, scope Scope, id int64) (Record, error) {
@@ -595,7 +602,7 @@ WHERE lifecycle_state = 'active'
   AND ($2 = '' OR kind = $2) AND ($3 = '' OR tier = $3)
 ORDER BY (lower(key)=lower($5)) DESC,
   ts_rank_cd(to_tsvector('english', key || ' ' || content), plainto_tsquery('english', $5)) DESC,
-  confidence DESC, updated_at DESC, id DESC LIMIT $4`, pattern, kind, tier, limit, query)
+  updated_at DESC, id DESC LIMIT $4`, pattern, kind, tier, limit, query)
 	} else {
 		rows, err = s.db.Query(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
 FROM memories
@@ -607,7 +614,7 @@ WHERE lifecycle_state = 'active' AND scope_type = $1 AND scope_value = $2
 ORDER BY (lower(key)=lower($7)) DESC,
   ts_rank_cd(to_tsvector('english', key || ' ' || content || ' ' || COALESCE(use_cases,'')),
              plainto_tsquery('english', $7)) DESC,
-  confidence DESC, updated_at DESC, id DESC LIMIT $6`,
+  updated_at DESC, id DESC LIMIT $6`,
 			scope.Type, scope.Value, pattern, kind, tier, limit, query)
 	}
 	if err != nil {
@@ -1859,7 +1866,14 @@ set_config('aimee.correlation_id',$9,true)`,
 			response.Diagnostics = []Diagnostic{diagnostic}
 		case "ask":
 			var answer AnswerResult
-			answer, err = retrieval.Ask(ctx, scope, request.Query, request.Limit)
+			if backend, ok := options.data.(*postgresDataStore); ok {
+				if explicitScope {
+					request.Scope = scope
+				}
+				answer, err = backend.askRequest(ctx, request)
+			} else {
+				answer, err = retrieval.Ask(ctx, scope, request.Query, request.Limit)
+			}
 			response.Answer = &answer
 		}
 	case "delete":

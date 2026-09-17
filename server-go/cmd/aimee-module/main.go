@@ -262,6 +262,8 @@ type memoryResources struct {
 	config *configclient.Client
 }
 
+func (r memoryResources) MemorySettings() (map[string]any, error) { return r.config.Snapshot() }
+
 func (r memoryResources) EmbeddingEndpoint() (string, error) {
 	values, err := r.config.Snapshot()
 	if err != nil {

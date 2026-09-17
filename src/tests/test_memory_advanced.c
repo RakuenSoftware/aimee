@@ -1432,45 +1432,6 @@ int main(void)
       assert(truncated2 == 1);
    }
 
-   /* --- memory.answerability: default-off trace, gate abstain, curated exemption --- */
-   {
-      reset_db();
-
-      write_test_config("memory:\n  abstain:\n    enabled: false\n    gate: 0.99\n    "
-                        "chunk_min_confidence: 0.0\n");
-      memory_t m;
-      assert(memory_insert(TIER_L2, KIND_FACT, "mars:color", "mars color is red", 0.9, "s1", &m) ==
-             0);
-      memory_answer_result_t result;
-      assert(memory_ask_query("mars color", 5, &result) == 0);
-      assert(result.no_answer == 0);
-      assert(result.evidence.decision == MEMORY_ANSWER_DECISION_ANSWERABLE);
-      assert(result.evidence.ranked_count > 0);
-      assert(result.evidence.candidate_id_count > 0);
-
-      write_test_config("memory:\n  abstain:\n    enabled: true\n    gate: 0.99\n    "
-                        "chunk_min_confidence: 0.0\n");
-      memset(&result, 0, sizeof(result));
-      assert(memory_ask_query("mars color", 5, &result) == 0);
-      assert(result.no_answer == 1);
-      assert(result.answer[0] == '\0');
-      assert(result.citation_count == 0);
-      assert(result.evidence.decision == MEMORY_ANSWER_DECISION_ABSTAIN);
-      assert(result.evidence.reason == MEMORY_ANSWER_REASON_GROUNDING_LOW);
-      char *rendered = memory_answer_query("mars color", 5);
-      assert(rendered && strcmp(rendered, "No confident answer for \"mars color\"") == 0);
-      free(rendered);
-
-      assert(memory_insert(TIER_L4, KIND_FACT, "venus:color", "venus color is yellow", 0.9, "s1",
-                           &m) == 0);
-      memset(&result, 0, sizeof(result));
-      assert(memory_ask_query("venus color", 5, &result) == 0);
-      assert(result.no_answer == 0);
-      assert(result.evidence.decision == MEMORY_ANSWER_DECISION_EXEMPT);
-      assert(result.evidence.reason == MEMORY_ANSWER_REASON_CURATED_EXEMPT);
-      assert(result.evidence.exempt == 1);
-   }
-
    /* --- memory_aggregate: keyword fallback when no entity seed --- */
    {
       memory_aggregation_hint_t hint;

@@ -15,6 +15,8 @@
 #include "config.h"
 #include "memory.h"
 #include "cJSON.h"
+#include "module_commands.h"
+#include "json_fluent.h"
 #include "aimee_sha256.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -664,28 +666,28 @@ static int mem_eval_query_has_temporal_intent(const char *query)
           strstr(query, "today") != NULL || strstr(query, "yesterday") != NULL;
 }
 
-static const char *mem_eval_bucket_failure(const char *query, const memory_diagnostic_t *expected)
+static const char *mem_eval_bucket_failure(const char *query, const cJSON *expected)
 {
-   if (!expected)
+   if (!cJSON_IsObject(expected))
       return "missing";
-   if (mem_eval_query_has_temporal_intent(query) && expected->parts.temporal <= 0.0 &&
-       (strstr(expected->memory.content, "20") || strstr(expected->memory.content, "Jan") ||
-        strstr(expected->memory.content, "Feb") || strstr(expected->memory.content, "Mar") ||
-        strstr(expected->memory.content, "Apr") || strstr(expected->memory.content, "May") ||
-        strstr(expected->memory.content, "Jun") || strstr(expected->memory.content, "Jul") ||
-        strstr(expected->memory.content, "Aug") || strstr(expected->memory.content, "Sep") ||
-        strstr(expected->memory.content, "Oct") || strstr(expected->memory.content, "Nov") ||
-        strstr(expected->memory.content, "Dec")))
+   cJSON *parts = cJSON_GetObjectItemCaseSensitive(expected, "parts");
+   const char *content = jo_cstr(cJSON_GetObjectItemCaseSensitive(expected, "memory"), "content");
+   if (mem_eval_query_has_temporal_intent(query) && jo_num(parts, "temporal", 0) <= 0.0 &&
+       (strstr(content, "20") || strstr(content, "Jan") || strstr(content, "Feb") ||
+        strstr(content, "Mar") || strstr(content, "Apr") || strstr(content, "May") ||
+        strstr(content, "Jun") || strstr(content, "Jul") || strstr(content, "Aug") ||
+        strstr(content, "Sep") || strstr(content, "Oct") || strstr(content, "Nov") ||
+        strstr(content, "Dec")))
       return "temporal_miss";
-   if (expected->parts.entity <= 0.0)
+   if (jo_num(parts, "entity", 0) <= 0.0)
       return "entity_miss";
-   if (expected->parts.lexical <= 0.0 && expected->parts.semantic > 0.0)
+   if (jo_num(parts, "lexical", 0) <= 0.0 && jo_num(parts, "semantic", 0) > 0.0)
       return "lexical_gap";
-   if (expected->parts.semantic <= 0.0 && expected->parts.lexical < 1.5)
+   if (jo_num(parts, "semantic", 0) <= 0.0 && jo_num(parts, "lexical", 0) < 1.5)
       return "semantic_gap";
-   if (expected->parts.state < -0.1)
+   if (jo_num(parts, "state", 0) < -0.1)
       return "state_penalty";
-   if (expected->parts.coverage < 0.5)
+   if (jo_num(parts, "coverage", 0) < 0.5)
       return "granularity_gap";
    return "ranking_gap";
 }
@@ -854,22 +856,32 @@ void mem_eval_print_miss_report(FILE *fp, mem_eval_case_t *cases, int n_cases, i
 
       (*misses_io)++;
       int64_t expected_id = cases[c].expected_ids[0];
-      memory_diagnostic_t expected;
       const char *bucket = "missing";
       memory_t expected_mem;
-      memset(&expected, 0, sizeof(expected));
       memset(&expected_mem, 0, sizeof(expected_mem));
 
-      if (expected_id > 0 && memory_explain_match(cases[c].query, expected_id, &expected) == 0)
+      cJSON *args = cJSON_CreateObject(), *reply = NULL;
+      cJSON_AddStringToObject(args, "query", cases[c].query);
+      cJSON_AddNumberToObject(args, "memory_id", (double)expected_id);
+      if (expected_id > 0)
+         (void)aimee_module_commands_dispatch("memory.explain_match", args, &reply);
+      cJSON_Delete(args);
+      const cJSON *expected = cJSON_GetObjectItemCaseSensitive(reply, "row");
+      if (cJSON_IsObject(expected))
       {
-         bucket = mem_eval_bucket_failure(cases[c].query, &expected);
-         expected_mem = expected.memory;
+         bucket = mem_eval_bucket_failure(cases[c].query, expected);
+         const cJSON *row = cJSON_GetObjectItemCaseSensitive(expected, "memory");
+         expected_mem.id = expected_id;
+         snprintf(expected_mem.key, sizeof(expected_mem.key), "%s", jo_cstr(row, "key"));
+         snprintf(expected_mem.content, sizeof(expected_mem.content), "%s",
+                  jo_cstr(row, "content"));
       }
       else if (expected_id > 0)
       {
          (void)memory_get(expected_id, &expected_mem);
       }
 
+      cJSON_Delete(reply);
       mem_eval_increment_bucket(bucket, temporal_miss_io, entity_miss_io, lexical_gap_io,
                                 semantic_gap_io, state_penalty_io, granularity_gap_io,
                                 ranking_gap_io, missing_io);

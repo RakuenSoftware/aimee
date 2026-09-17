@@ -713,25 +713,6 @@ int kb_handle_memory_search_assertions(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to search semantic assertions");
 }
 
-int kb_handle_memory_ask(int fd, cJSON *req)
-{
-   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   cJSON *st_j = cJSON_GetObjectItemCaseSensitive(req, "scope_type");
-   cJSON *sv_j = cJSON_GetObjectItemCaseSensitive(req, "scope_value");
-   if (!cJSON_IsString(query_j))
-      return kb_send_error(fd, "memory.ask requires query");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 5;
-   const char *st = (cJSON_IsString(st_j) && st_j->valuestring[0]) ? st_j->valuestring : NULL;
-   const char *sv = (cJSON_IsString(sv_j) && sv_j->valuestring[0]) ? sv_j->valuestring : NULL;
-
-   int missing = 0;
-   int scope_active = (!st && !sv) ? kb_memory_scope_begin(req, 0, &missing) : 0;
-   cJSON *resp = db2_kb_service_memory_ask_json(query_j->valuestring, st, sv, limit);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to answer query");
-}
-
 /* §4 retraction: withdraw a typed fact the layer got wrong. `target` is optional
  * and scopes the retraction to one value; omitting it retracts every current
  * value of (source, relation). */

@@ -28,7 +28,7 @@ ORDER BY CASE WHEN scope_type='project' AND scope_value=$2 THEN 1
  (lower(key)=lower($4)) DESC,
  ts_rank_cd(to_tsvector('english',key || ' ' || content || ' ' || COALESCE(use_cases,'')),
             plainto_tsquery('english',$4)) DESC,
- confidence DESC,updated_at DESC,id DESC LIMIT $8`,
+ updated_at DESC,id DESC LIMIT $8`,
 		req.IncludeAll, req.Project, req.Workspace, req.Query, searchPattern(req.Query), req.Kind, req.Tier, req.Limit)
 	if err != nil {
 		return nil, err
