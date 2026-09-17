@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import {
   cacheBelongsToAccount,
   legacyProviderAliasIDs,
+  isPristineDefaultSession,
   mergePersistedSessions,
   sessionsForLocalCache,
   sessionsMissingFromServer,
@@ -164,12 +165,31 @@ const Ctx = createContext<SessionCtx | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<Session[]>(loadSessions);
   const sessionsRef = useRef<Session[]>(sessions);
+  const refreshingRef = useRef(false);
+  const verifiedAccountRef = useRef('');
+  const dirtySessionsRef = useRef(new Set<string>());
+  const writesRef = useRef(new Map<string, Promise<boolean>>());
+  const updateSessions = useCallback((next: Session[]) => {
+    sessionsRef.current = next;
+    setSessions(next);
+  }, []);
+  // Serialize metadata writes so an older request cannot restore an old project.
+  const persistTracked = useCallback((session: Session) => {
+    const id = session.aimeeSid;
+    dirtySessionsRef.current.add(id);
+    const previous = writesRef.current.get(id) ?? Promise.resolve(true);
+    const write = previous.then(() => persistSession(session));
+    writesRef.current.set(id, write);
+    void write.then(ok => {
+      if (writesRef.current.get(id) !== write) return;
+      writesRef.current.delete(id);
+      if (ok) dirtySessionsRef.current.delete(id);
+    });
+  }, []);
   const [restored, setRestored] = useState(false);
   const [activeId, setActiveId] = useState<string>(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
   });
-
-  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
 
   // Keep an always-valid active id.
   useEffect(() => {
@@ -187,14 +207,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [activeId]);
 
   const refreshFromServer = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    const atStart = new Map(sessionsRef.current.map(session => [session.id, session]));
+    const dirtyAtStart = new Set(dirtySessionsRef.current);
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 10_000);
     let cacheVerified = false;
     const replaceUnverifiedCache = () => {
       if (cacheVerified) return;
       const next = [blankSession('Session 1')];
-      sessionsRef.current = next;
-      setSessions(next);
+      updateSessions(next);
     };
     try {
       // allSettled lets a successful identity response validate an owned cache
@@ -205,11 +228,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         fetch('/api/chat/sessions', { signal: controller.signal }),
       ]);
       if (identityResult.status !== 'fulfilled' || !identityResult.value.ok) {
+        // A transient focus-refresh failure cannot invalidate an account already
+        // verified in this page. An explicit auth rejection still clears it.
+        const rejected = identityResult.status === 'fulfilled' &&
+          (identityResult.value.status === 401 || identityResult.value.status === 403);
+        if (!rejected && verifiedAccountRef.current) cacheVerified = true;
+        if (rejected) verifiedAccountRef.current = '';
         replaceUnverifiedCache();
         return;
       }
       const identity = await identityResult.value.json() as { username?: string };
       const username = identity.username?.trim() || '';
+      verifiedAccountRef.current = username;
 
       let cachedOwner = '';
       try { cachedOwner = localStorage.getItem(CACHE_OWNER_KEY) || ''; } catch { /* ignore */ }
@@ -261,9 +291,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const canonicalRemote = remote.filter(session => !aliases.has(session.id));
       const legacy = alreadyAuthoritative ? [] : sessionsMissingFromServer(local, canonicalRemote);
       const merged = mergePersistedSessions(local, canonicalRemote, !alreadyAuthoritative);
+      // The GET may predate a local create/rename/project change or a pending
+      // write. Do not let that snapshot delete the chat or roll its binding back.
+      for (const session of local) {
+        const changed = atStart.get(session.id) !== session;
+        if (!changed && !dirtyAtStart.has(session.aimeeSid) &&
+            !dirtySessionsRef.current.has(session.aimeeSid)) continue;
+        const index = merged.findIndex(candidate => candidate.id === session.id);
+        if (index >= 0) merged[index] = session;
+        else if (!isPristineDefaultSession(session)) merged.push(session);
+      }
       const next = merged.length ? merged : [blankSession('Session 1')];
-      sessionsRef.current = next;
-      setSessions(next);
+      updateSessions(next);
 
       // One-time upgrade path: seed server rows/transcripts that only existed in
       // localStorage before account-scoped persistence became authoritative.
@@ -294,9 +333,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     finally {
       window.clearTimeout(timeout);
+      refreshingRef.current = false;
       setRestored(true);
     }
-  }, []);
+  }, [updateSessions]);
 
   useEffect(() => {
     void refreshFromServer();
@@ -319,45 +359,44 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const addSession = useCallback((name?: string) => {
     const session = blankSession(name && name.trim() ? name.trim() : `Session ${Date.now() % 100000}`);
-    setSessions(previous => [...previous, session]);
+    updateSessions([...sessionsRef.current, session]);
     setActiveId(session.id);
-    void persistSession(session);
+    persistTracked(session);
     return session.id;
-  }, []);
+  }, [persistTracked, updateSessions]);
 
   const closeSession = useCallback((id: string) => {
     const target = sessionsRef.current.find(session => session.id === id);
-    if (target) forgetSession(target.aimeeSid);
-    setSessions(previous => {
-      const remaining = previous.filter(session => session.id !== id);
-      const next = remaining.length ? remaining : [blankSession('Session 1')];
-      setActiveId(current => current === id ? next[0].id : current);
-      return next;
-    });
-  }, []);
+    if (target) {
+      const pending = writesRef.current.get(target.aimeeSid) ?? Promise.resolve(true);
+      void pending.then(() => forgetSession(target.aimeeSid));
+    }
+    const remaining = sessionsRef.current.filter(session => session.id !== id);
+    const next = remaining.length ? remaining : [blankSession('Session 1')];
+    updateSessions(next);
+    setActiveId(current => current === id ? next[0].id : current);
+  }, [updateSessions]);
 
   const selectSession = useCallback((id: string) => setActiveId(id), []);
 
+  const patchSession = useCallback((id: string, patch: Partial<Session>) => {
+    const session = sessionsRef.current.find(candidate => candidate.id === id);
+    if (!session) return;
+    const next = { ...session, ...patch };
+    updateSessions(sessionsRef.current.map(candidate => candidate.id === id ? next : candidate));
+    if (next.aimeeSid !== session.aimeeSid) {
+      const pending = writesRef.current.get(session.aimeeSid) ?? Promise.resolve(true);
+      void pending.then(() => forgetSession(session.aimeeSid));
+    }
+    // Streaming transcripts already persist through the chat backend. Mirror
+    // them in the account cache without sending a metadata write every tick.
+    if (Object.keys(patch).some(key => key !== 'messages')) persistTracked(next);
+  }, [persistTracked, updateSessions]);
+
   const renameSession = useCallback((id: string, name: string) => {
     const normalized = name.trim();
-    if (!normalized) return;
-    setSessions(previous => previous.map(session => {
-      if (session.id !== id) return session;
-      const next = { ...session, name: normalized };
-      void persistSession(next);
-      return next;
-    }));
-  }, []);
-
-  const patchSession = useCallback((id: string, patch: Partial<Session>) => {
-    setSessions(previous => previous.map(session => {
-      if (session.id !== id) return session;
-      const next = { ...session, ...patch };
-      if (next.aimeeSid !== session.aimeeSid) forgetSession(session.aimeeSid);
-      void persistSession(next);
-      return next;
-    }));
-  }, []);
+    if (normalized) patchSession(id, { name: normalized });
+  }, [patchSession]);
 
   const active = useMemo(
     () => sessions.find(session => session.id === activeId) || sessions[0] || null,

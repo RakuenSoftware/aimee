@@ -309,6 +309,7 @@ interface ActiveStreamRefs {
 }
 
 interface QueuedChatSend {
+  projectRoot: string;
   text: string;
   version: number;
   /* aimeeSid of the tab this send was enqueued from. Captured at enqueue time so
@@ -1300,7 +1301,10 @@ const Transcript = memo(function Transcript({ messages, working, activeSid }: {
 export default function Chat() {
   const [initialChatState] = useState(loadInitialChatState);
   const [tabs, setTabs] = useState<TabData[]>(initialChatState.tabs);
-  const [activeIdx, setActiveIdx] = useState(initialChatState.activeIdx);
+  const { sessions, active: activeSession, patchSession } = useSessions();
+  const activeSessionId = activeSession?.id ?? '';
+  const matchedIdx = tabs.findIndex(tab => tab.sessionId === activeSessionId);
+  const activeIdx = matchedIdx >= 0 ? matchedIdx : 0;
   const [streamMsgs, setStreamMsgs] = useState<StreamMsg[]>([]);
   // Work (in-flight/queued sends + iteration progress) keyed by the owning tab's
   // aimeeSid, so the busy indicator reflects the ACTIVE tab alone — sending on one
@@ -1332,8 +1336,6 @@ export default function Chat() {
   // The top session tabs are the source of truth. Each conversation tab mirrors
   // a session 1:1 (by sessionId), so every session keeps its own history; the
   // active session also drives the project (cwd).
-  const { sessions, active: activeSession, patchSession } = useSessions();
-  const activeSessionId = activeSession?.id ?? '';
   const sessionProject = activeSession?.projectRoot ?? '';
 
   // Keep one conversation tab per account-scoped session. Match both the UI id
@@ -1348,7 +1350,8 @@ export default function Chat() {
       const next = sessions.map((s, i) => {
         const existing = byId.get(s.id) ?? byAimeeId.get(s.aimeeSid);
         if (existing) {
-          const messages = reconcileSessionMessages(existing.messages, s.messages);
+          const messages = existing.aimeeSid === s.aimeeSid
+            ? reconcileSessionMessages(existing.messages, s.messages) : s.messages;
           if (existing.sessionId === s.id && existing.title === s.name &&
               existing.aimeeSid === s.aimeeSid && messages === existing.messages &&
               (!s.claudeSid || existing.sid === s.claudeSid)) return existing;
@@ -1384,12 +1387,6 @@ export default function Chat() {
       return next;
     });
   }, [sessions]);
-
-  // Switch the visible conversation when the active session changes.
-  useEffect(() => {
-    const idx = tabsRef.current.findIndex(t => t.sessionId === activeSessionId);
-    if (idx >= 0) setActiveIdx(idx);
-  }, [activeSessionId, sessions]);
 
   // Mirror the active session's project into the chat cwd (no conversation reset
   // — switching sessions preserves each one's history).
@@ -1455,7 +1452,6 @@ export default function Chat() {
   }
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
-  const projectRootRef = useRef(projectRoot);
   // Live mirror of remoteTurnActive so sendMessage can synchronously tell whether
   // a server/foreign turn (e.g. a steer auto-continue) is in flight for the tab.
   const remoteTurnActiveRef = useRef(false);
@@ -1712,7 +1708,6 @@ export default function Chat() {
     return () => { clearRemoteFlush(); es.close(); presenceSseRef.current = null; };
   }, [activeAimeeSid, activeAttachId]);
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
-  useEffect(() => { projectRootRef.current = projectRoot; }, [projectRoot]);
 
   /* Rebuild per-sid pending/queued counts from the live send refs. Iteration
    * progress is cleared for any sid that has no more in-flight or queued work, and
@@ -1772,6 +1767,10 @@ export default function Chat() {
 
   useEffect(() => {
     return () => {
+      saveOwnerStream(renderedSidRef.current);
+      for (const owner of bgStreamsRef.current.keys()) saveOwnerStream(owner);
+      saveTabs(tabsRef.current);
+      flushPendingTabs();
       abortActiveSends();
     };
   }, []);
@@ -1783,12 +1782,6 @@ export default function Chat() {
 
   /* SessionContext restores and refreshes the authenticated user's server-side
    * session list; the reconciliation effect above maps it onto chat tabs. */
-
-  useEffect(() => {
-    if (activeIdx >= tabs.length) {
-      setActiveIdx(Math.max(0, tabs.length - 1));
-    }
-  }, [activeIdx, tabs.length]);
 
   useEffect(() => {
     saveActiveTabIndex(activeIdx);
@@ -2086,7 +2079,10 @@ export default function Chat() {
     const newSid = tabs[activeIdx]?.aimeeSid ?? '';
     const oldSid = renderedSidRef.current;
     if (oldSid === newSid) return;
-    if (oldSid) bgStreamsRef.current.set(oldSid, streamMsgsRef.current);
+    if (oldSid) {
+      bgStreamsRef.current.set(oldSid, streamMsgsRef.current);
+      saveTabMessages(oldSid, streamMsgsRef.current);
+    }
     renderedSidRef.current = newSid;
     skipNextStreamPersistRef.current = true;
     const buffered = bgStreamsRef.current.get(newSid);
@@ -2104,7 +2100,7 @@ export default function Chat() {
       : [];
     streamMsgsRef.current = msgs;
     setStreamMsgs(msgs);
-  }, [activeIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activePersonaSid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A server refresh can hydrate the currently selected session without
   // changing its tab index (the normal fresh-browser case). Load that account-
@@ -2114,12 +2110,14 @@ export default function Chat() {
     const serverMessages = activeSession?.messages;
     if (!serverMessages) return;
     const tab = tabsRef.current.find(candidate => candidate.sessionId === activeSessionId);
-    // A non-empty shorter snapshot can be a focus refresh racing an active
-    // stream. An explicit empty transcript, however, is authoritative and must
-    // clear stale browser history restored from the local cache.
-    if (!tab || (serverMessages.length > 0 && serverMessages.length < tab.messages.length)) return;
-    if (sameTabMessages(tab.messages, serverMessages) &&
-        sameTabMessages(streamToTabMessages(streamMsgsRef.current), serverMessages)) return;
+    if (!tab || tab.aimeeSid !== renderedSidRef.current) return;
+    // A live reply owns its message ids. Replacing it with a snapshot would
+    // orphan the poll's id, causing the next update to append a second reply.
+    for (const owner of activeSendAbortRefs.current.values()) {
+      if (owner === tab.aimeeSid) return;
+    }
+    const live = streamToTabMessages(streamMsgsRef.current);
+    if (reconcileSessionMessages(live, serverMessages) === live) return;
     const hydrated = serverMessages.map(message => ({
       id: nextId(), type: message.role, text: message.text,
     }));
@@ -2128,42 +2126,35 @@ export default function Chat() {
     setStreamMsgs(hydrated);
   }, [activeSessionId, activeSession?.messages, tabs[activeIdx]?.sessionId]);
 
-  /* Save current tab messages back to tabs state */
-  const saveTabMessages = useCallback((tabIndex: number, msgs: StreamMsg[]) => {
-    const saved = streamToTabMessages(msgs);
-    setTabs(prev => {
-      const tab = prev[tabIndex];
-      if (!tab || sameTabMessages(tab.messages, saved)) return prev;
-      const next = [...prev];
-      next[tabIndex] = { ...tab, messages: saved };
-      tabsRef.current = next;
-      return next;
-    });
-  }, []);
+  /* Commit by stable id: a refresh may reorder tabs while a timer is pending. */
+  const saveTabMessages = useCallback((owner: string, msgs: StreamMsg[]) => {
+    const tab = tabsRef.current.find(candidate => candidate.aimeeSid === owner);
+    if (!tab) return;
+    const saved = reconcileSessionMessages(tab.messages, streamToTabMessages(msgs));
+    if (sameTabMessages(tab.messages, saved)) return;
+    const next = tabsRef.current.map(candidate => candidate === tab ? { ...tab, messages: saved } : candidate);
+    tabsRef.current = next;
+    setTabs(next);
+    if (tab.sessionId) patchSession(tab.sessionId, { messages: saved });
+  }, [patchSession]);
 
-  /* Route a stream mutation to its owning tab: the active tab's on-screen buffer
-   * (`streamMsgs`) when the owner is active, else the owner's off-screen buffer. */
+  /* Route updates to the buffer actually on screen, including the interval
+   * between selecting a session and swapping its transcript. Keep refs current
+   * synchronously so final commits cannot save an older React render. */
   const applyToOwnerStream = useCallback((owner: string, updater: (prev: StreamMsg[]) => StreamMsg[]) => {
-    const activeSid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
-    if (owner === activeSid) {
-      setStreamMsgs(updater);
+    if (owner === renderedSidRef.current) {
+      const next = updater(streamMsgsRef.current);
+      streamMsgsRef.current = next;
+      setStreamMsgs(next);
     } else {
       bgStreamsRef.current.set(owner, updater(bgStreamsRef.current.get(owner) ?? []));
     }
   }, []);
 
-  /* Commit a completed stream to ITS owning tab's history — never the active tab,
-   * which may have changed if the user switched tabs mid-turn. */
   const saveOwnerStream = useCallback((owner: string) => {
     flushStreamAppends();
-    const ownerIdx = tabsRef.current.findIndex(t => t.aimeeSid === owner);
-    if (ownerIdx < 0) return;
-    const activeSid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
-    if (owner === activeSid) {
-      setStreamMsgs(prev => { saveTabMessages(ownerIdx, prev); return prev; });
-    } else {
-      saveTabMessages(ownerIdx, bgStreamsRef.current.get(owner) ?? []);
-    }
+    saveTabMessages(owner, owner === renderedSidRef.current
+      ? streamMsgsRef.current : bgStreamsRef.current.get(owner) ?? []);
   }, [saveTabMessages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Replace the owning tab's live assistant bubble with the FULL current answer
@@ -2171,12 +2162,12 @@ export default function Chat() {
    * client reconciliation). Creates the bubble on first content. */
   const setLiveText = useCallback((refs: ActiveStreamRefs, text: string) => {
     if (!text) return;
+    // Allocate outside the updater: React may replay it in StrictMode.
+    const aid = refs.assistantId ?? nextId();
+    refs.assistantId = aid;
     applyToOwnerStream(refs.originSid, prev => {
-      const aid = refs.assistantId;
-      if (aid === null) {
-        const newId = nextId();
-        refs.assistantId = newId;
-        return [...prev, { id: newId, type: 'assistant', text }];
+      if (!prev.some(message => message.id === aid)) {
+        return [...prev, { id: aid, type: 'assistant', text }];
       }
       return prev.map(m => (m.id === aid ? { ...m, text } : m));
     });
@@ -2211,13 +2202,13 @@ export default function Chat() {
       return;
     }
 
-    const tabIndex = activeIdx;
+    const owner = renderedSidRef.current;
     if (streamPersistTimerRef.current !== null) {
       window.clearTimeout(streamPersistTimerRef.current);
     }
     streamPersistTimerRef.current = window.setTimeout(() => {
       streamPersistTimerRef.current = null;
-      saveTabMessages(tabIndex, streamMsgs);
+      saveTabMessages(owner, streamMsgs);
     }, STREAM_PERSIST_DEBOUNCE_MS);
 
     return () => {
@@ -2226,7 +2217,7 @@ export default function Chat() {
         streamPersistTimerRef.current = null;
       }
     };
-  }, [streamMsgs, activeIdx, saveTabMessages]);
+  }, [streamMsgs, activePersonaSid, saveTabMessages]);
 
   const workflowChannel = ((tabs[activeIdx]?.workflowChannel ?? '').trim()
     || (tabs[activeIdx]?.title ?? '').trim()
@@ -2485,13 +2476,14 @@ export default function Chat() {
   // The server only honours the steer when a turn was actually in flight; on the
   // race where it just finished (interrupted:false), fall back to a normal send.
   async function steerInterrupt(sid: string, text: string) {
+    const projectRoot = activeSession?.projectRoot ?? '';
     expectSteerRef.current = sid;
     // Safety net: if the server continuation never starts (dispatch failed), clear
     // the one-shot so it can't force-render a later turn on this session.
     window.setTimeout(() => { if (expectSteerRef.current === sid) expectSteerRef.current = ''; }, 12000);
     const sendNormally = () => {
       if (expectSteerRef.current === sid) expectSteerRef.current = '';
-      pushToSendQueue(sid, { text, version: sendQueueVersionRef.current, originSid: sid });
+      pushToSendQueue(sid, { text, version: sendQueueVersionRef.current, originSid: sid, projectRoot });
       recomputeWorkCounts();
       void drainSendQueue(sid);
     };
@@ -2537,7 +2529,8 @@ export default function Chat() {
     setStreamMsgs(prev => [...prev, { id: userMsgId, type: 'user', text }]);
 
     const originSid = tabsRef.current[idx]?.aimeeSid ?? '';
-    pushToSendQueue(originSid, { text, version: sendQueueVersionRef.current, originSid });
+    pushToSendQueue(originSid, { text, version: sendQueueVersionRef.current, originSid,
+      projectRoot: activeSession?.projectRoot ?? '' });
     recomputeWorkCounts();
     void drainSendQueue(originSid);
   }
@@ -2632,7 +2625,7 @@ export default function Chat() {
           message: text,
           aimee_session_id: aimeeSid,
           attach_id: attachId,
-          cwd: projectRootRef.current,
+          cwd: item.projectRoot,
         }),
       });
 
@@ -2782,7 +2775,7 @@ export default function Chat() {
       }
       return next ?? msgs;
     };
-    const activeSid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
+    const activeSid = renderedSidRef.current;
     for (const [owner, byId] of byOwner) {
       if (owner === activeSid) {
         setStreamMsgs(prev => applyDeltas(prev, byId));
@@ -2838,7 +2831,8 @@ export default function Chat() {
         // Commit to the stream's OWNING tab (saveOwnerStream flushes first), never
         // whatever tab is active now if the user switched tabs mid-turn.
         saveOwnerStream(streamRefs.originSid);
-        streamRefs.assistantId = null;
+        // The live poll and final fetch still update this reply after turn_end.
+        // Keep its id until the next turn_start so they replace the same bubble.
         streamRefs.thinkId = null;
         streamRefs.toolId = null;
         break;
@@ -2959,7 +2953,7 @@ export default function Chat() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <ProjectPicker
             key={activeSessionId}
-            storageKey={`aimee_session_project_${activeSessionId}`}
+            value={activeSession?.projectRoot ?? ''}
             onChange={sel => {
               const r = sel ? `${sel.root}/${sel.project}` : '';
               if (activeSession) patchSession(activeSession.id, { projectRoot: r, projectName: sel?.project ?? '' });

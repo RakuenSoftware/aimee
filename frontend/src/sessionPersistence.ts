@@ -50,18 +50,19 @@ function validMessages(value: unknown): SessionMessage[] {
   });
 }
 
-// Reconcile a server snapshot with a live browser buffer. A non-empty shorter
-// snapshot can be a refresh racing an in-flight stream, but an explicit empty
-// snapshot is authoritative (for example, history cleared on another device).
-export function reconcileSessionMessages<T>(local: T[], server: T[]): T[] {
-  return server.length === 0 || server.length >= local.length ? server : local;
+// A snapshot may lag a stream, including an empty metadata-only server row.
+// Clearing a conversation is explicit and mints a new session id; a refresh must
+// not erase messages or roll a partially streamed answer back to an older prefix.
+export function reconcileSessionMessages<T extends SessionMessage>(local: T[], server: T[]): T[] {
+  if (server.length < local.length) return local;
+  if (server.length === local.length && server.every((message, i) =>
+    message.role === local[i].role && local[i].text.startsWith(message.text))) return local;
+  return server;
 }
 
 function preferMessages(local: SessionMessage[], server: unknown): SessionMessage[] {
   if (!Array.isArray(server)) return local;
   const remote = validMessages(server);
-  // Preserve the distinction between an absent transcript and an explicit
-  // empty transcript before applying the live-refresh race guard above.
   return reconcileSessionMessages(local, remote);
 }
 
@@ -110,9 +111,8 @@ export function mergePersistedSessions(
       id: cached?.id || remote.id,
       name: remote.title?.trim() || cached?.name || 'Chat',
       projectRoot,
-      projectName: remote.cwd
-        ? projectNameFromRoot(remote.cwd)
-        : cached?.projectName || projectNameFromRoot(projectRoot),
+      projectName: cached?.projectRoot === projectRoot && cached.projectName
+        ? cached.projectName : projectNameFromRoot(projectRoot),
       claudeSid: remote.provider_session_id || cached?.claudeSid || '',
       aimeeSid: remote.id,
       // Attachments are live browser surfaces and must never cross devices.
