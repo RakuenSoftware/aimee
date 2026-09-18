@@ -437,6 +437,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		}
 		executor := moduleEgress(ctx, moduleBusSocket, egress.MemoryClientRef)
 		memory.StartPersonalIndex(ctx, data, executor, os.Getenv("EMBEDDER_URL"))
+		memory.StartSharedIndex(ctx, data, executor)
 		config.Handler = memory.NewHandler(executor, memory.WithDataStore(placement, data))
 	case "learning":
 		config.ModuleName = name

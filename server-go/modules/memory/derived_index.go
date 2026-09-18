@@ -57,38 +57,47 @@ func (s *postgresDataStore) RebuildDerivedIndexes(ctx context.Context, limit int
 		return 0, err
 	}
 	for _, id := range ids {
-		var key, content, created string
-		if err = s.db.QueryRow(ctx, `SELECT key,content,created_at FROM memories WHERE id=$1`, id).Scan(&key, &content, &created); err != nil {
-			return 0, err
-		}
-		if err = s.replaceDerivedText(ctx, id, deriveText(key, content, created)); err != nil {
-			return 0, err
-		}
-
-		if settings.Negation {
-			if _, err = s.db.Exec(ctx, `UPDATE memories SET negation_tokens=$2 WHERE id=$1`, id, strings.Join(negationTokens(textBound(key+" "+content, 3071)), " ")); err != nil {
-				return 0, err
-			}
-		}
-		if err = s.refreshCoreference(ctx, id, content, settings); err != nil {
-			return 0, err
-		}
-		if err = s.replaceDerivedRelations(ctx, id); err != nil {
-			return 0, err
-		}
-		if err = s.replaceDerivedUnits(ctx, id); err != nil {
-			return 0, err
-		}
-		if _, err = s.db.Exec(ctx, `INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
- SELECT id,scope_type,scope_value FROM memories WHERE id=$1 ON CONFLICT DO NOTHING`, id); err != nil {
-			return 0, err
-		}
-		if _, err = s.db.Exec(ctx, `INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
- SELECT id,'memory',id,'pending',0,'',pg_now_text() FROM memories WHERE id=$1
- AND NOT EXISTS(SELECT 1 FROM memory_embeddings WHERE point_id=$1)
- ON CONFLICT(point_id) DO UPDATE SET status='pending',last_error='',updated_at=pg_now_text()`, id); err != nil {
+		if err = s.refreshDerivedRecord(ctx, id, settings); err != nil {
 			return 0, err
 		}
 	}
 	return len(ids), nil
+}
+
+// The caller holds the parent lock and transaction for the complete replacement.
+// Background jobs and explicit reindex use this same pipeline.
+func (s *postgresDataStore) refreshDerivedRecord(ctx context.Context, id int64, settings derivedSettings) error {
+	var err error
+	var key, content, created string
+	if err = s.db.QueryRow(ctx, `SELECT key,content,created_at FROM memories WHERE id=$1`, id).Scan(&key, &content, &created); err != nil {
+		return err
+	}
+	if err = s.replaceDerivedText(ctx, id, deriveText(key, content, created)); err != nil {
+		return err
+	}
+
+	if settings.Negation {
+		if _, err = s.db.Exec(ctx, `UPDATE memories SET negation_tokens=$2 WHERE id=$1`, id, strings.Join(negationTokens(textBound(key+" "+content, 3071)), " ")); err != nil {
+			return err
+		}
+	}
+	if err = s.refreshCoreference(ctx, id, content, settings); err != nil {
+		return err
+	}
+	if err = s.replaceDerivedRelations(ctx, id); err != nil {
+		return err
+	}
+	if err = s.replaceDerivedUnits(ctx, id); err != nil {
+		return err
+	}
+	if _, err = s.db.Exec(ctx, `INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
+ SELECT id,scope_type,scope_value FROM memories WHERE id=$1 ON CONFLICT DO NOTHING`, id); err != nil {
+		return err
+	}
+	if _, err = s.db.Exec(ctx, `INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
+ SELECT id,'memory',id,'pending',0,'',pg_now_text() FROM memories WHERE id=$1
+ ON CONFLICT(point_id) DO UPDATE SET status='pending',attempts=0,last_error='',updated_at=pg_now_text()`, id); err != nil {
+		return err
+	}
+	return nil
 }

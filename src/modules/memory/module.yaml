@@ -80,6 +80,7 @@
     "server-go/modules/memory/answer.go",
     "server-go/modules/memory/public_answer.go",
     "server-go/modules/memory/derived_index.go",
+    "server-go/modules/memory/shared_index.go",
     "server-go/modules/memory/derived_text.go",
     "server-go/modules/memory/derived_units.go",
     "server-go/modules/memory/unit_vectors.go",
@@ -141,6 +142,7 @@
     "server-go/modules/memory/derived_units_test.go",
     "server-go/modules/memory/derived_relations_test.go",
     "server-go/modules/memory/coreference_test.go",
+    "server-go/modules/memory/shared_index_test.go",
     "server-go/modules/memory/negation_test.go"
   ],
   "public_headers": [

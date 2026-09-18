@@ -429,3 +429,13 @@ uses the existing PostgreSQL index plus bounded polarity-overlap ranking while
 retaining scope priority; positive-query ranking is unchanged. Runtime replay
 covers opposite-polarity twins, additional negative candidates and scope/state
 exclusions. The former derived-metadata C entry point is removed.
+
+The shared Go owner now runs the KB metadata/vector indexer alongside the
+placement-specific personal index. Canonical writes durably enqueue a new job
+generation in the same transaction, including edits, scope/lifecycle changes and
+deletions. Metadata replacement is atomic; failed attempts preserve the previous
+index and use bounded retries with backoff. Both parent and unit vectors are
+processed under the parent lock, preventing concurrent edits from being overtaken
+by an old embedding. Retired/deleted parents lose their queued and stored vectors.
+Restricted-role replay covers automatic indexing and retry rollback; two-connection
+tests cover competing owners, crash rollback and the embedding/edit lock order.

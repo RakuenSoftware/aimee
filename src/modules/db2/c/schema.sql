@@ -17663,6 +17663,37 @@ RETURNS JSONB LANGUAGE sql STABLE AS $$
  WHERE t.trace_id=p_trace_id AND t.scope_kind=p_scope_kind AND t.scope_id=p_scope_id
 $$;
 
+-- Canonical writes and durable Go indexing requests are one commit. This is
+-- enqueueing only: all derivation, retry policy and embedding run in Go. A new
+-- generation invalidates an older attempt, including after an in-place edit.
+ALTER TABLE kb_async_jobs ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 1;
+CREATE OR REPLACE FUNCTION memory_index_enqueue() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP='UPDATE' AND
+    ROW(OLD.key,OLD.content,OLD.kind,OLD.tier,OLD.scope_type,OLD.scope_value,
+        OLD.source_session,OLD.lifecycle_state,OLD.valid_from,OLD.valid_until,OLD.cognified_memory_kind)
+    IS NOT DISTINCT FROM
+    ROW(NEW.key,NEW.content,NEW.kind,NEW.tier,NEW.scope_type,NEW.scope_value,
+        NEW.source_session,NEW.lifecycle_state,NEW.valid_from,NEW.valid_until,NEW.cognified_memory_kind) THEN
+    RETURN NEW;
+  END IF;
+  INSERT INTO kb_async_jobs(kind,document_id,project,status,updated_at)
+    VALUES('memory_index',CASE WHEN TG_OP='DELETE' THEN OLD.id ELSE NEW.id END,'memory','pending',clock_timestamp()::text)
+  ON CONFLICT(kind,document_id) DO UPDATE SET status='pending',attempts=0,
+    last_error='',claimed_by='',claimed_at='',next_attempt_at='',
+    generation=kb_async_jobs.generation+1,updated_at=EXCLUDED.updated_at;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_index_enqueue ON memories;
+CREATE TRIGGER memory_index_enqueue AFTER INSERT OR DELETE OR UPDATE OF key,content,kind,tier,
+  scope_type,scope_value,source_session,lifecycle_state,valid_from,valid_until,cognified_memory_kind
+  ON memories FOR EACH ROW EXECUTE FUNCTION memory_index_enqueue();
+-- Adopt existing records once. Reapplying the schema preserves completed work.
+INSERT INTO kb_async_jobs(kind,document_id,project,status)
+  SELECT 'memory_index',id,'memory','pending' FROM memories WHERE lifecycle_state='active'
+  ON CONFLICT(kind,document_id) DO NOTHING;
+
 -- The embedded Go store has a separate, non-owner runtime role. The KB owner
 -- creates these objects, so the Go migrator's default privileges do not cover
 -- them. Grant only the memory domain's relations, never the Vault/control or

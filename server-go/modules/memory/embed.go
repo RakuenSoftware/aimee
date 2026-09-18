@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	store "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
@@ -347,6 +348,29 @@ func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, 
 	}
 	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB && memoryID >= unitPointOffset {
 		return backend.embedUnit(ctx, traceID, executor, memoryID, command, maxDim)
+	}
+	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB {
+		if db, ok := backend.db.(store.DB); ok {
+			tx, err := db.Begin(ctx)
+			if err != nil {
+				return EmbedResponse{Error: "embed: transaction unavailable"}
+			}
+			defer tx.Rollback(context.Background())
+			bound := *backend
+			bound.db = tx
+			response := EmbedRecord(ctx, traceID, executor, &bound, memoryID, command, maxDim)
+			if err = tx.Commit(ctx); err != nil {
+				return EmbedResponse{Error: "embed: transaction failed"}
+			}
+			return response
+		}
+		if _, ok := backend.db.(store.Tx); !ok {
+			return EmbedResponse{Error: "embed: transaction required"}
+		}
+		var locked int64
+		if err := backend.db.QueryRow(ctx, `SELECT id FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, memoryID).Scan(&locked); err != nil {
+			return EmbedResponse{Error: "embed: memory record unavailable"}
+		}
 	}
 	record, err := data.Get(ctx, Scope{}, memoryID)
 	if err != nil {
