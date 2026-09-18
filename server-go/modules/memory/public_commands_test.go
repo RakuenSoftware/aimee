@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -59,15 +60,35 @@ func runPublicCommand(t *testing.T, client *Client, verb, args string) map[strin
 }
 
 func TestPrivateCommandsPreserveEnvelopesAndScope(t *testing.T) {
+	for _, named := range []bool{false, true} {
+		t.Run(fmt.Sprintf("named=%v", named), func(t *testing.T) {
+			testPrivateCommandsPreserveEnvelopesAndScope(t, named)
+		})
+	}
+}
+func testPrivateCommandsPreserveEnvelopesAndScope(t *testing.T, named bool) {
 	s := &commandStore{deleted: true}
-	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementServer, s)))
+	handler := NewHandler(nil, WithDataStore(PlacementServer, s))
+	client := clientForHandler(t, handler)
+	run := func(verb, raw string) map[string]any {
+		if !named {
+			return runPublicCommand(t, client, verb, raw)
+		}
+		var args map[string]any
+		if err := json.Unmarshal([]byte(raw), &args); err != nil {
+			t.Fatal(err)
+		}
+		args["operation"] = "user-" + verb
+		encoded, _ := json.Marshal(args)
+		return runHostRuntime(t, handler, string(encoded))
+	}
 	for _, test := range []struct{ verb, args, want string }{
 		{"store", `{"key":"editor","content":"vim","project":"secret-project","scope":{"type":"global"},"authority":"user","operation":"visible-search"}`, `{"status":"ok","store":"user","id":41}`},
 		{"list", `{}`, `{"status":"ok","store":"user","memories":[],"active_context_missing":false}`},
 		{"search", `{"keywords":["editor","preference"]}`, `{"status":"ok","facts":[],"windows":[],"active_context_missing":false}`},
 		{"delete", `{"id":41}`, `{"status":"ok","store":"user","id":41,"deleted":true,"destroyed":false}`},
 	} {
-		got := runPublicCommand(t, client, test.verb, test.args)
+		got := run(test.verb, test.args)
 		var want map[string]any
 		json.Unmarshal([]byte(test.want), &want)
 		if !reflect.DeepEqual(got, want) {
@@ -83,15 +104,15 @@ func TestPrivateCommandsPreserveEnvelopesAndScope(t *testing.T) {
 	if s.query != "editor preference" || s.limit != 10 {
 		t.Fatalf("search=%q limit=%d", s.query, s.limit)
 	}
-	got := runPublicCommand(t, client, "supersede", `{"old_id":41,"new_content":"new","confidence":0.5,"session_id":"s"}`)
+	got := run("supersede", `{"old_id":41,"new_content":"new","confidence":0.5,"session_id":"s"}`)
 	if got["id"] != float64(42) || got["content"] != "new" || got["status"] != "ok" || got["store"] != "user" {
 		t.Fatalf("supersede=%v", got)
 	}
-	got = runPublicCommand(t, client, "get", `{"id":41,"workspace":"shared"}`)
+	got = run("get", `{"id":41,"workspace":"shared"}`)
 	if got["memory"].(map[string]any)["id"] != float64(41) || got["store"] != "user" {
 		t.Fatal(got)
 	}
-	got = runPublicCommand(t, client, "stats", `{}`)
+	got = run("stats", `{}`)
 	if got["stats"] == nil || got["store"] != "user" {
 		t.Fatal(got)
 	}

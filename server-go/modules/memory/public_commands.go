@@ -144,6 +144,10 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 			}
 		}
 	}
+	return handleUserCommand(options, invocation, verb, args)
+}
+
+func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
 	if options.placement != PlacementServer {
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}

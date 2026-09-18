@@ -2,33 +2,21 @@
  * commitments and unresolved epistemic directives at session start.
  * See docs/proposals/done/personal-agent-phase-2-recall.md.
  *
- * These build on state already persisted by the phase-1 primitives
- * (memory_prospective_t, memory_directive_t); they don't introduce a
- * new store. Each helper returns a heap-allocated markdown fragment
+ * The shared Go memory owner renders the persisted state.
+ * Each helper returns a heap-allocated markdown fragment
  * (or NULL / "") so build_session_context can drop it in without
  * touching schema. */
 
 #include "aimee.h"
-#include "memory.h"
 #include "session_briefing.h"
 #include "module_commands.h"
-#include "aimee/memory/module_api.h"
+#include "json_fluent.h"
 #include "cJSON.h"
 #include <aimee/skills/skill.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Default caps for the two briefing sections. Both are conservative
- * so a pathologically large backlog never blows out the session-start
- * output. Operators who want more can ask via the dedicated commands
- * (aimee memory reminders list, aimee memory directives list). */
-#ifndef SESSION_BRIEFING_COMMITMENTS_DEFAULT_LIMIT
-#define SESSION_BRIEFING_COMMITMENTS_DEFAULT_LIMIT 8
-#endif
-#ifndef SESSION_BRIEFING_DIRECTIVES_DEFAULT_LIMIT
-#define SESSION_BRIEFING_DIRECTIVES_DEFAULT_LIMIT 5
-#endif
 #ifndef SESSION_BRIEFING_SKILLS_DEFAULT_LIMIT
 #define SESSION_BRIEFING_SKILLS_DEFAULT_LIMIT 24
 #endif
@@ -89,8 +77,14 @@ char *session_briefing_render_commitments(int limit)
    if (!args)
       return NULL;
    cJSON_AddNumberToObject(args, "limit", limit);
-   cJSON *response = aimee_module_command_call(
-       AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND, "prospective_briefing", args);
+   cJSON *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "prospective-briefing");
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      cJSON_Delete(response);
+      response = NULL;
+   }
    cJSON_Delete(args);
    const char *block =
        response ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block")) : NULL;
@@ -105,8 +99,14 @@ char *session_briefing_render_directives(int limit)
    if (!args)
       return NULL;
    cJSON_AddNumberToObject(args, "limit", limit);
-   cJSON *response = aimee_module_command_call(
-       AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND, "directive_briefing", args);
+   cJSON *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "directive-briefing");
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      cJSON_Delete(response);
+      response = NULL;
+   }
    cJSON_Delete(args);
    const char *block =
        response ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block")) : NULL;

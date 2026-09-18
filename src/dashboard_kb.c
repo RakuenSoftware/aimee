@@ -1,6 +1,5 @@
 #include "json_fluent.h"
 #include "module_commands.h"
-#include "aimee/memory/module_api.h"
 /* dashboard_kb.c: dashboard JSON helpers that touch only DB2 + audit.log.
  *
  * These are the dashboard endpoints the kb sidecar's request handlers
@@ -21,7 +20,6 @@
 #include "modules/db2/c/decision_log.h"
 #include "modules/db2/c/memory_conflicts.h"
 #include "modules/db2/c/memory_query.h"
-#include <aimee/memory/module_api.h>
 #include "dashboard.h"
 #include "lifecycle.h"
 #include "headers/memory.h"
@@ -158,8 +156,14 @@ static int dashboard_log_row_compare_desc(const void *lhs, const void *rhs)
 char *api_memory_stats(void)
 {
    cJSON *req = cJSON_CreateObject();
-   cJSON *resp = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "stats_dashboard", req);
+   cJSON *resp = NULL;
+   cJSON_AddStringToObject(req, "operation", "stats-dashboard");
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", req, &resp);
+   if (rc <= 0 || !cJSON_IsObject(resp) || strcmp(jo_cstr(resp, "status"), "ok") != 0)
+   {
+      cJSON_Delete(resp);
+      resp = NULL;
+   }
    cJSON_Delete(req);
    cJSON *data = resp ? cJSON_GetObjectItemCaseSensitive(resp, "dashboard") : NULL;
    char *json = data ? cJSON_PrintUnformatted(data) : NULL;
@@ -237,8 +241,14 @@ char *api_dashboard_reminders(void)
    cJSON *args = cJSON_CreateObject();
    if (!args)
       return NULL;
-   cJSON *response = aimee_module_command_call(
-       AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND, "prospective_dashboard", args);
+   cJSON *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "prospective-dashboard");
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      cJSON_Delete(response);
+      response = NULL;
+   }
    cJSON_Delete(args);
    const cJSON *dashboard =
        response ? cJSON_GetObjectItemCaseSensitive(response, "dashboard") : NULL;
@@ -270,8 +280,14 @@ char *api_dashboard_directives(void)
    cJSON *args = cJSON_CreateObject();
    if (!args)
       return NULL;
-   cJSON *response = aimee_module_command_call(
-       AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND, "directive_dashboard", args);
+   cJSON *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "directive-dashboard");
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      cJSON_Delete(response);
+      response = NULL;
+   }
    cJSON_Delete(args);
    const cJSON *dashboard =
        response ? cJSON_GetObjectItemCaseSensitive(response, "dashboard") : NULL;

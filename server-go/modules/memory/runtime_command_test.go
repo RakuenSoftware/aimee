@@ -77,3 +77,23 @@ func TestRuntimeConfidenceBothPlacements(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeViewsAndPrivateCommandsRejectWrongPlacementAndPeer(t *testing.T) {
+	for _, operation := range []string{"user-store", "user-get", "user-list", "user-search", "user-delete", "user-supersede", "user-stats", "prospective-dashboard", "prospective-briefing", "directive-dashboard", "directive-briefing", "stats-dashboard"} {
+		placement := PlacementServer
+		if len(operation) >= 5 && operation[:5] == "user-" {
+			placement = PlacementKB
+		}
+		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(fmt.Sprintf(`{"operation":%q}`, operation)))
+		handler := NewHandler(nil, WithDataStore(placement, nil))
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+			t.Fatal(operation, status)
+		}
+		for _, p := range []Placement{PlacementServer, PlacementKB} {
+			handler = NewHandler(nil, WithDataStore(p, nil))
+			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+				t.Fatal(operation, p, status)
+			}
+		}
+	}
+}

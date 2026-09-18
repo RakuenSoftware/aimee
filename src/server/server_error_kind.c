@@ -80,12 +80,23 @@ cJSON *server_error_kind_json(const char *kind, const char *message, const char 
 
 /* Modules return the complete public envelope. The host only supplies its
  * existing HTTP error classification, which belongs to the server transport. */
-cJSON *server_invoke_module_command(uint32_t event_kind, uint32_t stage_id, const char *verb,
-                                    const cJSON *args, const char *unavailable_message)
+cJSON *server_invoke_module_operation(const char *method, const char *operation, const cJSON *args,
+                                      const char *unavailable_message)
 {
-   cJSON *reply = aimee_module_command_call(event_kind, stage_id, verb, args);
+   cJSON *request = args ? cJSON_Duplicate(args, 1) : cJSON_CreateObject();
+   if (!cJSON_IsObject(request))
+   {
+      cJSON_Delete(request);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, unavailable_message, NULL);
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(request, "operation");
+   cJSON *reply = NULL;
+   int rc = -1;
+   if (cJSON_AddStringToObject(request, "operation", operation))
+      rc = aimee_module_commands_dispatch_internal(method, request, &reply);
+   cJSON_Delete(request);
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
-   if (!cJSON_IsObject(reply) || !status ||
+   if (rc <= 0 || !cJSON_IsObject(reply) || !status ||
        (strcmp(status, "ok") != 0 && strcmp(status, "error") != 0))
    {
       cJSON_Delete(reply);

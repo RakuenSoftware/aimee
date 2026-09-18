@@ -15,6 +15,26 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	operation := args.stringOr("operation", "")
+	switch operation {
+	case "user-store", "user-get", "user-list", "user-search", "user-delete", "user-supersede", "user-stats":
+		return handleUserCommand(options, invocation, operation[len("user-"):], args)
+	case "prospective-dashboard", "prospective-briefing", "directive-dashboard", "directive-briefing", "stats-dashboard":
+		if options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		switch operation {
+		case "prospective-dashboard":
+			return handleProspectiveCommand(options, invocation, "prospective_dashboard", args)
+		case "prospective-briefing":
+			return handleProspectiveCommand(options, invocation, "prospective_briefing", args)
+		case "directive-dashboard":
+			return handleDirectiveCommand(options, invocation, "directive_dashboard", args)
+		case "directive-briefing":
+			return handleDirectiveCommand(options, invocation, "directive_briefing", args)
+		default:
+			return handleDomainCommand(options, invocation, "stats_dashboard", args)
+		}
+	}
 	if operation == "learning-apply" {
 		return handleLearningMutation(options, invocation, args)
 	}

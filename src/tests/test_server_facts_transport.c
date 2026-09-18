@@ -32,6 +32,44 @@ void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, c
    assert(strcmp(kind, "works_for") == 0 && confidence == 0 && session_id == NULL);
    audited = ok;
 }
+extern cJSON *server_invoke_module_operation(const char *method, const char *operation,
+                                             const cJSON *args, const char *unavailable_message);
+static int internal_result = 1;
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+{
+   assert(strcmp(method, "memory.runtime") == 0);
+   assert(strcmp(jo_cstr(args, "operation"), "user-get") == 0);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "id")) == 42);
+   *result = reply ? cJSON_Parse(reply) : NULL;
+   return internal_result;
+}
+static void test_named_module_envelope(void)
+{
+   cJSON *args = cJSON_Parse("{\"id\":42,\"operation\":\"delete\"}");
+   const char *responses[] = {NULL, "{}", "[]", "{\"status\":17}", "{\"status\":\"unknown\"}"};
+   for (size_t i = 0; i < sizeof(responses) / sizeof(responses[0]); i++)
+   {
+      reply = responses[i];
+      cJSON *r = server_invoke_module_operation("memory.runtime", "user-get", args, "unavailable");
+      assert(strcmp(jo_cstr(r, "kind"), "unavailable") == 0);
+      assert(jo_int(r, "http_status", 0) == 503);
+      cJSON_Delete(r);
+   }
+   reply = "{\"status\":\"error\",\"kind\":\"conflict\",\"reason\":\"retired\"}";
+   cJSON *r = server_invoke_module_operation("memory.runtime", "user-get", args, "unavailable");
+   assert(jo_int(r, "http_status", 0) == 409 && strcmp(jo_cstr(r, "reason"), "retired") == 0);
+   cJSON_Delete(r);
+   reply = "{\"status\":\"ok\",\"memory\":{\"id\":42}}";
+   r = server_invoke_module_operation("memory.runtime", "user-get", args, "unavailable");
+   assert(jo_int(cJSON_GetObjectItemCaseSensitive(r, "memory"), "id", 0) == 42);
+   assert(strcmp(jo_cstr(args, "operation"), "delete") == 0); /* Caller owns its arguments. */
+   cJSON_Delete(r);
+   internal_result = 0;
+   r = server_invoke_module_operation("memory.runtime", "user-get", args, "unavailable");
+   assert(strcmp(jo_cstr(r, "kind"), "unavailable") == 0);
+   cJSON_Delete(r);
+   cJSON_Delete(args);
+}
 static int classify(const char *kind, uint32_t *status)
 {
    *status = strcmp(kind, "conflict") == 0           ? 409
@@ -42,6 +80,7 @@ static int classify(const char *kind, uint32_t *status)
 int main(void)
 {
    server_error_kind_register_http_status_provider(classify);
+   test_named_module_envelope();
    cJSON *args = cJSON_Parse("{\"source\":\"user\",\"relation\":\"works_for\",\"target\":\"Private "
                              "Corp\",\"authority\":\"user\"}");
    reply = "{\"status\":\"ok\",\"retracted\":1,\"authority\":\"user\"}";

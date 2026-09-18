@@ -3,7 +3,6 @@
 #include "aimee.h"
 #include "server.h"
 #include "headers/module_commands.h"
-#include <aimee/memory/module_api.h>
 #include "module_stage_adapters.h"
 #include "kb_client.h"
 #include "json_fluent.h"
@@ -192,9 +191,8 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return send_and_free(conn, memory_bad_store());
    if (selection)
       return handle_kb_memory_search(ctx, conn, req);
-   return send_and_free(conn, server_invoke_module_command(AIMEE_MEMORY_EVENT_COMMAND,
-                                                           AIMEE_MEMORY_STAGE_COMMAND, "search",
-                                                           req, "user memory module unavailable"));
+   return send_and_free(conn, server_invoke_module_operation("memory.runtime", "user-search", req,
+                                                             "user memory module unavailable"));
 }
 
 /* THE command, in the shape the core command table can route.
@@ -256,8 +254,8 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
    if (selection)
       return memory_with_store(kb_memory_store_command(req, authority), "kb");
 
-   return server_invoke_module_command(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                       "store", req, "user memory module unavailable");
+   return server_invoke_module_operation("memory.runtime", "user-store", req,
+                                         "user memory module unavailable");
 }
 
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -299,8 +297,8 @@ cJSON *memory_list_command(const cJSON *req)
       return memory_bad_store();
    if (selection)
       return memory_with_store(kb_memory_list_command(req), "kb");
-   return server_invoke_module_command(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                       "list", req, "user memory module unavailable");
+   return server_invoke_module_operation("memory.runtime", "user-list", req,
+                                         "user memory module unavailable");
 }
 
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -317,9 +315,8 @@ int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (selection < 0)
       return send_and_free(conn, memory_bad_store());
    if (!selection)
-      return send_and_free(
-          conn, server_invoke_module_command(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                             "stats", req, "user memory module unavailable"));
+      return send_and_free(conn, server_invoke_module_operation("memory.runtime", "user-stats", req,
+                                                                "user memory module unavailable"));
    char *json = kb_client_memory_stats_json();
    if (!json)
       return server_send_error(conn,
@@ -368,9 +365,9 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (selection < 0)
       return send_and_free(conn, memory_bad_store());
    if (!selection)
-      return send_and_free(
-          conn, server_invoke_module_command(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                             "supersede", req, "user memory module unavailable"));
+      return send_and_free(conn,
+                           server_invoke_module_operation("memory.runtime", "user-supersede", req,
+                                                          "user memory module unavailable"));
 
    int64_t old_id = 0;
    cJSON *jnew = cJSON_GetObjectItemCaseSensitive(req, "new_content");
@@ -451,8 +448,8 @@ cJSON *memory_delete_command(cJSON *req, const char *account)
       return memory_bad_store();
    if (selection)
       return memory_with_store(kb_memory_delete_command(req, account), "kb");
-   return server_invoke_module_command(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                       "delete", req, "user memory module unavailable");
+   return server_invoke_module_operation("memory.runtime", "user-delete", req,
+                                         "user memory module unavailable");
 }
 
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -500,8 +497,8 @@ cJSON *memory_get_command(cJSON *req)
       return memory_bad_store();
    if (selection)
       return memory_with_store(kb_memory_get_command(req), "kb");
-   return server_invoke_module_command(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                       "get", req, "user memory module unavailable");
+   return server_invoke_module_operation("memory.runtime", "user-get", req,
+                                         "user memory module unavailable");
 }
 
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

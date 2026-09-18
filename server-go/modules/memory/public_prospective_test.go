@@ -53,7 +53,8 @@ func TestProspectivePublicPostgresLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB})))
+	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}))
+	client := clientForHandler(t, handler)
 	list := runPublicCommand(t, client, "prospective_list", `{}`)
 	if rows, ok := list["prospectives"].([]any); !ok || len(rows) != 0 {
 		t.Fatalf("empty list=%v", list)
@@ -75,7 +76,7 @@ func TestProspectivePublicPostgresLifecycle(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"id": row["id"]})
 		return string(body), row
 	}
-	if result := runPublicCommand(t, client, "prospective_briefing", `{}`); result["block"] != "" {
+	if result := runHostRuntime(t, handler, `{"operation":"prospective-briefing"}`); result["block"] != "" {
 		t.Fatal(result)
 	}
 	once, onceRow := create("once")
@@ -84,7 +85,7 @@ func TestProspectivePublicPostgresLifecycle(t *testing.T) {
 	if rows, ok := matches["matches"].([]any); !ok || len(rows) != 1 {
 		t.Fatal(matches)
 	}
-	briefing := runPublicCommand(t, client, "prospective_briefing", `{"limit":1}`)
+	briefing := runHostRuntime(t, handler, `{"operation":"prospective-briefing","limit":1}`)
 	if briefing["block"] != "# Open Commitments\n- when `release` → review deployment\n\n" {
 		t.Fatal(briefing)
 	}
@@ -130,7 +131,7 @@ func TestProspectivePublicPostgresLifecycle(t *testing.T) {
 	if result := runPublicCommand(t, client, "prospective_sweep_expired", `{}`); result["expired"] != float64(1) {
 		t.Fatal(result)
 	}
-	dashboard := runPublicCommand(t, client, "prospective_dashboard", `{}`)["dashboard"].(map[string]any)
+	dashboard := runHostRuntime(t, handler, `{"operation":"prospective-dashboard"}`)["dashboard"].(map[string]any)
 	counts := dashboard["counts"].(map[string]any)
 	if counts["armed"] != float64(301) || counts["completed"] != float64(2) || counts["expired"] != float64(1) || counts["total"] != float64(304) {
 		t.Fatal(dashboard)

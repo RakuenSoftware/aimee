@@ -427,6 +427,14 @@ unused fixed-wire extraction, scanning and confidence codecs are deleted from
 the native module header; only remaining stage identifiers and a relation bound
 remain. Go boundary tests, both live placements and all 77 lint checks pass.
 
+Server private-memory commands, dashboards and session briefings now resolve
+through named host command discovery instead of fixed memory stage IDs. Go
+rejects the wrong placement and non-host peers. The generic Server envelope
+adapter retains HTTP classification and overrides untrusted operation fields
+without mutating caller arguments. Native consumer tests preserve long briefing
+text and reject malformed/error responses; PostgreSQL tests exercise the named
+briefing/dashboard routes. Both live placements and the private scope tests pass.
+
 The current inventory is four C sources and six headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

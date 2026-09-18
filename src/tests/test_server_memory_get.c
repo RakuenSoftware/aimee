@@ -61,12 +61,12 @@ static double expected_confidence;
 
 /* Go validates and shapes these commands. This native test only verifies the
  * explicit user/KB routing boundary and propagation of complete module replies. */
-cJSON *server_invoke_module_command(uint32_t event_kind, uint32_t stage_id, const char *operation,
-                                    const cJSON *request, const char *unavailable_message)
+cJSON *server_invoke_module_operation(const char *method, const char *operation,
+                                      const cJSON *request, const char *unavailable_message)
 {
-   assert(event_kind == 5896 && stage_id == 8);
+   assert(strcmp(method, "memory.runtime") == 0);
    assert(strcmp(unavailable_message, "user memory module unavailable") == 0);
-   if (strcmp(operation, "store") == 0)
+   if (strcmp(operation, "user-store") == 0)
    {
       store_calls++;
       cJSON *confidence = cJSON_GetObjectItemCaseSensitive(request, "confidence");
@@ -74,7 +74,7 @@ cJSON *server_invoke_module_command(uint32_t event_kind, uint32_t stage_id, cons
       return cJSON_Parse("{\"status\":\"ok\",\"store\":\"user\",\"id\":42}");
    }
    user_calls++;
-   assert(strcmp(operation, "get") == 0);
+   assert(strcmp(operation, "user-get") == 0);
    assert(cJSON_GetObjectItemCaseSensitive(request, "id")->valuedouble == 42);
    if (user_result < 0)
       return server_error_kind_json(SERVER_ERR_UNAVAILABLE, unavailable_message, NULL);

@@ -653,6 +653,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-learning-memory-transport \
                $(TESTPREFIX)/unit-test-memory-reference-transport \
                $(TESTPREFIX)/unit-test-server-memory-get \
+               $(TESTPREFIX)/unit-test-memory-view-transport \
                $(TESTPREFIX)/unit-test-cmd-memory-data \
                $(TESTPREFIX)/unit-test-cmd-memory-cognify \
                $(TESTPREFIX)/unit-test-kb-memory-facts-connection \
@@ -7918,4 +7919,7 @@ $(TESTPREFIX)/unit-test-kb-memory-facts-connection: $(OBJDIR)/tests/test_kb_memo
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-server-facts-transport: $(OBJDIR)/tests/test_server_facts_transport.o $(OBJDIR)/server/server_facts.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-memory-view-transport: $(OBJDIR)/tests/test_memory_view_transport.o $(OBJDIR)/session_briefing.o $(OBJDIR)/dashboard_kb.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

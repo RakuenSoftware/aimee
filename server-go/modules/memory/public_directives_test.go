@@ -41,7 +41,8 @@ func TestDirectivePublicPostgresLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
-	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, s)))
+	handler := NewHandler(nil, WithDataStore(PlacementKB, s))
+	client := clientForHandler(t, handler)
 	for _, verb := range []string{"directive_list", "directive_briefing", "directive_dashboard"} {
 		if result := runPublicCommand(t, client, verb, `{}`); result["status"] != "ok" {
 			t.Fatal(result)
@@ -81,7 +82,7 @@ func TestDirectivePublicPostgresLifecycle(t *testing.T) {
 	if high["priority"] != float64(100) {
 		t.Fatal(high)
 	}
-	block := runPublicCommand(t, client, "directive_briefing", `{"limit":1}`)["block"].(string)
+	block := runHostRuntime(t, handler, `{"operation":"directive-briefing","limit":1}`)["block"].(string)
 	if block != "# Open Questions\n- [p100 · user_follow_up] Urgent?\n\n" {
 		t.Fatal(block)
 	}
@@ -107,12 +108,12 @@ func TestDirectivePublicPostgresLifecycle(t *testing.T) {
 	if result := runPublicCommand(t, client, "directive_sweep_expired", `{}`); result["expired"] != float64(1) {
 		t.Fatal(result)
 	}
-	dashboard := runPublicCommand(t, client, "directive_dashboard", `{}`)["dashboard"].(map[string]any)
+	dashboard := runHostRuntime(t, handler, `{"operation":"directive-dashboard"}`)["dashboard"].(map[string]any)
 	counts := dashboard["counts"].(map[string]any)
 	if counts["open"] != float64(1) || counts["total"] != float64(4) || counts["suppressed"] != float64(1) || counts["resolved"] != float64(1) || counts["expired"] != float64(1) {
 		t.Fatal(dashboard)
 	}
-	block = runPublicCommand(t, client, "directive_briefing", `{}`)["block"].(string)
+	block = runHostRuntime(t, handler, `{"operation":"directive-briefing"}`)["block"].(string)
 	if strings.Contains(block, "Urgent?") || !strings.Contains(block, "Review design?") {
 		t.Fatal(block)
 	}
