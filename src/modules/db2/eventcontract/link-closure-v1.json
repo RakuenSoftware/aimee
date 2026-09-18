@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "f5f92524ae81a4c4e4b0b03504b24e08433f13f7",
-  "source_fingerprint": "c44d42a2458c3a10a1c7d388da81085388d8106fd768cfec456dc16f3100829c",
+  "source_revision": "e007dd7cab57c0ea08da05ef8f0f183655638447",
+  "source_fingerprint": "9b39357c97e4bad56b5dfbbe0132b5983984979523909be5bd5145049d1740b1",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -1916,7 +1916,6 @@
       "symbol": "atoi",
       "references": [
         "src/modules/db2/c/db_postgres.c",
-        "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/typed_facts.c"
       ],
       "disposition": "system-link",
@@ -1966,16 +1965,7 @@
     {
       "symbol": "db2_memory_scope_bind_current",
       "references": [
-        "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/typed_facts.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
-    },
-    {
-      "symbol": "db2_memory_scope_context_get",
-      "references": [
-        "src/modules/db2/c/pgvec_transport.c"
       ],
       "disposition": "injected-module-contract",
       "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
@@ -2126,8 +2116,7 @@
       "references": [
         "src/modules/db2/c/db2_hardening.c",
         "src/modules/db2/c/db2_init.c",
-        "src/modules/db2/c/db_postgres.c",
-        "src/modules/db2/c/pgvec_transport.c"
+        "src/modules/db2/c/db_postgres.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3041,15 +3030,15 @@
   "summary": {
     "translation_units": 120,
     "descriptor_support_units": 19,
-    "unresolved_symbols": 143,
+    "unresolved_symbols": 142,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 2,
+      "injected-module-contract": 1,
       "portable-core-promotion": 1,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 140
     }
   },
-  "fingerprint": "757a9a66450d488030326e6e6dad3952f6640afeafb26f1061a6e29f02d7bcaa"
+  "fingerprint": "b8948f5d0b1bc90be5c9a07ed626d794d127206525d9c0896e6d8d06af7066d7"
 }

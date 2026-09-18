@@ -1446,7 +1446,7 @@ TEST_CORE_OBJS_PG = $(filter-out $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_
                     $(OBJDIR)/db2/db_postgres.o $(OBJDIR)/db2/entity_edges.o
 
 $(TESTPREFIX)/unit-test-pgvec: $(OBJDIR)/tests/test_pgvec.o \
-                    $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/modules/memory/memory_scope_connection.o $(OBJDIR)/db2/kb_vectors.o \
+                    $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/kb_vectors.o \
                     $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_kb_service.o \
                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
                     $(TEST_CORE_OBJS)

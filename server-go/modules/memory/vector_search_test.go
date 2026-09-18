@@ -74,6 +74,7 @@ CREATE TEMP TABLE memory_embeddings(point_id bigint PRIMARY KEY,embedding vector
 				args map[string]any
 				want []float64
 			}{
+				{"no-context", map[string]any{}, []float64{1}},
 				{"visible", map[string]any{"workspace": "team", "project": "app"}, []float64{1, 2, 4}},
 				{"exact-project", map[string]any{"workspace": "team", "project": "app", "scope_type": "project", "scope_value": "app"}, []float64{2}},
 				{"exact-global", map[string]any{"project": "app", "scope_type": "global", "scope_value": "_global"}, []float64{1}},
@@ -101,6 +102,23 @@ CREATE TEMP TABLE memory_embeddings(point_id bigint PRIMARY KEY,embedding vector
 						t.Fatal(status)
 					}
 				})
+			}
+			// A healthy empty search and an unavailable vector table must remain
+			// distinguishable at the owner boundary. The retired C smoke test
+			// accepted either zero results or failure without proving this.
+			raw, err := json.Marshal(map[string]any{"operation": "vector-search", "record_type": "absent-record-type", "vector": query})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := runHostRuntime(t, handler, string(raw))
+			if hits, ok := result["hits"].([]any); !ok || len(hits) != 0 {
+				t.Fatal("healthy empty search", result)
+			}
+			if _, err := tx.Exec(ctx, `DROP TABLE memory_embeddings`); err != nil {
+				t.Fatal(err)
+			}
+			if _, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "runtime", string(raw)); status != bus.ModuleStatusInternal {
+				t.Fatalf("unavailable storage became status %d", status)
 			}
 		})
 	}

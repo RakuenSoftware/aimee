@@ -1292,13 +1292,6 @@
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
     },
     {
-      "symbol": "pgvec_memory_search",
-      "signature_sha256": "4f54500f1f9b1b636fc682423c43a42ae0c36da57b7e0c77ac48e51b01d76d72",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
       "symbol": "pgvec_memory_upsert",
       "signature_sha256": "423d68121bcc9365889fd7a85cf5dd6dd1dfb403fab2d7c221315e2ff2632796",
       "disposition": "private-db2",

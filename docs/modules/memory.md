@@ -804,3 +804,13 @@ has no PostgreSQL provider, so it establishes process/wire parity, while the
 separate replay establishes storage behavior. Full isolated replay assets and
 standalone process hardening parity remain unfinished. Strict G0 remains 168;
 this consolidation does not retire the remaining C adapters.
+
+The unused native `pgvec_memory_search` implementation, private declaration and
+SQL scope macros are removed, along with the native pgvector test's memory-scope
+object dependency. The boundary check rejects restoration. Go vector tests now
+distinguish successful empty retrieval from unavailable storage and verify
+no-context visibility at both 1024 and 2560 dimensions. CLI, Server and KB builds
+and the remaining native pgvector suite pass. Strict G0 falls from 168 to 166
+findings without changing its baseline. Native semantic assertion retrieval,
+indexing and vector writes outside the memory directory still need migration;
+the memory-tree inventory remains two C sources (204 lines) and five headers.

@@ -18,7 +18,6 @@
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/lifecycle.h" /* db2_set_embedding_dim */
 #include "../modules/db2/c/pgvec_transport.h"
-#include "../modules/db2/c/pgvec_scope_query.h"
 #include "../modules/db2/c/memory_vectors.h"
 #include "../modules/db2/c/kb_vectors.h"
 
@@ -140,8 +139,8 @@ static void test_search_graceful_on_no_db(void)
    double scores[8];
    int n;
 
-   n = pgvec_memory_search(vec, 4, "memory", NULL, 0, "", "", 5, ids, scores, 8);
-   assert(n <= 0);
+   /* Memory vector success, scope and unavailable-storage behavior are covered
+    * by the Go owner in vector_search_test.go against PostgreSQL. */
 
    n = pgvec_kb_search("test", vec, 4, 5, ids, scores, 8);
    assert(n <= 0);
