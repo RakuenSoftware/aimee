@@ -48,7 +48,7 @@ const (
 	                              tool_name, tool_args, tool_result
 	                         FROM execution_trace
 	                        WHERE id > $1 AND tool_name <> ''
-	                        ORDER BY plan_id, turn, id
+	                        ORDER BY id
 	                        LIMIT $2`
 )
 

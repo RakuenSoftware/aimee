@@ -90,7 +90,6 @@ extern "C"
 #include "stopwords.h"
 #include "tasks.h"
 #include "tool_registry.h"
-#include "trace_mining.h"
 
 #ifdef __cplusplus
 }

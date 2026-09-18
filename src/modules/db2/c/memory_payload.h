@@ -17,8 +17,9 @@ extern "C"
 {
 #endif
 
-   /* Returns 1 if any memories row matches `key` exactly, 0 if not, -1
-    * on error. Cheap exact-match probe used by trace mining etc. */
+   /* Legacy wire-catalog declaration only. No native implementation or
+    * production caller remains; Go memory owns exact-key lookup. Retire this
+    * declaration with the older generated DB2 key_exists wire contract. */
    int db2_memory_key_exists(const char *key);
 
    /* Total row count in the memories table. Returns 0 on error. */

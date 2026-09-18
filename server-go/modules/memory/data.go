@@ -30,6 +30,7 @@ const (
 )
 
 type DataRequest struct {
+	TraceBatch     *traceMiningBatch  `json:"trace_batch,omitempty"`
 	Reflection     *reflectionOptions `json:"reflection,omitempty"`
 	Hops           int                `json:"hops,omitempty"`
 	Relations      []string           `json:"relations"`
@@ -1157,6 +1158,29 @@ set_config('aimee.correlation_id',$9,true)`,
 	}
 
 	switch request.Operation {
+	case "trace-state", "trace-apply":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var result map[string]any
+		if request.Operation == "trace-state" {
+			var id int64
+			id, err = backend.traceCursor(ctx)
+			result = map[string]any{"status": "ok", "last_id": strconv.FormatInt(id, 10)}
+		} else {
+			if !validTraceBatch(request.TraceBatch) {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			request.Scope = scope
+			result, err = backend.applyTraceBatch(ctx, request)
+		}
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+		}
 	case "wiki-bundle":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {

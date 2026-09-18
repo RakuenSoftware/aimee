@@ -471,7 +471,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/stopwords.c
     ${AIMEE_SRC_DIR}/modules/db2/c/tasks.c
     ${AIMEE_SRC_DIR}/modules/db2/c/tool_registry.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/trace_mining.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kind_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_payload.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_runtime_state.c
@@ -1052,7 +1051,6 @@ list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c)
 set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_main.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_domain_bus.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_scope_connection.c
     ${AIMEE_SRC_DIR}/kb/kb_document_inspector.c
     ${AIMEE_SRC_DIR}/kb/kb_obs_bus_adapter.c

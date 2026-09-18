@@ -1,72 +1,41 @@
-/* Legacy host connection exercised against the actual Go pattern detector. */
+/* The remaining native trace connection transports exact IDs and host context.
+ * Go PostgreSQL replay owns pattern/persistence/cursor transaction coverage. */
 #include "aimee.h"
 #include "cJSON.h"
 #include "db1_client/execution_trace.h"
-#include "modules/db2/c/anti_patterns.h"
-#include "support/module_runtime_fixture.h"
+#include "modules/memory/memory_bus_context.h"
+#include "json_fluent.h"
 #include "trace_analysis.h"
 #include <assert.h>
 
-static int load_count = 4, unavailable, fail_write, fail_cursor, exists_result;
-static int writes, records;
-static const char *malformed;
+static int load_count = 2, unavailable, applies, reads;
 static const int64_t last_id = INT64_C(9007199254741507);
-
-int64_t db2_trace_mining_last_id(void)
-{
-   return last_id;
-}
-int db1_execution_trace_list_after_id(int64_t after, db1_execution_trace_mining_row_t *out, int max)
-{
-   assert(after == last_id && max >= 4);
-   for (int i = 0; i < load_count; i++)
-   {
-      out[i].id = last_id + 1 + i;
-      out[i].plan_id = 7;
-      snprintf(out[i].tool_name, sizeof(out[i].tool_name), "%s", i == 3 ? "Search" : "Read");
-      snprintf(out[i].tool_result, sizeof(out[i].tool_result), "%s", i == 3 ? "ok" : "error");
-   }
-   return load_count;
-}
-int db2_trace_mining_record(int64_t id)
-{
-   assert(id == last_id + load_count);
-   records++;
-   return fail_cursor ? -1 : 0;
-}
+static const char *state_receipt = "{\"status\":\"ok\",\"last_id\":\"9007199254741507\"}";
+static const char *apply_receipt =
+    "{\"status\":\"ok\",\"last_id\":\"9007199254741509\",\"emitted\":1}";
 const char *session_id(void)
 {
    return "trace-session";
 }
-int db2_anti_pattern_exists_exact(const char *key)
+void memory_bus_read_context(db2_memory_scope_context_t *context)
 {
-   assert(!strcmp(key, "Retry loop: Read called 3 times with 3 errors"));
-   return exists_result;
+   memset(context, 0, sizeof(*context));
+   context->active = 1;
+   snprintf(context->project, sizeof(context->project), "trace-project");
 }
-int db2_memory_key_exists(const char *key)
+int db1_execution_trace_list_after_id(int64_t after, db1_execution_trace_mining_row_t *out, int max)
 {
-   assert(!strcmp(key, "recovery:Read->Search"));
-   return exists_result;
-}
-int db2_anti_pattern_insert(const char *key, const char *content, const char *source,
-                            const char *source_ref, double confidence, anti_pattern_t *out)
-{
-   assert(!strcmp(key, "Retry loop: Read called 3 times with 3 errors"));
-   assert(!strcmp(content, "Tool 'Read' was called 3 consecutive times with 3 failures. Consider a "
-                           "different approach after 2 failures."));
-   assert(!strcmp(source, "trace_mining") && !source_ref[0] && confidence == .7 && !out);
-   writes++;
-   return fail_write ? -1 : 0;
-}
-int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
-                  double confidence, const char *session, memory_t *out)
-{
-   assert(!strcmp(tier, TIER_L0) && !strcmp(kind, KIND_PROCEDURE));
-   assert(!strcmp(key, "recovery:Read->Search"));
-   assert(!strcmp(content, "When 'Read' fails, try 'Search' as a recovery step."));
-   assert(confidence == .7 && !strcmp(session, "trace-session") && !out);
-   writes++;
-   return fail_write ? -1 : 0;
+   assert(after == last_id && max >= 2);
+   reads++;
+   for (int i = 0; i < load_count; i++)
+   {
+      out[i].id = last_id + i + 1;
+      out[i].plan_id = 7;
+      out[i].turn = i + 1;
+      snprintf(out[i].tool_name, sizeof(out[i].tool_name), "%s", i == 0 ? "Read" : "Search");
+      snprintf(out[i].tool_result, sizeof(out[i].tool_result), "%s", i == 0 ? "error" : "ok");
+   }
+   return load_count;
 }
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **response)
 {
@@ -76,49 +45,62 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
       *response = NULL;
       return -1;
    }
-   if (malformed)
+   if (!strcmp(jo_cstr(args, "operation"), "trace-state"))
    {
-      *response = cJSON_Parse(malformed);
+      *response = cJSON_Parse(state_receipt);
       return 1;
    }
-   return module_runtime_fixture_call(args, response);
+   assert(!strcmp(jo_cstr(args, "operation"), "trace-apply"));
+   assert(!strcmp(jo_cstr(args, "session_id"), "trace-session"));
+   assert(!strcmp(jo_cstr(args, "project"), "trace-project"));
+   const cJSON *batch = cJSON_GetObjectItemCaseSensitive(args, "batch");
+   assert(!strcmp(jo_cstr(batch, "after_id"), "9007199254741507"));
+   const cJSON *rows = cJSON_GetObjectItemCaseSensitive(batch, "rows");
+   assert(cJSON_GetArraySize(rows) == 2);
+   for (int i = 0; i < 2; i++)
+   {
+      const cJSON *row = cJSON_GetArrayItem(rows, i);
+      assert(!strcmp(jo_cstr(row, "id"), i == 0 ? "9007199254741508" : "9007199254741509"));
+      assert(cJSON_GetObjectItemCaseSensitive(row, "turn")->valueint == i + 1);
+      assert(!strcmp(jo_cstr(row, "tool_result"), i == 0 ? "error" : "ok"));
+   }
+   applies++;
+   *response = cJSON_Parse(apply_receipt);
+   return 1;
 }
 int main(void)
 {
-   assert(trace_mine() == 2 && writes == 2 && records == 1);
-   writes = records = 0;
-   exists_result = 1;
-   assert(trace_mine() == 0 && writes == 0 && records == 1);
-   exists_result = -1;
-   records = 0;
-   assert(trace_mine() == -1 && writes == 0 && records == 0);
-   exists_result = 0;
-   fail_write = 1;
-   assert(trace_mine() == -1 && writes == 1 && records == 0);
-   fail_write = 0;
-   writes = 0;
-   fail_cursor = 1;
-   assert(trace_mine() == -1 && writes == 2 && records == 1);
-   fail_cursor = 0;
-   writes = records = 0;
+   assert(trace_mine() == 1 && applies == 1 && reads == 1);
    unavailable = 1;
-   assert(trace_mine() == -1 && writes == 0 && records == 0);
+   assert(trace_mine() == -1 && applies == 1 && reads == 1);
    unavailable = 0;
-   const char *bad[] = {"{}", "{\"status\":\"error\"}", "{\"status\":\"ok\",\"patterns\":{}}",
-                        "{\"status\":\"ok\",\"patterns\":[{\"type\":\"procedure\",\"key\":\"k\","
-                        "\"content\":\"c\",\"confidence\":0.7},{\"type\":\"bogus\"}]}",
-                        "{\"status\":\"ok\",\"patterns\":[{\"type\":\"procedure\",\"key\":\"k\","
-                        "\"content\":\"c\",\"confidence\":2}]}"};
-   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+   const char *bad_state[] = {"{}",
+                              "{\"status\":\"error\"}",
+                              "{\"status\":\"ok\",\"last_id\":9007199254741507}",
+                              "{\"status\":\"ok\",\"last_id\":\"-1\"}",
+                              "{\"status\":\"ok\",\"last_id\":\"01\"}",
+                              "{\"status\":\"ok\",\"last_id\":\"9223372036854775808\"}"};
+   for (size_t i = 0; i < sizeof(bad_state) / sizeof(bad_state[0]); i++)
    {
-      malformed = bad[i];
-      assert(trace_mine() == -1 && writes == 0 && records == 0);
+      state_receipt = bad_state[i];
+      assert(trace_mine() == -1 && applies == 1 && reads == 1);
    }
-   malformed = NULL;
+   state_receipt = "{\"status\":\"ok\",\"last_id\":\"9007199254741507\"}";
+   const char *bad_apply[] = {
+       "{}", "{\"status\":\"error\"}",
+       "{\"status\":\"ok\",\"last_id\":\"9007199254741509\",\"emitted\":1.5}",
+       "{\"status\":\"ok\",\"last_id\":\"9007199254741509\",\"emitted\":-1}",
+       "{\"status\":\"ok\",\"last_id\":\"9007199254741508\",\"emitted\":1}"};
+   for (size_t i = 0; i < sizeof(bad_apply) / sizeof(bad_apply[0]); i++)
+   {
+      apply_receipt = bad_apply[i];
+      assert(trace_mine() == -1);
+   }
+   int before = applies;
    load_count = -1;
-   assert(trace_mine() == -1 && writes == 0 && records == 0);
+   assert(trace_mine() == -1 && applies == before);
    load_count = 0;
-   assert(trace_mine() == 0 && writes == 0 && records == 0);
-   puts("trace transport: real Go analysis, write failures and cursor acknowledgement passed");
+   assert(trace_mine() == 0 && applies == before);
+   puts("trace connection: exact IDs, context and malformed/error responses passed");
    return 0;
 }

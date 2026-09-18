@@ -3136,8 +3136,7 @@
     },
     {
       "consumers": [
-        "src/tests/test_artifacts.c",
-        "src/trace_analysis.c"
+        "src/tests/test_artifacts.c"
       ],
       "locations": [
         {
@@ -3147,7 +3146,7 @@
       ],
       "signature": "int db2_anti_pattern_exists_exact ( const char * pattern )",
       "signature_sha256": "fad44e52e47b020c27f1c396d8a55877ca48ea3cdf46ecee761df01fb766c452",
-      "status": "audit-pending",
+      "status": "private-test-only",
       "symbol": "db2_anti_pattern_exists_exact"
     },
     {
@@ -3156,8 +3155,7 @@
         "src/modules/learning/learning_evidence.c",
         "src/tests/test_context_assembly.c",
         "src/tests/test_guardrails.c",
-        "src/tests/test_memory_advanced.c",
-        "src/trace_analysis.c"
+        "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
@@ -13525,7 +13523,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_payload.h",
-          "line": 25
+          "line": 26
         }
       ],
       "review": {
@@ -13887,13 +13885,11 @@
       "symbol": "db2_memory_health_set_effectiveness"
     },
     {
-      "consumers": [
-        "src/trace_analysis.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_payload.h",
-          "line": 22
+          "line": 23
         }
       ],
       "review": {
@@ -17548,36 +17544,6 @@
     },
     {
       "consumers": [
-        "src/trace_analysis.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/trace_mining.h",
-          "line": 17
-        }
-      ],
-      "signature": "int64_t db2_trace_mining_last_id ( void )",
-      "signature_sha256": "d2602b8adc4117f228ddd448a6f0184aa65553c1d4c1fe0d2dff30c83e0a0bdf",
-      "status": "audit-pending",
-      "symbol": "db2_trace_mining_last_id"
-    },
-    {
-      "consumers": [
-        "src/trace_analysis.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/trace_mining.h",
-          "line": 21
-        }
-      ],
-      "signature": "int db2_trace_mining_record ( int64_t last_trace_id )",
-      "signature_sha256": "08ee60779fcdd9f60a9a9d54ec3b64d6d1ae1796f7973ff1be64b4a76f7b19d5",
-      "status": "audit-pending",
-      "symbol": "db2_trace_mining_record"
-    },
-    {
-      "consumers": [
         "src/tests/test_typed_facts.c"
       ],
       "locations": [
@@ -20989,15 +20955,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "925266456cf1112bbc7b22afbe9ef87abe04245b4884ce2bd51f831c1f30cd47",
+  "fingerprint": "79a6fda7bd705b4c0515b96b0ea55d3292d10593ac545eae32074c31e5da5d01",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 453,
-    "declarations": 1157,
-    "headers": 133,
+    "audit_pending": 450,
+    "declarations": 1155,
+    "headers": 132,
     "internal_unconsumed": 202,
-    "private_test_only": 309,
+    "private_test_only": 310,
     "reviewed": 193
   }
 }

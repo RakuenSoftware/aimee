@@ -13,7 +13,6 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/memory/memory_data_bus.c",
-    "src/modules/memory/memory_domain_bus.c",
     "src/modules/memory/memory_scope_connection.c"
   ],
   "go_sources": [
@@ -129,7 +128,8 @@
     "server-go/modules/memory/mutation_audit_tx.go",
     "server-go/modules/memory/workflow_observer.go",
     "server-go/modules/memory/wiki.go",
-    "server-go/modules/memory/trace_patterns.go"
+    "server-go/modules/memory/trace_patterns.go",
+    "server-go/modules/memory/trace_store.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -215,7 +215,8 @@
     "server-go/modules/memory/mutation_audit_tx_test.go",
     "server-go/modules/memory/workflow_observer_test.go",
     "server-go/modules/memory/wiki_test.go",
-    "server-go/modules/memory/trace_patterns_test.go"
+    "server-go/modules/memory/trace_patterns_test.go",
+    "server-go/modules/memory/trace_store_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

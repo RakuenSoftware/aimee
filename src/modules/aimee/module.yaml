@@ -116,7 +116,8 @@
     "server-go/modules/aimee/peer/peer_test.go",
     "server-go/modules/aimee/peerwire/cwire_test.go",
     "server-go/modules/aimee/peerwire/wire_test.go",
-    "server-go/modules/aimee/unavailable_test.go"
+    "server-go/modules/aimee/unavailable_test.go",
+    "server-go/modules/aimee/families/trace_pagination_test.go"
   ],
   "docs": [
     "docs/modules/aimee.md"

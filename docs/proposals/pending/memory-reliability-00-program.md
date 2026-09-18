@@ -553,6 +553,22 @@ A source-specific, authenticated Server-to-KB handoff must replace them before
 this can be exposed through shipped surfaces. The new native connection fixture
 raises strict G0 to 170 findings; the immutable baseline remains unchanged.
 
+
+Go now commits legacy trace findings, canonical actor/extraction metadata and
+cursor advancement in one transaction. A transaction lock and expected-cursor
+comparison refuse stale concurrent batches. Packaged-schema replay under the
+restricted role forces a final cursor failure and verifies all findings roll
+back; separate PostgreSQL transactions verify serialization. DB1 trace pages
+now select by ID before LIMIT, with Go restoring plan/turn order for analysis.
+The native DB2 cursor implementation and memory_domain_bus.c are deleted. The
+old generated DB2 key_exists wire contract still retains its catalog declaration
+and remains migration debt, with no native implementation/production caller.
+Schema 16 grants the runtime only SELECT/INSERT on the cursor log and sequence
+access. Memory-tree inventory is two C sources (224 lines), five headers, and
+166 strict G0 findings. The native collector, global single-source cursor,
+source/epoch identity, cross-page continuity and authenticated Server-to-KB
+handoff remain unfinished; no public trace endpoint is introduced.
+
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.
 
 ## Serving sequence

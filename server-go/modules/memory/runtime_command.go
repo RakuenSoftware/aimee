@@ -62,6 +62,14 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	request := DataRequest{IncludeAll: true}
 
 	switch operation {
+	case "trace-state", "trace-apply":
+		if options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		request.Operation, request.SessionID = operation, args.stringOr("session_id", "")
+		if operation == "trace-apply" && (json.Unmarshal(args["batch"], &request.TraceBatch) != nil || !validTraceBatch(request.TraceBatch)) {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
 	case "hybrid-context":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusCapabilityAbsent
@@ -152,6 +160,13 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	commandScope(args, &request)
+	if operation == "trace-state" || operation == "trace-apply" {
+		request.IncludeAll = args.boolean("include_all")
+		request.Project, request.Workspace = args.stringOr("project", ""), args.stringOr("workspace", "")
+		if raw, ok := args["scope"]; ok && json.Unmarshal(raw, &request.Scope) != nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+	}
 	body, _ := json.Marshal(request)
 	encoded, status := handleData(options, invocation, body)
 	if status != bus.ModuleStatusOK {
@@ -162,7 +177,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInternal
 	}
 	switch operation {
-	case "hybrid-context":
+	case "hybrid-context", "trace-state", "trace-apply":
 		return commandResult(response.Payload)
 	case "convention-extract":
 		if response.Count == nil {

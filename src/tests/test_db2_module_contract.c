@@ -279,13 +279,6 @@ static int session_l2_count(const char *source_session)
    return session_l2_count_value;
 }
 
-int db2_memory_key_exists(const char *key)
-{
-   assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
-   key_exists_calls++;
-   return key_exists_value;
-}
-
 static int key_exists(const char *key)
 {
    assert(strcmp(key, "recovery:tool-a->tool-b") == 0);
