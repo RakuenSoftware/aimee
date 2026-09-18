@@ -17,14 +17,12 @@ import (
 
 	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
-	configclient "github.com/JBailes/aimee/server-go/config"
 	database "github.com/JBailes/aimee/server-go/db"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
-	"github.com/JBailes/aimee/server-go/modules/audit"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
@@ -79,12 +77,6 @@ const economizerStorePrincipalRef uint32 = 66
 // the merge that caused it rather than at it, so this yields rather than
 // contests. Declared as aimee-postgres in src/modules/process-contracts.json.
 const storePrincipalRef uint32 = 69
-
-// memoryStorePrincipalRef reaches storage/config and publishes content-free
-// action observations on the same daemon's bus. AIMEE_MODULE_PLACEMENT confines
-// SQL to user_memories (server) or scoped memories (kb); no cross-owner database
-// capability is granted.
-const memoryStorePrincipalRef uint32 = 73
 
 // aimeeDirectoryPrincipalRef is the aimee module's OUTBOUND identity, used only
 // to read the session directory out of aimeecontract. Same reason as the economizer's: a
@@ -258,60 +250,6 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (database.Store, 
 	return db, nil
 }
 
-type memoryResources struct {
-	auditPublisher audit.Publisher
-	database.Store
-	config *configclient.Client
-}
-
-func (r memoryResources) MemoryAuditAction(ctx context.Context, action audit.Action) error {
-	return audit.PublishAction(ctx, r.auditPublisher, action)
-}
-
-func (r memoryResources) MemorySettings() (map[string]any, error) { return r.config.Snapshot() }
-
-func (r memoryResources) EmbeddingEndpoint() (string, error) {
-	values, err := r.config.Snapshot()
-	if err != nil {
-		return "", err
-	}
-	if endpoint, ok := values["embedder_url"].(string); ok && endpoint != "" {
-		return endpoint, nil
-	}
-	if model, ok := values["embedder_model"].(string); ok && model != "" {
-		return "https://aimee-embedder:8762", nil
-	}
-	return os.Getenv("EMBEDDER_URL"), nil
-}
-
-func memoryStoreBackend(ctx context.Context, moduleBusSocket string) (database.Store, error) {
-	if ctx == nil || moduleBusSocket == "" {
-		return nil, errors.New("memory: no module bus to reach postgres")
-	}
-	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, memoryStorePrincipalRef)
-	if err != nil {
-		return nil, err
-	}
-	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
-	if err != nil {
-		busClient.Detach()
-		return nil, err
-	}
-	db, err := database.NewStore(caller)
-	if err != nil {
-		caller.CloseAndWait()
-		busClient.Detach()
-		return nil, err
-	}
-	config, err := configclient.NewClient(caller, 5*time.Second)
-	if err != nil {
-		caller.CloseAndWait()
-		busClient.Detach()
-		return nil, err
-	}
-	return memoryResources{Store: db, config: config, auditPublisher: busClient}, nil
-}
-
 // moduleEgress attaches a second, request-only identity for outbound transport.
 // Serving rights never imply calling rights, so the module's serving principal
 // is deliberately not reused here.
@@ -416,35 +354,18 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: memory.EventCommand, StageID: memory.StageCommand},
 			{EventKind: 4096 + 7*256 + bus.StageDescribeCommands, StageID: bus.StageDescribeCommands},
 		}
-		// moduleConfig() calls this with a nil context to inspect the static
-		// registry in tests. A running module always has a context and must name
-		// its placement explicitly; silently guessing here could put user data in
-		// the KB corpus or expose KB rows through a user service.
-		placement := memory.PlacementServer
-		var data memory.DataStore
-		if ctx != nil {
+		// Static registry inspection has no live resources. Every running
+		// process uses the owner's same placement-aware constructor.
+		if ctx == nil {
+			config.Handler = memory.NewHandler(nil)
+		} else {
 			var err error
-			placement, err = memory.ParsePlacement(os.Getenv("AIMEE_MODULE_PLACEMENT"))
+			config.Handler, err = memory.NewProcessHandler(ctx, moduleBusSocket, os.Getenv("AIMEE_MODULE_PLACEMENT"))
 			if err != nil {
 				log.Printf("memory module unavailable: %v", err)
 				return config, false
 			}
-			db, storeErr := memoryStoreBackend(ctx, moduleBusSocket)
-			if storeErr != nil {
-				log.Printf("memory module unavailable: postgres: %v", storeErr)
-				return config, false
-			}
-			data, err = memory.NewPostgresDataStore(db, placement)
-			if err != nil {
-				log.Printf("memory module unavailable: %v", err)
-				return config, false
-			}
-			log.Printf("memory module: placement=%s storage=postgres", placement)
 		}
-		executor := moduleEgress(ctx, moduleBusSocket, egress.MemoryClientRef)
-		memory.StartPersonalIndex(ctx, data, executor, os.Getenv("EMBEDDER_URL"))
-		memory.StartSharedIndex(ctx, data, executor)
-		config.Handler = memory.NewHandler(executor, memory.WithDataStore(placement, data))
 	case "learning":
 		config.ModuleName = name
 		config.PrincipalRef = 8

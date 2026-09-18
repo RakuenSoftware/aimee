@@ -631,9 +631,18 @@ def go_module_main(module_id: str, principal_ref: int,
         watchdog = "\tif handled, code := handler.ModelServicesBootstrap(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunBootstrapLookup(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunProbeWorker(os.Args); handled { os.Exit(code) }\n"
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     setup = ""
+    process_setup = ""
     if module_id in {"config", "providers"}:
         handler = "moduleHandler"
         setup = """\tmoduleHandler, err := handler.NewDefaultHandler()
+\tif err != nil {
+\t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
+\t\tos.Exit(1)
+\t}
+"""
+    if module_id == "memory":
+        handler = "moduleHandler"
+        process_setup = """\tmoduleHandler, err := handler.NewProcessHandler(ctx, os.Args[1], os.Getenv("AIMEE_MODULE_PLACEMENT"))
 \tif err != nil {
 \t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
 \t\tos.Exit(1)
@@ -682,6 +691,7 @@ func main() {{
 \t}}
 \tctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 \tdefer stop()
+{process_setup}\
 \tconfig := bus.ModuleProcessConfig{{
 \t\tSocketPath: os.Args[1], ModuleName: "{module_id}",
 \t\tPrincipalClass: {PRINCIPAL_CLASS}, PrincipalRef: {principal_ref},
@@ -704,7 +714,7 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
         path.relative_to(ROOT).as_posix()
         for path in (ROOT / "server-go/bus").glob("*.go")
         if not path.name.endswith("_test.go") and
-        (path.name != "concurrent_module_caller.go" or module_id in {"delegates", "roundtable", "providers"})
+        (path.name != "concurrent_module_caller.go" or module_id in {"delegates", "roundtable", "providers", "memory"})
     )
 
 
@@ -718,7 +728,7 @@ GO_SHARED_CONTRACTS = {
     "server-go/internal/retrievalmetrics": {"memory", "benchmarks"},
     "server-go/modules/module-runtime/identity": {"server", "kb"},
     "server-go/modules/module-runtime/supervisor": {"server", "kb"},
-    "server-go/config": {"config", "providers"},
+    "server-go/config": {"config", "providers", "memory"},
     "server-go/modules/egress": {"providers", "memory"},
     "server-go/modules/audit": {"memory"},
     "server-go/delegate": {"delegates", "roundtable"},

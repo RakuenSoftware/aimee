@@ -789,3 +789,18 @@ this change does not claim that the broader legacy native suite is migrated.
 Two C sources (204 lines) and five headers remain in the memory tree. Strict G0
 still reports 168 findings; insertion adapters, scope transport and other native
 clients remain unfinished.
+
+Memory process initialization now belongs to the shared Go owner. Both the
+multicall executable and standalone export call `NewProcessHandler`, which
+requires explicit Server/KB placement, attaches the existing storage/config/audit
+identity, configures governed egress and starts the applicable index workers.
+The standalone export previously served a default handler without a datastore.
+It now includes the concurrent bus caller and configuration client. Missing
+placement or storage attachment fails startup instead of serving that handler.
+Configuration precedence and failure propagation have focused coverage; both
+binaries pass live bus/process tests in both placements, and the memory/module
+race suites pass with restricted-role PostgreSQL replay. The live bus fixture
+has no PostgreSQL provider, so it establishes process/wire parity, while the
+separate replay establishes storage behavior. Full isolated replay assets and
+standalone process hardening parity remain unfinished. Strict G0 remains 168;
+this consolidation does not retire the remaining C adapters.

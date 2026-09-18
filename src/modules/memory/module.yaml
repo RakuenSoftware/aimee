@@ -3,6 +3,8 @@
   "id": "memory",
   "dependencies": [
     "config",
+    "egress",
+    "postgres",
     "ir",
     "module-runtime",
     "audit"
@@ -16,6 +18,7 @@
     "src/modules/memory/memory_scope_connection.c"
   ],
   "go_sources": [
+    "server-go/modules/memory/process.go",
     "server-go/modules/memory/cmd/aimee-memory-bus-probe/main.go",
     "server-go/modules/memory/commands.go",
     "server-go/modules/memory/content_gate.go",
@@ -135,6 +138,7 @@
     "server-go/modules/memory/benchmark_score.go"
   ],
   "go_tests": [
+    "server-go/modules/memory/process_test.go",
     "server-go/modules/memory/commands_test.go",
     "server-go/modules/memory/content_gate_test.go",
     "server-go/modules/memory/data_test.go",
