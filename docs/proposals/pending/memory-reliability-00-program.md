@@ -539,6 +539,20 @@ tree is down to three C sources (287 lines) and five headers. Strict G0 still
 reports 169 repository-wide findings because these adapter retirements do not
 remove the remaining native files and consumers; its baseline is unchanged.
 
+
+Trace retry/recovery/common-sequence detection now belongs to the shared Go
+owner through a host-only runtime operation. It preserves the legacy indicators,
+thresholds, order and wording, counts distinct supporting plans, and avoids the
+old 128-pair scratch limit. Bounded input/output and write screening refuse a
+batch without partial findings. Native trace code is reduced from 329 to 110
+lines of collection/persistence transport; its real-Go fixture checks malformed
+responses, deduplication and reported write/cursor failures. The trace path is
+still an unshipped monolithic connection: native DB1 fixed buffers, plan-sorted
+pagination, the global cursor and non-atomic persistence remain migration debt.
+A source-specific, authenticated Server-to-KB handoff must replace them before
+this can be exposed through shipped surfaces. The new native connection fixture
+raises strict G0 to 170 findings; the immutable baseline remains unchanged.
+
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.
 
 ## Serving sequence

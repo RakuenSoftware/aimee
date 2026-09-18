@@ -10,8 +10,8 @@ a hunch.
 
 It is the runnable reference implementation of the classifier specced in
 docs/proposals/pending/four-part-harness-taxonomy.md. The heuristics mirror the
-signals aimee already computes in src/trace_analysis.c (the retry-loop detector,
-the error-result indicators) so a later in-process port stays faithful.
+signals in server-go/modules/memory/trace_patterns.go (the retry-loop detector
+and error-result indicators).
 
 Input is execution-trace rows — the same shape src/trace_analysis.c mines
 (db1_execution_trace_mining_row_t): one JSON array of
@@ -33,12 +33,9 @@ import json
 import re
 import sys
 
-# Mirror src/trace_analysis.c: RETRY_THRESHOLD consecutive same-tool calls with
-# >=2 errors is a retry loop. Keep these in lockstep with the C constants
-# (src/trace_analysis.c: `#define RETRY_THRESHOLD 3` and the `errors >= 2` in
-# detect_retry_loops()). Like the C, the run is keyed on tool_name only; the
-# trace `direction` field is intentionally NOT a grouping key (detect_retry_loops()
-# ignores it too), so a port off db1_execution_trace_mining_row_t stays faithful.
+# Mirror tracePatterns in server-go/modules/memory/trace_patterns.go: at least
+# three consecutive same-tool calls with two errors. Runs group by plan/tool;
+# direction and arguments do not change the existing detector's grouping.
 RETRY_THRESHOLD = 3
 RETRY_MIN_ERRORS = 2
 # A run with more turns than this and no explicit budget/limit marker reads as a
@@ -59,8 +56,7 @@ PART_BLURB = {
     PART_CONTROL: "control — a budget/limit/timeout/circuit-breaker boundary",
 }
 
-# Error indicators, copied from result_looks_like_error() in src/trace_analysis.c
-# so "is this row a failure" matches what the C miner already flags.
+# Error indicators match traceResultError in the shared Go memory owner.
 ERROR_MARKERS = (
     "error", "Error", "ERROR", "failed", "Failed", "FAILED",
     "No such file", "not found", "Permission denied", "command not found",
@@ -114,7 +110,7 @@ TOOL_FAULT_PATTERNS = _compile_markers(TOOL_FAULT_MARKERS)
 
 def looks_like_error(result):
     # Case-sensitive substring match, kept byte-for-byte identical to
-    # result_looks_like_error() in src/trace_analysis.c (the C miner's own rule).
+    # traceResultError in server-go/modules/memory/trace_patterns.go.
     if not result:
         return False
     return any(m in result for m in ERROR_MARKERS)
