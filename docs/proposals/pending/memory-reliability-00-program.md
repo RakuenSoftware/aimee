@@ -256,6 +256,15 @@ and CLI/MCP provenance consume full JSON strings rather than fixed native buffer
 Native consumer tests cover refusal, redaction, gate outages and long responses;
 Go tests retain matching, expiry and once/repeat lifecycle coverage.
 
+Shared graph recall now uses a Go breadth-first traversal with a total 192-node
+budget, bounded neighbor reads and two-hop depth. It restores direct shared-entity
+bridges, relation/structural/observation weighting, provenance-class weighting and
+UTC utility decay. Code-shaped queries gate code traversal; inactive projections
+and unpromoted semantic facts are excluded. Parent visibility applies to seeds
+and returned memories, and scope priority precedes result limits. Equal graph
+scores preserve text ordering. Legacy graph feedback/diagnostic integration is
+still part of the remaining migration.
+
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

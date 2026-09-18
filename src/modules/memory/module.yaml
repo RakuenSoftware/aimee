@@ -28,6 +28,7 @@
     "server-go/modules/memory/extract.go",
     "server-go/modules/memory/fact_recall.go",
     "server-go/modules/memory/fusion.go",
+    "server-go/modules/memory/graph_score.go",
     "server-go/modules/memory/legacy.go",
     "server-go/modules/memory/memory.go",
     "server-go/modules/memory/maintenance.go",
@@ -142,6 +143,7 @@
     "server-go/modules/memory/derived_units_test.go",
     "server-go/modules/memory/derived_relations_test.go",
     "server-go/modules/memory/coreference_test.go",
+    "server-go/modules/memory/graph_score_test.go",
     "server-go/modules/memory/shared_index_test.go",
     "server-go/modules/memory/negation_test.go"
   ],

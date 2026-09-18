@@ -17733,6 +17733,8 @@ BEGIN
   -- Dependency freshness checks run as the caller. They need identity/version
   -- columns for every input kind, never indexed file contents or outcome bodies.
   GRANT SELECT(id,hash,generation) ON files TO aimee_store_runtime;
+  GRANT SELECT(id,project,state) ON code_projection_generations TO aimee_store_runtime;
+  GRANT SELECT(name,lifecycle_state) ON projects TO aimee_store_runtime;
   GRANT SELECT(outcome_id) ON work_outcomes TO aimee_store_runtime;
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id) ON artifacts TO aimee_store_runtime;

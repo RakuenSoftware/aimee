@@ -12,7 +12,6 @@
 #include "kb_client.h"
 #include "platform_process.h"
 #include "kb.h"
-#include "modules/memory/memory_graph_fusion.h"
 #include <ctype.h>
 #include <sys/stat.h>
 #include <unistd.h>

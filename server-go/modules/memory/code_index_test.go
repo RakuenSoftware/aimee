@@ -162,15 +162,19 @@ func TestKBGraphFusionUsesInstancePolicyAndVisibility(t *testing.T) {
 	_, err := db.Exec(ctx, `CREATE FUNCTION pg_now_text() RETURNS text LANGUAGE sql AS 'SELECT to_char(now(), ''YYYY-MM-DD HH24:MI:SS'')';
 CREATE TABLE memories(id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,content text,
  confidence double precision,lifecycle_state text,activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',updated_at timestamptz DEFAULT now());
-CREATE TABLE memory_entities(memory_id bigint,entity text);
+CREATE TABLE memory_entities(memory_id bigint,entity text,weight double precision DEFAULT 1);
+CREATE TABLE projects(name text,lifecycle_state text);
+CREATE TABLE code_projection_generations(id bigint,project text,state text);
 CREATE TABLE entity_edges(id bigint,source text,target text,confidence_class text,utility_score double precision,
+ relation text DEFAULT 'related_to',weight int DEFAULT 1,structural_weight int DEFAULT 0,utility_touched_at text DEFAULT '',
+ edge_class text DEFAULT 'semantic',edge_origin text DEFAULT 'extracted',projection_generation_id bigint,
  suppressed int DEFAULT 0,superseded_at text DEFAULT '',invalidated_at text DEFAULT '',lifecycle_state text DEFAULT 'persistent',valid_from text DEFAULT '',valid_until text DEFAULT '');
 INSERT INTO memories(id,scope_type,scope_value,tier,kind,key,content,confidence,lifecycle_state) VALUES
 (1,'project','alpha','L2','fact','quasar','entry note',1,'active'),
 (2,'project','alpha','L2','fact','helper','indirect note',1,'active'),
 (3,'project','beta','L2','fact','private','other project',1,'active'),
 (4,'project','alpha','L2','fact','retired','old note',1,'retired');
-INSERT INTO memory_entities VALUES(1,'entry'),(2,'helper'),(3,'helper'),(4,'helper');
+INSERT INTO memory_entities(memory_id,entity) VALUES(1,'entry'),(2,'helper'),(3,'helper'),(4,'helper');
 INSERT INTO entity_edges(id,source,target,confidence_class,utility_score) VALUES(1,'entry','helper','A',0);`)
 	if err != nil {
 		t.Fatal(err)

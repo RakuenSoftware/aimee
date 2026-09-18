@@ -247,6 +247,7 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 	exerciseCoreferenceReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseNegationReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseSharedIndexReplay(t, ctx, tx, backend.(*postgresDataStore))
+	exerciseGraphFusionReplay(t, ctx, tx, backend.(*postgresDataStore))
 
 	// Calls use nested transactions in this fixture; releasing a savepoint
 	// retains SET LOCAL until the enclosing transaction ends. Production store
