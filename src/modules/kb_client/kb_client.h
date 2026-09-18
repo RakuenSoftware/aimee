@@ -514,7 +514,7 @@ int kb_client_memory_list(const char *tier, const char *kind, int limit, memory_
 int kb_client_memory_load_eval_corpus(memory_t *out, int max, char *label_out, size_t label_len);
 
 /* Top L2 facts via aimee-kb.  Returns row count.  Mirrors
- * db2_memory_top_l2_facts(). */
+ * the Go memory.top_l2_facts command. */
 int kb_client_memory_top_l2_facts(memory_t *out, int max);
 
 /* Render the "Open Commitments" / "Unresolved Questions" briefing
@@ -827,7 +827,7 @@ int kb_client_memory_set_artifact(int64_t memory_id, const char *artifact_type,
  * session-start prompt builder to populate # Project / # Workspace /
  * # Global Context sections.  Each returns the number of rows
  * written into |out| (0 if kb is unreachable).  Mirrors
- * db2_memory_list_session_scope_priority{,_like}(). */
+ * the Go memory.list_session_scope_priority commands. */
 int kb_client_memory_list_session_scope_priority(memory_t *out, int max);
 int kb_client_memory_list_session_scope_priority_like(const char *pattern, memory_t *out, int max);
 

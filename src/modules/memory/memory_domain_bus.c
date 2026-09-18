@@ -51,46 +51,10 @@ static cJSON *domain_request(const char *operation)
    return request;
 }
 
-static int domain_copy(char *out, size_t cap, const cJSON *obj, const char *key)
-{
-   const cJSON *value = cJSON_GetObjectItemCaseSensitive(obj, key);
-   if (!out || cap == 0 || !cJSON_IsString(value) || !value->valuestring)
-      return -1;
-   snprintf(out, cap, "%s", value->valuestring);
-   return 0;
-}
-
 static int domain_bool(const cJSON *response, const char *key)
 {
    const cJSON *value = response ? cJSON_GetObjectItemCaseSensitive(response, key) : NULL;
    return cJSON_IsBool(value) && cJSON_IsTrue(value);
-}
-
-static int domain_number(const cJSON *response, const char *key, int *out)
-{
-   const cJSON *value = response ? cJSON_GetObjectItemCaseSensitive(response, key) : NULL;
-   if (!cJSON_IsNumber(value))
-      return -1;
-   if (out)
-      *out = value->valueint;
-   return 0;
-}
-
-static int domain_memory_from_json(const cJSON *obj, memory_t *out)
-{
-   const cJSON *id = cJSON_GetObjectItemCaseSensitive(obj, "id");
-   const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(obj, "confidence");
-   if (!out || !cJSON_IsObject(obj) || !cJSON_IsNumber(id) || !cJSON_IsNumber(confidence))
-      return -1;
-   memset(out, 0, sizeof(*out));
-   out->id = (int64_t)id->valuedouble;
-   out->confidence = confidence->valuedouble;
-   return domain_copy(out->tier, sizeof(out->tier), obj, "tier") ||
-                  domain_copy(out->kind, sizeof(out->kind), obj, "kind") ||
-                  domain_copy(out->key, sizeof(out->key), obj, "key") ||
-                  domain_copy(out->content, sizeof(out->content), obj, "content")
-              ? -1
-              : 0;
 }
 
 static int domain_id_update(const char *operation, int64_t id, const char *key, const char *value)
@@ -108,32 +72,6 @@ static int domain_id_update(const char *operation, int64_t id, const char *key, 
    int ok = domain_bool(response, "updated");
    cJSON_Delete(response);
    return ok ? 0 : -1;
-}
-
-int memory_touch_many(const int64_t *ids, int n)
-{
-   if (!ids || n <= 0 || n > 256)
-      return -1;
-   cJSON *request = domain_request("touch");
-   cJSON *array = request ? cJSON_AddArrayToObject(request, "ids") : NULL;
-   if (!array)
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   for (int i = 0; i < n; ++i)
-      if (ids[i] > 0)
-         cJSON_AddItemToArray(array, cJSON_CreateNumber((double)ids[i]));
-   cJSON *response = domain_call(request);
-   int changed = 0;
-   int rc = domain_number(response, "count", &changed);
-   cJSON_Delete(response);
-   return rc == 0 ? 0 : -1;
-}
-
-int memory_touch(int64_t id)
-{
-   return memory_touch_many(&id, 1);
 }
 
 int memory_reject(int64_t id, const char *reason)
@@ -199,55 +137,6 @@ cJSON *memory_briefing(int limit_tokens)
 cJSON *memory_alerts(const char *since)
 {
    return domain_payload_call("alerts-bundle", NULL, since ? since : "", 0, 0);
-}
-
-static int domain_query_records(const char *mode, const char *pattern, int days, memory_t *out,
-                                int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   cJSON *request = domain_request("query-records");
-   if (!request || !cJSON_AddStringToObject(request, "mode", mode) ||
-       !cJSON_AddStringToObject(request, "pattern", pattern ? pattern : "") ||
-       !cJSON_AddNumberToObject(request, "days", days) ||
-       !cJSON_AddNumberToObject(request, "limit", max))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *rows = response ? cJSON_GetObjectItemCaseSensitive(response, "records") : NULL;
-   if (!cJSON_IsArray(rows))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(rows);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-      if (domain_memory_from_json(cJSON_GetArrayItem(rows, i), &out[i]) != 0)
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-   cJSON_Delete(response);
-   return n;
-}
-
-int db2_memory_top_l2_facts(memory_t *out, int max)
-{
-   return domain_query_records("top-l2", "", 0, out, max);
-}
-
-int db2_memory_list_session_scope_priority(memory_t *out, int max)
-{
-   return domain_query_records("session-priority", "", 0, out, max);
-}
-
-int db2_memory_list_session_scope_priority_like(const char *pattern, memory_t *out, int max)
-{
-   return domain_query_records("session-priority", pattern ? pattern : "", 0, out, max);
 }
 
 int db2_memory_key_exists(const char *key)

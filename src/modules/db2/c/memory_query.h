@@ -403,26 +403,6 @@ extern "C"
    /* Legacy DB2 wire compatibility. Convention extraction is owned by Go. */
    int db2_memory_key_exists_in_tier_pair(const char *key, const char *tier_a, const char *tier_b);
 
-   /* Top-N L2 fact memories ordered by request scope, then use_count and
-    * confidence. Fills |id|, |key|, and |content| (other fields are zeroed);
-    * used by the session-briefing "Key Facts" panel. Returns rows written. */
-   int db2_memory_top_l2_facts(memory_t *out, int max);
-
-   /* L1/L2/L3 memories ordered by kind priority (workflow → decision →
-    * other), then tier priority (L3 → L2 → L1), then use_count DESC.
-    * Fills id/key/content/kind on each row (other fields zeroed). Used
-    * by the session-briefing scope-context panels which apply their
-    * own scope-rank filter on top. Returns rows written. */
-   int db2_memory_list_session_scope_priority(memory_t *out, int max);
-
-   /* Same scoped ordering as db2_memory_list_session_scope_priority but
-    * filtered to memories whose key OR content LIKE |pattern|. The session
-    * briefing uses this as a compatibility fallback and therefore retains
-    * legacy memory_workspaces rows. Guarded by
-    * test_local_first_applies_before_limits_across_memory_surfaces. Returns
-    * rows written. */
-   int db2_memory_list_session_scope_priority_like(const char *pattern, memory_t *out, int max);
-
    /* (tier, kind, count) tuple from a `GROUP BY tier, kind` over the
     * memories table.  Used by the dashboard's tier/kind panel. */
    typedef struct

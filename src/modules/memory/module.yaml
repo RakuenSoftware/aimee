@@ -190,7 +190,8 @@
     "server-go/modules/memory/code_context_test.go",
     "server-go/modules/memory/public_checkpoint_test.go",
     "server-go/modules/memory/conventions_test.go",
-    "server-go/modules/memory/hybrid_context_test.go"
+    "server-go/modules/memory/hybrid_context_test.go",
+    "server-go/modules/memory/session_queries_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

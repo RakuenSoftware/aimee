@@ -235,9 +235,9 @@ static void test_ws_cross_workspace_high_confidence(void)
                            MEMORY_AUTHORITY_USER, &m) == 0);
    memory_tag_workspace(m.id, "other-project");
 
-   /* Bump use_count to >= 5 */
-   for (int i = 0; i < 5; i++)
-      memory_touch(m.id);
+   /* Fixture state only. Touch behavior is covered by the Go owner replay. */
+   assert(count_for_memory("UPDATE memories SET use_count=5 WHERE id=?1 RETURNING use_count",
+                           m.id) == 5);
 
    char *ctx = memory_assemble_context_ws(NULL, "wol");
    assert(ctx != NULL);
@@ -399,16 +399,7 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
    count = db2_memory_list(TIER_L2, KIND_FACT, 1, 1, facts, 64);
    assert(count == 1 && facts[0].id == local.id);
 
-   count = db2_memory_top_l2_facts(facts, 1);
-   assert(count == 1 && facts[0].id == local.id);
-
-   count = db2_memory_list_session_scope_priority(facts, 1);
-   assert(count == 1 && facts[0].id == local.id);
-
-   count = db2_memory_list_session_scope_priority_like("%crowdout routing needle%", facts, 2);
-   assert(count == 2);
-   assert(facts[0].id == local.id);
-   assert(facts[1].id == workspace_mem.id);
+   /* Session fact/pattern query coverage is in Go session_queries_test.go. */
 
    memory_diagnostic_t diagnostics[2];
    count = memory_diagnose("crowdout routing needle", 1, diagnostics, 2);

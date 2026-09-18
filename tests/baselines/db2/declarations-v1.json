@@ -13674,7 +13674,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 449
+          "line": 429
         }
       ],
       "signature": "int64_t db2_memory_episode_insert ( int64_t memory_id , const char * episode_key , const char * episode_text , const char * source_session , const char * reference_time )",
@@ -14048,36 +14048,6 @@
       "signature_sha256": "97549e7b79d2634498bc4a267acacb27958c44628a9d0f5cfe7aea27b6b3349d",
       "status": "private-test-only",
       "symbol": "db2_memory_list_recall_section"
-    },
-    {
-      "consumers": [
-        "src/tests/test_workspace_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 416
-        }
-      ],
-      "signature": "int db2_memory_list_session_scope_priority ( memory_t * out , int max )",
-      "signature_sha256": "b0110278348371f632b08e96afb7a3771dd2eaaf39ee1786757de0c27c6ec0aa",
-      "status": "private-test-only",
-      "symbol": "db2_memory_list_session_scope_priority"
-    },
-    {
-      "consumers": [
-        "src/tests/test_workspace_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 424
-        }
-      ],
-      "signature": "int db2_memory_list_session_scope_priority_like ( const char * pattern , memory_t * out , int max )",
-      "signature_sha256": "f98db4067f01052772b105a9b369b84a48708c5a91e7444c98a4f1acf971e0e3",
-      "status": "private-test-only",
-      "symbol": "db2_memory_list_session_scope_priority_like"
     },
     {
       "consumers": [
@@ -14515,21 +14485,6 @@
       "signature_sha256": "efca90ae907b5403f429a06f1db17932f70a1941071d46e86b4e5630ab4a4a3b",
       "status": "reviewed",
       "symbol": "db2_memory_stats_counts"
-    },
-    {
-      "consumers": [
-        "src/tests/test_workspace_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 409
-        }
-      ],
-      "signature": "int db2_memory_top_l2_facts ( memory_t * out , int max )",
-      "signature_sha256": "c27a355ded77ece3f4ce80e0ec4db2adda6c23276260fc0b6859d095349f403a",
-      "status": "private-test-only",
-      "symbol": "db2_memory_top_l2_facts"
     },
     {
       "consumers": [
@@ -21131,15 +21086,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ea64e3693730d5cc0028d1c6da52f9d17acc18498b36e4743d49293f24b0b8d3",
+  "fingerprint": "5f9a96570427ff7762ef39af9214937b7f29dadf089b7224d633d671f160ae99",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 453,
-    "declarations": 1166,
+    "declarations": 1163,
     "headers": 134,
     "internal_unconsumed": 202,
-    "private_test_only": 318,
+    "private_test_only": 315,
     "reviewed": 193
   }
 }
