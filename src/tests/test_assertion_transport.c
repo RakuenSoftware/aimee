@@ -8,6 +8,7 @@
 
 static const char *receipt;
 static int unavailable;
+static const char *typed_receipt;
 void memory_bus_read_context(db2_memory_scope_context_t *context)
 {
    memset(context, 0, sizeof(*context));
@@ -19,6 +20,15 @@ void memory_bus_read_context(db2_memory_scope_context_t *context)
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **out)
 {
    assert(!strcmp(method, "memory.runtime"));
+   if (!strcmp(jo_cstr(args, "operation"), "typed-context"))
+   {
+      assert(!strcmp(jo_cstr(args, "project"), "assertion-project"));
+      assert(!strcmp(jo_cstr(args, "query"), "typed query"));
+      assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(args, "enabled")));
+      *out = cJSON_CreateObject();
+      assert(cJSON_AddStringToObject(*out, "json", typed_receipt));
+      return 1;
+   }
    assert(!strcmp(jo_cstr(args, "operation"), "assertion-search"));
    assert(!strcmp(jo_cstr(args, "project"), "assertion-project"));
    assert(!strcmp(jo_cstr(cJSON_GetObjectItemCaseSensitive(args, "scope"), "value"),
@@ -73,6 +83,24 @@ int main(void)
    cJSON_Delete(result);
    unavailable = 1;
    assert(!call());
-   puts("assertion transport: scope, exact IDs, copied receipts and failures passed");
+   cJSON *typed_request =
+       cJSON_Parse("{\"query\":\"typed query\",\"enabled\":false,\"operation\":\"untrusted\"}");
+   assert(typed_request);
+   typed_receipt = "{\"status\":\"ok\",\"proposal_id\":9007199254743001,\"rendered_context\":"
+                   "\"complete 界 context\",\"active_context_missing\":false}";
+   result = db2_kb_service_memory_assemble_typed_context_json(typed_request);
+   assert(result);
+   serialized = cJSON_PrintUnformatted(result);
+   assert(serialized && !strcmp(serialized, typed_receipt));
+   free(serialized);
+   cJSON_Delete(result);
+   const char *bad_typed[] = {"[]", "null", "{}junk", "{broken"};
+   for (size_t i = 0; i < sizeof(bad_typed) / sizeof(bad_typed[0]); ++i)
+   {
+      typed_receipt = bad_typed[i];
+      assert(!db2_kb_service_memory_assemble_typed_context_json(typed_request));
+   }
+   cJSON_Delete(typed_request);
+   puts("assertion/context transport: scope, exact JSON, copied receipts and failures passed");
    return 0;
 }

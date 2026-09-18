@@ -21,13 +21,16 @@ func scanEpisode(row store.Row, item *Episode) error {
 }
 
 func (s *postgresDataStore) EpisodeList(ctx context.Context, query string, limit int) ([]Episode, error) {
+	return s.episodeList(ctx, query, limit, Scope{})
+}
+func (s *postgresDataStore) episodeList(ctx context.Context, query string, limit int, exact Scope) ([]Episode, error) {
 	if err := s.requireKBDomain(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents+`) SELECT `+episodeColumns+` FROM memory_episodes
+	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents+` AND ($3='' OR (scope_type=$3 AND scope_value=$4))) SELECT `+episodeColumns+` FROM memory_episodes
 WHERE ($1='' OR episode_key ILIKE '%'||$1||'%' OR episode_text ILIKE '%'||$1||'%')
 AND memory_id IN (SELECT id FROM visible)
-ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,reference_time DESC,created_at DESC,id DESC LIMIT $2`, query, limit)
+ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,reference_time DESC,created_at DESC,id DESC LIMIT $2`, query, limit, exact.Type, exact.Value)
 	if err != nil {
 		return nil, err
 	}
@@ -104,11 +107,14 @@ ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,weight DESC,cr
 }
 
 func (s *postgresDataStore) EntityProfile(ctx context.Context, entity string) (EntityProfile, error) {
+	return s.entityProfile(ctx, entity, Scope{})
+}
+func (s *postgresDataStore) entityProfile(ctx context.Context, entity string, exact Scope) (EntityProfile, error) {
 	result := EntityProfile{Entity: entity}
 	if err := s.requireKBDomain(); err != nil {
 		return result, err
 	}
-	err := s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents+`),
+	err := s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents+` AND ($2='' OR (scope_type=$2 AND scope_value=$3))),
 visible_relations AS (SELECT * FROM memory_relations WHERE memory_id IN (SELECT id FROM visible))
 SELECT
 (SELECT COUNT(DISTINCT memory_id) FROM memory_entities
@@ -128,7 +134,7 @@ COALESCE((SELECT me.episode_key FROM memory_episodes me JOIN visible_relations m
 COALESCE((SELECT fact_text FROM visible_relations
  WHERE lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)
  ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,weight DESC,created_at DESC,id DESC LIMIT 1),'')`,
-		entity).Scan(&result.Mentions, &result.Relations, &result.LatestEpisode, &result.Summary)
+		entity, exact.Type, exact.Value).Scan(&result.Mentions, &result.Relations, &result.LatestEpisode, &result.Summary)
 	if err == nil && result.Mentions == 0 && result.Relations == 0 {
 		return result, ErrMemoryNotFound
 	}

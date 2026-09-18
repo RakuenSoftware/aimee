@@ -110,6 +110,9 @@ GRANT USAGE ON SCHEMA public TO aimee_store_runtime`)
 	}
 	var forbidden bool
 	if err := tx.QueryRow(ctx, `SELECT
+has_table_privilege(current_user,'learning_observations','UPDATE') OR
+has_table_privilege(current_user,'learning_proposals','UPDATE') OR
+has_column_privilege(current_user,'learning_proposals','evidence_refs','SELECT') OR
 has_table_privilege(current_user,'kb_vault_control','UPDATE') OR
 has_table_privilege(current_user,'org_vault_secret','SELECT') OR
 has_column_privilege(current_user,'files','path','SELECT') OR
@@ -132,6 +135,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseBenchmarkDiagnosticsReplay(t, ctx, tx, handler)
 	exerciseBenchmarkScoreReplay(t, ctx, tx, handler)
 	exerciseAssertionSearchReplay(t, ctx, tx, backend.(*postgresDataStore))
+	exerciseTypedContextReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseCheckpointReplay(t, ctx, tx, handler)
 	exerciseConventionReplay(t, ctx, tx, handler)
 	exerciseHybridReplay(t, ctx, tx, handler)

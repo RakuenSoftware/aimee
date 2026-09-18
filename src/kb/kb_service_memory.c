@@ -75,7 +75,8 @@ int kb_handle_memory_assemble_typed_context(int fd, cJSON *req)
    int missing = 0;
    int scope_active = kb_memory_scope_begin(req, 1, &missing);
    cJSON *resp = db2_kb_service_memory_assemble_typed_context_json(req);
-   kb_memory_scope_end(resp, scope_active, missing);
+   /* The owner includes context metadata in its complete serialized response. */
+   kb_memory_scope_end(NULL, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to assemble typed context");
 }
 

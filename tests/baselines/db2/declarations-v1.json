@@ -1768,7 +1768,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
@@ -1959,7 +1958,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
@@ -2161,7 +2159,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
@@ -2341,7 +2338,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
@@ -4976,7 +4972,6 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_agent.c",
-        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
@@ -11866,7 +11861,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/tests/test_kb_mining.c"
       ],
       "locations": [
@@ -11877,7 +11871,7 @@
       ],
       "signature": "int db2_learning_observation_list ( const char * status , const char * scope_kind , const char * scope_id , int limit , learning_observation_t * out , int max )",
       "signature_sha256": "5471082a15abe4a8dd0c0491f344e26732d988fba0cfdcf6b5c8ca7314028c6a",
-      "status": "audit-pending",
+      "status": "private-test-only",
       "symbol": "db2_learning_observation_list"
     },
     {
@@ -12038,7 +12032,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/modules/learning/learning_router.c"
       ],
       "locations": [
@@ -14281,7 +14274,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/kb_main.c"
       ],
       "locations": [
@@ -20868,15 +20860,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "eed6ecc83d0ae60e21437f7952bd9282f8b613d6f517a93873ffcfd945542935",
+  "fingerprint": "ce0f05abc10fc61e05fb695f529d946b7b6f645062cf702b0b3331073600e628",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 447,
+    "audit_pending": 446,
     "declarations": 1150,
     "headers": 131,
     "internal_unconsumed": 201,
-    "private_test_only": 310,
+    "private_test_only": 311,
     "reviewed": 192
   }
 }

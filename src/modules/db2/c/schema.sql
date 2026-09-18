@@ -17799,6 +17799,10 @@ BEGIN
   GRANT SELECT, INSERT, UPDATE ON ontology_evaluations TO aimee_store_runtime;
   GRANT UPDATE(rel_type) ON rel_types TO aimee_store_runtime;
   GRANT USAGE, SELECT ON SEQUENCE fact_evidence_id_seq, rel_types_id_seq, ontology_evaluations_id_seq TO aimee_store_runtime;
+  -- Typed memory context reads reviewed learning outputs; it cannot mutate or approve them.
+  GRANT SELECT(observation_id,scope_kind,scope_id,observation_type,title,summary,status,
+    confidence,evidence_count,refreshed_at) ON learning_observations TO aimee_store_runtime;
+  GRANT SELECT(id,sink,state,target_key,action_json) ON learning_proposals TO aimee_store_runtime;
   GRANT SELECT(outcome_id) ON work_outcomes TO aimee_store_runtime;
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id,last_accessed_at) ON artifacts TO aimee_store_runtime;
@@ -17832,5 +17836,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '16')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '17')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

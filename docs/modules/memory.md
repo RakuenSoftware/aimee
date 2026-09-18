@@ -840,3 +840,27 @@ semantic result structs, SQL scope macros and binding function are deleted. The
 memory tree now has two C sources totaling 192 lines and five headers. Strict G0
 remains 166 findings; typed-context channel selection, packing and watermarks,
 native typed-fact writes, benchmark loaders and other clients remain unfinished.
+
+Typed-context assembly now belongs to Go, including channel defaults/opt-outs,
+selection, packing traces, freshness watermarks, sufficiency and trust envelopes.
+Observations and reviewed procedures are scoped before their 64/32-row caps;
+hidden rows cannot crowd out visible evidence or leak IDs through dropped-row
+traces. Episode/profile reads and watermarks honor explicit scope, including
+include-all requests. Each channel runs behind a SQL savepoint so an unavailable
+channel remains explicit without aborting other reads. Watermark failures are
+reported as unavailable rather than as an empty successful watermark.
+
+Per-channel text estimates remain in `used_tokens`; `rendered_tokens` additionally
+accounts for the complete JSON and trust envelopes. Go drops complete rows in
+reverse packing order to fit the total rendered budget, preserving higher-priority
+assertions and UTF-8. An empty envelope that cannot fit a tiny budget reports
+`envelope_excess_tokens`. The native transport carries the complete Go JSON as
+text, so proposal IDs and nested procedure numbers remain exact. More than 480
+lines of native selection/packing/rendering are removed. Schema 17 adds only the
+learning observation/proposal SELECT columns required by this read path; the
+runtime role cannot update learning proposals or read their unrelated evidence
+references. Restricted-role replay covers scope-before-cap behavior, metadata
+visibility, exact IDs, independent channel failures, opt-outs and malformed time.
+Strict G0 is now 165 findings; the two memory-tree C sources remain 192 lines.
+Native transports, typed-fact writes, benchmark loaders, Server recall composition
+and the other previously listed migration work remain unfinished.

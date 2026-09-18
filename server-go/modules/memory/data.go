@@ -30,6 +30,7 @@ const (
 )
 
 type DataRequest struct {
+	TypedContext   *typedContextOptions    `json:"typed_context,omitempty"`
 	Assertions     *assertionSearchRequest `json:"assertions,omitempty"`
 	TraceBatch     *traceMiningBatch       `json:"trace_batch,omitempty"`
 	Reflection     *reflectionOptions      `json:"reflection,omitempty"`
@@ -1067,7 +1068,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if request.Operation == "demotion-run" || request.Operation == "demotion-check" {
 		budget = 120 * time.Second
 	}
-	if request.Operation == "cognify" || request.Operation == "cognify-drain" || request.Operation == "reflect" {
+	if request.Operation == "cognify" || request.Operation == "cognify-drain" || request.Operation == "reflect" || request.Operation == "typed-context" {
 		budget = 60 * time.Second
 	}
 	if request.Operation == "vector-verify" || request.Operation == "assertion-search" {
@@ -1159,6 +1160,31 @@ set_config('aimee.correlation_id',$9,true)`,
 	}
 
 	switch request.Operation {
+	case "typed-context":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.TypedContext == nil || request.Assertions == nil || request.Query == "" || request.Limit != 32 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		for name := range typedBudgetDefaults {
+			n, ok := request.TypedContext.Budgets[name]
+			if !ok || n < 0 || n > 4096 {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+		}
+		if explicitScope {
+			request.Scope = scope
+		}
+		var result typedContextResult
+		result, err = backend.assembleTypedContext(ctx, invocation.TraceID, options.executor, request, explicitScope)
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+			if len(response.Payload) > maxDataBody {
+				err = errors.New("memory: typed context exceeds response capacity")
+			}
+		}
 	case "assertion-search":
 		backend, ok := options.data.(*postgresDataStore)
 		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {

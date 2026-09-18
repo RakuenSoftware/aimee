@@ -16,6 +16,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "typed-context":
+		return handleTypedContext(options, invocation, args)
 	case "assertion-search":
 		return handleAssertionSearch(options, invocation, args)
 	case "benchmark-score":
