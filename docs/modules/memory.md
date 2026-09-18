@@ -755,3 +755,25 @@ The latest inventory is two C sources (224 lines) and five headers in the memory
 tree, with 169 strict repository-wide G0 findings. The baseline is unchanged.
 Benchmark scoring, seed/load operations, scratch-store isolation and other native
 memory clients remain pending; this checkpoint does not satisfy G0.
+
+Benchmark case scoring now retrieves through the Go owner and shares its MRR,
+NDCG and recall formulas with the Go benchmarks process. The generic formulas
+live in `server-go/internal/retrievalmetrics`, without a dependency cycle between
+memory and benchmarks. Top-20 result IDs and up to 128 expected IDs cross the
+remaining native transport as decimal strings. The owner retains legacy
+cutoff/duplicate semantics; native receipt validation completes before exposing
+scores. The remaining progress writer also preserves exact numeric ID tokens
+in JSONL, without conversion to double. Host latency measures the complete owner call, including transport and
+scoring. Restricted-role replay covers visibility, explicit scopes, archived
+rows and required-query failures. All benchmark calls to `memory_find_facts` are
+removed; its remaining legacy fixtures still need retirement.
+
+Isolated memory and benchmarks exports include the shared metric helper and
+build with CGO disabled. Exported manifests now use the canonical Go language
+version and include memory's Unicode dependency and PostgreSQL test dependencies.
+The isolated scoring tests pass; this is not a claim that the exported memory
+runtime has complete production bootstrap or that its full replay fixtures are
+packaged. The full benchmark runners still have retired query-plan references,
+native loaders, scratch-store isolation and native transports to migrate.
+Strict G0 is now 168 findings; the immutable baseline and memory-tree inventory
+(two C sources, 224 lines, five headers) are unchanged.

@@ -19,7 +19,8 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    assert(!strcmp(method, "memory.runtime"));
    const char *operation = jo_cstr(args, "operation");
    assert(!strcmp(operation, "benchmark-context") ||
-          !strcmp(operation, "benchmark-hard-negative") || !strcmp(operation, "benchmark-miss"));
+          !strcmp(operation, "benchmark-hard-negative") || !strcmp(operation, "benchmark-miss") ||
+          !strcmp(operation, "benchmark-score"));
    assert(!strcmp(jo_cstr(args, "project"), "bench-project"));
    if (unavailable)
    {
@@ -131,6 +132,74 @@ static void test_diagnostics(void)
    malformed = NULL;
 }
 
+static void test_scoring(void)
+{
+   mem_eval_case_t ecase = {0};
+   snprintf(ecase.query, sizeof(ecase.query), "fixture");
+   ecase.expected_ids[0] = INT64_C(9007199254740993);
+   ecase.n_expected = 1;
+   mem_eval_direct_trace_t trace;
+   assert(mem_eval_score_case(&ecase, &trace) == 0);
+   assert(trace.n_retrieved == 2 && trace.retrieved_ids[0] == ecase.expected_ids[0]);
+   assert(trace.mrr == 1 && trace.ndcg_5 == 1 && trace.ndcg_10 == 1 && trace.recall_5 == 1 &&
+          trace.recall_10 == 1 && trace.latency_ms >= 0);
+   FILE *progress = tmpfile();
+   assert(progress);
+   mem_eval_append_direct_progress_row(progress, "test", "q1", "category", "fact", "question",
+                                       "answer", &trace);
+   char *line = read_file(progress);
+   assert(strstr(line, "\"retrieved_ids\":[9007199254740993,2]"));
+   assert(strstr(line, "\"verdict\":\"CORRECT\""));
+   free(line);
+   fclose(progress);
+   mem_eval_support_case_t cases[2] = {0};
+   snprintf(cases[0].query, sizeof(cases[0].query), "fixture");
+   cases[0].relevant_ids[0] = ecase.expected_ids[0];
+   cases[0].n_relevant = 1;
+   snprintf(cases[1].query, sizeof(cases[1].query), "empty");
+   cases[1].relevant_ids[0] = 999;
+   cases[1].n_relevant = 1;
+   mem_eval_scores_t scores;
+   mem_eval_latency_t latency;
+   assert(mem_eval_run_support_with_latency(cases, 2, &scores, &latency) == 0);
+   assert(scores.n_cases == 2 && scores.mrr == .5 && scores.ndcg_5 == .5 && scores.ndcg_10 == .5 &&
+          scores.recall_5 == .5 && scores.recall_10 == .5);
+   int64_t relevant[128];
+   for (int i = 0; i < 128; i++)
+      relevant[i] = ecase.expected_ids[0];
+   assert(mem_eval_score_retrieval("fixture", relevant, 128, &trace) == 0);
+   assert(trace.recall_5 == 1.0 / 128);
+   mem_eval_direct_trace_t zero = {0};
+   memset(&trace, 0xff, sizeof(trace));
+   assert(mem_eval_score_retrieval("failure", relevant, 128, &trace) == -1);
+   assert(!memcmp(&trace, &zero, sizeof(trace)));
+   const char *bad[] = {
+       "{}",
+       "{\"status\":\"ok\",\"retrieved_ids\":[9007199254740993],\"mrr\":1,\"ndcg_5\":1,\"ndcg_10\":"
+       "1,\"recall_5\":1,\"recall_10\":1}",
+       "{\"status\":\"ok\",\"retrieved_ids\":[\"9223372036854775808\"],\"mrr\":1,\"ndcg_5\":1,"
+       "\"ndcg_10\":1,\"recall_5\":1,\"recall_10\":1}",
+       "{\"status\":\"ok\",\"retrieved_ids\":[\"01\"],\"mrr\":1,\"ndcg_5\":1,\"ndcg_10\":1,"
+       "\"recall_5\":1,\"recall_10\":1}",
+       "{\"status\":\"ok\",\"retrieved_ids\":[\"1\"],\"mrr\":2,\"ndcg_5\":1,\"ndcg_10\":1,\"recall_"
+       "5\":1,\"recall_10\":1}",
+       "{\"status\":\"ok\",\"retrieved_ids\":[\"1\"],\"mrr\":1,\"ndcg_5\":1,\"ndcg_10\":1,\"recall_"
+       "5\":-1,\"recall_10\":1}",
+   };
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+   {
+      malformed = bad[i];
+      memset(&trace, 0xff, sizeof(trace));
+      assert(mem_eval_score_case(&ecase, &trace) == -1);
+      assert(!memcmp(&trace, &zero, sizeof(trace)));
+   }
+   malformed = NULL;
+   unavailable = 1;
+   assert(mem_eval_score_case(&ecase, &trace) == -1);
+   assert(!memcmp(&trace, &zero, sizeof(trace)));
+   unavailable = 0;
+}
+
 int main(void)
 {
    assert(setenv("AIMEE_TEST_BENCHMARK_FIXTURE", "1", 1) == 0);
@@ -175,7 +244,8 @@ int main(void)
    malformed = NULL;
    assert(mem_eval_build_retrieval_context(NULL, 1, 20, context, sizeof(context), NULL) == -1);
    test_diagnostics();
-   puts("benchmark transport: real Go context, diagnostics, exact IDs, full UTF-8 and failures "
-        "passed");
+   test_scoring();
+   puts(
+       "benchmark transport: real Go context, diagnostics, scoring, exact IDs and failures passed");
    return 0;
 }

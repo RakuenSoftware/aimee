@@ -48,7 +48,7 @@ NAME = "go-package-ownership"
 MODULES_TREE = "server-go/modules"
 
 # Exact package directories under server-go/ that no module descriptor claims,
-# each with the reason it is not a module. Four of these categories are
+# each with the reason it is not a module. Five of these categories are
 # architectural and one is a debt; they are kept in one table so a reader sees
 # the whole complement at once rather than inferring it from what is absent.
 #
@@ -59,10 +59,19 @@ MODULES_TREE = "server-go/modules"
 #              by attaching to it.
 #   host       the process that module binaries are spawned as. A host is not a
 #              module; it is what modules run inside.
+#   pure       deterministic mathematical functions over caller-owned values;
+#              no state, I/O, authority or module execution of their own.
 #   buildtag   //go:build tools — build-time pins, never linked into a binary.
 #   debt       owns state and has no owner. Named, with what it would take to
 #              resolve. NOT a blessing.
 UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
+    "server-go/internal/retrievalmetrics": (
+        "pure",
+        "MRR/NDCG/recall formulas over supplied ID slices. Imports only math; "
+        "owns no retrieval, state, I/O, authority or event dispatch. The memory "
+        "and benchmarks modules own the observable evaluation operations. "
+        "Keeping this arithmetic outside both avoids a cyclic module dependency.",
+    ),
     "server-go/bus": (
         "substrate",
         "The event bus client, module runtime and wire. Every module imports it; "

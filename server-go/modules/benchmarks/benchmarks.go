@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/internal/retrievalmetrics"
 )
 
 const (
@@ -38,46 +39,6 @@ func zeroPadding(value []byte) bool {
 		}
 	}
 	return true
-}
-
-func isRelevant(id int64, relevant []int64) bool {
-	for _, candidate := range relevant {
-		if candidate == id {
-			return true
-		}
-	}
-	return false
-}
-
-func score(retrieved, relevant []int64, k int) (mrr, ndcg, recall float64) {
-	for index, id := range retrieved {
-		if isRelevant(id, relevant) {
-			mrr = 1 / float64(index+1)
-			break
-		}
-	}
-	if len(relevant) == 0 {
-		return mrr, 0, 0
-	}
-
-	limit := min(len(retrieved), k)
-	var dcg float64
-	found := 0
-	for index, id := range retrieved[:limit] {
-		if isRelevant(id, relevant) {
-			dcg += 1 / math.Log2(float64(index)+2)
-			found++
-		}
-	}
-	idealLimit := min(len(relevant), k)
-	var idcg float64
-	for index := range idealLimit {
-		idcg += 1 / math.Log2(float64(index)+2)
-	}
-	if idcg > 0 {
-		ndcg = dcg / idcg
-	}
-	return mrr, ndcg, float64(found) / float64(len(relevant))
 }
 
 func handleScore(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
@@ -112,7 +73,7 @@ func handleScore(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.M
 		offset := requestRelevantOff + index*8
 		relevant[index] = int64(binary.LittleEndian.Uint64(request[offset : offset+8]))
 	}
-	mrr, ndcg, recall := score(retrieved, relevant, k)
+	mrr, ndcg, recall := retrievalmetrics.Score(retrieved, relevant, k)
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], wireVersion)

@@ -865,6 +865,8 @@ int mem_eval_run_with_latency(mem_eval_case_t *cases, int n_cases, mem_eval_scor
    double total_mrr = 0, total_ndcg5 = 0, total_ndcg10 = 0;
    double total_recall5 = 0, total_recall10 = 0;
    double *latencies = latency_out ? calloc((size_t)n_cases, sizeof(double)) : NULL;
+   if (latency_out && !latencies)
+      return -1;
 
    for (int c = 0; c < n_cases; c++)
    {
@@ -874,45 +876,23 @@ int mem_eval_run_with_latency(mem_eval_case_t *cases, int n_cases, mem_eval_scor
       int route_bucket = mem_eval_route_bucket_index(plan.route);
       int shape_bucket = mem_eval_shape_bucket_index(plan.shape);
 
-      /* Run memory search */
-      struct timespec ts0, ts1;
-      if (latency_out)
-         clock_gettime(CLOCK_MONOTONIC, &ts0);
-      memory_t results[20];
-      int n_results = memory_find_facts(cases[c].query, 20, results, 20);
-      if (n_results < 0)
+      mem_eval_direct_trace_t trace;
+      if (mem_eval_score_case(&cases[c], &trace) != 0)
       {
          free(latencies);
          return -1;
       }
       if (latency_out)
-      {
-         clock_gettime(CLOCK_MONOTONIC, &ts1);
-         latencies[c] = elapsed_ms(&ts0, &ts1);
-      }
-
-      /* Extract retrieved IDs */
-      int64_t retrieved[20];
-      memset(retrieved, 0, sizeof(retrieved));
-      for (int i = 0; i < n_results; i++)
-         retrieved[i] = results[i].id;
-
-      double case_mrr = ir_mrr(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected);
-      double case_recall5 =
-          ir_recall_at_k(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected, 5);
-      double case_recall10 =
-          ir_recall_at_k(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected, 10);
-      total_mrr += case_mrr;
-      total_ndcg5 +=
-          ir_ndcg_at_k(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected, 5);
-      total_ndcg10 +=
-          ir_ndcg_at_k(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected, 10);
-      total_recall5 += case_recall5;
-      total_recall10 += case_recall10;
+         latencies[c] = trace.latency_ms;
+      total_mrr += trace.mrr;
+      total_ndcg5 += trace.ndcg_5;
+      total_ndcg10 += trace.ndcg_10;
+      total_recall5 += trace.recall_5;
+      total_recall10 += trace.recall_10;
       if (route_bucket >= 0 && route_bucket < MEM_EVAL_ROUTE_BUCKET_COUNT)
-         mem_eval_bucket_add(&out->route_buckets[route_bucket], case_mrr, case_recall10);
+         mem_eval_bucket_add(&out->route_buckets[route_bucket], trace.mrr, trace.recall_10);
       if (shape_bucket >= 0 && shape_bucket < MEM_EVAL_SHAPE_BUCKET_COUNT)
-         mem_eval_bucket_add(&out->shape_buckets[shape_bucket], case_mrr, case_recall10);
+         mem_eval_bucket_add(&out->shape_buckets[shape_bucket], trace.mrr, trace.recall_10);
    }
 
    out->mrr = total_mrr / n_cases;

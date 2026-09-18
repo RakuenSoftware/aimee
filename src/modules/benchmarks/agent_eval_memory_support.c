@@ -21,6 +21,7 @@
 #include "eval_support.h"
 #include "cJSON.h"
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,39 +126,25 @@ int mem_eval_run_support_with_latency(mem_eval_support_case_t *cases, int n_case
    double total_mrr = 0.0, total_ndcg5 = 0.0, total_ndcg10 = 0.0;
    double total_recall5 = 0.0, total_recall10 = 0.0;
    double *latencies = latency_out ? calloc((size_t)n_cases, sizeof(double)) : NULL;
+   if (latency_out && !latencies)
+      return -1;
 
    for (int c = 0; c < n_cases; c++)
    {
-      struct timespec ts0, ts1;
-      if (latency_out)
-         clock_gettime(CLOCK_MONOTONIC, &ts0);
-      memory_t results[20];
-      int n_results = memory_find_facts(cases[c].query, 20, results, 20);
-      if (n_results < 0)
+      mem_eval_direct_trace_t trace;
+      if (mem_eval_score_retrieval(cases[c].query, cases[c].relevant_ids, cases[c].n_relevant,
+                                   &trace) != 0)
       {
          free(latencies);
          return -1;
       }
       if (latency_out)
-      {
-         clock_gettime(CLOCK_MONOTONIC, &ts1);
-         latencies[c] = elapsed_ms(&ts0, &ts1);
-      }
-
-      int64_t retrieved[20];
-      memset(retrieved, 0, sizeof(retrieved));
-      for (int i = 0; i < n_results; i++)
-         retrieved[i] = results[i].id;
-
-      total_mrr += ir_mrr(retrieved, n_results, cases[c].relevant_ids, cases[c].n_relevant);
-      total_ndcg5 +=
-          ir_ndcg_at_k(retrieved, n_results, cases[c].relevant_ids, cases[c].n_relevant, 5);
-      total_ndcg10 +=
-          ir_ndcg_at_k(retrieved, n_results, cases[c].relevant_ids, cases[c].n_relevant, 10);
-      total_recall5 +=
-          ir_recall_at_k(retrieved, n_results, cases[c].relevant_ids, cases[c].n_relevant, 5);
-      total_recall10 +=
-          ir_recall_at_k(retrieved, n_results, cases[c].relevant_ids, cases[c].n_relevant, 10);
+         latencies[c] = trace.latency_ms;
+      total_mrr += trace.mrr;
+      total_ndcg5 += trace.ndcg_5;
+      total_ndcg10 += trace.ndcg_10;
+      total_recall5 += trace.recall_5;
+      total_recall10 += trace.recall_10;
    }
 
    out->mrr = total_mrr / n_cases;
@@ -252,40 +239,89 @@ static int mem_eval_parse_judge_score(const char *response, int *score_out)
    return 0;
 }
 
+int mem_eval_score_retrieval(const char *query, const int64_t *expected_ids, int n_expected,
+                             mem_eval_direct_trace_t *trace_out)
+{
+   if (!trace_out)
+      return -1;
+   memset(trace_out, 0, sizeof(*trace_out));
+   if (!query || n_expected < 0 || n_expected > 128 || (n_expected && !expected_ids))
+      return -1;
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON *ids = args ? cJSON_AddArrayToObject(args, "expected_ids") : NULL;
+   if (!ids || !cJSON_AddStringToObject(args, "operation", "benchmark-score") ||
+       !cJSON_AddStringToObject(args, "query", query))
+   {
+      cJSON_Delete(args);
+      return -1;
+   }
+   for (int i = 0; i < n_expected; i++)
+   {
+      char id[32];
+      snprintf(id, sizeof(id), "%lld", (long long)expected_ids[i]);
+      cJSON *item = cJSON_CreateString(id);
+      if (!item || !cJSON_AddItemToArray(ids, item))
+      {
+         cJSON_Delete(item);
+         cJSON_Delete(args);
+         return -1;
+      }
+   }
+   struct timespec start, end;
+   clock_gettime(CLOCK_MONOTONIC, &start);
+   int rc = mem_eval_dispatch_diagnostic(args, &reply);
+   clock_gettime(CLOCK_MONOTONIC, &end);
+   cJSON_Delete(args);
+   const cJSON *retrieved = cJSON_GetObjectItemCaseSensitive(reply, "retrieved_ids");
+   mem_eval_direct_trace_t trace = {0};
+   const char *names[] = {"mrr", "ndcg_5", "ndcg_10", "recall_5", "recall_10"};
+   double *values[] = {&trace.mrr, &trace.ndcg_5, &trace.ndcg_10, &trace.recall_5,
+                       &trace.recall_10};
+   if (rc <= 0 || strcmp(jo_cstr(reply, "status"), "ok") || !cJSON_IsArray(retrieved) ||
+       cJSON_GetArraySize(retrieved) > 20)
+      goto failed;
+   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(reply, names[i]);
+      if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) || value->valuedouble < 0 ||
+          value->valuedouble > (i == 0 ? 1 : 20))
+         goto failed;
+      *values[i] = value->valuedouble;
+   }
+   trace.n_retrieved = cJSON_GetArraySize(retrieved);
+   for (int i = 0; i < trace.n_retrieved; i++)
+   {
+      const cJSON *value = cJSON_GetArrayItem(retrieved, i);
+      if (!cJSON_IsString(value) || !value->valuestring[0])
+         goto failed;
+      char *tail = NULL, canonical[32];
+      errno = 0;
+      long long id = strtoll(value->valuestring, &tail, 10);
+      if (errno || !tail || *tail || id <= 0)
+         goto failed;
+      snprintf(canonical, sizeof(canonical), "%lld", id);
+      if (strcmp(canonical, value->valuestring))
+         goto failed;
+      trace.retrieved_ids[i] = (int64_t)id;
+   }
+   trace.latency_ms = elapsed_ms(&start, &end);
+   cJSON_Delete(reply);
+   *trace_out = trace;
+   return 0;
+failed:
+   cJSON_Delete(reply);
+   return -1;
+}
+
 int mem_eval_score_case(const mem_eval_case_t *ecase, mem_eval_direct_trace_t *trace_out)
 {
-   if (!ecase || !trace_out)
-      return -1;
-
-   memset(trace_out, 0, sizeof(*trace_out));
-   struct timespec ts0, ts1;
-   clock_gettime(CLOCK_MONOTONIC, &ts0);
-   memory_t results[20];
-   int n_results = memory_find_facts(ecase->query, 20, results, 20);
-   if (n_results < 0)
-      return -1;
-   clock_gettime(CLOCK_MONOTONIC, &ts1);
-
-   int64_t retrieved[20];
-   memset(retrieved, 0, sizeof(retrieved));
-   trace_out->n_retrieved = n_results < 20 ? n_results : 20;
-   for (int i = 0; i < trace_out->n_retrieved; i++)
+   if (!ecase || ecase->n_expected < 0 || ecase->n_expected > 20)
    {
-      retrieved[i] = results[i].id;
-      trace_out->retrieved_ids[i] = results[i].id;
+      if (trace_out)
+         memset(trace_out, 0, sizeof(*trace_out));
+      return -1;
    }
-
-   trace_out->latency_ms = elapsed_ms(&ts0, &ts1);
-   trace_out->mrr = ir_mrr(retrieved, n_results, ecase->expected_ids, ecase->n_expected);
-   trace_out->ndcg_5 =
-       ir_ndcg_at_k(retrieved, n_results, ecase->expected_ids, ecase->n_expected, 5);
-   trace_out->ndcg_10 =
-       ir_ndcg_at_k(retrieved, n_results, ecase->expected_ids, ecase->n_expected, 10);
-   trace_out->recall_5 =
-       ir_recall_at_k(retrieved, n_results, ecase->expected_ids, ecase->n_expected, 5);
-   trace_out->recall_10 =
-       ir_recall_at_k(retrieved, n_results, ecase->expected_ids, ecase->n_expected, 10);
-   return 0;
+   return mem_eval_score_retrieval(ecase->query, ecase->expected_ids, ecase->n_expected, trace_out);
 }
 
 FILE *mem_eval_open_progress_file(const char *path)
@@ -336,7 +372,12 @@ void mem_eval_append_direct_progress_row(FILE *fp, const char *dataset, const ch
 
    cJSON *retrieved = cJSON_AddArrayToObject(root, "retrieved_ids");
    for (int i = 0; i < trace->n_retrieved; i++)
-      cJSON_AddItemToArray(retrieved, cJSON_CreateNumber((double)trace->retrieved_ids[i]));
+   {
+      /* Preserve Go's exact IDs through the remaining progress-file transport. */
+      char id[32];
+      snprintf(id, sizeof(id), "%lld", (long long)trace->retrieved_ids[i]);
+      cJSON_AddItemToArray(retrieved, cJSON_CreateRaw(id));
+   }
 
    char *line = cJSON_PrintUnformatted(root);
    if (line)

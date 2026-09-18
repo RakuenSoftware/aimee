@@ -708,13 +708,14 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
     )
 
 
-# Caller-side contracts that live outside any implementation module, mapped to
+# Shared contracts and pure helpers outside an implementation module, mapped to
 # the modules that import them. Each is deliberately not owned by the module it
 # talks to: every peer that calls delegates may import server-go/delegate, and
 # every peer that calls runtime-domain operations may import server-go/aimee without importing
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
+    "server-go/internal/retrievalmetrics": {"memory", "benchmarks"},
     "server-go/modules/module-runtime/identity": {"server", "kb"},
     "server-go/modules/module-runtime/supervisor": {"server", "kb"},
     "server-go/config": {"config", "providers"},
@@ -727,7 +728,7 @@ GO_SHARED_CONTRACTS = {
 
 
 def go_process_shared_sources(module_id: str) -> list[str]:
-    """Return shared caller contracts needed by independently built Go modules."""
+    """Return shared contracts and helpers needed by independently built Go modules."""
     sources: list[str] = []
     for directory, importers in GO_SHARED_CONTRACTS.items():
         if module_id not in importers:
@@ -789,21 +790,34 @@ def external_module_pin(
     return pin
 
 
+def go_language_version() -> str:
+    """Keep isolated exports on the toolchain contract of the source module."""
+    for line in (ROOT / "server-go/go.mod").read_text(encoding="utf-8").splitlines():
+        if line.startswith("go "):
+            return line.split()[1]
+    raise ExportError("server-go/go.mod: missing Go language version")
+
+
 def go_module_requirements(module_id: str) -> tuple[list[str], list[str]]:
     """Return direct and indirect requirements for an isolated Go export."""
     direct = ["golang.org/x/sys"]
     indirect: list[str] = []
     if module_id == "config":
         direct.append("go.yaml.in/yaml/v3")
-    if module_id == "postgres":
+    if module_id == "memory":
+        direct.append("golang.org/x/text")
+    # The memory export includes PostgreSQL integration tests, while its
+    # production storage remains the pure-Go bus client.
+    if module_id in {"postgres", "memory"}:
         direct.append("github.com/jackc/pgx/v5")
         indirect.extend([
             "github.com/jackc/pgpassfile",
             "github.com/jackc/pgservicefile",
             "github.com/jackc/puddle/v2",
             "golang.org/x/sync",
-            "golang.org/x/text",
         ])
+        if module_id == "postgres":
+            indirect.append("golang.org/x/text")
     direct_lines = [
         f"\t{module} {go_dependency_version(module)}" for module in sorted(direct)
     ]
@@ -929,7 +943,7 @@ jobs:
                 repository / "go.mod",
                 f"""module github.com/JBailes/aimee
 
-go 1.25.0
+go {go_language_version()}
 
 require (
 {require_text}

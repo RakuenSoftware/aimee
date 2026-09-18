@@ -63,6 +63,9 @@ typedef struct
    int n_retrieved;
 } mem_eval_direct_trace_t;
 
+int mem_eval_score_retrieval(const char *query, const int64_t *expected_ids, int n_expected,
+                             mem_eval_direct_trace_t *trace_out);
+
 typedef struct
 {
    char question[1024];

@@ -150,17 +150,9 @@ type benchmarkMiss struct {
 
 func handleBenchmarkMiss(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
 	query, ok := args.stringValue("query")
-	var ids []string
-	if !ok || json.Unmarshal(args["expected_ids"], &ids) != nil || ids == nil || len(ids) > 20 {
+	expectedIDs, validIDs := benchmarkExpectedIDs(args, 20)
+	if !ok || !validIDs {
 		return nil, bus.ModuleStatusInvalidRequest
-	}
-	expectedIDs := make([]int64, len(ids))
-	for i, id := range ids {
-		n, err := strconv.ParseInt(id, 10, 64)
-		if err != nil || n <= 0 || strconv.FormatInt(n, 10) != id {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
-		expectedIDs[i] = n
 	}
 	response, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "search", Query: query, Limit: 20})
 	if status != bus.ModuleStatusOK {

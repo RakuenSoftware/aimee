@@ -580,16 +580,12 @@ int mem_eval_run_locomo_session_support(const char *dataset_path, int max_sample
             totals.n_cases += n_cases;
             sample_count++;
 
-            memory_t results[20];
             for (int i = 0; i < n_cases; i++)
             {
-               struct timespec ts0, ts1;
-               clock_gettime(CLOCK_MONOTONIC, &ts0);
-               if (memory_find_facts(cases[i].query, 20, results, 20) < 0)
+               mem_eval_direct_trace_t trace;
+               if (mem_eval_score_retrieval(cases[i].query, NULL, 0, &trace) != 0)
                   fatal("memory retrieval index unavailable; server-side maintenance is required");
-               clock_gettime(CLOCK_MONOTONIC, &ts1);
-               append_latency_sample(&latencies, &latency_count, &latency_cap,
-                                     elapsed_ms(&ts0, &ts1));
+               append_latency_sample(&latencies, &latency_count, &latency_cap, trace.latency_ms);
             }
          }
       }
