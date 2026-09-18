@@ -51,9 +51,22 @@ void mem_store(app_ctx_t *ctx, int argc, char **argv)
 
    /* Apply explicit workspace tag if provided */
    if (workspace && workspace[0])
-      kb_client_memory_tag_workspace(mem.id, workspace);
+   {
+      cJSON *tag_args = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(tag_args);
+      cJSON_AddNumberToObject(tag_args, "memory_id", (double)mem.id);
+      cJSON_AddStringToObject(tag_args, "workspace", workspace);
+      free(kb_v1_action_request("memory.tag_workspace", tag_args));
+   }
    if (scope_type && scope_type[0] && scope_value && scope_value[0])
-      kb_client_memory_tag_scope(mem.id, scope_type, scope_value);
+   {
+      cJSON *tag_args = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(tag_args);
+      cJSON_AddNumberToObject(tag_args, "memory_id", (double)mem.id);
+      cJSON_AddStringToObject(tag_args, "scope_type", scope_type);
+      cJSON_AddStringToObject(tag_args, "scope_value", scope_value);
+      free(kb_v1_action_request("memory.tag_scope", tag_args));
+   }
 
    if (ctx->json_output)
       emit_json_ctx(memory_to_json(&mem), ctx->json_fields, ctx->response_profile);
@@ -808,9 +821,20 @@ void mem_provenance(app_ctx_t *ctx, int argc, char **argv)
    if (kb_client_memory_get(id, &mem) != 0)
       fatal("memory not found: %lld", (long long)id);
 
-   provenance_entry_t entries[MAX_PROVENANCE_ENTRIES];
-   int count = kb_client_memory_get_provenance(id, entries, MAX_PROVENANCE_ENTRIES);
-
+   cJSON *args = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(args);
+   cJSON_AddNumberToObject(args, "memory_id", (double)id);
+   cJSON_AddNumberToObject(args, "max", MAX_PROVENANCE_ENTRIES);
+   char *json = kb_v1_action_request("memory.get_provenance", args);
+   cJSON *response = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   cJSON *entries = cJSON_GetObjectItemCaseSensitive(response, "entries");
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0 || !cJSON_IsArray(entries))
+   {
+      cJSON_Delete(response);
+      fatal("failed to read provenance for memory %lld", (long long)id);
+   }
+   int count = cJSON_GetArraySize(entries);
    if (ctx->json_output)
    {
       cJSON *root = cJSON_CreateObject();
@@ -818,18 +842,7 @@ void mem_provenance(app_ctx_t *ctx, int argc, char **argv)
       cJSON_AddStringToObject(root, "key", mem.key);
       cJSON_AddStringToObject(root, "tier", mem.tier);
       cJSON_AddStringToObject(root, "kind", mem.kind);
-      cJSON *arr = cJSON_CreateArray();
-      for (int i = 0; i < count; i++)
-      {
-         cJSON *e = cJSON_CreateObject();
-         cJSON_AddStringToObject(e, "created_at", entries[i].created_at);
-         cJSON_AddStringToObject(e, "action", entries[i].action);
-         cJSON_AddStringToObject(e, "session_id", entries[i].session_id);
-         if (entries[i].details[0])
-            cJSON_AddStringToObject(e, "details", entries[i].details);
-         cJSON_AddItemToArray(arr, e);
-      }
-      cJSON_AddItemToObject(root, "provenance", arr);
+      cJSON_AddItemToObject(root, "provenance", cJSON_DetachItemViaPointer(response, entries));
       emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
    }
    else
@@ -837,21 +850,19 @@ void mem_provenance(app_ctx_t *ctx, int argc, char **argv)
       printf("Memory #%lld: %s (%s, %s, confidence: %.2f)\n", (long long)id, mem.key, mem.tier,
              mem.kind, mem.confidence);
       if (count == 0)
-      {
          printf("  (no provenance records)\n");
-         return;
-      }
-      for (int i = 0; i < count; i++)
+      cJSON *entry = NULL;
+      cJSON_ArrayForEach(entry, entries)
       {
-         /* Show date part only (first 10 chars of ISO 8601) */
-         char date[11] = {0};
-         snprintf(date, sizeof(date), "%.10s", entries[i].created_at);
-         printf("  %s  %-10s session:%.8s", date, entries[i].action, entries[i].session_id);
-         if (entries[i].details[0])
-            printf("  \"%s\"", entries[i].details);
+         printf("  %.10s  %-10s session:%.8s", jo_cstr(entry, "created_at"),
+                jo_cstr(entry, "action"), jo_cstr(entry, "session_id"));
+         const char *details = jo_cstr(entry, "details");
+         if (details[0])
+            printf("  \"%s\"", details);
          printf("\n");
       }
    }
+   cJSON_Delete(response);
 }
 
 static unsigned int mem_maintain_parse_modes(const char *csv)
@@ -1056,8 +1067,30 @@ void mem_remind(app_ctx_t *ctx, int argc, char **argv)
       fatal("memory remind requires --do \"<reminder text>\"");
 
    (void)session; /* the kb side stamps the source session itself */
-   char *envelope =
-       kb_client_memory_prospective_create_json(when, doit, entity, file, recur, valid_until);
+   cJSON *create_args = cJSON_CreateObject();
+   int withheld = !create_args ||
+                  kb_client_pii_add_string_required(create_args, "trigger_text", when) != 0 ||
+                  kb_client_pii_add_string_required(create_args, "action_text", doit) != 0 ||
+                  kb_client_pii_add_string(create_args, "anchor_entity", entity) != 0 ||
+                  kb_client_pii_identifier_sensitive(file);
+   char *envelope = NULL;
+   if (withheld)
+   {
+      cJSON_Delete(create_args);
+      kb_client_memory_audit_note("memory.prospective_create.withheld_pii", 0, NULL, NULL, NULL, 0,
+                                  NULL, 0);
+      envelope = kb_client_pii_withheld_json();
+   }
+   else
+   {
+      if (file)
+         cJSON_AddStringToObject(create_args, "anchor_file", file);
+      if (recur)
+         cJSON_AddStringToObject(create_args, "recurrence", recur);
+      if (valid_until)
+         cJSON_AddStringToObject(create_args, "valid_until", valid_until);
+      envelope = kb_v1_action_request("memory.prospective_create", create_args);
+   }
    cJSON *prospective = mem_prospective_detach_from_envelope(envelope, "prospective");
    free(envelope);
    if (!prospective)
@@ -1095,7 +1128,9 @@ void mem_reminders(app_ctx_t *ctx, int argc, char **argv)
    if (complete_arg && complete_arg[0])
    {
       int64_t id = atoll(complete_arg);
-      char *envelope = kb_client_memory_prospective_complete_json(id);
+      cJSON *complete_args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(complete_args, "id", (double)(id));
+      char *envelope = kb_v1_action_request("memory.prospective_complete", complete_args);
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
       free(envelope);
       cJSON *status = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;
@@ -1118,7 +1153,18 @@ void mem_reminders(app_ctx_t *ctx, int argc, char **argv)
    }
    if (opt_get_flag(&opts, "expire-sweep"))
    {
-      int n = kb_client_memory_prospective_sweep_expired();
+      char *envelope =
+          kb_v1_action_request("memory.prospective_sweep_expired", cJSON_CreateObject());
+      cJSON *response = envelope ? cJSON_Parse(envelope) : NULL;
+      free(envelope);
+      const char *status = jo_cstr(response, "status");
+      if (strcmp(status, "ok") != 0)
+      {
+         cJSON_Delete(response);
+         fatal("memory reminder expiry failed");
+      }
+      int n = jo_int(response, "expired", 0);
+      cJSON_Delete(response);
       if (ctx->json_output)
       {
          cJSON *j = cJSON_CreateObject();
@@ -1139,7 +1185,11 @@ void mem_reminders(app_ctx_t *ctx, int argc, char **argv)
    if (limit > 256)
       limit = 256;
 
-   char *envelope = kb_client_memory_prospective_list_json(state, limit);
+   cJSON *list_args = cJSON_CreateObject();
+   if (state && state[0])
+      cJSON_AddStringToObject(list_args, "state", state);
+   cJSON_AddNumberToObject(list_args, "limit", limit);
+   char *envelope = kb_v1_action_request("memory.prospective_list", list_args);
    cJSON *prospectives = mem_prospective_detach_from_envelope(envelope, "prospectives");
    free(envelope);
    if (!prospectives || !cJSON_IsArray(prospectives))
@@ -2074,7 +2124,17 @@ void mem_tag(app_ctx_t *ctx, int argc, char **argv)
    }
    if (!scope_type || !scope_type[0] || !scope_value || !scope_value[0])
       fatal("memory tag requires a scope value");
-   if (kb_client_memory_tag_scope(id, scope_type, scope_value) != 0)
+   cJSON *tag_args = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(tag_args);
+   cJSON_AddNumberToObject(tag_args, "memory_id", (double)id);
+   cJSON_AddStringToObject(tag_args, "scope_type", scope_type);
+   cJSON_AddStringToObject(tag_args, "scope_value", scope_value);
+   char *json = kb_v1_action_request("memory.tag_scope", tag_args);
+   cJSON *reply = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   int ok = strcmp(jo_cstr(reply, "status"), "ok") == 0;
+   cJSON_Delete(reply);
+   if (!ok)
       fatal("failed to tag memory %lld", (long long)id);
    if (ctx->json_output)
       emit_ok_ctx(ctx->json_fields, ctx->response_profile);

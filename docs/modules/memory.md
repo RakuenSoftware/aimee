@@ -439,3 +439,11 @@ processed under the parent lock, preventing concurrent edits from being overtake
 by an old embedding. Retired/deleted parents lose their queued and stored vectors.
 Restricted-role replay covers automatic indexing and retry rollback; two-connection
 tests cover competing owners, crash rollback and the embedding/edit lock order.
+
+The native prospective-memory client source has been deleted. CLI, MCP, agent
+and review-reminder consumers now use generic authenticated commands for reminder
+CRUD/matching, scope ranking/tagging and provenance. Reminder creation still
+screens locally through the Go content gate before transmission. Agent reminders
+and CLI/MCP provenance consume full JSON strings rather than fixed native buffers.
+Native consumer tests cover refusal, redaction, gate outages and long responses;
+Go tests retain matching, expiry and once/repeat lifecycle coverage.

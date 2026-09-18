@@ -538,31 +538,6 @@ int kb_client_memory_top_l2_facts(memory_t *out, int max);
 char *kb_client_session_briefing_commitments(int limit);
 char *kb_client_session_briefing_directives(int limit);
 
-/* Prospective memory CRUD via aimee-kb.  Each returns the kb response
- * envelope as JSON (caller frees) or NULL when kb is unreachable.
- * Mirror memory_prospective_list / _create / _complete. */
-char *kb_client_memory_prospective_list_json(const char *state, int limit);
-char *kb_client_memory_prospective_create_json(const char *trigger_text, const char *action_text,
-                                               const char *anchor_entity, const char *anchor_file,
-                                               const char *recurrence, const char *valid_until);
-char *kb_client_memory_prospective_complete_json(int64_t id);
-
-/* Match active prospective memories against the current turn / entity / file
- * via aimee-kb. Returns count written into `out` (capped at `max`), or 0 if
- * kb is unreachable. Mirrors memory_prospective_match(). */
-int kb_client_memory_prospective_match(const char *turn_text, const char *active_entity,
-                                       const char *active_file, memory_prospective_t *out, int max);
-
-/* Bump the trigger counter on a prospective memory via aimee-kb.  Returns
- * 0 on success, -1 on failure or if kb is unreachable.  Mirrors
- * memory_prospective_mark_triggered(). */
-int kb_client_memory_prospective_mark_triggered(int64_t id);
-
-/* Sweep expired prospective memories via aimee-kb.  Returns the number
- * expired (0 on failure / kb unreachable).  Mirrors
- * memory_prospective_sweep_expired(). */
-int kb_client_memory_prospective_sweep_expired(void);
-
 /* Run memory maintenance (replay/compact/prune/summarize) inside aimee-kb.
  * Returns the kb response envelope as JSON (caller frees) including the
  * summary object.  Mirrors memory_maintenance_run(). */
@@ -588,24 +563,6 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
 int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *signal_type,
                                          const char *rule, double observed_confidence,
                                          const char *session_id);
-
-/* Read provenance entries for a memory via aimee-kb.  Returns count
- * written into `out` (capped at `max`), or 0 if kb is unreachable.
- * Mirrors memory_get_provenance(). */
-int kb_client_memory_get_provenance(int64_t memory_id, provenance_entry_t *out, int max);
-
-/* Apply a workspace / scope tag to a memory via aimee-kb.  Both return
- * 0 on success, -1 on failure or if kb is unreachable.  Mirror
- * memory_tag_workspace / memory_tag_scope. */
-int kb_client_memory_tag_workspace(int64_t memory_id, const char *workspace);
-int kb_client_memory_tag_scope(int64_t memory_id, const char *scope_type, const char *scope_value);
-
-/* Compute the scope-visibility rank (0-3) for each memory id in `ids`
- * (length `id_count`), filling `out_ranks` with the per-id rank.  Returns
- * the number of ranks filled (0 if kb is unreachable).  Mirrors per-id
- * memory_scope_visibility_rank() in batch form. */
-int kb_client_memory_scope_visibility_rank(const int64_t *ids, int id_count, const char *workspace,
-                                           const char *project, int *out_ranks);
 
 /* Memory-to-memory link CRUD via aimee-kb.  Mirror memory_link_create
  * / _query / _delete.  Return 0/-1 on success/failure for create+delete,

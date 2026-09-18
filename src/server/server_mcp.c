@@ -1,3 +1,4 @@
+#include "modules/kb_client/kb_client_pii.h"
 /* server_mcp.c: handle mcp.call -- dispatches MCP tool calls within the server */
 #include "server_mcp_internal.h"
 #include "server.h"
@@ -931,8 +932,31 @@ cJSON *tool_create_prospective_memory(cJSON *args)
                         ? cJSON_GetObjectItemCaseSensitive(args, "valid_until")->valuestring
                         : "";
 
-   char *envelope =
-       kb_client_memory_prospective_create_json(jt->valuestring, ja->valuestring, ae, af, re, vu);
+   cJSON *create_args = cJSON_CreateObject();
+   int withheld =
+       !create_args ||
+       kb_client_pii_add_string_required(create_args, "trigger_text", jt->valuestring) != 0 ||
+       kb_client_pii_add_string_required(create_args, "action_text", ja->valuestring) != 0 ||
+       kb_client_pii_add_string(create_args, "anchor_entity", ae) != 0 ||
+       kb_client_pii_identifier_sensitive(af);
+   char *envelope = NULL;
+   if (withheld)
+   {
+      cJSON_Delete(create_args);
+      kb_client_memory_audit_note("memory.prospective_create.withheld_pii", 0, NULL, NULL, NULL, 0,
+                                  NULL, 0);
+      envelope = kb_client_pii_withheld_json();
+   }
+   else
+   {
+      if (af)
+         cJSON_AddStringToObject(create_args, "anchor_file", af);
+      if (re)
+         cJSON_AddStringToObject(create_args, "recurrence", re);
+      if (vu)
+         cJSON_AddStringToObject(create_args, "valid_until", vu);
+      envelope = kb_v1_action_request("memory.prospective_create", create_args);
+   }
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *status = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;
@@ -978,7 +1002,11 @@ cJSON *tool_list_prospective_memories(cJSON *args)
    if (limit > 256)
       limit = 256;
 
-   char *envelope = kb_client_memory_prospective_list_json(state, limit);
+   cJSON *list_args = cJSON_CreateObject();
+   if (state && state[0])
+      cJSON_AddStringToObject(list_args, "state", state);
+   cJSON_AddNumberToObject(list_args, "limit", limit);
+   char *envelope = kb_v1_action_request("memory.prospective_list", list_args);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *prospectives = resp ? cJSON_GetObjectItemCaseSensitive(resp, "prospectives") : NULL;
@@ -1002,7 +1030,9 @@ cJSON *tool_complete_prospective_memory(cJSON *args)
    if (!cJSON_IsNumber(ji))
       return text_content("error: missing 'id'");
    int64_t id = (int64_t)ji->valuedouble;
-   char *envelope = kb_client_memory_prospective_complete_json(id);
+   cJSON *complete_args = cJSON_CreateObject();
+   cJSON_AddNumberToObject(complete_args, "id", (double)(id));
+   char *envelope = kb_v1_action_request("memory.prospective_complete", complete_args);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *status = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;

@@ -1306,33 +1306,25 @@ static cJSON *mcph_memory_provenance(struct mcp_call *c)
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(c->jargs, "memory_id");
    if (!cJSON_IsNumber(jid))
       return text_content("error: memory_provenance requires 'memory_id'");
-   const int max = 200;
-   provenance_entry_t *ents = calloc((size_t)max, sizeof(*ents));
-   if (!ents)
-      return text_content("error: out of memory");
-   int n = kb_client_memory_get_provenance((int64_t)jid->valuedouble, ents, max);
-   if (n < 0)
+   cJSON *args = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(args);
+   cJSON_AddNumberToObject(args, "memory_id", jid->valuedouble);
+   cJSON_AddNumberToObject(args, "max", 200);
+   char *json = kb_v1_action_request("memory.get_provenance", args);
+   cJSON *response = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   cJSON *entries = cJSON_GetObjectItemCaseSensitive(response, "entries");
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0 || !cJSON_IsArray(entries))
    {
-      free(ents);
+      cJSON_Delete(response);
       return mcph_kb_last_result("memory provenance returned no result");
    }
+   int count = cJSON_GetArraySize(entries);
    cJSON *result = cJSON_CreateObject();
-   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
-   cJSON *arr = cJSON_AddArrayToObject(result, "provenance");
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *e = cJSON_CreateObject();
-      cJSON_AddNumberToObject(e, "id", (double)ents[i].id);
-      cJSON_AddStringToObject(e, "action", ents[i].action);
-      if (ents[i].session_id[0])
-         cJSON_AddStringToObject(e, "session_id", ents[i].session_id);
-      if (ents[i].details[0])
-         cJSON_AddStringToObject(e, "details", ents[i].details);
-      cJSON_AddStringToObject(e, "created_at", ents[i].created_at);
-      cJSON_AddItemToArray(arr, e);
-   }
-   cJSON_AddNumberToObject(result, "count", n);
-   free(ents);
+   cJSON_AddStringToObject(result, "status", count > 0 ? "ok" : "empty");
+   cJSON_AddNumberToObject(result, "count", count);
+   cJSON_AddItemToObject(result, "provenance", cJSON_DetachItemViaPointer(response, entries));
+   cJSON_Delete(response);
    return json_result_content(result);
 }
 

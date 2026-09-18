@@ -145,13 +145,33 @@ static size_t session_append_scope_section(const memory_t *rows, int n_rows, cha
 
    /* Batch the per-row visibility rank lookup into a single aimee-kb RPC. */
    int n_lookup = n_rows < max_items ? n_rows : max_items;
-   int64_t lookup_ids[32];
    int lookup_ranks[32] = {0};
-   for (int i = 0; i < n_lookup; i++)
-      lookup_ids[i] = rows[i].id;
    if (n_lookup > 0)
-      kb_client_memory_scope_visibility_rank(lookup_ids, n_lookup, workspace, project,
-                                             lookup_ranks);
+   {
+      cJSON *rank_args = cJSON_CreateObject();
+      cJSON *ids = cJSON_AddArrayToObject(rank_args, "ids");
+      for (int i = 0; i < n_lookup; i++)
+         cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)rows[i].id));
+      if (workspace)
+         cJSON_AddStringToObject(rank_args, "workspace", workspace);
+      if (project)
+         cJSON_AddStringToObject(rank_args, "project", project);
+      char *json = kb_v1_action_request("memory.scope_visibility_rank", rank_args);
+      cJSON *reply = json ? cJSON_Parse(json) : NULL;
+      free(json);
+      cJSON *ranks = cJSON_GetObjectItemCaseSensitive(reply, "ranks");
+      cJSON *status = cJSON_GetObjectItemCaseSensitive(reply, "status");
+      if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsArray(ranks))
+      {
+         for (int i = 0; i < n_lookup; i++)
+         {
+            cJSON *rank = cJSON_GetArrayItem(ranks, i);
+            if (cJSON_IsNumber(rank))
+               lookup_ranks[i] = rank->valueint;
+         }
+      }
+      cJSON_Delete(reply);
+   }
 
    for (int i = 0; i < n_rows && item_count < max_items; i++)
    {

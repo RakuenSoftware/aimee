@@ -631,12 +631,6 @@ static void test_every_content_wrapper_screens(void)
    free(json);
    PII_CASE("notes.create(title)", json = kb_client_note_create_json(secret, "c", "tag", "a"));
    free(json);
-   PII_CASE("memory.prospective_create",
-            json = kb_client_memory_prospective_create_json(secret, "do it", "", "", "", ""));
-   free(json);
-   PII_CASE("memory.prospective_create(action)",
-            json = kb_client_memory_prospective_create_json("when", secret, "", "", "", ""));
-   free(json);
    PII_CASE("curiosity.create",
             json = kb_client_curiosity_create_json("gap", "", "topic", secret, 1.0, 1.0, "s"));
    free(json);

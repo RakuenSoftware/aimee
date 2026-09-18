@@ -1822,7 +1822,11 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
                   long long id =
                       (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
                   if (id > 0)
-                     kb_client_memory_prospective_mark_triggered((int64_t)id);
+                  {
+                     cJSON *trigger_args = cJSON_CreateObject();
+                     cJSON_AddNumberToObject(trigger_args, "id", (double)id);
+                     free(kb_v1_action_request("memory.prospective_mark_triggered", trigger_args));
+                  }
                }
             }
             cJSON_Delete(recall);
@@ -1841,22 +1845,38 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
          int cap_matches = config_memory_prospective_max_matches() > 0
                                ? config_memory_prospective_max_matches()
                                : 3;
-         if (cap_matches > MEMORY_PROSPECTIVE_MAX_MATCHES)
-            cap_matches = MEMORY_PROSPECTIVE_MAX_MATCHES;
-         memory_prospective_t triggered[MEMORY_PROSPECTIVE_MAX_MATCHES];
-         int n =
-             kb_client_memory_prospective_match(custom_prompt, NULL, NULL, triggered, cap_matches);
-         if (n > 0)
+         cJSON *match_args = cJSON_CreateObject();
+         cJSON_AddStringToObject(match_args, "turn_text", custom_prompt ? custom_prompt : "");
+         cJSON_AddNumberToObject(match_args, "max", cap_matches);
+         char *matches_json = kb_v1_action_request("memory.prospective_match", match_args);
+         cJSON *response = matches_json ? cJSON_Parse(matches_json) : NULL;
+         free(matches_json);
+         cJSON *matches = cJSON_GetObjectItemCaseSensitive(response, "matches");
+         cJSON *status = cJSON_GetObjectItemCaseSensitive(response, "status");
+         if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 &&
+             cJSON_IsArray(matches) && cJSON_GetArraySize(matches) > 0)
          {
             ctx_appendf(buf, cap, &pos, "# Reminders\n");
-            for (int i = 0; i < n && pos < cap - 256; i++)
+            cJSON *item = NULL;
+            cJSON_ArrayForEach(item, matches)
             {
-               ctx_appendf(buf, cap, &pos, "- %s (when: %s)\n", triggered[i].action_text,
-                           triggered[i].trigger_text);
-               kb_client_memory_prospective_mark_triggered(triggered[i].id);
+               if (pos >= cap - 256)
+                  break;
+               const char *action =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "action_text"));
+               const char *trigger =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "trigger_text"));
+               cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
+               if (!action || !trigger || !cJSON_IsNumber(id) || id->valuedouble <= 0)
+                  continue;
+               ctx_appendf(buf, cap, &pos, "- %s (when: %s)\n", action, trigger);
+               cJSON *trigger_args = cJSON_CreateObject();
+               cJSON_AddNumberToObject(trigger_args, "id", id->valuedouble);
+               free(kb_v1_action_request("memory.prospective_mark_triggered", trigger_args));
             }
             ctx_appendf(buf, cap, &pos, "\n");
          }
+         cJSON_Delete(response);
       }
    }
 
