@@ -14,6 +14,7 @@
 static int g_runtime_failure;
 static int g_scope_active;
 static int g_evidence_enabled;
+static int g_assembly_budget = 1200;
 
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
                                                     int timeout_ms, cJSON **result)
@@ -27,6 +28,29 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
       return g_runtime_failure == 1 ? -1 : 1;
    }
    return module_runtime_fixture_call(request, result);
+}
+
+static cJSON *fixture_runtime(const char *operation)
+{
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", operation);
+   cJSON *reply = NULL;
+   assert(module_runtime_fixture_call(request, &reply) == 1);
+   cJSON_Delete(request);
+   return reply;
+}
+static void fixture_reset_tasks(void)
+{
+   cJSON_Delete(fixture_runtime("ingress-task-reset"));
+}
+static long long fixture_recall_unavailable_total(void)
+{
+   cJSON *reply = fixture_runtime("ingress-metrics");
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(reply, "recall_unavailable_total");
+   assert(cJSON_IsNumber(value));
+   long long total = (long long)value->valuedouble;
+   cJSON_Delete(reply);
+   return total;
 }
 
 static const char *g_context_mode = "observe";
@@ -218,7 +242,7 @@ const char *config_code_context_mode(void)
 
 int config_ingress_preinject_assembly_budget(void)
 {
-   return 1200;
+   return g_assembly_budget;
 }
 
 int config_ingress_compress_enabled(void)
@@ -307,65 +331,9 @@ int platform_random_bytes(void *buf, size_t len)
    return 0;
 }
 
-static void test_format_task_context_strict_contract(void)
-{
-   const char *ok = "{\"status\":\"ok\",\"project\":\"active-project\",\"generation\":7,"
-                    "\"freshness\":\"current\",\"resolved\":true,"
-                    "\"max_results\":4,\"max_tokens\":1200,\"item_count\":2,"
-                    "\"answerability\":{\"decision\":\"answerable\"},\"results\":[{"
-                    "\"project\":\"active-project\",\"file_path\":\"src/local.c\","
-                    "\"generation\":7,\"freshness\":\"current\",\"confidence\":0.95,"
-                    "\"accepted\":true,\"provenance\":[\"code\",\"graph\"],"
-                    "\"span\":{\"kind\":\"line\",\"line_start\":12,\"line_end\":12},"
-                    "\"snippet\":\"int local_answer(void);\"}],\"why\":[{"
-                    "\"memory_id\":9,\"content\":\"Use the local resolver.\","
-                    "\"scope\":\"project\",\"provenance\":\"memory\","
-                    "\"confidence\":0.9,\"anchor\":{\"project\":\"active-project\","
-                    "\"file_path\":\"src/local.c\",\"generation\":7,"
-                    "\"freshness\":\"current\"}}]}";
-   int count = 0;
-   double confidence = 0.0;
-   char *packet = ingress_preinject_format_task_context(ok, "active-project", &count, &confidence);
-   assert(packet && count == 2 && confidence == 0.95);
-   assert(strstr(packet, "task-conditioned code; project=active-project; generation=7") != NULL);
-   assert(strstr(packet, "src/local.c:12") != NULL);
-   assert(strstr(packet, "provenance=code,graph") != NULL);
-   assert(strstr(packet, "memory[project") != NULL);
-   free(packet);
-
-   const char *no_answer =
-       "{\"status\":\"no_answer\",\"project\":\"active-project\",\"generation\":7,"
-       "\"freshness\":\"current\",\"resolved\":true,"
-       "\"answerability\":{\"decision\":\"no_answer\"},\"results\":[],\"why\":[]}";
-   assert(ingress_preinject_format_task_context(no_answer, "active-project", NULL, NULL) == NULL);
-
-   char *wrong = strdup(ok);
-   char *project = strstr(wrong, "active-project");
-   memcpy(project, "foreign-projec", 14);
-   assert(ingress_preinject_format_task_context(wrong, "active-project", NULL, NULL) == NULL);
-   free(wrong);
-
-   char *high_code_confidence = strdup(ok);
-   char *code_confidence = strstr(high_code_confidence, "0.95");
-   assert(code_confidence != NULL);
-   code_confidence[0] = '1';
-   assert(ingress_preinject_format_task_context(high_code_confidence, "active-project", NULL,
-                                                NULL) == NULL);
-   free(high_code_confidence);
-
-   char *high_memory_confidence = strdup(ok);
-   char *memory_confidence = strstr(high_memory_confidence, "0.9,\"anchor\"");
-   assert(memory_confidence != NULL);
-   memory_confidence[0] = '1';
-   assert(ingress_preinject_format_task_context(high_memory_confidence, "active-project", NULL,
-                                                NULL) == NULL);
-   free(high_memory_confidence);
-   printf("format_task_context_strict_contract OK\n");
-}
-
 static void test_task_context_mode_and_first_turn_gate(void)
 {
-   ingress_preinject_task_state_reset();
+   fixture_reset_tasks();
    ingress_preinject_set_session_id("session-task-1");
    g_context_calls = 0;
    g_facts_calls = 0;
@@ -394,7 +362,7 @@ static void test_task_context_mode_and_first_turn_gate(void)
 
    /* Observe retrieves and validates the packet but preserves the existing
     * project-local preview bytes. */
-   ingress_preinject_task_state_reset();
+   fixture_reset_tasks();
    g_context_mode = "observe";
    char *observed = ingress_preinject_build("fix local resolver", 0);
    assert(observed && strstr(observed, "recommended (code):") != NULL);
@@ -416,21 +384,21 @@ static void test_task_context_mode_and_first_turn_gate(void)
  * those bytes are a cache prefix and must not change during an outage. */
 static void test_recall_unavailable_is_counted_apart_from_empty(void)
 {
-   ingress_preinject_task_state_reset();
+   fixture_reset_tasks();
    ingress_preinject_set_session_id("session-degraded");
    g_context_mode = "off"; /* isolate the memory layer from the task-context path */
    g_memory_returns_none = 1;
 
    /* Quiet turn: recall reached the service and it had nothing. Not a failure. */
    g_context_result = KB_CLIENT_RESULT_OK;
-   long long before_quiet = ingress_preinject_recall_unavailable_total();
+   long long before_quiet = fixture_recall_unavailable_total();
    char *quiet = ingress_preinject_build("what did we decide about retries", 0);
-   assert(ingress_preinject_recall_unavailable_total() == before_quiet);
+   assert(fixture_recall_unavailable_total() == before_quiet);
 
    /* Outage: same empty result, different cause. This must be counted. */
    g_context_result = KB_CLIENT_RESULT_UNAVAILABLE;
    char *outage = ingress_preinject_build("what did we decide about retries", 0);
-   assert(ingress_preinject_recall_unavailable_total() == before_quiet + 1);
+   assert(fixture_recall_unavailable_total() == before_quiet + 1);
 
    /* The envelope is unchanged by the outage: whatever the quiet turn produced,
     * the degraded turn produces byte-for-byte. The signal is the counter and the
@@ -447,9 +415,9 @@ static void test_recall_unavailable_is_counted_apart_from_empty(void)
 
    /* Recovery does not keep counting. */
    g_context_result = KB_CLIENT_RESULT_OK;
-   long long before_recovery = ingress_preinject_recall_unavailable_total();
+   long long before_recovery = fixture_recall_unavailable_total();
    char *recovered = ingress_preinject_build("what did we decide about retries", 0);
-   assert(ingress_preinject_recall_unavailable_total() == before_recovery);
+   assert(fixture_recall_unavailable_total() == before_recovery);
    free(recovered);
 
    g_memory_returns_none = 0;
@@ -460,7 +428,7 @@ static void test_recall_unavailable_is_counted_apart_from_empty(void)
 
 static void test_unavailable_task_context_retries_after_recovery(void)
 {
-   ingress_preinject_task_state_reset();
+   fixture_reset_tasks();
    ingress_preinject_set_session_id("session-recovery");
    g_context_mode = "on";
    g_context_calls = 0;
@@ -629,7 +597,7 @@ static void test_default_temporal_context_injection(void)
    /* The repository default is strict code-context mode. Temporal learning is
     * an independently labelled and scope-filtered channel, so strict mode must
     * not silently turn the default back off. */
-   ingress_preinject_task_state_reset();
+   fixture_reset_tasks();
    ingress_preinject_set_session_id("session-temporal-strict");
    g_context_mode = "on";
    env = ingress_preinject_build("recover the strict deployment", 0);
@@ -746,11 +714,6 @@ static void test_go_owner_unavailable(void)
    for (int failure = 1; failure <= 2; failure++)
    {
       g_runtime_failure = failure;
-      int count = 9;
-      double confidence = 1;
-      assert(ingress_preinject_format_task_context("{}", "active-project", &count, &confidence) ==
-             NULL);
-      assert(count == 0 && confidence == 0);
       g_context_mode = "on";
       ingress_preinject_set_session_id("owner-unavailable");
       int calls = g_context_calls;
@@ -791,14 +754,33 @@ static void test_scope_cleanup_on_failed_event_id(void)
    printf("scope_cleanup_on_failed_event_id OK\n");
 }
 
+static void test_small_budget_does_not_retrieve_or_claim(void)
+{
+   fixture_reset_tasks();
+   ingress_preinject_set_session_id("small-budget");
+   g_context_mode = "on";
+   g_assembly_budget = 384;
+   int calls = g_context_calls;
+   assert(ingress_preinject_build("fix local resolver", 0) == NULL);
+   assert(g_context_calls == calls && !g_scope_active);
+   g_assembly_budget = 1200;
+   char *env = ingress_preinject_build("fix local resolver", 0);
+   assert(env && strstr(env, "task-conditioned code") != NULL);
+   assert(g_context_calls == calls + 1 && !g_scope_active);
+   free(env);
+   ingress_preinject_set_session_id(NULL);
+   g_context_mode = "observe";
+   printf("small_budget_does_not_retrieve_or_claim OK\n");
+}
+
 int main(void)
 {
+   test_small_budget_does_not_retrieve_or_claim();
    test_scope_cleanup_on_failed_event_id();
    test_go_assembly_full_ids_and_integrity();
    test_go_owner_unavailable();
    test_fact_command_failures();
    printf("ingress_preinject: ");
-   test_format_task_context_strict_contract();
    test_task_context_mode_and_first_turn_gate();
    test_unavailable_task_context_retries_after_recovery();
    test_recall_unavailable_is_counted_apart_from_empty();

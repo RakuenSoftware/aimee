@@ -14,6 +14,7 @@ import (
 // Evaluated outcomes stay separate: unnecessary recall cannot cancel missed recall.
 type gatewayState struct {
 	tasks             ingressTaskState
+	recallUnavailable atomic.Uint64
 	predictedSkip     atomic.Uint64
 	predictedRetrieve atomic.Uint64
 	wronglySkipped    atomic.Uint64

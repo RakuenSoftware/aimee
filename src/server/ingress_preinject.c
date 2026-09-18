@@ -31,8 +31,6 @@
 
 #define INGRESS_AUDIT_CONTEXT_FILE            "audit_context.txt"
 #define INGRESS_AUDIT_CONTEXT_MAX_AGE_SECONDS (6 * 60 * 60)
-#define INGRESS_DEFAULT_ASSEMBLY_BUDGET       6144
-#define INGRESS_FOOTER_RESERVE_BYTES          384
 
 /* Per-request disable, set by the HTTP layer from the `x-aimee-preinject: 0`
  * header. Thread-local: the ingress runs the turn synchronously on the request
@@ -80,16 +78,10 @@ const char *ingress_preinject_turn_id(void)
 
 static __thread char g_session_id[64] = "";
 
-/* Transitional host transport for the remaining ingress caller. Task tracking,
- * validation and rendering all execute in the same supervised Go owner. */
-static cJSON *ingress_runtime_request(const char *operation, const char *session,
-                                      const char *project, const char *query)
+/* Host transport only. The supplied request is consumed; all ingress policy
+ * and state live in the shared Go owner. */
+static cJSON *ingress_command(cJSON *request)
 {
-   cJSON *request = cJSON_CreateObject();
-   cJSON_AddStringToObject(request, "operation", operation);
-   cJSON_AddStringToObject(request, "session", session ? session : "");
-   cJSON_AddStringToObject(request, "project", project ? project : "");
-   cJSON_AddStringToObject(request, "query", query ? query : "");
    cJSON *response = NULL;
    int rc =
        aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 500, &response);
@@ -116,42 +108,6 @@ const char *ingress_preinject_session_id(void)
    return g_session_id;
 }
 
-void ingress_preinject_task_state_reset(void)
-{
-   cJSON_Delete(ingress_runtime_request("ingress-task-reset", NULL, NULL, NULL));
-}
-
-static int ingress_preinject_first_task_turn(const char *session, const char *project,
-                                             const char *query)
-{
-   cJSON *response = ingress_runtime_request("ingress-task-claim", session, project, query);
-   int fetch = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "fetch"));
-   cJSON_Delete(response);
-   return fetch;
-}
-
-/* Turns whose memory recall could not reach the knowledge service, as opposed to
- * turns that legitimately recalled nothing. Process-local and monotonic; read
- * through ingress_preinject_recall_unavailable_total(). A non-zero and climbing
- * value means agents are being handed envelopes with no memory previews because
- * the dependency is down -- which reads identically to "nothing to recall" at
- * every surface unless something counts it. */
-static long long ingress_recall_unavailable_total = 0;
-
-long long ingress_preinject_recall_unavailable_total(void)
-{
-   return ingress_recall_unavailable_total;
-}
-
-/* A first/new-task marker is claimed before retrieval so concurrent turns do
- * not duplicate packets. If that one retrieval never reached the dependency,
- * remove only its exact session/project marker: a related follow-up may then
- * use the breaker's single recovery probe without restarting the client. */
-static void ingress_preinject_rearm_unavailable(const char *session, const char *project)
-{
-   cJSON_Delete(ingress_runtime_request("ingress-task-rearm", session, project, NULL));
-}
-
 static long ingress_elapsed_ms(const struct timespec *start, const struct timespec *end)
 {
    return (long)(end->tv_sec - start->tv_sec) * 1000L +
@@ -172,46 +128,6 @@ static void ingress_query_fingerprint(const char *q, char *out, size_t len)
       h *= 1099511628211ULL; /* FNV-1a prime */
    }
    snprintf(out, len, "q:%016llx", (unsigned long long)h);
-}
-
-/* The host supplies the retrieved packet and verified active project. Validation
- * and rendering belong to the shared Go memory owner. No native fallback. */
-char *ingress_preinject_format_task_context(const char *json, const char *active_project,
-                                            int *item_count_out, double *confidence_out)
-{
-   if (item_count_out)
-      *item_count_out = 0;
-   if (confidence_out)
-      *confidence_out = 0;
-   if (!json || !active_project)
-      return NULL;
-   cJSON *packet = cJSON_Parse(json);
-   if (!packet)
-      return NULL;
-   cJSON *request = cJSON_CreateObject();
-   cJSON_AddStringToObject(request, "operation", "ingress-task-packet");
-   cJSON_AddStringToObject(request, "project", active_project);
-   cJSON_AddItemToObject(request, "packet", packet);
-   cJSON *response = NULL;
-   int rc =
-       aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 500, &response);
-   cJSON_Delete(request);
-   char *result = NULL;
-   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
-   const char *block = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block"));
-   const cJSON *count = cJSON_GetObjectItemCaseSensitive(response, "item_count");
-   const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(response, "confidence");
-   if (rc == 1 && status && strcmp(status, "ok") == 0 && block && block[0] &&
-       cJSON_IsNumber(count) && cJSON_IsNumber(confidence))
-   {
-      result = strdup(block);
-      if (result && item_count_out)
-         *item_count_out = count->valueint;
-      if (result && confidence_out)
-         *confidence_out = confidence->valuedouble;
-   }
-   cJSON_Delete(response);
-   return result;
 }
 
 static char *ingress_preinject_read_audit_context(void)
@@ -334,115 +250,85 @@ char *ingress_preinject_last_assistant_from_messages(const cJSON *messages)
 
 char *ingress_preinject_build(const char *query, int request_disabled)
 {
-   if (request_disabled || g_request_disabled)
-      return NULL;
-   if (!query || !query[0])
-      return NULL;
-   /* The envelope carries code/memory preview, typed-fact, and temporal-learning
-    * layers. The temporal assembler is default-on and remains governed by the
-    * ingress master gate and per-request opt-out.
-    *
-    * Typed facts used to be KB-OWNED (proposal §8): aimee-server asked the KB
-    * through kb_client_typed_facts_enabled() rather than reading a config of its
-    * own. That gate is retired and the layer is unconditional, so the question
-    * had one answer and the seam is gone with it -- leaving a function that
-    * always returns 1 would keep the shape of an option that no longer exists.
-    * Facts now depend only on having an active scope. */
-   int preview_configured = config_ingress_preinject_enabled();
-   int temporal_configured = preview_configured;
    char active_workspace[512] = "";
    char active_project[512] = "";
    int active_scope =
        ingress_preinject_resolve_active_scope(active_workspace, sizeof(active_workspace),
                                               active_project, sizeof(active_project)) == 0;
-   /* Agent ingress is deliberately fail-closed without an active repository:
-    * neither code nor memory may silently broaden to global recall. */
-   int preview_on = preview_configured && active_scope;
-   int facts_on = active_scope;
-   int temporal_on = temporal_configured && active_scope;
-
-   const char *mode_name = config_code_context_mode();
-   int context_mode = 1; /* invalid/blank values fail safely to observe */
-   if (mode_name && strcmp(mode_name, "off") == 0)
-      context_mode = 0;
-   else if (mode_name && strcmp(mode_name, "on") == 0)
-      context_mode = 2;
-   else if (mode_name && mode_name[0] && strcmp(mode_name, "observe") != 0)
-      LOG_WARN("ingress-context", "invalid code_context_mode=%s; using observe", mode_name);
-
-   /* Strict `on` task packets may contain only validated current-project code
-    * evidence. Typed facts are user/global evidence today, so they cannot
-    * become a silent fallback when strict code retrieval abstains. Temporal
-    * learning is a separately labelled, scope-filtered channel with explicit
-    * trust/authority boundaries, and remains default-on in every code-context
-    * mode. */
-   if (context_mode == 2)
-      facts_on = 0;
-   if (!preview_on && !facts_on && !temporal_on)
-      return NULL;
-
-   kb_client_memory_scope_context_set(active_workspace, active_project, 0);
-   int first_task_turn = preview_on && context_mode != 0 &&
-                         ingress_preinject_first_task_turn(g_session_id, active_project, query);
-   char *task_packet = NULL;
-   int task_items = 0;
-   double task_confidence = 0.0;
-   int context_status = -1;
-   if (first_task_turn)
-   {
-      struct timespec context_started, context_finished;
-      clock_gettime(CLOCK_MONOTONIC, &context_started);
-      char *context_json = kb_client_code_context(query, NULL, active_project, &context_status);
-      clock_gettime(CLOCK_MONOTONIC, &context_finished);
-      if (kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE)
-         ingress_preinject_rearm_unavailable(g_session_id, active_project);
-      long context_latency_ms = ingress_elapsed_ms(&context_started, &context_finished);
-      if (context_json && context_status == 200)
-         task_packet = ingress_preinject_format_task_context(context_json, active_project,
-                                                             &task_items, &task_confidence);
-      if (context_latency_ms > 2000)
-      {
-         free(task_packet);
-         task_packet = NULL;
-         task_items = 0;
-      }
-      const char *effective_mode = context_mode == 2 && task_packet ? "on" : "observe";
-      LOG_INFO("ingress-context",
-               "mode=%s effective=%s project=%s status=%d latency_ms=%ld decision=%s items=%d "
-               "visible=%d",
-               context_mode == 2 ? "on" : "observe", effective_mode, active_project, context_status,
-               context_latency_ms, task_packet ? "answerable" : "suppressed", task_items,
-               context_mode == 2 && task_packet != NULL);
-      free(context_json);
-      if (context_mode == 1)
-      {
-         free(task_packet);
-         task_packet = NULL; /* observe changes telemetry, never model-visible bytes */
-      }
-   }
-   /* `on` is task-packet-only: no weak/global legacy substitution on a
-    * no_answer/unavailable turn, and no repeated packet on same-task followups. */
-   int legacy_preview_on = preview_on && context_mode != 2;
-   int configured_budget = config_ingress_preinject_assembly_budget() > 0
-                               ? config_ingress_preinject_assembly_budget()
-                               : INGRESS_DEFAULT_ASSEMBLY_BUDGET;
-   size_t envelope_budget = (size_t)configured_budget;
-   if (envelope_budget <= INGRESS_FOOTER_RESERVE_BYTES)
-   {
-      free(task_packet);
-      kb_client_memory_scope_context_clear();
-      return NULL;
-   }
-   cJSON *assembly = cJSON_CreateObject();
-   cJSON_AddStringToObject(assembly, "operation", "ingress-assemble");
-   cJSON_AddNumberToObject(assembly, "budget", (double)envelope_budget);
    const request_context_t *rctx = request_context_get();
-   cJSON_AddBoolToObject(assembly, "compress",
-                         config_ingress_compress_enabled() && !(rctx && rctx->compress_disabled));
-   cJSON_AddNumberToObject(assembly, "compress_min", config_ingress_compress_min_chars());
-   cJSON_AddStringToObject(assembly, "task_block", task_packet ? task_packet : "");
-   cJSON_AddNumberToObject(assembly, "task_confidence", task_confidence);
-   free(task_packet);
+   const char *mode = config_code_context_mode();
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "ingress-begin");
+   cJSON_AddStringToObject(request, "query", query ? query : "");
+   cJSON_AddStringToObject(request, "session", g_session_id);
+   cJSON_AddStringToObject(request, "project", active_project);
+   cJSON_AddBoolToObject(request, "active_scope", active_scope);
+   cJSON_AddBoolToObject(request, "disabled", request_disabled || g_request_disabled);
+   cJSON_AddBoolToObject(request, "preview_enabled", config_ingress_preinject_enabled());
+   cJSON_AddStringToObject(request, "mode", mode ? mode : "");
+   cJSON_AddNumberToObject(request, "budget", config_ingress_preinject_assembly_budget());
+   cJSON_AddBoolToObject(request, "compress", config_ingress_compress_enabled());
+   cJSON_AddBoolToObject(request, "compress_disabled", rctx && rctx->compress_disabled);
+   cJSON_AddNumberToObject(request, "compress_min", config_ingress_compress_min_chars());
+   cJSON *plan = ingress_command(request);
+   if (!plan)
+   {
+      LOG_WARN("memory", "Go ingress plan unavailable; omitting pre-injection envelope");
+      return NULL;
+   }
+   const char *warning = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "warning"));
+   if (warning)
+      LOG_WARN("ingress-context", "%s", warning);
+   if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "active")))
+   {
+      cJSON_Delete(plan);
+      return NULL;
+   }
+   const cJSON *assembly_plan = cJSON_GetObjectItemCaseSensitive(plan, "assembly");
+   const char *planned_mode = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "mode"));
+   if (!cJSON_IsObject(assembly_plan) || !planned_mode)
+   {
+      cJSON_Delete(plan);
+      return NULL;
+   }
+   cJSON *assembly = cJSON_Duplicate(assembly_plan, 1);
+   int legacy_preview_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "legacy_preview"));
+   int facts_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "facts"));
+   int temporal_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "temporal"));
+   kb_client_memory_scope_context_set(active_workspace, active_project, 0);
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "task")))
+   {
+      int context_status = -1;
+      struct timespec started, finished;
+      clock_gettime(CLOCK_MONOTONIC, &started);
+      char *raw = kb_client_code_context(query, NULL, active_project, &context_status);
+      clock_gettime(CLOCK_MONOTONIC, &finished);
+      cJSON *task = cJSON_CreateObject();
+      cJSON_AddStringToObject(task, "operation", "ingress-task-result");
+      cJSON_AddStringToObject(task, "session", g_session_id);
+      cJSON_AddStringToObject(task, "project", active_project);
+      cJSON_AddStringToObject(task, "mode", planned_mode);
+      cJSON_AddNumberToObject(task, "http_status", context_status);
+      cJSON_AddNumberToObject(task, "elapsed_ms", ingress_elapsed_ms(&started, &finished));
+      cJSON_AddBoolToObject(task, "unavailable",
+                            kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE);
+      cJSON *packet = raw ? cJSON_Parse(raw) : NULL;
+      free(raw);
+      cJSON_AddItemToObject(task, "packet", packet ? packet : cJSON_CreateNull());
+      cJSON *result = ingress_command(task);
+      const char *block = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "block"));
+      const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(result, "confidence");
+      if (block && cJSON_IsNumber(confidence))
+      {
+         cJSON_AddStringToObject(assembly, "task_block", block);
+         cJSON_AddNumberToObject(assembly, "task_confidence", confidence->valuedouble);
+      }
+      const char *message = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "log"));
+      if (message)
+         LOG_INFO("ingress-context", "%s", message);
+      cJSON_Delete(result);
+   }
+   cJSON_Delete(plan);
 
    /* Primary signal: code search over the turn query. The code index is the
     * richest source, so recommended code files lead the envelope; the agent
@@ -468,29 +354,20 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * the advertised memory:<id> handle and the memory_get MCP tool. */
    memory_diagnostic_t mems[5];
    int mem_n = legacy_preview_on ? kb_client_memory_diagnose(query, 5, mems, 5) : 0;
-   /* A zero here has two meanings that must not be conflated: this turn had
-    * nothing worth recalling, or the knowledge service could not answer. Both
-    * produce an envelope with no memory previews, and until now both were
-    * silent -- so a memory outage was indistinguishable from a quiet turn, and
-    * the agent would state that something does not exist when it merely could
-    * not look. session_degraded_notice.c makes exactly this point, but it fires
-    * only at SessionStart; every per-turn injection (webchat, the Codex
-    * /v1/responses path, the Anthropic proxy) had no equivalent.
-    *
-    * Recorded, not injected. The envelope bytes are a cache prefix on the
-    * Anthropic arm, and adding a line to it on an outage would perturb the
-    * cached prefix precisely when the service is already struggling. The
-    * counter and this log line separate the two causes without touching the
-    * request the provider sees. */
-   if (legacy_preview_on && mem_n == 0 &&
-       kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE)
+   if (legacy_preview_on)
    {
-      ingress_recall_unavailable_total++;
-      LOG_WARN("ingress-memory",
-               "memory recall UNAVAILABLE (not empty): the knowledge service did not answer; "
-               "this turn's envelope carries no memory previews. project=%s total=%lld",
-               active_project[0] ? active_project : "-",
-               (long long)ingress_recall_unavailable_total);
+      cJSON *outcome = cJSON_CreateObject();
+      cJSON_AddStringToObject(outcome, "operation", "ingress-recall-result");
+      cJSON_AddStringToObject(outcome, "project", active_project);
+      cJSON_AddNumberToObject(outcome, "count", mem_n);
+      cJSON_AddBoolToObject(outcome, "unavailable",
+                            kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE);
+      cJSON *result = ingress_command(outcome);
+      const char *message =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "warning"));
+      if (message)
+         LOG_WARN("ingress-memory", "%s", message);
+      cJSON_Delete(result);
    }
    cJSON *memories = cJSON_AddArrayToObject(assembly, "memories");
    for (int i = 0; i < mem_n; i++)
@@ -513,7 +390,6 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * having to call the get_context_block tool. Gated kb-side on
     * the typed-fact layer (returns NULL when there are none), so this is a no-op
     * then. User-asserted facts are high-signal, so they lift confidence. */
-   cJSON_AddBoolToObject(assembly, "facts_requested", facts_on);
    if (facts_on)
    {
       cJSON *request = cJSON_CreateObject();
@@ -613,14 +489,10 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    free(audit);
    kb_client_memory_scope_context_clear();
 
-   cJSON *response = NULL;
-   int rc =
-       aimee_module_commands_dispatch_internal_timeout("memory.runtime", assembly, 500, &response);
-   cJSON_Delete(assembly);
-   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+   cJSON *response = ingress_command(assembly);
    const char *envelope =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "envelope"));
-   if (rc != 1 || !status || strcmp(status, "ok") != 0 || !envelope)
+   if (!envelope)
    {
       cJSON_Delete(response);
       LOG_WARN("memory", "Go ingress assembly unavailable; omitting pre-injection envelope");

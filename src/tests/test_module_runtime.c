@@ -882,6 +882,23 @@ static void smoke_host_gateway_plan(bus_client_t *host)
    assert(strstr(envelope, "memory:9223372036854775807") != NULL);
    assert(strstr(envelope, "local.go\n    > local resolver") != NULL);
    cJSON_Delete(plan);
+   plan = host_plan(
+       &client, "{\"operation\":\"ingress-begin\",\"session\":\"live-plan\",\"project\":\"p\","
+                "\"query\":\"fix resolver\","
+                "\"active_scope\":true,\"preview_enabled\":true,\"mode\":\"on\",\"budget\":1200}");
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "active")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "task")));
+   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(plan, "legacy_preview")));
+   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(plan, "facts")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "temporal")));
+   cJSON_Delete(plan);
+   plan = host_plan(&client, "{\"operation\":\"ingress-recall-result\",\"project\":\"p\",\"count\":"
+                             "0,\"unavailable\":true}");
+   assert(strstr(json_string(plan, "warning"), "UNAVAILABLE (not empty)") != NULL);
+   cJSON_Delete(plan);
+   plan = host_plan(&client, "{\"operation\":\"ingress-metrics\"}");
+   assert(cJSON_GetObjectItemCaseSensitive(plan, "recall_unavailable_total")->valueint == 1);
+   cJSON_Delete(plan);
    aimee_module_client_destroy(&client);
    puts("memory: authenticated host/Go process gateway plans and ingress policy passed");
 }

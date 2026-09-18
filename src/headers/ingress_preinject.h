@@ -40,19 +40,6 @@ char *ingress_preinject_last_assistant_from_messages(const cJSON *messages);
  * confidence tier, and returns a malloc'd <aimee-context> envelope. */
 char *ingress_preinject_build(const char *query, int request_disabled);
 
-/* Turns whose memory recall could not reach the knowledge service, as distinct
- * from turns that recalled nothing. Both yield an envelope with no memory
- * previews, so without this counter an outage is indistinguishable from a quiet
- * turn at every per-turn surface -- and an agent handed an empty recall will
- * report that something does not exist when it merely could not look.
- * (session_degraded_notice.c makes the same point, but only at SessionStart.)
- *
- * Deliberately a counter and a log line rather than a marker inside the
- * envelope: those bytes are a cache prefix on the Anthropic arm, and perturbing
- * them during an outage would cost prompt-cache hits exactly when the service is
- * already degraded. Process-local and monotonic. */
-long long ingress_preinject_recall_unavailable_total(void);
-
 /* Merge `envelope` with `instructions` (the request system prompt), returning a
  * fresh malloc'd string the caller frees. Default: PREPENDS the envelope. When
  * the cache-prefix placement lever (ingress_cache_placement_enabled, §2) is on,
@@ -106,15 +93,5 @@ const char *ingress_preinject_session_id(void);
  * when an active project is known; callers must not fall back to global recall. */
 int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
                                            size_t project_len);
-
-/* Validate and render a strict /v1/code/context response into a compact task
- * packet. Returns NULL on no_answer, stale/mismatched/incomplete provenance, or
- * when no complete item fits the 1200-token resident budget. */
-char *ingress_preinject_format_task_context(const char *json, const char *active_project,
-                                            int *item_count_out, double *confidence_out);
-
-/* Forget bounded first-task session state. Production does not need to call
- * this; it exists so tests and controlled reloads can start deterministically. */
-void ingress_preinject_task_state_reset(void);
 
 #endif /* DEC_INGRESS_PREINJECT_H */

@@ -485,6 +485,17 @@ injection, and failure to mint an audit event now releases request scope.
 Live tests exercise assembly in both placements. Retrieval selection, audit
 policy and transitional native transport still prevent G0 completion.
 
+Go ingress plans now select scoped retrieval channels, strict/observe/off mode,
+request opt-outs, compression overrides and usable budgets. Task completion in
+Go enforces the two-second latency limit, observe-mode invisibility and retry
+rearming; unavailable-versus-empty recall metrics are atomic Go state. Native
+callers only capture request/config context and invoke the planned connections.
+The native task-format/reset/counter APIs are retired. Budgets too small to
+inject now avoid retrieval and leave the first-task claim available for a later
+usable request. Mode/scope matrices, concurrent telemetry, native byte parity
+and live authenticated-host checks pass in both placements. Audit/placement
+policy and legacy native clients still remain G0 work.
+
 The current inventory is three C sources and five headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 
