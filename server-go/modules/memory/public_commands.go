@@ -313,6 +313,7 @@ func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation
 		request.LimitTokens = int(math.Max(math.Min(value, math.MaxInt32), math.MinInt32))
 	}
 	_ = json.Unmarshal(args["session_start"], &request.SessionStart)
+	request.LimitTokens = recallTokenLimit(request.LimitTokens, request.SessionStart)
 	var scoped bool
 	_ = json.Unmarshal(args["scope_context"], &scoped)
 	if scoped {
@@ -326,6 +327,9 @@ func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	data, status := handleData(options, invocation, encoded)
 	if status != bus.ModuleStatusOK {
+		if status == bus.ModuleStatusCapabilityAbsent || status == bus.ModuleStatusInternal {
+			return commandResult(commandError("unavailable", "memory recall unavailable"))
+		}
 		return nil, status
 	}
 	var response DataResponse

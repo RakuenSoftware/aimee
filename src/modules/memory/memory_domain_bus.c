@@ -105,30 +105,6 @@ int memory_tag_workspace(int64_t id, const char *workspace)
    return memory_tag_scope(id, "workspace", workspace);
 }
 
-static cJSON *domain_payload_call(const char *operation, const char *query, const char *as_of,
-                                  int limit_tokens, int session_start)
-{
-   cJSON *request = domain_request(operation);
-   if (!request || (query && !cJSON_AddStringToObject(request, "query", query)) ||
-       (as_of && !cJSON_AddStringToObject(request, "as_of", as_of)) ||
-       (limit_tokens > 0 && !cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens)) ||
-       !cJSON_AddBoolToObject(request, "session_start", session_start != 0))
-   {
-      cJSON_Delete(request);
-      return NULL;
-   }
-   cJSON *response = domain_call(request);
-   cJSON *payload = response ? cJSON_DetachItemFromObjectCaseSensitive(response, "payload") : NULL;
-   cJSON_Delete(response);
-   return payload;
-}
-
-cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start)
-{
-   return domain_payload_call("recall-bundle", task_hint ? task_hint : "", NULL, limit_tokens,
-                              session_start);
-}
-
 int db2_memory_key_exists(const char *key)
 {
    if (!key || !key[0])

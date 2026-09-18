@@ -130,6 +130,22 @@ dispatcher; the remaining verbs still use their native handlers.
 The command wire tests cover the existing CMPQ/CMPS frame, while Go tests cover
 private scope isolation, mutation defaults, missing records, and typed failures.
 
+Go owns recall section caps, identity-prefix selection, and complete-bundle
+budgeting in both placements. KB recall also includes always-on hard rules and
+the prompt-consumer `memory_id`, `text`, and `why` fields for reminders and
+directives. Unexpired open directives provide the fallback when none match the
+hint; only directives retained in the returned bundle increment surfaced counts,
+within the request transaction. Required reads and counter writes fail the
+request rather than returning an empty successful bundle.
+
+The budget estimate uses four serialized UTF-8 bytes per token, including all
+record aliases and metadata. Defaults remain 600 per turn and 1800 at session
+start, clamped to 64–8192. Whole rows are removed in reverse section priority,
+with hard rules last. If the required empty envelope alone exceeds a tiny budget,
+`budget_exceeded` reports that explicitly. This is the owner's bundle budget;
+the remaining native Server composition still needs final merged-payload
+budgeting during its migration.
+
 KB recall decodes conversation activation snapshots in Go. Cooldown, delay, and
 suppression are applied before each section cap; sticky state can preserve
 relevance but cannot override cooldown. Graph-expanded candidates pass the same

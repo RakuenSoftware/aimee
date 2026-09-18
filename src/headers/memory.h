@@ -1097,36 +1097,6 @@ typedef struct
 
 int memory_lifecycle_counts(memory_lifecycle_counts_t *out);
 
-/* --- Proactive Recall ---
- *
- * Assemble a compact, deterministic "what's relevant right now" bundle
- * that callers can inject into the agent prompt before response
- * generation.  Six ranked sections per the proposal:
- *
- *   1. identity       — long-lived facts about the user (name, role)
- *   2. preferences    — KIND_PREFERENCE rows at L2+
- *   3. active_context — recent L1/L2 facts in the active workspace
- *   4. open_commitments — memories with lifecycle_state='pending'
- *   5. reminders      — matched armed prospective memories
- *   6. directives     — epistemic directives (reserved for when the
- *                        separate directives proposal lands)
- *
- * Each section is budgeted independently so one noisy category cannot
- * crowd out the rest.  All ranking is DB-side — no LLM calls.
- *
- * Default budgets: session-start gets a larger block, per-turn is
- * compact.  The function returns a cJSON object with all six sections
- * and an `explain` array describing why each memory was injected.
- * Caller owns the returned pointer.
- *
- * `task_hint` is the current turn's user text; pass NULL/empty at
- * session start for the larger bundle. */
-#define MEMORY_RECALL_DEFAULT_LIMIT_TOKENS_SESSION 1800
-#define MEMORY_RECALL_DEFAULT_LIMIT_TOKENS_TURN    600
-#define MEMORY_RECALL_MIN_LIMIT_TOKENS             64
-#define MEMORY_RECALL_MAX_LIMIT_TOKENS             8192
-
-struct cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start);
 /* Topic-pivot detection between consecutive user turns.  Pure
  * function — no DB access — so callers can invoke it cheaply and
  * decide whether the per-turn recall block should be re-keyed on the

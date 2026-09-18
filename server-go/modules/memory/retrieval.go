@@ -2,10 +2,8 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 )
 
 type Diagnostic struct {
@@ -75,48 +73,6 @@ func recallItems(records []Record) []RecallRecord {
 	return items
 }
 
-type recallBundle struct {
-	ActivationHeld  int            `json:"activation_held"`
-	Identity        []RecallRecord `json:"identity"`
-	Preferences     []RecallRecord `json:"preferences"`
-	ActiveContext   []RecallRecord `json:"active_context"`
-	OpenCommitments []RecallRecord `json:"open_commitments"`
-	Reminders       []Prospective  `json:"reminders"`
-	Directives      []Directive    `json:"directives"`
-	LimitTokens     int            `json:"limit_tokens"`
-	UsedTokens      int            `json:"used_tokens"`
-	SessionStart    bool           `json:"session_start"`
-	Explain         []any          `json:"explain"`
-}
-
-func retrievalLimit(tokens int, sessionStart bool) int {
-	if tokens <= 0 {
-		if sessionStart {
-			tokens = 1800
-		} else {
-			tokens = 600
-		}
-	}
-	limit := tokens / 96
-	if limit < 4 {
-		limit = 4
-	}
-	if limit > 40 {
-		limit = 40
-	}
-	return limit
-}
-
-func approximateTokens(records ...[]Record) int {
-	bytes := 0
-	for _, group := range records {
-		for _, item := range group {
-			bytes += len(item.Key) + len(item.Content) + 24
-		}
-	}
-	return (bytes + 3) / 4
-}
-
 // recallSource projects the authorized store into one retrieval shape. This is
 // storage adaptation, not a second recall implementation. Personal rows retain
 // their user scope and expiry without exposing the shared store's table.
@@ -133,7 +89,7 @@ func (s *postgresDataStore) recallSource() string {
 func (s *postgresDataStore) recallRecords(ctx context.Context, where string, limit int, args ...any) ([]Record, error) {
 	query := fmt.Sprintf(`SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
 FROM %s WHERE lifecycle_state='active' AND activation_suppressed=0 AND (%s)
-ORDER BY confidence DESC,use_count DESC,updated_at DESC,id DESC LIMIT $%d`, s.recallSource(), where, len(args)+1)
+ORDER BY `+queryScopeOrder+`,confidence DESC,use_count DESC,updated_at DESC,id DESC LIMIT $%d`, s.recallSource(), where, len(args)+1)
 	args = append(args, limit)
 	return s.readRecallRecords(ctx, query, args...)
 }
@@ -154,133 +110,6 @@ func (s *postgresDataStore) readRecallRecords(ctx context.Context, query string,
 		items = append(items, item)
 	}
 	return items, rows.Err()
-}
-
-func (s *postgresDataStore) RecallBundle(ctx context.Context, query string, tokens int, sessionStart bool) (json.RawMessage, error) {
-	return s.recallBundleActivated(ctx, query, tokens, sessionStart, nil)
-}
-
-func (s *postgresDataStore) RecallBundleWithActivation(ctx context.Context, query string, tokens int, sessionStart bool, raw json.RawMessage) (json.RawMessage, error) {
-	var snapshot *ActivationSnapshot
-	if s.placement == PlacementKB {
-		snapshot = parseActivation(raw)
-	}
-	return s.recallBundleActivated(ctx, query, tokens, sessionStart, snapshot)
-}
-
-func (s *postgresDataStore) recallBundleActivated(ctx context.Context, query string, tokens int, sessionStart bool, snapshot *ActivationSnapshot) (json.RawMessage, error) {
-	started := time.Now()
-	defer runtimeMetricState.recallCalls.observe(started)
-	limit := retrievalLimit(tokens, sessionStart)
-	held := 0
-	reasons := make(map[int64]string)
-	fetch := func(where string, limit int, sticky bool, args ...any) ([]Record, error) {
-		if snapshot == nil {
-			return s.recallRecords(ctx, where, limit, args...)
-		}
-		records, why, count, err := s.recallActivated(ctx, snapshot, where, limit, sticky, false, args...)
-		held += count
-		for id, reason := range why {
-			reasons[id] = reason
-		}
-		return records, err
-	}
-	identity, err := fetch(`kind='fact' AND tier IN ('L2','L3','L4','L5') AND
-(key ILIKE '%name%' OR key ILIKE '%role%' OR key ILIKE '%identity%')`, limit/4+1, false)
-	if err != nil {
-		return nil, err
-	}
-	preferences, err := fetch(`kind='preference' AND tier IN ('L2','L3','L4','L5')`, limit/4+1, false)
-	if err != nil {
-		return nil, err
-	}
-	active, err := fetch(`$1='' OR key ILIKE '%'||$1||'%' OR content ILIKE '%'||$1||'%'`, limit/2+1, true, query)
-	if err != nil {
-		return nil, err
-	}
-	if s.placement == PlacementServer && query != "" {
-		active, err = s.Search(ctx, Scope{Type: ScopeUser, Value: "_user"}, query, "", "", limit/2+1)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if s.placement == PlacementKB && query != "" {
-		lexical := active
-		active, err = s.fuseMemoryGraph(ctx, DataRequest{Query: query, IncludeAll: true, Limit: limit/2 + 1}, false, active)
-		if err != nil {
-			return nil, err
-		}
-		if snapshot != nil {
-			var why map[int64]string
-			var count int
-			active, why, count, err = s.activationAfterFusion(ctx, snapshot, active, lexical, limit/2+1)
-			if err != nil {
-				return nil, err
-			}
-			held += count
-			for id, reason := range why {
-				reasons[id] = reason
-			}
-		}
-	}
-	var commitments []Record
-	if snapshot != nil {
-		var why map[int64]string
-		var count int
-		commitments, why, count, err = s.recallActivated(ctx, snapshot, "true", limit/4+1, false, true)
-		held += count
-		for id, reason := range why {
-			reasons[id] = reason
-		}
-	} else {
-		commitments, err = s.readRecallRecords(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
-FROM `+s.recallSource()+` WHERE lifecycle_state='pending' AND activation_suppressed=0 ORDER BY updated_at DESC,id DESC LIMIT $1`, limit/4+1)
-	}
-	if err != nil {
-		return nil, err
-	}
-	reminders := make([]Prospective, 0)
-	directives := make([]Directive, 0)
-	// Structured reminder and directive relations currently belong to the
-	// shared schema. Their absence must not prevent recall from a user store.
-	if s.placement == PlacementKB {
-		reminders, err = s.ProspectiveMatch(ctx, query, "", "", 8)
-		if err != nil {
-			return nil, err
-		}
-		directives, err = s.DirectiveMatch(ctx, query, "", "", 4)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if tokens <= 0 {
-		if sessionStart {
-			tokens = 1800
-		} else {
-			tokens = 600
-		}
-	}
-	bundle := recallBundle{Identity: recallItems(identity), Preferences: recallItems(preferences), ActiveContext: recallItems(active),
-		OpenCommitments: recallItems(commitments), Reminders: reminders, Directives: directives,
-		LimitTokens: tokens, SessionStart: sessionStart, Explain: []any{}}
-	bundle.ActivationHeld = held
-	if snapshot != nil {
-		for _, section := range [][]RecallRecord{bundle.Identity, bundle.Preferences, bundle.ActiveContext, bundle.OpenCommitments} {
-			for i := range section {
-				section[i].ActivationManaged = true
-				section[i].Why = reasons[section[i].ID]
-			}
-		}
-	}
-	bundle.UsedTokens = approximateTokens(identity, preferences, active, commitments)
-	encoded, err := json.Marshal(bundle)
-	if err == nil {
-		runtimeMetricState.recallAssemblies.Add(1)
-		if sessionStart {
-			runtimeMetricState.recallStarts.Add(1)
-		}
-	}
-	return encoded, err
 }
 
 func (s *postgresDataStore) AssembleContext(ctx context.Context, scope Scope, query, blockType string, limit int) (string, error) {

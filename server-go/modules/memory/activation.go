@@ -84,7 +84,7 @@ AND $%d-a.last_turn<=m.activation_sticky_turns)`, turnParam)
 	}
 	query := fmt.Sprintf(`WITH candidates AS (
  SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,
- m.use_count,m.updated_at, %s AS sticky,
+ m.use_count,m.updated_at, `+queryScopeOrder+` AS scope_rank, %s AS sticky,
  (m.activation_suppressed=0 AND $%d>m.activation_delay_turns AND
  (a.last_turn IS NULL OR m.activation_cooldown_turns=0 OR
   $%d-a.last_turn>m.activation_cooldown_turns)) AS eligible
@@ -93,13 +93,13 @@ AND $%d-a.last_turn<=m.activation_sticky_turns)`, turnParam)
  WHERE m.lifecycle_state='%s' AND (%s)
 ), served AS (
  SELECT * FROM candidates WHERE eligible
- ORDER BY confidence+CASE WHEN sticky THEN 0.04 ELSE 0 END DESC,
+ ORDER BY scope_rank,confidence+CASE WHEN sticky THEN 0.04 ELSE 0 END DESC,
  use_count DESC,updated_at DESC,id DESC LIMIT $%d
 )
 SELECT COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'id',id,'scope',jsonb_build_object('type',scope_type,'value',scope_value),
  'tier',tier,'kind',kind,'key',key,'content',content,'confidence',confidence,'sticky',sticky)
- ORDER BY confidence+CASE WHEN sticky THEN 0.04 ELSE 0 END DESC,use_count DESC,updated_at DESC,id DESC)
+ ORDER BY scope_rank,confidence+CASE WHEN sticky THEN 0.04 ELSE 0 END DESC,use_count DESC,updated_at DESC,id DESC)
  FROM served),'[]'::jsonb)::text,
  (SELECT COUNT(*) FROM candidates WHERE NOT eligible)`,
 		sticky, turnParam, turnParam, rowsParam, state, match, limitParam)

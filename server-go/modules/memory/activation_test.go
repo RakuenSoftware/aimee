@@ -69,6 +69,7 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
  cause text,priority bigint,state text,memory_a_id bigint,memory_b_id bigint,resolution_memory_id bigint,
  evidence text,source_session text,surfaced_count bigint,last_surfaced_at text,resolved_at text,
  valid_until text,created_at text,updated_at text);
+ CREATE TEMP TABLE rules(id bigint,polarity text,title text,description text,weight bigint,directive_type text);
  CREATE SCHEMA activation_test;
  CREATE FUNCTION activation_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
  SET LOCAL search_path TO pg_temp,activation_test,public;`)
