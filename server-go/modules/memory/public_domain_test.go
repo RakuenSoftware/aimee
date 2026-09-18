@@ -211,6 +211,12 @@ SET LOCAL ROLE memory_domain_test;`)
 	if privateProfile["mention_count"] != float64(2) || privateProfile["latest_episode"] != "" {
 		t.Fatal(privateProfile)
 	}
+	if got := runPublicCommand(t, client, "get_episode", `{"episode_key":"release","scope_context":true,"project":"private"}`); got["kind"] != "not_found" {
+		t.Fatalf("public episode lookup leaked across project scope: %v", got)
+	}
+	if got := run("get_episode", `{"episode_key":"release","scope_context":true,"project":"app"}`); got["episode"] == nil {
+		t.Fatalf("public scoped episode lookup lost visible result: %v", got)
+	}
 	for _, req := range []DataRequest{
 		{Operation: "provenance-list", ID: 4, Project: "app"},
 		{Operation: "link-query", ID: 1, Project: "app"},

@@ -653,6 +653,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-learning-memory-transport \
                $(TESTPREFIX)/unit-test-memory-reference-transport \
                $(TESTPREFIX)/unit-test-server-memory-get \
+               $(TESTPREFIX)/unit-test-server-memory-domain \
                $(TESTPREFIX)/unit-test-server-prospective \
                $(TESTPREFIX)/unit-test-session-brief \
                $(TESTPREFIX)/unit-test-learning-eval-synthesis \
@@ -7925,4 +7926,7 @@ $(TESTPREFIX)/unit-test-learning-memory-transport: $(OBJDIR)/tests/test_learning
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-memory-reference-transport: $(OBJDIR)/tests/test_memory_reference_transport.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-server-memory-domain: $(OBJDIR)/tests/test_server_memory_domain.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

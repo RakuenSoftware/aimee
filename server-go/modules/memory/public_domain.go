@@ -82,6 +82,7 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 			return invalid("memory.get_episode requires episode_key")
 		}
 		request.Operation = "episode-get"
+		scoped = commandScope(args, &request)
 	case "get_provenance", "link_query":
 		var ok bool
 		request.ID, ok = args.positiveID("memory_id")

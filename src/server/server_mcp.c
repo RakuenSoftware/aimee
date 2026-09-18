@@ -618,125 +618,223 @@ cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
 
 cJSON *tool_search_graph(cJSON *args)
 {
-   cJSON *jq = cJSON_GetObjectItemCaseSensitive(args, "query");
-   cJSON *jl = cJSON_GetObjectItemCaseSensitive(args, "limit");
-   if (!cJSON_IsString(jq))
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "query"));
+   if (!value)
       return text_content("error: missing 'query' parameter");
-
-   int limit = cJSON_IsNumber(jl) ? jl->valueint : 10;
-   memory_relation_t rels[20];
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);
-   int count = kb_client_memory_search_graph(jq->valuestring, limit, rels, 20);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "query", value);
+   int limit = jo_int(args, "limit", 10);
+   cJSON_AddNumberToObject(request, "limit", limit > 20 ? 20 : limit);
+   char *raw = kb_v1_action_request("memory.search_graph", request);
    mcp_memory_scope_end();
-   if (count < 0)
-      return kb_last_result_content("knowledge service memory graph search failed");
-
-   char buf[8192];
-   int pos = 0;
+   if (!raw)
+      return kb_last_result_content("memory search_graph unavailable");
+   cJSON *response = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(response))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory search_graph response");
+   }
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      return json_result_content(response);
+   }
+   cJSON *data = cJSON_GetObjectItemCaseSensitive(response, "relations");
+   if (!cJSON_IsArray(data))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory search_graph result");
+   }
+   dstr_t body;
+   dstr_init(&body);
    if (active_context_missing)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
-                        "Active project context is unavailable; showing shared/global memory "
-                        "only.\n\n");
-   if (count == 0)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No graph relations found for '%s'",
-                        jq->valuestring);
+      dstr_append_str(
+          &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
+   int count = cJSON_GetArraySize(data);
+   if (!count)
+      dstr_appendf(&body, "No graph relations found for '%s'", value);
    else
    {
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Found %d graph relation(s):\n\n", count);
-      for (int i = 0; i < count && pos < (int)sizeof(buf) - 512; i++)
-         pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- %s [%s] %s (%s)\n", rels[i].src_entity,
-                           rels[i].relation, rels[i].dst_entity,
-                           rels[i].valid_at[0] ? rels[i].valid_at : "undated");
+      dstr_appendf(&body, "Found %d graph relation(s):\n\n", count);
+      cJSON *row;
+      cJSON_ArrayForEach(row, data)
+      {
+         const char *time = jo_cstr(row, "valid_at");
+         dstr_appendf(&body, "- %s [%s] %s (%s)\n", jo_cstr(row, "src_entity"),
+                      jo_cstr(row, "relation"), jo_cstr(row, "dst_entity"),
+                      time[0] ? time : "undated");
+      }
    }
-   return text_content(buf);
+   cJSON *content = text_content(dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_Delete(response);
+   return content;
 }
 
 cJSON *tool_get_episode(cJSON *args)
 {
-   cJSON *jk = cJSON_GetObjectItemCaseSensitive(args, "episode_key");
-   if (!cJSON_IsString(jk))
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "episode_key"));
+   if (!value)
       return text_content("error: missing 'episode_key' parameter");
-
-   memory_episode_t episode;
-   int episode_rc = kb_client_memory_get_episode(jk->valuestring, &episode);
-   if (episode_rc > 0)
-      return kb_empty_result_content("memory episode not found");
-   if (episode_rc < 0)
-      return kb_last_result_content("memory episode lookup returned no result");
-
-   char buf[4096];
-   snprintf(buf, sizeof(buf), "Episode: %s\nSession: %s\nTime: %s\nMemory ID: %lld\n\n%s",
-            episode.episode_key, episode.source_session,
-            episode.reference_time[0] ? episode.reference_time : "unknown",
-            (long long)episode.memory_id, episode.episode_text);
-   return text_content(buf);
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(args, &active_context_missing);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "episode_key", value);
+   char *raw = kb_v1_action_request("memory.get_episode", request);
+   mcp_memory_scope_end();
+   if (!raw)
+      return kb_last_result_content("memory get_episode unavailable");
+   cJSON *response = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(response))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory get_episode response");
+   }
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      if (strcmp(jo_cstr(response, "kind"), "not_found") == 0)
+      {
+         cJSON_Delete(response);
+         return kb_empty_result_content("memory episode not found");
+      }
+      return json_result_content(response);
+   }
+   cJSON *data = cJSON_GetObjectItemCaseSensitive(response, "episode");
+   if (!cJSON_IsObject(data))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory get_episode result");
+   }
+   dstr_t body;
+   dstr_init(&body);
+   if (active_context_missing)
+      dstr_append_str(
+          &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
+   const char *time = jo_cstr(data, "reference_time");
+   dstr_appendf(&body, "Episode: %s\nSession: %s\nTime: %s\nMemory ID: %.0f\n\n%s",
+                jo_cstr(data, "episode_key"), jo_cstr(data, "source_session"),
+                time[0] ? time : "unknown", jo_num(data, "memory_id", 0),
+                jo_cstr(data, "episode_text"));
+   cJSON *content = text_content(dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_Delete(response);
+   return content;
 }
 
 cJSON *tool_get_entity(cJSON *args)
 {
-   cJSON *je = cJSON_GetObjectItemCaseSensitive(args, "entity");
-   if (!cJSON_IsString(je))
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "entity"));
+   if (!value)
       return text_content("error: missing 'entity' parameter");
-
-   memory_entity_profile_t profile;
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);
-   int profile_rc = kb_client_memory_get_entity_profile(je->valuestring, &profile);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "entity", value);
+   char *raw = kb_v1_action_request("memory.entity_profile", request);
    mcp_memory_scope_end();
-   if (profile_rc > 0)
-      return kb_empty_result_content("memory entity profile not found");
-   if (profile_rc < 0)
-      return kb_last_result_content("memory entity profile lookup returned no result");
-
-   char buf[4096];
-   int pos = 0;
+   if (!raw)
+      return kb_last_result_content("memory entity_profile unavailable");
+   cJSON *response = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(response))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory entity_profile response");
+   }
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      if (strcmp(jo_cstr(response, "kind"), "not_found") == 0)
+      {
+         cJSON_Delete(response);
+         return kb_empty_result_content("memory profile not found");
+      }
+      return json_result_content(response);
+   }
+   cJSON *data = cJSON_GetObjectItemCaseSensitive(response, "profile");
+   if (!cJSON_IsObject(data))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory entity_profile result");
+   }
+   dstr_t body;
+   dstr_init(&body);
    if (active_context_missing)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
-                        "Active project context is unavailable; showing shared/global memory "
-                        "only.\n\n");
-   pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Entity: %s\nMentions: %d\nRelations: %d\n",
-                     profile.entity, profile.mention_count, profile.relation_count);
-   if (profile.latest_episode[0])
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Latest episode: %s\n", profile.latest_episode);
-   if (profile.summary[0])
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Summary: %s\n", profile.summary);
-   return text_content(buf);
+      dstr_append_str(
+          &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
+   dstr_appendf(&body, "Entity: %s\nMentions: %d\nRelations: %d\n", jo_cstr(data, "entity"),
+                jo_int(data, "mention_count", 0), jo_int(data, "relation_count", 0));
+   if (jo_cstr(data, "latest_episode")[0])
+      dstr_appendf(&body, "Latest episode: %s\n", jo_cstr(data, "latest_episode"));
+   if (jo_cstr(data, "summary")[0])
+      dstr_appendf(&body, "Summary: %s\n", jo_cstr(data, "summary"));
+   cJSON *content = text_content(dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_Delete(response);
+   return content;
 }
 
 cJSON *tool_get_entity_edges(cJSON *args)
 {
-   cJSON *je = cJSON_GetObjectItemCaseSensitive(args, "entity");
-   cJSON *jl = cJSON_GetObjectItemCaseSensitive(args, "limit");
-   if (!cJSON_IsString(je))
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "entity"));
+   if (!value)
       return text_content("error: missing 'entity' parameter");
-
-   int limit = cJSON_IsNumber(jl) ? jl->valueint : 10;
-   memory_relation_t rels[20];
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);
-   int count = kb_client_memory_get_entity_edges(je->valuestring, limit, rels, 20);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "entity", value);
+   int limit = jo_int(args, "limit", 10);
+   cJSON_AddNumberToObject(request, "limit", limit > 20 ? 20 : limit);
+   char *raw = kb_v1_action_request("memory.entity_edges", request);
    mcp_memory_scope_end();
-   if (count < 0)
-      return kb_last_result_content("knowledge service entity-edge lookup failed");
-
-   char buf[8192];
-   int pos = 0;
+   if (!raw)
+      return kb_last_result_content("memory entity_edges unavailable");
+   cJSON *response = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(response))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory entity_edges response");
+   }
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      return json_result_content(response);
+   }
+   cJSON *data = cJSON_GetObjectItemCaseSensitive(response, "edges");
+   if (!cJSON_IsArray(data))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory entity_edges result");
+   }
+   dstr_t body;
+   dstr_init(&body);
    if (active_context_missing)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
-                        "Active project context is unavailable; showing shared/global memory "
-                        "only.\n\n");
-   if (count == 0)
-      pos +=
-          snprintf(buf + pos, sizeof(buf) - pos, "No edges found for entity '%s'", je->valuestring);
+      dstr_append_str(
+          &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
+   int count = cJSON_GetArraySize(data);
+   if (!count)
+      dstr_appendf(&body, "No edges found for entity '%s'", value);
    else
    {
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Edges for %s:\n\n", je->valuestring);
-      for (int i = 0; i < count && pos < (int)sizeof(buf) - 512; i++)
-         pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- %s [%s] %s\n", rels[i].src_entity,
-                           rels[i].relation, rels[i].dst_entity);
+      dstr_appendf(&body, "Edges for %s:\n\n", value);
+      cJSON *row;
+      cJSON_ArrayForEach(row, data)
+      {
+         dstr_appendf(&body, "- %s [%s] %s\n", jo_cstr(row, "src_entity"), jo_cstr(row, "relation"),
+                      jo_cstr(row, "dst_entity"));
+      }
    }
-   return text_content(buf);
+   cJSON *content = text_content(dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_Delete(response);
+   return content;
 }
 
 cJSON *tool_get_context_block(cJSON *args)

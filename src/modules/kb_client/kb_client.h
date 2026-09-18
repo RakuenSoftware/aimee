@@ -951,30 +951,6 @@ char *kb_client_evidence_provenance_retrieval_event(const char *turn_id);
  * (malloc'd, caller frees; NULL on bad arg or kb error). */
 char *kb_client_evidence_fidelity_retrieval_event(const char *turn_id);
 
-/* Fetch the entity profile card via aimee-kb. Returns 0 on success,
- * 1 for a valid missing entity, or -1 when the service/result is unavailable. */
-int kb_client_memory_get_entity_profile(const char *entity, memory_entity_profile_t *out);
-
-/* Fetch up to |max| graph edges for an entity via aimee-kb.  Returns
- * the number of edges written into |out| (0 if kb is unreachable).
- * Mirrors memory_get_entity_edges(). */
-int kb_client_memory_get_entity_edges(const char *entity, int limit, memory_relation_t *out,
-                                      int max);
-
-/* Search graph relations by free-text query via aimee-kb.  Returns
- * the number of relations written into |out| (0 if kb is unreachable).
- * Mirrors memory_search_graph(). */
-int kb_client_memory_search_graph(const char *query, int limit, memory_relation_t *out, int max);
-
-/* Search the entity graph as of a wall-clock timestamp via aimee-kb.
- * Returns row count.  Mirrors memory_search_graph_as_of(). */
-int kb_client_memory_search_graph_as_of(const char *query, const char *as_of, int limit,
-                                        memory_relation_t *out, int max);
-
-/* Fetch a single episode by key via aimee-kb. Returns 0 on success,
- * 1 for a valid missing episode, or -1 when the service/result is unavailable. */
-int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out);
-
 /* Invoke an action through the authenticated KB transport. Takes ownership of
  * req; the caller frees the returned JSON, including non-success envelopes. */
 char *kb_v1_action_request(const char *action, cJSON *req);

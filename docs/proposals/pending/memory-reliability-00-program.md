@@ -291,6 +291,12 @@ let the Go owner select the active provider. CLI progress preserves 64-bit IDs a
 reports readiness, incomplete work and pending metadata without claiming a failed
 batch is complete. Vector mutation routes require index-admin capabilities at Server.
 
+The graph/entity/episode typed KB clients are retired. CLI as-of graph search
+and the actual MCP tools use generic authenticated commands and retain full JSON
+strings. MCP rendering preserves long results and dependency/authorization errors;
+episode reads now carry the same caller scope as graph/entity reads. PostgreSQL
+regression coverage rejects cross-project episode access through the public route.
+
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

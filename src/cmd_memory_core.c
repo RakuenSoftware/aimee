@@ -266,11 +266,22 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
    int win_count = kb_client_memory_search(clusters, cluster_count, limit, results, max_results);
 
    /* Optional as-of graph relations search */
-   memory_relation_t as_of_rels[32];
-   int as_of_count = 0;
+   cJSON *as_of_response = NULL, *as_of_rels = NULL;
    if (as_of && query_buf[0])
-      as_of_count = kb_client_memory_search_graph_as_of(query_buf, as_of, limit < 32 ? limit : 32,
-                                                        as_of_rels, 32);
+   {
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "query", query_buf);
+      cJSON_AddStringToObject(request, "as_of", as_of);
+      cJSON_AddNumberToObject(request, "limit", limit < 32 ? limit : 32);
+      char *raw = kb_v1_action_request("memory.search_graph_as_of", request);
+      as_of_response = raw ? cJSON_Parse(raw) : NULL;
+      free(raw);
+      as_of_rels = cJSON_GetObjectItemCaseSensitive(as_of_response, "relations");
+      if (strcmp(jo_cstr(as_of_response, "status"), "ok") || !cJSON_IsArray(as_of_rels))
+         fatal("memory as-of graph search failed: %s", jo_cstr(as_of_response, "message"));
+   }
+   int as_of_count = cJSON_GetArraySize(as_of_rels);
 
    if (ctx->json_output)
    {
@@ -307,19 +318,7 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
 
       if (as_of_count > 0)
       {
-         cJSON *rarr = cJSON_CreateArray();
-         for (int i = 0; i < as_of_count; i++)
-         {
-            cJSON *r = cJSON_CreateObject();
-            cJSON_AddNumberToObject(r, "id", (double)as_of_rels[i].id);
-            cJSON_AddStringToObject(r, "src_entity", as_of_rels[i].src_entity);
-            cJSON_AddStringToObject(r, "relation", as_of_rels[i].relation);
-            cJSON_AddStringToObject(r, "dst_entity", as_of_rels[i].dst_entity);
-            cJSON_AddStringToObject(r, "valid_at", as_of_rels[i].valid_at);
-            cJSON_AddStringToObject(r, "invalid_at", as_of_rels[i].invalid_at);
-            cJSON_AddItemToArray(rarr, r);
-         }
-         cJSON_AddItemToObject(obj, "as_of_relations", rarr);
+         cJSON_AddItemToObject(obj, "as_of_relations", cJSON_Duplicate(as_of_rels, 1));
       }
 
       if (explain)
@@ -376,20 +375,29 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
       if (as_of_count > 0)
       {
          printf("Graph relations as-of %s:\n", as_of);
-         for (int i = 0; i < as_of_count; i++)
-            printf("  %s -[%s]-> %s  (valid_at=%s)\n", as_of_rels[i].src_entity,
-                   as_of_rels[i].relation, as_of_rels[i].dst_entity,
-                   as_of_rels[i].valid_at[0] ? as_of_rels[i].valid_at : "(any)");
+         cJSON *relation;
+         cJSON_ArrayForEach(relation, as_of_rels)
+         {
+            const char *valid = jo_cstr(relation, "valid_at");
+            printf("  %s -[%s]-> %s  (valid_at=%s)\n", jo_cstr(relation, "src_entity"),
+                   jo_cstr(relation, "relation"), jo_cstr(relation, "dst_entity"),
+                   valid[0] ? valid : "(any)");
+         }
       }
    }
    else if (as_of_count > 0)
    {
       printf("Graph relations as-of %s:\n", as_of);
-      for (int i = 0; i < as_of_count; i++)
-         printf("  %s -[%s]-> %s  (valid_at=%s)\n", as_of_rels[i].src_entity,
-                as_of_rels[i].relation, as_of_rels[i].dst_entity,
-                as_of_rels[i].valid_at[0] ? as_of_rels[i].valid_at : "(any)");
+      cJSON *relation;
+      cJSON_ArrayForEach(relation, as_of_rels)
+      {
+         const char *valid = jo_cstr(relation, "valid_at");
+         printf("  %s -[%s]-> %s  (valid_at=%s)\n", jo_cstr(relation, "src_entity"),
+                jo_cstr(relation, "relation"), jo_cstr(relation, "dst_entity"),
+                valid[0] ? valid : "(any)");
+      }
    }
+   cJSON_Delete(as_of_response);
    free(results);
 }
 

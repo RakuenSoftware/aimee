@@ -329,8 +329,6 @@ static void test_ordered_readers_propagate_active_project_context(void)
 {
    memory_t mems[8];
    memory_diagnostic_t diagnostics[2];
-   memory_relation_t relations[8];
-   memory_entity_profile_t profile;
 
    scoped_request_count = 0;
    mock_agent_http_set_post_handler(scoped_ok_post_handler);
@@ -353,10 +351,18 @@ static void test_ordered_readers_propagate_active_project_context(void)
    free(json);
    cJSON *briefing = kb_client_memory_briefing(128);
    cJSON_Delete(briefing);
-   (void)kb_client_memory_get_entity_profile("entity", &profile);
-   (void)kb_client_memory_get_entity_edges("entity", 8, relations, 8);
-   (void)kb_client_memory_search_graph("entity", 8, relations, 8);
-   (void)kb_client_memory_search_graph_as_of("entity", "2026-07-29", 8, relations, 8);
+   const char *graph_commands[] = {"memory.entity_profile", "memory.entity_edges",
+                                   "memory.search_graph", "memory.search_graph_as_of"};
+   for (size_t i = 0; i < sizeof(graph_commands) / sizeof(graph_commands[0]); i++)
+   {
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "entity", "entity");
+      cJSON_AddStringToObject(request, "query", "entity");
+      cJSON_AddStringToObject(request, "as_of", "2026-07-29");
+      json = kb_v1_action_request(graph_commands[i], request);
+      free(json);
+   }
    cJSON *ask = cJSON_CreateObject();
    kb_client_memory_scope_context_apply(ask);
    cJSON_AddStringToObject(ask, "query", "q");
@@ -391,16 +397,10 @@ static void test_ordered_readers_propagate_active_project_context(void)
 static void test_single_record_miss_is_not_dependency_failure(void)
 {
    memory_t memory;
-   memory_entity_profile_t profile;
-   memory_episode_t episode;
 
    kb_client_dependency_reset_for_tests();
    mock_agent_http_set_post_handler(single_miss_post_handler);
    assert(kb_client_memory_get(42, &memory) == 1);
-   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
-   assert(kb_client_memory_get_entity_profile("missing", &profile) == 1);
-   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
-   assert(kb_client_memory_get_episode("missing", &episode) == 1);
    assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
 
    kb_client_dependency_reset_for_tests();
