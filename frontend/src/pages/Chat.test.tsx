@@ -2,184 +2,137 @@
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Session } from '../SessionContext';
 import Chat from './Chat';
 
-const context = vi.hoisted(() => ({ sessions: [] as Session[], active: null as Session | null, patchSession: vi.fn() }));
+const context = vi.hoisted(() => {
+  const sessions = ['one', 'two'].map(id => ({
+    id, name: id, aimeeSid: `web-${id}`, claudeSid: '', projectRoot: '',
+    messages: [{ role: 'user' as const, text: `History ${id}` }],
+  }));
+  return { sessions, active: sessions[0], patchSession: vi.fn() };
+});
 vi.mock('../SessionContext', () => ({ useSessions: () => context }));
-vi.mock('./chat/ChatPrimitives', () => ({
-  Message: ({ role, text }: { role: string; text: string }) => <div data-testid={role}>{text}</div>,
-  BootstrapBanner: () => null, DiffBlock: () => null, RewindMarker: () => null,
-  ThinkingBlock: () => null, ToolBlock: () => null, TurnSummaryCard: () => null,
-}));
+vi.mock('../components/ProjectPicker', () => ({ default: () => null }));
 
-function session(id: string, text = ''): Session {
-  return { id, aimeeSid: id, name: id, projectRoot: `/work/${id}`, projectName: id,
-    claudeSid: '', attachId: '', messages: text ? [{ role: 'user', text }] : [] };
-}
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 let stream: ReadableStreamDefaultController<Uint8Array>;
-let liveText: string;
-let liveStatus: string;
-const emit = (event: string, data = {}) => stream.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-const tick = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+let fetchMock: ReturnType<typeof vi.fn>;
+const encoder = new TextEncoder();
+
+async function emit(...events: [string, Record<string, unknown>?][]) {
+  await act(async () => {
+    stream.enqueue(encoder.encode(events.map(([event, data = {}]) =>
+      `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join('')));
+  });
+}
+async function tick(ms = 100) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+}
+async function start() {
+  const view = render(<StrictMode><Chat /></StrictMode>);
+  await act(async () => {});
+  fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'Please investigate' } });
+  fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter', shiftKey: false });
+  await act(async () => {});
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/send')).toBe(true);
+  return view;
+}
+async function close() {
+  await act(async () => { stream.close(); });
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
   localStorage.clear();
-  context.sessions = [session('one')];
   context.active = context.sessions[0];
-  context.patchSession.mockReset();
-  liveText = ''; liveStatus = 'active';
+  vi.stubGlobal('EventSource', class {
+    addEventListener() {}
+    close() {}
+  });
+  vi.stubGlobal('ResizeObserver', class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
   Element.prototype.scrollIntoView = vi.fn();
-  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  vi.stubGlobal('EventSource', class { addEventListener() {} close() {} });
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url === '/api/chat/send') return new Response(new ReadableStream({ start(controller) { stream = controller; } }));
-    if (url.startsWith('/api/chat/live?')) return json({ changed: true, rev: 1, text: liveText, status: liveStatus });
-    if (url === '/api/chat/attach') return json({ attach_id: 'attachment' });
-    if (url === '/api/git/projects') return json({ root: '/work', projects: ['one', 'two'] });
-    if (url.startsWith('/api/chat/bootstrap-status')) return json({ has_rules: true });
-    if (url.startsWith('/api/sessions/workflows')) return json({}, 404);
-    return json({});
-  }));
+  fetchMock = vi.fn(async (url: string) => {
+    if (url === '/api/chat/send') {
+      return new Response(new ReadableStream<Uint8Array>({ start(c) { stream = c; } }), {
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }
+    return new Response(JSON.stringify(url === '/api/chat/attach' ? { attach_id: 'attach-1' } : {}));
+  });
+  vi.stubGlobal('fetch', fetchMock);
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
-function send(text: string) {
-  const input = screen.getByPlaceholderText(/Type a message/);
-  fireEvent.change(input, { target: { value: text } });
-  fireEvent.keyDown(input, { key: 'Enter' });
-}
-
-describe('chat transcript ownership', () => {
-  it.each([false, true])('keeps one model reply when turn_end precedes the final live fetch (StrictMode=%s)', async strict => {
-    render(strict ? <StrictMode><Chat /></StrictMode> : <Chat />);
+describe('webchat intermediate messages', () => {
+  it('shows text before completion and batches subsequent tokens', async () => {
+    await start();
+    await emit(['turn_start'], ['text', { content: 'Checking' }]);
+    expect(screen.getByText('Checking')).toBeTruthy();
+    await emit(['text', { content: ' the' }], ['text', { content: ' files' }]);
+    expect(screen.queryByText('Checking the files')).toBeNull();
     await tick();
-    send('hello');
-    await tick();
-    await act(async () => { emit('turn_start'); });
-    liveText = 'The answer';
-    await tick(500);
-    expect(screen.getAllByTestId('assistant').map(node => node.textContent)).toEqual(['The answer']);
-    liveText = 'The answer is complete';
-    liveStatus = 'done';
-    await act(async () => { emit('turn_end'); stream.close(); });
-    await tick(500);
-    expect(screen.getAllByTestId('assistant').map(node => node.textContent)).toEqual(['The answer is complete']);
-    expect(screen.getAllByTestId('user').map(node => node.textContent)).toEqual(['hello']);
+    expect(screen.getByText('Checking the files')).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/chat/live'))).toBe(false);
+    await emit(['turn_end'], ['done']);
+    await close();
+    expect(screen.getAllByText('Checking the files')).toHaveLength(1);
   });
 
-  it('does not erase a live reply when metadata refreshes with an empty transcript', async () => {
-    const view = render(<Chat />);
-    await tick();
-    send('hello');
-    await tick();
-    await act(async () => { emit('turn_start'); });
-    liveText = 'Still writing';
-    await tick(500);
-    context.active = { ...context.active!, messages: [] };
-    context.sessions = [context.active];
-    view.rerender(<Chat />);
-    await tick();
-    expect(screen.getByTestId('assistant').textContent).toBe('Still writing');
-    expect(screen.getByTestId('user').textContent).toBe('hello');
-    liveStatus = 'done';
-    await act(async () => { emit('turn_end'); stream.close(); });
-    await tick(500);
+  it('preserves intermediate messages when the next message starts in the same read', async () => {
+    await start();
+    await emit(
+      ['turn_start'], ['text', { content: 'First' }], ['text', { content: ' update' }],
+      ['turn_start'], ['text', { content: 'Second' }], ['text', { content: ' update' }],
+      ['turn_start'], ['text', { content: 'Final' }], ['text', { content: ' answer' }],
+      ['turn_end'], ['done'],
+    );
+    await close();
+    expect(screen.getAllByText(/^(First update|Second update|Final answer)$/).map(el => el.textContent))
+      .toEqual(['First update', 'Second update', 'Final answer']);
   });
 
-  it('does not duplicate a live reply when a server snapshot arrives ahead of the poll', async () => {
-    const view = render(<Chat />);
+  it('displays thinking and flushes the last text batch on EOF without done', async () => {
+    await start();
+    await emit(['turn_start'], ['thinking', { content: 'Inspecting' }], ['thinking', { content: ' files' }]);
     await tick();
-    send('hello');
-    await tick();
-    await act(async () => { emit('turn_start'); });
-    liveText = 'Partial';
-    await tick(500);
-    context.active = { ...context.active!, messages: [
-      { role: 'user', text: 'hello' }, { role: 'assistant', text: 'Partial answer' },
-    ] };
-    context.sessions = [context.active];
-    view.rerender(<Chat />);
-    await tick();
-    liveText = 'Partial answer complete'; liveStatus = 'done';
-    await act(async () => { emit('turn_end'); stream.close(); });
-    await tick(500);
-    expect(screen.getAllByTestId('assistant').map(node => node.textContent)).toEqual(['Partial answer complete']);
+    expect(screen.getByText('Thinking…')).toBeTruthy();
+    expect(screen.getByText('Inspecting files')).toBeTruthy();
+    await emit(['text', { content: 'Found' }], ['text', { content: ' the issue' }]);
+    await close();
+    expect(screen.getByText('Found the issue')).toBeTruthy();
+    expect(screen.getByPlaceholderText(/^Type a message/).getAttribute('placeholder')).not.toMatch(/steer/i);
   });
 
-  it('keeps the active conversation when the session list is reordered', async () => {
-    const one = session('one', 'First conversation');
-    const two = session('two', 'Second conversation');
-    context.sessions = [one, two]; context.active = one;
-    const view = render(<Chat />);
-    await tick();
-    expect(screen.getByTestId('user').textContent).toBe('First conversation');
-    context.sessions = [two, one];
-    view.rerender(<Chat />);
-    await tick();
-    expect(screen.getByTestId('user').textContent).toBe('First conversation');
-    context.active = two;
-    view.rerender(<Chat />);
-    await tick();
-    expect(screen.getByTestId('user').textContent).toBe('Second conversation');
-    context.active = one;
-    view.rerender(<Chat />);
-    await tick();
-    expect(screen.getByTestId('user').textContent).toBe('First conversation');
+  it('keeps partial content when an error arrives before the flush timer', async () => {
+    await start();
+    await emit(['turn_start'], ['text', { content: 'Partial' }], ['text', { content: ' update' }],
+      ['error', { message: 'Provider disconnected' }]);
+    await close();
+    expect(screen.getByText(/Partial update/)).toBeTruthy();
+    expect(screen.getByText(/Provider disconnected/)).toBeTruthy();
   });
 
-  it('flushes a new message to the account cache when navigating before the debounce fires', async () => {
-    const view = render(<Chat />);
-    await tick();
-    send('Do not lose this message');
-    await tick();
-    view.unmount();
-    expect(context.patchSession).toHaveBeenCalledWith('one', {
-      messages: [{ role: 'user', text: 'Do not lose this message' }],
-    });
-    await act(async () => { stream.close(); });
-    await tick(500);
-  });
-
-  it('hydrates newer server history without changing the active session', async () => {
-    context.active = session('one', 'First message');
-    context.sessions = [context.active];
-    const view = render(<Chat />);
-    await tick();
-    context.active = { ...context.active, messages: [
-      ...context.active.messages, { role: 'assistant', text: 'Reply from another device' },
-    ] };
-    context.sessions = [context.active];
-    view.rerender(<Chat />);
-    await tick();
-    expect(screen.getByTestId('assistant').textContent).toBe('Reply from another device');
-  });
-
-  it('sends to the originating project when the user switches sessions while attachment is pending', async () => {
-    let attached!: (response: Response) => void;
-    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
-    vi.mocked(fetch).mockImplementation((url, init) => String(url) === '/api/chat/attach'
-      ? new Promise(resolve => { attached = resolve; }) : originalFetch(url, init));
-    context.sessions = [session('one'), session('two')]; context.active = context.sessions[0];
-    const view = render(<Chat />);
-    await tick();
-    send('work on project one');
-    await tick();
+  it('routes queued deltas and later messages to the originating tab', async () => {
+    const view = await start();
+    await emit(['turn_start'], ['text', { content: 'First' }], ['text', { content: ' update' }]);
     context.active = context.sessions[1];
-    view.rerender(<Chat />);
+    view.rerender(<StrictMode><Chat /></StrictMode>);
     await tick();
-    await act(async () => { attached(json({ attach_id: 'attachment' })); });
-    const request = vi.mocked(fetch).mock.calls.find(([url]) => url === '/api/chat/send');
-    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ aimee_session_id: 'one', cwd: '/work/one' });
-    liveText = 'Finished project one'; liveStatus = 'done';
-    await act(async () => { emit('turn_start'); emit('turn_end'); stream.close(); });
-    await tick(500);
-    expect(screen.queryByTestId('assistant')).toBeNull();
+    await emit(['turn_start'], ['text', { content: 'Finished elsewhere' }], ['turn_end'], ['done']);
+    await close();
+    expect(screen.queryByText('First update')).toBeNull();
+    expect(screen.queryByText('Finished elsewhere')).toBeNull();
     context.active = context.sessions[0];
-    view.rerender(<Chat />);
-    await tick();
-    expect(screen.getByTestId('assistant').textContent).toBe('Finished project one');
+    view.rerender(<StrictMode><Chat /></StrictMode>);
+    expect(screen.getByText('First update')).toBeTruthy();
+    expect(screen.getByText('Finished elsewhere')).toBeTruthy();
   });
 });

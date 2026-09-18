@@ -17,7 +17,7 @@ const { chromium } = require('../frontend/node_modules/playwright');
       sent = JSON.parse(body);
       sendResponse = res;
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
-      res.write('event: turn_start\ndata: {}\n\n');
+      res.write('event: turn_start\ndata: {}\n\nevent: text\ndata: {"content":"Reply"}\n\n');
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -41,7 +41,6 @@ const { chromium } = require('../frontend/node_modules/playwright');
       { id: 'web-one', title: 'One', cwd: '/work/org/one', messages: [{ role: 'user', text: 'First conversation' }] },
       { id: 'web-two', title: 'Two', cwd: '/work/org/two', messages: [{ role: 'user', text: 'Second conversation' }] },
     ];
-    let live = { changed: true, rev: 1, text: 'Reply in progress', status: 'active' };
     const bindings = [];
     await page.route(`${origin}/**`, async route => {
       const request = route.request();
@@ -62,7 +61,7 @@ const { chromium } = require('../frontend/node_modules/playwright');
         '/api/chat/sessions': sessions, '/api/setup/account': { complete: true },
         '/api/config': { config: { provider: 'test', embedder_model: 'bekko-a25m' } },
         '/api/git/projects': { root: '/work', projects: ['org/one', 'org/two'], details: [] },
-        '/api/chat/bootstrap-status': { has_rules: true }, '/api/chat/live': live,
+        '/api/chat/bootstrap-status': { has_rules: true },
         '/api/chat/attach': { attach_id: 'attachment' },
         '/api/git/credentials': { hosts: ['github.com'] },
         '/api/vault/credentials': { credentials: [{ agent: 'git', cred: 'author_name' }, { agent: 'git', cred: 'author_email' }] },
@@ -78,15 +77,14 @@ const { chromium } = require('../frontend/node_modules/playwright');
 
     await page.getByPlaceholder('Type a message… (Shift+Enter for newline)').fill('Please answer once');
     await page.getByPlaceholder('Type a message… (Shift+Enter for newline)').press('Enter');
-    await page.getByText('Reply in progress', { exact: true }).waitFor();
+    await page.getByText('Reply', { exact: true }).waitFor();
     assert.equal(sent.cwd, '/work/org/one');
     assert.equal(sent.aimee_session_id, 'web-one');
-    live = { changed: true, rev: 2, text: 'Reply from project one.', status: 'done' };
-    sendResponse.end('event: turn_end\ndata: {}\n\n');
+    sendResponse.end('event: text\ndata: {"content":" from project one."}\n\nevent: turn_end\ndata: {}\n\n');
     await page.getByText('Reply from project one.', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Send', exact: true }).waitFor();
     assert.equal(await page.getByText('Reply from project one.', { exact: true }).count(), 1);
-    assert.equal(await page.getByText('Reply in progress', { exact: true }).count(), 0);
+    assert.equal(await page.getByText('Reply', { exact: true }).count(), 0);
 
     // A focus refresh returns metadata-only rows in a different order.
     sessions = [sessions[1], { ...sessions[0], messages: [] }];
