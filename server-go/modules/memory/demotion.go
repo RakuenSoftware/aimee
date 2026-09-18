@@ -148,67 +148,17 @@ func (s *postgresDataStore) runDemotion(ctx context.Context, config DemotionConf
 		result.Skipped = true
 		return result, nil
 	}
-	window := config.Window
-	if window <= 0 {
-		window = 64
-	}
-	rows, err := s.db.Query(ctx, `SELECT scope_id FROM artifacts WHERE kind='retrieval_attribution'
- GROUP BY scope_id HAVING COUNT(*) >= $1 ORDER BY scope_id LIMIT 4096`, max(1, config.Minimum))
+	scoredRows, candidates, err := s.collectDemotion(ctx, config, true)
 	if err != nil {
 		return result, err
 	}
-	ids := []int64{}
-	candidates := 0
-	for rows.Next() {
-		var text string
-		if err := rows.Scan(&text); err != nil {
-			rows.Close()
-			return result, err
-		}
-		candidates++
-		if id, err := strconv.ParseInt(text, 10, 64); err == nil && id > 0 {
-			ids = append(ids, id)
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return result, err
-	}
-	type scored struct {
-		id    int64
-		kind  string
-		score float64
-	}
-	scoredRows := []scored{}
 	classes := map[string][]float64{}
 	order := []string{}
-	now := time.Now().UTC()
-	for _, id := range ids {
-		evidence, err := s.demotionEvidence(ctx, id, window)
-		if err != nil {
-			return result, err
+	for _, row := range scoredRows {
+		if _, ok := classes[row.kind]; !ok {
+			order = append(order, row.kind)
 		}
-		score, ok := demotionScore(evidence, config.Minimum, config.HalfLifeDays, now)
-		if !ok {
-			continue
-		}
-		var kind string
-		err = s.db.QueryRow(ctx, `SELECT kind FROM memories WHERE id=$1 FOR UPDATE`, id).Scan(&kind)
-		if store.IsNoRows(err) {
-			continue
-		}
-		if err != nil {
-			return result, err
-		}
-		if kind == "" {
-			continue
-		}
-		if _, exists := classes[kind]; !exists {
-			order = append(order, kind)
-		}
-		classes[kind] = append(classes[kind], score)
-		scoredRows = append(scoredRows, scored{id, kind, score})
+		classes[row.kind] = append(classes[row.kind], row.score)
 	}
 	result.Scored = len(scoredRows)
 	thresholds := map[string]float64{}
@@ -261,5 +211,146 @@ func (s *postgresDataStore) runDemotion(ctx context.Context, config DemotionConf
 		}
 	}
 	result.ProfilesWritten = result.ProfilesCreated + result.Demoted
+	return result, nil
+}
+
+type demotionRow struct {
+	id    int64
+	kind  string
+	score float64
+}
+
+func (s *postgresDataStore) collectDemotion(ctx context.Context, config DemotionConfig, lockRows bool) ([]demotionRow, int, error) {
+	window := config.Window
+	if window <= 0 {
+		window = 64
+	}
+	rows, err := s.db.Query(ctx, `SELECT scope_id FROM artifacts WHERE kind='retrieval_attribution' AND scope_id<>''
+ GROUP BY scope_id HAVING COUNT(*) >= $1 ORDER BY scope_id LIMIT 4096`, max(1, config.Minimum))
+	if err != nil {
+		return nil, 0, err
+	}
+	ids := []int64{}
+	candidates := 0
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		candidates++
+		if id, err := strconv.ParseInt(text, 10, 64); err == nil && id > 0 && strconv.FormatInt(id, 10) == text {
+			ids = append(ids, id)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, 0, err
+	}
+	scoredRows := []demotionRow{}
+	now := time.Now().UTC()
+	for _, id := range ids {
+		evidence, err := s.demotionEvidence(ctx, id, window)
+		if err != nil {
+			return nil, 0, err
+		}
+		score, ok := demotionScore(evidence, config.Minimum, config.HalfLifeDays, now)
+		if !ok {
+			continue
+		}
+		var kind string
+		query := `SELECT kind FROM memories WHERE id=$1`
+		if lockRows {
+			query += ` FOR UPDATE`
+		}
+		err = s.db.QueryRow(ctx, query, id).Scan(&kind)
+		if store.IsNoRows(err) {
+			continue
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+		if kind == "" {
+			continue
+		}
+		scoredRows = append(scoredRows, demotionRow{id, kind, score})
+	}
+	return scoredRows, candidates, nil
+}
+
+// Exact scope wins over the scope-kind default, then the global fallback.
+// A missing profile is normal; a database failure must not become a threshold.
+func (s *postgresDataStore) demotionProfile(ctx context.Context, kind, scopeKind, scopeID string) (json.RawMessage, error) {
+	var id, raw string
+	err := s.db.QueryRow(ctx, `SELECT id,payload::text FROM artifacts
+ WHERE kind='demotion_profile' AND target_surface=$1 AND state='committed' AND
+ ((scope_kind=$2 AND scope_id=$3) OR ($3<>'' AND scope_kind=$2 AND scope_id='') OR ($2<>'' AND scope_kind='global' AND scope_id=''))
+ ORDER BY CASE WHEN scope_kind=$2 AND scope_id=$3 THEN 0 WHEN scope_kind=$2 AND scope_id='' THEN 1 ELSE 2 END,
+ committed_at DESC,id DESC LIMIT 1`, kind, scopeKind, scopeID).Scan(&id, &raw)
+	if store.IsNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err = s.db.Exec(ctx, `UPDATE artifacts SET last_accessed_at=CURRENT_TIMESTAMP WHERE id=$1`, id); err != nil {
+		return nil, err
+	}
+	return json.RawMessage(raw), nil
+}
+
+type demotionKindPreview struct {
+	Kind        string  `json:"kind"`
+	Scored      int     `json:"scored"`
+	WouldDemote int     `json:"would_demote"`
+	P10         float64 `json:"p10"`
+}
+type demotionPreview struct {
+	Status      string                `json:"status"`
+	Candidates  int                   `json:"candidates"`
+	Scored      int                   `json:"scored"`
+	WouldDemote int                   `json:"would_demote"`
+	Enabled     int                   `json:"demotion_enabled"`
+	ByKind      []demotionKindPreview `json:"by_kind"`
+}
+
+// Preview consults the persisted profile, including when live demotion is off.
+// It consumes evidence but never fits a new profile or changes confidence.
+func (s *postgresDataStore) previewDemotion(ctx context.Context, config DemotionConfig) (demotionPreview, error) {
+	result := demotionPreview{Status: "ok", Enabled: config.Enabled, ByKind: []demotionKindPreview{}}
+	rows, candidates, err := s.collectDemotion(ctx, config, false)
+	if err != nil {
+		return result, err
+	}
+	result.Candidates, result.Scored = candidates, len(rows)
+	byKind := map[string]int{}
+	for _, row := range rows {
+		i, ok := byKind[row.kind]
+		if !ok {
+			raw, err := s.demotionProfile(ctx, row.kind, "global", "")
+			if err != nil {
+				return result, err
+			}
+			p10 := 0.0
+			var profile struct {
+				Percentiles map[string]json.RawMessage `json:"score_percentiles"`
+			}
+			if json.Unmarshal(raw, &profile) == nil {
+				if err := json.Unmarshal(profile.Percentiles["p10"], &p10); err != nil || math.IsInf(p10, 0) || math.IsNaN(p10) {
+					p10 = 0
+				}
+			}
+			i = len(result.ByKind)
+			byKind[row.kind] = i
+			result.ByKind = append(result.ByKind, demotionKindPreview{Kind: row.kind, P10: p10})
+		}
+		entry := &result.ByKind[i]
+		entry.Scored++
+		if row.score < entry.P10 {
+			entry.WouldDemote++
+			result.WouldDemote++
+		}
+	}
 	return result, nil
 }

@@ -398,12 +398,6 @@ typedef int (*pgvec_kb_service_record_exists_fn)(int64_t record_id);
 
 typedef struct
 {
-   int64_t row_id;
-   int attribution_n;
-} db2_demotion_candidate_t;
-
-typedef struct
-{
    long long n_decisions;
    long long n_rewards;
    double sum_reward;
@@ -1658,34 +1652,6 @@ int kb_ranker_fit_run(char *id_out, int id_out_len, char **report_out)
    if (report_out)
       *report_out = strdup("{\"status\":\"disabled\"}");
    return 1;
-}
-
-int db2_demotion_candidates(int n_min, db2_demotion_candidate_t *out, int max)
-{
-   assert(n_min == 2);
-   assert(out != NULL);
-   assert(max >= 2);
-   out[0].row_id = 101;
-   out[1].row_id = 102;
-   return 2;
-}
-
-double db2_demotion_score(int64_t row_id, int window_size, double half_life_days, int n_min)
-{
-   assert(window_size == 64);
-   assert(half_life_days == 30.0);
-   assert(n_min == 2);
-   return row_id == 101 ? 0.20 : 0.80;
-}
-
-int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
-                              const char *scope_id, char *buf, size_t len)
-{
-   assert(strcmp(memory_class, "fact") == 0);
-   assert(strcmp(scope_kind, "global") == 0);
-   assert(strcmp(scope_id, "") == 0);
-   snprintf(buf, len, "{\"score_percentiles\":{\"p10\":0.5}}");
-   return 0;
 }
 
 /* kb_intel_payload's bandit.sample/close builders call these (kb_bandit.o unlinked):
@@ -4687,6 +4653,21 @@ int aimee_module_commands_dispatch_context(const char *method, const cJSON *args
                                   : "{\"status\":\"ok\"}"))
                  : NULL;
    return review_transport;
+}
+
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
+                                                    int timeout_ms, cJSON **result)
+{
+   assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 120000);
+   assert(strcmp(jo_cstr(args, "operation"), "demotion-check") == 0);
+   const cJSON *config = cJSON_GetObjectItemCaseSensitive(args, "config");
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(config, "n_min")) == 2);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(config, "window")) == 64);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(config, "half_life_days")) == 30);
+   *result = cJSON_Parse(
+       "{\"status\":\"ok\",\"candidates\":2,\"scored\":2,\"would_demote\":1,\"demotion_enabled\":1,"
+       "\"by_kind\":[{\"kind\":\"fact\",\"scored\":2,\"would_demote\":1,\"p10\":0.5}]}");
+   return 1;
 }
 
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)

@@ -6485,55 +6485,6 @@
     },
     {
       "consumers": [
-        "src/kb/kb_intel_payload.c",
-        "src/tests/test_demotion.c",
-        "src/tests/test_kb_http_routes.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/demotion.h",
-          "line": 141
-        }
-      ],
-      "signature": "int db2_demotion_candidates ( int n_min , db2_demotion_candidate_t * out , int max )",
-      "signature_sha256": "405096b4a822079ca9a6b29ab2b0fbc4044d57b7854c37713054a30bbe22ef0a",
-      "status": "audit-pending",
-      "symbol": "db2_demotion_candidates"
-    },
-    {
-      "consumers": [
-        "src/kb/kb_intel_payload.c",
-        "src/tests/test_demotion.c",
-        "src/tests/test_kb_http_routes.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/demotion.h",
-          "line": 129
-        }
-      ],
-      "signature": "int db2_demotion_profile_read ( const char * memory_class , const char * scope_kind , const char * scope_id , char * buf , size_t len )",
-      "signature_sha256": "51dca521eccbc0c052d2b52f6afea972aa1c6eef6f1aa754316c30b25b7a6b46",
-      "status": "audit-pending",
-      "symbol": "db2_demotion_profile_read"
-    },
-    {
-      "consumers": [
-        "src/tests/test_demotion.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/demotion.h",
-          "line": 122
-        }
-      ],
-      "signature": "int db2_demotion_profile_write ( const char * memory_class , const char * scope_kind , const char * scope_id , const char * payload_json , char * id_out , int id_out_len )",
-      "signature_sha256": "fbb594a297fb7f86ad959c94cf8d93228b809132399cc8cd67760985613fb5f5",
-      "status": "private-test-only",
-      "symbol": "db2_demotion_profile_write"
-    },
-    {
-      "consumers": [
         "src/modules/learning/learning_evidence.c",
         "src/tests/test_demotion.c"
       ],
@@ -6626,23 +6577,6 @@
       "signature_sha256": "dd52d76b34a51a809c2a4ea7d8edd8c74b7e2b2d4f7388c5caed965c53d8be08",
       "status": "audit-pending",
       "symbol": "db2_demotion_retrieval_event_write_turn"
-    },
-    {
-      "consumers": [
-        "src/kb/kb_intel_payload.c",
-        "src/tests/test_demotion.c",
-        "src/tests/test_kb_http_routes.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/demotion.h",
-          "line": 115
-        }
-      ],
-      "signature": "double db2_demotion_score ( int64_t row_id , int window_size , double half_life_days , int n_min )",
-      "signature_sha256": "cdac5744c3bfd93008f818a4ac3c9735cb9761a74b6af707ec51122bc90ec9c1",
-      "status": "audit-pending",
-      "symbol": "db2_demotion_score"
     },
     {
       "consumers": [
@@ -23430,15 +23364,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "79f7f17c7fb4ec462e57ff7f76eb6edf0d507395a239a838a0642a3d7750751c",
+  "fingerprint": "0315b785c353db7e94bdc27909f213bf79770c76d027f11d5c3e7128f4dd4377",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 460,
-    "declarations": 1333,
+    "audit_pending": 457,
+    "declarations": 1329,
     "headers": 136,
     "internal_unconsumed": 344,
-    "private_test_only": 319,
+    "private_test_only": 318,
     "reviewed": 210
   }
 }

@@ -1033,7 +1033,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}
 	budget := dataTimeout
-	if request.Operation == "demotion-run" {
+	if request.Operation == "demotion-run" || request.Operation == "demotion-check" {
 		budget = 120 * time.Second
 	}
 	if request.Operation == "cognify" || request.Operation == "cognify-drain" {
@@ -1114,13 +1114,17 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
-	case "demotion-run":
+	case "demotion-run", "demotion-check":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil || request.Demotion == nil {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
-		var summary demotionSummary
-		summary, err = backend.runDemotion(ctx, *request.Demotion)
+		var summary any
+		if request.Operation == "demotion-check" {
+			summary, err = backend.previewDemotion(ctx, *request.Demotion)
+		} else {
+			summary, err = backend.runDemotion(ctx, *request.Demotion)
+		}
 		if err == nil {
 			response.Payload, err = json.Marshal(summary)
 		}

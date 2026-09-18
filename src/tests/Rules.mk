@@ -7934,5 +7934,5 @@ $(OBJDIR)/aimee-memory-fixture: $(wildcard ../server-go/modules/memory/*.go) ../
 	@mkdir -p $(dir $@)
 	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../src/$@ ./modules/memory/testdata/nativefixture
 
-$(TESTPREFIX)/unit-test-memory-demotion-transport: $(OBJDIR)/tests/test_memory_demotion_transport.o $(OBJDIR)/kb/kb_service_agent.o $(OBJDIR)/vendor/cJSON.o
+$(TESTPREFIX)/unit-test-memory-demotion-transport: $(OBJDIR)/tests/test_memory_demotion_transport.o $(OBJDIR)/kb/kb_service_agent.o $(OBJDIR)/kb/kb_intel_payload.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

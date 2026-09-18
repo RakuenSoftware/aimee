@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "544a663a6fef0d62f9e070923a640d0c5d86bd35",
-  "source_fingerprint": "26cb784d6f73df2c48b3a3a005fb67ea46fa56ac3945b749521599b452fe6dbe",
+  "source_revision": "775b5e3a176965ea76b30a2a7962b2565e929da7",
+  "source_fingerprint": "421f81ba74a41a464ce376dd663d143d41ccecdd043b06f8c3fc43a93509c271",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -1932,7 +1932,6 @@
     {
       "symbol": "atoll",
       "references": [
-        "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/kb_releases.c"
       ],
       "disposition": "system-link",
@@ -1947,7 +1946,6 @@
         "src/modules/db2/c/db2_init.c",
         "src/modules/db2/c/db2_reembed.c",
         "src/modules/db2/c/db_postgres.c",
-        "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/kb_service_backend.c",
         "src/modules/db2/c/learning.c",
         "src/modules/db2/c/org_vault_rewrap.c",
@@ -1993,7 +1991,6 @@
       "symbol": "difftime",
       "references": [
         "src/modules/db2/c/curiosity.c",
-        "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/entity_edges.c"
       ],
       "disposition": "system-link",
@@ -2003,7 +2000,6 @@
       "symbol": "exp",
       "references": [
         "src/modules/db2/c/curiosity.c",
-        "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/entity_edges.c"
       ],
       "disposition": "system-link",
@@ -3009,7 +3005,6 @@
         "src/modules/db2/c/cross_repo_review.c",
         "src/modules/db2/c/curiosity.c",
         "src/modules/db2/c/db2_reembed.c",
-        "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/enrollments.c",
         "src/modules/db2/c/entity_edges.c",
         "src/modules/db2/c/entity_profiles.c",
@@ -3071,5 +3066,5 @@
       "system-link": 140
     }
   },
-  "fingerprint": "211e1d5426c68afc77a3187a84cfe612d244d004e5d31804c23758063be06dce"
+  "fingerprint": "14fed4b536ab64e4064a2186285816b740611c91ea51380dfadf9b2916f8e886"
 }

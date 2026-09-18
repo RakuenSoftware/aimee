@@ -13,7 +13,7 @@ extern "C"
     * Answer-level fidelity is recorded as a NON-SCORED 'fidelity_report' artifact
     * keyed by turn_id, and per-chunk verdicts as 'fidelity_attribution' artifacts
     * (operator_id 'fidelity-judge'). Both kinds are structurally invisible to
-    * db2_demotion_score, which reads only kind='retrieval_attribution' — so
+    * Go memory demotion scoring, which reads only kind='retrieval_attribution' — so
     * fidelity feeds NOTHING into demotion (the proposal's "demotion-inert by
     * construction" guarantee). The LLM entailment judge that PRODUCES these rows
     * is a later, default-off increment; this layer is the storage + read only. */

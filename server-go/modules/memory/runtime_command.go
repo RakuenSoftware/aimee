@@ -54,14 +54,14 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	request := DataRequest{IncludeAll: true}
 
 	switch operation {
-	case "demotion-run":
+	case "demotion-run", "demotion-check":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
 		if json.Unmarshal(args["config"], &request.Demotion) != nil || request.Demotion == nil {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
-		if request.Demotion.Enabled == 0 {
+		if operation == "demotion-run" && request.Demotion.Enabled == 0 {
 			return commandResult(demotionSummary{Status: "ok"})
 		}
 		request.Operation = operation
@@ -141,7 +141,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInternal
 	}
 	switch operation {
-	case "fact-review", "fact-candidates", "demotion-run":
+	case "fact-review", "fact-candidates", "demotion-run", "demotion-check":
 		return commandResult(response.Payload)
 	case "feedback-path":
 		return commandResult(map[string]any{"status": "ok", "updated": response.Updated})

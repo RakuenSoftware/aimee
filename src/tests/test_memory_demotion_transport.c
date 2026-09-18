@@ -1,12 +1,14 @@
 /* The native endpoint snapshots host configuration and forwards the Go result. */
 #include "cJSON.h"
 #include "kb_service_agent.h"
+#include "kb_intel_payload.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
 static int mode = 2, transport_result = 1, calls;
 static const char *reply;
+static const char *operation = "demotion-run";
 static cJSON *sent;
 
 int config_demotion_enabled(void)
@@ -31,7 +33,7 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
 {
    assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 120000);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
-                 "demotion-run") == 0);
+                 operation) == 0);
    const cJSON *config = cJSON_GetObjectItemCaseSensitive(args, "config");
    assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(config, "enabled")) == mode);
    assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(config, "n_min")) == 7);
@@ -75,6 +77,22 @@ int main(void)
    assert(kb_handle_maintenance_compute_demotions(17, request) == 29);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(sent, "status")), "error") ==
           0);
+   operation = "demotion-check";
+   transport_result = 1;
+   reply = "{\"status\":\"ok\",\"candidates\":3,\"scored\":2,\"would_demote\":1,\"by_kind\":[]}";
+   cJSON *preview = kb_intel_demote_check_response();
+   expected = cJSON_Parse(reply);
+   assert(preview && cJSON_Compare(preview, expected, 1));
+   cJSON_Delete(preview);
+   cJSON_Delete(expected);
+   for (size_t i = 0; i < sizeof(failures) / sizeof(failures[0]); i++)
+   {
+      reply = failures[i];
+      assert(kb_intel_demote_check_response() == NULL);
+   }
+   reply = "{\"status\":\"ok\"}";
+   transport_result = -1;
+   assert(kb_intel_demote_check_response() == NULL);
    cJSON_Delete(sent);
    cJSON_Delete(request);
    puts("demotion native transport: ok");

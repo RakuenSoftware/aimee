@@ -110,6 +110,20 @@ func TestDemotionRuntimeAuthority(t *testing.T) {
 	}
 }
 
+func TestDemotionPreviewAuthority(t *testing.T) {
+	frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"demotion-check","config":{"enabled":0}}`))
+	for _, placement := range []Placement{PlacementServer, PlacementKB} {
+		handler := NewHandler(nil, WithDataStore(placement, nil))
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal(status)
+		}
+		// Preview needs the store even when live demotion is disabled.
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+			t.Fatal(status)
+		}
+	}
+}
+
 func exerciseDemotionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
 	t.Helper()
 	execSQL := func(sql string, args ...any) {
@@ -133,7 +147,7 @@ func exerciseDemotionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
 		}
 	}
 	// Malformed IDs and missing memories must not alias valid candidates.
-	for _, scope := range []string{"invalid", "0", "9223372036854775807"} {
+	for _, scope := range []string{"invalid", "0", "9223372036854775807", "+" + fmt.Sprint(ids[0]), "0" + fmt.Sprint(ids[0])} {
 		for j := 0; j < 3; j++ {
 			execSQL(`INSERT INTO artifacts(id,kind,scope_id,payload) VALUES($1,'retrieval_attribution',$2,'{"verdict":"accepted"}')`, fmt.Sprintf("demotion-invalid-%s-%d", scope, j), scope)
 		}
@@ -221,4 +235,63 @@ func exerciseDemotionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
 		t.Fatal("partial demotion committed", p, a, touch)
 	}
 	execSQL(`RESET ROLE; DROP TRIGGER reject_demotion_action ON artifacts; SET LOCAL ROLE aimee_store_runtime`)
+	preview := func() map[string]any {
+		t.Helper()
+		return runHostRuntime(t, handler, `{"operation":"demotion-check","config":{"enabled":0,"n_min":3,"window":3}}`)
+	}
+	r := preview()
+	if r["status"] != "ok" || r["demotion_enabled"] != float64(0) || r["scored"] != float64(3) || r["would_demote"] != float64(1) {
+		t.Fatal(r)
+	}
+	assertConfidence(.7)
+	if p, a, touch := counts(); p != 2 || a != 1 || touch != 9 {
+		t.Fatal(p, a, touch)
+	}
+	// Preview uses the stored profile rather than fitting one from today's scores.
+	execSQL(`INSERT INTO artifacts(id,kind,state,target_surface,scope_kind,committed_at,payload)
+     VALUES('demotion-preview-override','demotion_profile','committed',$1,'global','2099-01-01','{"score_percentiles":{"p10":4}}')`, kind)
+	r = preview()
+	if r["would_demote"] != float64(3) {
+		t.Fatal(r)
+	}
+	assertConfidence(.7)
+	execSQL(`RESET ROLE; DELETE FROM artifacts WHERE kind='demotion_profile'; SET LOCAL ROLE aimee_store_runtime`)
+	r = preview()
+	if r["would_demote"] != float64(2) {
+		t.Fatal("missing profile must use zero threshold", r)
+	}
+	if p, a, _ := counts(); p != 0 || a != 1 {
+		t.Fatal("preview wrote an artifact", p, a)
+	}
+
+	backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+	readProfile := func(scope, id, want string) {
+		t.Helper()
+		raw, err := backend.demotionProfile(ctx, "fallback-fixture", scope, id)
+		var got map[string]string
+		if err != nil || json.Unmarshal(raw, &got) != nil || got["scope"] != want {
+			t.Fatal(string(raw), want, err)
+		}
+	}
+	writeProfile := func(id, scopeKind, scopeID, value string) {
+		t.Helper()
+		execSQL(`INSERT INTO artifacts(id,kind,state,scope_kind,scope_id,target_surface,committed_at,payload)
+     VALUES($1,'demotion_profile','committed',$2,$3,'fallback-fixture',pg_now_text(),jsonb_build_object('scope',$4::text))`, id, scopeKind, scopeID, value)
+	}
+	writeProfile("demotion-fallback-global", "global", "", "global")
+	readProfile("user", "alice", "global")
+	writeProfile("demotion-fallback-kind", "user", "", "kind")
+	readProfile("user", "alice", "kind")
+	writeProfile("demotion-fallback-exact", "user", "alice", "exact")
+	readProfile("user", "alice", "exact")
+	readProfile("user", "bob", "kind")
+	readProfile("project", "different", "global")
+	if raw, err := backend.demotionProfile(ctx, "absent-class", "global", ""); err != nil || raw != nil {
+		t.Fatal(string(raw), err)
+	}
+	var touched int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM artifacts WHERE id LIKE 'demotion-fallback-%' AND last_accessed_at IS NOT NULL`).Scan(&touched); err != nil || touched != 3 {
+		t.Fatal(touched, err)
+	}
+
 }
