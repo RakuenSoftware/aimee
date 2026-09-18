@@ -1338,6 +1338,31 @@ set_config('aimee.correlation_id',$9,true)`,
 		if err == nil {
 			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "retracted": count, "authority": actor.Role})
 		}
+	case "ontology-dashboard", "ontology-review":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var result map[string]any
+		if request.Operation == "ontology-review" {
+			caller := options.commandContext
+			if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			actor := FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "operator", Rank: 40, Authenticated: 1}
+			if actor.TransportIdentity == "" {
+				actor.TransportIdentity = actor.Principal
+			}
+			result, err = backend.reviewOntology(ctx, actor, request.State, request.Relation, request.FactTarget)
+		} else {
+			result, err = backend.ontologyDashboard(ctx)
+		}
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+			if len(response.Payload) > maxDataBody {
+				err = errors.New("memory: ontology result exceeds capacity")
+			}
+		}
 	case "fact-maintenance":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {

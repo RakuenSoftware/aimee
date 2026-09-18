@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "1cbc5a574d85057bc96865475fd401c2dd2f08af",
-  "source_fingerprint": "13981ae2209eb988fd25ec8d443a05c0c15dfb8318914148bb46d617dcb1cb38",
+  "source_revision": "bbb16865d84aadadd9543c33ccc242c411b87273",
+  "source_fingerprint": "5b4476cf69f404ddc235a50ea31bac2187f61695663cec87892324fd01985d2a",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -101,7 +101,6 @@
     "src/modules/db2/c/mining.c",
     "src/modules/db2/c/notes.c",
     "src/modules/db2/c/oidc_jwks.c",
-    "src/modules/db2/c/ontology_evolution.c",
     "src/modules/db2/c/org_budget.c",
     "src/modules/db2/c/org_egress.c",
     "src/modules/db2/c/org_model_catalog.c",
@@ -116,7 +115,6 @@
     "src/modules/db2/c/pgvec_kb_service.c",
     "src/modules/db2/c/pgvec_transport.c",
     "src/modules/db2/c/project.c",
-    "src/modules/db2/c/rel_types_store.c",
     "src/modules/db2/c/report_enrichments.c",
     "src/modules/db2/c/rules.c",
     "src/modules/db2/c/server_registry.c",
@@ -2133,7 +2131,6 @@
         "src/modules/db2/c/curiosity.c",
         "src/modules/db2/c/entity_profiles.c",
         "src/modules/db2/c/fact_mutation.c",
-        "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/support/time_primitives.c"
       ],
       "disposition": "system-link",
@@ -2491,7 +2488,6 @@
         "src/modules/db2/c/membership.c",
         "src/modules/db2/c/mining.c",
         "src/modules/db2/c/oidc_jwks.c",
-        "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/c/org_budget.c",
         "src/modules/db2/c/org_model_catalog.c",
         "src/modules/db2/c/org_rate.c",
@@ -2641,7 +2637,6 @@
         "src/modules/db2/c/management_status_runtime.c",
         "src/modules/db2/c/management_token_authority.c",
         "src/modules/db2/c/management_token_roots.c",
-        "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/c/org_budget.c",
         "src/modules/db2/c/org_egress.c",
         "src/modules/db2/c/org_model_catalog.c",
@@ -2731,7 +2726,6 @@
         "src/modules/db2/c/curiosity.c",
         "src/modules/db2/c/entity_profiles.c",
         "src/modules/db2/c/fact_mutation.c",
-        "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/support/time_primitives.c"
       ],
       "disposition": "system-link",
@@ -2964,7 +2958,6 @@
         "src/modules/db2/c/entity_profiles.c",
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/support/time_primitives.c"
       ],
       "disposition": "system-link",
@@ -3007,7 +3000,7 @@
     }
   ],
   "summary": {
-    "translation_units": 118,
+    "translation_units": 116,
     "descriptor_support_units": 19,
     "unresolved_symbols": 141,
     "dispositions": {
@@ -3019,5 +3012,5 @@
       "system-link": 140
     }
   },
-  "fingerprint": "d42f71f022bcfba51cb6c57024b51aeb89629cd8c7036d06f3511c65a653ecc0"
+  "fingerprint": "6441e432afa1c532e5caf253f957db4939092beceb0c6e1cc4129921134410d1"
 }

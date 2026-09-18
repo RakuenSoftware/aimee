@@ -1466,7 +1466,6 @@
         "src/tests/test_management_status_runtime.c",
         "src/tests/test_memory_advanced.c",
         "src/tests/test_memory_retrieval_eval.c",
-        "src/tests/test_ontology_evolution.c",
         "src/tests/test_org_model_catalog_target.c",
         "src/tests/test_org_vault_rewrap.c",
         "src/tests/test_planner.c",
@@ -7011,7 +7010,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_registry.h",
-          "line": 123
+          "line": 97
         }
       ],
       "signature": "int db2_entity_conflict_count ( const char * status )",
@@ -7026,7 +7025,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_registry.h",
-          "line": 127
+          "line": 101
         }
       ],
       "signature": "int db2_entity_conflict_priority ( const char * name )",
@@ -7041,7 +7040,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_registry.h",
-          "line": 114
+          "line": 88
         }
       ],
       "signature": "int64_t db2_entity_conflict_record ( const char * name )",
@@ -7056,7 +7055,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_registry.h",
-          "line": 120
+          "line": 94
         }
       ],
       "signature": "int db2_entity_conflict_set_status ( int64_t conflict_id , const char * status )",
@@ -7535,23 +7534,6 @@
       "symbol": "db2_entity_merge_as"
     },
     {
-      "consumers": [
-        "src/kb/http/kb_http_console.c",
-        "src/tests/support/kb_http_route_stubs.c",
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 109
-        }
-      ],
-      "signature": "int db2_entity_merge_summaries ( entity_merge_summary_t * out , int max )",
-      "signature_sha256": "ae7df83565cfa9cacf0d054edde8cf39f63873686ccaa10d434475802d362934",
-      "status": "audit-pending",
-      "symbol": "db2_entity_merge_summaries"
-    },
-    {
       "consumers": [],
       "locations": [
         {
@@ -7795,23 +7777,6 @@
       "signature_sha256": "729c6264575c9a170c24aea5e4ac984334028ecd8587a3de06a8f8055d450401",
       "status": "private-test-only",
       "symbol": "db2_entity_resolve"
-    },
-    {
-      "consumers": [
-        "src/kb/http/kb_http_console.c",
-        "src/tests/support/kb_http_route_stubs.c",
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 108
-        }
-      ],
-      "signature": "int db2_entity_summaries ( entity_summary_t * out , int max )",
-      "signature_sha256": "c3ef5a4f8da18c9f27650b683ec42259a04b116cf20c79cc09de8b81eeade0d0",
-      "status": "audit-pending",
-      "symbol": "db2_entity_summaries"
     },
     {
       "consumers": [
@@ -8204,7 +8169,9 @@
       "symbol": "db2_fact_erasure_preview"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/tests/test_ontology_evolution.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
@@ -8213,7 +8180,7 @@
       ],
       "signature": "int db2_fact_graph_record_external_in_txn ( const fact_actor_t * actor , const char * operation , const char * object_kind , const char * object_key , const char * action , const char * before_state , const char * after_state , int reversible , char commit_id [ FACT_COMMIT_ID_MAX ] )",
       "signature_sha256": "98f8d6b061cafe3f7ed0f5f735bed4a6ad343b0fe9608d98f92778ee4339de9c",
-      "status": "internal-unconsumed",
+      "status": "private-test-only",
       "symbol": "db2_fact_graph_record_external_in_txn"
     },
     {
@@ -14586,123 +14553,6 @@
       "symbol": "db2_note_title_to_slug"
     },
     {
-      "consumers": [
-        "src/kb/http/kb_http_console.c",
-        "src/tests/test_kb_http_routes.c",
-        "src/tests/test_ontology_evolution.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/ontology_evolution.h",
-          "line": 51
-        }
-      ],
-      "signature": "int db2_ontology_approve ( const char * rel_type )",
-      "signature_sha256": "aea184bdb37446a38a0bf8f5d59e36e3941d139d30427c3f36f1be2c3e2b1e1e",
-      "status": "audit-pending",
-      "symbol": "db2_ontology_approve"
-    },
-    {
-      "consumers": [
-        "src/kb/http/kb_http_console.c",
-        "src/tests/test_kb_http_routes.c",
-        "src/tests/test_ontology_evolution.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/ontology_evolution.h",
-          "line": 46
-        }
-      ],
-      "signature": "int db2_ontology_eval_candidates ( int threshold , char ( * out ) [ REL_TYPE_NAME_MAX ] , int max )",
-      "signature_sha256": "a11b25264d60f15a21d4806bdb62df307fb207b356995b1acd9ea12df30e9217",
-      "status": "audit-pending",
-      "symbol": "db2_ontology_eval_candidates"
-    },
-    {
-      "consumers": [
-        "src/kb/http/kb_http_console.c",
-        "src/tests/test_kb_http_routes.c",
-        "src/tests/test_ontology_evolution.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/ontology_evolution.h",
-          "line": 37
-        }
-      ],
-      "signature": "long db2_ontology_eval_count ( const char * rel_type )",
-      "signature_sha256": "96a44edb346a47b3e1a6a4e18cc7eab924e5b92814da8be3008c499269352659",
-      "status": "audit-pending",
-      "symbol": "db2_ontology_eval_count"
-    },
-    {
-      "consumers": [
-        "src/tests/test_ontology_evolution.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/ontology_evolution.h",
-          "line": 33
-        }
-      ],
-      "signature": "long db2_ontology_eval_observe ( const char * rel_type )",
-      "signature_sha256": "7ab71916439a24f40e77d7009b9dda0eb3852351f9cb2172c0ffec67aab1601d",
-      "status": "private-test-only",
-      "symbol": "db2_ontology_eval_observe"
-    },
-    {
-      "consumers": [
-        "src/kb/http/kb_http_console.c",
-        "src/tests/test_kb_http_routes.c",
-        "src/tests/test_ontology_evolution.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/ontology_evolution.h",
-          "line": 41
-        }
-      ],
-      "signature": "int db2_ontology_eval_status ( const char * rel_type , char * out , size_t out_len )",
-      "signature_sha256": "8a093cf8d1dca2e86eed604e3813133ef4a72e55bce62640e24a0a593fbc7c77",
-      "status": "audit-pending",
-      "symbol": "db2_ontology_eval_status"
-    },
-    {
-      "consumers": [
-        "src/kb/http/kb_http_console.c",
-        "src/tests/test_kb_http_routes.c",
-        "src/tests/test_ontology_evolution.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/ontology_evolution.h",
-          "line": 58
-        }
-      ],
-      "signature": "int db2_ontology_map ( const char * novel , const char * target )",
-      "signature_sha256": "67707a7da648911487ece0360e4b3e200ecf33811016677f679e5dd298b541a5",
-      "status": "audit-pending",
-      "symbol": "db2_ontology_map"
-    },
-    {
-      "consumers": [
-        "src/kb/http/kb_http_console.c",
-        "src/tests/test_kb_http_routes.c",
-        "src/tests/test_ontology_evolution.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/ontology_evolution.h",
-          "line": 62
-        }
-      ],
-      "signature": "int db2_ontology_reject ( const char * rel_type )",
-      "signature_sha256": "b3b46ff86fb67bb350c08d1f6d61682e477b3bf1cacf40831bde3987c8214e71",
-      "status": "audit-pending",
-      "symbol": "db2_ontology_reject"
-    },
-    {
       "consumers": [],
       "locations": [
         {
@@ -15394,19 +15244,6 @@
       "signature_sha256": "e6e192729bd27bfcf59d354a0d94a9c2d21fa7e3d3df9498ab5605453398f058",
       "status": "internal-unconsumed",
       "symbol": "db2_register_shared_sqlite"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 8
-        }
-      ],
-      "signature": "int db2_rel_types_resolve ( const char * rel_type , long * out_id )",
-      "signature_sha256": "fb0afea67a101f59fc58cd09aa4b3dfbbbae21ce8a09dc388295a0c408d6e7bf",
-      "status": "internal-unconsumed",
-      "symbol": "db2_rel_types_resolve"
     },
     {
       "consumers": [
@@ -20560,14 +20397,14 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "215b4ba0b7ef78b8125127d96083cfd29571f050d62f3b13320003caa92c92ac",
+  "fingerprint": "a18cc4b807b0faaa5570cc1f5028f171cd4dda1a6fa0b321997e5d60ab5a9352",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 445,
-    "declarations": 1131,
-    "headers": 129,
-    "internal_unconsumed": 198,
+    "audit_pending": 437,
+    "declarations": 1121,
+    "headers": 127,
+    "internal_unconsumed": 196,
     "private_test_only": 296,
     "reviewed": 192
   }

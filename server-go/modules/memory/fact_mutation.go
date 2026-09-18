@@ -82,6 +82,10 @@ func (s *postgresDataStore) openFactCommit(ctx context.Context, a FactActor, ope
 }
 
 func (s *postgresDataStore) closeFactCommit(ctx context.Context, commit string, id int64) error {
+	return s.closeFactObjectCommit(ctx, commit, strconv.FormatInt(id, 10))
+}
+
+func (s *postgresDataStore) closeFactObjectCommit(ctx context.Context, commit, object string) error {
 	tag, err := s.db.Exec(ctx, `UPDATE fact_graph_commits SET status='applied',closed_at=pg_now_text() WHERE commit_id=$1 AND status='open'`, commit)
 	if err != nil {
 		return err
@@ -89,7 +93,7 @@ func (s *postgresDataStore) closeFactCommit(ctx context.Context, commit string, 
 	if tag.RowsAffected() != 1 {
 		return errors.New("memory: fact commit is not open")
 	}
-	_, err = s.db.Exec(ctx, `SELECT kb_fact_commit_worm_seal($1,$2)`, commit, strconv.FormatInt(id, 10))
+	_, err = s.db.Exec(ctx, `SELECT kb_fact_commit_worm_seal($1,$2)`, commit, object)
 	return err
 }
 

@@ -28,7 +28,6 @@ extern int handle_get_code_context(const char *query_string, char *out_buf, int 
 #include "kb/kb_surprising_judge.h"  /* §4 judge stub seam (kb_surprising_verdict_t) */
 #include "modules/db2/c/lifecycle.h" /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
 #include "modules/db2/c/code_project_lifecycle.h"
-#include "rel_types.h"        /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
@@ -731,44 +730,6 @@ int db2_curator_invalidations_since(int64_t since_id, void *out, int max)
    return 0;
 }
 
-/* Ontology-console db2 stubs: the typed_facts ontology console added
- * these refs into kb_http_console.o; the real defs pull the whole db2 stack,
- * so stub them link-only (this test exercises routing, not the ontology backend). */
-long db2_ontology_eval_count(const char *rel_type)
-{
-   (void)rel_type;
-   return 0;
-}
-int db2_ontology_eval_status(const char *rel_type, char *out, size_t out_len)
-{
-   (void)rel_type;
-   if (out && out_len)
-      out[0] = '\0';
-   return 0;
-}
-int db2_ontology_eval_candidates(int threshold, char (*out)[REL_TYPE_NAME_MAX], int max)
-{
-   (void)threshold;
-   (void)out;
-   (void)max;
-   return 0;
-}
-int db2_ontology_approve(const char *rel_type)
-{
-   (void)rel_type;
-   return 0;
-}
-int db2_ontology_map(const char *novel, const char *target)
-{
-   (void)novel;
-   (void)target;
-   return 0;
-}
-int db2_ontology_reject(const char *rel_type)
-{
-   (void)rel_type;
-   return 0;
-}
 /* The console writes through the module client. Report success without touching
  * a real config file; this route test owns only the HTTP-facing contract. */
 int config_set(const char *key, const char *value)
@@ -2696,6 +2657,84 @@ static void test_console_pipeline(void)
 static const char *review_reply;
 static int review_transport = 1;
 static int review_calls;
+static const char *ontology_json =
+    "{\"schema\":\"console.typed_facts.v1\",\"id\":9007199254740993,\"name\":\"完整名称\"}";
+static int ontology_status = 200;
+static int ontology_transport = 1;
+static int ontology_calls;
+
+static int ontology_owner_fixture(cJSON **result)
+{
+   ontology_calls++;
+   *result = NULL;
+   if (ontology_transport != 1)
+      return ontology_transport;
+   *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(*result, "status", "ok");
+   cJSON_AddNumberToObject(*result, "http_status", ontology_status);
+   cJSON_AddStringToObject(*result, "json", ontology_json);
+   return 1;
+}
+
+static void test_console_ontology_owner(void)
+{
+   extern void test_kb_fact_actor_set(int enabled);
+   char buf[4096];
+   const char *path = "/v1/console/typed_facts";
+   assert(kb_http_route_ex("GET", path, NULL, NULL, NULL, NULL, 0, buf, sizeof(buf)) == 200);
+   assert(!strcmp(buf, ontology_json));
+   const char *body =
+       "{\"action\":\"map\",\"relation\":\"novel\",\"target\":\"works_for\",\"actor\":\"forged\"}";
+   path = "/v1/console/typed_facts/relation";
+   test_kb_fact_actor_set(1);
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 200);
+   assert(!strcmp(buf, ontology_json));
+   const int statuses[] = {400, 403, 500, 503};
+   for (unsigned i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++)
+   {
+      ontology_status = statuses[i];
+      assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                              sizeof(buf)) == statuses[i]);
+   }
+   ontology_status = 201;
+   assert(kb_http_route_ex("GET", "/v1/console/typed_facts", NULL, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 503);
+   ontology_status = 200;
+   const char *saved = ontology_json;
+   const char *bad[] = {"bad", "[]", "{} trailing"};
+   for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+   {
+      ontology_json = bad[i];
+      assert(kb_http_route_ex("GET", "/v1/console/typed_facts", NULL, NULL, NULL, NULL, 0, buf,
+                              sizeof(buf)) == 503);
+   }
+   char large[8192];
+   memset(large, 'x', sizeof(large));
+   large[0] = '{';
+   large[1] = '"';
+   large[sizeof(large) - 5] = '"';
+   large[sizeof(large) - 4] = ':';
+   large[sizeof(large) - 3] = '0';
+   large[sizeof(large) - 2] = '}';
+   large[sizeof(large) - 1] = 0;
+   ontology_json = large;
+   assert(kb_http_route_ex("GET", "/v1/console/typed_facts", NULL, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 500);
+   ontology_json = saved;
+   ontology_transport = -1;
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 503);
+   ontology_transport = 1;
+   int before = ontology_calls;
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, "[]", 2, buf, sizeof(buf)) == 400);
+   test_kb_fact_actor_set(0);
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 403);
+   assert(before == ontology_calls);
+   puts("  PASS: ontology owner transport preserves JSON and verified context");
+}
+
 static void test_console_memories(void)
 {
    extern void test_kb_fact_actor_set(int enabled);
@@ -4574,6 +4613,18 @@ static int g_vec_unauthorized = 0;
 int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
                                            const cJSON *context, cJSON **result)
 {
+   if (!strcmp(method, "memory.runtime") && !strcmp(jo_cstr(args, "operation"), "ontology-review"))
+   {
+      assert(!strcmp(jo_cstr(args, "action"), "map"));
+      assert(!strcmp(jo_cstr(args, "relation"), "novel"));
+      assert(!strcmp(jo_cstr(args, "target"), "works_for"));
+      assert(!cJSON_GetObjectItemCaseSensitive(args, "actor"));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
+      assert(!strcmp(jo_cstr(context, "principal"), "test:operator"));
+      assert(!strcmp(jo_cstr(context, "transport_identity"), "test-transport"));
+      return ontology_owner_fixture(result);
+   }
    review_calls++;
    assert(strcmp(method, "memory.reject") == 0 || strcmp(method, "memory.restore") == 0 ||
           strcmp(method, "memory.runtime") == 0);
@@ -4690,6 +4741,8 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    }
    if (strcmp(method, "memory.runtime") == 0)
    {
+      if (!strcmp(jo_cstr(args, "operation"), "ontology-dashboard"))
+         return ontology_owner_fixture(result);
       if (!strcmp(jo_cstr(args, "operation"), "fact-candidates"))
       {
          *result = cJSON_Parse("{\"status\":\"ok\",\"candidates\":[]}");
@@ -7701,6 +7754,7 @@ int main(void)
    test_console_pipeline();
    test_console_memories();
    test_console_fact_review();
+   test_console_ontology_owner();
    test_console_settings();
    test_console_evidence_operator_boundary();
    test_accounts_routes();

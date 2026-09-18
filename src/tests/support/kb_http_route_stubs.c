@@ -351,20 +351,6 @@ int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const ch
  * DB2.  Keep reads empty and mutations fail-closed; lifecycle/entity integration
  * is exercised by its dedicated DB2 tests and the real full-stack browser E2E. */
 
-int db2_entity_summaries(entity_summary_t *out, int max)
-{
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int db2_entity_merge_summaries(entity_merge_summary_t *out, int max)
-{
-   (void)out;
-   (void)max;
-   return 0;
-}
-
 static int g_fact_actor_enabled;
 
 void test_kb_fact_actor_set(int enabled)

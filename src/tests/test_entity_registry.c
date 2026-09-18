@@ -130,10 +130,6 @@ int main(void)
    assert(mid > 0);
    assert(direct_commit[0] != '\0');
    assert_commit_actor(direct_commit, "test:operator", FACT_ACTOR_OPERATOR);
-   entity_summary_t summaries[32];
-   entity_merge_summary_t merge_summaries[32];
-   assert(db2_entity_summaries(summaries, 32) > 0);
-   assert(db2_entity_merge_summaries(merge_summaries, 32) > 0);
    assert(db2_entity_unmerge_as(&operator_actor, mid, unmerge_commit) == 0);
    assert(unmerge_commit[0] != '\0');
    assert_commit_actor(unmerge_commit, "test:operator", FACT_ACTOR_OPERATOR);
