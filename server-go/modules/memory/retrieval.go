@@ -283,62 +283,6 @@ FROM `+s.recallSource()+` WHERE lifecycle_state='pending' AND activation_suppres
 	return encoded, err
 }
 
-func (s *postgresDataStore) AlertsBundle(ctx context.Context, since string) (json.RawMessage, error) {
-	if err := s.requireKBDomain(); err != nil {
-		return nil, err
-	}
-	if since == "" {
-		since = "1970-01-01T00:00:00Z"
-	}
-	stale := make([]map[string]any, 0)
-	rows, err := s.db.Query(ctx, `SELECT id,content,created_at,ttl_at FROM memories
-WHERE lifecycle_state='pending' AND ttl_at<>'' AND ttl_at<=pg_now_text('+2 days')
-ORDER BY ttl_at LIMIT 64`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var id int64
-		var content, created, ttl string
-		if err := rows.Scan(&id, &content, &created, &ttl); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		stale = append(stale, map[string]any{"memory_id": id, "text": content, "created_at": created, "ttl_at": ttl})
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	conflicts, err := s.ConflictList(ctx, 64)
-	if err != nil {
-		return nil, err
-	}
-	superseded := make([]Record, 0)
-	rows, err = s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
-FROM memories WHERE lifecycle_state='superseded' AND updated_at>=$1 ORDER BY updated_at DESC LIMIT 64`, since)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var item Record
-		if err := rows.Scan(&item.ID, &item.Scope.Type, &item.Scope.Value, &item.Tier,
-			&item.Kind, &item.Key, &item.Content, &item.Confidence); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		superseded = append(superseded, item)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(map[string]any{"stale_pending": stale, "unresolved_contradictions": conflicts,
-		"newly_superseded": superseded})
-}
-
 func (s *postgresDataStore) AssembleContext(ctx context.Context, scope Scope, query, blockType string, limit int) (string, error) {
 	if limit <= 0 {
 		limit = 12

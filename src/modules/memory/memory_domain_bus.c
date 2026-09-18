@@ -129,11 +129,6 @@ cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start)
                               session_start);
 }
 
-cJSON *memory_alerts(const char *since)
-{
-   return domain_payload_call("alerts-bundle", NULL, since ? since : "", 0, 0);
-}
-
 int db2_memory_key_exists(const char *key)
 {
    if (!key || !key[0])

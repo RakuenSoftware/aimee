@@ -366,8 +366,9 @@ static void test_ordered_readers_propagate_active_project_context(void)
    free(json);
    json = kb_client_memory_recall_json("q", 128, 0);
    free(json);
-   json = kb_client_memory_alerts_json(NULL);
-   free(json);
+   cJSON *alerts = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(alerts);
+   free(kb_v1_action_request("memory.alerts", alerts));
    cJSON *briefing = cJSON_Parse("{\"limit_tokens\":128}");
    kb_client_memory_scope_context_apply(briefing);
    free(kb_v1_action_request("memory.briefing", briefing));

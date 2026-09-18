@@ -1227,53 +1227,28 @@ void mem_alerts(app_ctx_t *ctx, int argc, char **argv)
    opt_parse(argc, argv, NULL, &opts);
    const char *since = opt_get(&opts, "since");
 
-   char *envelope = kb_client_memory_alerts_json(since);
-   cJSON *bundle = mem_prospective_detach_from_envelope(envelope, "alerts");
-   free(envelope);
-   if (!bundle)
-      fatal("memory alerts failed");
-
+   cJSON *request = cJSON_CreateObject();
+   if (since)
+      cJSON_AddStringToObject(request, "since", since);
+   cJSON_AddStringToObject(request, "format", ctx->json_output ? "json" : "text");
+   if (ctx->json_fields)
+      cJSON_AddStringToObject(request, "fields", ctx->json_fields);
+   if (ctx->response_profile)
+      cJSON_AddStringToObject(request, "profile", ctx->response_profile);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.alerts", request);
+   cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   const cJSON *output = reply ? cJSON_GetObjectItemCaseSensitive(reply, "output") : NULL;
+   if (!reply || strcmp(jo_cstr(reply, "status"), "ok") != 0 || !cJSON_IsString(output))
+   {
+      cJSON_Delete(reply);
+      fatal("memory alerts failed or returned malformed output");
+   }
+   fputs(output->valuestring, stdout);
    if (ctx->json_output)
-   {
-      emit_json_ctx(bundle, ctx->json_fields, ctx->response_profile);
-      return;
-   }
-
-   cJSON *stale = cJSON_GetObjectItemCaseSensitive(bundle, "stale_pending");
-   cJSON *conflicts = cJSON_GetObjectItemCaseSensitive(bundle, "unresolved_contradictions");
-   cJSON *superseded = cJSON_GetObjectItemCaseSensitive(bundle, "newly_superseded");
-
-   printf("# Memory Alerts\n\n");
-   printf("## Stale Pending (%d)\n", cJSON_GetArraySize(stale));
-   cJSON *it = NULL;
-   cJSON_ArrayForEach(it, stale)
-   {
-      long long id = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
-      double age = cJSON_GetNumberValue(cJSON_GetObjectItem(it, "age_days"));
-      double window = cJSON_GetNumberValue(cJSON_GetObjectItem(it, "window_days"));
-      const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(it, "text"));
-      printf("  - #%lld age=%.1fd/%.1fd: %s\n", id, age, window, text ? text : "");
-   }
-   printf("\n## Unresolved Contradictions (%d)\n", cJSON_GetArraySize(conflicts));
-   cJSON_ArrayForEach(it, conflicts)
-   {
-      const char *topic = cJSON_GetStringValue(cJSON_GetObjectItem(it, "topic"));
-      const char *a = cJSON_GetStringValue(cJSON_GetObjectItem(it, "a"));
-      const char *b = cJSON_GetStringValue(cJSON_GetObjectItem(it, "b"));
-      printf("  - %s\n    A: %s\n    B: %s\n", topic ? topic : "", a ? a : "", b ? b : "");
-   }
-   printf("\n## Newly Superseded (%d)\n", cJSON_GetArraySize(superseded));
-   cJSON_ArrayForEach(it, superseded)
-   {
-      long long id = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
-      const char *key = cJSON_GetStringValue(cJSON_GetObjectItem(it, "key"));
-      const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(it, "text"));
-      const char *ts = cJSON_GetStringValue(cJSON_GetObjectItem(it, "superseded_at"));
-      printf("  - #%lld [%s] %s (at %s)\n", id, key ? key : "", text ? text : "", ts ? ts : "");
-   }
-   double ms = cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(bundle, "elapsed_ms"));
-   printf("\nassembled in %.2fms\n", ms);
-   cJSON_Delete(bundle);
+      fputc('\n', stdout);
+   cJSON_Delete(reply);
 }
 
 static void mem_recall_print_section(const char *header, cJSON *section, int show_why)

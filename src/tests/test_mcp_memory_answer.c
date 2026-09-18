@@ -10,6 +10,7 @@
 
 extern cJSON *tool_search_memory(cJSON *args);
 extern cJSON *tool_memory_briefing(cJSON *args);
+extern cJSON *tool_memory_alerts(cJSON *args);
 extern cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out);
 static char project[1024], workspace[1024];
 static int active, all, calls;
@@ -69,7 +70,7 @@ char *kb_v1_action_request(const char *action, cJSON *request)
 {
    calls++;
    assert(active && strcmp(action, expected_action) == 0);
-   if (strcmp(action, "memory.briefing") != 0)
+   if (strcmp(action, "memory.briefing") != 0 && strcmp(action, "memory.alerts") != 0)
       assert(strcmp(jo_cstr(request, "query"), "query") == 0);
    assert(strcmp(jo_cstr(request, "project"), expected_project) == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
@@ -87,6 +88,12 @@ char *kb_v1_action_request(const char *action, cJSON *request)
    {
       assert(strcmp(jo_cstr(request, "format"), "mcp") == 0);
       assert(jo_int(request, "limit_tokens", 0) == 768);
+      assert(jo_bool(request, "include_all", -1) == expected_all);
+   }
+   if (strcmp(action, "memory.alerts") == 0)
+   {
+      assert(strcmp(jo_cstr(request, "format"), "mcp") == 0);
+      assert(strcmp(jo_cstr(request, "since"), "2026-09-01") == 0);
       assert(jo_bool(request, "include_all", -1) == expected_all);
    }
    cJSON_Delete(request);
@@ -190,36 +197,42 @@ int main(void)
    assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "unavailable"));
    cJSON_Delete(content);
    cJSON_Delete(args);
-   expected_action = "memory.briefing";
-   args = cJSON_Parse("{\"limit_tokens\":768,\"include_all\":true}");
-   reply = cJSON_Parse("{\"status\":\"ok\",\"output\":\"{\\\"key_facts\\\":[{\\\"memory_id\\\":"
-                       "9223372036854775807}]}\"}");
-   assert(reply);
-   content = tool_memory_briefing(args);
-   assert(!active &&
-          strcmp(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), jo_cstr(reply, "output")) == 0);
-   assert(strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "9223372036854775807"));
-   cJSON_Delete(content);
-   cJSON_AddStringToObject(args, "scope", "all");
-   expected_all = 1;
-   expected_project = "";
-   content = tool_memory_briefing(args);
-   assert(!active);
-   cJSON_Delete(content);
-   cJSON_ReplaceItemInObjectCaseSensitive(reply, "output", cJSON_CreateNumber(7));
-   content = tool_memory_briefing(args);
-   assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "invalid output"));
-   cJSON_Delete(content);
-   cJSON_ReplaceItemInObjectCaseSensitive(reply, "status", cJSON_CreateString("unavailable"));
-   content = tool_memory_briefing(args);
-   assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "unavailable"));
-   cJSON_Delete(content);
-   cJSON_Delete(reply);
-   reply = NULL;
-   content = tool_memory_briefing(args);
-   assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "unavailable"));
-   cJSON_Delete(content);
-   cJSON_Delete(args);
+   cJSON *(*bundle_tools[])(cJSON *) = {tool_memory_briefing, tool_memory_alerts};
+   for (int i = 0; i < 2; i++)
+   {
+      expected_action = i == 0 ? "memory.briefing" : "memory.alerts";
+      expected_project = "__aimee_scope_missing__";
+      expected_all = 0;
+      args = cJSON_Parse("{\"limit_tokens\":768,\"since\":\"2026-09-01\",\"include_all\":true}");
+      reply = cJSON_Parse("{\"status\":\"ok\",\"output\":\"{\\\"key_facts\\\":[{\\\"memory_id\\\":"
+                          "9223372036854775807}]}\"}");
+      assert(reply);
+      content = bundle_tools[i](args);
+      assert(!active && strcmp(jo_cstr(cJSON_GetArrayItem(content, 0), "text"),
+                               jo_cstr(reply, "output")) == 0);
+      assert(strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "9223372036854775807"));
+      cJSON_Delete(content);
+      cJSON_AddStringToObject(args, "scope", "all");
+      expected_all = 1;
+      expected_project = "";
+      content = bundle_tools[i](args);
+      assert(!active);
+      cJSON_Delete(content);
+      cJSON_ReplaceItemInObjectCaseSensitive(reply, "output", cJSON_CreateNumber(7));
+      content = bundle_tools[i](args);
+      assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "invalid output"));
+      cJSON_Delete(content);
+      cJSON_ReplaceItemInObjectCaseSensitive(reply, "status", cJSON_CreateString("unavailable"));
+      content = bundle_tools[i](args);
+      assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "unavailable"));
+      cJSON_Delete(content);
+      cJSON_Delete(reply);
+      reply = NULL;
+      content = bundle_tools[i](args);
+      assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "unavailable"));
+      cJSON_Delete(content);
+      cJSON_Delete(args);
+   }
    puts("mcp_memory_answer: PASS (scope, long answers, trace, citations, failure)");
    return 0;
 }

@@ -270,32 +270,7 @@ static cJSON *mcph_upsert_role_template(struct mcp_call *c)
 
 static cJSON *mcph_memory_alerts(struct mcp_call *c)
 {
-   cJSON *jargs = c->jargs;
-   const char *since = NULL;
-   cJSON *js = cJSON_GetObjectItemCaseSensitive(jargs, "since");
-   if (cJSON_IsString(js) && js->valuestring[0])
-      since = js->valuestring;
-   int active_context_missing = 0;
-   mcp_memory_scope_begin(jargs, &active_context_missing);
-   char *envelope = kb_client_memory_alerts_json(since);
-   mcp_memory_scope_end();
-   cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
-   free(envelope);
-   cJSON *alerts = resp ? cJSON_GetObjectItemCaseSensitive(resp, "alerts") : NULL;
-   char *rendered = NULL;
-   if (alerts)
-   {
-      cJSON *detached = cJSON_DetachItemViaPointer(resp, alerts);
-      if (detached)
-         cJSON_AddBoolToObject(detached, "active_context_missing", active_context_missing);
-      rendered = detached ? cJSON_PrintUnformatted(detached) : NULL;
-      cJSON_Delete(detached);
-   }
-   cJSON_Delete(resp);
-   cJSON *content =
-       rendered ? text_content(rendered) : mcph_kb_last_result("memory alerts returned no result");
-   free(rendered);
-   return content;
+   return tool_memory_alerts(c->jargs);
 }
 
 static cJSON *mcph_memory_recall(struct mcp_call *c)

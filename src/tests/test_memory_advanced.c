@@ -1036,95 +1036,8 @@ int main(void)
          assert(memory_lifecycle_sweep_expired() == 0);
       }
 
-      /* Alerts bundle shape: stale_pending surfaces rows past 80% of the
-       * TTL window; unresolved_contradictions pulls from memory_conflicts;
-       * newly_superseded pulls rows transitioned to superseded since the
-       * `since` cutoff. */
-      {
-         reset_db();
-
-         char err[256] = "";
-         memory_t stale;
-         assert(memory_insert(TIER_L2, KIND_FACT, "alert:stale", "I'll audit this month", 0.9, "s1",
-                              &stale) == 0);
-         /* Created 9 days ago with a 10-day window — 90% elapsed > 80%
-          * threshold, so stale_pending should pick it up. */
-         char stale_created[TEST_TS_MAX], stale_ttl[TEST_TS_MAX], stale_sql[512];
-         test_ts_days(stale_created, sizeof(stale_created), -9);
-         test_ts_days(stale_ttl, sizeof(stale_ttl), 1);
-         snprintf(stale_sql, sizeof(stale_sql),
-                  "UPDATE memories SET lifecycle_state = 'pending',"
-                  " created_at = '%s', ttl_at = '%s'"
-                  " WHERE key = 'alert:stale'",
-                  stale_created, stale_ttl);
-         assert(aimee_pg_exec(db2_conn(), stale_sql, err, sizeof(err)) == 0);
-
-         /* Fresh pending (just created, 10-day window) must NOT be stale. */
-         memory_t fresh;
-         assert(memory_insert(TIER_L2, KIND_FACT, "alert:fresh", "I'll sync tomorrow", 0.9, "s1",
-                              &fresh) == 0);
-         char fresh_created[TEST_TS_MAX], fresh_ttl[TEST_TS_MAX], fresh_sql[512];
-         test_ts_days(fresh_created, sizeof(fresh_created), -1);
-         test_ts_days(fresh_ttl, sizeof(fresh_ttl), 9);
-         snprintf(fresh_sql, sizeof(fresh_sql),
-                  "UPDATE memories SET lifecycle_state = 'pending',"
-                  " created_at = '%s', ttl_at = '%s'"
-                  " WHERE key = 'alert:fresh'",
-                  fresh_created, fresh_ttl);
-         assert(aimee_pg_exec(db2_conn(), fresh_sql, err, sizeof(err)) == 0);
-
-         /* Conflict row for the unresolved section. */
-         memory_t a, b;
-         assert(memory_insert(TIER_L2, KIND_FACT, "alert:conflict", "value A", 0.9, "s1", &a) == 0);
-         assert(memory_insert(TIER_L2, KIND_FACT, "alert:conflict", "value B", 0.9, "s1", &b) == 0);
-         memory_record_conflict(a.id, b.id);
-
-         /* Newly superseded row. */
-         memory_t sup;
-         assert(memory_insert(TIER_L2, KIND_FACT, "alert:sup", "was-true", 0.9, "s1", &sup) == 0);
-         assert(memory_transition_lifecycle(sup.id, MEMORY_LIFECYCLE_STATE_SUPERSEDED, NULL) == 0);
-
-         cJSON *bundle = memory_alerts(NULL);
-         assert(bundle != NULL);
-         cJSON *stale_arr = cJSON_GetObjectItemCaseSensitive(bundle, "stale_pending");
-         cJSON *conf_arr = cJSON_GetObjectItemCaseSensitive(bundle, "unresolved_contradictions");
-         cJSON *sup_arr = cJSON_GetObjectItemCaseSensitive(bundle, "newly_superseded");
-         assert(cJSON_IsArray(stale_arr));
-         assert(cJSON_IsArray(conf_arr));
-         assert(cJSON_IsArray(sup_arr));
-
-         /* Exactly the stale row lands in stale_pending, not the fresh one. */
-         int saw_stale = 0, saw_fresh = 0;
-         cJSON *it = NULL;
-         cJSON_ArrayForEach(it, stale_arr)
-         {
-            long long id = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
-            if (id == stale.id)
-               saw_stale = 1;
-            if (id == fresh.id)
-               saw_fresh = 1;
-         }
-         assert(saw_stale);
-         assert(!saw_fresh);
-
-         /* Unresolved conflict shows up. */
-         assert(cJSON_GetArraySize(conf_arr) >= 1);
-
-         /* Newly-superseded section captures the row we transitioned. */
-         int saw_sup = 0;
-         cJSON_ArrayForEach(it, sup_arr)
-         {
-            long long id = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
-            if (id == sup.id)
-               saw_sup = 1;
-         }
-         assert(saw_sup);
-
-         double elapsed =
-             cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(bundle, "elapsed_ms"));
-         assert(elapsed >= 0.0);
-         cJSON_Delete(bundle);
-      }
+      /* Alert shape, TTL fractions, scope limits and sweep plateau coverage
+       * run through Go alerts_test.go with the restricted runtime role. */
 
       /* Stress fixture: inject 500 commitment-shape rows across a simulated
        * 90-day window and assert that the sweep keeps the stale-pending
@@ -1177,13 +1090,6 @@ int main(void)
          assert(memory_lifecycle_counts(&cts) == 0);
          assert(cts.pending < 500);
          assert(cts.archived >= archived_first);
-
-         cJSON *bundle = memory_alerts(NULL);
-         cJSON *stale_arr = cJSON_GetObjectItemCaseSensitive(bundle, "stale_pending");
-         int stale_count = cJSON_GetArraySize(stale_arr);
-         /* Plateau check: stale_count <= pending <= plateau bound. */
-         assert(stale_count <= (int)cts.pending);
-         cJSON_Delete(bundle);
 
          /* Running the sweep again must be a no-op — idempotence. */
          int archived_second = memory_lifecycle_sweep_expired();

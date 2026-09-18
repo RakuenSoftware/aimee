@@ -947,6 +947,34 @@ cJSON *tool_memory_briefing(cJSON *args)
    return content;
 }
 
+cJSON *tool_memory_alerts(cJSON *args)
+{
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "format", "mcp");
+   const cJSON *since = cJSON_GetObjectItemCaseSensitive(args, "since");
+   if (cJSON_IsString(since))
+      cJSON_AddItemToObject(request, "since", cJSON_Duplicate(since, 1));
+   mcp_memory_scope_begin(args, NULL);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.alerts", request);
+   mcp_memory_scope_end();
+   cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   if (!reply)
+      return kb_last_result_content("memory alerts failed");
+   if (strcmp(jo_cstr(reply, "status"), "ok") != 0)
+      return json_result_content(reply);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+   if (!cJSON_IsString(output))
+   {
+      cJSON_Delete(reply);
+      return text_content("error: memory alerts returned invalid output");
+   }
+   cJSON *content = text_content(output->valuestring);
+   cJSON_Delete(reply);
+   return content;
+}
+
 cJSON *tool_get_identity(void)
 {
    if (!config_present())

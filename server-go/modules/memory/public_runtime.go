@@ -81,17 +81,26 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			}
 		}
 		scoped = commandScope(args, &request)
-	case "briefing":
+	case "briefing", "alerts":
 		format := args.stringOr("format", "")
 		if format != "" && format != "text" && format != "json" && format != "mcp" {
-			return invalid("briefing format must be text, json or mcp")
+			return invalid(verb + " format must be text, json or mcp")
 		}
-		request.Operation, request.LimitTokens = "briefing-bundle", args.integer("limit_tokens", 0)
-		if request.LimitTokens < 0 {
-			request.LimitTokens = 0
-		}
-		if request.LimitTokens > 8192 {
-			request.LimitTokens = 8192
+		if verb == "briefing" {
+			request.Operation, request.LimitTokens = "briefing-bundle", args.integer("limit_tokens", 0)
+			if request.LimitTokens < 0 {
+				request.LimitTokens = 0
+			}
+			if request.LimitTokens > 8192 {
+				request.LimitTokens = 8192
+			}
+		} else {
+			request.Operation, request.AsOf = "alerts-bundle", args.stringOr("since", "")
+			if request.AsOf != "" {
+				if _, err := parseMemoryTime(request.AsOf); err != nil {
+					return invalid(err.Error())
+				}
+			}
 		}
 		scoped = commandScope(args, &request)
 		if format == "mcp" {
@@ -105,9 +114,6 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 				request.Workspace = ""
 			}
 		}
-	case "alerts":
-		request.Operation, request.AsOf = "alerts-bundle", args.stringOr("since", "")
-		scoped = commandScope(args, &request)
 	case "context_block", "facts":
 		var ok bool
 		request.Query, ok = args.stringValue("query")
@@ -216,8 +222,8 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		if len(response.Payload) == 0 {
 			return nil, bus.ModuleStatusInternal
 		}
-		if verb == "briefing" && args.stringOr("format", "") != "" {
-			output, err := briefingOutput(response.Payload, args, scoped && !request.IncludeAll && request.Project == "" && request.Workspace == "")
+		if args.stringOr("format", "") != "" {
+			output, err := memoryBundleOutput(verb, response.Payload, args, scoped && !request.IncludeAll && request.Project == "" && request.Workspace == "")
 			if err != nil {
 				return nil, bus.ModuleStatusInternal
 			}

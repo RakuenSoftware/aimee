@@ -13,55 +13,6 @@ extern "C"
 {
 #endif
 
-   /* Per-state row counts for the dashboard / metrics path. */
-   typedef struct
-   {
-      int64_t active;
-      int64_t pending;
-      int64_t fulfilled;
-      int64_t superseded;
-      int64_t archived;
-   } db2_memory_lifecycle_counts_t;
-
-   /* Read-only snapshot of one stale-pending memory row. The orchestrator
-    * wraps these into the alert JSON. */
-   typedef struct
-   {
-      int64_t memory_id;
-      char text[2048];
-      char created_at[32];
-      char ttl_at[32];
-      double age_days;
-      double window_days;
-   } db2_memory_lifecycle_stale_t;
-
-   /* Read-only snapshot of one unresolved memory_conflicts row. */
-   typedef struct
-   {
-      int64_t conflict_id;
-      int64_t memory_a_id;
-      int64_t memory_b_id;
-      char detected_at[32];
-      char a_key[256];
-      char a_content[2048];
-      char b_content[2048];
-   } db2_memory_lifecycle_conflict_t;
-
-   /* Read-only snapshot of a recently-superseded memory row. */
-   typedef struct
-   {
-      int64_t memory_id;
-      char key[256];
-      char text[2048];
-      char superseded_at[32];
-   } db2_memory_lifecycle_superseded_t;
-
-   /* Apply a lifecycle transition to a memory id. Caller has already
-    * verified the transition is allowed; this just runs the UPDATE.
-    * Returns 0 on a row-changed success, -1 on miss / SQL failure. */
-   int db2_memory_lifecycle_update_state(int64_t memory_id, const char *new_state,
-                                         const char *archive_reason);
-
    /* Was this memory true at `as_of`, in EVENT time?
     *
     * lifecycle_state answers "is this true now" and nothing else -- a superseded
@@ -80,9 +31,6 @@ extern "C"
     * stopped being true, and inventing a boundary would be worse than admitting
     * the interval is open. */
    int db2_memory_valid_at(int64_t memory_id, const char *as_of);
-
-   int db2_memory_lifecycle_list_newly_superseded(const char *since,
-                                                  db2_memory_lifecycle_superseded_t *out, int max);
 
 #ifdef __cplusplus
 }

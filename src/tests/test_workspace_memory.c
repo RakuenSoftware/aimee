@@ -11,7 +11,6 @@
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
 #include "../modules/db2/c/lifecycle.h"
-#include "../modules/db2/c/memory_lifecycle.h"
 #include "../modules/db2/c/memory_query.h"
 #include "../modules/db2/c/memory_relations.h"
 #include "../modules/db2/c/memory_scope_query.h"
@@ -434,13 +433,7 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
    assert(strstr(ctx, "other project distractor") == NULL);
    free(ctx);
 
-   assert(db2_memory_lifecycle_update_state(local.id, "superseded", NULL) == 0);
-   assert(db2_memory_lifecycle_update_state(workspace_mem.id, "superseded", NULL) == 0);
-   assert(db2_memory_lifecycle_update_state(global.id, "superseded", NULL) == 0);
-   assert(db2_memory_lifecycle_update_state(other.id, "superseded", NULL) == 0);
-   db2_memory_lifecycle_superseded_t superseded[2];
-   count = db2_memory_lifecycle_list_newly_superseded(NULL, superseded, 1);
-   assert(count == 1 && superseded[0].memory_id == local.id);
+   /* Alert scope-before-LIMIT assertions run in Go alerts_test.go. */
 
    teardown();
 }

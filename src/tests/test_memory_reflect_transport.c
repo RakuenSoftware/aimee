@@ -7,7 +7,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-static int unavailable, explicit_scope, briefing_mode;
+static int unavailable, explicit_scope, view_mode;
 static const char *forced;
 void cmd_memory_apply_rerank_mode(const opt_parsed_t *opts)
 {
@@ -63,13 +63,16 @@ char *kb_v1_action_request_with_timeout(const char *method, cJSON *args, int tim
 }
 char *kb_v1_action_request(const char *method, cJSON *args)
 {
-   assert(briefing_mode && !strcmp(method, "memory.briefing"));
-   assert(jo_int(args, "limit_tokens", 0) == 768);
+   assert(view_mode && !strcmp(method, view_mode == 1 ? "memory.briefing" : "memory.alerts"));
+   if (view_mode == 1)
+      assert(jo_int(args, "limit_tokens", 0) == 768);
+   else
+      assert(!strcmp(jo_cstr(args, "since"), "2026-09-01"));
    assert(!strcmp(jo_cstr(args, "project"), "reflect-project"));
    assert(!strcmp(jo_cstr(args, "profile"), "compact"));
    int json = !strcmp(jo_cstr(args, "format"), "json");
    if (json)
-      assert(!strcmp(jo_cstr(args, "fields"), "key_facts"));
+      assert(!strcmp(jo_cstr(args, "fields"), view_mode == 1 ? "key_facts" : "stale_pending"));
    cJSON_Delete(args);
    if (unavailable)
       return NULL;
@@ -78,8 +81,8 @@ char *kb_v1_action_request(const char *method, cJSON *args)
    cJSON *out = cJSON_CreateObject();
    cJSON_AddStringToObject(out, "status", "ok");
    cJSON_AddStringToObject(out, "output",
-                           json ? "{\"key_facts\":[{\"memory_id\":9223372036854775807}]}"
-                                : "Go-owned briefing\n");
+                           json ? "{\"memory_id\":9223372036854775807}"
+                                : (view_mode == 1 ? "Go-owned briefing\n" : "Go-owned alerts\n"));
    char *raw = cJSON_PrintUnformatted(out);
    cJSON_Delete(out);
    return raw;
@@ -87,9 +90,16 @@ char *kb_v1_action_request(const char *method, cJSON *args)
 static void invoke(int json)
 {
    app_ctx_t ctx = {.json_output = json,
-                    .json_fields = briefing_mode ? "key_facts" : "results,contradictions",
+                    .json_fields = view_mode ? (view_mode == 1 ? "key_facts" : "stale_pending")
+                                             : "results,contradictions",
                     .response_profile = "compact"};
-   if (briefing_mode)
+   if (view_mode == 2)
+   {
+      char *args[] = {"--since", "2026-09-01"};
+      mem_alerts(&ctx, 2, args);
+      return;
+   }
+   if (view_mode)
    {
       char *args[] = {"--limit-tokens", "768"};
       mem_briefing(&ctx, 2, args);
@@ -102,11 +112,11 @@ static void invoke(int json)
 }
 int main(void)
 {
-   for (briefing_mode = 0; briefing_mode < 2; briefing_mode++)
+   for (view_mode = 0; view_mode < 3; view_mode++)
    {
       unavailable = 0;
       forced = NULL;
-      for (int scope = 0; scope < (briefing_mode ? 1 : 2); scope++)
+      for (int scope = 0; scope < (view_mode ? 1 : 2); scope++)
       {
          explicit_scope = scope;
          for (int json = 0; json < 2; json++)
@@ -127,9 +137,10 @@ int main(void)
             assert(n > 0);
             buf[n] = 0;
             close(fds[0]);
-            assert(
-                strstr(buf, json ? "9223372036854775807"
-                                 : (briefing_mode ? "Go-owned briefing" : "Go-owned reflection")));
+            assert(strstr(
+                buf, json ? "9223372036854775807"
+                          : (view_mode ? (view_mode == 1 ? "Go-owned briefing" : "Go-owned alerts")
+                                       : "Go-owned reflection")));
          }
       }
       const char *errors[] = {"not-json", "{}", "{\"status\":\"error\"}", "{\"status\":\"ok\"}"};

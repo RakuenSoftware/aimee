@@ -36,7 +36,7 @@ func TestMemoryJSONOutput(t *testing.T) {
 	if err != nil || out != string(payload) {
 		t.Fatal(out, err)
 	}
-	out, err = briefingOutput(payload, commandArgs{"format": json.RawMessage(`"mcp"`)}, true)
+	out, err = memoryBundleOutput("briefing", payload, commandArgs{"format": json.RawMessage(`"mcp"`)}, true)
 	if err != nil || !strings.Contains(out, `"active_context_missing":true`) || !strings.Contains(out, "9223372036854775807") || !strings.Contains(out, "created_at") {
 		t.Fatal(out, err)
 	}

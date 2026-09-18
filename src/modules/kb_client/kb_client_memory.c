@@ -393,15 +393,6 @@ static char *kb_client_v1_session_briefing_section(const char *method, int limit
    return out;
 }
 
-char *kb_client_memory_alerts_json(const char *since)
-{
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   if (since && since[0])
-      cJSON_AddStringToObject(req, "since", since);
-   return kb_v1_action_request("memory.alerts", req);
-}
-
 int kb_client_memory_list_conflicts(conflict_t *out, int max)
 {
    if (!out || max <= 0)

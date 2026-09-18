@@ -147,7 +147,7 @@ SET LOCAL ROLE memory_runtime_test;`)
 		t.Fatal(r)
 	}
 	alerts := run("alerts", `{"scope_context":true,"project":"app"}`)["alerts"].(map[string]any)
-	if len(alerts) != 3 {
+	if len(alerts) != 4 || alerts["elapsed_ms"].(float64) < 0 {
 		t.Fatal(alerts)
 	}
 	for _, key := range []string{"stale_pending", "unresolved_contradictions", "newly_superseded"} {

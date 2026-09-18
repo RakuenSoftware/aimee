@@ -86,6 +86,7 @@ cJSON *smcp_tool_list_notes(cJSON *args);
 cJSON *tool_list_prospective_memories(cJSON *args);
 cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out);
 cJSON *tool_memory_briefing(cJSON *args);
+cJSON *tool_memory_alerts(cJSON *args);
 /* Always activates a request-local context; active_context_missing reports the
  * safe shared/global-only fallback when project/workspace resolution fails. */
 void mcp_memory_scope_begin(cJSON *args, int *active_context_missing);

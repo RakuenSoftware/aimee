@@ -528,10 +528,8 @@ char *kb_client_session_briefing_directives(int limit);
  * Returns the kb response envelope as JSON (caller frees) including the
  * summary object.  Mirrors memory_maintenance_run(). */
 
-/* Memory alerts / session recall via aimee-kb.  Each returns the kb
- * response envelope as JSON (caller frees) with the bundle nested under
- * "alerts" or "recall".  Mirror memory_alerts / memory_recall. */
-char *kb_client_memory_alerts_json(const char *since);
+/* Session recall via aimee-kb. Returns the response envelope as JSON
+ * (caller frees), with the bundle nested under "recall". */
 char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int session_start);
 /* Shared-store recall without the legacy personal-memory merge. */
 char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,

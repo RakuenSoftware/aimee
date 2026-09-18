@@ -94,9 +94,16 @@ func briefingText(b briefingBundle) string {
 	return out.String()
 }
 
-func briefingOutput(payload json.RawMessage, args commandArgs, missing bool) (string, error) {
+func memoryBundleOutput(verb string, payload json.RawMessage, args commandArgs, missing bool) (string, error) {
 	switch args.stringOr("format", "") {
 	case "text":
+		if verb == "alerts" {
+			var b alertsBundle
+			if err := json.Unmarshal(payload, &b); err != nil {
+				return "", err
+			}
+			return alertsText(b), nil
+		}
 		var b briefingBundle
 		if err := json.Unmarshal(payload, &b); err != nil {
 			return "", err

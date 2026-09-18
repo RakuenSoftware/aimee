@@ -13934,36 +13934,6 @@
       ],
       "locations": [
         {
-          "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 84
-        }
-      ],
-      "signature": "int db2_memory_lifecycle_list_newly_superseded ( const char * since , db2_memory_lifecycle_superseded_t * out , int max )",
-      "signature_sha256": "ce4364d49ac4c66d2a7b59f8aedb795cfc1cee02d0f5058c8b42628265cb9cd2",
-      "status": "private-test-only",
-      "symbol": "db2_memory_lifecycle_list_newly_superseded"
-    },
-    {
-      "consumers": [
-        "src/tests/test_workspace_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 62
-        }
-      ],
-      "signature": "int db2_memory_lifecycle_update_state ( int64_t memory_id , const char * new_state , const char * archive_reason )",
-      "signature_sha256": "0de703391a1e478b4cafbcac514f9b76a1f36c14af09a0a05580716bbf72670c",
-      "status": "private-test-only",
-      "symbol": "db2_memory_lifecycle_update_state"
-    },
-    {
-      "consumers": [
-        "src/tests/test_workspace_memory.c"
-      ],
-      "locations": [
-        {
           "header": "src/modules/db2/c/memory_query.h",
           "line": 394
         }
@@ -14477,7 +14447,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 82
+          "line": 33
         }
       ],
       "signature": "int db2_memory_valid_at ( int64_t memory_id , const char * as_of )",
@@ -21040,15 +21010,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3da9caa0ea9ecbc6c90474db58922cb724a007189afd9eafe3df44ec6aaa10c8",
+  "fingerprint": "0a60f7b4b67ea71ce8d8f78702593305fc380546b3e61d2f11e52265d79f500a",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 453,
-    "declarations": 1160,
+    "declarations": 1158,
     "headers": 133,
     "internal_unconsumed": 202,
-    "private_test_only": 312,
+    "private_test_only": 310,
     "reviewed": 193
   }
 }

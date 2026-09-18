@@ -1097,14 +1097,6 @@ typedef struct
 
 int memory_lifecycle_counts(memory_lifecycle_counts_t *out);
 
-/* Assemble the alerts bundle.  Returns a cJSON object with three arrays:
- *   stale_pending: pending rows whose age crossed 80% of ttl_at
- *   unresolved_contradictions: memory_conflicts rows with resolved=0
- *   newly_superseded: memories transitioned to superseded since `since`
- * `since` is an ISO-8601 timestamp; pass NULL/empty for "last 7 days".
- * Caller owns the returned cJSON*. */
-struct cJSON *memory_alerts(const char *since);
-
 /* --- Proactive Recall ---
  *
  * Assemble a compact, deterministic "what's relevant right now" bundle
