@@ -1160,6 +1160,30 @@ set_config('aimee.correlation_id',$9,true)`,
 	}
 
 	switch request.Operation {
+	case "css-convention-sync", "css-conventions":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Project == "" || len(request.Project) > 4096 || scope.Type != ScopeProject || scope.Value != request.Project {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		result := map[string]any{"status": "ok", "project": request.Project}
+		if request.Operation == "css-convention-sync" {
+			result["op"] = "assert-conventions"
+			result["asserted"], err = backend.syncCSSConventions(ctx, request.Project)
+		} else {
+			result["op"] = "conventions"
+			var items []cssConvention
+			items, err = backend.cssConventions(ctx, request.Project)
+			result["results"], result["count"] = items, len(items)
+		}
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+			if len(response.Payload) > maxDataBody {
+				err = errors.New("memory: CSS conventions exceed response capacity")
+			}
+		}
 	case "typed-context":
 		backend, ok := options.data.(*postgresDataStore)
 		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {

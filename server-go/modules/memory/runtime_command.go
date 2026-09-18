@@ -16,6 +16,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "css-convention-sync", "css-conventions":
+		return handleCSSConventions(options, invocation, args)
 	case "typed-context":
 		return handleTypedContext(options, invocation, args)
 	case "assertion-search":

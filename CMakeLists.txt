@@ -482,7 +482,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/code_index.c
     ${AIMEE_SRC_DIR}/modules/db2/c/code_project_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/db2/c/css_graph.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/typed_facts.c
     ${AIMEE_SRC_DIR}/modules/db2/c/css_migration.c
     ${AIMEE_SRC_DIR}/modules/db2/c/css_render.c
     ${AIMEE_SRC_DIR}/modules/db2/c/css_insights.c

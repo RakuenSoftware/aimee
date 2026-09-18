@@ -172,6 +172,27 @@ func TestFactMutationRuntimeReplay(t *testing.T) {
 	if err := tx.QueryRow(ctx, `SELECT identity_key FROM entity_edges WHERE id=$1`, unrelated.AssertionID).Scan(&unchanged); err != nil || unchanged != "" {
 		t.Fatal("unrelated history rewritten", unchanged, err)
 	}
+	// Former native typed-facts checks: novel facts and personal facts stay
+	// candidates until authenticated evidence promotes them; credentials never
+	// enter the shared graph.
+	for _, relation := range []string{"works_as", "home_address"} {
+		c := candidate("GoFact compatibility", relation, "fixture value", "legacy-model-"+relation, model)
+		c.ObjectKind = NodeOther
+		r, verdict, err := s.commitFactCandidate(ctx, c)
+		if err != nil || verdict != FactNovel || r.Lifecycle != "candidate" {
+			t.Fatal(r, verdict, err)
+		}
+		c.Actor, c.Evidence.SourceID = user, "legacy-user-"+relation
+		promoted, verdict, err := s.commitFactCandidate(ctx, c)
+		if err != nil || verdict != FactNovel || promoted.AssertionID != r.AssertionID || promoted.Lifecycle != "persistent" {
+			t.Fatal(promoted, verdict, err)
+		}
+	}
+	secret := candidate("GoFact compatibility", "api_key", "sk-123", "legacy-secret", model)
+	secret.ObjectKind = NodeOther
+	if r, _, err := s.commitFactCandidate(ctx, secret); err == nil || r.AssertionID != 0 {
+		t.Fatal("credential persisted", r, err)
+	}
 	exerciseFactWorkerReplay(t, ctx, tx, s)
 	exerciseFactReviewReplay(t, ctx, tx, s)
 	exerciseFactContextReplay(t, ctx, tx, s)

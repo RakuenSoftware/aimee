@@ -23,6 +23,8 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/db2/c/typed_facts.c",
+    "src/modules/db2/c/typed_facts.h",
     "src/modules/memory/memory_domain_bus.c",
     "src/modules/db2/c/trace_mining.c",
     "src/modules/db2/c/trace_mining.h",

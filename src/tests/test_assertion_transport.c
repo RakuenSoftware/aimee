@@ -20,6 +20,14 @@ void memory_bus_read_context(db2_memory_scope_context_t *context)
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **out)
 {
    assert(!strcmp(method, "memory.runtime"));
+   if (!strcmp(jo_cstr(args, "operation"), "css-conventions") ||
+       !strcmp(jo_cstr(args, "operation"), "css-convention-sync"))
+   {
+      assert(!strcmp(jo_cstr(args, "project"), "css-project"));
+      *out = cJSON_CreateObject();
+      assert(cJSON_AddStringToObject(*out, "json", typed_receipt));
+      return unavailable ? -1 : 1;
+   }
    if (!strcmp(jo_cstr(args, "operation"), "typed-context"))
    {
       assert(!strcmp(jo_cstr(args, "project"), "assertion-project"));
@@ -48,6 +56,25 @@ static cJSON *call(void)
 }
 int main(void)
 {
+   typed_receipt =
+       "{\"status\":\"ok\",\"value\":\"full 界 convention\",\"count\":9007199254742002}";
+   for (int sync = 0; sync <= 1; sync++)
+   {
+      cJSON *css = db2_kb_service_css_conventions_json("css-project", sync);
+      char *text = cJSON_PrintUnformatted(css);
+      assert(text && !strcmp(text, typed_receipt));
+      free(text);
+      cJSON_Delete(css);
+   }
+   unavailable = 1;
+   assert(!db2_kb_service_css_conventions_json("css-project", 1));
+   unavailable = 0;
+   const char *bad_css[] = {"[]", "{} trailing", "null"};
+   for (unsigned i = 0; i < sizeof(bad_css) / sizeof(bad_css[0]); i++)
+   {
+      typed_receipt = bad_css[i];
+      assert(!db2_kb_service_css_conventions_json("css-project", 0));
+   }
    receipt = "{\"status\":\"ok\",\"assertions\":[{\"assertion_id\":9007199254742002,\"stable_id\":"
              "\"9007199254742002\",\"rendered\":\"full 界 evidence\",\"historical\":false}]}";
    cJSON *result = call();

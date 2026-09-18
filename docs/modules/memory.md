@@ -864,3 +864,28 @@ visibility, exact IDs, independent channel failures, opt-outs and malformed time
 Strict G0 is now 165 findings; the two memory-tree C sources remain 192 lines.
 Native transports, typed-fact writes, benchmark loaders, Server recall composition
 and the other previously listed migration work remain unfinished.
+
+CSS convention inference and recall now run in the shared Go memory owner.
+Host-only `css-convention-sync` and `css-conventions` operations preserve the
+public CSS response fields and successful unchanged assertion count. Inference
+reads rule, naming and token measurements from one current-generation snapshot,
+honors `css_style_graph_enabled`, and commits both convention assertions in one
+transaction. Its fixed system authority cannot overwrite human corrections;
+canonical evidence deduplication, functional supersession and sealed graph
+commits remain in force. Missing configuration or failed SQL returns an error.
+Recall preserves full text and filters hidden memory evidence before its cap.
+
+The native typed-fact implementation/header and obsolete native fixture are
+removed. KB retains only bounded request/JSON receipt transport; related CSS
+analysis and migration-unit logic remain in their own module. Schema 18 grants
+only the CSS selector/property and project/file identity columns needed for
+inference, with no CSS writes or declaration value access. Restricted-role
+PostgreSQL replay covers opt-outs, replay, generation changes, authority, Unicode,
+scope-before-cap behavior, denied reads and rollback of a failed second assertion.
+Legacy novel/personal-fact promotion and credential rejection checks also run in
+Go. CLI/Server/KB builds, Go race tests, CGO-disabled module builds, native
+transport, native CSS migration and live Server/KB process checks pass. All 77
+repository lint checks pass after regenerating the declaration ledger. Strict G0
+falls from 165 to 163;
+the memory tree still contains two C sources totaling 192 lines and five headers.
+The complete migration remains unfinished.

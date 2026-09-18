@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "3edf6de23dd4fa02249bde309854db06848d5670",
-  "source_fingerprint": "f06020e760d79b1f4429582da2b4cb8a08fdcb6a59296434fe16e68b0f9641c9",
+  "source_revision": "f598db93fabad5eaf010b44e3115dd645723be62",
+  "source_fingerprint": "f4d1517f7f6ae8cee388cc68fe642d184936c95beaf6e54b8f80c19ebd5e9ffe",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -127,7 +127,6 @@
     "src/modules/db2/c/tasks.c",
     "src/modules/db2/c/team.c",
     "src/modules/db2/c/tool_registry.c",
-    "src/modules/db2/c/typed_facts.c",
     "src/modules/db2/c/vault_operator_rewrap_runtime.c",
     "src/modules/db2/c/vault_operator_status_runtime.c",
     "src/modules/db2/c/vault_pg.c",
@@ -2514,7 +2513,6 @@
         "src/modules/db2/c/tasks.c",
         "src/modules/db2/c/team.c",
         "src/modules/db2/c/tool_registry.c",
-        "src/modules/db2/c/typed_facts.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
         "src/modules/db2/c/vault_pg.c",
@@ -2657,7 +2655,6 @@
         "src/modules/db2/c/report_enrichments.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/sketch.c",
-        "src/modules/db2/c/typed_facts.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
         "src/modules/db2/c/vault_pg.c",
@@ -3016,7 +3013,7 @@
     }
   ],
   "summary": {
-    "translation_units": 120,
+    "translation_units": 119,
     "descriptor_support_units": 19,
     "unresolved_symbols": 141,
     "dispositions": {
@@ -3028,5 +3025,5 @@
       "system-link": 140
     }
   },
-  "fingerprint": "5208a8f1a65a351a095e4a68a65b8df99471ebe449d9813c6d98ed8a45335d90"
+  "fingerprint": "5c27487e3e4ea2bb39db9cfb9fde11fd8679ce9a6f01c6757050167c63daa375"
 }

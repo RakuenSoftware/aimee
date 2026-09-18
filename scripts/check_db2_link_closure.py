@@ -89,7 +89,6 @@ REVIEWED_SOURCE_UPDATES = {
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/learning.c",
         "src/modules/db2/c/notes.c",
-        "src/modules/db2/c/typed_facts.c",
     )
 }
 REVIEWED_SUPPORT_UPDATES = {
@@ -145,8 +144,7 @@ MEMORY_ADAPTER_IMPORTS = {
         "src/modules/db2/c/kb_service_backend.c"
     ],
     "db2_memory_scope_bind_current": [
-        "src/modules/db2/c/pgvec_transport.c",
-        "src/modules/db2/c/typed_facts.c"
+        "src/modules/db2/c/pgvec_transport.c"
     ],
     "db2_memory_scope_context_get": [
         "src/modules/db2/c/pgvec_transport.c"

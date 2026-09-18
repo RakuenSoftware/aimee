@@ -140,6 +140,7 @@ extern "C"
    cJSON *db2_kb_service_dashboard_directives_json(void);
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
+   cJSON *db2_kb_service_css_conventions_json(const char *project, int sync);
    cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
 
    cJSON *db2_kb_service_memory_search_assertions_json(const char *query, const char *valid_at,

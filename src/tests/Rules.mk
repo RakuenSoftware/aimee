@@ -316,7 +316,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-turn-registry \
  $(TESTPREFIX)/unit-test-extractors-extra \
                $(TESTPREFIX)/unit-test-evidence-replay $(TESTPREFIX)/unit-test-git-pr-ci-grade $(TESTPREFIX)/unit-test-roundtable-verify $(TESTPREFIX)/unit-test-roundtable-chair $(TESTPREFIX)/unit-test-sweep-logic $(TESTPREFIX)/unit-test-sweep-scope $(TESTPREFIX)/unit-test-sweep-parse \
-               $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-typed-facts $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-insights $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render $(TESTPREFIX)/unit-test-css-render-cmd \
+               $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-insights $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render $(TESTPREFIX)/unit-test-css-render-cmd \
                $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-db2-conn-bounds $(TESTPREFIX)/unit-test-db2-conn-open $(TESTPREFIX)/unit-test-cli-launch \
                $(TESTPREFIX)/unit-test-server-session-pools \
                $(TESTPREFIX)/unit-test-presence \
@@ -1318,21 +1318,7 @@ $(TESTPREFIX)/unit-test-css-insights: \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
-# Typed-fact store + write gate over the sqlite shim.
-$(TESTPREFIX)/unit-test-typed-facts: \
-                                       $(OBJDIR)/tests/test_typed_facts.o \
-                                       $(OBJDIR)/db2/typed_facts.o \
-                                       $(TEST_FACT_MUTATION_MIN_OBJS) \
-                                       $(OBJDIR)/db2/rel_types_store.o \
-                                       $(OBJDIR)/db2/entity_edges.o \
-                                       $(OBJDIR)/db2/entity_registry.o \
-                                       $(OBJDIR)/db2/ontology_evolution.o \
-                                       $(OBJDIR)/db2/fact_lifecycle.o \
-                                       $(OBJDIR)/rel_types.o \
-                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
-                                       $(OBJDIR)/db2/db_schema.o \
-                                       $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+# Typed-fact coverage lives in Go: scripts/test_temporal_assertion_retrieval.sh.
 
 # CSS migration pipeline driver (WP-F) over the sqlite shim.
 $(TESTPREFIX)/unit-test-css-migration: \
@@ -1340,7 +1326,6 @@ $(TESTPREFIX)/unit-test-css-migration: \
                                        $(OBJDIR)/db2/css_migration.o \
                                        $(OBJDIR)/db2/css_graph.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
-                                       $(OBJDIR)/db2/typed_facts.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/rel_types.o \
                                        $(OBJDIR)/modules/css/css_analyze.o \
@@ -1360,7 +1345,6 @@ $(TESTPREFIX)/unit-test-css-render: \
                                        $(OBJDIR)/db2/css_migration.o \
                                        $(OBJDIR)/db2/css_graph.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
-                                       $(OBJDIR)/db2/typed_facts.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/rel_types.o \
                                        $(OBJDIR)/modules/css/css_analyze.o \
@@ -1417,7 +1401,6 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
-                                       $(OBJDIR)/db2/typed_facts.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/db2/rel_types_store.o \
                                        $(OBJDIR)/db2/fact_lifecycle.o \
