@@ -1338,6 +1338,16 @@ set_config('aimee.correlation_id',$9,true)`,
 		if err == nil {
 			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "retracted": count, "authority": actor.Role})
 		}
+	case "entity-conflicts":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var result map[string]any
+		result, err = backend.entityConflicts(ctx, request)
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+		}
 	case "entity-review", "entity-mutate":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {

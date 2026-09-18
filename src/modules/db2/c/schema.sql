@@ -17803,6 +17803,8 @@ BEGIN
   GRANT SELECT(id,sink,state,target_key,action_json) ON learning_proposals TO aimee_store_runtime;
   GRANT SELECT(id,from_id,into_id,undone), INSERT(from_id,into_id), UPDATE(undone) ON entity_merges TO aimee_store_runtime;
   GRANT USAGE,SELECT ON SEQUENCE entity_merges_id_seq TO aimee_store_runtime;
+  GRANT SELECT(id,name_norm,status,priority), INSERT(name_norm,status,priority), UPDATE(status,priority) ON entity_name_conflicts TO aimee_store_runtime;
+  GRANT USAGE,SELECT ON SEQUENCE entity_name_conflicts_id_seq TO aimee_store_runtime;
   GRANT SELECT(outcome_id) ON work_outcomes TO aimee_store_runtime;
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id,last_accessed_at) ON artifacts TO aimee_store_runtime;
@@ -17836,5 +17838,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '20')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '21')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

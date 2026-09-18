@@ -1618,6 +1618,7 @@
         "src/tests/test_css_render.c",
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
+        "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
@@ -1663,6 +1664,7 @@
         "src/tests/test_cross_repo_route.c",
         "src/tests/test_cross_repo_stats.c",
         "src/tests/test_db2.c",
+        "src/tests/test_entity_registry.c",
         "src/tests/test_fidelity.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_audit_worm.c",
@@ -1773,6 +1775,7 @@
         "src/tests/test_corpus_structural.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
+        "src/tests/test_entity_registry.c",
         "src/tests/test_features.c",
         "src/tests/test_index.c",
         "src/tests/test_kb_http_routes.c",
@@ -1976,6 +1979,7 @@
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
+        "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
@@ -2175,6 +2179,7 @@
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
+        "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
@@ -2353,6 +2358,7 @@
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
+        "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
@@ -6969,96 +6975,6 @@
       "symbol": "db2_enrollment_touch_last_seen"
     },
     {
-      "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 41
-        }
-      ],
-      "signature": "int db2_entity_alias_bind ( const char * name , int64_t canonical_id , int is_preferred )",
-      "signature_sha256": "959d7be9b0c849dd8537b83b800936c6bf45904deb8033faaa204a565b823413",
-      "status": "private-test-only",
-      "symbol": "db2_entity_alias_bind"
-    },
-    {
-      "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 64
-        }
-      ],
-      "signature": "int db2_entity_aliases_for ( int64_t canonical_id , char ( * out ) [ 128 ] , int max )",
-      "signature_sha256": "b87386bb5e1aae671c742505fd2eeea38a7b77b9296d9c2a99eb2f9acd0bfc36",
-      "status": "private-test-only",
-      "symbol": "db2_entity_aliases_for"
-    },
-    {
-      "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 78
-        }
-      ],
-      "signature": "int db2_entity_conflict_count ( const char * status )",
-      "signature_sha256": "257d2d6fd78f39408830664b1c764a45907a19c9f1f5bcdaa5470dca0bef5608",
-      "status": "private-test-only",
-      "symbol": "db2_entity_conflict_count"
-    },
-    {
-      "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 82
-        }
-      ],
-      "signature": "int db2_entity_conflict_priority ( const char * name )",
-      "signature_sha256": "487a476fd03c1d55bba6370ccaf0faf5bdcaa7d2c92b4a00ab7c6b4a3e9d6dfd",
-      "status": "private-test-only",
-      "symbol": "db2_entity_conflict_priority"
-    },
-    {
-      "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 69
-        }
-      ],
-      "signature": "int64_t db2_entity_conflict_record ( const char * name )",
-      "signature_sha256": "6c0f0abbe1d8b9e6cc82d7f9e7f08aea53a4d4acb252ba0e957f7da657ce8691",
-      "status": "private-test-only",
-      "symbol": "db2_entity_conflict_record"
-    },
-    {
-      "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 75
-        }
-      ],
-      "signature": "int db2_entity_conflict_set_status ( int64_t conflict_id , const char * status )",
-      "signature_sha256": "725bc6baee103c298e2cc784ad1255218d5d7d3b9317baeb268b03acb1c1b9d8",
-      "status": "private-test-only",
-      "symbol": "db2_entity_conflict_set_status"
-    },
-    {
       "consumers": [],
       "locations": [
         {
@@ -7453,21 +7369,6 @@
       "symbol": "db2_entity_edges_semantic_by_entity"
     },
     {
-      "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 54
-        }
-      ],
-      "signature": "int db2_entity_kind ( int64_t canonical_id )",
-      "signature_sha256": "571a85782ebb7818f1504cfe26f25ee98c4c1dc1acce25441a937a63ffc03bcc",
-      "status": "private-test-only",
-      "symbol": "db2_entity_kind"
-    },
-    {
       "consumers": [],
       "locations": [
         {
@@ -7479,21 +7380,6 @@
       "signature_sha256": "61af738c3c8c4a09768d35465f4f25bb9c4b237e8a92e2ea9666ed313855fa32",
       "status": "internal-unconsumed",
       "symbol": "db2_entity_list_active"
-    },
-    {
-      "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 59
-        }
-      ],
-      "signature": "int db2_entity_mark_merged ( int64_t from_id , int64_t into_id )",
-      "signature_sha256": "274faf91003b24c709b57b806c601c03bf74403337494eb3f42b077e660558a6",
-      "status": "private-test-only",
-      "symbol": "db2_entity_mark_merged"
     },
     {
       "consumers": [],
@@ -7696,49 +7582,6 @@
       "signature_sha256": "bf1074079808100046c48b6dfd53c7df093a28be816a8e6a6f9c0fc7c79de724",
       "status": "internal-unconsumed",
       "symbol": "db2_entity_profile_upsert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 35
-        }
-      ],
-      "signature": "int64_t db2_entity_register ( int kind , const char * status )",
-      "signature_sha256": "079a7ff64df660d79c4e5a977979d75871accd69b4d1f28015914c281b21a023",
-      "status": "internal-unconsumed",
-      "symbol": "db2_entity_register"
-    },
-    {
-      "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 51
-        }
-      ],
-      "signature": "int64_t db2_entity_register_named ( const char * name , int kind )",
-      "signature_sha256": "49f51596a33f29d2fcb7c4492c6019161e89cfd9c82617d0fede91280b988547",
-      "status": "private-test-only",
-      "symbol": "db2_entity_register_named"
-    },
-    {
-      "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 46
-        }
-      ],
-      "signature": "int64_t db2_entity_resolve ( const char * name )",
-      "signature_sha256": "729c6264575c9a170c24aea5e4ac984334028ecd8587a3de06a8f8055d450401",
-      "status": "private-test-only",
-      "symbol": "db2_entity_resolve"
     },
     {
       "consumers": [],
@@ -9242,7 +9085,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 203
+          "line": 202
         }
       ],
       "signature": "int db2_kb_file_index_delete_current_project ( const char * project )",
@@ -9258,7 +9101,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 202
+          "line": 201
         }
       ],
       "signature": "int db2_kb_file_index_delete_project ( const char * project )",
@@ -9273,7 +9116,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 199
+          "line": 198
         }
       ],
       "signature": "int db2_kb_file_index_get ( const char * project , const char * file_path , char * hash_out , size_t hash_cap , char * ingested_at_out , size_t ingested_at_cap )",
@@ -9289,7 +9132,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 201
+          "line": 200
         }
       ],
       "signature": "char * db2_kb_file_index_get_content ( const char * project , const char * file_path )",
@@ -9304,7 +9147,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 204
+          "line": 203
         }
       ],
       "signature": "cJSON * db2_kb_file_index_snapshot_json ( const char * project )",
@@ -9320,7 +9163,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 197
+          "line": 196
         }
       ],
       "signature": "int db2_kb_file_index_upsert ( const char * project , const char * file_path , const char * file_hash , const char * content )",
@@ -9362,7 +9205,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 190
+          "line": 189
         }
       ],
       "signature": "int db2_kb_ingest_queue_claim_next ( db2_kb_ingest_job_t * out )",
@@ -9378,7 +9221,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 191
+          "line": 190
         }
       ],
       "signature": "int db2_kb_ingest_queue_complete ( int64_t job_id , int files_indexed , int chunks_added , int embeddings_added )",
@@ -9397,7 +9240,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 188
+          "line": 187
         }
       ],
       "signature": "int db2_kb_ingest_queue_enqueue ( const char * project , const char * root_path , const char * workspace , int force , int priority )",
@@ -9413,7 +9256,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 193
+          "line": 192
         }
       ],
       "signature": "int db2_kb_ingest_queue_fail ( int64_t job_id , const char * error_message )",
@@ -9428,7 +9271,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 195
+          "line": 194
         }
       ],
       "signature": "int db2_kb_ingest_queue_recent ( db2_kb_ingest_recent_t * rows , int max_rows )",
@@ -9443,7 +9286,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 175
+          "line": 174
         }
       ],
       "signature": "int db2_kb_ingest_queue_reset_running ( void )",
@@ -9458,7 +9301,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 194
+          "line": 193
         }
       ],
       "signature": "int db2_kb_ingest_queue_stats ( db2_kb_ingest_queue_stats_t * out )",
@@ -10090,7 +9933,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 207
+          "line": 206
         }
       ],
       "signature": "int db2_kb_service_async_job_get ( int64_t job_id , db2_kb_service_async_job_t * out )",
@@ -10108,7 +9951,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 211
+          "line": 210
         }
       ],
       "signature": "int db2_kb_service_async_queue_drain ( const char * claimed_by , const char * embedding_cmd , int timeout_secs , const char * vector_collection , db2_kb_service_vector_upsert_fn vector_upsert , void * vector_upsert_ctx , db2_kb_service_async_queue_stats_t * out )",
@@ -10123,7 +9966,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 208
+          "line": 207
         }
       ],
       "signature": "int db2_kb_service_async_queue_spawn_worker ( void )",
@@ -10141,7 +9984,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 206
+          "line": 205
         }
       ],
       "signature": "int db2_kb_service_async_queue_status ( db2_kb_service_async_queue_stats_t * out )",
@@ -10159,7 +10002,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 219
+          "line": 218
         }
       ],
       "signature": "int db2_kb_service_clear_current_project ( const char * project )",
@@ -10176,7 +10019,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 218
+          "line": 217
         }
       ],
       "signature": "int db2_kb_service_clear_project ( const char * project )",
@@ -10361,7 +10204,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 216
+          "line": 215
         }
       ],
       "signature": "int db2_kb_service_collect_project_status ( const char * project , db2_kb_service_project_status_t * out )",
@@ -10377,7 +10220,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 140
+          "line": 139
         }
       ],
       "signature": "cJSON * db2_kb_service_css_conventions_json ( const char * project , int sync )",
@@ -10534,7 +10377,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 137
+          "line": 136
         }
       ],
       "review": {
@@ -10555,7 +10398,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 134
+          "line": 133
         }
       ],
       "review": {
@@ -10576,7 +10419,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 133
+          "line": 132
         }
       ],
       "review": {
@@ -10597,7 +10440,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 136
+          "line": 135
         }
       ],
       "review": {
@@ -10618,7 +10461,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 135
+          "line": 134
         }
       ],
       "review": {
@@ -10681,7 +10524,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 130
+          "line": 129
         }
       ],
       "review": {
@@ -10738,7 +10581,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 221
+          "line": 220
         }
       ],
       "review": {
@@ -10758,7 +10601,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 220
+          "line": 219
         }
       ],
       "review": {
@@ -10815,7 +10658,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 222
+          "line": 221
         }
       ],
       "review": {
@@ -10836,7 +10679,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 141
+          "line": 140
         }
       ],
       "signature": "cJSON * db2_kb_service_memory_assemble_typed_context_json ( const cJSON * req )",
@@ -10868,7 +10711,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 143
+          "line": 142
         }
       ],
       "signature": "cJSON * db2_kb_service_memory_search_assertions_json ( const char * query , const char * valid_at , const char * believed_at , int include_historical , int max_hops , int limit )",
@@ -11091,7 +10934,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 138
+          "line": 137
         }
       ],
       "review": {
@@ -11112,7 +10955,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 139
+          "line": 138
         }
       ],
       "review": {
@@ -18722,21 +18565,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_entity_registry.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_registry.h",
-          "line": 31
-        }
-      ],
-      "signature": "void entity_name_normalize ( const char * in , char * out , size_t out_len )",
-      "signature_sha256": "6307f7212e30609d6d94f6610117ad13dcad314955a7c8f7911b9ac55e3e866a",
-      "status": "private-test-only",
-      "symbol": "entity_name_normalize"
-    },
-    {
-      "consumers": [
         "src/tests/test_fact_identity.c"
       ],
       "locations": [
@@ -20295,15 +20123,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "315c8628023c60d6fdd8f5b2022b162d42d4d2fafc7dc957a02a3573cb3a41f4",
+  "fingerprint": "666134e0dc242cd52d6cc519a32bc498ade7108e5c51011d4b58b077dbc265c6",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 431,
-    "declarations": 1115,
-    "headers": 127,
-    "internal_unconsumed": 196,
-    "private_test_only": 296,
+    "declarations": 1103,
+    "headers": 126,
+    "internal_unconsumed": 195,
+    "private_test_only": 285,
     "reviewed": 192
   }
 }

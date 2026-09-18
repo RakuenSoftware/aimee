@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "fdd5de7ac80ea1c0a6cf8f9f9726710db1e531a4",
-  "source_fingerprint": "298bde2c18150a29f22925686cae258c526857d044e39794ed38de2b8188a642",
+  "source_revision": "735d94a06e9b0a404e87f4a6279ba38629d3044d",
+  "source_fingerprint": "6ffef399768f4b4f9ccfa8faadb36c8e91b5739e8a4bb4a6e26a292d062ea00c",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -63,7 +63,6 @@
     "src/modules/db2/c/entity_edges.c",
     "src/modules/db2/c/entity_nodes.c",
     "src/modules/db2/c/entity_profiles.c",
-    "src/modules/db2/c/entity_registry.c",
     "src/modules/db2/c/evidence_lifecycle.c",
     "src/modules/db2/c/evidence_vectors.c",
     "src/modules/db2/c/fact_identity.c",
@@ -1802,7 +1801,6 @@
         "src/modules/db2/c/css_insights.c",
         "src/modules/db2/c/curator_terms.c",
         "src/modules/db2/c/db_postgres.c",
-        "src/modules/db2/c/entity_registry.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
         "src/modules/db2/support/extractor_primitives.c",
@@ -1817,7 +1815,6 @@
         "src/modules/db2/c/anti_patterns.c",
         "src/modules/db2/c/corpus_structural.c",
         "src/modules/db2/c/css_insights.c",
-        "src/modules/db2/c/entity_registry.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
         "src/modules/db2/support/cert_serial_primitives.c",
@@ -2461,7 +2458,6 @@
         "src/modules/db2/c/entity_edges.c",
         "src/modules/db2/c/entity_nodes.c",
         "src/modules/db2/c/entity_profiles.c",
-        "src/modules/db2/c/entity_registry.c",
         "src/modules/db2/c/evidence_lifecycle.c",
         "src/modules/db2/c/evidence_vectors.c",
         "src/modules/db2/c/fact_identity.c",
@@ -2616,7 +2612,6 @@
         "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/enrollments.c",
         "src/modules/db2/c/entity_edges.c",
-        "src/modules/db2/c/entity_registry.c",
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/feedback.c",
         "src/modules/db2/c/fidelity.c",
@@ -3000,7 +2995,7 @@
     }
   ],
   "summary": {
-    "translation_units": 116,
+    "translation_units": 115,
     "descriptor_support_units": 19,
     "unresolved_symbols": 141,
     "dispositions": {
@@ -3012,5 +3007,5 @@
       "system-link": 140
     }
   },
-  "fingerprint": "eff77a8b80f1141b5fdfd10b96420c16ffa3063095a66b1c072e3249bfcd393d"
+  "fingerprint": "bcaa87e3e06dfdad903f5bfe8057d35a110f836df209bc6dd8f6f816e84bddee"
 }

@@ -98,7 +98,7 @@ extern "C"
     * pass through normalized and unchanged, so a genuinely new predicate is
     * still distinguishable and still stages as provisional (§7.2).
     *
-    * This mirrors what entities already have. db2_entity_alias_bind() maps an
+    * The Go memory owner also maps an
     * alias to a canonical node so aliased facts share one entity; relations had
     * no equivalent, so a model's reasonable synonym for a relation we already
     * model was staged as a provisional rel_type on a Class-C edge instead of

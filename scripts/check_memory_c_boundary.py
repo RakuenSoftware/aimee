@@ -23,6 +23,8 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/db2/c/entity_registry.c",
+    "src/modules/db2/c/entity_registry.h",
     "src/modules/db2/c/ontology_evolution.c",
     "src/modules/db2/c/ontology_evolution.h",
     "src/modules/db2/c/rel_types_store.c",
@@ -83,6 +85,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:entity_name_normalize|db2_entity_(?:register(?:_named)?|alias_bind|resolve|kind|mark_merged|aliases_for|conflict_\w+))\b(?=\s*\()|"
     r"\b(?:db2_entity_(?:merge|unmerge)(?:_as)?|kb_client_entities_(?:merge|unmerge)|db2_kb_service_entities_(?:merge|unmerge)_json)\b(?=\s*\()|"
     r"\b(?:db2_ontology_\w+|db2_rel_types_resolve|db2_entity_(?:merge_)?summaries)\b(?=\s*\()|"
     r"\b(?:aimee_db2_register_fact_gate_provider|db2_rel_types_stage_provisional|db2_fact_commit(?:_with_actor|_with_evidence)?|db2_fact_mutation_promote_supported|db2_fact_mutation_expire_candidates|db2_fact_expire_speculative|db2_fact_promote_durable)\b(?=\s*\()|"
