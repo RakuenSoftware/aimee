@@ -1437,34 +1437,6 @@ int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_
    return 0;
 }
 
-cJSON *kb_client_memory_briefing(int limit_tokens)
-{
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   if (limit_tokens > 0)
-      cJSON_AddNumberToObject(req, "limit_tokens", limit_tokens);
-   char *json = kb_v1_action_request("memory.briefing", req);
-   if (!json)
-      return NULL;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return NULL;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-
-   cJSON *briefing = cJSON_GetObjectItemCaseSensitive(resp, "briefing");
-   cJSON *detached = briefing ? cJSON_DetachItemViaPointer(resp, briefing) : NULL;
-   cJSON_Delete(resp);
-   return detached;
-}
-
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
                                                const char *query_fingerprint, const int64_t *ids,
                                                int n_ids, char *event_id_out, size_t event_id_len)

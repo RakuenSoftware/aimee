@@ -120,7 +120,8 @@
     "server-go/modules/memory/reflect.go",
     "server-go/modules/memory/public_reflect.go",
     "server-go/modules/memory/search_view.go",
-    "server-go/modules/memory/briefing.go"
+    "server-go/modules/memory/briefing.go",
+    "server-go/modules/memory/briefing_view.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -198,7 +199,8 @@
     "server-go/modules/memory/session_queries_test.go",
     "server-go/modules/memory/reflect_test.go",
     "server-go/modules/memory/search_view_test.go",
-    "server-go/modules/memory/briefing_test.go"
+    "server-go/modules/memory/briefing_test.go",
+    "server-go/modules/memory/briefing_view_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

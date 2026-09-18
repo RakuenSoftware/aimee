@@ -921,26 +921,29 @@ cJSON *tool_list_facts(cJSON *args)
 
 cJSON *tool_memory_briefing(cJSON *args)
 {
-   int limit_tokens = MEMORY_BRIEFING_DEFAULT_LIMIT_TOKENS;
-   cJSON *jlimit = cJSON_GetObjectItemCaseSensitive(args, "limit_tokens");
-   if (cJSON_IsNumber(jlimit))
-      limit_tokens = (int)jlimit->valuedouble;
-
-   int active_context_missing = 0;
-   mcp_memory_scope_begin(args, &active_context_missing);
-   cJSON *bundle = kb_client_memory_briefing(limit_tokens);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "format", "mcp");
+   const cJSON *limit = cJSON_GetObjectItemCaseSensitive(args, "limit_tokens");
+   if (cJSON_IsNumber(limit))
+      cJSON_AddItemToObject(request, "limit_tokens", cJSON_Duplicate(limit, 1));
+   mcp_memory_scope_begin(args, NULL);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.briefing", request);
    mcp_memory_scope_end();
-   if (!bundle)
+   cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   if (!reply)
       return kb_last_result_content("memory briefing failed");
-   cJSON_AddBoolToObject(bundle, "active_context_missing", active_context_missing);
-
-   char *rendered = cJSON_PrintUnformatted(bundle);
-   cJSON_Delete(bundle);
-   if (!rendered)
-      return text_content("error: could not render briefing");
-
-   cJSON *content = text_content(rendered);
-   free(rendered);
+   if (strcmp(jo_cstr(reply, "status"), "ok") != 0)
+      return json_result_content(reply);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+   if (!cJSON_IsString(output))
+   {
+      cJSON_Delete(reply);
+      return text_content("error: memory briefing returned invalid output");
+   }
+   cJSON *content = text_content(output->valuestring);
+   cJSON_Delete(reply);
    return content;
 }
 

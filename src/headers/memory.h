@@ -823,25 +823,6 @@ int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confi
 
 /* --- Scene Clustering --- */
 
-/* --- Session Briefing ---
- *
- * Assemble a compact, deterministic start-of-session context bundle.  Returns
- * a new cJSON object with three arrays: key_facts, recent_activity,
- * active_entities.  All ranking is DB-side; no LLM calls.  Caller owns the
- * returned cJSON*.  Returns NULL on allocation failure.
- *
- * limit_tokens is an approximate character budget (1 token ~= 4 chars) that
- * caps the rendered payload.  Sections are filled in priority order
- * (key_facts > recent_activity > active_entities); later sections are
- * truncated if the running total crosses the budget.  Section-internal
- * ordering is deterministic so two runs against a frozen DB produce
- * byte-identical bundles.
- *
- * Default sizing: MEMORY_BRIEFING_DEFAULT_LIMIT_TOKENS ~= 1500. */
-#define MEMORY_BRIEFING_DEFAULT_LIMIT_TOKENS 1500
-#define MEMORY_BRIEFING_MIN_LIMIT_TOKENS     64
-#define MEMORY_BRIEFING_MAX_LIMIT_TOKENS     8192
-
 /* --- Prospective Memory and Triggered Recall ---
  *
  * First-class "when X, surface Y" records.  Lives in its own table so the

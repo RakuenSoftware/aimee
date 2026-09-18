@@ -125,6 +125,7 @@ func exerciseBriefingReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
 	if len(b.Entities) != 2 || b.Entities[0].Name != "caroline" || b.Entities[0].Mentions != 2 {
 		t.Fatal(b.Entities)
 	}
+	exerciseBriefingViewsReplay(t, handler, b)
 	_, again := run(0)
 	if string(raw) != string(again) {
 		t.Fatal("not deterministic")

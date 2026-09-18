@@ -852,11 +852,6 @@ int kb_client_task_delete(int64_t id);
 int kb_client_task_add_edge(int64_t source, int64_t target, const char *relation);
 int kb_client_task_get_edges(int64_t task_id, task_edge_t *out, int max);
 
-/* Build the memory briefing bundle via aimee-kb.  Returns a heap-
- * allocated cJSON object (caller cJSON_Delete()s) or NULL on failure.
- * Mirrors memory_briefing(). */
-struct cJSON *kb_client_memory_briefing(int limit_tokens);
-
 /* Auditable-correctness P1: ask the KB to record a single per-turn
  * retrieval_event keyed by `turn_id` (a UUID), listing the int64 memory row ids
  * surfaced into the turn. `role` is the recall op (e.g. "Recall"),

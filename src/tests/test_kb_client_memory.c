@@ -368,8 +368,9 @@ static void test_ordered_readers_propagate_active_project_context(void)
    free(json);
    json = kb_client_memory_alerts_json(NULL);
    free(json);
-   cJSON *briefing = kb_client_memory_briefing(128);
-   cJSON_Delete(briefing);
+   cJSON *briefing = cJSON_Parse("{\"limit_tokens\":128}");
+   kb_client_memory_scope_context_apply(briefing);
+   free(kb_v1_action_request("memory.briefing", briefing));
    const char *graph_commands[] = {"memory.entity_profile", "memory.entity_edges",
                                    "memory.search_graph", "memory.search_graph_as_of"};
    for (size_t i = 0; i < sizeof(graph_commands) / sizeof(graph_commands[0]); i++)

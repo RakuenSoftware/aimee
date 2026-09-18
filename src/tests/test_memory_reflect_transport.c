@@ -7,7 +7,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-static int unavailable, explicit_scope;
+static int unavailable, explicit_scope, briefing_mode;
 static const char *forced;
 void cmd_memory_apply_rerank_mode(const opt_parsed_t *opts)
 {
@@ -61,10 +61,40 @@ char *kb_v1_action_request_with_timeout(const char *method, cJSON *args, int tim
    cJSON_Delete(out);
    return raw;
 }
+char *kb_v1_action_request(const char *method, cJSON *args)
+{
+   assert(briefing_mode && !strcmp(method, "memory.briefing"));
+   assert(jo_int(args, "limit_tokens", 0) == 768);
+   assert(!strcmp(jo_cstr(args, "project"), "reflect-project"));
+   assert(!strcmp(jo_cstr(args, "profile"), "compact"));
+   int json = !strcmp(jo_cstr(args, "format"), "json");
+   if (json)
+      assert(!strcmp(jo_cstr(args, "fields"), "key_facts"));
+   cJSON_Delete(args);
+   if (unavailable)
+      return NULL;
+   if (forced)
+      return strdup(forced);
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddStringToObject(out, "status", "ok");
+   cJSON_AddStringToObject(out, "output",
+                           json ? "{\"key_facts\":[{\"memory_id\":9223372036854775807}]}"
+                                : "Go-owned briefing\n");
+   char *raw = cJSON_PrintUnformatted(out);
+   cJSON_Delete(out);
+   return raw;
+}
 static void invoke(int json)
 {
-   app_ctx_t ctx = {
-       .json_output = json, .json_fields = "results,contradictions", .response_profile = "compact"};
+   app_ctx_t ctx = {.json_output = json,
+                    .json_fields = briefing_mode ? "key_facts" : "results,contradictions",
+                    .response_profile = "compact"};
+   if (briefing_mode)
+   {
+      char *args[] = {"--limit-tokens", "768"};
+      mem_briefing(&ctx, 2, args);
+      return;
+   }
    char *args[] = {"needle",        "query",           "--limit", "7",
                    "--draft-rule",  "--synthesize",    "--scope", "project",
                    "--scope-value", "explicit-project"};
@@ -72,45 +102,52 @@ static void invoke(int json)
 }
 int main(void)
 {
-   for (int scope = 0; scope < 2; scope++)
+   for (briefing_mode = 0; briefing_mode < 2; briefing_mode++)
    {
-      explicit_scope = scope;
-      for (int json = 0; json < 2; json++)
+      unavailable = 0;
+      forced = NULL;
+      for (int scope = 0; scope < (briefing_mode ? 1 : 2); scope++)
       {
-         int fds[2];
-         assert(pipe(fds) == 0);
-         fflush(stdout);
-         int saved = dup(STDOUT_FILENO);
-         assert(saved >= 0);
-         assert(dup2(fds[1], STDOUT_FILENO) >= 0);
-         close(fds[1]);
-         invoke(json);
-         fflush(stdout);
-         assert(dup2(saved, STDOUT_FILENO) >= 0);
-         close(saved);
-         char buf[1024];
-         int n = read(fds[0], buf, sizeof(buf) - 1);
-         assert(n > 0);
-         buf[n] = 0;
-         close(fds[0]);
-         assert(strstr(buf, json ? "9223372036854775807" : "Go-owned reflection"));
+         explicit_scope = scope;
+         for (int json = 0; json < 2; json++)
+         {
+            int fds[2];
+            assert(pipe(fds) == 0);
+            fflush(stdout);
+            int saved = dup(STDOUT_FILENO);
+            assert(saved >= 0);
+            assert(dup2(fds[1], STDOUT_FILENO) >= 0);
+            close(fds[1]);
+            invoke(json);
+            fflush(stdout);
+            assert(dup2(saved, STDOUT_FILENO) >= 0);
+            close(saved);
+            char buf[1024];
+            int n = read(fds[0], buf, sizeof(buf) - 1);
+            assert(n > 0);
+            buf[n] = 0;
+            close(fds[0]);
+            assert(
+                strstr(buf, json ? "9223372036854775807"
+                                 : (briefing_mode ? "Go-owned briefing" : "Go-owned reflection")));
+         }
       }
-   }
-   const char *errors[] = {"not-json", "{}", "{\"status\":\"error\"}", "{\"status\":\"ok\"}"};
-   for (int i = 0; i < 5; i++)
-   {
-      forced = i < 4 ? errors[i] : NULL;
-      unavailable = i == 4;
-      pid_t pid = fork();
-      assert(pid >= 0);
-      if (pid == 0)
+      const char *errors[] = {"not-json", "{}", "{\"status\":\"error\"}", "{\"status\":\"ok\"}"};
+      for (int i = 0; i < 5; i++)
       {
-         invoke(0);
-         _exit(0);
+         forced = i < 4 ? errors[i] : NULL;
+         unavailable = i == 4;
+         pid_t pid = fork();
+         assert(pid >= 0);
+         if (pid == 0)
+         {
+            invoke(0);
+            _exit(0);
+         }
+         int status;
+         assert(waitpid(pid, &status, 0) == pid);
+         assert(WIFEXITED(status) && WEXITSTATUS(status) != 0);
       }
-      int status;
-      assert(waitpid(pid, &status, 0) == pid);
-      assert(WIFEXITED(status) && WEXITSTATUS(status) != 0);
    }
    return 0;
 }

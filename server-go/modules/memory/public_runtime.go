@@ -82,6 +82,10 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		}
 		scoped = commandScope(args, &request)
 	case "briefing":
+		format := args.stringOr("format", "")
+		if format != "" && format != "text" && format != "json" && format != "mcp" {
+			return invalid("briefing format must be text, json or mcp")
+		}
 		request.Operation, request.LimitTokens = "briefing-bundle", args.integer("limit_tokens", 0)
 		if request.LimitTokens < 0 {
 			request.LimitTokens = 0
@@ -90,6 +94,17 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			request.LimitTokens = 8192
 		}
 		scoped = commandScope(args, &request)
+		if format == "mcp" {
+			scoped = true
+			request.IncludeAll = args.boolean("include_all")
+			request.Project, request.Workspace = args.stringOr("project", ""), args.stringOr("workspace", "")
+			if request.Project == "__aimee_scope_missing__" {
+				request.Project = ""
+			}
+			if request.Workspace == "__aimee_scope_missing__" {
+				request.Workspace = ""
+			}
+		}
 	case "alerts":
 		request.Operation, request.AsOf = "alerts-bundle", args.stringOr("since", "")
 		scoped = commandScope(args, &request)
@@ -200,6 +215,13 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	case "briefing", "alerts":
 		if len(response.Payload) == 0 {
 			return nil, bus.ModuleStatusInternal
+		}
+		if verb == "briefing" && args.stringOr("format", "") != "" {
+			output, err := briefingOutput(response.Payload, args, scoped && !request.IncludeAll && request.Project == "" && request.Workspace == "")
+			if err != nil {
+				return nil, bus.ModuleStatusInternal
+			}
+			return commandResult(map[string]any{"status": "ok", "output": output})
 		}
 		result[verb] = response.Payload
 	case "context_block", "facts":

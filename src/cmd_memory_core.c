@@ -989,55 +989,27 @@ void mem_briefing(app_ctx_t *ctx, int argc, char **argv)
 {
    opt_parsed_t opts;
    opt_parse(argc, argv, NULL, &opts);
-   int limit_tokens = opt_get_int(&opts, "limit-tokens", MEMORY_BRIEFING_DEFAULT_LIMIT_TOKENS);
-
-   cJSON *bundle = kb_client_memory_briefing(limit_tokens);
-   if (!bundle)
-      fatal("memory briefing failed");
-
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddNumberToObject(request, "limit_tokens", opt_get_int(&opts, "limit-tokens", 0));
+   cJSON_AddStringToObject(request, "format", ctx->json_output ? "json" : "text");
+   if (ctx->json_fields)
+      cJSON_AddStringToObject(request, "fields", ctx->json_fields);
+   if (ctx->response_profile)
+      cJSON_AddStringToObject(request, "profile", ctx->response_profile);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.briefing", request);
+   cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   const cJSON *output = reply ? cJSON_GetObjectItemCaseSensitive(reply, "output") : NULL;
+   if (!reply || strcmp(jo_cstr(reply, "status"), "ok") != 0 || !cJSON_IsString(output))
+   {
+      cJSON_Delete(reply);
+      fatal("memory briefing failed or returned malformed output");
+   }
+   fputs(output->valuestring, stdout);
    if (ctx->json_output)
-   {
-      emit_json_ctx(bundle, ctx->json_fields, ctx->response_profile);
-      return;
-   }
-
-   cJSON *key_facts = cJSON_GetObjectItemCaseSensitive(bundle, "key_facts");
-   cJSON *recent = cJSON_GetObjectItemCaseSensitive(bundle, "recent_activity");
-   cJSON *entities = cJSON_GetObjectItemCaseSensitive(bundle, "active_entities");
-
-   printf("# Session Briefing\n\n");
-   printf("## Key Facts (%d)\n", cJSON_GetArraySize(key_facts));
-   cJSON *it = NULL;
-   cJSON_ArrayForEach(it, key_facts)
-   {
-      const char *tier = cJSON_GetStringValue(cJSON_GetObjectItem(it, "tier"));
-      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItem(it, "kind"));
-      const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(it, "text"));
-      long long id = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
-      printf("  - [%s/%s #%lld] %s\n", tier ? tier : "", kind ? kind : "", id, text ? text : "");
-   }
-
-   printf("\n## Recent Activity (%d)\n", cJSON_GetArraySize(recent));
-   cJSON_ArrayForEach(it, recent)
-   {
-      const char *sess = cJSON_GetStringValue(cJSON_GetObjectItem(it, "session_id"));
-      const char *summary = cJSON_GetStringValue(cJSON_GetObjectItem(it, "summary"));
-      printf("  - %s: %s\n", sess ? sess : "", summary ? summary : "");
-   }
-
-   printf("\n## Active Entities (%d)\n", cJSON_GetArraySize(entities));
-   cJSON_ArrayForEach(it, entities)
-   {
-      const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(it, "name"));
-      int mentions = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "mentions"));
-      printf("  - %s (mentions=%d)\n", name ? name : "", mentions);
-   }
-
-   cJSON *tok = cJSON_GetObjectItemCaseSensitive(bundle, "approx_tokens");
-   cJSON *cap = cJSON_GetObjectItemCaseSensitive(bundle, "limit_tokens");
-   printf("\napprox_tokens=%d / limit_tokens=%d\n", (int)cJSON_GetNumberValue(tok),
-          (int)cJSON_GetNumberValue(cap));
-   cJSON_Delete(bundle);
+      fputc('\n', stdout);
+   cJSON_Delete(reply);
 }
 
 /* Read the "prospective" object from a kb response envelope and detach

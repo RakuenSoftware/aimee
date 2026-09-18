@@ -7942,5 +7942,5 @@ $(TESTPREFIX)/unit-test-memory-demotion-transport: $(OBJDIR)/tests/test_memory_d
 $(TESTPREFIX)/unit-test-memory-checkpoint-transport: $(OBJDIR)/tests/test_memory_checkpoint_transport.o $(OBJDIR)/tasks.o $(OBJDIR)/cmd_memory_core.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-memory-reflect-transport: $(OBJDIR)/tests/test_memory_reflect_transport.o $(OBJDIR)/cmd_memory_embed.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
+$(TESTPREFIX)/unit-test-memory-reflect-transport: $(OBJDIR)/tests/test_memory_reflect_transport.o $(OBJDIR)/cmd_memory_embed.o $(OBJDIR)/cmd_memory_core.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
