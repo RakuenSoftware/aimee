@@ -873,17 +873,6 @@ int kb_client_task_get_edges(int64_t task_id, task_edge_t *out, int max);
  * Mirrors memory_briefing(). */
 struct cJSON *kb_client_memory_briefing(int limit_tokens);
 
-/* Fetch a context block via aimee-kb.  Returns a heap-allocated
- * string (caller frees) or NULL if kb is unreachable.  Mirrors
- * memory_get_context_block(). */
-char *kb_client_memory_context_block(const char *query, const char *block_type, int limit);
-
-/* Read-only typed-fact recall for the turn: facts about entities named in the
- * query, PII-gated. Returns the facts block (caller frees), NULL if kb is
- * unreachable or there are no facts. Cheaper than context_block (no memory
- * assembly); used by ingress_preinject to auto-inject known facts. */
-char *kb_client_memory_facts(const char *query);
-
 /* Auditable-correctness P1: ask the KB to record a single per-turn
  * retrieval_event keyed by `turn_id` (a UUID), listing the int64 memory row ids
  * surfaced into the turn. `role` is the recall op (e.g. "Recall"),

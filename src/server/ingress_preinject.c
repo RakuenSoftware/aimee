@@ -1043,7 +1043,24 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * having to call the get_context_block tool. Gated kb-side on
     * the typed-fact layer (returns NULL when there are none), so this is a no-op
     * then. User-asserted facts are high-signal, so they lift confidence. */
-   char *facts = facts_on ? kb_client_memory_facts(query) : NULL;
+   cJSON *fact_response = NULL;
+   const char *facts = NULL;
+   if (facts_on)
+   {
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "query", query);
+      char *raw = kb_v1_action_request("memory.facts", request);
+      fact_response = raw ? cJSON_Parse(raw) : NULL;
+      free(raw);
+      const char *status =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(fact_response, "status"));
+      if (status && strcmp(status, "ok") == 0)
+         facts = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(fact_response, "facts"));
+      if (!facts)
+         LOG_WARN("ingress-memory",
+                  "typed-fact recall unavailable or invalid; continuing without facts");
+   }
    if (facts && facts[0])
    {
       dstr_t f;
@@ -1060,7 +1077,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       if (score < 0.5)
          score = 0.5;
    }
-   free(facts);
+   cJSON_Delete(fact_response);
 
    /* Default temporal-learning context: current semantic assertions, active
     * evidence-backed observations, and reviewed procedures. The KB assembles

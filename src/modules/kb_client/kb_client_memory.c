@@ -1486,66 +1486,6 @@ cJSON *kb_client_memory_briefing(int limit_tokens)
    return detached;
 }
 
-char *kb_client_memory_context_block(const char *query, const char *block_type, int limit)
-{
-   if (!query)
-      return NULL;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   if (block_type && block_type[0])
-      cJSON_AddStringToObject(req, "block_type", block_type);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.context_block", req);
-   if (!json)
-      return NULL;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return NULL;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *block = cJSON_GetObjectItemCaseSensitive(resp, "block");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsString(block))
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   char *out = strdup(block->valuestring);
-   cJSON_Delete(resp);
-   return out;
-}
-
-char *kb_client_memory_facts(const char *query)
-{
-   if (!query || !query[0])
-      return NULL;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   char *json = kb_v1_action_request("memory.facts", req);
-   if (!json)
-      return NULL;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return NULL;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *facts = cJSON_GetObjectItemCaseSensitive(resp, "facts");
-   char *out = NULL;
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsString(facts) &&
-       facts->valuestring[0])
-      out = strdup(facts->valuestring);
-   cJSON_Delete(resp);
-   return out;
-}
-
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
                                                const char *query_fingerprint, const int64_t *ids,
                                                int n_ids, char *event_id_out, size_t event_id_len)

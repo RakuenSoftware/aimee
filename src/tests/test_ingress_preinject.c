@@ -14,6 +14,7 @@
 static const char *g_context_mode = "observe";
 static int g_context_calls = 0;
 static int g_facts_calls = 0;
+static int g_facts_failure = 0;
 static int g_temporal_enabled = 0;
 static int g_temporal_calls = 0;
 static kb_client_result_status_t g_context_result = KB_CLIENT_RESULT_OK;
@@ -42,18 +43,28 @@ void obs_bus_emit_durable_event(const char *event_type, const char *subject, con
 /* The kb-backed builder (ingress_preinject_build) is out of scope here; these
  * stubs satisfy the linker so the test links only the pure helpers without
  * dragging in the kb client / config-load object graph. */
-char *kb_client_memory_context_block(const char *query, const char *block_type, int limit)
+
+void kb_client_memory_scope_context_apply(cJSON *request)
 {
-   (void)query;
-   (void)block_type;
-   (void)limit;
-   return NULL;
+   cJSON_AddBoolToObject(request, "scope_context", 1);
+   cJSON_AddStringToObject(request, "project", "active-project");
 }
-char *kb_client_memory_facts(const char *query)
+char *kb_v1_action_request(const char *method, cJSON *request)
 {
-   (void)query;
+   assert(strcmp(method, "memory.facts") == 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "project")),
+                 "active-project") == 0);
+   cJSON_Delete(request);
    g_facts_calls++;
-   return strdup("- global preference: never substitute for project evidence\n");
+   if (g_facts_failure == 1)
+      return NULL;
+   if (g_facts_failure == 2)
+      return strdup("not-json");
+   if (g_facts_failure == 3)
+      return strdup("{\"status\":\"error\",\"facts\":\"must not inject\"}");
+   return strdup("{\"status\":\"ok\",\"facts\":\"- global preference: never substitute for project "
+                 "evidence\\n\"}");
 }
 char *kb_client_memory_assemble_typed_context(const char *query)
 {
@@ -867,8 +878,25 @@ static void test_compress_code_fold(void)
    printf("compress_code_fold OK\n");
 }
 
+static void test_fact_command_failures(void)
+{
+   ingress_preinject_register_confidence_provider(test_confidence_provider);
+   for (int mode = 1; mode <= 3; mode++)
+   {
+      g_facts_failure = mode;
+      g_context_mode = "observe";
+      char *env = ingress_preinject_build("fact command failure example", 0);
+      assert(env);
+      assert(!strstr(env, "## Known facts"));
+      assert(!strstr(env, "must not inject"));
+      free(env);
+   }
+   g_facts_failure = 0;
+}
+
 int main(void)
 {
+   test_fact_command_failures();
    printf("ingress_preinject: ");
    test_confidence_tiers();
    test_format_envelope();

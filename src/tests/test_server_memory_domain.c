@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern cJSON *tool_get_context_block(cJSON *args);
 extern cJSON *tool_search_graph(cJSON *args);
 extern cJSON *tool_get_entity_edges(cJSON *args);
 extern cJSON *tool_get_entity(cJSON *args);
@@ -79,6 +80,7 @@ int main(void)
        {"memory.entity_edges", "edges", "dst_entity", tool_get_entity_edges, 1},
        {"memory.entity_profile", "profile", "summary", tool_get_entity, 0},
        {"memory.get_episode", "episode", "episode_text", tool_get_episode, 0},
+       {"memory.context_block", "block", "", tool_get_context_block, -1},
    };
    char long_text[12001];
    memset(long_text, 'x', sizeof(long_text) - 1);
@@ -92,13 +94,18 @@ int main(void)
       cJSON *envelope = cJSON_CreateObject(), *row = cJSON_CreateObject();
       cJSON_AddStringToObject(envelope, "status", "ok");
       cJSON_AddStringToObject(row, cases[i].text_field, long_text);
-      if (cases[i].array)
+      if (cases[i].array > 0)
       {
          cJSON *rows = cJSON_AddArrayToObject(envelope, cases[i].field);
          cJSON_AddItemToArray(rows, row);
       }
-      else
+      else if (cases[i].array == 0)
          cJSON_AddItemToObject(envelope, cases[i].field, row);
+      else
+      {
+         cJSON_Delete(row);
+         cJSON_AddStringToObject(envelope, cases[i].field, long_text);
+      }
       char *success = cJSON_PrintUnformatted(envelope);
       reply = success;
       cJSON *result = cases[i].call(args);
@@ -106,7 +113,7 @@ int main(void)
       assert(strcmp(jo_cstr(sent, "project"), "project-a") == 0);
       assert(strcmp(jo_cstr(sent, "workspace"), "workspace-a") == 0);
       assert(jo_bool(sent, "scope_context", 0) && !jo_bool(sent, "include_all", 1));
-      if (cases[i].array)
+      if (cases[i].array > 0)
          assert(jo_int(sent, "limit", 0) == 20);
       cJSON_Delete(result);
       cJSON_DeleteItemFromObjectCaseSensitive(args, "workspace");
@@ -134,7 +141,7 @@ int main(void)
             assert(strstr(text, "invalid"));
          if (j == 3)
             assert(strstr(text, "forbidden") && !strstr(text, "empty"));
-         if (j == 4 && !cases[i].array)
+         if (j == 4 && cases[i].array == 0)
             assert(strstr(text, "empty"));
          cJSON_Delete(result);
       }

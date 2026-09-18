@@ -578,3 +578,10 @@ seed-kind correction and sensitive recall coverage; restricted-role replay
 covers public context authority, scope, historical evidence, bounds and rollback.
 The KB now declares 97 commands; the Server still declares four. Native fact
 rollback, other mutation consumers and gateway integration remain G0 work.
+
+The native context-block and typed-fact KB clients are also retired. MCP and
+prompt injection use the generic authenticated command transport with the
+existing request scope. MCP preserves full context text and explicit refusal
+bodies; automatic injection rejects malformed or failed responses and reports
+unavailable recall. Actual MCP, ingress, gateway and transport tests preserve
+scope forwarding, long responses and the rendered envelope contract.

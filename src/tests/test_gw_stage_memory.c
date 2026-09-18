@@ -60,17 +60,20 @@ void obs_bus_emit_durable_event(const char *event_type, const char *subject, con
 }
 
 /* --- stubs: make ingress_preinject_build deterministic without the kb graph --- */
-char *kb_client_memory_context_block(const char *query, const char *block_type, int limit)
+
+void kb_client_memory_scope_context_apply(cJSON *request)
 {
-   (void)query;
-   (void)block_type;
-   (void)limit;
-   return NULL;
+   cJSON_AddBoolToObject(request, "scope_context", 1);
+   cJSON_AddStringToObject(request, "project", "active-project");
 }
-char *kb_client_memory_facts(const char *query)
+char *kb_v1_action_request(const char *method, cJSON *request)
 {
-   (void)query;
-   return NULL;
+   assert(strcmp(method, "memory.facts") == 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "project")),
+                 "active-project") == 0);
+   cJSON_Delete(request);
+   return strdup("{\"status\":\"ok\",\"facts\":\"\"}");
 }
 char *kb_client_memory_assemble_typed_context(const char *query)
 {

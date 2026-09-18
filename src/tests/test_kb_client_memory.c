@@ -368,11 +368,18 @@ static void test_ordered_readers_propagate_active_project_context(void)
    cJSON_AddStringToObject(ask, "query", "q");
    json = kb_v1_action_request("memory.ask", ask);
    free(json);
-   json = kb_client_memory_context_block("q", "general", 8);
-   free(json);
+
+   const char *context_commands[] = {"memory.context_block", "memory.facts"};
+   for (size_t i = 0; i < sizeof(context_commands) / sizeof(context_commands[0]); i++)
+   {
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "query", "q");
+      json = kb_v1_action_request(context_commands[i], request);
+      free(json);
+   }
    (void)kb_client_memory_diagnose("q", 2, diagnostics, 2);
-   json = kb_client_memory_facts("q");
-   free(json);
+
    (void)kb_client_memory_top_l2_facts(mems, 8);
    (void)kb_client_memory_list_session_scope_priority(mems, 8);
    (void)kb_client_memory_list_session_scope_priority_like("%q%", mems, 8);

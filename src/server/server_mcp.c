@@ -849,26 +849,42 @@ cJSON *tool_get_context_block(cJSON *args)
    int limit = cJSON_IsNumber(jl) ? jl->valueint : 5;
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);
-   char *ctx = kb_client_memory_context_block(jq->valuestring, block_type, limit);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "query", jq->valuestring);
+   cJSON_AddStringToObject(request, "block_type", block_type);
+   cJSON_AddNumberToObject(request, "limit", limit);
+   char *raw = kb_v1_action_request("memory.context_block", request);
    mcp_memory_scope_end();
-   if (!ctx)
-      return kb_last_result_content("memory context block returned no result");
-   char *rendered = ctx;
-   if (active_context_missing)
+   if (!raw)
+      return kb_last_result_content("memory context block unavailable");
+   cJSON *response = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(response))
    {
-      size_t need = strlen(ctx) + 96;
-      rendered = malloc(need);
-      if (rendered)
-         snprintf(rendered, need,
-                  "Active project context is unavailable; showing shared/global memory only.\n\n%s",
-                  ctx);
-      else
-         rendered = ctx;
+      cJSON_Delete(response);
+      return text_content("error: invalid memory context block response");
    }
-   cJSON *result = text_content(rendered);
-   if (rendered != ctx)
-      free(rendered);
-   free(ctx);
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0)
+      return json_result_content(response);
+   const char *block = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block"));
+   if (!block)
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory context block result");
+   }
+   dstr_t body;
+   dstr_init(&body);
+   if (active_context_missing)
+      dstr_append_str(
+          &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
+   dstr_append_str(&body, block);
+   const char *retraction = jo_cstr(response, "retraction");
+   if (strcmp(retraction, "annotate_only") == 0 || strcmp(retraction, "operator_required") == 0)
+      dstr_appendf(&body, "\nFact retraction declined: %s.\n", retraction);
+   cJSON *result = text_content(dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_Delete(response);
    return result;
 }
 
