@@ -84,7 +84,11 @@ func negationOverlap(query, content []string) float64 {
 }
 
 func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest, exact bool, base []Record) ([]Record, error) {
-	base, err := s.fuseMemoryGraph(ctx, req, exact, base)
+	base, err := s.fuseSharedSemantic(ctx, req, exact, base)
+	if err != nil {
+		return nil, err
+	}
+	base, err = s.fuseMemoryGraph(ctx, req, exact, base)
 	if err != nil {
 		return nil, err
 	}

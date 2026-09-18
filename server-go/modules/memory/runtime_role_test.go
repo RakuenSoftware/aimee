@@ -128,6 +128,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 		t.Fatal(err)
 	}
 	exerciseReembedReplay(t, ctx, tx, backend.(*postgresDataStore))
+	exerciseSharedRecallReplay(t, ctx, tx, backend.(*postgresDataStore))
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	exerciseDemotionReplay(t, ctx, tx, handler)
 	exerciseCodeContextReplay(t, ctx, tx, handler)

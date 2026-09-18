@@ -42,6 +42,21 @@ isolated Go path until their seeding, embeddings and reads are migrated together
 
 ## Purpose and non-goals
 
+Shared KB searches also admit semantic-only whole-record matches from the active
+versioned embedding catalog. The Go owner holds the rebuild lock while it checks
+the model identity, embeds the query and reads candidates. Current input hashes,
+parent visibility, exact scope, lifecycle, suppression, kind and tier are checked
+before limiting candidates. Wrong-width and zero vectors cannot enter the result.
+The channel retains the former whole-record cosine floor and dimension-dependent
+scale, including the `memory_semantic_floor_scale` configuration override, then
+fuses lexical and semantic ranks while preserving scope priority.
+
+Model outages, identity changes and invalid query embeddings leave lexical recall
+available; a required SQL failure remains an operation failure. This path requires
+a pinned active version and a governed executor. Unversioned-vector admission and
+the native unit/temporal semantic weighting still need migration; this does not
+certify the full legacy retrieval pipeline or the native benchmark runners.
+
 Memory is one Go module deployed in two placements. `AIMEE_MODULE_PLACEMENT` is
 required for a running process:
 

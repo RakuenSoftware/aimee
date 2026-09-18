@@ -426,6 +426,7 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
+	recallExecutor egress.Executor
 	auditAction    func(context.Context, audit.Action) error
 	auditBatch     *mutationAuditBatch
 	episodeCommand func(context.Context, string, []byte) ([]byte, error)
@@ -909,6 +910,11 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 }
 
 func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []byte) (result []byte, status bus.ModuleStatus) {
+	if backend, ok := options.data.(*postgresDataStore); ok {
+		bound := *backend
+		bound.recallExecutor = options.executor
+		options.data = &bound
+	}
 	request, err := decodeDataRequest(body)
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
