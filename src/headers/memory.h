@@ -464,11 +464,6 @@ void add_provenance(int64_t memory_id, const char *session_id, const char *actio
 int memory_find_facts(const char *query, int limit, memory_t *out, int max);
 int memory_find_facts_scoped(const char *query, const char *scope_type, const char *scope_value,
                              int limit, memory_t *out, int max);
-int memory_find_facts_visible(const char *query, const char *workspace, const char *project,
-                              int limit, memory_t *out, int max);
-int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
-                                 int include_all, int limit, memory_t *out, int max);
-
 /* --- Conversation Scanning --- */
 
 /* --- Window Compaction --- */

@@ -13,16 +13,12 @@
 #include "modules/db2/c/cross_repo_stats.h" /* db2_cross_repo_set_trust, recompute_blocked_symbols */
 #include "modules/db2/c/kb_service_backend.h" /* db2_kb_ingest_queue_enqueue */
 #include "modules/db2/c/lifecycle.h"
-#include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/code_projection.h"
 #include "modules/db2/c/code_project_lifecycle.h"
 #include "modules/db2/c/code_index.h"
 #include "modules/db2/c/pgvec_transport.h"
-#include "modules/db2/c/entity_edges.h"     /* §6 memory-fusion leg: knowledge-graph edges */
-#include "modules/db2/c/entity_nodes.h"     /* db2_entity_node_get -> file_path */
 #include "code_collect.h"                   /* §6 live: git_resolve_default_sha + change gate */
 #include "modules/db2/c/kb_runtime_state.h" /* stored last-indexed default-branch SHA */
-#include "memory.h"
 #include "kb_rrf.h"
 #include "modules/db2/c/lessons.h" /* §3 actuation: earned-trust tie-break */
 #include "kb/lessons_reflect.h"    /* reflect the ledger into per-node trust */
@@ -950,12 +946,11 @@ int handle_get_code_cross_repo_deps_route(const char *method, const char *query_
  *   - "code"  : lexical search over file contents (canonical_index_code_search);
  *   - "graph" : callers of `symbol` from the structural call graph
  *               (canonical_index_find_callers), marked structural (tie-break).
- * Memory recall (db2_memory_find_facts_like) is returned as a separate `why`
+ * Go-owned memory recall is returned as a separate `why`
  * array — the recorded reasoning behind the code, not a file, so it is context
  * rather than a fused row. The vector signal (pgvec_code_search) slots in as a
  * third fused leg once the query embedder is wired (integration-tier). */
 #define HYBRID_PER_SIGNAL 25
-#define HYBRID_WHY_MAX    5
 #define HYBRID_TRUST_MAX  2000
 
 typedef struct
@@ -1082,7 +1077,6 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
 
    code_search_hit_t *chits = calloc(HYBRID_PER_SIGNAL, sizeof(*chits));
    caller_hit_t *ghits = calloc(HYBRID_PER_SIGNAL, sizeof(*ghits));
-   memory_t *mems = calloc(HYBRID_PER_SIGNAL, sizeof(*mems));
    kb_rrf_item_t *code_items = calloc(HYBRID_PER_SIGNAL, sizeof(*code_items));
    kb_rrf_item_t *graph_items = calloc(HYBRID_PER_SIGNAL, sizeof(*graph_items));
    kb_rrf_item_t *vector_items = calloc(HYBRID_PER_SIGNAL, sizeof(*vector_items));
@@ -1091,12 +1085,11 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    double *vscores = calloc(HYBRID_PER_SIGNAL, sizeof(*vscores));
    kb_rrf_result_t *fused = calloc(HYBRID_PER_SIGNAL * 4, sizeof(*fused));
    hybrid_candidate_t *candidates = calloc(HYBRID_PER_SIGNAL * 4, sizeof(*candidates));
-   if (!chits || !ghits || !mems || !code_items || !graph_items || !vector_items || !memory_items ||
+   if (!chits || !ghits || !code_items || !graph_items || !vector_items || !memory_items ||
        !vpaths || !vscores || !fused || !candidates)
    {
       free(chits);
       free(ghits);
-      free(mems);
       free(code_items);
       free(graph_items);
       free(vector_items);
@@ -1220,52 +1213,42 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
          kb_code_vector_status_embed(&vector_status, embed_cmd, qdim, db2_embedding_dim(),
                                      embed_unauthorized);
    }
-   /* Signal D — cross-session memory / knowledge graph (§6 fusion). Symbol-anchored
-    * like the graph leg: seed the symbol's entity node and walk its incident
-    * knowledge-graph edges (built by the curator across sessions), resolving each
-    * neighbor entity to a file_path. Surfaces files the recorded reasoning associates
-    * with the symbol — a signal a regenerated code-only snapshot can never hold.
-    * w_memory<=0 disables it; absent a symbol or an entity graph it is simply empty. */
+   /* The shared Go memory owner selects scoped graph files and why records. */
+   cJSON *memory_args = cJSON_CreateObject(), *memory_reply = NULL;
+   cJSON_AddStringToObject(memory_args, "operation", "hybrid-context");
+   cJSON_AddStringToObject(memory_args, "query", query);
+   cJSON_AddStringToObject(memory_args, "project", project);
+   cJSON_AddBoolToObject(memory_args, "scope_context", 1);
+   cJSON_AddBoolToObject(memory_args, "include_all", all_projects);
+   if (fusion_on && w_memory > 0.0)
+      cJSON_AddStringToObject(memory_args, "symbol", symbol);
+   int memory_rc = aimee_module_commands_dispatch_internal_timeout("memory.runtime", memory_args,
+                                                                   10000, &memory_reply);
+   cJSON_Delete(memory_args);
+   const char *why_json = jo_cstr(memory_reply, "why_json");
+   cJSON *why_check = why_json ? cJSON_Parse(why_json) : NULL;
+   const cJSON *memory_files = cJSON_GetObjectItemCaseSensitive(memory_reply, "files");
+   int memory_ok = memory_rc > 0 && strcmp(jo_cstr(memory_reply, "status"), "ok") == 0 &&
+                   cJSON_IsArray(why_check) && cJSON_IsArray(memory_files);
+   cJSON_Delete(why_check);
    int nmem = 0;
-   if (fusion_on && w_memory > 0.0 && symbol[0] && project[0])
-   {
-      char skey[GRAPH_ENDPOINT_MAX];
-      db2_entity_edge_explain_t *eedges = calloc(HYBRID_PER_SIGNAL, sizeof(*eedges));
-      if (eedges && db2_entity_node_key_symbol(proj, symbol, skey, sizeof(skey)) == 0)
+   const cJSON *file;
+   if (memory_ok)
+      cJSON_ArrayForEach(file, memory_files)
       {
-         int ne2 = db2_entity_edge_explain_by_entity(skey, eedges, HYBRID_PER_SIGNAL);
-         for (int i = 0; i < ne2 && nmem < HYBRID_PER_SIGNAL; i++)
-         {
-            /* the neighbor is whichever endpoint isn't the seed symbol */
-            const char *neighbor =
-                strcmp(eedges[i].source, skey) == 0 ? eedges[i].target : eedges[i].source;
-            if (strcmp(neighbor, skey) == 0)
-               continue; /* self-edge: the symbol isn't its own memory neighbor */
-            db2_entity_node_t node;
-            if (db2_entity_node_get(neighbor, &node) != 0 || !node.file_path[0])
-               continue;
-            int id = hybrid_candidate_intern(candidates, &candidate_count, HYBRID_PER_SIGNAL * 4,
-                                             project, node.file_path);
-            if (id < 0)
-               continue;
-            char key[sizeof(memory_items[0].id)];
-            hybrid_candidate_key(id, key, sizeof(key));
-            int dup = 0; /* keep the best-ranked row per project/file pair */
-            for (int j = 0; j < nmem; j++)
-               if (strcmp(memory_items[j].id, key) == 0)
-               {
-                  dup = 1;
-                  break;
-               }
-            if (dup)
-               continue;
-            snprintf(memory_items[nmem].id, sizeof(memory_items[nmem].id), "%s", key);
-            memory_items[nmem].structural_weight = eedges[i].structural_weight;
-            nmem++;
-         }
+         if (nmem == HYBRID_PER_SIGNAL)
+            break;
+         const char *path = jo_cstr(file, "file_path");
+         const char *owner = jo_cstr(file, "project");
+         if (!path[0] || !owner[0])
+            continue;
+         int id = hybrid_candidate_intern(candidates, &candidate_count, HYBRID_PER_SIGNAL * 4,
+                                          owner, path);
+         if (id < 0)
+            continue;
+         hybrid_candidate_key(id, memory_items[nmem].id, sizeof(memory_items[nmem].id));
+         memory_items[nmem++].structural_weight = jo_int((cJSON *)file, "structural_weight", 0);
       }
-      free(eedges);
-   }
 
    kb_rrf_signal_t sigs[4] = {
        {code_items, ncode, w_code, "code"},
@@ -1323,21 +1306,12 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    if (nf > max_r)
       nf = max_r;
 
-   /* Memory "why" context (recorded reasoning, capped). */
-   int nm = project[0] ? memory_find_facts_visible_ex(query, NULL, project, all_projects,
-                                                      HYBRID_WHY_MAX, mems, HYBRID_PER_SIGNAL)
-                       : db2_memory_find_facts_like(query, HYBRID_WHY_MAX, mems, HYBRID_PER_SIGNAL);
-   if (nm < 0)
-      nm = 0;
-   if (nm > HYBRID_WHY_MAX)
-      nm = HYBRID_WHY_MAX;
-
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
    {
+      cJSON_Delete(memory_reply);
       free(chits);
       free(ghits);
-      free(mems);
       free(code_items);
       free(graph_items);
       free(vector_items);
@@ -1414,19 +1388,9 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       cJSON_AddItemToArray(results, row);
    }
 
-   cJSON *why = cJSON_AddArrayToObject(resp, "why");
-   for (int i = 0; why && i < nm; i++)
-   {
-      cJSON *m = cJSON_CreateObject();
-      if (!m)
-         continue;
-      cJSON_AddNumberToObject(m, "id", (double)mems[i].id);
-      cJSON_AddStringToObject(m, "kind", mems[i].kind);
-      if (mems[i].headline[0])
-         cJSON_AddStringToObject(m, "headline", mems[i].headline);
-      cJSON_AddStringToObject(m, "content", mems[i].content);
-      cJSON_AddItemToArray(why, m);
-   }
+   cJSON_AddStringToObject(resp, "memory_status", memory_ok ? "ok" : "unavailable");
+   cJSON_AddItemToObject(resp, "why", cJSON_CreateRaw(memory_ok ? why_json : "[]"));
+   cJSON_Delete(memory_reply);
 
    char *s = cJSON_PrintUnformatted(resp);
    int status = 200;
@@ -1451,7 +1415,6 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
    cJSON_Delete(resp);
    free(chits);
    free(ghits);
-   free(mems);
    free(code_items);
    free(graph_items);
    free(vector_items);

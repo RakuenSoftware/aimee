@@ -102,12 +102,21 @@ func exerciseSharedIndexReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	execSQL(`RESET ROLE; GRANT INSERT ON memory_chunks TO aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	execSQL(`UPDATE kb_async_jobs SET next_attempt_at='' WHERE kind='memory_index' AND document_id=$1`, first)
 	executor.reply = `[0.1,0.2]`
+	var failureStarted time.Time
+	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&failureStarted); err != nil {
+		t.Fatal(err)
+	}
 	batch(64)
 	checkJob(first, "done", 2, 0)
 	var attempts int
 	if err := tx.QueryRow(ctx, `SELECT attempts FROM vector_index_ops WHERE point_id=$1 AND status='failed'`, first).Scan(&attempts); err != nil || attempts != 1 {
 		t.Fatal("vector failure missing", attempts, err)
 	}
+	var failedAt time.Time
+	if err := tx.QueryRow(ctx, `SELECT updated_at::timestamptz FROM vector_index_ops WHERE point_id=$1`, first).Scan(&failedAt); err != nil || failedAt.Before(failureStarted) {
+		t.Fatal("failure backoff used transaction start instead of failure time", failedAt, failureStarted, err)
+	}
+
 	if err := tx.QueryRow(ctx, `SELECT vector_dims(embedding) FROM memory_embeddings WHERE point_id=$1`, first).Scan(&count); err != nil || count != dimension {
 		t.Fatal("old vector lost", count, err)
 	}

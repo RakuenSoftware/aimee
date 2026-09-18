@@ -129,6 +129,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseScopeReplay(t, ctx, tx, handler)
 	exerciseCheckpointReplay(t, ctx, tx, handler)
 	exerciseConventionReplay(t, ctx, tx, handler)
+	exerciseHybridReplay(t, ctx, tx, handler)
 	call := func(request DataRequest) DataResponse {
 		t.Helper()
 		reply, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request))

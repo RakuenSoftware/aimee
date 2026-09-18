@@ -4434,60 +4434,6 @@ static void test_curator_routes(void)
  * the surprising_judged:/surprising_confirmed: keys (-1 = key absent). */
 static int g_sj_judged = -1;
 static int g_sj_confirmed = -1;
-/* Full memory_t layout (mirrors headers/memory.h) so the stub writes each field
- * at the offset the handler — compiled against the real struct — reads. The main
- * file keeps a truncated local memory_t for other stubs, so we cast a void* here
- * rather than redeclare the type, exactly like canonical_index_code_search. Lives
- * here (with the hybrid test it feeds) to keep test_kb_http_routes.c under the
- * 2000-line build-integrity limit. */
-typedef struct
-{
-   int64_t id;
-   char tier[4];
-   char kind[16];
-   char key[512];
-   char headline[512];
-   char content[2048];
-   char use_cases[1024];
-   double confidence;
-   int use_count;
-   char last_used_at[32];
-   char created_at[32];
-   char updated_at[32];
-   char source_session[128];
-   double salience;
-   char provenance_category[32];
-   double retrieval_score;
-   int hybrid_rank;
-} test_full_memory_t;
-
-int db2_memory_find_facts_like(const char *query, int limit, void *out, int max)
-{
-   assert(out);
-   if (!query || strcmp(query, "needle") != 0 || limit < 1 || max < 1)
-      return 0;
-   test_full_memory_t *m = (test_full_memory_t *)out;
-   memset(&m[0], 0, sizeof(m[0]));
-   m[0].id = 7;
-   snprintf(m[0].kind, sizeof(m[0].kind), "decision");
-   snprintf(m[0].headline, sizeof(m[0].headline), "why needle exists");
-   snprintf(m[0].content, sizeof(m[0].content), "%schose needle over haystack for O(1) lookup",
-            g_code_context_memory_anchored ? "src/search.c: " : "");
-   return 1;
-}
-
-int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
-                                 int include_all, int limit, void *out, int max)
-{
-   (void)workspace;
-   assert(project == NULL || strcmp(project, "proj-alpha") == 0);
-   assert(include_all == 0 || include_all == 1);
-   int n = db2_memory_find_facts_like(query, limit, out, max);
-   if (n > 0)
-      ((test_full_memory_t *)out)[0].confidence = 0.91;
-   return n;
-}
-
 /* canonical_index_find_callers stub (used by the callers + hybrid route tests
  * below) — moved here from test_kb_http_routes.c to keep that file under the
  * 2000-line build-integrity limit; cast a void* like the other canonical stubs. */
@@ -4651,9 +4597,43 @@ int aimee_module_commands_dispatch_context(const char *method, const cJSON *args
    return review_transport;
 }
 
+static int hybrid_owner_unavailable;
+static const char *hybrid_why_override;
+
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
                                                     int timeout_ms, cJSON **result)
 {
+   if (strcmp(jo_cstr(args, "operation"), "hybrid-context") == 0)
+   {
+      assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 10000);
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(args, "scope_context")));
+      if (hybrid_owner_unavailable)
+      {
+         *result = NULL;
+         return -1;
+      }
+      *result = cJSON_CreateObject();
+      cJSON_AddStringToObject(*result, "status", "ok");
+      cJSON *files = cJSON_AddArrayToObject(*result, "files");
+      if (instance_fusion_enabled && !strcmp(jo_cstr(args, "symbol"), "target_fn") &&
+          !strcmp(jo_cstr(args, "project"), "proj-alpha"))
+      {
+         cJSON *file = cJSON_CreateObject();
+         cJSON_AddStringToObject(file, "project", "proj-alpha");
+         cJSON_AddStringToObject(file, "file_path", "src/design_notes.c");
+         cJSON_AddNumberToObject(file, "structural_weight", 0);
+         cJSON_AddItemToArray(files, file);
+      }
+      cJSON_AddStringToObject(
+          *result, "why_json",
+          hybrid_why_override ? hybrid_why_override
+          : !strcmp(jo_cstr(args, "query"), "needle")
+              ? "[{\"id\":7,\"kind\":\"decision\",\"headline\":\"why needle "
+                "exists\",\"content\":\"chose needle over haystack for O(1) lookup\"}]"
+              : "[]");
+      return 1;
+   }
+
    if (strcmp(jo_cstr(args, "operation"), "code-context") == 0)
    {
       assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 10000);
@@ -5149,6 +5129,35 @@ static void test_code_hybrid_ok(void)
 /* §6 cross-session memory fusion: the knowledge graph connects the seed symbol to a
  * memory-extracted entity that resolves to a file the code/graph/vector legs never
  * see, fused in as a ranked "memory" signal (not just a why annotation). */
+static void test_code_hybrid_owner_transport(void)
+{
+   char buf[16384];
+   const char *query = "query=needle&symbol=target_fn&project=proj-alpha";
+   hybrid_owner_unavailable = 1;
+   assert(kb_http_route_ex("GET", "/v1/code/hybrid", query, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 200);
+   assert(strstr(buf, "\"memory_status\":\"unavailable\""));
+   assert(strstr(buf, "src/search.c") && strstr(buf, "\"why\":[]"));
+   hybrid_owner_unavailable = 0;
+   char why[8192];
+   const char *prefix = "[{\"id\":9223372036854775807,\"kind\":\"fact\",\"content\":\"";
+   size_t n = strlen(prefix);
+   memcpy(why, prefix, n);
+   memset(why + n, 'x', 5000);
+   strcpy(why + n + 5000, "END\"}]");
+   hybrid_why_override = why;
+   assert(kb_http_route_ex("GET", "/v1/code/hybrid", query, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 200);
+   assert(strstr(buf, "9223372036854775807") && strstr(buf, "END"));
+   assert(kb_http_route_ex("GET", "/v1/code/hybrid", query, NULL, NULL, NULL, 0, buf, 2048) == 413);
+   assert(strstr(buf, "result_too_large"));
+   hybrid_why_override = "invalid";
+   assert(kb_http_route_ex("GET", "/v1/code/hybrid", query, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 200);
+   assert(strstr(buf, "\"memory_status\":\"unavailable\""));
+   hybrid_why_override = NULL;
+}
+
 static void test_code_hybrid_memory_leg(void)
 {
    char buf[2048];
@@ -5464,72 +5473,6 @@ static void test_code_lessons_missing_project(void)
    int s = kb_http_route_ex("GET", "/v1/code/lessons", "", NULL, NULL, NULL, 0, buf, sizeof(buf));
    assert(s == 409);
    assert(strstr(buf, "scope_required") != NULL);
-}
-
-/* §6 memory-fusion leg stubs. The real db2_entity_edge_explain_t / db2_entity_node_t
- * (db2/entity_*.h) pull in memory.h's edge_t, which conflicts with this file's
- * simplified memory_t; so mirror the layouts and take void* (same pattern as the
- * code-projection stub). A symbol seed -> one knowledge-graph edge to a memory-
- * extracted entity that resolves to a file the code/graph/vector legs never see. */
-typedef struct
-{
-   int64_t id;
-   char source[512];
-   char relation[64];
-   char target[512];
-   int weight;
-   int structural_weight;
-   double utility_score;
-   char edge_origin[32];
-} test_entity_edge_explain_t;
-typedef struct
-{
-   char node_key[512];
-   int node_kind;
-   char project[256];
-   char display_name[256];
-   char full_key[512];
-   char file_path[512];
-   char symbol[256];
-   char node_origin[32];
-   int64_t last_seen_generation_id;
-} test_entity_node_t;
-
-int db2_entity_node_key_symbol(const char *project, const char *name, char *out, size_t cap)
-{
-   (void)project;
-   if (!name || !out || cap == 0)
-      return -1;
-   snprintf(out, cap, "symbol:proj:%s", name);
-   return 0;
-}
-int db2_entity_edge_explain_by_entity(const char *entity, void *out, int max)
-{
-   if (!entity || !out || max < 1)
-      return 0;
-   if (strcmp(entity, "symbol:proj:target_fn") != 0)
-      return 0;
-   test_entity_edge_explain_t *e = (test_entity_edge_explain_t *)out;
-   memset(&e[0], 0, sizeof(e[0]));
-   snprintf(e[0].source, sizeof(e[0].source), "%s", entity);
-   snprintf(e[0].relation, sizeof(e[0].relation), "relates_to");
-   snprintf(e[0].target, sizeof(e[0].target), "mement:proj:design");
-   e[0].weight = 80;
-   e[0].structural_weight = 0;
-   return 1;
-}
-int db2_entity_node_get(const char *node_key, void *out)
-{
-   if (!node_key || !out)
-      return -1;
-   if (strcmp(node_key, "mement:proj:design") != 0)
-      return -1;
-   test_entity_node_t *n = (test_entity_node_t *)out;
-   memset(n, 0, sizeof(*n));
-   snprintf(n->node_key, sizeof(n->node_key), "%s", node_key);
-   snprintf(n->file_path, sizeof(n->file_path), "src/design_notes.c");
-   snprintf(n->node_origin, sizeof(n->node_origin), "memory_extraction");
-   return 0;
 }
 
 /* §4 judge stub: confirm the first link (the disconnected file:x/file:y pair) with a
@@ -7817,6 +7760,7 @@ int main(void)
    test_code_hybrid_ok();
    test_code_hybrid_instance_off();
    test_code_hybrid_memory_leg();
+   test_code_hybrid_owner_transport();
    test_code_hybrid_keeps_same_path_projects_distinct();
    test_code_hybrid_missing_query();
    test_code_hybrid_no_symbol();

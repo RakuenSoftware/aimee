@@ -115,7 +115,8 @@
     "server-go/modules/memory/demotion.go",
     "server-go/modules/memory/code_context.go",
     "server-go/modules/memory/public_checkpoint.go",
-    "server-go/modules/memory/conventions.go"
+    "server-go/modules/memory/conventions.go",
+    "server-go/modules/memory/hybrid_context.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -188,7 +189,8 @@
     "server-go/modules/memory/demotion_test.go",
     "server-go/modules/memory/code_context_test.go",
     "server-go/modules/memory/public_checkpoint_test.go",
-    "server-go/modules/memory/conventions_test.go"
+    "server-go/modules/memory/conventions_test.go",
+    "server-go/modules/memory/hybrid_context_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

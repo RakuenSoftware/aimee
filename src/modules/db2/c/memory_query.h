@@ -27,7 +27,6 @@ extern "C"
     * fallback in the search pipeline when lexical / semantic / alias / entity all
     * miss. Returns up to min(limit, max) rows ranked by exact-key, exact-content,
     * key-prefix, then tier (L3>L2>L1) and use_count. */
-   int db2_memory_find_facts_like(const char *query, int limit, memory_t *out, int max);
 
    /* Indexed lexical lookup over memories_fts. Unlike the LIKE fallback above,
     * this is safe to call once per query token without rescanning the memories

@@ -235,13 +235,6 @@ static int domain_query_records(const char *mode, const char *pattern, int days,
    return n;
 }
 
-int db2_memory_find_facts_like(const char *query, int limit, memory_t *out, int max)
-{
-   if (limit > 0 && limit < max)
-      max = limit;
-   return domain_query_records("like", query ? query : "", 0, out, max);
-}
-
 int db2_memory_top_l2_facts(memory_t *out, int max)
 {
    return domain_query_records("top-l2", "", 0, out, max);

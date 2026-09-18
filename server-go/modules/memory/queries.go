@@ -108,7 +108,10 @@ func (s *postgresDataStore) QueryRecords(ctx context.Context, mode, pattern stri
 	case "like":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
 WHERE lifecycle_state='active' AND (key ILIKE '%'||$1||'%' OR content ILIKE '%'||$1||'%')
-ORDER BY CASE WHEN lower(key)=lower($1) THEN 0 WHEN lower(content)=lower($1) THEN 1
+ORDER BY CASE WHEN scope_type='project' AND scope_value=current_setting('aimee.memory_project',true) THEN 1
+ WHEN scope_type='workspace' AND scope_value=current_setting('aimee.memory_workspace',true) THEN 2
+ WHEN scope_type='global' THEN 3 ELSE 4 END,
+ CASE WHEN lower(key)=lower($1) THEN 0 WHEN lower(content)=lower($1) THEN 1
  WHEN lower(key) LIKE lower($1)||'%' THEN 2 ELSE 3 END,tier DESC,use_count DESC LIMIT $2`, pattern, limit)
 	case "top-l2":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories

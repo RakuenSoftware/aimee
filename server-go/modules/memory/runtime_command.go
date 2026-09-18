@@ -56,6 +56,14 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	request := DataRequest{IncludeAll: true}
 
 	switch operation {
+	case "hybrid-context":
+		if options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		request.Operation, request.Query, request.Entity = operation, args.stringOr("query", ""), args.stringOr("symbol", "")
+		if request.Query == "" {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
 	case "convention-extract":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusCapabilityAbsent
@@ -148,6 +156,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInternal
 	}
 	switch operation {
+	case "hybrid-context":
+		return commandResult(response.Payload)
 	case "convention-extract":
 		if response.Count == nil {
 			return nil, bus.ModuleStatusInternal

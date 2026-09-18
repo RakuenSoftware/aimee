@@ -336,31 +336,6 @@ static void test_scoped_retrieval_filters_results(void)
    teardown();
 }
 
-static void test_visible_retrieval_prefers_narrower_scope(void)
-{
-   setup();
-   memory_t global_mem, workspace_mem, project_mem;
-   memory_insert(TIER_L2, KIND_FACT, "deploy-target-global", "Deploy target is shared infra", 0.9,
-                 "s1", &global_mem);
-   memory_insert(TIER_L2, KIND_FACT, "deploy-target-ws", "Deploy target is workspace cluster", 0.9,
-                 "s2", &workspace_mem);
-   memory_insert(TIER_L2, KIND_FACT, "deploy-target-project", "Deploy target is project sandbox",
-                 0.9, "s3", &project_mem);
-
-   assert(memory_tag_global(global_mem.id) == 0);
-   assert(memory_tag_workspace(workspace_mem.id, "wol") == 0);
-   assert(memory_tag_project(project_mem.id, "aimee") == 0);
-
-   memory_t results[8];
-   int count = memory_find_facts_visible("deploy target", "wol", "aimee", 5, results, 8);
-   assert(count == 3);
-   assert(results[0].id == project_mem.id);
-   assert(results[1].id == workspace_mem.id);
-   assert(results[2].id == global_mem.id);
-
-   teardown();
-}
-
 static void test_local_first_applies_before_limits_across_memory_surfaces(void)
 {
    setup();
@@ -415,39 +390,9 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
 
    memory_t facts[64];
    db2_memory_scope_context_set("active-workspace", "active-project", 0);
-   int direct_count = db2_memory_find_facts_like("crowdout routing needle", 2, facts, 64);
-   assert(direct_count == 2);
-   assert(facts[0].id == local.id);
-   assert(facts[1].id == workspace_mem.id);
-   db2_memory_scope_context_clear();
-   int count = memory_find_facts_visible_ex("crowdout routing needle", "active-workspace",
-                                            "active-project", 0, 1, facts, 64);
-   assert(count == 1);
-   assert(facts[0].id == local.id);
-
-   /* Explicit all preserves the same bucket order but makes other projects
-    * visible at the tail. */
-   count = memory_find_facts_visible_ex("crowdout routing needle", "active-workspace",
-                                        "active-project", 1, 64, facts, 64);
-   assert(count > 1);
-   assert(facts[0].id == local.id);
-   assert(facts[1].id == workspace_mem.id);
-   int saw_other = 0;
-   for (int i = 0; i < count; i++)
-      if (facts[i].id == other.id)
-         saw_other = 1;
-   assert(saw_other);
-
-   /* With no active identity, only shared/global memory is returned. */
-   count = memory_find_facts_visible_ex("crowdout routing needle", NULL, NULL, 0, 64, facts, 64);
-   assert(count > 0);
-   for (int i = 0; i < count; i++)
-   {
-      assert(facts[i].id != local.id);
-      assert(facts[i].id != workspace_mem.id);
-   }
-
-   db2_memory_scope_context_set("active-workspace", "active-project", 0);
+   /* Visible and LIKE retrieval scope-order assertions now run through Go in
+    * hybrid_context_test.go, including distractors, all scope and no identity. */
+   int count;
 
    /* Ordered SQL readers used by list, context/recall, briefing, episodes,
     * graph, entity, and answer evidence all apply scope before LIMIT. */
@@ -777,7 +722,6 @@ int main(void)
    test_ws_null_workspace_falls_back();
    test_auto_tag_shared_keywords();
    test_scoped_retrieval_filters_results();
-   test_visible_retrieval_prefers_narrower_scope();
    test_local_first_applies_before_limits_across_memory_surfaces();
    test_ws_context_prefers_project_scope_when_available();
    test_api_memory_stats_includes_scope_counts();

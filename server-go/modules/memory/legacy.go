@@ -573,10 +573,11 @@ func (s *postgresDataStore) MarkEmbeddingFailure(ctx context.Context, id int64, 
 	if len(detail) > 1024 {
 		detail = textBound(detail, 1024)
 	}
+	// Backoff starts when the attempt fails, even after a long transaction.
 	_, err := s.db.Exec(ctx, `INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
-SELECT $1,'memory',id,'failed',1,$2,pg_now_text() FROM memories WHERE id=CASE WHEN $1::bigint >= $3::bigint
+SELECT $1,'memory',id,'failed',1,$2,clock_timestamp()::text FROM memories WHERE id=CASE WHEN $1::bigint >= $3::bigint
  THEN (SELECT memory_id FROM memory_units WHERE id=$1::bigint-$3::bigint) ELSE $1::bigint END AND lifecycle_state='active'
  ON CONFLICT(point_id) DO UPDATE SET
-status='failed',attempts=vector_index_ops.attempts+1,last_error=EXCLUDED.last_error,updated_at=pg_now_text()`, id, detail, unitPointOffset)
+status='failed',attempts=vector_index_ops.attempts+1,last_error=EXCLUDED.last_error,updated_at=clock_timestamp()::text`, id, detail, unitPointOffset)
 	return err
 }

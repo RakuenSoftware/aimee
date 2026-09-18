@@ -157,36 +157,6 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    return search_bus(query, scope_type, scope_value, NULL, NULL, limit, out, max);
 }
 
-int memory_find_facts_visible(const char *query, const char *workspace, const char *project,
-                              int limit, memory_t *out, int max)
-{
-   return memory_find_facts_visible_ex(query, workspace, project, 0, limit, out, max);
-}
-
-int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
-                                 int include_all, int limit, memory_t *out, int max)
-{
-   if (!out || max <= 0 || limit <= 0)
-      return -1;
-   if (limit > max)
-      limit = max;
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "visible-search") ||
-       !cJSON_AddStringToObject(request, "query", query ? query : "") ||
-       !cJSON_AddNumberToObject(request, "limit", limit) ||
-       !cJSON_AddBoolToObject(request, "include_all", include_all != 0) ||
-       (workspace && workspace[0] && !cJSON_AddStringToObject(request, "workspace", workspace)) ||
-       (project && project[0] && !cJSON_AddStringToObject(request, "project", project)))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = memory_data_call(request);
-   int count = records_from_response(response, out, max);
-   cJSON_Delete(response);
-   return count;
-}
-
 int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,
                                const char *key, const char *content, const char *use_cases,
                                double confidence, const char *session_id,

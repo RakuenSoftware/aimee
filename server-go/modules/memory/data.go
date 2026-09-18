@@ -1119,6 +1119,16 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
+	case "hybrid-context":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || invocation.PrincipalRef != 0 || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var result hybridMemoryResult
+		result, err = backend.hybridContext(ctx, request)
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+		}
 	case "convention-extract":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || invocation.PrincipalRef != 0 || transaction == nil {

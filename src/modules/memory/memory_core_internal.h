@@ -237,9 +237,6 @@ int memory_filter_scope(memory_t *matches, int count, const char *scope_type,
 int memory_find_facts_lexical_fallback(const char *query, const char *scope_type,
                                        const char *scope_value, int limit, memory_t *out, int max);
 int memory_find_facts_like(const char *query, int limit, memory_t *out, int max);
-int memory_find_facts_visible_lexical_fallback(const char *query, const char *workspace,
-                                               const char *project, int limit, memory_t *out,
-                                               int max);
 int memory_parse_temporal_constraint(const char *norm_query, char qtokens[][64], int nq,
                                      memory_temporal_constraint_t *out);
 int memory_parse_temporal_ref_date(const char *ref_key, const char *granularity,

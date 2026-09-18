@@ -237,7 +237,7 @@ func (s *postgresDataStore) indexSharedVector(ctx context.Context, executor egre
 		// EmbedRecord normally persists failure itself. Ensure even early validation
 		// errors are retryable without incrementing a failed attempt twice.
 		_, err = s.db.Exec(ctx, `UPDATE vector_index_ops SET status='failed',attempts=attempts+1,last_error=$2,
-   updated_at=pg_now_text() WHERE point_id=$1 AND attempts=$3`, point, textBound(fmt.Sprint(result.Error), 1024), attempts)
+   updated_at=clock_timestamp()::text WHERE point_id=$1 AND attempts=$3`, point, textBound(fmt.Sprint(result.Error), 1024), attempts)
 	}
 	return true, err
 }
