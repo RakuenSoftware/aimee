@@ -15,6 +15,8 @@
 #include "config.h"
 #include "config_database.h"
 #include "memory.h"
+#include "../memory/memory_bus_context.h"
+#include <math.h>
 #include "lifecycle.h"
 #include "eval_support.h"
 #include "cJSON.h"
@@ -369,68 +371,51 @@ void mem_eval_append_miss_setup_progress_row(FILE *fp, const char *dataset, cons
    cJSON_Delete(root);
 }
 
-static int mem_eval_build_retrieval_context(const char *query, int top_k, int token_budget,
-                                            char *context_out, size_t context_len,
-                                            int *retrieved_tokens_out)
+int mem_eval_build_retrieval_context(const char *query, int top_k, int token_budget,
+                                     char *context_out, size_t context_len,
+                                     int *retrieved_tokens_out)
 {
-   if (!query || !context_out || context_len == 0)
-      return 0;
-
-   if (top_k <= 0)
-      top_k = 10;
-   if (token_budget <= 0)
-      token_budget = 2000;
-
-   memory_t results[32];
-   int fetch_limit = top_k * 4;
-   if (fetch_limit < top_k)
-      fetch_limit = top_k;
-   if (fetch_limit > 32)
-      fetch_limit = 32;
-   int n_results = memory_find_facts(query, fetch_limit, results, 32);
-   if (n_results < 0)
-      return -1;
-   size_t used = 0;
-   int tokens = 0;
-   int kept = 0;
-   int per_item_token_cap = token_budget / 2;
-   if (per_item_token_cap < 96)
-      per_item_token_cap = token_budget;
-   context_out[0] = '\0';
-
-   for (int i = 0; i < n_results && kept < top_k; i++)
-   {
-      char line[2304];
-      const char *content = results[i].content;
-      char trimmed[1600];
-      int max_chars = per_item_token_cap * 4;
-      if (max_chars > (int)sizeof(trimmed) - 4)
-         max_chars = (int)sizeof(trimmed) - 4;
-      if ((int)strlen(content) > max_chars && per_item_token_cap < token_budget)
-      {
-         snprintf(trimmed, sizeof(trimmed), "%.*s...", max_chars, content);
-         content = trimmed;
-      }
-      int line_len = snprintf(line, sizeof(line), "[%d] %s\n", kept + 1, content);
-      if (line_len <= 0)
-         continue;
-      int line_tokens = mem_eval_estimate_tokens(line);
-      if (line_tokens > per_item_token_cap && kept > 0)
-         continue;
-      if (kept > 0 && tokens + line_tokens > token_budget)
-         continue;
-      if (used + (size_t)line_len + 1 >= context_len)
-         continue;
-      memcpy(context_out + used, line, (size_t)line_len);
-      used += (size_t)line_len;
-      context_out[used] = '\0';
-      tokens += line_tokens;
-      kept++;
-   }
-
    if (retrieved_tokens_out)
-      *retrieved_tokens_out = tokens;
-   return kept;
+      *retrieved_tokens_out = 0;
+   if (!context_out || context_len == 0)
+      return -1;
+   context_out[0] = '\0';
+   if (!query)
+      return -1;
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   if (!args || !cJSON_AddStringToObject(args, "operation", "benchmark-context") ||
+       !cJSON_AddStringToObject(args, "query", query) ||
+       !cJSON_AddNumberToObject(args, "top_k", top_k) ||
+       !cJSON_AddNumberToObject(args, "token_budget", token_budget) ||
+       !cJSON_AddNumberToObject(args, "capacity", context_len) || memory_bus_add_context(args) != 0)
+   {
+      cJSON_Delete(args);
+      return -1;
+   }
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &reply);
+   cJSON_Delete(args);
+   const cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "context");
+   const cJSON *tokens = cJSON_GetObjectItemCaseSensitive(reply, "tokens");
+   const cJSON *kept = cJSON_GetObjectItemCaseSensitive(reply, "kept");
+   if (rc <= 0 || strcmp(jo_cstr(reply, "status"), "ok") || !cJSON_IsString(text) ||
+       strlen(text->valuestring) >= context_len || !cJSON_IsNumber(tokens) ||
+       !isfinite(tokens->valuedouble) || tokens->valuedouble < 0 || tokens->valuedouble > 131072 ||
+       floor(tokens->valuedouble) != tokens->valuedouble ||
+       (token_budget > 0 && tokens->valuedouble > token_budget) || !cJSON_IsNumber(kept) ||
+       !isfinite(kept->valuedouble) || kept->valuedouble < 0 || kept->valuedouble > 32 ||
+       floor(kept->valuedouble) != kept->valuedouble || (top_k > 0 && kept->valuedouble > top_k) ||
+       ((kept->valuedouble == 0) != (text->valuestring[0] == '\0')) ||
+       ((kept->valuedouble == 0) != (tokens->valuedouble == 0)))
+   {
+      cJSON_Delete(reply);
+      return -1;
+   }
+   memcpy(context_out, text->valuestring, strlen(text->valuestring) + 1);
+   if (retrieved_tokens_out)
+      *retrieved_tokens_out = (int)tokens->valuedouble;
+   int count = (int)kept->valuedouble;
+   cJSON_Delete(reply);
+   return count;
 }
 
 static int mem_eval_write_text_file(const char *path, const char *text)

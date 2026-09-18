@@ -569,6 +569,19 @@ access. Memory-tree inventory is two C sources (224 lines), five headers, and
 source/epoch identity, cross-page continuity and authenticated Server-to-KB
 handoff remain unfinished; no public trace endpoint is introduced.
 
+
+Benchmark QA context assembly now runs in the Go owner through a host-only
+runtime operation. It uses the same scoped search path as the former native
+adapter, preserves numbered snippets and the byte/4 token estimate, and counts
+prefixes, ellipses and newlines against both budgets. Full UTF-8 content survives
+when it fits; small budgets truncate only at rune boundaries, and unavailable
+retrieval cannot become an empty success. Restricted-role replay covers local
+priority, missing/exact context and failures. A native connection fixture calls
+the real Go assembler. Native benchmark scoring, loaders, scratch-store isolation
+and other consumers remain migration debt. Its explicit scope-context transport
+and fixture raise strict G0 to 169 findings; the baseline is unchanged and the
+memory tree still has two C sources (224 lines) and five headers.
+
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.
 
 ## Serving sequence

@@ -129,7 +129,8 @@
     "server-go/modules/memory/workflow_observer.go",
     "server-go/modules/memory/wiki.go",
     "server-go/modules/memory/trace_patterns.go",
-    "server-go/modules/memory/trace_store.go"
+    "server-go/modules/memory/trace_store.go",
+    "server-go/modules/memory/benchmark_context.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -216,7 +217,8 @@
     "server-go/modules/memory/workflow_observer_test.go",
     "server-go/modules/memory/wiki_test.go",
     "server-go/modules/memory/trace_patterns_test.go",
-    "server-go/modules/memory/trace_store_test.go"
+    "server-go/modules/memory/trace_store_test.go",
+    "server-go/modules/memory/benchmark_context_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

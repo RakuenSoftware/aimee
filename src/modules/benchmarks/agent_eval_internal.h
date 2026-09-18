@@ -87,6 +87,11 @@ double elapsed_ms(const struct timespec *start, const struct timespec *end);
 int append_latency_sample(double **samples, int *count, int *cap, double value);
 void mem_eval_latency_finalize(const double *samples, int n_samples, mem_eval_latency_t *out);
 
+/* Benchmark context is assembled by Go; native callers copy the full reply. */
+int mem_eval_build_retrieval_context(const char *query, int top_k, int token_budget,
+                                     char *context_out, size_t context_len,
+                                     int *retrieved_tokens_out);
+
 /* Case scoring and tracing */
 int mem_eval_score_case(const mem_eval_case_t *ecase, mem_eval_direct_trace_t *trace_out);
 int mem_eval_run_qa_with_latency(agent_config_t *cfg, mem_eval_qa_case_t *cases, int n_cases,
