@@ -58,6 +58,8 @@ interface ProbeResult {
   model_available?: boolean;
   latency_ms?: number;
   execution_message?: string;
+  execution_error?: string;
+  model_probe?: string;
   error?: string;
 }
 
@@ -157,7 +159,7 @@ export default function Models() {
         [name]: {
           status: up ? "ok" : "down",
           latency_ms: res.latency_ms,
-          msg: res.execution_message,
+          msg: res.execution_error || res.execution_message || res.model_probe,
         },
       }));
     } catch {

@@ -69,15 +69,15 @@ describe('account-scoped session persistence', () => {
     }]);
   });
 
-  it('uses an explicit empty server transcript to clear stale browser history', () => {
+  it('keeps local history when a metadata-only server row has an empty transcript', () => {
     const [got] = mergePersistedSessions([local()], [{
       id: 'web-stable',
       cwd: '/work/project',
       messages: [],
     }], false);
 
-    expect(got.messages).toEqual([]);
-    expect(reconcileSessionMessages(local().messages, [])).toEqual([]);
+    expect(got.messages).toEqual(local().messages);
+    expect(reconcileSessionMessages(local().messages, [])).toEqual(local().messages);
   });
 
   it('keeps a longer live transcript during a non-empty stale server refresh', () => {
@@ -86,6 +86,13 @@ describe('account-scoped session persistence', () => {
       { role: 'assistant' as const, text: 'still streaming' },
     ];
     expect(reconcileSessionMessages(live, [live[0]])).toBe(live);
+  });
+
+  it('keeps a longer partial reply when a snapshot has the same number of messages', () => {
+    const live = [{ role: 'assistant' as const, text: 'The complete answer' }];
+    expect(reconcileSessionMessages(live, [{ role: 'assistant', text: 'The complete' }])).toBe(live);
+    expect(reconcileSessionMessages(live, [{ role: 'assistant', text: 'The complete answer, continued' }]))
+      .toEqual([{ role: 'assistant', text: 'The complete answer, continued' }]);
   });
 
   it('preserves the local UI key while refreshing stable server state', () => {
@@ -104,6 +111,13 @@ describe('account-scoped session persistence', () => {
     expect(got[0].claudeSid).toBe('provider-new');
     expect(got[0].attachId).toBe('');
     expect(got[0].messages).toHaveLength(2);
+  });
+
+  it('preserves an organization-qualified project name for the same checkout', () => {
+    const [got] = mergePersistedSessions([local({
+      projectRoot: '/work/org/project', projectName: 'org/project',
+    })], [{ id: 'web-stable', cwd: '/work/org/project' }], false);
+    expect(got.projectName).toBe('org/project');
   });
 
   it('drops local sessions deleted on another browser after migration', () => {

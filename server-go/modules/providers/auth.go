@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -74,4 +75,43 @@ func (m *Manager) commitCredentials(ctx context.Context, changes []credentialCha
 		}
 	}
 	return rollback, nil
+}
+
+// Resolve the selected connection's OAuth credential, never an unrelated API
+// key or another account. These are the same Vault slots used by serving.
+func (m *Manager) resolveCodex(ctx context.Context, p object) (string, string, error) {
+	name := str(p, "name")
+	token, err := m.resources.Credential(ctx, "get", name, "codex_oauth_token", "")
+	if err != nil {
+		return "", "", err
+	}
+	account, err := m.resources.Credential(ctx, "get", name, "codex_account_id", "")
+	if err != nil {
+		return "", "", err
+	}
+	if token == "" {
+		document, err := m.resources.Credential(ctx, "get", name, "oauth", "")
+		if err != nil {
+			return "", "", err
+		}
+		var doc object
+		if json.Unmarshal([]byte(document), &doc) == nil {
+			token = str(doc, "access_token")
+			if account == "" {
+				account = str(doc, "account_id")
+			}
+			if tokens, ok := doc["tokens"].(map[string]any); ok {
+				if token == "" {
+					token = str(tokens, "access_token")
+				}
+				if account == "" {
+					account = str(tokens, "account_id")
+				}
+			}
+		}
+	}
+	if token == "" {
+		return "", "", errors.New("Codex OAuth credential unavailable; re-authenticate this provider")
+	}
+	return token, account, nil
 }

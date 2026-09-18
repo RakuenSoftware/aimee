@@ -1,16 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button, Picker } from '@rakuensoftware/smoothgui';
 import type { GitProjectsResponse } from '../setup/ownerUrl';
 import { notifySetupUpdated } from '../setup/setupState';
 
-/* ProjectPicker — a compact "select or clone a project" control embedded in each
- * tool tab. Each tab passes its own storageKey so its selected project persists
- * independently (per the per-tab project model). onChange fires with the selected
- * project name and the user's workspace root (so the tab can act on it — the
- * editor opens root/<project>, chat sets cwd to it, etc.).
- *
- * The select is the generic smoothgui <Picker>; this component supplies the
- * aimee-specific data (/api/git/projects) and the clone-repo action. */
+/* The session owns the selected project. Loading or refreshing the options must
+ * never change that binding; only an explicit selection or clone emits a change. */
 
 export interface ProjectSelection {
   project: string;
@@ -26,29 +20,18 @@ async function api(path: string, init?: RequestInit): Promise<Response> {
 
 const input: React.CSSProperties = { padding: '5px 8px', borderRadius: 4, border: '1px solid var(--sg-border-medium)', fontSize: 13 };
 
-export default function ProjectPicker({ storageKey, onChange }: {
-  storageKey: string;
+export default function ProjectPicker({ value, onChange }: {
+  /* Absolute checkout path, matching Session.projectRoot (including any org). */
+  value: string;
   onChange: (sel: ProjectSelection | null) => void;
 }) {
   const [projects, setProjects] = useState<string[]>([]);
   const [root, setRoot] = useState('');
-  const [selected, setSelected] = useState<string>(() => localStorage.getItem(storageKey) || '');
   const [cloneOpen, setCloneOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-
-  // onChange goes through a ref so its identity never feeds the load/effect
-  // chain: parents pass inline closures that patch their own state, and a
-  // load() → onChange → parent re-render → new closure → new load() cycle
-  // re-fires the mount effect forever (an unthrottled /api/git/projects loop).
-  const onChangeRef = useRef(onChange);
-  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
-
-  const emit = useCallback((project: string, rootPath: string) => {
-    onChangeRef.current(project && rootPath ? { project, root: rootPath } : null);
-  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -59,20 +42,14 @@ export default function ProjectPicker({ storageKey, onChange }: {
       const rootPath = d.root || '';
       setProjects(ps);
       setRoot(rootPath);
-      // keep the persisted selection if still present, else clear
-      const prev = localStorage.getItem(storageKey) || '';
-      const next = prev && ps.includes(prev) ? prev : '';
-      setSelected(next);
-      emit(next, rootPath);
+      return rootPath;
     } catch { setErr('aimee-server unavailable'); }
-  }, [emit, storageKey]);
+  }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
-  function select(p: string) {
-    setSelected(p);
-    if (p) localStorage.setItem(storageKey, p); else localStorage.removeItem(storageKey);
-    emit(p, root);
+  function select(project: string, rootPath = root) {
+    onChange(project && rootPath ? { project, root: rootPath } : null);
   }
 
   async function clone() {
@@ -86,8 +63,8 @@ export default function ProjectPicker({ storageKey, onChange }: {
       const d = await r.json();
       if (!r.ok) { setErr(d.error || 'clone failed'); return; }
       setUrl(''); setToken(''); setCloneOpen(false);
-      await load();
-      if (d.name) select(d.name);
+      const rootPath = await load();
+      if (d.name && rootPath) select(d.name, rootPath);
       notifySetupUpdated();
     } finally { setBusy(false); }
   }
@@ -97,9 +74,9 @@ export default function ProjectPicker({ storageKey, onChange }: {
       <Picker
         label="Project"
         emptyLabel="— none —"
-        options={projects.map(p => ({ value: p, label: p }))}
-        value={selected}
-        onChange={select}
+        options={projects.map(p => ({ value: `${root}/${p}`, label: p }))}
+        value={value}
+        onChange={path => select(projects.find(project => `${root}/${project}` === path) ?? '')}
         error={err}
         actions={
           <Button size="md" onClick={() => setCloneOpen(o => !o)}>
