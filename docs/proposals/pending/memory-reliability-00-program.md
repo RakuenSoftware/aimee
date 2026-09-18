@@ -326,7 +326,9 @@ on. Queue reads respect source scope. Direct Go canonical writes also enforce
 the shared content gate, closing the native-client bypass. PostgreSQL replay and
 actual CLI tests cover these contracts, redaction, tombstone rollback and full
 text. The old Go DB1 queue remains a migration concern for pre-existing jobs;
-new work is owned by the shared KB memory queue.
+new work is owned by the shared KB memory queue. The unused native DB1 queue
+bindings and their fixed-width client header are also deleted; queue behavior
+is exercised through the Go owner and PostgreSQL.
 
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.

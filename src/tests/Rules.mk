@@ -746,7 +746,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-toolset \
                $(TESTPREFIX)/unit-test-db1-git-ownership-client \
                $(TESTPREFIX)/unit-test-db1-conversation-client \
-               $(TESTPREFIX)/unit-test-db1-agent-work-client \
                $(TESTPREFIX)/unit-test-server-http \
                $(TESTPREFIX)/unit-test-web-search-fuse \
                $(TESTPREFIX)/unit-test-trajectory-batch \
@@ -4897,12 +4896,6 @@ check-db2-module-runtime: $(OBJDIR)/aimee-module-db2
 	  echo "DB2 module leaked its DSN" >&2; exit 1; \
 	fi; \
 	echo "DB2 module runtime: complete link and fail-closed initialization ok"
-
-$(TESTPREFIX)/unit-test-db1-agent-work-client: \
-                                       $(OBJDIR)/tests/test_db1_agent_work_client.o \
-                                       $(OBJDIR)/db1_client/agent_work.o \
-                                       $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-db1-conversation-client: \
                                        $(OBJDIR)/tests/test_db1_conversation_client.o \

@@ -13,10 +13,6 @@
 #define db1_agent_log_list_delegation_patterns                ((int (*)())0)
 #define db1_agent_log_list_failure_episode_seeds              ((int (*)())0)
 #define db1_agent_log_list_recent_errors                      ((int (*)())0)
-#define db1_cognify_job_claim_next                            ((int (*)())0)
-#define db1_cognify_job_enqueue                               ((int (*)())0)
-#define db1_cognify_job_mark                                  ((int (*)())0)
-#define db1_cognify_job_status                                ((int (*)())0)
 #define db1_context_cache_get                                 ((int (*)())0)
 #define db1_context_cache_invalidate                          ((void (*)())0)
 #define db1_context_cache_put                                 ((void (*)())0)
@@ -53,10 +49,6 @@
 #pragma weak db1_agent_log_list_delegation_patterns
 #pragma weak db1_agent_log_list_failure_episode_seeds
 #pragma weak db1_agent_log_list_recent_errors
-#pragma weak db1_cognify_job_claim_next
-#pragma weak db1_cognify_job_enqueue
-#pragma weak db1_cognify_job_mark
-#pragma weak db1_cognify_job_status
 #pragma weak db1_context_cache_get
 #pragma weak db1_context_cache_invalidate
 #pragma weak db1_context_cache_put
