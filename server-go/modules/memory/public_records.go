@@ -109,6 +109,22 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			request.Operation = "visible-search"
 			request.Workspace, request.Project = args.stringOr("workspace", ""), args.stringOr("project", "")
 			scoped = true
+			if args.stringOr("format", "") == "mcp" {
+				request.IncludeAll = args.boolean("include_all")
+				if request.Workspace == "__aimee_scope_missing__" {
+					request.Workspace = ""
+				}
+				if request.Project == "__aimee_scope_missing__" {
+					request.Project = ""
+				}
+				if scope, explicit := searchViewScope(args); explicit {
+					if _, err := normalizeScope(PlacementKB, scope); err != nil {
+						return invalid(err.Error())
+					}
+					request.Operation, request.Scope, request.IncludeAll = "search", scope, false
+					scoped = false
+				}
+			}
 		} else {
 			request.Operation = "search"
 			request.Scope = Scope{Type: args.stringOr("scope_type", ""), Value: args.stringOr("scope_value", "")}
@@ -181,6 +197,10 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
+	}
+	if verb == "find_facts_visible" && args.stringOr("format", "") == "mcp" {
+		missing := scoped && !request.IncludeAll && request.Workspace == "" && request.Project == ""
+		return commandResult(map[string]any{"status": "ok", "text": memorySearchText(request.Query, response.PublicRecords, missing), "active_context_missing": missing})
 	}
 	result := map[string]any{"status": "ok"}
 	if verb == "get" {

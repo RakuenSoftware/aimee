@@ -262,31 +262,6 @@ cJSON *tool_get_help(cJSON *args)
    return result;
 }
 
-/* Extract scope_type + scope_value from a canonical filter object.
- * Priority: workspace > project > session > user. */
-static void parse_filter_scope(cJSON *filter, const char **scope_type, const char **scope_value)
-{
-   *scope_type = NULL;
-   *scope_value = NULL;
-   if (!cJSON_IsObject(filter))
-      return;
-   cJSON *scope = cJSON_GetObjectItemCaseSensitive(filter, "scope");
-   if (!cJSON_IsObject(scope))
-      return;
-   static const char *keys[] = {"workspace", "project", "session", "user", NULL};
-   for (int i = 0; keys[i]; i++)
-   {
-      cJSON *jv = cJSON_GetObjectItemCaseSensitive(scope, keys[i]);
-      if (cJSON_IsString(jv) && jv->valuestring[0] && strcmp(jv->valuestring, "any") != 0 &&
-          strcmp(jv->valuestring, "current") != 0)
-      {
-         *scope_type = keys[i];
-         *scope_value = jv->valuestring;
-         return;
-      }
-   }
-}
-
 void mcp_memory_scope_begin(cJSON *args, int *active_context_missing)
 {
    char workspace[MAX_PATH_LEN] = "";
@@ -360,43 +335,32 @@ cJSON *tool_search_memory(cJSON *args)
       return json_result_content(reply);
    }
 
-   const char *scope_type = NULL;
-   const char *scope_value = NULL;
-   cJSON *jf = cJSON_GetObjectItemCaseSensitive(args, "filter");
-   parse_filter_scope(jf, &scope_type, &scope_value);
-
-   memory_t facts[20];
-   /* Graph-code fusion is always on for recall. */
-   int count;
-   int active_context_missing = 0;
-   if (scope_type && scope_type[0])
-      count = kb_client_memory_find_facts_scoped_ex(jq->valuestring, scope_type, scope_value, 20,
-                                                    facts, 20, "on");
-   else
-   {
-      mcp_memory_scope_begin(args, &active_context_missing);
-      count = kb_client_memory_find_facts_visible(jq->valuestring, NULL, NULL, 20, facts, 20);
-      mcp_memory_scope_end();
-   }
-   if (count < 0)
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "query", jq->valuestring);
+   cJSON_AddStringToObject(request, "format", "mcp");
+   cJSON_AddNumberToObject(request, "limit", 20);
+   const cJSON *filter = cJSON_GetObjectItemCaseSensitive(args, "filter");
+   if (filter)
+      cJSON_AddItemToObject(request, "filter", cJSON_Duplicate(filter, 1));
+   mcp_memory_scope_begin(args, NULL);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.find_facts_visible", request);
+   mcp_memory_scope_end();
+   cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   if (!reply)
       return kb_last_result_content("knowledge service memory search failed");
-
-   char buf[8192];
-   int pos = 0;
-   if (active_context_missing)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
-                        "Active project context is unavailable; showing shared/global memory "
-                        "only.\n\n");
-   if (count == 0)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No facts found for '%s'", jq->valuestring);
-   else
+   if (strcmp(jo_cstr(reply, "status"), "ok") != 0)
+      return json_result_content(reply);
+   const cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "text");
+   if (!cJSON_IsString(text))
    {
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Found %d fact(s):\n\n", count);
-      for (int i = 0; i < count && pos < (int)sizeof(buf) - 512; i++)
-         pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- **%s** [%s/%s]: %s\n", facts[i].key,
-                           facts[i].tier, facts[i].kind, facts[i].content);
+      cJSON_Delete(reply);
+      return text_content("error: memory search returned invalid output");
    }
-   return text_content(buf);
+   cJSON *content = text_content(text->valuestring);
+   cJSON_Delete(reply);
+   return content;
 }
 
 cJSON *tool_memory_mutate(cJSON *args)

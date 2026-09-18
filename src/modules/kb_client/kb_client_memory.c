@@ -596,27 +596,6 @@ int kb_client_memory_explain_match(const char *query, int64_t memory_id, memory_
    return 0;
 }
 
-int kb_client_memory_find_facts_visible(const char *query, const char *workspace,
-                                        const char *project, int limit, memory_t *out, int max)
-{
-   if (!query || !out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddBoolToObject(req, "scope_context", 1);
-   cJSON_AddStringToObject(req, "query", query);
-   if (workspace && workspace[0])
-      cJSON_AddStringToObject(req, "workspace", workspace);
-   if (project && project[0])
-      cJSON_AddStringToObject(req, "project", project);
-   kbc_memory_add_scope_context(req);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.find_facts_visible", req);
-   int n = kbc_facts_array_from_envelope(json, out, max);
-   free(json);
-   return n;
-}
-
 int kb_client_memory_find_facts_scoped_ex(const char *query, const char *scope_type,
                                           const char *scope_value, int limit, memory_t *out,
                                           int max, const char *graph_code_fusion_state)

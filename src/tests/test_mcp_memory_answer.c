@@ -8,11 +8,26 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern cJSON *tool_search_memory(cJSON *args);
 extern cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out);
 static char project[1024], workspace[1024];
 static int active, all, calls;
 static cJSON *reply;
 static const char *expected_project;
+static const char *expected_action = "memory.ask";
+static int expected_all;
+
+int server_memory_store_selection(const cJSON *request)
+{
+   (void)request;
+   return 1;
+}
+cJSON *server_module_memory_data(const cJSON *request)
+{
+   (void)request;
+   assert(0 && "KB search must not query user memory");
+   return NULL;
+}
 
 int workspace_repo_identity(const char *cwd, char *p, size_t pc, char *w, size_t wc)
 {
@@ -52,10 +67,20 @@ void kb_client_memory_scope_context_apply(cJSON *request)
 char *kb_v1_action_request(const char *action, cJSON *request)
 {
    calls++;
-   assert(active && strcmp(action, "memory.ask") == 0);
+   assert(active && strcmp(action, expected_action) == 0);
    assert(strcmp(jo_cstr(request, "query"), "query") == 0);
    assert(strcmp(jo_cstr(request, "project"), expected_project) == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
+   if (strcmp(action, "memory.find_facts_visible") == 0)
+   {
+      assert(strcmp(jo_cstr(request, "format"), "mcp") == 0);
+      assert(jo_int(request, "limit", 0) == 20);
+      assert(jo_bool(request, "include_all", -1) == expected_all);
+      assert(strcmp(jo_cstr(cJSON_GetObjectItemCaseSensitive(
+                                cJSON_GetObjectItemCaseSensitive(request, "filter"), "scope"),
+                            "workspace"),
+                    "filtered-workspace") == 0);
+   }
    cJSON_Delete(request);
    return reply ? cJSON_PrintUnformatted(reply) : NULL;
 }
@@ -119,6 +144,42 @@ int main(void)
    content = tool_memory_ask(args, &structured);
    assert(!active && !structured);
    assert(strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "unavailable"));
+   cJSON_Delete(content);
+   cJSON_Delete(args);
+   expected_action = "memory.find_facts_visible";
+   expected_project = "project-a";
+   args = cJSON_Parse("{\"query\":\"query\",\"project\":\"project-a\",\"include_all\":true,"
+                      "\"filter\":{\"scope\":{\"workspace\":\"filtered-workspace\"}}}");
+   reply = cJSON_Parse("{\"status\":\"ok\"}");
+   char search[14000];
+   memset(search, 'x', sizeof(search) - 1);
+   search[sizeof(search) - 1] = 0;
+   cJSON_AddStringToObject(reply, "text", search);
+   content = tool_search_memory(args);
+   assert(!active && strcmp(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), search) == 0);
+   cJSON_Delete(content);
+   // Only the boundary-resolved scope=all can enable an all-project query.
+   expected_all = 1;
+   cJSON_AddStringToObject(args, "scope", "all");
+   content = tool_search_memory(args);
+   assert(!active && strcmp(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), search) == 0);
+   cJSON_Delete(content);
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "project");
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "scope");
+   expected_all = 0;
+   expected_project = "__aimee_scope_missing__";
+   cJSON_ReplaceItemInObjectCaseSensitive(reply, "text", cJSON_CreateNumber(42));
+   content = tool_search_memory(args);
+   assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "invalid output"));
+   cJSON_Delete(content);
+   cJSON_ReplaceItemInObjectCaseSensitive(reply, "status", cJSON_CreateString("unavailable"));
+   content = tool_search_memory(args);
+   assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "unavailable"));
+   cJSON_Delete(content);
+   cJSON_Delete(reply);
+   reply = NULL;
+   content = tool_search_memory(args);
+   assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "unavailable"));
    cJSON_Delete(content);
    cJSON_Delete(args);
    puts("mcp_memory_answer: PASS (scope, long answers, trace, citations, failure)");

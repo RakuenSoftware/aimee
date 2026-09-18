@@ -303,7 +303,15 @@ static void test_readers_distinguish_unreachable_from_empty(void)
    assert(kb_client_memory_list(NULL, NULL, 8, mems, 8) < 0);
    assert(kb_client_memory_find_facts("q", 8, mems, 8) < 0);
    assert(kb_client_memory_find_facts_scoped("q", NULL, NULL, 8, mems, 8) < 0);
-   assert(kb_client_memory_find_facts_visible("q", NULL, NULL, 8, mems, 8) < 0);
+   char *failed = kb_v1_action_request("memory.find_facts_visible",
+                                       cJSON_Parse("{\"query\":\"q\",\"limit\":8}"));
+   cJSON *failure = failed ? cJSON_Parse(failed) : NULL;
+   assert(failure &&
+          strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(failure, "status")),
+                 "unavailable") == 0);
+   assert(!cJSON_GetObjectItemCaseSensitive(failure, "facts"));
+   cJSON_Delete(failure);
+   free(failed);
    assert(kb_client_memory_search(clusters, 1, 8, windows, 8) < 0);
    assert(kb_client_memory_list_conflicts(conflicts, 8) < 0);
 
@@ -317,7 +325,16 @@ static void test_readers_distinguish_unreachable_from_empty(void)
    assert(kb_client_memory_list(NULL, NULL, 8, mems, 8) == 0);
    assert(kb_client_memory_find_facts("q", 8, mems, 8) == 0);
    assert(kb_client_memory_find_facts_scoped("q", NULL, NULL, 8, mems, 8) == 0);
-   assert(kb_client_memory_find_facts_visible("q", NULL, NULL, 8, mems, 8) == 0);
+   char *raw = kb_v1_action_request("memory.find_facts_visible",
+                                    cJSON_Parse("{\"query\":\"q\",\"limit\":8}"));
+   cJSON *visible = raw ? cJSON_Parse(raw) : NULL;
+   assert(visible &&
+          strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(visible, "status")), "ok") ==
+              0);
+   const cJSON *facts = cJSON_GetObjectItemCaseSensitive(visible, "facts");
+   assert(cJSON_IsArray(facts) && cJSON_GetArraySize(facts) == 0);
+   cJSON_Delete(visible);
+   free(raw);
    assert(kb_client_memory_search(clusters, 1, 8, windows, 8) == 0);
    assert(kb_client_memory_list_conflicts(conflicts, 8) == 0);
 
@@ -340,7 +357,9 @@ static void test_ordered_readers_propagate_active_project_context(void)
    char *clusters[] = {"q"};
    search_result_t windows[2];
    (void)kb_client_memory_search(clusters, 1, 2, windows, 2);
-   (void)kb_client_memory_find_facts_visible("q", NULL, NULL, 8, mems, 8);
+   cJSON *visible = cJSON_Parse("{\"query\":\"q\",\"limit\":8}");
+   kb_client_memory_scope_context_apply(visible);
+   free(kb_v1_action_request("memory.find_facts_visible", visible));
    char *json = kb_client_memory_assemble_context("q");
    free(json);
    json = kb_client_memory_assemble_typed_context("q");
@@ -421,11 +440,14 @@ static void test_single_record_miss_is_not_dependency_failure(void)
 
 static void test_explicit_scope_overrides_ambient_context(void)
 {
-   memory_t mems[2];
    mock_agent_http_set_post_handler(explicit_scope_post_handler);
    kb_client_memory_scope_context_set("active-workspace", "active-project", 0);
-   assert(kb_client_memory_find_facts_visible("q", "explicit-workspace", "explicit-project", 2,
-                                              mems, 2) == 0);
+   cJSON *request = cJSON_Parse("{\"query\":\"q\",\"limit\":2,\"workspace\":\"explicit-workspace\","
+                                "\"project\":\"explicit-project\"}");
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.find_facts_visible", request);
+   assert(raw);
+   free(raw);
    kb_client_memory_scope_context_clear();
    mock_agent_http_reset();
    printf("  PASS: test_explicit_scope_overrides_ambient_context\n");

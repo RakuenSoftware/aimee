@@ -655,10 +655,7 @@ char *kb_client_memory_assemble_typed_context(const char *query);
 int kb_client_memory_search(char **clusters, int cluster_count, int limit, search_result_t *out,
                             int max);
 
-/* Workspace/project-scoped fact search via aimee-kb.  Returns row count.
- * Mirrors memory_find_facts_visible() / memory_find_facts_scoped(). */
-int kb_client_memory_find_facts_visible(const char *query, const char *workspace,
-                                        const char *project, int limit, memory_t *out, int max);
+/* Explicitly scoped fact search via the Go memory owner. Returns row count. */
 int kb_client_memory_find_facts_scoped(const char *query, const char *scope_type,
                                        const char *scope_value, int limit, memory_t *out, int max);
 /* ABI-compatible legacy form; the fusion argument is ignored. The receiving
