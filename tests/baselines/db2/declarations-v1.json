@@ -8404,9 +8404,7 @@
       "symbol": "db2_fact_commit_rollback"
     },
     {
-      "consumers": [
-        "src/kb/kb_memory_facts.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
@@ -8415,7 +8413,7 @@
       ],
       "signature": "fact_gate_verdict_t db2_fact_commit_with_actor ( const char * source , memory_node_kind_t head_kind , const char * rel_type , const char * target , memory_node_kind_t tail_kind , const fact_actor_t * actor , int enabled , const fact_evidence_input_t * evidence , const char * assertion_kind , const char * valid_from , const char * valid_until )",
       "signature_sha256": "e308a4a4486b3fba571466f9005d13df1a23dd24d51651343dbbf0f10f44942b",
-      "status": "audit-pending",
+      "status": "internal-unconsumed",
       "symbol": "db2_fact_commit_with_actor"
     },
     {
@@ -23709,14 +23707,14 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "b9ceafa7645aa0ec2a2dbe213a961de2723da5cb2f2a137a112fc1d784540386",
+  "fingerprint": "f354b8b6f95cfac9cb0cd47e677c88bba89cb6db58fb0d712c5b7a0c6bc576de",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 469,
+    "audit_pending": 468,
     "declarations": 1349,
     "headers": 138,
-    "internal_unconsumed": 346,
+    "internal_unconsumed": 347,
     "private_test_only": 322,
     "reviewed": 212
   }

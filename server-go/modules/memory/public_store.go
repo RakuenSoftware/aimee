@@ -31,7 +31,8 @@ transport_identity=EXCLUDED.transport_identity,captured_at=pg_now_text()`, id, a
 		return err
 	}
 	_, err = s.db.Exec(ctx, `INSERT INTO kb_async_jobs(kind,document_id,project,status,updated_at)
-VALUES('memory_facts',$1,'memory','pending',pg_now_text()) ON CONFLICT(kind,document_id) DO NOTHING`, id)
+VALUES('memory_facts',$1,'memory','pending',pg_now_text()) ON CONFLICT(kind,document_id) DO UPDATE SET
+ status='pending',generation=kb_async_jobs.generation+1,attempts=0,claimed_by='',claimed_at='',last_error='',next_attempt_at='',updated_at=pg_now_text()`, id)
 	return err
 }
 

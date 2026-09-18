@@ -347,6 +347,23 @@ header and ported C fixtures are removed; DB2 provenance coverage remains.
 Schema version 8 adds only code identity/generation read grants for the runtime
 role, without exposing vector payloads or project writes.
 
+Typed-fact extraction completion now commits through the Go memory owner.
+Canonical entity aliases, ontology admission, normalized identities, authority
+quarantine, functional corrections, evidence replay and WORM seals share one
+transaction. Restricted-role tests exercise deferred evidence guards and prove
+that a denied audit seal rolls back facts and queue acknowledgement. Legacy
+identity matching is read-only until an assertion is actually mutated, and
+rejections survive alternate Unicode spellings.
+
+Extraction leases now carry generation, nonce and source hash. Edited memories
+requeue completed jobs; stale completion cannot acknowledge a newer lease or
+attach model output to changed/suppressed sources. Pattern and model facts use
+valid world-fact kinds, retain distinct authority, and retry errors omit provider
+content. The native worker no longer commits candidates; it still supplies the
+existing curator connection. Other native fact-ingest/review paths remain G0
+work. Schema version 9 adds the bounded runtime writer's evidence/ontology
+grants while WORM chain writes remain unavailable to it.
+
 The current inventory is four C sources and six headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

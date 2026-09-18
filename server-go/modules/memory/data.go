@@ -29,6 +29,7 @@ const (
 )
 
 type DataRequest struct {
+	FactWork       *MemoryFactWork   `json:"fact_work,omitempty"`
 	GraphPath      []GraphPathEntry  `json:"graph_path,omitempty"`
 	CodePointIDs   []int64           `json:"code_point_ids,omitempty"`
 	AutomaticLimit bool              `json:"automatic_limit,omitempty"`
@@ -207,14 +208,13 @@ type DataResponse struct {
 	ExportRecords      []ExportRecord       `json:"export_records,omitempty"`
 	Metrics            *RuntimeMetrics      `json:"metrics,omitempty"`
 
-	LegacyResults  []LegacySearchResult `json:"legacy_results,omitempty"`
-	VectorHits     []VectorHit          `json:"vector_hits,omitempty"`
-	Drift          *DriftResult         `json:"drift,omitempty"`
-	SummaryCount   int                  `json:"summary_count,omitempty"`
-	FactCount      int                  `json:"fact_count,omitempty"`
-	Failed         int                  `json:"failed,omitempty"`
-	FactWork       *MemoryFactWork      `json:"fact_work,omitempty"`
-	FactCandidates []FactCandidate      `json:"fact_candidates,omitempty"`
+	LegacyResults []LegacySearchResult `json:"legacy_results,omitempty"`
+	VectorHits    []VectorHit          `json:"vector_hits,omitempty"`
+	Drift         *DriftResult         `json:"drift,omitempty"`
+	SummaryCount  int                  `json:"summary_count,omitempty"`
+	FactCount     int                  `json:"fact_count,omitempty"`
+	Failed        int                  `json:"failed,omitempty"`
+	FactWork      *MemoryFactWork      `json:"fact_work,omitempty"`
 }
 
 // recallGateDecision owns the inexpensive turn-level recall policy. Keeping it
@@ -402,8 +402,7 @@ type legacyDataStore interface {
 
 type memoryFactDataStore interface {
 	ClaimMemoryFact(context.Context) (*MemoryFactWork, error)
-	ParseMemoryFacts(context.Context, int64, string) ([]FactCandidate, error)
-	FinishMemoryFact(context.Context, int64, bool, string) error
+	CompleteMemoryFact(context.Context, MemoryFactWork, string, bool, string) (bool, error)
 }
 
 type DataStore interface {
@@ -1164,28 +1163,21 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 		response.Payload, err = backend.maintenanceDashboard(ctx)
 
-	case "memory-facts-claim", "memory-facts-parse", "memory-facts-finish":
-		if options.placement != PlacementKB {
+	case "memory-facts-claim", "memory-facts-complete":
+		if options.placement != PlacementKB || invocation.PrincipalRef != 0 {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		facts, ok := options.data.(memoryFactDataStore)
 		if !ok {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
-		switch request.Operation {
-		case "memory-facts-claim":
+		if request.Operation == "memory-facts-claim" {
 			response.FactWork, err = facts.ClaimMemoryFact(ctx)
-		case "memory-facts-parse":
-			if request.ID <= 0 || request.Content == "" {
+		} else {
+			if request.FactWork == nil {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			response.FactCandidates, err = facts.ParseMemoryFacts(ctx, request.ID, request.Content)
-		case "memory-facts-finish":
-			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
-			}
-			err = facts.FinishMemoryFact(ctx, request.ID, request.Success, request.Reason)
-			response.Updated = err == nil
+			response.Updated, err = facts.CompleteMemoryFact(ctx, *request.FactWork, request.Content, request.Success, request.Reason)
 		}
 	case "rebuild-derived", "legacy-search", "compact-legacy", "scan-conversations", "check-drift",
 		"anti-pattern-feedback", "anti-pattern-failures", "anti-pattern-escalate", "learn-style",
