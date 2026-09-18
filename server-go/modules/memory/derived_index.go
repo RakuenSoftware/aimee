@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"strings"
 
 	store "github.com/JBailes/aimee/server-go/db"
 )
@@ -29,6 +30,10 @@ func (s *postgresDataStore) RebuildDerivedIndexes(ctx context.Context, limit int
 	}
 	if _, ok := s.db.(store.Tx); !ok {
 		return 0, errors.New("memory: derived indexes require a transaction")
+	}
+	settings, err := s.derivedSettings()
+	if err != nil {
+		return 0, err
 	}
 	if limit <= 0 || limit > 100000 {
 		limit = 100000
@@ -57,6 +62,15 @@ func (s *postgresDataStore) RebuildDerivedIndexes(ctx context.Context, limit int
 			return 0, err
 		}
 		if err = s.replaceDerivedText(ctx, id, deriveText(key, content, created)); err != nil {
+			return 0, err
+		}
+
+		if settings.Negation {
+			if _, err = s.db.Exec(ctx, `UPDATE memories SET negation_tokens=$2 WHERE id=$1`, id, strings.Join(negationTokens(textBound(key+" "+content, 3071)), " ")); err != nil {
+				return 0, err
+			}
+		}
+		if err = s.refreshCoreference(ctx, id, content, settings); err != nil {
 			return 0, err
 		}
 		if err = s.replaceDerivedRelations(ctx, id); err != nil {

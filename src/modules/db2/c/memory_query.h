@@ -47,11 +47,6 @@ extern "C"
     * table. The query must be normalized plain text. */
    int db2_memory_find_facts_fts(const char *query, int limit, memory_t *out, int max);
 
-   /* Negation lexical recall over the Postgres-only memory_negation_fts_tsv GIN
-    * index. `neg_tokens` is the extract_negation_tokens() output. Returns 0 on the
-    * sqlite shim (GENERATED tsvector unsupported) so callers keep their fallback. */
-   int db2_memory_negation_fts_search(const char *neg_tokens, int limit, memory_t *out, int max);
-
    /* List memory ids whose vector indexing failed but remains retryable.
     * Vector index status storage is DB2-internal; memory repair callers use
     * this domain helper instead of importing that table API directly. */
@@ -916,30 +911,9 @@ extern "C"
     * on success (year/month/day filled), 0 on miss / parse failure. */
    int db2_memory_parse_created_date(int64_t memory_id, int *year, int *month, int *day);
 
-   /* Replace the negation_tokens column on a memory and sync the DB2
-    * negation lexical index accordingly. Best-effort. */
-   void db2_memory_negation_tokens_update(int64_t memory_id, const char *new_tokens);
-
    /* Read source_session for a memory id. Returns 0 on hit, -1 on miss
     * or empty session_id. */
    int db2_memory_get_source_session(int64_t memory_id, char *out, int out_len);
-
-   /* (content, key) pair returned by db2_memory_list_prior_in_session. */
-   typedef struct
-   {
-      char content[2048];
-      char key[256];
-   } db2_memory_prior_row_t;
-
-   /* List up to `max` memories with the same source_session and an
-    * id < `before_id`, ordered newest-first, capped by `limit`. */
-   int db2_memory_list_prior_in_session(const char *session_id, int64_t before_id, int limit,
-                                        db2_memory_prior_row_t *out, int max);
-
-   /* INSERT a memory_coref_audit row. Best-effort. */
-   void db2_memory_coref_audit_insert(int64_t memory_id, const char *session_id,
-                                      const char *outcome, const char *entity, const char *mode,
-                                      double confidence);
 
    /* (id, unit_type, unit_key, unit_text, weight) row from memory_units. */
    typedef struct

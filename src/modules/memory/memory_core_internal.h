@@ -157,8 +157,6 @@ memory_query_route_t memory_query_route(const char *raw_query, const char *norm_
                                         memory_query_shape_t shape);
 memory_query_shape_t memory_query_shape(const char *raw_query, const char *norm_query);
 memory_rank_weights_t memory_rank_weights(void);
-void memory_refresh_coref_entities(int64_t memory_id, const char *content);
-void memory_refresh_derived_metadata(int64_t memory_id, const char *key, const char *content);
 int memory_rerank_is_slow(void);
 void memory_runtime_state_increment(const char *key, int delta);
 int memory_salience_enabled(void);
@@ -180,13 +178,6 @@ extern __thread int s_qembed_spawns;
 /* promoted cross-TU (former .inc statics) */
 int memory_alias_is_useful_token(const char *token);
 void memory_alias_join_tokens(char *buf, size_t buf_len, char tokens[][64], int start, int count);
-void memory_coref_audit_record(int64_t memory_id, const char *session_id, const char *outcome,
-                               const char *entity, const char *mode, double confidence);
-int memory_coref_has_pronoun(const char *content);
-int memory_coref_llm_resolve(int64_t memory_id, const char *content, const char *session_buf);
-const char *memory_coref_mode_effective(void);
-int memory_coref_window_effective(void);
-int memory_extract_named_entities(const char *text, char names[][128], int max_names);
 void memory_format_date(char *buf, size_t buf_len, int year, int month, int day);
 int memory_parse_created_date(int64_t memory_id, int *year, int *month, int *day);
 void memory_shift_day(int *year, int *month, int *day, int delta);

@@ -229,6 +229,15 @@ obsolete generated facts are removed, and inaccessible linked content cannot be
 copied into a visible parent. Summary replacement also retains its dependency
 registry identity. Coreference and negation refresh remain open migration work.
 
+Coreference and negation refresh now run in Go. Heuristic and configured-model
+coreference use bounded, same-session, same-scope active history; disabled or
+failed resolution clears obsolete bindings, and audit writes commit atomically.
+The native coreference API and C negation tokenizer are retired. Negation recall
+uses the existing PostgreSQL index plus bounded polarity-overlap ranking while
+retaining scope priority; positive-query ranking is unchanged. Runtime replay
+covers opposite-polarity twins, additional negative candidates and scope/state
+exclusions. The former derived-metadata C entry point is removed.
+
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

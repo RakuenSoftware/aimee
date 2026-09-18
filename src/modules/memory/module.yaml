@@ -83,7 +83,9 @@
     "server-go/modules/memory/derived_text.go",
     "server-go/modules/memory/derived_units.go",
     "server-go/modules/memory/unit_vectors.go",
-    "server-go/modules/memory/derived_relations.go"
+    "server-go/modules/memory/derived_relations.go",
+    "server-go/modules/memory/coreference.go",
+    "server-go/modules/memory/negation.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -137,7 +139,9 @@
     "server-go/modules/memory/runtime_record_test.go",
     "server-go/modules/memory/retrieval_policy_test.go",
     "server-go/modules/memory/derived_units_test.go",
-    "server-go/modules/memory/derived_relations_test.go"
+    "server-go/modules/memory/derived_relations_test.go",
+    "server-go/modules/memory/coreference_test.go",
+    "server-go/modules/memory/negation_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

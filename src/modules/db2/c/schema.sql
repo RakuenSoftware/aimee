@@ -17680,7 +17680,7 @@ BEGIN
     'entity_aliases','entity_edges','entity_registry',
     'epistemic_directives','fact_graph_changes','fact_graph_commits',
     'kb_async_jobs','kb_meta','memories','memory_conflicts',
-    'memory_aliases','memory_chunks','memory_event_frames','memory_temporal_refs',
+    'memory_aliases','memory_chunks','memory_coref_audit','memory_event_frames','memory_temporal_refs',
     'memory_embeddings','memory_entities','memory_episodes','memory_evidence_events','memory_fact_actors',
     'memory_health','memory_lineage','memory_links','memory_provenance',
     'memory_rejection_tombstones','memory_relations','memory_scene_members',

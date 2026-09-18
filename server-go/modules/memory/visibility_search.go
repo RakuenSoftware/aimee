@@ -46,5 +46,5 @@ ORDER BY CASE WHEN scope_type='project' AND scope_value=$2 THEN 1
 		return nil, err
 	}
 	rows.Close()
-	return s.fuseMemoryGraph(ctx, req, false, records)
+	return s.finalizeRecall(ctx, req, false, records)
 }

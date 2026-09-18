@@ -14004,7 +14004,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 565
+          "line": 560
         }
       ],
       "signature": "int db2_memory_activation_policy_set ( int64_t memory_id , int sticky_turns , int cooldown_turns , int delay_turns , int suppressed )",
@@ -14017,7 +14017,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 259
+          "line": 254
         }
       ],
       "signature": "int db2_memory_active_kind_dedupe_candidates ( const char * kind , db2_memory_dedupe_candidate_t * out , int max )",
@@ -14030,7 +14030,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 750
+          "line": 745
         }
       ],
       "signature": "int db2_memory_aggregate ( const char * entity_seed , const char * keyword , memory_t * out , int max , int * truncated_out )",
@@ -14043,7 +14043,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1084
+          "line": 1058
         }
       ],
       "signature": "void db2_memory_alias_insert ( int64_t memory_id , const char * alias , double weight )",
@@ -14056,7 +14056,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1009
+          "line": 983
         }
       ],
       "signature": "void db2_memory_aliases_delete_for_memory ( int64_t memory_id )",
@@ -14069,7 +14069,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 897
+          "line": 892
         }
       ],
       "signature": "int db2_memory_alloc_all_ids ( int64_t * * out_ids , size_t * out_count )",
@@ -14153,7 +14153,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1080
+          "line": 1054
         }
       ],
       "signature": "void db2_memory_chunk_upsert ( int64_t memory_id , int chunk_index , const char * chunk_text )",
@@ -14166,7 +14166,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1006
+          "line": 980
         }
       ],
       "signature": "void db2_memory_chunks_delete_for_memory ( int64_t memory_id )",
@@ -14179,7 +14179,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1076
+          "line": 1050
         }
       ],
       "signature": "int db2_memory_chunks_list ( int64_t memory_id , db2_memory_chunk_row_t * out , int max )",
@@ -14192,7 +14192,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 63
+          "line": 58
         }
       ],
       "signature": "int db2_memory_collect_alias_matches ( const char * alias , int limit , memory_t * out , int max )",
@@ -14205,7 +14205,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 68
+          "line": 63
         }
       ],
       "signature": "int db2_memory_collect_entity_matches ( const char * term , int limit , memory_t * out , int max )",
@@ -14218,7 +14218,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 81
+          "line": 76
         }
       ],
       "signature": "int db2_memory_collect_event_frame_matches ( const char * term , int limit , memory_t * out , int max )",
@@ -14231,7 +14231,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 702
+          "line": 697
         }
       ],
       "signature": "int db2_memory_collect_relation_token_matches ( const char * token , int limit , memory_t * out , int max )",
@@ -14244,7 +14244,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 76
+          "line": 71
         }
       ],
       "signature": "int db2_memory_collect_summary_matches ( const char * term , int limit , memory_t * out , int max )",
@@ -14257,7 +14257,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 72
+          "line": 67
         }
       ],
       "signature": "int db2_memory_collect_temporal_matches ( const char * term , int limit , memory_t * out , int max )",
@@ -14344,19 +14344,6 @@
       "symbol": "db2_memory_contradiction_log"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 940
-        }
-      ],
-      "signature": "void db2_memory_coref_audit_insert ( int64_t memory_id , const char * session_id , const char * outcome , const char * entity , const char * mode , double confidence )",
-      "signature_sha256": "761257e3f8c89e1cf9ddbc11af087603e9fe923e9ce8eb095b5030050d305697",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_coref_audit_insert"
-    },
-    {
       "consumers": [
         "src/cmd_doctor.c"
       ],
@@ -14381,7 +14368,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 482
+          "line": 477
         }
       ],
       "signature": "int db2_memory_count_and_max_updated ( int * out_count , char * out_ts , int out_ts_len )",
@@ -14394,7 +14381,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 886
+          "line": 881
         }
       ],
       "signature": "int db2_memory_count_by_tier_kind ( db2_memory_tier_kind_count_t * out , int max )",
@@ -14409,7 +14396,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 641
+          "line": 636
         }
       ],
       "review": {
@@ -14427,7 +14414,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 626
+          "line": 621
         }
       ],
       "review": {
@@ -14447,7 +14434,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 644
+          "line": 639
         }
       ],
       "review": {
@@ -14468,7 +14455,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 649
+          "line": 644
         }
       ],
       "review": {
@@ -14486,7 +14473,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 309
+          "line": 304
         }
       ],
       "review": {
@@ -14504,7 +14491,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 417
+          "line": 412
         }
       ],
       "signature": "void db2_memory_decay_confidence ( int64_t memory_id )",
@@ -14517,7 +14504,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 757
+          "line": 752
         }
       ],
       "signature": "int db2_memory_dedupe_by_key ( int dry_run )",
@@ -14530,7 +14517,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 792
+          "line": 787
         }
       ],
       "signature": "int db2_memory_delete_row ( int64_t memory_id )",
@@ -14543,7 +14530,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 394
+          "line": 389
         }
       ],
       "signature": "int db2_memory_derivation_source_refused ( int64_t memory_id )",
@@ -14556,7 +14543,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 910
+          "line": 905
         }
       ],
       "signature": "void db2_memory_entities_delete_for_memory ( int64_t memory_id )",
@@ -14569,7 +14556,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1066
+          "line": 1040
         }
       ],
       "signature": "int db2_memory_entities_list_weighted ( int64_t memory_id , db2_memory_entity_row_t * out , int max )",
@@ -14585,7 +14572,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 901
+          "line": 896
         }
       ],
       "signature": "void db2_memory_entity_insert ( int64_t memory_id , const char * entity , const char * role , double weight )",
@@ -14626,7 +14613,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 961
+          "line": 935
         }
       ],
       "signature": "int64_t db2_memory_episode_insert ( int64_t memory_id , const char * episode_key , const char * episode_text , const char * source_session , const char * reference_time )",
@@ -14639,7 +14626,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1089
+          "line": 1063
         }
       ],
       "signature": "int db2_memory_episode_unit_ids_for_session ( int64_t memory_id , const char * source_session , int64_t * out , int max )",
@@ -14652,7 +14639,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1095
+          "line": 1069
         }
       ],
       "signature": "int db2_memory_episode_unit_ids_supersedes ( int64_t source_memory_id , int64_t * out , int max )",
@@ -14667,7 +14654,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 163
+          "line": 158
         }
       ],
       "signature": "int db2_memory_episodes_search ( const char * query , int limit , memory_episode_t * out , int max )",
@@ -14680,7 +14667,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 300
+          "line": 295
         }
       ],
       "signature": "int db2_memory_epistemic_kind ( int64_t memory_id , char * out , size_t out_cap )",
@@ -14693,7 +14680,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 998
+          "line": 972
         }
       ],
       "signature": "void db2_memory_event_frame_insert ( int64_t memory_id , const char * actor , const char * action , const char * object , const char * location , const char * event_time , const char * evidence_kind )",
@@ -14706,7 +14693,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1003
+          "line": 977
         }
       ],
       "signature": "void db2_memory_event_frames_delete_for_memory ( int64_t memory_id )",
@@ -14719,7 +14706,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 994
+          "line": 968
         }
       ],
       "signature": "int db2_memory_event_frames_list ( int64_t memory_id , db2_memory_event_frame_row_t * out , int max )",
@@ -14745,7 +14732,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 716
+          "line": 711
         }
       ],
       "signature": "int db2_memory_filter_archived_ids ( const int64_t * ids , int n , int64_t * out , int max )",
@@ -14758,7 +14745,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 840
+          "line": 835
         }
       ],
       "signature": "int db2_memory_find_conflicting_l2 ( const char * key , const char * content , double * existing_confidence_out )",
@@ -14804,7 +14791,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 847
+          "line": 842
         }
       ],
       "review": {
@@ -14822,7 +14809,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 968
+          "line": 942
         }
       ],
       "signature": "int db2_memory_get_by_unit_id ( int64_t unit_id , memory_t * out )",
@@ -14835,7 +14822,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 167
+          "line": 162
         }
       ],
       "signature": "int db2_memory_get_confidence_by_key ( const char * key , double * confidence_out )",
@@ -14848,7 +14835,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 371
+          "line": 366
         }
       ],
       "signature": "int db2_memory_get_content ( int64_t memory_id , char * out , int out_len )",
@@ -14861,7 +14848,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 98
+          "line": 93
         }
       ],
       "signature": "int db2_memory_get_evidence_fields ( int64_t memory_id , double * evidence , int * observations )",
@@ -14887,7 +14874,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 102
+          "line": 97
         }
       ],
       "signature": "double db2_memory_get_salience ( int64_t memory_id , double default_value )",
@@ -14900,7 +14887,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1041
+          "line": 1015
         }
       ],
       "signature": "int db2_memory_get_session_kinds ( int64_t memory_id , char * session_out , int session_len , char * kind_out , int kind_len , char * explicit_kind_out , int explicit_kind_len )",
@@ -14913,7 +14900,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 925
+          "line": 916
         }
       ],
       "signature": "int db2_memory_get_source_session ( int64_t memory_id , char * out , int out_len )",
@@ -14926,7 +14913,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 113
+          "line": 108
         }
       ],
       "signature": "int db2_memory_get_state_fields ( int64_t memory_id , int * has_valid_until , int * observations , int * use_count )",
@@ -14939,7 +14926,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 106
+          "line": 101
         }
       ],
       "signature": "double db2_memory_get_surprise ( int64_t memory_id , double default_value )",
@@ -14952,7 +14939,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 135
+          "line": 130
         }
       ],
       "signature": "int db2_memory_has_any_workspace_tag ( int64_t memory_id )",
@@ -14965,7 +14952,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 130
+          "line": 125
         }
       ],
       "signature": "int db2_memory_has_scope_type ( int64_t memory_id , const char * scope_type )",
@@ -15206,7 +15193,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 852
+          "line": 847
         }
       ],
       "review": {
@@ -15224,7 +15211,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 579
+          "line": 574
         }
       ],
       "signature": "int db2_memory_l1_session_clusters ( const char * excluded_source , int min_count , db2_memory_l1_cluster_row_t * rows , int max )",
@@ -15237,7 +15224,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 604
+          "line": 599
         }
       ],
       "signature": "int db2_memory_l1_session_content ( const char * session_id , db2_memory_content_row_t * rows , int max )",
@@ -15250,7 +15237,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 590
+          "line": 585
         }
       ],
       "signature": "int db2_memory_l1_session_created_at ( const char * session_id , db2_memory_created_at_row_t * rows , int max )",
@@ -15263,7 +15250,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 670
+          "line": 665
         }
       ],
       "signature": "int db2_memory_l2_cross_key_pairs ( int max_pairs , db2_memory_pair_row_t * out , int max )",
@@ -15276,7 +15263,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 675
+          "line": 670
         }
       ],
       "signature": "int db2_memory_l2_fact_vs_decision_pairs ( int max_pairs , db2_memory_pair_row_t * out , int max )",
@@ -15289,7 +15276,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 638
+          "line": 633
         }
       ],
       "signature": "int db2_memory_last_retro_scan ( char * out , int out_len )",
@@ -15410,7 +15397,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 826
+          "line": 821
         }
       ],
       "signature": "int db2_memory_lineage_get ( const char * object_type , int64_t object_id , memory_lineage_t * out , int max )",
@@ -15423,7 +15410,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 683
+          "line": 678
         }
       ],
       "signature": "int64_t db2_memory_lineage_insert ( const char * object_type , int64_t object_id , const char * source_kind , const char * source_ref , double confidence )",
@@ -15475,7 +15462,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1022
+          "line": 996
         }
       ],
       "signature": "int db2_memory_links_with_targets ( int64_t memory_id , db2_memory_link_target_row_t * out , int max )",
@@ -15490,7 +15477,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 833
+          "line": 828
         }
       ],
       "signature": "int db2_memory_list ( const char * tier , const char * kind , int hide_archived , int limit , memory_t * out , int max )",
@@ -15503,7 +15490,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 412
+          "line": 407
         }
       ],
       "signature": "int db2_memory_list_artifact_hashed ( db2_memory_artifact_row_t * rows , int max )",
@@ -15516,7 +15503,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 179
+          "line": 174
         }
       ],
       "signature": "int db2_memory_list_by_key ( const char * key , db2_memory_id_content_row_t * out , int max )",
@@ -15529,7 +15516,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 186
+          "line": 181
         }
       ],
       "signature": "int db2_memory_list_by_key_after ( const char * key , int64_t after_id , db2_memory_id_content_row_t * out , int max )",
@@ -15544,7 +15531,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 560
+          "line": 555
         }
       ],
       "signature": "int db2_memory_list_candidates ( db2_memory_cand_filter_t filter , db2_memory_cand_row_t * rows , int max )",
@@ -15557,7 +15544,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 524
+          "line": 519
         }
       ],
       "signature": "int db2_memory_list_depends_on_keys ( int64_t memory_id , db2_memory_key_row_t * rows , int max )",
@@ -15570,7 +15557,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 448
+          "line": 443
         }
       ],
       "signature": "int db2_memory_list_episode_cards ( db2_memory_episode_card_row_t * rows , int max )",
@@ -15583,7 +15570,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 453
+          "line": 448
         }
       ],
       "signature": "int db2_memory_list_global_constraints ( db2_memory_kv_row_t * rows , int max )",
@@ -15596,7 +15583,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1106
+          "line": 1080
         }
       ],
       "signature": "int db2_memory_list_id_key_content ( int limit , db2_memory_id_key_content_row_t * out , int max )",
@@ -15609,7 +15596,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 476
+          "line": 471
         }
       ],
       "signature": "int db2_memory_list_id_kv_ws_section ( db2_memory_ws_section_t section , db2_memory_id_kv_row_t * rows , int max )",
@@ -15622,7 +15609,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 514
+          "line": 509
         }
       ],
       "signature": "int db2_memory_list_key_facts_with_provenance ( db2_memory_key_fact_row_t * rows , int max )",
@@ -15635,7 +15622,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 438
+          "line": 433
         }
       ],
       "signature": "int db2_memory_list_kv_section ( db2_memory_section_t section , db2_memory_kv_row_t * rows , int max )",
@@ -15648,7 +15635,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 331
+          "line": 326
         }
       ],
       "signature": "int db2_memory_list_low_effectiveness ( double threshold , int limit , db2_memory_low_eff_row_t * rows , int max )",
@@ -15657,26 +15644,13 @@
       "symbol": "db2_memory_list_low_effectiveness"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 936
-        }
-      ],
-      "signature": "int db2_memory_list_prior_in_session ( const char * session_id , int64_t before_id , int limit , db2_memory_prior_row_t * out , int max )",
-      "signature_sha256": "ee2917cbb053a7754a0cd1958a02f6282e7391939ad64af306eb5c87e20bb2b6",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_prior_in_session"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 620
+          "line": 615
         }
       ],
       "signature": "int db2_memory_list_recall_section ( db2_memory_recall_section_t section , db2_memory_cand_row_t * rows , int max )",
@@ -15689,7 +15663,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 58
+          "line": 53
         }
       ],
       "signature": "int db2_memory_list_retryable_index_failures ( int max_attempts , int limit , int64_t * out , int max )",
@@ -15704,7 +15678,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 864
+          "line": 859
         }
       ],
       "signature": "int db2_memory_list_session_scope_priority ( memory_t * out , int max )",
@@ -15719,7 +15693,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 872
+          "line": 867
         }
       ],
       "signature": "int db2_memory_list_session_scope_priority_like ( const char * pattern , memory_t * out , int max )",
@@ -15732,7 +15706,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 357
+          "line": 352
         }
       ],
       "signature": "int db2_memory_list_superseded_keys ( int min_versions , db2_memory_superseded_row_t * rows , int max )",
@@ -15745,7 +15719,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 346
+          "line": 341
         }
       ],
       "signature": "int db2_memory_list_unused_l2 ( int days , db2_memory_unused_l2_row_t * rows , int max )",
@@ -15758,7 +15732,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 224
+          "line": 219
         }
       ],
       "signature": "int db2_memory_lookup_by_key ( const char * key , int64_t * id_out , char * content_out , int content_len , double * confidence_out , char * tier_out , int tier_len )",
@@ -15771,7 +15745,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 237
+          "line": 232
         }
       ],
       "signature": "int db2_memory_lookup_merge_fields ( const char * key , int64_t * id_out , char * * content_out , double * confidence_out , int * use_count_out , double * surprise_out , int * observation_count_out , double * evidence_out )",
@@ -15784,7 +15758,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 398
+          "line": 393
         }
       ],
       "signature": "void db2_memory_mark_merged_into ( int64_t merged_into , const char * session_id , double max_confidence )",
@@ -15797,7 +15771,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 270
+          "line": 265
         }
       ],
       "signature": "int db2_memory_merge_update ( int64_t memory_id , const char * content , double confidence , int use_count , int observation_count , double evidence_strength , double salience , double surprise , const char * ts )",
@@ -15812,7 +15786,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 266
+          "line": 261
         }
       ],
       "signature": "int db2_memory_merge_update_ex ( int64_t memory_id , const char * content , const char * use_cases , double confidence , int use_count , int observation_count , double evidence_strength , double salience , double surprise , const char * ts )",
@@ -15825,33 +15799,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 53
-        }
-      ],
-      "signature": "int db2_memory_negation_fts_search ( const char * neg_tokens , int limit , memory_t * out , int max )",
-      "signature_sha256": "2801882c88b2d3a42e9ebb09bc7c198e4d60b032260e9a7e89e1c855354164f0",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_negation_fts_search"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 921
-        }
-      ],
-      "signature": "void db2_memory_negation_tokens_update ( int64_t memory_id , const char * new_tokens )",
-      "signature_sha256": "6f6ed69c0c5b235dbb8ab8b15667e06d17a5854ecb51d850b1d3396bf060d33e",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_negation_tokens_update"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 301
+          "line": 296
         }
       ],
       "signature": "double db2_memory_outcome_adjustment ( int64_t memory_id )",
@@ -15864,7 +15812,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 917
+          "line": 912
         }
       ],
       "signature": "int db2_memory_parse_created_date ( int64_t memory_id , int * year , int * month , int * day )",
@@ -15877,7 +15825,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 742
+          "line": 737
         }
       ],
       "signature": "int db2_memory_pick_first_temporal_ref ( int64_t memory_id , char * out , int out_len )",
@@ -16158,7 +16106,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 777
+          "line": 772
         }
       ],
       "review": {
@@ -16204,7 +16152,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 654
+          "line": 649
         }
       ],
       "signature": "int db2_memory_prune_orphaned_l0 ( void )",
@@ -16217,7 +16165,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 679
+          "line": 674
         }
       ],
       "signature": "void db2_memory_record_retro_scan_marker ( const char * ts )",
@@ -16234,7 +16182,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 799
+          "line": 794
         }
       ],
       "signature": "int db2_memory_reject ( int64_t memory_id , const char * reason )",
@@ -16249,7 +16197,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 299
+          "line": 294
         }
       ],
       "signature": "int db2_memory_rejection_blocks ( const char * key , const char * content )",
@@ -16369,7 +16317,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 821
+          "line": 816
         }
       ],
       "signature": "int db2_memory_restore ( int64_t memory_id , const char * actor )",
@@ -16385,7 +16333,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 818
+          "line": 813
         }
       ],
       "signature": "int db2_memory_review_list ( const char * state , int limit , db2_memory_review_row_t * out , int max )",
@@ -16398,7 +16346,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 302
+          "line": 297
         }
       ],
       "signature": "int64_t db2_memory_row_insert ( const char * tier , const char * kind , const char * key , const char * content , double confidence , const char * session_id , const char * ts , const char * sensitivity , double evidence_strength , double salience , double surprise )",
@@ -16411,7 +16359,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 291
+          "line": 286
         }
       ],
       "signature": "int64_t db2_memory_row_insert_epistemic_ex ( const char * tier , const char * kind , const char * epistemic_kind , const char * key , const char * content , const char * use_cases , double confidence , const char * session_id , const char * ts , const char * sensitivity , double evidence_strength , double salience , double surprise , const char * provenance_category )",
@@ -16424,7 +16372,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 286
+          "line": 281
         }
       ],
       "review": {
@@ -16600,7 +16548,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 122
+          "line": 117
         }
       ],
       "review": {
@@ -16618,7 +16566,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 157
+          "line": 152
         }
       ],
       "signature": "int db2_memory_scope_replace ( int64_t memory_id , const char * scope_type , const char * scope_value )",
@@ -16633,7 +16581,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 151
+          "line": 146
         }
       ],
       "signature": "void db2_memory_scope_tag_insert ( int64_t memory_id , const char * scope_type , const char * scope_value )",
@@ -16648,7 +16596,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 148
+          "line": 143
         }
       ],
       "signature": "int db2_memory_scopes_list ( int64_t memory_id , db2_memory_scope_tag_row_t * out , int max )",
@@ -16674,7 +16622,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 204
+          "line": 199
         }
       ],
       "signature": "int db2_memory_session_id_content_list ( const char * session_id , int limit , db2_memory_id_content_row_t * out , int max )",
@@ -16687,7 +16635,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 199
+          "line": 194
         }
       ],
       "review": {
@@ -16705,7 +16653,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 632
+          "line": 627
         }
       ],
       "review": {
@@ -16723,7 +16671,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 734
+          "line": 729
         }
       ],
       "signature": "int db2_memory_session_neighbors_after ( const char * session_id , int64_t after_id , int limit , memory_t * out , int max )",
@@ -16736,7 +16684,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 729
+          "line": 724
         }
       ],
       "signature": "int db2_memory_session_neighbors_before ( const char * session_id , int64_t before_id , int limit , memory_t * out , int max )",
@@ -16749,7 +16697,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 363
+          "line": 358
         }
       ],
       "signature": "int db2_memory_set_artifact ( int64_t memory_id , const char * artifact_type , const char * artifact_ref , const char * artifact_hash )",
@@ -16762,7 +16710,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 367
+          "line": 362
         }
       ],
       "signature": "void db2_memory_set_cognified_kind ( int64_t memory_id , const char * kind )",
@@ -16775,7 +16723,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 208
+          "line": 203
         }
       ],
       "signature": "void db2_memory_set_source_session ( int64_t memory_id , const char * session_id )",
@@ -16788,7 +16736,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 316
+          "line": 311
         }
       ],
       "review": {
@@ -16806,7 +16754,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 313
+          "line": 308
         }
       ],
       "review": {
@@ -16842,7 +16790,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 980
+          "line": 954
         }
       ],
       "signature": "void db2_memory_summaries_delete_for_memory ( int64_t memory_id )",
@@ -16855,7 +16803,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 384
+          "line": 379
         }
       ],
       "signature": "int db2_memory_summarise_clusters ( double max_confidence , int min_count , db2_memory_summary_cluster_t * rows , int max )",
@@ -16868,7 +16816,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 389
+          "line": 384
         }
       ],
       "signature": "int db2_memory_summary_source_ids ( const char * session_id , double max_confidence , int64_t * ids , int max )",
@@ -16881,7 +16829,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 977
+          "line": 951
         }
       ],
       "signature": "void db2_memory_summary_upsert ( int64_t memory_id , const char * scope , const char * summary )",
@@ -16894,7 +16842,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 499
+          "line": 494
         }
       ],
       "signature": "int db2_memory_supersede_lookup ( int64_t new_memory_id , db2_memory_supersede_pair_t * out )",
@@ -16907,7 +16855,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 906
+          "line": 901
         }
       ],
       "signature": "void db2_memory_temporal_insert ( int64_t memory_id , const char * ref_key , const char * granularity , double weight )",
@@ -16920,7 +16868,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 913
+          "line": 908
         }
       ],
       "signature": "void db2_memory_temporal_refs_delete_for_memory ( int64_t memory_id )",
@@ -16933,7 +16881,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1054
+          "line": 1028
         }
       ],
       "signature": "int db2_memory_temporal_refs_list ( int64_t memory_id , db2_memory_temporal_ref_row_t * out , int max )",
@@ -16948,7 +16896,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 857
+          "line": 852
         }
       ],
       "signature": "int db2_memory_top_l2_facts ( memory_t * out , int max )",
@@ -16961,7 +16909,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 761
+          "line": 756
         }
       ],
       "signature": "int db2_memory_touch ( int64_t memory_id )",
@@ -16974,7 +16922,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 768
+          "line": 763
         }
       ],
       "signature": "int db2_memory_touch_many ( const int64_t * ids , int n )",
@@ -16987,7 +16935,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 723
+          "line": 718
         }
       ],
       "signature": "int db2_memory_unit_active_meta ( int64_t unit_id , double * weight_out , char * unit_type_out , int unit_type_len , char * unit_kind_out , int unit_kind_len )",
@@ -17000,7 +16948,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 118
+          "line": 113
         }
       ],
       "signature": "int db2_memory_unit_edge_exists ( int64_t unit_id_a , int64_t unit_id_b )",
@@ -17013,7 +16961,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 972
+          "line": 946
         }
       ],
       "signature": "void db2_memory_unit_edge_insert ( int64_t src_unit_id , int64_t dst_unit_id , const char * edge_type , double weight )",
@@ -17026,7 +16974,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1034
+          "line": 1008
         }
       ],
       "signature": "void db2_memory_unit_edges_delete_for_memory ( int64_t memory_id )",
@@ -17041,7 +16989,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 213
+          "line": 208
         }
       ],
       "signature": "void db2_memory_unit_episode_card_insert ( int64_t memory_id , const char * unit_key , const char * unit_text )",
@@ -17054,7 +17002,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 218
+          "line": 213
         }
       ],
       "signature": "int64_t db2_memory_unit_first_episode_card_id ( int64_t memory_id )",
@@ -17067,7 +17015,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1029
+          "line": 1003
         }
       ],
       "signature": "int64_t db2_memory_unit_insert ( int64_t memory_id , const char * unit_type , const char * memory_kind , const char * unit_key , const char * unit_text , double weight )",
@@ -17082,7 +17030,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 782
+          "line": 777
         }
       ],
       "signature": "int db2_memory_unit_list_ids ( int64_t memory_id , int64_t * out , int max )",
@@ -17097,7 +17045,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 788
+          "line": 783
         }
       ],
       "signature": "int db2_memory_unit_list_ids_after ( int64_t memory_id , int64_t after_id , int64_t * out , int max , int * has_more_out )",
@@ -17110,7 +17058,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 1037
+          "line": 1011
         }
       ],
       "signature": "void db2_memory_units_delete_for_memory ( int64_t memory_id )",
@@ -17123,7 +17071,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 955
+          "line": 929
         }
       ],
       "signature": "int db2_memory_units_list ( int64_t memory_id , db2_memory_unit_row_t * out , int max )",
@@ -17136,7 +17084,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 795
+          "line": 790
         }
       ],
       "signature": "int db2_memory_update_content ( int64_t memory_id , const char * content )",
@@ -17164,7 +17112,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 126
+          "line": 121
         }
       ],
       "review": {
@@ -18423,7 +18371,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 772
+          "line": 767
         }
       ],
       "signature": "int db2_retrieval_shortcut_lookup ( const char * normalized_query , int64_t * ids , int max , int * promoted_out , int64_t * hit_count_out )",
@@ -18436,7 +18384,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 774
+          "line": 769
         }
       ],
       "signature": "int db2_retrieval_shortcut_observe ( const char * normalized_query , const int64_t * ids , int count )",
@@ -23950,14 +23898,14 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "eaff462584f310252817f48f10390ac02fc4278345474e95afb8f44f8f0862e1",
+  "fingerprint": "6eb8ee49747452dedf595176c11d4f89fe55a44da5a990cf6270e1f87f4bdb02",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 480,
-    "declarations": 1364,
+    "declarations": 1360,
     "headers": 138,
-    "internal_unconsumed": 346,
+    "internal_unconsumed": 342,
     "private_test_only": 326,
     "reviewed": 212
   }

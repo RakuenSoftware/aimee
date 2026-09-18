@@ -659,32 +659,6 @@ typedef struct
  * cfg must be loaded by the caller. */
 void memory_query_rewrite(const char *query, memory_query_rewrite_t *out);
 
-/* --- Negation and Absence Memory --- */
-
-typedef enum
-{
-   POLARITY_POSITIVE = 0,
-   POLARITY_NEGATIVE = 1
-} polarity_t;
-
-/* Return 1 if the lowercased word is a negation marker
- * ("not", "never", "no", "without", "haven't", "hasn't", "didn't",
- *  "doesn't", "can't", "won't", "neither", "nor"). */
-int is_negation_marker(const char *word);
-
-/* Scan text and produce space-separated "not_<token>" synthetic terms for
- * any content token that falls within ±3 tokens of a negation marker,
- * stopping at simple clause boundaries (.,!?;).  Tokens shorter than
- * 3 characters and stopwords are skipped.
- * buf is written as a NUL-terminated string; at most buf_len-1 chars.
- * Returns the number of synthetic tokens written. */
-int extract_negation_tokens(const char *text, char *buf, size_t buf_len);
-
-/* Classify the polarity of a query string using the same heuristic.
- * Returns POLARITY_NEGATIVE if a negation marker is detected, else
- * POLARITY_POSITIVE. */
-polarity_t memory_query_polarity(const char *query);
-
 /* Conversational window expansion: for each result with a source_session,
  * fetch up to window_radius neighbours (earlier and later memories from the
  * same session, ordered by id) and inject them into out[] without duplicates.
@@ -1157,19 +1131,6 @@ int memory_cluster_scenes(const char *workspace_id);
  * Called after a new memory is embedded.  No-op if no scenes exist.
  * Returns 0 on success. */
 int memory_assign_scene(int64_t memory_id);
-
-/* In-process coreference resolution counters.
- * Incremented each time memory_coref_audit_record() fires.
- * Thread-safe; reset with memory_coref_stats_reset(). */
-typedef struct
-{
-   int64_t bound;
-   int64_t unbound;
-   int64_t ambiguous;
-} memory_coref_stats_t;
-
-void memory_coref_stats(memory_coref_stats_t *out);
-void memory_coref_stats_reset(void);
 
 /* --- Session Briefing ---
  *

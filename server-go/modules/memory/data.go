@@ -667,7 +667,7 @@ ORDER BY (lower(key)=lower($7)) DESC,
 			records = fusePersonal(records, semantic, limit)
 		}
 	}
-	return s.fuseMemoryGraph(ctx, DataRequest{Scope: scope, Query: query, Kind: kind, Tier: tier, Limit: limit}, true, records)
+	return s.finalizeRecall(ctx, DataRequest{Scope: scope, Query: query, Kind: kind, Tier: tier, Limit: limit}, true, records)
 }
 
 // searchPattern keeps a multi-word query useful when callers supply keyword
