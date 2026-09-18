@@ -28,6 +28,7 @@ func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation,
 			return invalid("missing key")
 		}
 		request.Operation = "key-exists"
+		scoped = commandScope(args, &request)
 		if verb == "find_id_by_key_kind" {
 			var ok bool
 			request.Kind, ok = args.stringValue("kind")

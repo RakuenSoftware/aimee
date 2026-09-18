@@ -1029,7 +1029,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_agent.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_dashboard.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_tasks.c
-    ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_data.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_tool_registry.c
     ${AIMEE_SRC_DIR}/cmd_session_lifecycle.c
     ${AIMEE_SRC_DIR}/cmd_hooks_scope.c

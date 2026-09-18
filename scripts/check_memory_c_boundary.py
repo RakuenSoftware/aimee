@@ -43,6 +43,7 @@ RETIRED_POLICY_C = (
     "src/modules/memory/memory_extract_patterns.c",
     "src/modules/memory/memory_extract_patterns.h",
     "src/modules/memory/memory_fact_gate.c",
+    "src/modules/kb_client/kb_client_data.c",
     "src/posix/memory.c",
     "src/windows/memory.c",
     "src/modules/db2/c/prospective_memories.c",
@@ -57,6 +58,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\bkb_client_memory_(?:export_jsonl|decisions_export_jsonl|key_exists)\b(?=\s*\()|"
     r"\bmemory_(?:list_episodes|search_graph|get_entity_profile)\b(?=\s*\()|"
     r"\bkb_client_memory_(?:get_entity_profile|get_entity_edges|search_graph(?:_as_of)?|get_episode)\b(?=\s*\()|"
     r"\b(?:memory_embed|kb_client_memory_(?:embed|reembed_\w+)_json|db2_kb_service_(?:get_active_embedder_version|set_active_embedder_version|collect_reembed_status|mark_reembed_finished|prepare_reembed_start|update_reembed_progress|list_unembedded_memory_ids|list_pending_reembed_memory_ids|count_embeddings_for_version))\b(?=\s*\()|"

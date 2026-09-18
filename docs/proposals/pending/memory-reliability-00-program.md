@@ -308,6 +308,13 @@ retain the verified request context, preserve long JSON strings and distinguish
 missing entities from unavailable services. Failed context channels report degraded
 status instead of an empty success.
 
+The separate native JSONL/duplicate-check client source is deleted. Actual data
+CLI calls use the authenticated generic command transport. Export errors stop the
+command; an unavailable or malformed duplicate check cannot turn skip into an
+overwrite, and refused writes cannot be counted as imported. Go key-existence
+queries now honor caller scope. Native CLI tests cover these failure paths, while
+PostgreSQL checks cover scoped duplicate visibility.
+
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

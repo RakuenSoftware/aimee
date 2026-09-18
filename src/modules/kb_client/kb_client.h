@@ -668,17 +668,6 @@ int kb_client_memory_find_facts_scoped_ex(const char *query, const char *scope_t
                                           const char *scope_value, int limit, memory_t *out,
                                           int max, const char *graph_code_fusion_state);
 
-/* Export memories / decisions to a JSONL file via aimee-kb.  Returns
- * row count or -1.  Mirrors the wholesale-export flow used by
- * `aimee export`. */
-int kb_client_memory_export_jsonl(const char *path);
-int kb_client_memory_decisions_export_jsonl(const char *path);
-
-/* Check whether a memory key already exists via aimee-kb.  Returns 1
- * if present, 0 otherwise (or on kb-unreachable).  Mirrors
- * db2_memory_key_exists(). */
-int kb_client_memory_key_exists(const char *key);
-
 /* Export rules to JSONL via aimee-kb.  Returns row count or -1. */
 int kb_client_rules_export_jsonl(const char *path);
 

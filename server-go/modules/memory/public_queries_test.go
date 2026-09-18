@@ -132,4 +132,22 @@ INSERT INTO memory_rejection_tombstones(memory_key,memory_content,scope_type,sco
 	if stats["low_effectiveness_count"] != float64(305) || stats["never_surfaced_l2"] != float64(305) || len(stats) != 4 {
 		t.Fatal(stats)
 	}
+	_, err = tx.Exec(ctx, `CREATE ROLE memory_query_scope_test NOINHERIT NOBYPASSRLS;
+ GRANT USAGE ON SCHEMA query_command_test TO memory_query_scope_test;
+ GRANT SELECT ON memories TO memory_query_scope_test;
+ ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
+ CREATE POLICY query_scope_test ON memories USING(scope_type='global' OR current_setting('aimee.memory_scope_all',true)='1' OR
+ (scope_type=current_setting('aimee.memory_scope_type',true) AND scope_value=current_setting('aimee.memory_scope_value',true)));
+ SET LOCAL ROLE memory_query_scope_test;`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client = clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB})))
+	for _, project := range []string{"app", "other"} {
+		got := run("key_exists", `{"key":"record-1","scope_context":true,"project":"`+project+`"}`)
+		if got["exists"] != (project == "app") {
+			t.Fatalf("scoped import duplicate check: %v", got)
+		}
+	}
+
 }
