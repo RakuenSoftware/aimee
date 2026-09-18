@@ -3,6 +3,8 @@
  * (case scoring, latency buckets, temp-db bootstrap, progress files) lives
  * in agent_eval.c and is exposed via agent_eval_internal.h. */
 #include "aimee.h"
+#include "json_fluent.h"
+#include "module_commands.h"
 #include "agent_eval.h"
 #include "agent_eval_internal.h"
 #include "agent_config.h"
@@ -132,9 +134,8 @@ static int mem_eval_drain_async_queues(mem_eval_async_drain_totals_t *totals)
 
    const char *embed_cmd = config_embedder_command_current(NULL);
    db2_kb_service_async_queue_stats_t queue_stats;
-   memory_cognify_queue_stats_t cog_stats;
+   cJSON *cog = NULL;
    memset(&queue_stats, 0, sizeof(queue_stats));
-   memset(&cog_stats, 0, sizeof(cog_stats));
 
    struct timespec ts0, ts1;
    clock_gettime(CLOCK_MONOTONIC, &ts0);
@@ -142,8 +143,18 @@ static int mem_eval_drain_async_queues(mem_eval_async_drain_totals_t *totals)
                                         pgvec_kb_vector_collection_name(),
                                         mem_eval_vector_upsert_document, NULL, &queue_stats) != 0)
       return -1;
-   if (cognify_enabled && memory_cognify_drain(0, &cog_stats) != 0)
-      return -1;
+   if (cognify_enabled)
+   {
+      cJSON *args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(args, "limit", 64);
+      int rc = aimee_module_commands_dispatch_internal("memory.cognify_drain", args, &cog);
+      cJSON_Delete(args);
+      if (rc != 1 || strcmp(jo_cstr(cog, "status"), "ok") != 0)
+      {
+         cJSON_Delete(cog);
+         return -1;
+      }
+   }
    clock_gettime(CLOCK_MONOTONIC, &ts1);
 
    if (totals)
@@ -155,16 +166,17 @@ static int mem_eval_drain_async_queues(mem_eval_async_drain_totals_t *totals)
       totals->queue_pending += queue_stats.pending;
       totals->queue_running += queue_stats.running;
       totals->queue_failed += queue_stats.failed;
-      totals->cognify_processed += cog_stats.processed;
-      totals->cognify_pending += cog_stats.pending;
-      totals->cognify_running += cog_stats.running;
-      totals->cognify_failed += cog_stats.failed;
-      totals->cognify_retried += cog_stats.retried;
-      if (queue_stats.pending == 0 && queue_stats.running == 0 && cog_stats.pending == 0 &&
-          cog_stats.running == 0)
+      totals->cognify_processed += jo_int(cog, "processed", 0);
+      totals->cognify_pending += jo_int(cog, "pending", 0);
+      totals->cognify_running += jo_int(cog, "running", 0);
+      totals->cognify_failed += jo_int(cog, "failed", 0);
+      totals->cognify_retried += jo_int(cog, "retried", 0);
+      if (queue_stats.pending == 0 && queue_stats.running == 0 && jo_int(cog, "pending", 0) == 0 &&
+          jo_int(cog, "running", 0) == 0)
          totals->fully_drained_calls++;
    }
 
+   cJSON_Delete(cog);
    return 0;
 }
 

@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"errors"
 	"github.com/JBailes/aimee/server-go/bus"
 	"regexp"
 )
@@ -90,4 +91,27 @@ func handleScreenCommand(_ handlerOptions, _ bus.ModuleInvocation, _ string, arg
 	result := scanContent(content, capacity)
 	verdict := map[int]string{0: "allow", 1: "redact", 2: "reject"}[result.SensitiveStatus]
 	return commandResult(map[string]any{"status": "ok", "verdict": verdict, "redacted": result.Redacted})
+}
+
+// Apply the same policy at the owning store as at the pre-transmission gate.
+// Keys are identities: redacting one could overwrite a different memory.
+var errSensitiveMemory = errors.New("memory: sensitive content refused")
+
+func screenMemoryText(text string) (string, error) {
+	gate := scanContent(text, maxDataBody)
+	switch gate.SensitiveStatus {
+	case 1:
+		return gate.Redacted, nil
+	case 2:
+		return "", errSensitiveMemory
+	default:
+		return text, nil
+	}
+}
+
+func screenMemoryWrite(key, content string) (string, error) {
+	if scanContent(key, 0).SensitiveStatus != 0 {
+		return "", errSensitiveMemory
+	}
+	return screenMemoryText(content)
 }

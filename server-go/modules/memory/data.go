@@ -520,6 +520,11 @@ status='ok',last_error='',indexed_at=pg_now_text(),updated_at=pg_now_text()`, re
 }
 
 func (s *postgresDataStore) Supersede(ctx context.Context, scope Scope, id int64, content string, confidence float64) (Record, error) {
+	var screenErr error
+	content, screenErr = screenMemoryText(content)
+	if screenErr != nil {
+		return Record{}, screenErr
+	}
 	if s.placement == PlacementServer {
 		// Personal memory has one row per (kind,key). Replace atomically: a
 		// failed write must not retire the only copy or touch the KB namespace.
@@ -685,6 +690,11 @@ func searchPattern(query string) string {
 }
 
 func (s *postgresDataStore) Put(ctx context.Context, scope Scope, r Record) (Record, error) {
+	var screenErr error
+	r.Content, screenErr = screenMemoryWrite(r.Key, r.Content)
+	if screenErr != nil {
+		return Record{}, screenErr
+	}
 	if r.Tier == "" {
 		r.Tier = "L2"
 	}
@@ -1015,6 +1025,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}
 	budget := dataTimeout
+	if request.Operation == "cognify" || request.Operation == "cognify-drain" {
+		budget = 60 * time.Second
+	}
 	if request.Operation == "vector-verify" {
 		budget = 30 * time.Second
 	}
@@ -1090,6 +1103,12 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
+	case "cognify", "cognify-drain", "cognify-status":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.cognifyData(ctx, request)
 	case "reembed-prepare", "reembed-next", "reembed-point", "reembed-status", "reembed-cutover":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {

@@ -654,6 +654,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-memory-reference-transport \
                $(TESTPREFIX)/unit-test-server-memory-get \
                $(TESTPREFIX)/unit-test-cmd-memory-data \
+               $(TESTPREFIX)/unit-test-cmd-memory-cognify \
                $(TESTPREFIX)/unit-test-server-memory-domain \
                $(TESTPREFIX)/unit-test-server-prospective \
                $(TESTPREFIX)/unit-test-session-brief \
@@ -1816,16 +1817,6 @@ $(TESTPREFIX)/unit-test-index: $(OBJDIR)/tests/test_index.o $(TEST_DATA_OBJS_MOC
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 
-# Restored. 513 assertions about memory behaviour, deleted with the C store for
-# four lines: the db1_init/db1_shutdown fixture pair and two cognify enqueues.
-#
-# The cognify block is gated on db1_store_ready() rather than stubbed, because
-# what it asserts IS store behaviour -- a duplicate enqueue leaves pending
-# unchanged, which is the queue's UNIQUE constraint. A stub would have to
-# reimplement that constraint to be worth anything, and then the test would be
-# checking the stub; the postgres family suites cover it against a real
-# database. This binary links module_bus_stub, whose honest default is "no
-# module attached", so the gate is closed here and the other 511 assertions run.
 $(TESTPREFIX)/unit-test-graph-scoring: $(OBJDIR)/tests/test_graph_scoring.o \
     $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
@@ -7933,4 +7924,7 @@ $(TESTPREFIX)/unit-test-server-memory-domain: $(OBJDIR)/tests/test_server_memory
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-cmd-memory-data: $(OBJDIR)/tests/test_cmd_memory_data.o $(OBJDIR)/cmd_data.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-cmd-memory-cognify: $(OBJDIR)/tests/test_cmd_memory_cognify.o $(OBJDIR)/cmd_memory_core.o $(OBJDIR)/cmd_memory_vector.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

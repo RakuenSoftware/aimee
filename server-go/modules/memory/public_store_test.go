@@ -243,4 +243,26 @@ SET LOCAL ROLE memory_store_test;`)
 	if r := runPublicCommand(t, client, "supersede", args); r["status"] != "ok" {
 		t.Fatal(r)
 	}
+	// The owner enforces screening even when no native pre-send client is used.
+	for _, args := range []string{
+		`{"key":"password=identity","content":"safe"}`,
+		`{"key":"pem-note","content":"-----BEGIN PRIVATE KEY-----\nsecret body\n-----END PRIVATE KEY-----"}`,
+	} {
+		if r := put(args, false); r["kind"] != "unavailable" {
+			t.Fatal("sensitive write accepted", r)
+		}
+	}
+	redacted := put(`{"key":"redacted-note","content":"password=first token=second","use_cases":"secret=third"}`, false)
+	if redacted["status"] != "ok" || redacted["memory"].(map[string]any)["content"] != "[REDACTED] [REDACTED]" || redacted["memory"].(map[string]any)["use_cases"] != "[REDACTED]" {
+		t.Fatal(redacted)
+	}
+	editRaw := fmt.Sprintf(`{"id":%.0f,"content":"-----BEGIN PRIVATE KEY-----\nsecret"}`, redacted["id"])
+	if r := runPublicCommand(t, client, "update", editRaw); r["kind"] != "unavailable" {
+		t.Fatal(r)
+	}
+	editRaw = fmt.Sprintf(`{"old_id":%.0f,"new_content":"password=replacement"}`, redacted["id"])
+	if r := runPublicCommand(t, client, "supersede", editRaw); r["status"] != "ok" || r["memory"].(map[string]any)["content"] != "[REDACTED]" {
+		t.Fatal(r)
+	}
+
 }

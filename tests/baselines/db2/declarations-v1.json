@@ -18330,7 +18330,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_memory_advanced.c",
         "src/tests/test_rules.c"
       ],
       "locations": [
@@ -23761,7 +23760,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d405370729c69aa7b804dad917857d8cd4f2a8035aea1d1d59ae5e0ea9fa5d79",
+  "fingerprint": "6c3ea2106b921f073bbc2c88f48c778dd6ca68784e0847eeb5e19b477498af94",
   "module": "db2",
   "schema_version": 1,
   "summary": {

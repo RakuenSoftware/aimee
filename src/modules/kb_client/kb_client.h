@@ -714,10 +714,6 @@ int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
  * Returns 0 / -1.  Mirrors memory_explain_match(). */
 int kb_client_memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic_t *out);
 
-/* memory_cognify_drain crosses DB1 queue state and DB2 memory reads. Ports
- * must split that flow across aimee-server and aimee-kb; do not add a client
- * or auxiliary process with both tiers linked. */
-
 /* Fetch a single memory row by id via aimee-kb. Returns 0 on success,
  * 1 for a valid missing row, or -1 when the service/result is unavailable. */
 int kb_client_memory_get(int64_t id, memory_t *out);

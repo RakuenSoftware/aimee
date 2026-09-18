@@ -16,6 +16,9 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "cognify", "Derive scoped claims and relations from a memory.", handleCognifyCommand, true},
+	{"memory", "cognify_drain", "Process a bounded batch of scoped cognification jobs.", handleCognifyCommand, true},
+	{"memory", "cognify_status", "Read scoped cognification queue status.", handleCognifyCommand, true},
 	{"memory", "embed", "Embed current memory records.", handleRepairCommand, true},
 	{"memory", "reembed_start", "Stage a resumable embedding version.", handleReembedCommand, true},
 	{"memory", "reembed_status", "Inspect versioned embedding progress.", handleReembedCommand, true},

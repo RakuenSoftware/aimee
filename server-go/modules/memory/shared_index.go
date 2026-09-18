@@ -75,7 +75,16 @@ func (s *postgresDataStore) sharedIndexBatch(ctx context.Context, executor egres
 		}
 		bound := *s
 		bound.db = tx
-		if vector {
+		if command == "memory-cognify" {
+			configured, _, configErr := bound.cognifySettings()
+			if errors.Is(configErr, errCognifyDisabled) {
+				return false, nil
+			}
+			if configErr != nil {
+				return false, configErr
+			}
+			worked, _, err = bound.cognifyNext(ctx, configured)
+		} else if vector {
 			worked, err = bound.indexSharedVector(ctx, executor, command)
 		} else {
 			worked, err = bound.indexSharedRecord(ctx)
@@ -87,6 +96,15 @@ func (s *postgresDataStore) sharedIndexBatch(ctx context.Context, executor egres
 	}
 	for i := 0; i < limit; i++ {
 		worked, err := run(false, "")
+		if err != nil {
+			return err
+		}
+		if !worked {
+			break
+		}
+	}
+	for i := 0; i < limit; i++ {
+		worked, err := run(false, "memory-cognify")
 		if err != nil {
 			return err
 		}

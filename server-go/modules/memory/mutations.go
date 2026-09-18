@@ -28,6 +28,15 @@ func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataReq
 	if err := s.requireKBDomain(); err != nil {
 		return Record{}, err
 	}
+	var screenErr error
+	request.Content, screenErr = screenMemoryWrite(request.Key, request.Content)
+	if screenErr != nil {
+		return Record{}, screenErr
+	}
+	request.UseCases, screenErr = screenMemoryText(request.UseCases)
+	if screenErr != nil {
+		return Record{}, screenErr
+	}
 	epistemic := request.EpistemicKind
 	if epistemic == "" {
 		epistemic = "world_fact"
@@ -84,6 +93,11 @@ func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataReq
 // UpdateAs preserves model-authored history while allowing an authenticated
 // operator to make the explicitly destructive in-place edit.
 func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content string, authority int) (int, int64, error) {
+	var screenErr error
+	content, screenErr = screenMemoryText(content)
+	if screenErr != nil {
+		return -1, 0, screenErr
+	}
 	if err := s.requireKBDomain(); err != nil {
 		return -1, 0, err
 	}
@@ -148,6 +162,11 @@ var (
 // instant. The locked source retains its content and scope; model replacement
 // cannot inherit a user's provenance or exceed the source's confidence ceiling.
 func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content string, confidence float64, session string) (Record, error) {
+	var screenErr error
+	content, screenErr = screenMemoryText(content)
+	if screenErr != nil {
+		return Record{}, screenErr
+	}
 	var epistemic string
 	if err := s.db.QueryRow(ctx, `SELECT epistemic_kind FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&epistemic); err != nil {
 		if store.IsNoRows(err) {

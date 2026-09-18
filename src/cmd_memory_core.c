@@ -626,13 +626,17 @@ void mem_drain(app_ctx_t *ctx, int argc, char **argv)
       stats.total = (int)n->valuedouble;
    cJSON_Delete(resp);
 
-   /* Legacy monolithic command path. Cognify crosses DB1 and DB2; the server
-    * RPC port must split DB1 queue ownership from DB2 memory reads instead
-    * of running this from a DB-owning client or auxiliary process. */
-   memory_cognify_queue_stats_t cog_stats;
-   memset(&cog_stats, 0, sizeof(cog_stats));
-   if (config_memory_cognify_enabled() && config_memory_cognify_command()[0])
-      (void)memory_cognify_drain(timeout, &cog_stats);
+   cJSON *cog_args = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(cog_args);
+   char *cog_raw = kb_v1_action_request_with_timeout("memory.cognify_drain", cog_args, 60000L);
+   cJSON *cog = cog_raw ? cJSON_Parse(cog_raw) : NULL;
+   free(cog_raw);
+   const char *cog_status = jo_cstr(cog, "status");
+   if (strcmp(cog_status, "ok") != 0 && strcmp(cog_status, "disabled") != 0)
+   {
+      cJSON_Delete(cog);
+      fatal("failed to drain cognification queue");
+   }
 
    if (ctx->json_output)
    {
@@ -643,13 +647,6 @@ void mem_drain(app_ctx_t *ctx, int argc, char **argv)
       cJSON_AddNumberToObject(j, "done", stats.done);
       cJSON_AddNumberToObject(j, "failed", stats.failed);
       cJSON_AddNumberToObject(j, "total", stats.total);
-      cJSON *cog = cJSON_CreateObject();
-      cJSON_AddNumberToObject(cog, "processed", cog_stats.processed);
-      cJSON_AddNumberToObject(cog, "pending", cog_stats.pending);
-      cJSON_AddNumberToObject(cog, "running", cog_stats.running);
-      cJSON_AddNumberToObject(cog, "done", cog_stats.done);
-      cJSON_AddNumberToObject(cog, "failed", cog_stats.failed);
-      cJSON_AddNumberToObject(cog, "retried", cog_stats.retried);
       cJSON_AddItemToObject(j, "cognify", cog);
       emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
       return;
@@ -657,9 +654,11 @@ void mem_drain(app_ctx_t *ctx, int argc, char **argv)
 
    printf("Async memory queue drained: processed=%d pending=%d running=%d failed=%d\n",
           stats.processed, stats.pending, stats.running, stats.failed);
-   if (config_memory_cognify_enabled())
-      printf("Cognify queue: processed=%d pending=%d failed=%d retried=%d\n", cog_stats.processed,
-             cog_stats.pending, cog_stats.failed, cog_stats.retried);
+   if (strcmp(cog_status, "ok") == 0)
+      printf("Cognify queue: processed=%d pending=%d failed=%d retried=%d\n",
+             jo_int(cog, "processed", 0), jo_int(cog, "pending", 0), jo_int(cog, "failed", 0),
+             jo_int(cog, "retried", 0));
+   cJSON_Delete(cog);
 }
 
 void mem_edges(app_ctx_t *ctx, int argc, char **argv)

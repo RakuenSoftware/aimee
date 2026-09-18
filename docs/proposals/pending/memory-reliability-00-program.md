@@ -315,6 +315,19 @@ overwrite, and refused writes cannot be counted as imported. Go key-existence
 queries now honor caller scope. Native CLI tests cover these failure paths, while
 PostgreSQL checks cover scoped duplicate visibility.
 
+Cognification now runs in the shared Go owner. The CLI and benchmark drain
+callers use generic commands; the native result and queue API is retired. Model
+execution is bounded, source ancestry is checked, and kind/relations/claims/actor
+provenance commit atomically. Claims inherit canonical source scope and model
+authority; private preferences cannot leak through the global rule channel.
+Shared queue attempts lock the parent and generation, roll back partial writes,
+retry at most three times and execute synchronously even when enqueue mode is
+on. Queue reads respect source scope. Direct Go canonical writes also enforce
+the shared content gate, closing the native-client bypass. PostgreSQL replay and
+actual CLI tests cover these contracts, redaction, tombstone rollback and full
+text. The old Go DB1 queue remains a migration concern for pre-existing jobs;
+new work is owned by the shared KB memory queue.
+
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

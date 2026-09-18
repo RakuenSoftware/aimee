@@ -935,101 +935,41 @@ void mem_cognify(app_ctx_t *ctx, int argc, char **argv)
 {
    opt_parsed_t opts;
    opt_parse(argc, argv, NULL, &opts);
-
-   /* Require --unit <id> */
-   const char *unit_str = opt_get(&opts, "unit");
-   if (!unit_str || !unit_str[0])
+   const char *unit = opt_get(&opts, "unit");
+   char *end = NULL;
+   long long id = unit ? strtoll(unit, &end, 10) : 0;
+   if (id <= 0 || !end || *end)
+      fatal("memory cognify requires --unit <memory_id>");
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddNumberToObject(args, "unit", (double)id);
+   kb_client_memory_scope_context_apply(args);
+   char *raw = kb_v1_action_request_with_timeout("memory.cognify", args, 60000L);
+   cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   if (strcmp(jo_cstr(reply, "status"), "ok") != 0)
    {
-      fprintf(stderr, "Usage: aimee memory cognify --unit <memory_id>\n");
-      return;
+      cJSON_Delete(reply);
+      fatal("cognification unavailable or refused for unit %lld", id);
    }
-   int64_t unit_id = (int64_t)strtoll(unit_str, NULL, 10);
-   if (unit_id <= 0)
-   {
-      fprintf(stderr, "error: invalid --unit id '%s'\n", unit_str);
-      return;
-   }
-
-   cJSON *get_args = cJSON_CreateObject();
-   cJSON_AddNumberToObject(get_args, "id", (double)unit_id);
-   kb_client_memory_scope_context_apply(get_args);
-   char *get_raw = kb_v1_action_request("memory.get", get_args);
-   cJSON *get_reply = get_raw ? cJSON_Parse(get_raw) : NULL;
-   free(get_raw);
-   const cJSON *record = cJSON_GetObjectItemCaseSensitive(get_reply, "memory");
-   if (strcmp(jo_cstr(get_reply, "status"), "ok") != 0 || !cJSON_IsObject(record))
-   {
-      fprintf(stderr, "error: memory %lld unavailable\n", (long long)unit_id);
-      cJSON_Delete(get_reply);
-      return;
-   }
-
-   if (!config_memory_cognify_enabled())
-   {
-      fprintf(stderr,
-              "error: cognification disabled (set memory.cognify.enabled=true in config)\n");
-      cJSON_Delete(get_reply);
-      return;
-   }
-
-   memory_cognify_result_t result;
-   int rc = memory_cognify_unit(unit_id, jo_cstr(record, "content"), &result);
-   cJSON_Delete(get_reply);
-   if (rc != 0)
-   {
-      fprintf(stderr, "error: cognification failed for unit %lld\n", (long long)unit_id);
-      return;
-   }
-
    if (ctx->json_output)
    {
-      cJSON *obj = cJSON_CreateObject();
-      cJSON_AddNumberToObject(obj, "unit_id", (double)unit_id);
-      cJSON_AddStringToObject(obj, "summary", result.summary);
-      cJSON_AddStringToObject(obj, "memory_kind", result.memory_kind);
-      cJSON *rels = cJSON_AddArrayToObject(obj, "relations");
-      for (int i = 0; i < result.relation_count; i++)
-      {
-         cJSON *r = cJSON_CreateObject();
-         cJSON_AddStringToObject(r, "subject", result.relations[i].src_entity);
-         cJSON_AddStringToObject(r, "relation", result.relations[i].relation);
-         cJSON_AddStringToObject(r, "object", result.relations[i].dst_entity);
-         cJSON_AddStringToObject(r, "fact_text", result.relations[i].fact_text);
-         cJSON_AddItemToArray(rels, r);
-      }
-      cJSON *clms = cJSON_AddArrayToObject(obj, "claims");
-      for (int i = 0; i < result.claim_count; i++)
-      {
-         cJSON *c = cJSON_CreateObject();
-         cJSON_AddStringToObject(c, "subject", result.claims[i].subject);
-         cJSON_AddStringToObject(c, "attribute", result.claims[i].attribute);
-         cJSON_AddStringToObject(c, "value", result.claims[i].value);
-         cJSON_AddStringToObject(c, "kind", result.claims[i].kind);
-         cJSON_AddItemToArray(clms, c);
-      }
-      emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
+      emit_json_ctx(reply, ctx->json_fields, ctx->response_profile);
+      return;
    }
-   else
-   {
-      printf("Cognified unit %lld\n", (long long)unit_id);
-      if (result.summary[0])
-         printf("Summary: %s\n", result.summary);
-      if (result.relation_count > 0)
-      {
-         printf("Relations (%d):\n", result.relation_count);
-         for (int i = 0; i < result.relation_count; i++)
-            printf("  [%s -[%s]-> %s] %s\n", result.relations[i].src_entity,
-                   result.relations[i].relation, result.relations[i].dst_entity,
-                   result.relations[i].fact_text);
-      }
-      if (result.claim_count > 0)
-      {
-         printf("Claims (%d):\n", result.claim_count);
-         for (int i = 0; i < result.claim_count; i++)
-            printf("  [%s] %s:%s = %s\n", result.claims[i].kind, result.claims[i].subject,
-                   result.claims[i].attribute, result.claims[i].value);
-      }
-   }
+   printf("%s unit %lld\n",
+          cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "queued")) ? "Queued" : "Cognified",
+          id);
+   const char *summary = jo_cstr(reply, "summary");
+   if (summary[0])
+      printf("Summary: %s\n", summary);
+   const cJSON *item;
+   cJSON_ArrayForEach(item, cJSON_GetObjectItemCaseSensitive(reply, "relations"))
+       printf("  [%s -[%s]-> %s] %s\n", jo_cstr(item, "subject"), jo_cstr(item, "relation"),
+              jo_cstr(item, "object"), jo_cstr(item, "fact_text"));
+   cJSON_ArrayForEach(item, cJSON_GetObjectItemCaseSensitive(reply, "claims"))
+       printf("  [%s] %s:%s = %s\n", jo_cstr(item, "kind"), jo_cstr(item, "subject"),
+              jo_cstr(item, "attribute"), jo_cstr(item, "value"));
+   cJSON_Delete(reply);
 }
 
 /* --- mem_episode: view or generate episode cards for a session --- */
