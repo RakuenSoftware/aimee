@@ -146,7 +146,7 @@ UPDATE memories SET epistemic_kind='policy' WHERE id=8;`)
 	if r, status := invokeContextCommand(t, handler, 0, other, "restore", `{"id":5,"actor":"user:alice"}`); status != bus.ModuleStatusOK || r["kind"] != "not_found" {
 		t.Fatal(r, status)
 	}
-	if r := run("restore", `{"id":5,"actor":"forged"}`, true); r["status"] != "ok" {
+	if r := run("restore", `{"id":5,"actor":"forged"}`, true); r["status"] != "ok" || r["id"] != float64(5) || r["restored"] != true {
 		t.Fatal(r)
 	}
 	if err := tx.QueryRow(ctx, `SELECT restored_by FROM memory_rejection_tombstones`).Scan(&state); err != nil || state != "user:alice" {

@@ -54,6 +54,17 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return handleIngressTaskState(&options.gateway.tasks, args)
 	case "gateway-plan", "gateway-recall", "gateway-outcome", "gateway-metrics", "gateway-enabled":
 		return handleGatewayCommand(options, invocation, args)
+	case "user-review-list":
+		encoded, status := handleUserCommand(options, invocation, "review-list", args)
+		if status != bus.ModuleStatusOK {
+			return nil, status
+		}
+		body, err := bus.DecodeCommandResult(encoded)
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		// The native transport must not round review IDs through cJSON doubles.
+		return commandResult(map[string]any{"status": "ok", "json": string(body)})
 	case "user-store", "user-get", "user-list", "user-search", "user-delete", "user-supersede", "user-stats":
 		return handleUserCommand(options, invocation, operation[len("user-"):], args)
 	case "prospective-dashboard", "prospective-briefing", "directive-dashboard", "directive-briefing", "stats-dashboard":

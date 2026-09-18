@@ -2,11 +2,103 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestPersonalReviewOwnerPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_MEMORY_EVAL_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_MEMORY_EVAL_URL for PostgreSQL review regression")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `CREATE TEMP TABLE user_memories(id bigint PRIMARY KEY,tier text,kind text,key text,content text,confidence double precision,lifecycle_state text,created_at timestamptz,updated_at timestamptz);
+ INSERT INTO user_memories SELECT 9007199254740993+g,'L2','fact','private-review',repeat('長い記憶',2000),.8,
+ CASE WHEN g=70 THEN 'archived' ELSE 'active' END,now(),now() FROM generate_series(1,70) g`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := NewPostgresDataStore(evalQueryer{tx}, PlacementServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(nil, WithDataStore(PlacementServer, data))
+	call := func(args string) []byte {
+		t.Helper()
+		frame, err := bus.EncodeCommand("runtime", []byte(args))
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != bus.ModuleStatusOK {
+			t.Fatal(status)
+		}
+		body, err := bus.DecodeCommandResult(encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope struct {
+			JSON string `json:"json"`
+		}
+		if err := json.Unmarshal(body, &envelope); err != nil || envelope.JSON == "" {
+			t.Fatal(string(body), err)
+		}
+		return []byte(envelope.JSON)
+	}
+	body := call(`{"operation":"user-review-list","project":"forged","scope":{"type":"project","value":"other"}}`)
+	var response struct {
+		Status   string `json:"status"`
+		Store    string `json:"store"`
+		Memories []struct {
+			ReviewRecord
+			Lifecycle string `json:"lifecycle"`
+		} `json:"memories"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Status != "ok" || response.Store != "user" || len(response.Memories) != 64 {
+		t.Fatal(string(body))
+	}
+	first := response.Memories[0]
+	if first.ID != 9007199254741063 || first.Lifecycle != "archived" || first.LifecycleState != "archived" || first.ScopeType != "user" || first.ScopeValue != "_user" || first.Content != strings.Repeat("長い記憶", 2000) {
+		t.Fatal("review lost identity, scope, lifecycle or full content")
+	}
+	body = call(`{"operation":"user-review-list","state":"archived","limit":1}`)
+	if err := json.Unmarshal(body, &response); err != nil || len(response.Memories) != 1 || response.Memories[0].ID != first.ID {
+		t.Fatal(string(body), err)
+	}
+	body = call(`{"operation":"user-review-list","state":"nonexistent"}`)
+	if err := json.Unmarshal(body, &response); err != nil || len(response.Memories) != 0 || !strings.Contains(string(body), `"memories":[]`) {
+		t.Fatal(string(body), err)
+	}
+	body = call(`{"operation":"user-review-list","store":"kb"}`)
+	if !strings.Contains(string(body), `"kind":"invalid_argument"`) {
+		t.Fatal(string(body))
+	}
+	if _, err := tx.Exec(ctx, `DROP TABLE user_memories`); err != nil {
+		t.Fatal(err)
+	}
+	body = call(`{"operation":"user-review-list"}`)
+	if !strings.Contains(string(body), `"kind":"unavailable"`) {
+		t.Fatal("missing store reported as empty review", string(body))
+	}
+}
 
 func TestQueryPublicValidation(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))

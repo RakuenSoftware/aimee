@@ -3174,7 +3174,7 @@ $(TESTPREFIX)/unit-test-memory-bus-context: $(OBJDIR)/tests/test_memory_bus_cont
 $(TESTPREFIX)/unit-test-server-prospective: $(OBJDIR)/tests/test_server_prospective.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-server-memory-get: $(OBJDIR)/tests/test_server_memory_get.o $(OBJDIR)/server/server_memory.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+$(TESTPREFIX)/unit-test-server-memory-get: $(OBJDIR)/tests/test_server_memory_get.o $(OBJDIR)/server/server_memory.o $(OBJDIR)/server/server_memory_review.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-replay

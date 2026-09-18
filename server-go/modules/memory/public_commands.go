@@ -239,6 +239,11 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		if len(request.Query) > 2047 {
 			request.Query = request.Query[:2047]
 		}
+	case "review-list":
+		request.State, request.Limit = args.stringOr("state", ""), 64
+		if value, ok := args.number("limit"); ok {
+			request.Limit = int(math.Max(math.Min(value, math.MaxInt32), math.MinInt32))
+		}
 	case "stats":
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
@@ -301,6 +306,18 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			return commandResult(commandError("unavailable", "user memory module unavailable"))
 		}
 		result["stats"] = response.Stats
+	case "review-list":
+		rows := make([]struct {
+			ReviewRecord
+			Lifecycle string `json:"lifecycle"`
+		}, 0, len(response.Reviews))
+		for _, row := range response.Reviews {
+			rows = append(rows, struct {
+				ReviewRecord
+				Lifecycle string `json:"lifecycle"`
+			}{row, row.LifecycleState})
+		}
+		result["memories"] = rows
 	}
 	return commandResult(result)
 }

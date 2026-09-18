@@ -107,6 +107,9 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	if missing {
 		return commandResult(commandError("not_found", "memory not found or mutation refused"))
 	}
+	if verb == "restore" {
+		result["id"], result["restored"] = request.ID, true
+	}
 	if scoped {
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}

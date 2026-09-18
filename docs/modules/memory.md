@@ -69,6 +69,18 @@ server placement to address KB memory. The KB placement rejects user scope.
 
 ## Public contracts
 
+Personal review-list rendering now belongs to the Go owner through the private
+`user-review-list` runtime operation. It retains the Server envelope, both
+`lifecycle_state` and `lifecycle` fields, complete content and integer IDs. The
+Server only selects local-user versus explicit KB transport. KB review responses
+pass through as complete JSON, and restore returns its `id` and `restored` receipt
+from Go. The retired `kb_client_memory_review_list_json` and
+`kb_client_memory_restore` APIs are forbidden by the native boundary guard.
+Server restore still records its content-free transport audit; KB publishes the
+authoritative mutation audit. Owner refusals retain their error kinds, while
+missing or malformed responses are unavailable rather than successful empty
+reviews or a fabricated not-found result.
+
 The supervised `aimee-module-memory` process is pure Go. It owns extraction,
 write gating, embedding, retrieval safety, reranking, command declaration, and
 the scoped memory data API.

@@ -79,7 +79,7 @@ func TestRuntimeConfidenceBothPlacements(t *testing.T) {
 }
 
 func TestRuntimeViewsAndPrivateCommandsRejectWrongPlacementAndPeer(t *testing.T) {
-	for _, operation := range []string{"user-store", "user-get", "user-list", "user-search", "user-delete", "user-supersede", "user-stats", "prospective-dashboard", "prospective-briefing", "directive-dashboard", "directive-briefing", "stats-dashboard"} {
+	for _, operation := range []string{"user-store", "user-get", "user-list", "user-search", "user-delete", "user-supersede", "user-stats", "user-review-list", "prospective-dashboard", "prospective-briefing", "directive-dashboard", "directive-briefing", "stats-dashboard"} {
 		placement := PlacementServer
 		if len(operation) >= 5 && operation[:5] == "user-" {
 			placement = PlacementKB
