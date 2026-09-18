@@ -479,8 +479,3 @@ void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type, cons
 {
    (void)memory_tag_scope(memory_id, scope_type, scope_value);
 }
-
-int db2_memory_promotion_demote_id(int64_t memory_id)
-{
-   return domain_id_update("demote-confidence", memory_id, NULL, NULL) == 0 ? 1 : 0;
-}

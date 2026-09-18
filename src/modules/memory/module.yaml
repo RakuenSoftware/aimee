@@ -107,7 +107,8 @@
     "server-go/modules/memory/ingress_task_state.go",
     "server-go/modules/memory/testdata/nativefixture/main.go",
     "server-go/modules/memory/ingress_assembly.go",
-    "server-go/modules/memory/ingress_plan.go"
+    "server-go/modules/memory/ingress_plan.go",
+    "server-go/modules/memory/demotion.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -172,7 +173,8 @@
     "server-go/modules/memory/ingress_task_packet_test.go",
     "server-go/modules/memory/ingress_task_state_test.go",
     "server-go/modules/memory/ingress_assembly_test.go",
-    "server-go/modules/memory/ingress_plan_test.go"
+    "server-go/modules/memory/ingress_plan_test.go",
+    "server-go/modules/memory/demotion_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

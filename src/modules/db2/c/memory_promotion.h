@@ -64,10 +64,6 @@ extern "C"
     * count. */
    int db2_memory_promotion_match_error_keys(const char *error_lowered, int64_t *ids_out, int max);
 
-   /* `UPDATE memories SET confidence = confidence * 0.9 WHERE id = ? AND
-    * confidence > 0.3`. Returns rows changed. */
-   int db2_memory_promotion_demote_id(int64_t memory_id);
-
    /* List L2 memory ids that lack a versioned embedding row for `version`.
     * Up to `max` ids; returns count. */
    int db2_memory_promotion_list_unembedded_l2(const char *version, int64_t *ids_out, int max);

@@ -24,6 +24,8 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/kb/kb_demote.c",
+    "src/kb_demote.h",
     "src/modules/memory/gw_stage_memory.c",
     "src/modules/memory/gw_stage_memory.h",
     'src/modules/db2/c/fact_ingest.c',
@@ -65,6 +67,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:kb_demote_run|db2_memory_promotion_demote_id)\b(?=\s*\()|"
     r"\b(?:ingress_render_block|ingress_preinject_(?:register_confidence_provider|confidence|format_envelope|format_code_block|format_task_context|task_state_reset|recall_unavailable_total))\b(?=\s*\()|"
     r"\b(?:db2_fact_ingest_text(?:_as_actor|_with_evidence)?|db2_typed_fact_ingress|db2_fact_recall_(?:block|in_query)|aimee_db2_register_fact_(?:extract|scan|recall)_provider)\b(?=\s*\()|"
     r"\b(?:db2_kb_service_memory_(?:context_block|facts)_json|kb_handle_memory_(?:context_block|facts)|memory_get_context_block)\b(?=\s*\()|"

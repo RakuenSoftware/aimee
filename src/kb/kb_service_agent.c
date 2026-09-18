@@ -10,7 +10,7 @@
 #include "modules/db2/c/feedback.h"
 #include "modules/db2/c/kb_service_backend.h"
 #include "kb_calibrate.h"
-#include "kb_demote.h"
+#include "module_commands.h"
 #include "kb_ranker_fit.h"
 #include "kb_service_agent.h"
 #include "modules/learning/learning_evidence.h"
@@ -607,12 +607,27 @@ int kb_handle_ranker_record_outcome(int fd, cJSON *req)
 int kb_handle_maintenance_compute_demotions(int fd, cJSON *req)
 {
    (void)req;
-   int n = kb_demote_run();
-
-   cJSON *resp = cJSON_CreateObject();
-   cJSON_AddStringToObject(resp, "status", n >= 0 ? "ok" : "error");
-   cJSON_AddNumberToObject(resp, "profiles_written", n >= 0 ? n : 0);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "demotion-run");
+   cJSON *config = cJSON_AddObjectToObject(request, "config");
+   cJSON_AddNumberToObject(config, "enabled", config_demotion_enabled());
+   cJSON_AddNumberToObject(config, "n_min", config_demotion_n_min());
+   cJSON_AddNumberToObject(config, "window", config_demotion_window());
+   cJSON_AddNumberToObject(config, "half_life_days", config_demotion_half_life_days());
+   cJSON *response = NULL;
+   int called = aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 120000,
+                                                                &response);
+   cJSON_Delete(request);
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+   if (called != 1 || !status || strcmp(status, "ok") != 0)
+   {
+      cJSON_Delete(response);
+      response = cJSON_CreateObject();
+      cJSON_AddStringToObject(response, "status", "error");
+      cJSON_AddNumberToObject(response, "profiles_written", 0);
+      cJSON_AddStringToObject(response, "message", "Go memory demotion unavailable");
+   }
+   int rc = kb_send_response(fd, response);
+   cJSON_Delete(response);
+   return rc;
 }

@@ -52,7 +52,19 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return handleRecordCommand(options, invocation, "get", args)
 	}
 	request := DataRequest{IncludeAll: true}
+
 	switch operation {
+	case "demotion-run":
+		if options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if json.Unmarshal(args["config"], &request.Demotion) != nil || request.Demotion == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if request.Demotion.Enabled == 0 {
+			return commandResult(demotionSummary{Status: "ok"})
+		}
+		request.Operation = operation
 	case "confidence":
 		score, ok := args.number("score")
 		if !ok {
@@ -129,7 +141,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInternal
 	}
 	switch operation {
-	case "fact-review", "fact-candidates":
+	case "fact-review", "fact-candidates", "demotion-run":
 		return commandResult(response.Payload)
 	case "feedback-path":
 		return commandResult(map[string]any{"status": "ok", "updated": response.Updated})

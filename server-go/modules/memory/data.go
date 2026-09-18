@@ -42,6 +42,7 @@ type DataRequest struct {
 	Activation     json.RawMessage   `json:"activation,omitempty"`
 	FactWrite      *FactWriteRequest `json:"fact_write,omitempty"`
 	CodeIndex      *CodeIndexRequest `json:"code_index,omitempty"`
+	Demotion       *DemotionConfig   `json:"demotion,omitempty"`
 	// Accepted for old callers, but never used to override instance configuration.
 	GraphCodeFusionState  string    `json:"graph_code_fusion_state,omitempty"`
 	Operation             string    `json:"operation"`
@@ -1032,6 +1033,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}
 	budget := dataTimeout
+	if request.Operation == "demotion-run" {
+		budget = 120 * time.Second
+	}
 	if request.Operation == "cognify" || request.Operation == "cognify-drain" {
 		budget = 60 * time.Second
 	}
@@ -1110,6 +1114,17 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
+	case "demotion-run":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil || request.Demotion == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var summary demotionSummary
+		summary, err = backend.runDemotion(ctx, *request.Demotion)
+		if err == nil {
+			response.Payload, err = json.Marshal(summary)
+		}
+
 	case "fact-retract":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || transaction == nil {

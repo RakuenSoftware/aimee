@@ -202,10 +202,6 @@
     },
     {
       "classification": "kb-generated-client",
-      "path": "src/kb/kb_demote.c"
-    },
-    {
-      "classification": "kb-generated-client",
       "path": "src/kb/kb_detect.c"
     },
     {
@@ -3335,7 +3331,6 @@
       "consumers": [
         "src/kb/http/kb_http_reflections.c",
         "src/kb/kb_bandit.c",
-        "src/kb/kb_demote.c",
         "src/kb/kb_detect.c",
         "src/kb/kb_learning_synth.c",
         "src/kb/kb_neardup.c",
@@ -3621,7 +3616,6 @@
       "consumers": [
         "src/kb/http/kb_http_reflections.c",
         "src/kb/kb_bandit.c",
-        "src/kb/kb_demote.c",
         "src/kb/kb_detect.c",
         "src/kb/kb_learning_synth.c",
         "src/kb/kb_mining.c",
@@ -6491,7 +6485,6 @@
     },
     {
       "consumers": [
-        "src/kb/kb_demote.c",
         "src/kb/kb_intel_payload.c",
         "src/tests/test_demotion.c",
         "src/tests/test_kb_http_routes.c"
@@ -6509,7 +6502,6 @@
     },
     {
       "consumers": [
-        "src/kb/kb_demote.c",
         "src/kb/kb_intel_payload.c",
         "src/tests/test_demotion.c",
         "src/tests/test_kb_http_routes.c"
@@ -6527,7 +6519,6 @@
     },
     {
       "consumers": [
-        "src/kb/kb_demote.c",
         "src/tests/test_demotion.c"
       ],
       "locations": [
@@ -6538,7 +6529,7 @@
       ],
       "signature": "int db2_demotion_profile_write ( const char * memory_class , const char * scope_kind , const char * scope_id , const char * payload_json , char * id_out , int id_out_len )",
       "signature_sha256": "fbb594a297fb7f86ad959c94cf8d93228b809132399cc8cd67760985613fb5f5",
-      "status": "audit-pending",
+      "status": "private-test-only",
       "symbol": "db2_demotion_profile_write"
     },
     {
@@ -6638,7 +6629,6 @@
     },
     {
       "consumers": [
-        "src/kb/kb_demote.c",
         "src/kb/kb_intel_payload.c",
         "src/tests/test_demotion.c",
         "src/tests/test_kb_http_routes.c"
@@ -15547,21 +15537,6 @@
       "symbol": "db2_memory_promotion_demote_cascade"
     },
     {
-      "consumers": [
-        "src/kb/kb_demote.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 69
-        }
-      ],
-      "signature": "int db2_memory_promotion_demote_id ( int64_t memory_id )",
-      "signature_sha256": "41338c6555357a70173d9a2228d92792c6e9f22b1e50bca963eb7aee7e097b93",
-      "status": "audit-pending",
-      "symbol": "db2_memory_promotion_demote_id"
-    },
-    {
       "consumers": [],
       "locations": [
         {
@@ -15584,7 +15559,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 115
+          "line": 111
         }
       ],
       "signature": "int db2_memory_promotion_l5_pattern_candidates ( db2_memory_l5_candidate_t * out , int max )",
@@ -15623,7 +15598,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 73
+          "line": 69
         }
       ],
       "signature": "int db2_memory_promotion_list_unembedded_l2 ( const char * version , int64_t * ids_out , int max )",
@@ -15675,7 +15650,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 78
+          "line": 74
         }
       ],
       "review": {
@@ -15693,7 +15668,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 84
+          "line": 80
         }
       ],
       "review": {
@@ -15711,7 +15686,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 88
+          "line": 84
         }
       ],
       "review": {
@@ -23455,15 +23430,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "bd5faa28016ad4761e796c0b0af74bb0b0468fc8aa9db74ccd73fa19d2fae5ea",
+  "fingerprint": "79f7f17c7fb4ec462e57ff7f76eb6edf0d507395a239a838a0642a3d7750751c",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 462,
-    "declarations": 1334,
+    "audit_pending": 460,
+    "declarations": 1333,
     "headers": 136,
     "internal_unconsumed": 344,
-    "private_test_only": 318,
+    "private_test_only": 319,
     "reviewed": 210
   }
 }

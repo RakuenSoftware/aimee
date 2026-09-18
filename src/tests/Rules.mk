@@ -654,6 +654,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-memory-reference-transport \
                $(TESTPREFIX)/unit-test-server-memory-get \
                $(TESTPREFIX)/unit-test-memory-view-transport \
+               $(TESTPREFIX)/unit-test-memory-demotion-transport \
                $(TESTPREFIX)/unit-test-cmd-memory-data \
                $(TESTPREFIX)/unit-test-cmd-memory-cognify \
                $(TESTPREFIX)/unit-test-kb-memory-facts-connection \
@@ -7932,3 +7933,6 @@ $(TESTPREFIX)/unit-test-memory-view-transport: $(OBJDIR)/tests/test_memory_view_
 $(OBJDIR)/aimee-memory-fixture: $(wildcard ../server-go/modules/memory/*.go) ../server-go/modules/memory/testdata/nativefixture/main.go
 	@mkdir -p $(dir $@)
 	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../src/$@ ./modules/memory/testdata/nativefixture
+
+$(TESTPREFIX)/unit-test-memory-demotion-transport: $(OBJDIR)/tests/test_memory_demotion_transport.o $(OBJDIR)/kb/kb_service_agent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

@@ -661,7 +661,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/sketch.c
     ${AIMEE_SRC_DIR}/modules/learning/learning_evidence.c
     ${AIMEE_SRC_DIR}/kb/kb_calibrate.c
-    ${AIMEE_SRC_DIR}/kb/kb_demote.c
     ${AIMEE_SRC_DIR}/kb/kb_features.c
     ${AIMEE_SRC_DIR}/kb/kb_ranker.c
     ${AIMEE_SRC_DIR}/kb/kb_detect.c
@@ -1155,7 +1154,6 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/sketch.c
     ${AIMEE_SRC_DIR}/modules/learning/learning_evidence.c
     ${AIMEE_SRC_DIR}/kb/kb_calibrate.c
-    ${AIMEE_SRC_DIR}/kb/kb_demote.c
     ${AIMEE_SRC_DIR}/kb/kb_features.c
     ${AIMEE_SRC_DIR}/kb/kb_ranker.c
     ${AIMEE_SRC_DIR}/kb/kb_detect.c
