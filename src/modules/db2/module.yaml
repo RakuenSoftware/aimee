@@ -165,7 +165,6 @@
     "src/modules/db2/eventcontract/operations.json"
   ],
   "private_headers": [
-    "src/modules/db2/c/memory_briefing.h",
     "src/modules/db2/c/memory_export.h",
     "src/modules/db2/c/memory_health.h",
     "src/modules/db2/c/memory_lifecycle.h",

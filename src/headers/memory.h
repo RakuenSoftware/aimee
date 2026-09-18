@@ -842,8 +842,6 @@ int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confi
 #define MEMORY_BRIEFING_MIN_LIMIT_TOKENS     64
 #define MEMORY_BRIEFING_MAX_LIMIT_TOKENS     8192
 
-struct cJSON *memory_briefing(int limit_tokens);
-
 /* --- Prospective Memory and Triggered Recall ---
  *
  * First-class "when X, surface Y" records.  Lives in its own table so the

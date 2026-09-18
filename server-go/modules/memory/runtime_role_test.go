@@ -132,6 +132,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseHybridReplay(t, ctx, tx, handler)
 	exerciseSessionQueryReplay(t, ctx, tx, handler)
 	exerciseSearchViewReplay(t, ctx, tx, handler)
+	exerciseBriefingReplay(t, ctx, tx, handler)
 	exerciseReflectionReplay(t, ctx, tx, backend.(*postgresDataStore))
 	call := func(request DataRequest) DataResponse {
 		t.Helper()

@@ -48,6 +48,7 @@ SET LOCAL search_path TO pg_temp,runtime_command_test,public;
 CREATE TEMP TABLE memories(id bigint PRIMARY KEY,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
  scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',source_session text DEFAULT '',ttl_at text DEFAULT '',
+ sensitivity text DEFAULT 'normal',evidence_strength double precision DEFAULT 0.5,observation_count int DEFAULT 1,last_used_at text,
  created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,memory_id bigint,source_session text,episode_text text,reference_time text,created_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_entities(memory_id bigint,entity text);
@@ -85,7 +86,7 @@ SET LOCAL ROLE memory_runtime_test;`)
 	if len(activities) != 1 || activities[0].(map[string]any)["summary"] != "release summary" || len(briefing["key_facts"].([]any)) != 2 || len(briefing["active_entities"].([]any)) != 1 {
 		t.Fatal(briefing)
 	}
-	if b := run("briefing", `{"limit_tokens":99999}`)["briefing"].(map[string]any); b["limit_tokens"] != float64(8192) || len(b["recent_activity"].([]any)) != 2 {
+	if b := run("briefing", `{"limit_tokens":99999}`)["briefing"].(map[string]any); b["limit_tokens"] != float64(1024) || len(b["recent_activity"].([]any)) != 2 {
 		t.Fatal(b)
 	}
 	block := run("assemble_context", `{"scope_context":true,"project":"app"}`)["context"].(string)

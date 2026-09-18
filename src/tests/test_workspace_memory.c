@@ -11,7 +11,6 @@
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
 #include "../modules/db2/c/lifecycle.h"
-#include "../modules/db2/c/memory_briefing.h"
 #include "../modules/db2/c/memory_lifecycle.h"
 #include "../modules/db2/c/memory_query.h"
 #include "../modules/db2/c/memory_relations.h"
@@ -413,20 +412,7 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
    count = db2_memory_list_recall_section(DB2_MEM_RECALL_IDENTITY, recall, 1);
    assert(count == 1 && recall[0].id == local.id);
 
-   db2_memory_briefing_fact_t briefing[2];
-   count = db2_memory_briefing_list_key_facts(briefing, 1);
-   assert(count == 1 && briefing[0].memory_id == local.id);
-
-   db2_memory_briefing_activity_t activity[2];
-   count = db2_memory_briefing_list_recent_activity(activity, 1);
-   assert(count == 1 && strcmp(activity[0].session_id, "local-session") == 0);
-   assert(strstr(activity[0].summary, "active project") != NULL);
-
-   db2_memory_briefing_entity_t entities[2];
-   count = db2_memory_briefing_list_active_entities(entities, 1);
-   assert(count == 1);
-   assert(strcmp(entities[0].name, "GlobalCrowdEntity") != 0);
-   assert(strcmp(entities[0].name, "OtherCrowdEntity") != 0);
+   /* Briefing scope-before-LIMIT coverage is in Go briefing_test.go. */
 
    memory_episode_t episodes[2];
    count = db2_memory_episodes_search("crowdout", 1, episodes, 2);

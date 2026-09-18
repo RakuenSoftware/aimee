@@ -3883,8 +3883,7 @@
     {
       "consumers": [
         "src/kb/kb_intel_payload.c",
-        "src/tests/test_kb_http_routes.c",
-        "src/tests/test_memory_advanced.c"
+        "src/tests/test_kb_http_routes.c"
       ],
       "locations": [
         {
@@ -13525,51 +13524,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_workspace_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_briefing.h",
-          "line": 52
-        }
-      ],
-      "signature": "int db2_memory_briefing_list_active_entities ( db2_memory_briefing_entity_t * out , int max )",
-      "signature_sha256": "e750e4a7cb33161a28c393d084c75a16f612f24639bcb44f38bd29420c06d111",
-      "status": "private-test-only",
-      "symbol": "db2_memory_briefing_list_active_entities"
-    },
-    {
-      "consumers": [
-        "src/tests/test_workspace_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_briefing.h",
-          "line": 45
-        }
-      ],
-      "signature": "int db2_memory_briefing_list_key_facts ( db2_memory_briefing_fact_t * out , int max )",
-      "signature_sha256": "65c3756051fa8cbeee223f8f0980aa40b7dbdee6d74b8870ff571ef1f906a0ec",
-      "status": "private-test-only",
-      "symbol": "db2_memory_briefing_list_key_facts"
-    },
-    {
-      "consumers": [
-        "src/tests/test_workspace_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_briefing.h",
-          "line": 48
-        }
-      ],
-      "signature": "int db2_memory_briefing_list_recent_activity ( db2_memory_briefing_activity_t * out , int max )",
-      "signature_sha256": "2480658cf4bb0258ea214fb6de1129897730ff213f5fe2a527d6035b25386cce",
-      "status": "private-test-only",
-      "symbol": "db2_memory_briefing_list_recent_activity"
-    },
-    {
-      "consumers": [
         "src/cmd_doctor.c"
       ],
       "locations": [
@@ -21086,15 +21040,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "5f9a96570427ff7762ef39af9214937b7f29dadf089b7224d633d671f160ae99",
+  "fingerprint": "3da9caa0ea9ecbc6c90474db58922cb724a007189afd9eafe3df44ec6aaa10c8",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 453,
-    "declarations": 1163,
-    "headers": 134,
+    "declarations": 1160,
+    "headers": 133,
     "internal_unconsumed": 202,
-    "private_test_only": 315,
+    "private_test_only": 312,
     "reviewed": 193
   }
 }
