@@ -19,6 +19,7 @@ func (s *postgresDataStore) RebuildDerivedIndexes(ctx context.Context, limit int
 		if err != nil {
 			return 0, err
 		}
+		tx = s.auditTransaction(tx)
 		defer tx.Rollback(context.Background())
 		bound := *s
 		bound.db = tx

@@ -133,7 +133,10 @@ last_used_at=pg_now_text(), updated_at=pg_now_text() WHERE id=ANY($1::text::bigi
 	return int(tag.RowsAffected()), nil
 }
 
-func (s *postgresDataStore) UpdateContent(ctx context.Context, id int64, content string) (bool, error) {
+func (s *postgresDataStore) UpdateContent(ctx context.Context, id int64, content string) (out bool, err error) {
+	defer func() {
+		s.recordMutation(DataRequest{Operation: "update-content", ID: id}, DataResponse{Updated: out}, err, "")
+	}()
 	if err := s.requireKBDomain(); err != nil {
 		return false, err
 	}
@@ -142,12 +145,15 @@ WHERE id=$1 AND lifecycle_state='active'`, id, content)
 	return err == nil && tag.RowsAffected() > 0, err
 }
 
-func (s *postgresDataStore) Reject(ctx context.Context, id int64, reason string) (bool, error) {
+func (s *postgresDataStore) Reject(ctx context.Context, id int64, reason string) (out bool, err error) {
+	defer func() {
+		s.recordMutation(DataRequest{Operation: "reject", ID: id}, DataResponse{Updated: out}, err, "")
+	}()
 	if err := s.requireKBDomain(); err != nil {
 		return false, err
 	}
 	var changed int
-	err := s.db.QueryRow(ctx, `WITH target AS (
+	err = s.db.QueryRow(ctx, `WITH target AS (
  SELECT key,content,scope_type,scope_value FROM memories WHERE id=$1
 ), tomb AS (
  INSERT INTO memory_rejection_tombstones(object_kind,memory_key,memory_content,scope_type,scope_value,reason)

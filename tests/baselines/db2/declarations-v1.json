@@ -958,10 +958,6 @@
     },
     {
       "classification": "private-implementation-test",
-      "path": "src/tests/test_memory_audit_hook.c"
-    },
-    {
-      "classification": "private-implementation-test",
       "path": "src/tests/test_memory_filter.c"
     },
     {
@@ -17403,7 +17399,6 @@
         "src/tests/test_learning_synth.c",
         "src/tests/test_learning_version.c",
         "src/tests/test_memory_advanced.c",
-        "src/tests/test_memory_audit_hook.c",
         "src/tests/test_memory_filter.c",
         "src/tests/test_notes.c",
         "src/tests/test_ontology_evolution.c",
@@ -21010,7 +21005,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "0a60f7b4b67ea71ce8d8f78702593305fc380546b3e61d2f11e52265d79f500a",
+  "fingerprint": "d8ea4545d43f306520237240bd0ae94c67335b1184e1853916a2a9c0eca0aa7b",
   "module": "db2",
   "schema_version": 1,
   "summary": {

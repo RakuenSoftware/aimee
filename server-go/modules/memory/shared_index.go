@@ -69,6 +69,7 @@ func (s *postgresDataStore) sharedIndexBatch(ctx context.Context, executor egres
 		if err != nil {
 			return false, err
 		}
+		tx = s.auditTransaction(tx)
 		defer tx.Rollback(context.Background())
 		if err = sharedIndexContext(ctx, tx); err != nil {
 			return false, err
@@ -171,6 +172,7 @@ func (s *postgresDataStore) indexSharedRecord(ctx context.Context) (bool, error)
 	// Keep both locks outside the savepoint. A failed derivation rolls back every
 	// index mutation while its retry status commits. Process death rolls back the
 	// whole attempt, leaving the original pending work claimable immediately.
+	rewindAudit := s.auditSavepoint()
 	if _, err = s.db.Exec(ctx, `SAVEPOINT memory_shared_index`); err != nil {
 		return false, err
 	}
@@ -187,6 +189,7 @@ func (s *postgresDataStore) indexSharedRecord(ctx context.Context) (bool, error)
 	}
 	workErr := err
 	if workErr != nil {
+		rewindAudit()
 		if _, err = s.db.Exec(context.Background(), `ROLLBACK TO SAVEPOINT memory_shared_index`); err != nil {
 			return false, err
 		}

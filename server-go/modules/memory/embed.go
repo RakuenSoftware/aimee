@@ -355,6 +355,7 @@ func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, 
 			if err != nil {
 				return EmbedResponse{Error: "embed: transaction unavailable"}
 			}
+			tx = backend.auditTransaction(tx)
 			defer tx.Rollback(context.Background())
 			bound := *backend
 			bound.db = tx

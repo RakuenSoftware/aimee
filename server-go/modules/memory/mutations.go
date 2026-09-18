@@ -24,7 +24,15 @@ var validEpistemicKinds = map[string]bool{
 // InsertEpistemic is the canonical KB memory write. Authority is derived by the
 // authenticated caller and becomes durable provenance; it is never inferred
 // from the memory text. Active rejection tombstones fail the write closed.
-func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataRequest) (Record, error) {
+func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataRequest) (record Record, err error) {
+	merged := false
+	defer func() {
+		tool := ""
+		if merged {
+			tool = "memory.merge"
+		}
+		s.recordMutation(DataRequest{Operation: "insert-epistemic", SessionID: request.SessionID}, DataResponse{Records: []Record{record}}, err, tool)
+	}()
 	if err := s.requireKBDomain(); err != nil {
 		return Record{}, err
 	}
@@ -60,9 +68,8 @@ func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataReq
 		confidence = ceiling
 	}
 	scope := request.Scope
-	var record Record
 	record.Scope = scope
-	err := s.db.QueryRow(ctx, `WITH allowed AS (
+	err = s.db.QueryRow(ctx, `WITH allowed AS (
  SELECT 1 WHERE NOT EXISTS (
   SELECT 1 FROM memory_rejection_tombstones WHERE object_kind='memory' AND active=1
    AND memory_key=$3 AND memory_content=$4 AND scope_type=$10 AND scope_value=$11
@@ -79,9 +86,9 @@ func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataReq
  source_session,provenance_category,scope_type,scope_value,lifecycle_state)
  SELECT $1,$12,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active' FROM allowed
  WHERE NOT EXISTS(SELECT 1 FROM updated) RETURNING id
-) SELECT id FROM updated UNION ALL SELECT id FROM inserted LIMIT 1`, request.Tier, epistemic,
+) SELECT id,true FROM updated UNION ALL SELECT id,false FROM inserted LIMIT 1`, request.Tier, epistemic,
 		request.Key, request.Content, request.UseCases, confidence, ceiling, request.SessionID,
-		provenance, scope.Type, scope.Value, request.Kind).Scan(&record.ID)
+		provenance, scope.Type, scope.Value, request.Kind).Scan(&record.ID, &merged)
 	if store.IsNoRows(err) {
 		return Record{}, errors.New("memory: write blocked by rejection tombstone")
 	}
@@ -92,7 +99,12 @@ func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataReq
 
 // UpdateAs preserves model-authored history while allowing an authenticated
 // operator to make the explicitly destructive in-place edit.
-func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content string, authority int) (int, int64, error) {
+func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content string, authority int) (code int, newID int64, err error) {
+	defer func() {
+		if authority == AuthorityUser {
+			s.recordMutation(DataRequest{Operation: "update-as", ID: id}, DataResponse{Code: &code, IDs: []int64{newID}}, err, "")
+		}
+	}()
 	var screenErr error
 	content, screenErr = screenMemoryText(content)
 	if screenErr != nil {
@@ -134,7 +146,10 @@ WHERE id=$1 AND lifecycle_state='active'`, id, content)
 
 // DeleteAs hard-deletes only under explicit user authority. Model authority
 // retires and versions the row so historical retrieval remains possible.
-func (s *postgresDataStore) DeleteAs(ctx context.Context, id int64, authority int) (bool, error) {
+func (s *postgresDataStore) DeleteAs(ctx context.Context, id int64, authority int) (changed bool, err error) {
+	defer func() {
+		s.recordMutation(DataRequest{Operation: "delete-as", ID: id, Authority: authority}, DataResponse{Deleted: changed}, err, "")
+	}()
 	if err := s.requireKBDomain(); err != nil {
 		return false, err
 	}
@@ -161,7 +176,10 @@ var (
 // supersedeKB closes the old interval and opens the replacement at the same
 // instant. The locked source retains its content and scope; model replacement
 // cannot inherit a user's provenance or exceed the source's confidence ceiling.
-func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content string, confidence float64, session string) (Record, error) {
+func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content string, confidence float64, session string) (r Record, err error) {
+	defer func() {
+		s.recordMutation(DataRequest{Operation: "supersede", ID: id, SessionID: session}, DataResponse{Records: []Record{r}}, err, "")
+	}()
 	var screenErr error
 	content, screenErr = screenMemoryText(content)
 	if screenErr != nil {
@@ -180,8 +198,7 @@ func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content s
 	case "instruction", "policy":
 		return Record{}, errRequiresRevocation
 	}
-	var r Record
-	err := s.db.QueryRow(ctx, `WITH candidate AS MATERIALIZED (
+	err = s.db.QueryRow(ctx, `WITH candidate AS MATERIALIZED (
  SELECT *,pg_now_text() AS boundary FROM memories WHERE id=$1 AND lifecycle_state='active'
  AND NOT EXISTS (SELECT 1 FROM memory_rejection_tombstones t WHERE t.object_kind='memory' AND t.active=1
   AND t.memory_key=memories.key AND t.memory_content=$2 AND t.scope_type=memories.scope_type AND t.scope_value=memories.scope_value)

@@ -17,6 +17,7 @@ func (s *postgresDataStore) embedUnit(ctx context.Context, trace uint64, executo
 		if err != nil {
 			return EmbedResponse{Error: "embed: unit transaction unavailable"}
 		}
+		tx = s.auditTransaction(tx)
 		defer tx.Rollback(context.Background())
 		bound := *s
 		bound.db = tx

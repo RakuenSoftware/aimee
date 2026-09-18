@@ -120,6 +120,7 @@ func (s *postgresDataStore) withEmbeddingWrite(ctx context.Context, write func(*
 		if err != nil {
 			return err
 		}
+		tx = s.auditTransaction(tx)
 		defer tx.Rollback(context.Background())
 		bound := *s
 		bound.db = tx
@@ -131,12 +132,14 @@ func (s *postgresDataStore) withEmbeddingWrite(ctx context.Context, write func(*
 	if _, ok := s.db.(store.Tx); !ok {
 		return errors.New("memory: embedding persistence requires a transaction")
 	}
+	rewindAudit := s.auditSavepoint()
 	if _, err := s.db.Exec(ctx, `SAVEPOINT memory_embedding_write`); err != nil {
 		return err
 	}
 	err := write(s)
 	if err != nil {
 		// Rollback must still run if the embedding request was cancelled.
+		rewindAudit()
 		_, _ = s.db.Exec(context.Background(), `ROLLBACK TO SAVEPOINT memory_embedding_write`)
 	}
 	_, releaseErr := s.db.Exec(context.Background(), `RELEASE SAVEPOINT memory_embedding_write`)

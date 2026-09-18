@@ -20,7 +20,6 @@
 
 #define MEMORY_DATA_TIMEOUT_MS 5000
 
-static memory_audit_hook_fn memory_audit_hook;
 static void (*memory_context_reader)(db2_memory_scope_context_t *);
 
 void memory_bus_set_context_reader(void (*reader)(db2_memory_scope_context_t *))
@@ -33,18 +32,6 @@ void memory_bus_read_context(db2_memory_scope_context_t *context)
    memset(context, 0, sizeof(*context));
    if (memory_context_reader)
       memory_context_reader(context);
-}
-
-void memory_set_audit_hook(memory_audit_hook_fn hook)
-{
-   memory_audit_hook = hook;
-}
-
-void memory_audit_emit(const char *op, int64_t id, const char *tier, const char *kind,
-                       const char *key, double confidence, const char *session_id)
-{
-   if (memory_audit_hook)
-      memory_audit_hook(op, id, tier, kind, key, confidence, session_id);
 }
 
 static cJSON *memory_data_call(cJSON *request)

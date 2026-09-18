@@ -234,9 +234,12 @@ ORDER BY updated_at DESC,id DESC LIMIT $2`
 	return items, rows.Err()
 }
 
-func (s *postgresDataStore) Restore(ctx context.Context, id int64, actor string) (bool, error) {
+func (s *postgresDataStore) Restore(ctx context.Context, id int64, actor string) (out bool, err error) {
+	defer func() {
+		s.recordMutation(DataRequest{Operation: "restore", ID: id}, DataResponse{Updated: out}, err, "")
+	}()
 	var restored int
-	err := s.db.QueryRow(ctx, `WITH target AS (
+	err = s.db.QueryRow(ctx, `WITH target AS (
  SELECT key,content,scope_type,scope_value FROM memories WHERE id=$1
 ), tomb AS (
  UPDATE memory_rejection_tombstones t SET active=0,restored_at=pg_now_text(),restored_by=$2

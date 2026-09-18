@@ -54,6 +54,7 @@ func (s *postgresDataStore) cognifyNext(ctx context.Context, command string) (wo
 	if err != nil {
 		return false, false, err
 	}
+	rewindAudit := s.auditSavepoint()
 	if _, err = s.db.Exec(ctx, `SAVEPOINT memory_cognify_attempt`); err != nil {
 		return false, false, err
 	}
@@ -61,6 +62,7 @@ func (s *postgresDataStore) cognifyNext(ctx context.Context, command string) (wo
 	// and generation locks survive the savepoint and protect the full model call.
 	_, workErr := s.cognify(ctx, id, command, false)
 	if workErr != nil {
+		rewindAudit()
 		if _, err = s.db.Exec(ctx, `ROLLBACK TO SAVEPOINT memory_cognify_attempt`); err != nil {
 			return false, false, err
 		}

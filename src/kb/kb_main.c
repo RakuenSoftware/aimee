@@ -58,7 +58,6 @@
 #include "vault_env_bootstrap.h"      /* first-boot credential env -> Vault */
 #include "vault_config_bootstrap.h"   /* legacy config credential -> Vault */
 #include "runtime_secret.h"           /* wipe Vault-sourced runtime cache at exit */
-#include "kb_memory_audit_bridge.h"   /* record memory mutations on aimee-kb's own obs bus */
 #include "kb_module_stage_adapters.h" /* process-module calls over aimee-kb's event bus */
 #include "kb_obs_bus_adapter.h"       /* bus durability rows -> PostgreSQL WORM */
 #include <aimee/audit/obs_bus.h>
@@ -1789,7 +1788,6 @@ int main(int argc, char **argv)
 
    /* Install KB-owned memory audit and request-context transport hooks. */
    kb_module_stage_adapters_configure();
-   kb_memory_audit_bridge_install();
    memory_bus_set_context_reader(db2_memory_scope_context_get);
 
    /* P7-D3a is an all-or-none service-manager contract. The listener fd and

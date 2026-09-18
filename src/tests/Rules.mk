@@ -6197,31 +6197,12 @@ $(TESTPREFIX)/unit-test-dogfood: $(OBJDIR)/tests/test_dogfood.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 
-# KB store-side memory-audit hook + end-to-end onto aimee-kb's obs_bus/ledger:
-# memory_core_crud (db2 shim) fires the hook, the REAL KB bridge maps it, and the
-# row lands in the ledger. Links the db2-shim memory set plus the bus stack.
-$(TESTPREFIX)/unit-test-memory-audit-hook: $(OBJDIR)/tests/test_memory_audit_hook.o \
-                                           $(OBJDIR)/kb/kb_memory_audit_bridge.o \
-                                           $(OBS_BUS_LINK_OBJS) \
-                                           $(OBJDIR)/modules/audit/audit_ledger.o \
-                                           $(OBJDIR)/core/event_bus/bus_client.o \
-                                           $(OBJDIR)/core/event_bus/bus_attach.o \
-                                           $(OBJDIR)/core/event_bus/bus_host.o \
-                                           $(OBJDIR)/core/event_bus/bus_route.o \
-                                           $(OBJDIR)/core/event_bus/bus_region.o $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                           $(OBJDIR)/core/event_bus/bus_ring.o \
-                                           $(OBJDIR)/core/event_bus/bus_arena.o \
-                                           $(OBJDIR)/core/event_bus/bus_wire.o \
-                                           $(OBJDIR)/core/event_bus/bus_capture.o \
-                                           $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
-
-# NOT in TEST_TARGETS: it links the bus objects, which the standard unit-tests
-# build does not assemble — so the bench gate (check_bus_perf_gate.sh) force-builds
-# and runs it via this .PHONY target, like the other bus tests.
+# Go memory mutations, transaction rollback, authenticated publication and the
+# real daemon ledger. The former C hook fixture has been retired.
 .PHONY: unit-test-memory-audit-hook
-unit-test-memory-audit-hook: $(TESTPREFIX)/unit-test-memory-audit-hook
-	$<
+unit-test-memory-audit-hook: $(TESTPREFIX)/unit-test-bus-memory-audit
+	@test -n "$(AIMEE_DB2_REPLAY_URL)" || { echo "AIMEE_DB2_REPLAY_URL is required for the memory audit replay" >&2; exit 1; }
+	cd ../server-go && AIMEE_AUDIT_LEDGER_FIXTURE="$(abspath $<)" go test -count=1 ./modules/audit ./modules/memory -run '^(TestAction|TestMutationAudit|TestMemoryRuntimeRoleReplay)'
 
 
 # Pure helpers extracted from session_start_emit; the header is static-inline so

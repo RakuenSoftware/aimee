@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -92,5 +94,51 @@ func TestActionBackpressure(t *testing.T) {
 	p = &testPublisher{failure: bus.ErrWouldBlock}
 	if err := PublishAction(deadline, p, action); !errors.Is(err, context.DeadlineExceeded) || p.attempts == 0 {
 		t.Fatal(p, err)
+	}
+}
+
+// The native fixture hosts obs_bus and reads the real ledger. It admits this
+// test executable only for ACTION publication, and acknowledges ledger arrival.
+func TestActionNativeLedger(t *testing.T) {
+	fixture := os.Getenv("AIMEE_AUDIT_LEDGER_FIXTURE")
+	if fixture == "" {
+		t.Skip("set AIMEE_AUDIT_LEDGER_FIXTURE to the native audit fixture")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, fixture, "--go-publisher", executable).CombinedOutput()
+	if err != nil || !bytes.Contains(output, []byte("Go ACTION publisher -> authenticated daemon bus -> ledger: ok")) {
+		t.Fatalf("%s: %v", output, err)
+	}
+}
+
+func TestActionPublisherProcess(t *testing.T) {
+	socket := os.Getenv("AIMEE_AUDIT_FIXTURE_SOCKET")
+	if socket == "" {
+		t.Skip("native fixture child")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	client, err := bus.ConnectClient(ctx, socket, 1, 73)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Detach()
+	if err = PublishAction(ctx, client, Action{Actor: "go\nproducer", Tool: "go.action.fixture", ArgsHash: "v1-", Command: "mk:0123456789ab", Mode: "L2", Reason: "conf=0.88", Verdict: "ok", TaskID: 101}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err = os.Stat(os.Getenv("AIMEE_AUDIT_FIXTURE_ACK")); err == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("ledger did not acknowledge action")
+		case <-time.After(time.Millisecond * 10):
+		}
 	}
 }

@@ -424,6 +424,7 @@ var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
 	auditAction    func(context.Context, audit.Action) error
+	auditBatch     *mutationAuditBatch
 	episodeCommand func(context.Context, string, []byte) ([]byte, error)
 	settings       func() (map[string]any, error)
 	fusionEnabled  bool
@@ -536,7 +537,12 @@ status='ok',last_error='',indexed_at=pg_now_text(),updated_at=pg_now_text()`, re
 	return err
 }
 
-func (s *postgresDataStore) Supersede(ctx context.Context, scope Scope, id int64, content string, confidence float64) (Record, error) {
+func (s *postgresDataStore) Supersede(ctx context.Context, scope Scope, id int64, content string, confidence float64) (out Record, err error) {
+	defer func() {
+		if s.placement == PlacementServer {
+			s.recordMutation(DataRequest{Operation: "supersede", ID: id}, DataResponse{Records: []Record{out}}, err, "")
+		}
+	}()
 	var screenErr error
 	content, screenErr = screenMemoryText(content)
 	if screenErr != nil {
@@ -706,7 +712,15 @@ func searchPattern(query string) string {
 	return "%" + strings.Join(terms, "%") + "%"
 }
 
-func (s *postgresDataStore) Put(ctx context.Context, scope Scope, r Record) (Record, error) {
+func (s *postgresDataStore) Put(ctx context.Context, scope Scope, r Record) (out Record, err error) {
+	merged := false
+	defer func() {
+		tool := ""
+		if merged {
+			tool = "memory.merge"
+		}
+		s.recordMutation(DataRequest{Operation: "store"}, DataResponse{Records: []Record{out}}, err, tool)
+	}()
 	var screenErr error
 	r.Content, screenErr = screenMemoryWrite(r.Key, r.Content)
 	if screenErr != nil {
@@ -727,7 +741,7 @@ ON CONFLICT (kind, key) DO UPDATE SET
 RETURNING id`, r.Kind, r.Tier, r.Key, r.Content, r.Confidence).Scan(&r.ID)
 		return r, err
 	}
-	err := s.db.QueryRow(ctx, `WITH updated AS (
+	err = s.db.QueryRow(ctx, `WITH updated AS (
   UPDATE memories SET tier = $2, content = $4, confidence = $5,
     updated_at = pg_now_text()
   WHERE kind = $1 AND key = $3 AND scope_type = $6 AND scope_value = $7
@@ -740,15 +754,17 @@ RETURNING id`, r.Kind, r.Tier, r.Key, r.Content, r.Confidence).Scan(&r.ID)
   WHERE NOT EXISTS (SELECT 1 FROM updated)
   RETURNING id
 )
-SELECT id FROM updated UNION ALL SELECT id FROM inserted LIMIT 1`,
-		r.Kind, r.Tier, r.Key, r.Content, r.Confidence, scope.Type, scope.Value).Scan(&r.ID)
+SELECT id,true FROM updated UNION ALL SELECT id,false FROM inserted LIMIT 1`,
+		r.Kind, r.Tier, r.Key, r.Content, r.Confidence, scope.Type, scope.Value).Scan(&r.ID, &merged)
 	return r, err
 }
 
-func (s *postgresDataStore) Delete(ctx context.Context, scope Scope, id int64) (bool, error) {
+func (s *postgresDataStore) Delete(ctx context.Context, scope Scope, id int64) (changed bool, err error) {
+	defer func() {
+		s.recordMutation(DataRequest{Operation: "delete", ID: id}, DataResponse{Deleted: changed}, err, "memory.retire")
+	}()
 	var (
 		tag store.Tag
-		err error
 	)
 	if s.placement == PlacementServer {
 		tag, err = s.db.Exec(ctx, `UPDATE user_memories SET lifecycle_state = 'retired', updated_at = now()
@@ -1082,7 +1098,16 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 
 	response := DataResponse{}
 	if backend, ok := options.data.(*postgresDataStore); ok && backend.auditAction != nil {
-		defer func() { publishMutationAudit(backend.auditAction, request, response, status) }()
+		bound := *backend
+		bound.auditBatch = &mutationAuditBatch{}
+		options.data = &bound
+		defer func() {
+			if status == bus.ModuleStatusOK && len(bound.auditBatch.actions) > 0 {
+				bound.auditBatch.flush(bound.auditAction)
+			} else {
+				publishMutationAudit(bound.auditAction, request, response, status)
+			}
+		}()
 	}
 
 	// Request scope used to live on the C connection. Pin it to the Go store
@@ -1095,6 +1120,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 			if err != nil {
 				return nil, bus.ModuleStatusInternal
 			}
+			transaction = backend.auditTransaction(transaction)
 			defer transaction.Rollback(context.Background())
 			principal, authority, transport := "system:model-inference", "model", "internal"
 			if caller := options.commandContext; caller != nil && caller.Authenticated {

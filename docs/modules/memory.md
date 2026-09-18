@@ -684,3 +684,15 @@ no injection; recall-gate off/observe/enforce behavior stays in Go.
 Three C sources and five headers remain in the memory tree. The strict immutable
 G0 audit still reports 254 violations across the remaining files, callers and
 build registrations; pre-injection policy and legacy clients remain migration work.
+
+Go canonical mutation observations now follow their owning transaction, including
+background cognification. Commit releases the bounded ACTION batch; transaction
+rollback and SQL savepoint rollback discard observations for reverted writes.
+The KB memory audit bridge and native memory hook API are removed. A Go producer
+is tested through the authenticated daemon bus into the real audit ledger, and
+restricted-role replay covers failed work whose retry bookkeeping still commits.
+Publication acknowledges enqueue only; transactional SQL WORM remains the durable
+mutation record. Server pre-dispatch refusal hooks and other native memory
+clients still require migration. The current inventory is three C sources
+(353 lines) and five headers in the memory tree, with 169 strict repository-wide
+G0 findings; the immutable baseline is unchanged and G0 remains incomplete.

@@ -43,11 +43,13 @@ func configNumber(values map[string]any, key string) float64 {
 // telemetry writes from a successful memory lookup, including under PostgreSQL's
 // aborted-transaction semantics. The caller's memory scope remains unchanged.
 func (s *postgresDataStore) retrievalPolicyAttempt(ctx context.Context, run func() error) error {
+	rewindAudit := s.auditSavepoint()
 	if _, err := s.db.Exec(ctx, `SAVEPOINT memory_retrieval_policy`); err != nil {
 		return err
 	}
 	err := run()
 	if err != nil {
+		rewindAudit()
 		if _, rollbackErr := s.db.Exec(ctx, `ROLLBACK TO SAVEPOINT memory_retrieval_policy`); rollbackErr != nil {
 			return rollbackErr
 		}

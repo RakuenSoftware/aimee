@@ -287,7 +287,6 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
                                const char *key, const char *content, const char *use_cases,
                                double confidence, const char *session_id,
                                memory_authority_t authority, memory_t *out);
-int memory_reject(int64_t id, const char *reason);
 int memory_stats(memory_stats_t *out);
 
 /* Legacy direct mutation consumers; public authority-preserving edits are
@@ -295,29 +294,6 @@ int memory_stats(memory_stats_t *out);
 int memory_update_content(int64_t id, const char *content);
 int memory_delete(int64_t id);
 
-/* Audit hook: notified after each memory MUTATION at the store — insert, an
- * exact-key or near-duplicate content overwrite ("memory.merge"), update, delete,
- * and reject — with NON-CONTENT fields only: the operation, the memory id, and
- * (for insert/merge) its tier / kind / key identity, confidence, and session. (A
- * supersede is recorded as its follow-on insert.) This fires in aimee-kb, at the
- * authoritative mutation site, so it catches every caller regardless of entry
- * point — agent-driven via kb_client, KB-internal maintenance, and CLI. A
- * KB-side bridge forwards it to aimee-kb's own observability bus. The memory
- * CONTENT (and use_cases / reject reason) — the PII payload — is NEVER passed;
- * and the key/kind, which can themselves embed PII, are fingerprinted by the
- * bridge before they reach any ledger. update/delete/reject carry only the id
- * (the row's identity is not re-read on the mutation path). The memory module has
- * NO event-bus dependency (the bus lives only in the bridge). NULL by default. */
-typedef void (*memory_audit_hook_fn)(const char *op, int64_t id, const char *tier, const char *kind,
-                                     const char *key, double confidence, const char *session_id);
-void memory_set_audit_hook(memory_audit_hook_fn fn);
-
-/* Fire the audit hook directly. INTERNAL to the memory module: mutation sites
- * that live outside memory_core_crud.c (memory_retire in memory_advanced.c) use
- * this so the hook still fires at the authoritative mutation site, as the
- * contract above requires. Not for callers outside the module. */
-void memory_audit_emit(const char *op, int64_t id, const char *tier, const char *kind,
-                       const char *key, double confidence, const char *session_id);
 int memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max);
 
 /* Returns 1 if answer contains at least one citation marker ([#N]). */

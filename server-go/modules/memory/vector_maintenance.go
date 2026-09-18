@@ -44,6 +44,7 @@ func (s *postgresDataStore) vectorTransaction(ctx context.Context, run func(*pos
 		if err != nil {
 			return err
 		}
+		tx = s.auditTransaction(tx)
 		defer tx.Rollback(context.Background())
 		bound := *s
 		bound.db = tx

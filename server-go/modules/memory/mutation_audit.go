@@ -15,7 +15,7 @@ import (
 // The wire contains no content, prose reason or raw memory identity. This is
 // operation telemetry alongside the KB's transactional SQL WORM record, not a
 // replacement for that durable write. Server composition hooks remain until
-// their pre-dispatch refusals and background mutations also migrate.
+// their pre-dispatch refusal policy also migrates.
 func mutationAudit(request DataRequest, response DataResponse, status bus.ModuleStatus) (audit.Action, bool) {
 	a := audit.Action{Actor: "memory", ArgsHash: "v1-", TaskID: request.ID, Verdict: "fail"}
 	success := status == bus.ModuleStatusOK

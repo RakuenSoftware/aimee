@@ -57,31 +57,6 @@ static int domain_bool(const cJSON *response, const char *key)
    return cJSON_IsBool(value) && cJSON_IsTrue(value);
 }
 
-static int domain_id_update(const char *operation, int64_t id, const char *key, const char *value)
-{
-   if (id <= 0)
-      return -1;
-   cJSON *request = domain_request(operation);
-   if (!request || !cJSON_AddNumberToObject(request, "id", (double)id) ||
-       (key && !cJSON_AddStringToObject(request, key, value ? value : "")))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   int ok = domain_bool(response, "updated");
-   cJSON_Delete(response);
-   return ok ? 0 : -1;
-}
-
-int memory_reject(int64_t id, const char *reason)
-{
-   int result = domain_id_update("reject", id, "reason", reason);
-   if (result == 0)
-      memory_audit_emit("memory.reject", id, NULL, NULL, NULL, 0.0, NULL);
-   return result;
-}
-
 int memory_tag_scope(int64_t memory_id, const char *scope_type, const char *scope_value)
 {
    cJSON *request = domain_request("scope-tag");

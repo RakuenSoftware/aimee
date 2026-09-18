@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/audit"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -45,6 +46,8 @@ func exerciseCognifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
 		t.Fatal(err)
 	}
 	s := *backend
+	var observations []audit.Action
+	s.auditAction = func(_ context.Context, a audit.Action) error { observations = append(observations, a); return nil }
 	enabled, async := true, false
 	s.settings = func() (map[string]any, error) {
 		return map[string]any{"memory_cognify_enabled": enabled, "memory_cognify_command": "fixture", "memory_cognify_async_enabled": async}, nil
@@ -96,6 +99,14 @@ func exerciseCognifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
 	r := call("cognify", source, "cognify-visible")
 	if r["status"] != "ok" || r["summary"] != long || calls != 1 {
 		t.Fatal(r, calls)
+	}
+	if len(observations) != 3 {
+		t.Fatal("background claims not observed", observations)
+	}
+	for _, a := range observations {
+		if a.Tool != "memory.insert" || a.Actor != "cognify" || a.Verdict != "ok" {
+			t.Fatal(a)
+		}
 	}
 	scalar := func(sql string, args ...any) int {
 		t.Helper()
@@ -184,7 +195,8 @@ func exerciseCognifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
  VALUES('memory','cognify-refused:value','no','project','cognify-visible')`); err != nil {
 		t.Fatal(err)
 	}
-	reply = map[string]any{"memory_kind": "episodic", "relations": []any{map[string]any{"subject": "rollback", "relation": "uses", "object": "nothing"}}, "claims": []any{map[string]any{"subject": "cognify-refused", "attribute": "value", "value": "no"}}}
+	reply = map[string]any{"memory_kind": "episodic", "relations": []any{map[string]any{"subject": "rollback", "relation": "uses", "object": "nothing"}}, "claims": []any{map[string]any{"subject": "cognify-transient", "attribute": "value", "value": "uncommitted"}, map[string]any{"subject": "cognify-refused", "attribute": "value", "value": "no"}}}
+	auditBefore := len(observations)
 	if r := call("cognify", source, "cognify-visible"); r["kind"] != "unavailable" {
 		t.Fatal(r)
 	}
@@ -194,6 +206,21 @@ func exerciseCognifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
 	if n := scalar(`SELECT count(*) FROM memories WHERE id=$1 AND cognified_memory_kind='procedural'`, source); n != 1 {
 		t.Fatal("kind partially committed", n)
 	}
+
+	if len(observations) != auditBefore || scalar(`SELECT count(*) FROM memories WHERE key='cognify-transient:value'`) != 0 {
+		t.Fatal("rolled-back claim observed", observations[auditBefore:])
+	}
+	async = true
+	if r := call("cognify", source, "cognify-visible"); r["queued"] != true {
+		t.Fatal(r)
+	}
+	if r := call("cognify_drain", 0, "cognify-visible"); r["failed"] != float64(1) {
+		t.Fatal(r)
+	}
+	if len(observations) != auditBefore || scalar(`SELECT count(*) FROM memories WHERE key='cognify-transient:value'`) != 0 {
+		t.Fatal("savepoint rollback observed", observations[auditBefore:])
+	}
+	async = false
 
 	// A plain semantic fact must not be promoted into a behavioral rule.
 	reply = map[string]any{"memory_kind": "semantic", "claims": []any{map[string]any{"subject": "cognify-server", "attribute": "port", "value": "5432"}}}
