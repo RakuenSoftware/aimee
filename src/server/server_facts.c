@@ -14,6 +14,7 @@
 #include "kb_client.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 /* All three are gated on CAP_MEMORY_WRITE, matching memory.supersede — the
  * closest analogue, since none of them destroys a row: retraction stamps or
@@ -49,26 +50,42 @@ cJSON *facts_retract_command(cJSON *req, const char *account)
    int wants_user = cJSON_IsString(jauth) && strcmp(jauth->valuestring, "user") == 0;
    const char *authority = (wants_user && server_account_is_person(account)) ? "user" : "model";
 
-   int retracted = 0;
-   int immutable = 0;
-   if (kb_client_facts_retract(jsrc->valuestring, jrel->valuestring,
-                               cJSON_IsString(jtgt) ? jtgt->valuestring : NULL, authority,
-                               &retracted, &immutable) != 0)
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "source", jsrc->valuestring);
+   cJSON_AddStringToObject(request, "relation", jrel->valuestring);
+   cJSON_AddStringToObject(request, "target", cJSON_IsString(jtgt) ? jtgt->valuestring : "");
+   cJSON_AddStringToObject(request, "authority", authority);
+   char *raw = kb_v1_action_request("facts.retract", request);
+   cJSON *response = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   const char *status = jo_cstr(response, "status");
+   int ok = strcmp(status, "ok") == 0;
+   const cJSON *count = cJSON_GetObjectItemCaseSensitive(response, "retracted");
+   int valid = cJSON_IsObject(response) && ((!ok && strcmp(status, "error") == 0) ||
+                                            (ok && cJSON_IsNumber(count) && count->valueint >= 0 &&
+                                             count->valuedouble == (double)count->valueint));
+   kb_client_memory_audit_note("facts.retract", 0, NULL, jrel->valuestring, NULL, 0.0, NULL,
+                               valid && ok);
+   if (!valid)
    {
-      if (immutable)
-         return server_error_kind_json(
-             SERVER_ERR_INVALID_ARGUMENT,
-             "this relation is immutable; only a user authority may retract it", NULL);
-      return server_error_kind_json(SERVER_ERR_NOT_FOUND,
-                                    "the knowledge service refused the retraction", NULL);
+      cJSON_Delete(response);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                    "fact retraction unavailable or invalid response", NULL);
    }
-
-   cJSON *resp = jo_ok();
-   /* Reported rather than folded into the status: retracting a fact that was
-    * already gone succeeds, and a caller correcting a mistake needs to know
-    * whether anything actually changed. */
-   cJSON_AddNumberToObject(resp, "retracted", retracted);
-   return resp;
+   if (!ok)
+   {
+      const char *kind = jo_cstr(response, "kind");
+      char *owned_kind = strdup(kind[0] ? kind : SERVER_ERR_UNAVAILABLE);
+      if (!owned_kind)
+      {
+         cJSON_Delete(response);
+         return server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                       "fact retraction response unavailable", NULL);
+      }
+      server_error_kind_apply(response, owned_kind);
+      free(owned_kind);
+   }
+   return response;
 }
 
 int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

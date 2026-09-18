@@ -69,6 +69,7 @@ RETIRED_NATIVE_SYMBOLS = re.compile(
     r"\bkb_client_memory_(?:context_block|facts)\b(?=\s*\()|"
     r"\b(?:db2_kb_service_facts_retract_json|kb_handle_facts_retract)\b(?=\s*\()|"
     r"\b(?:db2_fact_retract|db2_fact_mutation_invalidate)\b(?=\s*\()|"
+    r"\bkb_client_facts_retract\b(?=\s*\()|"
     r"\bdb2_fact_candidates\b(?=\s*\()|"
     r"\b(?:memory_graph_(?:relation_gravity|confidence_factor|edge_score|detect_code_shape|expand_from_seeds|point_id_to_node_key|populate_score_parts|distribute_path_credit)|memory_fusion_\w+|memory_apply_feedback_path)\b(?=\s*\()|"
     r"\bdb2_memory_(?:reject|restore)\b(?=\s*\()|"

@@ -602,3 +602,11 @@ are now deleted. Go restricted-role replay covers the remaining native cases:
 nonfunctional sibling values, model/user alias corrections and all three
 immutable relations. Native lifecycle/graph fixtures retain their independent
 review, traversal and rollback checks and pass after the retirement.
+
+The Server's typed fact-retraction client is retired. Its actual consumer
+forwards through the generic authenticated transport, preserves the verified
+account authority cap and content-free audit notification, and retains the Go
+refusal envelope. Missing/malformed replies are unavailable rather than not-found;
+invalid counts cannot become success. Runtime-web maps explicit conflicts to
+HTTP 409. Native consumer tests cover authority, valid zero-count responses,
+refusals, malformed counts and HTTP classification; Go tests cover the status map.
