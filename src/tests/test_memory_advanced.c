@@ -91,50 +91,6 @@ static void test_long_content_survives_store_and_merge(void)
    printf("  long_content_survives_store_and_merge: ok\n");
 }
 
-static void test_memory_rejection_governance(void)
-{
-   reset_db();
-   /* Episodic refusal survives re-extraction and remains human reviewable.
-    * Recall never depends on the old lifecycle feature flags. */
-   {
-      memory_t rejected, replay, found[8];
-      db2_memory_scope_context_set("", "governance-project", 0);
-      assert(memory_insert(TIER_L2, KIND_FACT, "refusal:deploy",
-                           "never deploy directly to production", 0.9, "review-session",
-                           &rejected) == 0);
-
-      /* Application-side filtering remains authoritative even for an owner or
-       * superuser connection that PostgreSQL permits to bypass RLS. */
-      db2_memory_scope_context_set("", "other-project", 0);
-      db2_memory_review_row_t review[8];
-      assert(db2_memory_review_list("", 8, review, 8) == 0);
-      assert(db2_memory_reject(rejected.id, "cross-project rejection") == -1);
-
-      db2_memory_scope_context_set("", "governance-project", 0);
-      assert(db2_memory_reject(rejected.id, "operator says this extraction is wrong") == 0);
-      assert(db2_memory_find_facts_like("never deploy directly", 8, found, 8) == 0);
-
-      int review_count = db2_memory_review_list("rejected", 8, review, 8);
-      assert(review_count == 1);
-      assert(review[0].id == rejected.id);
-      assert(strcmp(review[0].scope_type, "project") == 0);
-      assert(strcmp(review[0].scope_value, "governance-project") == 0);
-      assert(strstr(review[0].review_reason, "operator") != NULL);
-      assert(db2_memory_rejection_blocks(review[0].key, review[0].content) == 1);
-      assert(memory_insert(TIER_L2, KIND_FACT, "refusal:deploy",
-                           "never deploy directly to production", 0.9, "second-extraction",
-                           &replay) == -1);
-
-      db2_memory_scope_context_set("", "other-project", 0);
-      assert(db2_memory_restore(rejected.id, "test:other-operator") == -1);
-      db2_memory_scope_context_set("", "governance-project", 0);
-      assert(db2_memory_restore(rejected.id, "test:operator") == 0);
-      assert(db2_memory_find_facts_like("never deploy directly", 8, found, 8) == 1);
-      assert(found[0].id == rejected.id);
-      db2_memory_scope_context_clear();
-   }
-}
-
 static int64_t insert_raw_fact(const char *key, const char *content)
 {
    char err[128] = "";
@@ -2092,7 +2048,6 @@ int main(void)
       printf("  timestamp_writers_agree: ok\n");
    }
 
-   test_memory_rejection_governance();
    test_long_content_survives_store_and_merge();
    db2_test_shim_close();
    db1_shutdown();

@@ -175,3 +175,70 @@ SET LOCAL ROLE memory_mutation_test;`)
 		}
 	}
 }
+
+// The former console/native rejection fixture now exercises the enforcing Go
+// owner with the packaged role, scopes, durable tombstones and replayed writes.
+func exerciseRejectionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+	t.Helper()
+	caller := bus.CommandContext{Authenticated: true, Principal: "scope:console-admin:review", TransportIdentity: "verified-console", UserAuthority: true}
+	call := func(verb string, args map[string]any) map[string]any {
+		t.Helper()
+		raw, _ := json.Marshal(args)
+		out, status := invokeContextCommand(t, handler, 0, caller, verb, string(raw))
+		if status != bus.ModuleStatusOK {
+			t.Fatal(out, status)
+		}
+		return out
+	}
+	original := map[string]any{"key": "refusal:deploy", "content": "never deploy directly to production", "tier": "L2", "scope_context": true, "project": "governance-project"}
+	created := call("store", original)
+	if created["status"] != "ok" {
+		t.Fatal(created)
+	}
+	id := int64(created["id"].(float64))
+	review := map[string]any{"id": id, "reason": "operator says this extraction is wrong", "scope_context": true, "project": "other-project"}
+	if r := call("reject", review); r["kind"] != "not_found" {
+		t.Fatal("cross-project rejection", r)
+	}
+	review["project"] = "governance-project"
+	if r := call("reject", review); r["status"] != "ok" {
+		t.Fatal(r)
+	}
+	var archived bool
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state='archived' AND activation_suppressed=1 FROM memories WHERE id=$1`, id).Scan(&archived); err != nil || !archived {
+		t.Fatal("rejection only demoted confidence", archived, err)
+	}
+	if r := call("store", original); r["kind"] != "unavailable" {
+		t.Fatal("re-extraction bypassed refusal", r)
+	}
+	list := call("review_console", map[string]any{"state": "rejected"})
+	found := false
+	for _, raw := range list["memories"].([]any) {
+		row := raw.(map[string]any)
+		if row["id"] == float64(id) {
+			found = row["scope_type"] == "project" && row["scope_value"] == "governance-project" && row["review_reason"] == review["reason"]
+		}
+	}
+	if !found {
+		t.Fatal("refusal absent from human review", list)
+	}
+	review["project"] = "other-project"
+	if r := call("restore", review); r["kind"] != "not_found" {
+		t.Fatal("cross-project restore", r)
+	}
+	review["project"] = "governance-project"
+	review["actor"] = "forged"
+	if r := call("restore", review); r["status"] != "ok" {
+		t.Fatal(r)
+	}
+	var restored string
+	if err := tx.QueryRow(ctx, `SELECT restored_by FROM memory_rejection_tombstones WHERE memory_key='refusal:deploy' AND scope_value='governance-project' AND active=0`).Scan(&restored); err != nil || restored != caller.Principal {
+		t.Fatal("restore identity", restored, err)
+	}
+	if r := call("get", review); r["status"] != "ok" || r["memory"].(map[string]any)["content"] != original["content"] {
+		t.Fatal(r)
+	}
+	if r := call("store", original); r["status"] != "ok" || r["id"] != float64(id) {
+		t.Fatal(r)
+	}
+}

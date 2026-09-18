@@ -2723,6 +2723,9 @@ static void test_console_pipeline(void)
    printf("  PASS: console pipeline (registry + key allowlist)\n");
 }
 
+static const char *review_reply;
+static int review_transport = 1;
+static int review_calls;
 static void test_console_memories(void)
 {
    extern void test_kb_fact_actor_set(int enabled);
@@ -2750,6 +2753,28 @@ static void test_console_memories(void)
                            sizeof(buf)) == 405);
    assert(kb_http_route_ex("GET", "/v1/console/memories/review", NULL, NULL, NULL, NULL, 0, buf,
                            sizeof(buf)) == 405);
+   const char *failures[] = {"bad-json", "{}", "{\"status\":\"error\",\"kind\":\"not_found\"}",
+                             "{\"status\":\"error\",\"kind\":\"forbidden\"}"};
+   const int codes[] = {503, 503, 404, 403};
+   for (unsigned i = 0; i < sizeof(codes) / sizeof(codes[0]); i++)
+   {
+      review_reply = failures[i];
+      assert(kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, restore,
+                              (int)strlen(restore), buf, sizeof(buf)) == codes[i]);
+   }
+   review_reply = NULL;
+   review_transport = -1;
+   assert(kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, restore,
+                           (int)strlen(restore), buf, sizeof(buf)) == 503);
+   review_transport = 1;
+   const char *fraction = "{\"memory_id\":42.5,\"action\":\"reject\"}";
+   int before = review_calls;
+   assert(kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, fraction,
+                           (int)strlen(fraction), buf, sizeof(buf)) == 400);
+   test_kb_fact_actor_set(0);
+   assert(kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, restore,
+                           (int)strlen(restore), buf, sizeof(buf)) == 403);
+   assert(review_calls == before);
    test_kb_fact_actor_set(0);
    printf("  PASS: console memory review (list + reject + restore)\n");
 }
@@ -4602,18 +4627,31 @@ static int g_vec_search_unavailable = 0;
 static int g_vec_unauthorized = 0;
 /* The module's query behavior is exercised in Go; this fixture owns HTTP
  * rendering of its command result. */
-cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const char *verb,
-                                 const cJSON *args)
+int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
+                                           const cJSON *context, cJSON **result)
 {
-   (void)event_kind;
-   (void)stage_id;
-   (void)args;
-   assert(strcmp(verb, "review_console") == 0);
-   return cJSON_Parse("{\"status\":\"ok\",\"schema\":\"console.memories.v1\",\"memories\":[]}");
+   review_calls++;
+   assert(strcmp(method, "memory.reject") == 0 || strcmp(method, "memory.restore") == 0);
+   assert(jo_i64((cJSON *)args, "id", 0) == 42);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
+   assert(strcmp(jo_cstr(context, "principal"), "test:operator") == 0);
+   assert(strcmp(jo_cstr(context, "transport_identity"), "test-transport") == 0);
+   assert(!cJSON_GetObjectItemCaseSensitive(args, "actor"));
+   *result = review_transport == 1
+                 ? cJSON_Parse(review_reply ? review_reply : "{\"status\":\"ok\"}")
+                 : NULL;
+   return review_transport;
 }
 
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
+   if (strcmp(method, "memory.review_console") == 0)
+   {
+      *result =
+          cJSON_Parse("{\"status\":\"ok\",\"schema\":\"console.memories.v1\",\"memories\":[]}");
+      return 1;
+   }
    if (strcmp(method, "memory.runtime") == 0)
    {
       if (strcmp(jo_cstr(args, "operation"), "record") == 0)

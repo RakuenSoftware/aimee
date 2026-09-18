@@ -789,10 +789,6 @@ extern "C"
    /* UPDATE memories SET content = ? WHERE id = ?. Returns rows changed. */
    int db2_memory_update_content(int64_t memory_id, const char *content);
 
-   /* UPDATE memories SET confidence = GREATEST(confidence - 0.1, 0.0) WHERE id = ?.
-    * Returns 0 on success, -1 on failure. */
-   int db2_memory_reject(int64_t memory_id, const char *reason);
-
    typedef struct
    {
       int64_t id;
@@ -811,10 +807,6 @@ extern "C"
 
    /* Human review/history surface. Ordinary recall never uses this function. */
    int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t *out, int max);
-   /* Explicit human restore: deactivates the value tombstone and returns the
-    * retained row to active in the same transaction. */
-   int db2_memory_restore(int64_t memory_id, const char *actor);
-
    /* SELECT lineage rows for an (object_type, object_id) pair. memory_lineage_t
     * lives in headers/memory.h; callers must include "aimee.h" before this
     * header for the type to resolve. Returns count written. */

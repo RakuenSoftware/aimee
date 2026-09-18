@@ -519,3 +519,11 @@ text. The old Go DB1 queue remains a migration concern for pre-existing jobs;
 new work is owned by the shared KB memory queue. The unused native DB1 queue
 bindings and their fixed-width client header are also deleted; queue behavior
 is exercised through the Go owner and PostgreSQL.
+
+Console memory review now uses generic Go commands with the authenticated
+operator context separate from action JSON. Reject creates the canonical scoped
+refusal and suppresses the memory, rather than merely lowering confidence; the
+old reject/restore adapters are deleted. Restore retains the verified actor.
+Restricted-role replay covers scope isolation, blocked re-extraction, review
+visibility and restore, while native HTTP tests distinguish missing/forbidden
+responses from unavailable or malformed replies and reject fractional IDs.

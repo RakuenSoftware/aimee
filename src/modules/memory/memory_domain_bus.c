@@ -489,25 +489,3 @@ int db2_memory_promotion_demote_id(int64_t memory_id)
 {
    return domain_id_update("demote-confidence", memory_id, NULL, NULL) == 0 ? 1 : 0;
 }
-
-int db2_memory_reject(int64_t memory_id, const char *reason)
-{
-   (void)reason;
-   return domain_id_update("demote-confidence", memory_id, NULL, NULL);
-}
-
-int db2_memory_restore(int64_t memory_id, const char *actor)
-{
-   cJSON *request = domain_request("restore");
-   if (!request || memory_id <= 0 || !actor || !actor[0] ||
-       !cJSON_AddNumberToObject(request, "id", (double)memory_id) ||
-       !cJSON_AddStringToObject(request, "actor", actor))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   int updated = domain_bool(response, "updated");
-   cJSON_Delete(response);
-   return updated ? 0 : -1;
-}

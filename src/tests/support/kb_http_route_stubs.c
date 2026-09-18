@@ -47,20 +47,6 @@ int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t
    return 0;
 }
 
-int db2_memory_reject(int64_t id, const char *reason)
-{
-   (void)id;
-   (void)reason;
-   return 0;
-}
-
-int db2_memory_restore(int64_t id, const char *actor)
-{
-   (void)id;
-   (void)actor;
-   return 0;
-}
-
 int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
 {
    (void)cert_issuer;

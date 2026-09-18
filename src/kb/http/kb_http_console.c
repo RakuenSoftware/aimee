@@ -5,7 +5,7 @@
 
 #include "aimee.h" /* now_utc */
 #include "module_commands.h"
-#include "aimee/memory/module_api.h"
+#include "json_fluent.h"
 #include "cJSON.h"
 #include "config.h"
 #include "config_client.h"
@@ -16,12 +16,11 @@
 #include "modules/db2/c/kb_service_backend.h" /* async queue status */
 #include "modules/db2/c/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
 #include "modules/db2/c/fact_mutation.h"      /* assertion review/rollback/removal */
-#include "modules/db2/c/memory_query.h"       /* human memory review/restore */
-#include "modules/db2/c/memory_scope_query.h" /* operator all-scope review */
 #include "modules/db2/c/evidence_lifecycle.h" /* P1-P9 operator evidence surface */
 #include "modules/db2/c/entity_registry.h"    /* entity merge/unmerge review */
 #include "rel_types.h"                        /* REL_TYPE_NAME_MAX */
 #include "runtime_secret.h"
+#include <math.h>
 #include <openssl/crypto.h> /* wipe transient credential request copies */
 
 #include <stdio.h>
@@ -300,11 +299,12 @@ static int console_typed_facts(char *out_buf, int out_cap)
 static int console_memories(char *out_buf, int out_cap)
 {
    cJSON *req = cJSON_CreateObject();
-   cJSON *root = aimee_module_command_call(AIMEE_MEMORY_EVENT_COMMAND, AIMEE_MEMORY_STAGE_COMMAND,
-                                           "review_console", req);
+   cJSON *root = NULL;
+   int rc = aimee_module_commands_dispatch_internal("memory.review_console", req, &root);
    cJSON_Delete(req);
-   if (!root)
+   if (rc != 1 || !root || strcmp(jo_cstr(root, "status"), "ok") != 0)
    {
+      cJSON_Delete(root);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory review unavailable\"}");
       return 500;
    }
@@ -320,7 +320,11 @@ static int console_memory_review(const char *body, char *out_buf, int out_cap)
    const char *reason =
        req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "reason")) : NULL;
    cJSON *idj = req ? cJSON_GetObjectItemCaseSensitive(req, "memory_id") : NULL;
-   int64_t id = cJSON_IsNumber(idj) && idj->valuedouble > 0 ? (int64_t)idj->valuedouble : 0;
+   int64_t id = cJSON_IsNumber(idj) && isfinite(idj->valuedouble) && idj->valuedouble > 0 &&
+                        idj->valuedouble <= 9007199254740991.0 &&
+                        trunc(idj->valuedouble) == idj->valuedouble
+                    ? (int64_t)idj->valuedouble
+                    : 0;
    if (!id || !action || (strcmp(action, "reject") != 0 && strcmp(action, "restore") != 0))
    {
       cJSON_Delete(req);
@@ -337,16 +341,38 @@ static int console_memory_review(const char *body, char *out_buf, int out_cap)
    }
    char action_copy[16];
    snprintf(action_copy, sizeof(action_copy), "%s", action);
-   db2_memory_scope_context_set("", "", 1);
-   int rc = strcmp(action, "reject") == 0 ? db2_memory_reject(id, reason)
-                                          : db2_memory_restore(id, actor.principal);
-   db2_memory_scope_context_clear();
+   /* The console route has authenticated the operator. Preserve that verified
+    * identity separately from the untrusted action body on the generic bus. */
+   cJSON *args = cJSON_CreateObject();
+   cJSON *context = cJSON_CreateObject();
+   cJSON_AddNumberToObject(args, "id", (double)id);
+   cJSON_AddStringToObject(args, "reason", reason ? reason : "");
+   cJSON_AddBoolToObject(context, "authenticated", 1);
+   cJSON_AddBoolToObject(context, "user_authority", 1);
+   cJSON_AddStringToObject(context, "principal", actor.principal);
+   cJSON_AddStringToObject(context, "transport_identity", actor.transport_identity);
+   cJSON *reply = NULL;
+   int rc = args && context
+                ? aimee_module_commands_dispatch_context(
+                      strcmp(action, "reject") == 0 ? "memory.reject" : "memory.restore", args,
+                      context, &reply)
+                : -1;
+   cJSON_Delete(args);
+   cJSON_Delete(context);
    cJSON_Delete(req);
-   if (rc != 0)
+   if (rc != 1 || !cJSON_IsObject(reply) || strcmp(jo_cstr(reply, "status"), "ok") != 0)
    {
+      int status = rc == 1 && !strcmp(jo_cstr(reply, "kind"), "not_found") ? 404
+                   : rc == 1 && (!strcmp(jo_cstr(reply, "kind"), "unauthorized") ||
+                                 !strcmp(jo_cstr(reply, "kind"), "forbidden"))
+                       ? 403
+                   : rc == 1 && !strcmp(jo_cstr(reply, "kind"), "conflict") ? 409
+                                                                            : 503;
+      cJSON_Delete(reply);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory review transition failed\"}");
-      return 409;
+      return status;
    }
+   cJSON_Delete(reply);
    snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"memory_id\":%lld,\"action\":\"%s\"}",
             (long long)id, action_copy);
    return 200;
@@ -512,7 +538,11 @@ static int console_typed_facts_assertion(const char *body, char *out_buf, int ou
    const char *action =
        req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
    cJSON *idj = req ? cJSON_GetObjectItemCaseSensitive(req, "assertion_id") : NULL;
-   int64_t id = cJSON_IsNumber(idj) && idj->valuedouble > 0 ? (int64_t)idj->valuedouble : 0;
+   int64_t id = cJSON_IsNumber(idj) && isfinite(idj->valuedouble) && idj->valuedouble > 0 &&
+                        idj->valuedouble <= 9007199254740991.0 &&
+                        trunc(idj->valuedouble) == idj->valuedouble
+                    ? (int64_t)idj->valuedouble
+                    : 0;
    fact_review_action_t review;
    if (action && strcmp(action, "approve") == 0)
       review = FACT_REVIEW_APPROVE;
