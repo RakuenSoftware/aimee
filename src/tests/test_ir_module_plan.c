@@ -12,6 +12,7 @@
 #include "config.h"
 #include "platform_test_util.h"
 #include "kb_client.h"
+#include "support/module_runtime_fixture.h"
 
 /* When set, the recall stubs return nothing so ingress_preinject_build → NULL
  * (the "pre-injection off / recall empty" path). */
@@ -48,6 +49,8 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    const char *operation =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
    assert(operation);
+   if (strncmp(operation, "ingress-task-", 13) == 0)
+      return module_runtime_fixture_call(request, result);
    *result = cJSON_CreateObject();
    cJSON_AddStringToObject(*result, "status", "ok");
    assert(strcmp(operation, "gateway-plan") == 0);

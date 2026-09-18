@@ -10,6 +10,23 @@
 #include "config.h"
 #include "kb_client.h"
 #include "request_context.h"
+#include "support/module_runtime_fixture.h"
+
+static int g_runtime_failure;
+
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
+                                                    int timeout_ms, cJSON **result)
+{
+   assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 500);
+   if (g_runtime_failure)
+   {
+      *result = g_runtime_failure == 1 ? NULL
+                                       : cJSON_Parse("{\"status\":\"error\",\"block\":\"must not "
+                                                     "inject\",\"item_count\":1,\"confidence\":1}");
+      return g_runtime_failure == 1 ? -1 : 1;
+   }
+   return module_runtime_fixture_call(request, result);
+}
 
 static const char *g_context_mode = "observe";
 static int g_context_calls = 0;
@@ -894,8 +911,31 @@ static void test_fact_command_failures(void)
    g_facts_failure = 0;
 }
 
+static void test_go_owner_unavailable(void)
+{
+   for (int failure = 1; failure <= 2; failure++)
+   {
+      g_runtime_failure = failure;
+      int count = 9;
+      double confidence = 1;
+      assert(ingress_preinject_format_task_context("{}", "active-project", &count, &confidence) ==
+             NULL);
+      assert(count == 0 && confidence == 0);
+      g_context_mode = "on";
+      ingress_preinject_set_session_id("owner-unavailable");
+      int calls = g_context_calls;
+      assert(ingress_preinject_build("fix local resolver", 0) == NULL);
+      assert(g_context_calls == calls);
+   }
+   g_runtime_failure = 0;
+   g_context_mode = "observe";
+   ingress_preinject_set_session_id(NULL);
+   printf("go_owner_unavailable OK\n");
+}
+
 int main(void)
 {
+   test_go_owner_unavailable();
    test_fact_command_failures();
    printf("ingress_preinject: ");
    test_confidence_tiers();

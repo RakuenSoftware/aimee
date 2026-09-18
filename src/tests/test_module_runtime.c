@@ -844,8 +844,36 @@ static void smoke_host_gateway_plan(bus_client_t *host)
    assert(cJSON_GetArraySize(indices) == 2 && cJSON_GetArrayItem(indices, 0)->valueint == 2 &&
           cJSON_GetArrayItem(indices, 1)->valueint == 0);
    cJSON_Delete(plan);
+   const char *claim = "{\"operation\":\"ingress-task-claim\",\"session\":\"live\",\"project\":"
+                       "\"p\",\"query\":\"fix resolver\"}";
+   plan = host_plan(&client, claim);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "fetch")));
+   cJSON_Delete(plan);
+   plan = host_plan(&client, claim);
+   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(plan, "fetch")));
+   cJSON_Delete(plan);
+   plan = host_plan(
+       &client, "{\"operation\":\"ingress-task-rearm\",\"session\":\"live\",\"project\":\"p\"}");
+   cJSON_Delete(plan);
+   plan = host_plan(&client, claim);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "fetch")));
+   cJSON_Delete(plan);
+   plan =
+       host_plan(&client, "{\"operation\":\"ingress-task-packet\",\"project\":\"p\",\"packet\":{"
+                          "\"status\":\"ok\",\"project\":\"p\",\"generation\":7,\"freshness\":"
+                          "\"current\",\"resolved\":true,"
+                          "\"max_results\":4,\"max_tokens\":1200,\"item_count\":1,"
+                          "\"answerability\":{\"decision\":\"answerable\"},"
+                          "\"results\":[{\"project\":\"p\",\"file_path\":\"local.go\","
+                          "\"generation\":7,\"freshness\":\"current\","
+                          "\"confidence\":0.9,\"accepted\":true,\"provenance\":[\"code\"],\"span\":"
+                          "{\"kind\":\"line\",\"line_start\":12,\"line_end\":12}}],\"why\":[]}}");
+   assert(strstr(json_string(plan, "block"), "local.go:12 [confidence=0.90; provenance=code]") !=
+          NULL);
+   assert(cJSON_GetObjectItemCaseSensitive(plan, "item_count")->valueint == 1);
+   cJSON_Delete(plan);
    aimee_module_client_destroy(&client);
-   puts("memory: authenticated host/Go process gateway plans passed");
+   puts("memory: authenticated host/Go process gateway plans and ingress task policy passed");
 }
 
 int main(int argc, char **argv)

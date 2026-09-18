@@ -1000,7 +1000,7 @@ proxy-tests: $(BINARY)
 	AIMEE_TEST_PROXY_BINARY="$(abspath $(BINARY))" python3 ../scripts/tests/test_thin_client_proxy.py -v
 
 unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) proxy-tests $(OBJDIR)/aimee-module $(OBJDIR)/aimee-module-config \
-            $(UNIT_TEST_TARGETS) $(UNIT_TEST_AUX_TARGETS) $(OBJDIR)/aimee-providers-fixture
+            $(UNIT_TEST_TARGETS) $(UNIT_TEST_AUX_TARGETS) $(OBJDIR)/aimee-providers-fixture $(OBJDIR)/aimee-memory-fixture
 	@if ! printf '%s:%s\n' "$(UNIT_TEST_SHARD_COUNT)" "$(UNIT_TEST_SHARD_INDEX)" | \
 	     awk -F: '$$1 ~ /^[0-9]+$$/ && $$2 ~ /^[0-9]+$$/ && $$1 > 0 && $$2 < $$1 { ok=1 } END { exit !ok }'; then \
 	  echo "invalid unit-test shard $(UNIT_TEST_SHARD_INDEX)/$(UNIT_TEST_SHARD_COUNT)" >&2; \
@@ -1054,6 +1054,7 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) proxy-tests $(OBJDIR)/aimee-module 
 	export AIMEE_TEST_FAILURE_DIR="$$fd"; \
 	export AIMEE_TEST_MODULE_BIN="$(CURDIR)/$(OBJDIR)/aimee-module"; \
 	export AIMEE_CONFIG_TEST_DEFAULTS="$(CONFIG_TEST_DEFAULTS)"; \
+	export AIMEE_TEST_RUNTIME_FIXTURE="$(CURDIR)/$(OBJDIR)/aimee-memory-fixture"; \
 	export AIMEE_PROVIDERS_TEST_MODULE="$(CURDIR)/$(OBJDIR)/aimee-providers-fixture"; \
 	export AIMEE_CONFIG_TEST_MODULE="$(CURDIR)/$(OBJDIR)/aimee-module-config"; \
 	export AIMEE_CONFIG_TEST_HOST_HOME="$$HOME"; \
@@ -1653,7 +1654,8 @@ $(TESTPREFIX)/unit-test-text: $(OBJDIR)/tests/test_text.o $(OBJDIR)/util.o $(OBJ
 $(TESTPREFIX)/unit-test-ingress-preinject: $(OBJDIR)/tests/test_ingress_preinject.o \
                      $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/request_context.o \
                      $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o \
-                     $(OBJDIR)/log.o $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o
+                     $(OBJDIR)/log.o $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o \
+                     $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-code-span: $(OBJDIR)/tests/test_code_span.o \
@@ -1671,7 +1673,8 @@ $(TESTPREFIX)/unit-test-ir-module-plan: $(OBJDIR)/tests/test_ir_module_plan.o \
                      $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/aimee_ir_session.o \
                      $(OBJDIR)/core/turn_integrity/turn_integrity.o \
                      $(OBJDIR)/aimee_sha256.o \
-                     $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o
+                     $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o \
+                     $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-codex-auth: $(OBJDIR)/tests/test_codex_auth.o \
@@ -7924,3 +7927,8 @@ $(TESTPREFIX)/unit-test-server-facts-transport: $(OBJDIR)/tests/test_server_fact
 
 $(TESTPREFIX)/unit-test-memory-view-transport: $(OBJDIR)/tests/test_memory_view_transport.o $(OBJDIR)/session_briefing.o $(OBJDIR)/dashboard_kb.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+# Real shared Go memory owner behind native compatibility fixtures.
+$(OBJDIR)/aimee-memory-fixture: $(wildcard ../server-go/modules/memory/*.go) ../server-go/modules/memory/testdata/nativefixture/main.go
+	@mkdir -p $(dir $@)
+	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../src/$@ ./modules/memory/testdata/nativefixture

@@ -14,8 +14,7 @@
 #include "platform_random.h"
 #include "agent_code_capabilities.h"
 #include "integrity.h"
-#include <ctype.h>
-#include <pthread.h>
+#include "module_commands.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -80,19 +79,28 @@ const char *ingress_preinject_turn_id(void)
 
 static __thread char g_session_id[64] = "";
 
-#define INGRESS_TASK_SESSION_SLOTS 64
-
-typedef struct
+/* Transitional host transport for the remaining ingress caller. Task tracking,
+ * validation and rendering all execute in the same supervised Go owner. */
+static cJSON *ingress_runtime_request(const char *operation, const char *session,
+                                      const char *project, const char *query)
 {
-   char session[64];
-   char project[256];
-   uint64_t token_bits;
-   uint64_t used_at;
-} ingress_task_session_t;
-
-static ingress_task_session_t g_task_sessions[INGRESS_TASK_SESSION_SLOTS];
-static pthread_mutex_t g_task_sessions_mu = PTHREAD_MUTEX_INITIALIZER;
-static uint64_t g_task_sessions_clock;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", operation);
+   cJSON_AddStringToObject(request, "session", session ? session : "");
+   cJSON_AddStringToObject(request, "project", project ? project : "");
+   cJSON_AddStringToObject(request, "query", query ? query : "");
+   cJSON *response = NULL;
+   int rc =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 500, &response);
+   cJSON_Delete(request);
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+   if (rc != 1 || !status || strcmp(status, "ok") != 0)
+   {
+      cJSON_Delete(response);
+      return NULL;
+   }
+   return response;
+}
 
 void ingress_preinject_set_session_id(const char *session_id)
 {
@@ -109,81 +117,15 @@ const char *ingress_preinject_session_id(void)
 
 void ingress_preinject_task_state_reset(void)
 {
-   pthread_mutex_lock(&g_task_sessions_mu);
-   memset(g_task_sessions, 0, sizeof(g_task_sessions));
-   g_task_sessions_clock = 0;
-   pthread_mutex_unlock(&g_task_sessions_mu);
-}
-
-static uint64_t ingress_task_token_bits(const char *query)
-{
-   uint64_t bits = 0;
-   const unsigned char *p = (const unsigned char *)(query ? query : "");
-   while (*p)
-   {
-      while (*p && !isalnum(*p) && *p != '_')
-         p++;
-      uint64_t h = 1469598103934665603ULL;
-      int n = 0;
-      while (*p && (isalnum(*p) || *p == '_'))
-      {
-         h ^= (uint64_t)tolower(*p++);
-         h *= 1099511628211ULL;
-         n++;
-      }
-      if (n >= 2)
-         bits |= 1ULL << (h & 63U);
-   }
-   return bits ? bits : 1ULL;
+   cJSON_Delete(ingress_runtime_request("ingress-task-reset", NULL, NULL, NULL));
 }
 
 static int ingress_preinject_first_task_turn(const char *session, const char *project,
                                              const char *query)
 {
-   if (!session || !session[0] || !project || !project[0])
-      return 0;
-   uint64_t bits = ingress_task_token_bits(query);
-   int fetch = 0;
-   pthread_mutex_lock(&g_task_sessions_mu);
-   int slot = -1;
-   int oldest = 0;
-   for (int i = 0; i < INGRESS_TASK_SESSION_SLOTS; i++)
-   {
-      if (!g_task_sessions[i].session[0])
-      {
-         if (slot < 0)
-            slot = i;
-         continue;
-      }
-      if (strcmp(g_task_sessions[i].session, session) == 0 &&
-          strcmp(g_task_sessions[i].project, project) == 0)
-      {
-         slot = i;
-         break;
-      }
-      if (g_task_sessions[i].used_at < g_task_sessions[oldest].used_at)
-         oldest = i;
-   }
-   if (slot < 0)
-      slot = oldest;
-   ingress_task_session_t *state = &g_task_sessions[slot];
-   if (!state->session[0] || strcmp(state->session, session) != 0 ||
-       strcmp(state->project, project) != 0)
-      fetch = 1;
-   else
-   {
-      unsigned common = (unsigned)__builtin_popcountll(state->token_bits & bits);
-      unsigned total = (unsigned)__builtin_popcountll(state->token_bits | bits);
-      /* A low-overlap turn is a new task. Follow-ups usually retain at least a
-       * third of their salient vocabulary; the bounded bitset intentionally
-       * errs toward observing rather than injecting on every wording change. */
-      fetch = total == 0 || (common * 3U < total);
-   }
-   snprintf(state->session, sizeof(state->session), "%s", session);
-   snprintf(state->project, sizeof(state->project), "%s", project);
-   state->token_bits = bits;
-   state->used_at = ++g_task_sessions_clock;
-   pthread_mutex_unlock(&g_task_sessions_mu);
+   cJSON *response = ingress_runtime_request("ingress-task-claim", session, project, query);
+   int fetch = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "fetch"));
+   cJSON_Delete(response);
    return fetch;
 }
 
@@ -206,17 +148,7 @@ long long ingress_preinject_recall_unavailable_total(void)
  * use the breaker's single recovery probe without restarting the client. */
 static void ingress_preinject_rearm_unavailable(const char *session, const char *project)
 {
-   if (!session || !session[0] || !project || !project[0])
-      return;
-   pthread_mutex_lock(&g_task_sessions_mu);
-   for (int i = 0; i < INGRESS_TASK_SESSION_SLOTS; i++)
-      if (strcmp(g_task_sessions[i].session, session) == 0 &&
-          strcmp(g_task_sessions[i].project, project) == 0)
-      {
-         memset(&g_task_sessions[i], 0, sizeof(g_task_sessions[i]));
-         break;
-      }
-   pthread_mutex_unlock(&g_task_sessions_mu);
+   cJSON_Delete(ingress_runtime_request("ingress-task-rearm", session, project, NULL));
 }
 
 static long ingress_elapsed_ms(const struct timespec *start, const struct timespec *end)
@@ -362,206 +294,44 @@ static void append_single_line_escaped(dstr_t *d, const char *s, size_t max_char
    }
 }
 
-static int context_string_eq(const cJSON *object, const char *field, const char *expected)
-{
-   const cJSON *value = cJSON_GetObjectItemCaseSensitive(object, field);
-   return cJSON_IsString(value) && value->valuestring && strcmp(value->valuestring, expected) == 0;
-}
-
-static int context_number_positive(const cJSON *object, const char *field, long long *out)
-{
-   const cJSON *value = cJSON_GetObjectItemCaseSensitive(object, field);
-   if (!cJSON_IsNumber(value) || value->valuedouble <= 0)
-      return 0;
-   if (out)
-      *out = (long long)value->valuedouble;
-   return 1;
-}
-
-static int context_number_eq(const cJSON *object, const char *field, int expected)
-{
-   const cJSON *value = cJSON_GetObjectItemCaseSensitive(object, field);
-   return cJSON_IsNumber(value) && value->valuedouble == (double)expected;
-}
-
-static int context_provenance_allowed(const char *value)
-{
-   return value && (strcmp(value, "code") == 0 || strcmp(value, "graph") == 0 ||
-                    strcmp(value, "vector") == 0 || strcmp(value, "memory") == 0);
-}
-
+/* The host supplies the retrieved packet and verified active project. Validation
+ * and rendering belong to the shared Go memory owner. No native fallback. */
 char *ingress_preinject_format_task_context(const char *json, const char *active_project,
                                             int *item_count_out, double *confidence_out)
 {
    if (item_count_out)
       *item_count_out = 0;
    if (confidence_out)
-      *confidence_out = 0.0;
-   if (!json || !active_project || !active_project[0])
+      *confidence_out = 0;
+   if (!json || !active_project)
       return NULL;
-
-   cJSON *root = cJSON_Parse(json);
-   long long generation = 0;
-   const cJSON *answerability =
-       root ? cJSON_GetObjectItemCaseSensitive(root, "answerability") : NULL;
-   const cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
-   const cJSON *why = root ? cJSON_GetObjectItemCaseSensitive(root, "why") : NULL;
-   if (!root || !context_string_eq(root, "status", "ok") ||
-       !context_string_eq(root, "project", active_project) ||
-       !context_string_eq(root, "freshness", "current") ||
-       !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "resolved")) ||
-       !context_number_positive(root, "generation", &generation) ||
-       !cJSON_IsObject(answerability) ||
-       !context_string_eq(answerability, "decision", "answerable") || !cJSON_IsArray(results) ||
-       !cJSON_IsArray(why) || cJSON_GetArraySize(results) < 1 || cJSON_GetArraySize(results) > 4 ||
-       cJSON_GetArraySize(results) + cJSON_GetArraySize(why) > 4 ||
-       !context_number_eq(root, "max_results", 4) || !context_number_eq(root, "max_tokens", 1200) ||
-       !context_number_eq(root, "item_count",
-                          cJSON_GetArraySize(results) + cJSON_GetArraySize(why)))
-   {
-      cJSON_Delete(root);
+   cJSON *packet = cJSON_Parse(json);
+   if (!packet)
       return NULL;
-   }
-
-   dstr_t block;
-   dstr_init(&block);
-   dstr_append_str(&block, "recommended (task-conditioned code; project=");
-   append_single_line_escaped(&block, active_project, 512);
-   dstr_appendf(&block, "; generation=%lld):\n", generation);
-   int kept = 0;
-   double top = 0.0;
-   const cJSON *row = NULL;
-   cJSON_ArrayForEach(row, results)
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "ingress-task-packet");
+   cJSON_AddStringToObject(request, "project", active_project);
+   cJSON_AddItemToObject(request, "packet", packet);
+   cJSON *response = NULL;
+   int rc =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 500, &response);
+   cJSON_Delete(request);
+   char *result = NULL;
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+   const char *block = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block"));
+   const cJSON *count = cJSON_GetObjectItemCaseSensitive(response, "item_count");
+   const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(response, "confidence");
+   if (rc == 1 && status && strcmp(status, "ok") == 0 && block && block[0] &&
+       cJSON_IsNumber(count) && cJSON_IsNumber(confidence))
    {
-      const cJSON *path = cJSON_GetObjectItemCaseSensitive(row, "file_path");
-      const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(row, "confidence");
-      const cJSON *accepted = cJSON_GetObjectItemCaseSensitive(row, "accepted");
-      const cJSON *provenance = cJSON_GetObjectItemCaseSensitive(row, "provenance");
-      const cJSON *span = cJSON_GetObjectItemCaseSensitive(row, "span");
-      long long row_generation = 0;
-      const cJSON *line_start =
-          cJSON_IsObject(span) ? cJSON_GetObjectItemCaseSensitive(span, "line_start") : NULL;
-      const cJSON *line_end =
-          cJSON_IsObject(span) ? cJSON_GetObjectItemCaseSensitive(span, "line_end") : NULL;
-      int line_span = cJSON_IsNumber(line_start) && line_start->valueint > 0;
-      if (!cJSON_IsString(path) || !path->valuestring[0] ||
-          !context_string_eq(row, "project", active_project) ||
-          !context_string_eq(row, "freshness", "current") ||
-          !context_number_positive(row, "generation", &row_generation) ||
-          row_generation != generation || !cJSON_IsTrue(accepted) || !cJSON_IsNumber(confidence) ||
-          confidence->valuedouble <= 0.0 || confidence->valuedouble > 1.0 ||
-          !cJSON_IsArray(provenance) || cJSON_GetArraySize(provenance) < 1 ||
-          !cJSON_IsObject(span) || !cJSON_IsNumber(line_start) || !cJSON_IsNumber(line_end) ||
-          !context_string_eq(span, "kind", line_span ? "line" : "file") ||
-          (line_span && line_end->valueint < line_start->valueint) ||
-          (!line_span && (line_start->valueint != 0 || line_end->valueint != 0)))
-      {
-         dstr_free(&block);
-         cJSON_Delete(root);
-         return NULL;
-      }
-
-      dstr_t item;
-      dstr_init(&item);
-      dstr_append_str(&item, "  - ");
-      append_single_line_escaped(&item, path->valuestring, 512);
-      if (line_span)
-         dstr_appendf(&item, ":%d", line_start->valueint);
-      dstr_appendf(&item, " [confidence=%.2f; provenance=", confidence->valuedouble);
-      const cJSON *signal = NULL;
-      int signal_i = 0;
-      cJSON_ArrayForEach(signal, provenance)
-      {
-         if (!cJSON_IsString(signal) || !context_provenance_allowed(signal->valuestring))
-         {
-            dstr_free(&item);
-            dstr_free(&block);
-            cJSON_Delete(root);
-            return NULL;
-         }
-         if (signal_i++)
-            dstr_append_char(&item, ',');
-         append_single_line_escaped(&item, signal->valuestring, 32);
-      }
-      dstr_append_str(&item, "]\n");
-      const cJSON *snippet = cJSON_GetObjectItemCaseSensitive(row, "snippet");
-      if (cJSON_IsString(snippet) && snippet->valuestring[0])
-      {
-         dstr_append_str(&item, "    > ");
-         append_single_line_escaped(&item, snippet->valuestring, 480);
-         dstr_append_char(&item, '\n');
-      }
-      if (dstr_len(&block) + dstr_len(&item) > 4800)
-      {
-         dstr_free(&item);
-         break;
-      }
-      dstr_append(&block, dstr_cstr(&item), dstr_len(&item));
-      dstr_free(&item);
-      kept++;
-      if (confidence->valuedouble > top)
-         top = confidence->valuedouble;
+      result = strdup(block);
+      if (result && item_count_out)
+         *item_count_out = count->valueint;
+      if (result && confidence_out)
+         *confidence_out = confidence->valuedouble;
    }
-
-   const cJSON *memory = NULL;
-   cJSON_ArrayForEach(memory, why)
-   {
-      if (kept >= 4)
-         break;
-      const cJSON *anchor = cJSON_GetObjectItemCaseSensitive(memory, "anchor");
-      const cJSON *content = cJSON_GetObjectItemCaseSensitive(memory, "content");
-      const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(memory, "confidence");
-      const cJSON *memory_id = cJSON_GetObjectItemCaseSensitive(memory, "memory_id");
-      long long anchor_generation = 0;
-      if (!cJSON_IsObject(anchor) || !context_string_eq(anchor, "project", active_project) ||
-          !context_string_eq(anchor, "freshness", "current") ||
-          !context_number_positive(anchor, "generation", &anchor_generation) ||
-          anchor_generation != generation || !cJSON_IsString(content) || !content->valuestring[0] ||
-          !context_string_eq(memory, "scope", "project") ||
-          !context_string_eq(memory, "provenance", "memory") || !cJSON_IsNumber(memory_id) ||
-          memory_id->valuedouble <= 0 || !cJSON_IsNumber(confidence) ||
-          confidence->valuedouble <= 0 || confidence->valuedouble > 1.0)
-      {
-         dstr_free(&block);
-         cJSON_Delete(root);
-         return NULL;
-      }
-      dstr_t item;
-      dstr_init(&item);
-      dstr_appendf(&item, "  - memory[project; confidence=%.2f] anchored to ",
-                   confidence->valuedouble);
-      const cJSON *anchor_path = cJSON_GetObjectItemCaseSensitive(anchor, "file_path");
-      if (!cJSON_IsString(anchor_path) || !anchor_path->valuestring[0])
-      {
-         dstr_free(&item);
-         dstr_free(&block);
-         cJSON_Delete(root);
-         return NULL;
-      }
-      append_single_line_escaped(&item, anchor_path->valuestring, 256);
-      dstr_append_str(&item, ": ");
-      append_single_line_escaped(&item, content->valuestring, 320);
-      dstr_append_char(&item, '\n');
-      if (dstr_len(&block) + dstr_len(&item) > 4800)
-      {
-         dstr_free(&item);
-         break;
-      }
-      dstr_append(&block, dstr_cstr(&item), dstr_len(&item));
-      dstr_free(&item);
-      kept++;
-   }
-   cJSON_Delete(root);
-   if (kept == 0)
-   {
-      dstr_free(&block);
-      return NULL;
-   }
-   if (item_count_out)
-      *item_count_out = kept;
-   if (confidence_out)
-      *confidence_out = top;
-   return dstr_steal(&block);
+   cJSON_Delete(response);
+   return result;
 }
 
 char *ingress_render_block(const ingress_entry_t *entries, int count, size_t envelope_budget,

@@ -381,6 +381,12 @@
     },
     {
       "ctest": false,
+      "make": true,
+      "module": "ir",
+      "test": "src/tests/test_ir_module_plan.c"
+    },
+    {
+      "ctest": false,
       "make": false,
       "module": "ir",
       "test": "src/tests/test_panel_ir_contract.c"
@@ -522,12 +528,6 @@
       "make": true,
       "module": "learning",
       "test": "src/tests/test_learning_bundle.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_gw_stage_memory.c"
     },
     {
       "ctest": true,

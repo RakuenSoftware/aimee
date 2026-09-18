@@ -462,6 +462,18 @@ Three C sources and five headers remain in the memory tree. The strict immutable
 G0 audit still reports 254 violations across the remaining files, callers and
 build registrations; pre-injection policy and legacy clients remain migration work.
 
+Task-conditioned ingress now uses Go for its bounded 64-session history,
+atomic first-task claims, low-overlap task changes and recovery after unavailable
+KB retrieval. The same Go owner validates the complete task packet before
+rendering its bounded prefix, so a large earlier row cannot conceal later
+foreign/stale evidence. Packet identities and spans reject fractional/overflow
+values; long project identities and UTF-8 truncation remain intact. Native
+retrieval continues on the authenticated, scoped KB connection. Native fixtures
+invoke the real Go handler, and live trusted-host tests cover claims, recovery
+and packet rendering in both placements. An unavailable Go task owner suppresses
+the task packet. Other pre-injection assembly/rendering and native communication
+remain G0 work; this change does not complete the migration.
+
 The current inventory is three C sources and five headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

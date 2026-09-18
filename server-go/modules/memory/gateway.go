@@ -13,6 +13,7 @@ import (
 // Gateway counters belong to one module handler/process, not to native callers.
 // Evaluated outcomes stay separate: unnecessary recall cannot cancel missed recall.
 type gatewayState struct {
+	tasks             ingressTaskState
 	predictedSkip     atomic.Uint64
 	predictedRetrieve atomic.Uint64
 	wronglySkipped    atomic.Uint64
