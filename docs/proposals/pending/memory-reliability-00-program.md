@@ -474,6 +474,17 @@ and packet rendering in both placements. An unavailable Go task owner suppresses
 the task packet. Other pre-injection assembly/rendering and native communication
 remain G0 work; this change does not complete the migration.
 
+The shared Go owner now assembles ingress envelopes: code compression, escaped
+memory previews, grouping, byte budgets, omissions, fact/temporal/audit sections
+and confidence all run there. Native renderer types/helpers and the separate
+confidence provider are deleted. Go ports retain the renderer goldens, and the
+actual native builder reproduces its prior full-envelope fixture through the
+real Go handler. Decimal transport preserves full int64 memory IDs. The native
+integrity gate examines the final envelope, unavailable assembly yields no
+injection, and failure to mint an audit event now releases request scope.
+Live tests exercise assembly in both placements. Retrieval selection, audit
+policy and transitional native transport still prevent G0 completion.
+
 The current inventory is three C sources and five headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

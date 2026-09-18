@@ -10,7 +10,6 @@
 #include <aimee/delegates/delegate_patch_coordinator.h>
 #include <aimee/git/git_ops.h>
 #include "gw_stage_governance.h"
-#include "ingress_preinject.h"
 #include "wfe_advance.h"
 #include <aimee/learning/learning.h>
 #include "response_dedup.h"
@@ -135,44 +134,6 @@ cJSON *server_module_memory_data(const cJSON *request)
       decoded = cJSON_ParseWithLength((const char *)response, response_len);
    free(response);
    return decoded;
-}
-
-static int memory_confidence(double score, const char **confidence)
-{
-   if (!confidence)
-      return -1;
-   cJSON *request = cJSON_CreateObject(), *response = NULL;
-   if (!request)
-      return -1;
-   cJSON_AddStringToObject(request, "operation", "confidence");
-   cJSON_AddNumberToObject(request, "score", score);
-   int dispatched =
-       aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 500, &response);
-   cJSON_Delete(request);
-   const char *value =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "confidence"));
-   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
-   int result = -1;
-   if (dispatched > 0 && status && strcmp(status, "ok") == 0 && value)
-   {
-      if (strcmp(value, "high") == 0)
-      {
-         *confidence = "high";
-         result = 0;
-      }
-      else if (strcmp(value, "medium") == 0)
-      {
-         *confidence = "medium";
-         result = 0;
-      }
-      else if (strcmp(value, "low") == 0)
-      {
-         *confidence = "low";
-         result = 0;
-      }
-   }
-   cJSON_Delete(response);
-   return result;
 }
 
 static int learning_classify(const char *signal, uint32_t *sink_mask)
@@ -1122,7 +1083,6 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
 
 void server_module_stage_adapters_configure(void)
 {
-   ingress_preinject_register_confidence_provider(memory_confidence);
    learning_router_register_signal_classifier(learning_classify);
    delegate_role_register_canonicalizer(delegate_canonicalize);
    delegate_routing_register_capability_provider(delegate_infer_caps);

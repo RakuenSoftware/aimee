@@ -49,7 +49,7 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    const char *operation =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
    assert(operation);
-   if (strncmp(operation, "ingress-task-", 13) == 0)
+   if (strncmp(operation, "ingress-", 8) == 0)
       return module_runtime_fixture_call(request, result);
    *result = cJSON_CreateObject();
    cJSON_AddStringToObject(*result, "status", "ok");
@@ -339,14 +339,6 @@ int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *ro
 int platform_random_bytes(void *buf, size_t len)
 {
    memset(buf, 0x5a, len);
-   return 0;
-}
-
-static int test_confidence_provider(double score, const char **confidence)
-{
-   if (!confidence)
-      return -1;
-   *confidence = score >= 0.66 ? "high" : score >= 0.33 ? "medium" : "low";
    return 0;
 }
 
@@ -714,7 +706,6 @@ static void test_generic_bindings_full_text_and_epoch(void)
 int main(void)
 {
    printf("test_ir_module_plan:\n");
-   ingress_preinject_register_confidence_provider(test_confidence_provider);
    test_system_prompt_raw_env();
    test_gate_reply_and_audit();
    test_disabled_noop();

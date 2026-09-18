@@ -16,6 +16,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "ingress-assemble":
+		return handleIngressAssembly(args)
 	case "ingress-task-packet":
 		return handleIngressTaskPacket(args)
 	case "ingress-task-claim", "ingress-task-rearm", "ingress-task-reset":

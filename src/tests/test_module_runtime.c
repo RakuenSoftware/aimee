@@ -872,8 +872,18 @@ static void smoke_host_gateway_plan(bus_client_t *host)
           NULL);
    assert(cJSON_GetObjectItemCaseSensitive(plan, "item_count")->valueint == 1);
    cJSON_Delete(plan);
+   plan =
+       host_plan(&client, "{\"operation\":\"ingress-assemble\",\"budget\":1200,\"code\":[{\"file_"
+                          "path\":\"local.go\",\"snippet\":\"local resolver\",\"line\":12}],"
+                          "\"memories\":[{\"id\":\"9223372036854775807\",\"headline\":\"Use the "
+                          "local resolver.\",\"score\":0.95}]}");
+   const char *envelope = json_string(plan, "envelope");
+   assert(strstr(envelope, "<aimee-context confidence=\"low\">") == envelope);
+   assert(strstr(envelope, "memory:9223372036854775807") != NULL);
+   assert(strstr(envelope, "local.go\n    > local resolver") != NULL);
+   cJSON_Delete(plan);
    aimee_module_client_destroy(&client);
-   puts("memory: authenticated host/Go process gateway plans and ingress task policy passed");
+   puts("memory: authenticated host/Go process gateway plans and ingress policy passed");
 }
 
 int main(int argc, char **argv)
