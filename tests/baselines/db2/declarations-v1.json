@@ -14425,7 +14425,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 62
+          "line": 56
         }
       ],
       "signature": "void db2_memory_scope_bind_current ( aimee_pg_stmt_t * st )",
@@ -14476,41 +14476,6 @@
       "signature_sha256": "55d1008e106a1147103b87726e4c0833c1a94acbe8962c4d65b71b3e4ba658a9",
       "status": "reviewed",
       "symbol": "db2_memory_scope_context_get"
-    },
-    {
-      "consumers": [
-        "src/tests/test_workspace_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 56
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "Per-candidate rank probes would expose chatty implicit state; DB2 applies scope ranking inside the complete bounded memory search and returns only the ranked result set."
-      },
-      "signature": "int db2_memory_scope_context_rank ( int64_t memory_id )",
-      "signature_sha256": "284878b4cdc500db2a5e7288465e3522ff5481857669ffec3f8ddaf7c0de5845",
-      "status": "reviewed",
-      "symbol": "db2_memory_scope_context_rank"
-    },
-    {
-      "consumers": [
-        "src/tests/test_workspace_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 61
-        }
-      ],
-      "signature": "int db2_memory_scope_context_rank_batch ( const int64_t * ids , int n , int * out_ranks )",
-      "signature_sha256": "869d561d1b609e2cd140ab99a45f58cb08ab768e957bac3787c253d2e73679aa",
-      "status": "private-test-only",
-      "symbol": "db2_memory_scope_context_rank_batch"
     },
     {
       "consumers": [
@@ -21230,15 +21195,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "277de7a02a5537e7d2c1cb5bde97d5ad07f68eaa4975c6fc674752975767c7d4",
+  "fingerprint": "49f2c64f371335d6fda689697adca68dc3c0f61e2900d2bbfb601496eccce046",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 457,
-    "declarations": 1171,
+    "declarations": 1169,
     "headers": 134,
     "internal_unconsumed": 202,
-    "private_test_only": 318,
-    "reviewed": 194
+    "private_test_only": 317,
+    "reviewed": 193
   }
 }

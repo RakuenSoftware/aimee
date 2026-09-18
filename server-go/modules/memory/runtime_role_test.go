@@ -126,6 +126,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	exerciseDemotionReplay(t, ctx, tx, handler)
 	exerciseCodeContextReplay(t, ctx, tx, handler)
+	exerciseScopeReplay(t, ctx, tx, handler)
 	call := func(request DataRequest) DataResponse {
 		t.Helper()
 		reply, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request))

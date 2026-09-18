@@ -58,6 +58,7 @@ CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text DEFAUL
  lifecycle_state text DEFAULT 'active',use_cases text DEFAULT 'answer questions',last_used_at text DEFAULT '',source_session text DEFAULT 'session-1',provenance_category text DEFAULT 'human',
  valid_from text DEFAULT '2026-01-01',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_summaries(id bigserial PRIMARY KEY,memory_id bigint,scope text,summary text);
+CREATE TEMP TABLE memory_workspaces(memory_id bigint,workspace text,PRIMARY KEY(memory_id,workspace));
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text,UNIQUE(memory_id,scope_type,scope_value));
 INSERT INTO memories(key,content) VALUES ('release',repeat('memory detail ',700));
 INSERT INTO memories(key,lifecycle_state,valid_until) VALUES ('release#v1','superseded','2026-06-01');
@@ -158,7 +159,7 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 GRANT USAGE ON SCHEMA record_command_test TO memory_record_test;
 GRANT SELECT,UPDATE ON memories TO memory_record_test;
 GRANT SELECT ON memory_summaries TO memory_record_test;
-GRANT SELECT,INSERT ON memory_scopes TO memory_record_test;
+GRANT SELECT,INSERT ON memory_scopes,memory_workspaces TO memory_record_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY test_memory_visibility ON memories USING
  (scope_type='global' OR current_setting('aimee.memory_scope_all',true)='1' OR

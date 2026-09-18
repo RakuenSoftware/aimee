@@ -415,8 +415,6 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
 
    memory_t facts[64];
    db2_memory_scope_context_set("active-workspace", "active-project", 0);
-   assert(db2_memory_scope_context_rank(local.id) == 3);
-   assert(db2_memory_scope_context_rank(workspace_mem.id) == 2);
    int direct_count = db2_memory_find_facts_like("crowdout routing needle", 2, facts, 64);
    assert(direct_count == 2);
    assert(facts[0].id == local.id);
@@ -447,7 +445,6 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
    {
       assert(facts[i].id != local.id);
       assert(facts[i].id != workspace_mem.id);
-      assert(memory_scope_visibility_rank(facts[i].id, NULL, NULL) == 1);
    }
 
    db2_memory_scope_context_set("active-workspace", "active-project", 0);
@@ -522,26 +519,6 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
    db2_memory_lifecycle_superseded_t superseded[2];
    count = db2_memory_lifecycle_list_newly_superseded(NULL, superseded, 1);
    assert(count == 1 && superseded[0].memory_id == local.id);
-
-   teardown();
-}
-
-static void test_collect_scopes_defaults_legacy_rows_to_global(void)
-{
-   setup();
-   memory_t mem;
-   memory_insert(TIER_L2, KIND_FACT, "legacy-scope", "legacy content", 0.9, "s1", &mem);
-
-   memory_scope_tag_t scopes[4];
-   int count = memory_collect_scopes(mem.id, scopes, 4);
-   assert(count == 1);
-   assert(strcmp(scopes[0].type, "global") == 0);
-   assert(strcmp(scopes[0].value, "_global") == 0);
-
-   char primary_value[128];
-   memory_scope_level_t level = memory_primary_scope(mem.id, primary_value, sizeof(primary_value));
-   assert(level == MEMORY_SCOPE_GLOBAL);
-   assert(strcmp(primary_value, "_global") == 0);
 
    teardown();
 }
@@ -715,73 +692,11 @@ static void test_api_memory_stats_includes_functional_tiers(void)
    teardown();
 }
 
-/* ---------------------------------------------------------------------------
- * Ranking a candidate set must cost ONE statement, not one per candidate.
- *
- * Two assertions, and the first matters more: the batch reader must agree with
- * the single-id reader on every id. This is a visibility ladder -- a batch form
- * that ranks even one row differently silently changes who can see what, and
- * that would be a far worse bug than the latency it set out to fix.
- *
- * The second asserts round-trip COUNT rather than elapsed time: deterministic,
- * no clock, no load sensitivity, and it fails identically on every machine.
- */
+/* Scope collection and the one-statement rank equivalence tests now run at
+ * the shared Go owner in scope_owner_test.go. */
+
 void aimee_pg_test_stmt_count_reset(void);
 long aimee_pg_test_stmt_count(void);
-
-static void test_scope_rank_batch_matches_single_and_costs_one_statement(void)
-{
-   setup();
-   db2_memory_scope_context_set("active-workspace", "active-project", 0);
-
-   /* One memory per rank tier, plus an unscoped row and an id that does not
-    * exist -- the two cases a naive IN(...) batch gets wrong. */
-   memory_t proj, ws, shared, plain;
-   memory_insert(TIER_L2, KIND_FACT, "rb-proj", "batch rank project row", 0.9, "s", &proj);
-   memory_insert(TIER_L2, KIND_FACT, "rb-ws", "batch rank workspace row", 0.9, "s", &ws);
-   memory_insert(TIER_L2, KIND_FACT, "rb-shared", "batch rank shared row", 0.9, "s", &shared);
-   memory_insert(TIER_L2, KIND_FACT, "rb-plain", "batch rank unscoped row", 0.9, "s", &plain);
-   assert(memory_tag_project(proj.id, "active-project") == 0);
-   assert(memory_tag_workspace(ws.id, "active-workspace") == 0);
-   assert(memory_tag_workspace(shared.id, SHARED_WORKSPACE) == 0);
-
-   int64_t ids[6];
-   ids[0] = proj.id;
-   ids[1] = ws.id;
-   ids[2] = shared.id;
-   ids[3] = plain.id;
-   ids[4] = proj.id;         /* a repeated id must rank at BOTH positions */
-   ids[5] = plain.id + 9999; /* absent from `memories` -> rank 0 */
-
-   int single[6];
-   for (int i = 0; i < 6; i++)
-      single[i] = db2_memory_scope_context_rank(ids[i]);
-
-   int batch[6];
-   aimee_pg_test_stmt_count_reset();
-   db2_memory_scope_context_rank_batch(ids, 6, batch);
-   long batch_stmts = aimee_pg_test_stmt_count();
-
-   /* Equivalence: identical verdict for every position, repeats and misses too. */
-   for (int i = 0; i < 6; i++)
-      assert(batch[i] == single[i]);
-   assert(batch[5] == 0);        /* absent id */
-   assert(batch[0] == batch[4]); /* repeated id ranked twice */
-
-   /* Cost: one statement for six ids, not six. */
-   assert(batch_stmts == 1);
-
-   /* And the single-id reader really is the per-id shape being replaced, so the
-    * saving is proportional to the candidate set rather than a constant. */
-   aimee_pg_test_stmt_count_reset();
-   for (int i = 0; i < 6; i++)
-      (void)db2_memory_scope_context_rank(ids[i]);
-   assert(aimee_pg_test_stmt_count() == 6);
-
-   db2_memory_scope_context_clear();
-   teardown();
-   printf("  PASS: test_scope_rank_batch_matches_single_and_costs_one_statement\n");
-}
 
 static void test_indexed_lexical_recall_and_substring_compatibility(void)
 {
@@ -851,7 +766,6 @@ int main(void)
 {
    test_indexed_lexical_recall_and_substring_compatibility();
    test_memory_link_batch_matches_single_query_surface();
-   test_scope_rank_batch_matches_single_and_costs_one_statement();
    test_tag_workspace();
    test_tag_generic_scope();
    test_tag_multiple_workspaces();
@@ -865,7 +779,6 @@ int main(void)
    test_scoped_retrieval_filters_results();
    test_visible_retrieval_prefers_narrower_scope();
    test_local_first_applies_before_limits_across_memory_surfaces();
-   test_collect_scopes_defaults_legacy_rows_to_global();
    test_ws_context_prefers_project_scope_when_available();
    test_api_memory_stats_includes_scope_counts();
    test_api_memory_stats_includes_functional_tiers();

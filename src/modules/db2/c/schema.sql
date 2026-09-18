@@ -17762,6 +17762,7 @@ BEGIN
   IF to_regclass('code_embeddings') IS NOT NULL THEN
     GRANT SELECT(point_id,project,generation,node_key) ON code_embeddings TO aimee_store_runtime;
   END IF;
+  GRANT SELECT,INSERT ON memory_workspaces TO aimee_store_runtime;
   GRANT SELECT,INSERT ON fact_review_actions TO aimee_store_runtime;
   GRANT USAGE,SELECT ON SEQUENCE fact_review_actions_id_seq TO aimee_store_runtime;
   GRANT SELECT(version,active) ON ontology_package_versions TO aimee_store_runtime;
@@ -17802,5 +17803,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '11')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '12')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

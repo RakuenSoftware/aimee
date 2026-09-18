@@ -146,6 +146,7 @@
     "server-go/modules/memory/command_routes_test.go",
     "server-go/modules/memory/public_records_test.go",
     "server-go/modules/memory/public_runtime_test.go",
+    "server-go/modules/memory/scope_owner_test.go",
     "server-go/modules/memory/public_ontology_test.go",
     "server-go/modules/memory/context_assembly_test.go",
     "server-go/modules/memory/public_mutations_test.go",

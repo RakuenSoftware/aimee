@@ -475,27 +475,10 @@ int memory_find_facts_visible_ex(const char *query, const char *workspace, const
 /* --- Window Compaction --- */
 
 /* --- Workspace Scoping --- */
-typedef enum
-{
-   MEMORY_SCOPE_NONE = 0,
-   MEMORY_SCOPE_GLOBAL,
-   MEMORY_SCOPE_WORKSPACE,
-   MEMORY_SCOPE_PROJECT
-} memory_scope_level_t;
-
-typedef struct
-{
-   char type[16];
-   char value[128];
-} memory_scope_tag_t;
-
 int memory_tag_global(int64_t memory_id);
 int memory_tag_project(int64_t memory_id, const char *project);
 int memory_tag_workspace(int64_t memory_id, const char *workspace);
 int memory_tag_scope(int64_t memory_id, const char *scope_type, const char *scope_value);
-int memory_collect_scopes(int64_t memory_id, memory_scope_tag_t *out, int max);
-memory_scope_level_t memory_primary_scope(int64_t memory_id, char *value, size_t value_len);
-int memory_scope_visibility_rank(int64_t memory_id, const char *workspace, const char *project);
 
 /* --- Canonical filter / scope contract (memory-public-contract) --- */
 

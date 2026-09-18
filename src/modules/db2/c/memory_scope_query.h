@@ -6,7 +6,7 @@
 
 /* Canonical local-first rank for a memory id.  Ownership lives on the memory
  * row itself; memory_scopes remains a compatibility/multi-tag projection.
- * Keep this SQL equivalent to memory_scope_visibility_rank(): active project,
+ * Keep this SQL equivalent to the Go memory scope ranks: active project,
  * active workspace, shared/global, then explicit-all others.
  *
  * The request context is thread-local because KB worker threads may serve
@@ -53,12 +53,6 @@ void db2_memory_scope_context_set_exact(const char *workspace, const char *proje
                                         int include_all);
 void db2_memory_scope_context_clear(void);
 void db2_memory_scope_context_get(db2_memory_scope_context_t *out);
-int db2_memory_scope_context_rank(int64_t memory_id);
-
-/* Rank every id in one statement instead of one per id. out_ranks must hold n
- * ints; an id with no row keeps rank 0. Returns the number of positions
- * ranked. Prefer this wherever a whole candidate set is being ranked. */
-int db2_memory_scope_context_rank_batch(const int64_t *ids, int n, int *out_ranks);
 void db2_memory_scope_bind_current(aimee_pg_stmt_t *st);
 
 #endif

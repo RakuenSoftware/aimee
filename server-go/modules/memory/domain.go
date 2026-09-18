@@ -300,13 +300,23 @@ func (s *postgresDataStore) ScopeTag(ctx context.Context, id int64, scope Scope)
 	if err := s.requireKBDomain(); err != nil {
 		return false, err
 	}
-	tag, err := s.db.Exec(ctx, `UPDATE memories SET scope_type=$2,scope_value=$3,updated_at=pg_now_text() WHERE id=$1`, id, scope.Type, scope.Value)
-	if err != nil || tag.RowsAffected() == 0 {
+	scope, err := normalizeScope(PlacementKB, scope)
+	if err != nil {
 		return false, err
 	}
-	_, err = s.db.Exec(ctx, `INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
-VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, id, scope.Type, scope.Value)
-	return err == nil, err
+	// One statement keeps canonical ownership and compatibility projections
+	// atomic, including callers already inside a larger transaction.
+	var updated bool
+	err = s.db.QueryRow(ctx, `WITH changed AS (
+ UPDATE memories SET scope_type=$2,scope_value=$3,updated_at=pg_now_text() WHERE id=$1 RETURNING id
+), tags AS (
+ INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
+ SELECT id,$2,$3 FROM changed WHERE true ON CONFLICT DO NOTHING
+), workspaces AS (
+ INSERT INTO memory_workspaces(memory_id,workspace)
+ SELECT id,$3 FROM changed WHERE $2='workspace' ON CONFLICT DO NOTHING
+) SELECT EXISTS(SELECT 1 FROM changed)`, id, scope.Type, scope.Value).Scan(&updated)
+	return updated, err
 }
 
 func (s *postgresDataStore) ScopeCollect(ctx context.Context, id int64) ([]ScopeTag, error) {
@@ -315,9 +325,9 @@ func (s *postgresDataStore) ScopeCollect(ctx context.Context, id int64) ([]Scope
 	}
 	rows, err := s.db.Query(ctx, `SELECT scope_type,scope_value FROM (
  SELECT scope_type,scope_value,0 AS ordering FROM memories WHERE id=$1
- UNION SELECT scope_type,scope_value,1 FROM memory_scopes WHERE memory_id=$1
+ UNION ALL SELECT scope_type,scope_value,1 FROM memory_scopes WHERE memory_id=$1
  AND memory_id IN (SELECT id FROM memories)
-) s ORDER BY ordering,scope_type,scope_value`, id)
+) s GROUP BY scope_type,scope_value ORDER BY MIN(ordering),scope_type,scope_value`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -338,25 +348,12 @@ func (s *postgresDataStore) PrimaryScope(ctx context.Context, id int64) (ScopeTa
 	if err != nil {
 		return ScopeTag{}, err
 	}
-	rank := func(kind string) int {
-		switch kind {
-		case "project":
-			return 3
-		case "workspace":
-			return 2
-		case "global":
-			return 1
-		default:
-			return 0
-		}
+	// Collection puts the canonical row first. Historical tags describe
+	// provenance; they cannot override current ownership after a scope change.
+	if len(tags) == 0 {
+		return ScopeTag{}, nil
 	}
-	primary := ScopeTag{}
-	for _, tag := range tags {
-		if rank(tag.Type) > rank(primary.Type) {
-			primary = tag
-		}
-	}
-	return primary, nil
+	return tags[0], nil
 }
 
 func (s *postgresDataStore) ScopeRanks(ctx context.Context, ids []int64, workspace, project string, includeAll bool) ([]ScopeRank, error) {

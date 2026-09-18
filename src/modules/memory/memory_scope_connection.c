@@ -1,8 +1,8 @@
 /* Per-request memory scope carried by the KB connection thread.
  *
- * This is intentionally C: it binds request context onto the legacy PostgreSQL
- * connection and contains no ranking or visibility policy. Rank decisions are
- * delegated to the Go memory module through memory_scope_visibility_rank().
+ * Temporary connection boundary while the remaining native DB2 callers migrate.
+ * It binds request context onto their PostgreSQL connection; ranking and
+ * visibility decisions belong to the Go memory owner.
  */
 #include "aimee.h"
 #include "memory_scope_query.h"
@@ -42,15 +42,6 @@ void db2_memory_scope_context_get(db2_memory_scope_context_t *out)
 {
    if (out)
       *out = current_scope;
-}
-
-int db2_memory_scope_context_rank(int64_t memory_id)
-{
-   if (!current_scope.active)
-      return 1;
-   if (current_scope.include_all)
-      return 1;
-   return memory_scope_visibility_rank(memory_id, current_scope.workspace, current_scope.project);
 }
 
 void db2_memory_scope_bind_current(aimee_pg_stmt_t *statement)
