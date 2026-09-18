@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+void mem_ontology(app_ctx_t *, int, char **);
 void mem_assemble(app_ctx_t *, int, char **);
 void mem_cognify(app_ctx_t *, int, char **);
 void mem_drain(app_ctx_t *, int, char **);
@@ -64,6 +65,30 @@ char *kb_v1_action_request_with_timeout(const char *method, cJSON *args, int tim
 }
 char *kb_v1_action_request(const char *method, cJSON *args)
 {
+   if (!strcmp(method, "memory.ontology"))
+   {
+      assert(jo_bool(args, "scope_context", 0));
+      assert(!strcmp(jo_cstr(args, "project"), "cognify-test"));
+      int walk = !strcmp(jo_cstr(args, "action"), "walk");
+      if (walk)
+      {
+         assert(!strcmp(jo_cstr(args, "entity"), "root"));
+         assert(jo_int(args, "hops", 0) == 3);
+         cJSON *rels = cJSON_GetObjectItemCaseSensitive(args, "relations");
+         assert(cJSON_GetArraySize(rels) == 2);
+         assert(!strcmp(cJSON_GetArrayItem(rels, 0)->valuestring, "calls"));
+         assert(!strcmp(cJSON_GetArrayItem(rels, 1)->valuestring, "works_for"));
+      }
+      cJSON_Delete(args);
+      if (unavailable)
+         return NULL;
+      if (forced)
+         return strdup(forced);
+      return strdup(walk ? "{\"status\":\"ok\",\"entries\":[{\"hop\":1,\"target\":\"b\"}],\"text\":"
+                           "\"Go walk\"}"
+                         : "{\"status\":\"ok\",\"node_kinds\":[],\"relation_kinds\":[],\"schema_"
+                           "rules\":[],\"text\":\"Go ontology\"}");
+   }
    assert(!strcmp(method, "memory.assemble_context"));
    assert(jo_bool(args, "scope_context", 0));
    assert(!strcmp(jo_cstr(args, "project"), "cognify-test"));
@@ -84,7 +109,12 @@ static void run(int drain)
 {
    app_ctx_t ctx = {.json_output = 1};
    char *args[] = {"--unit=42"};
-   if (drain == 2)
+   if (drain == 3 || drain == 4)
+   {
+      char *walk[] = {"walk", "root", "--hops", "3", "--rel", "calls,works_for"};
+      mem_ontology(&ctx, drain == 4 ? 6 : 0, drain == 4 ? walk : NULL);
+   }
+   else if (drain == 2)
    {
       char *assembly_args[] = {"cert", "auth", "--explain"};
       mem_assemble(&ctx, assembly_explain ? 3 : 2, assembly_args);
@@ -140,6 +170,14 @@ int main(void)
       cJSON_Delete(captured);
    }
    assembly_explain = 1;
+   run(3);
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(captured, "node_kinds")));
+   assert(!cJSON_HasObjectItem(captured, "text"));
+   cJSON_Delete(captured);
+   run(4);
+   assert(cJSON_IsArray(captured) && cJSON_GetArraySize(captured) == 1);
+   assert(!strcmp(jo_cstr(cJSON_GetArrayItem(captured, 0), "target"), "b"));
+   cJSON_Delete(captured);
    const char *errors[] = {"bad-json", "{}", "{\"status\":\"error\",\"kind\":\"forbidden\"}"};
    for (unsigned i = 0; i < sizeof(errors) / sizeof(errors[0]); i++)
    {
@@ -147,6 +185,8 @@ int main(void)
       rejected(0);
       rejected(1);
       rejected(2);
+      rejected(3);
+      rejected(4);
    }
    forced = "{\"status\":\"ok\",\"context\":\"partial\"}";
    rejected(2);
@@ -154,5 +194,7 @@ int main(void)
    rejected(0);
    rejected(1);
    rejected(2);
+   rejected(3);
+   rejected(4);
    return 0;
 }

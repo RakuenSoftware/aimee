@@ -7917,7 +7917,7 @@ $(TESTPREFIX)/unit-test-server-memory-domain: $(OBJDIR)/tests/test_server_memory
 $(TESTPREFIX)/unit-test-cmd-memory-data: $(OBJDIR)/tests/test_cmd_memory_data.o $(OBJDIR)/cmd_data.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-cmd-memory-cognify: $(OBJDIR)/tests/test_cmd_memory_cognify.o $(OBJDIR)/cmd_memory_core.o $(OBJDIR)/cmd_memory_vector.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
+$(TESTPREFIX)/unit-test-cmd-memory-cognify: $(OBJDIR)/cmd_util.o $(OBJDIR)/tests/test_cmd_memory_cognify.o $(OBJDIR)/cmd_memory_core.o $(OBJDIR)/cmd_memory_vector.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-kb-memory-facts-connection: $(OBJDIR)/tests/test_kb_memory_facts_connection.o $(OBJDIR)/kb/kb_memory_facts.o $(OBJDIR)/vendor/cJSON.o

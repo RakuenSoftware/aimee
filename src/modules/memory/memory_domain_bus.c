@@ -298,31 +298,6 @@ cJSON *memory_alerts(const char *since)
    return domain_payload_call("alerts-bundle", NULL, since ? since : "", 0, 0);
 }
 
-static int domain_policy_code(const char *operation, const char *key, const char *value)
-{
-   cJSON *request = domain_request(operation);
-   if (!request || !cJSON_AddStringToObject(request, key, value ? value : ""))
-   {
-      cJSON_Delete(request);
-      return 99;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *code = response ? cJSON_GetObjectItemCaseSensitive(response, "code") : NULL;
-   int result = cJSON_IsNumber(code) ? code->valueint : 99;
-   cJSON_Delete(response);
-   return result;
-}
-
-memory_relation_kind_t memory_ontology_relation_from_text(const char *label)
-{
-   return (memory_relation_kind_t)domain_policy_code("ontology-relation-code", "relation", label);
-}
-
-const char *memory_ontology_relation_to_text(memory_relation_kind_t relation)
-{
-   return domain_policy_name("ontology-relation-name", NULL, NULL, "relation_code", (int)relation);
-}
-
 const char *memory_ontology_node_kind_to_text(memory_node_kind_t kind)
 {
    return domain_policy_name("ontology-node-name", NULL, NULL, "subject_kind", (int)kind);

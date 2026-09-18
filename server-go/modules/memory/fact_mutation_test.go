@@ -107,6 +107,14 @@ func TestFactMutationRuntimeReplay(t *testing.T) {
 	if promoted.AssertionID != first.AssertionID || promoted.Lifecycle != "persistent" {
 		t.Fatal(promoted)
 	}
+	var walkSeed string
+	if err := tx.QueryRow(ctx, `SELECT source FROM entity_edges WHERE id=$1`, first.AssertionID).Scan(&walkSeed); err != nil {
+		t.Fatal(err)
+	}
+	walked, walkErr := s.ontologyWalk(ctx, DataRequest{Entity: walkSeed, Hops: 2, Limit: 128, IncludeAll: true}, false)
+	if walkErr != nil || len(walked) != 1 || walked[0].Relation != "works_for" || walked[0].RelationKind != "other" {
+		t.Fatalf("packaged ontology walk: %+v, %v", walked, walkErr)
+	}
 	lower := commit(candidate("GoFact Alice", "works_for", "Second Corp", "go-fact-3", model))
 	if !lower.Quarantined || lower.Lifecycle != "candidate" {
 		t.Fatal("lower authority displaced incumbent", lower)

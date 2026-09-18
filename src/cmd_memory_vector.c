@@ -1240,154 +1240,74 @@ void mem_scene(app_ctx_t *ctx, int argc, char **argv)
 
 /* --- ontology: dump schema, or walk typed graph --- */
 
-static void mem_ontology_list(app_ctx_t *ctx, int argc, char **argv)
+static void mem_ontology_request(app_ctx_t *ctx, cJSON *args, int walk)
 {
-   /* Dump node kinds and relation kinds */
-   if (ctx->json_output)
+   kb_client_memory_scope_context_apply(args);
+   char *raw = kb_v1_action_request("memory.ontology", args);
+   cJSON *result = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   if (strcmp(jo_cstr(result, "status"), "ok") != 0 ||
+       !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "text")) ||
+       (walk && !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(result, "entries"))) ||
+       (!walk && (!cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(result, "node_kinds")) ||
+                  !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(result, "relation_kinds")) ||
+                  !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(result, "schema_rules")))))
+      fatal("memory ontology failed: %s",
+            jo_str(result, "message", "invalid or unavailable response"));
+   if (!ctx->json_output)
    {
-      cJSON *root = cJSON_CreateObject();
-
-      cJSON *nodes = cJSON_AddArrayToObject(root, "node_kinds");
-      for (int i = 0; i <= (int)NODE_OTHER; i++)
-      {
-         const char *label = memory_ontology_node_kind_to_text((memory_node_kind_t)i);
-         if (strcmp(label, "other") == 0 && i != (int)NODE_OTHER)
-            continue;
-         cJSON *n = cJSON_CreateObject();
-         cJSON_AddNumberToObject(n, "id", i);
-         cJSON_AddStringToObject(n, "label", label);
-         cJSON_AddItemToArray(nodes, n);
-      }
-
-      cJSON *rels = cJSON_AddArrayToObject(root, "relation_kinds");
-      for (int i = 0; i <= (int)REL_OTHER; i++)
-      {
-         const char *label = memory_ontology_relation_to_text((memory_relation_kind_t)i);
-         if (strcmp(label, "other") == 0 && i != (int)REL_OTHER)
-            continue;
-         cJSON *r = cJSON_CreateObject();
-         cJSON_AddNumberToObject(r, "id", i);
-         cJSON_AddStringToObject(r, "label", label);
-         cJSON_AddItemToArray(rels, r);
-      }
-
-      /* Also dump the DB schema table if present (via aimee-kb). */
-      db2_relation_schema_row_t schema_rows[256];
-      int n_schema = kb_client_relations_schema_list(
-          schema_rows, (int)(sizeof(schema_rows) / sizeof(schema_rows[0])));
-      if (n_schema > 0)
-      {
-         cJSON *rules = cJSON_AddArrayToObject(root, "schema_rules");
-         for (int i = 0; i < n_schema; i++)
-         {
-            cJSON *rule = cJSON_CreateObject();
-            int rid = schema_rows[i].relation_id;
-            int sk = schema_rows[i].subject_kind;
-            int ok = schema_rows[i].object_kind;
-            cJSON_AddStringToObject(rule, "relation",
-                                    memory_ontology_relation_to_text((memory_relation_kind_t)rid));
-            cJSON_AddStringToObject(
-                rule, "subject_kind",
-                sk == 99 ? "any" : memory_ontology_node_kind_to_text((memory_node_kind_t)sk));
-            cJSON_AddStringToObject(
-                rule, "object_kind",
-                ok == 99 ? "any" : memory_ontology_node_kind_to_text((memory_node_kind_t)ok));
-            cJSON_AddItemToArray(rules, rule);
-         }
-      }
-
-      emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
+      printf("%s", jo_cstr(result, "text"));
+      cJSON_Delete(result);
+      return;
+   }
+   if (walk)
+   {
+      cJSON *entries = cJSON_DetachItemFromObjectCaseSensitive(result, "entries");
+      cJSON_Delete(result);
+      emit_json_ctx(entries, ctx->json_fields, ctx->response_profile);
    }
    else
    {
-      printf("Node kinds:\n");
-      for (int i = 0; i <= (int)NODE_OTHER; i++)
-      {
-         const char *label = memory_ontology_node_kind_to_text((memory_node_kind_t)i);
-         if (strcmp(label, "other") == 0 && i != (int)NODE_OTHER)
-            continue;
-         printf("  %3d  %s\n", i, label);
-      }
-      printf("\nRelation kinds:\n");
-      for (int i = 0; i <= (int)REL_OTHER; i++)
-      {
-         const char *label = memory_ontology_relation_to_text((memory_relation_kind_t)i);
-         if (strcmp(label, "other") == 0 && i != (int)REL_OTHER)
-            continue;
-         printf("  %3d  %s\n", i, label);
-      }
+      cJSON_DeleteItemFromObjectCaseSensitive(result, "status");
+      cJSON_DeleteItemFromObjectCaseSensitive(result, "text");
+      emit_json_ctx(result, ctx->json_fields, ctx->response_profile);
    }
+}
+
+static void mem_ontology_list(app_ctx_t *ctx, int argc, char **argv)
+{
+   (void)argc;
+   (void)argv;
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "list");
+   mem_ontology_request(ctx, args, 0);
 }
 
 static void mem_ontology_walk(app_ctx_t *ctx, int argc, char **argv)
 {
-   /* Walk typed graph from a seed entity */
    if (argc < 2)
-   {
-      fprintf(stderr, "memory ontology walk <entity> [--hops N] [--rel relation,...]\n");
-      return;
-   }
-   const char *seed = argv[1];
-   int max_hops = 2;
-   unsigned int mask = RELATION_MASK_ALL;
-
+      fatal("memory ontology walk <entity> [--hops N] [--rel relation,...]");
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "walk");
+   cJSON_AddStringToObject(args, "entity", argv[1]);
    for (int i = 2; i < argc; i++)
    {
       if (strcmp(argv[i], "--hops") == 0 && i + 1 < argc)
-         max_hops = atoi(argv[++i]);
+         cJSON_AddNumberToObject(args, "hops", atoi(argv[++i]));
       else if (strcmp(argv[i], "--rel") == 0 && i + 1 < argc)
       {
-         /* Comma-separated relation names */
-         mask = 0;
-         char rel_copy[512];
-         snprintf(rel_copy, sizeof(rel_copy), "%s", argv[++i]);
-         char *sv = NULL;
-         char *tok = strtok_r(rel_copy, ",", &sv);
-         while (tok)
-         {
-            memory_relation_kind_t r = memory_ontology_relation_from_text(tok);
-            if ((int)r < 32)
-               mask |= RELATION_MASK(r);
-            tok = strtok_r(NULL, ",", &sv);
-         }
+         cJSON_DeleteItemFromObjectCaseSensitive(args, "relations");
+         cJSON *relations = cJSON_AddArrayToObject(args, "relations");
+         char *copy = strdup(argv[++i]);
+         if (!copy)
+            fatal("memory ontology: allocation failed");
+         char *save = NULL;
+         for (char *name = strtok_r(copy, ",", &save); name; name = strtok_r(NULL, ",", &save))
+            cJSON_AddItemToArray(relations, cJSON_CreateString(name));
+         free(copy);
       }
    }
-
-#define WALK_MAX 128
-   graph_walk_entry_t entries[WALK_MAX];
-   int count = memory_graph_walk(seed, mask, max_hops, entries, WALK_MAX);
-
-   if (ctx->json_output)
-   {
-      cJSON *arr = cJSON_CreateArray();
-      for (int i = 0; i < count; i++)
-      {
-         cJSON *e = cJSON_CreateObject();
-         cJSON_AddNumberToObject(e, "hop", entries[i].hop);
-         cJSON_AddStringToObject(e, "source", entries[i].source);
-         cJSON_AddStringToObject(e, "relation", entries[i].relation);
-         cJSON_AddStringToObject(e, "target", entries[i].target);
-         cJSON_AddStringToObject(
-             e, "relation_kind",
-             memory_ontology_relation_to_text((memory_relation_kind_t)entries[i].relation_id));
-         cJSON_AddStringToObject(
-             e, "subject_kind",
-             memory_ontology_node_kind_to_text((memory_node_kind_t)entries[i].subject_kind));
-         cJSON_AddStringToObject(
-             e, "object_kind",
-             memory_ontology_node_kind_to_text((memory_node_kind_t)entries[i].object_kind));
-         cJSON_AddNumberToObject(e, "weight", entries[i].weight);
-         cJSON_AddItemToArray(arr, e);
-      }
-      emit_json_ctx(arr, ctx->json_fields, ctx->response_profile);
-   }
-   else
-   {
-      for (int i = 0; i < count; i++)
-         printf("[hop %d] %s -[%s]-> %s (wt=%d)\n", entries[i].hop, entries[i].source,
-                entries[i].relation, entries[i].target, entries[i].weight);
-   }
-#undef WALK_MAX
+   mem_ontology_request(ctx, args, 1);
 }
 
 static const subcmd_t mem_ontology_subs[] = {

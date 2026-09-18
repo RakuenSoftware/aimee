@@ -779,27 +779,6 @@ _Static_assert(sizeof(((graph_related_t *)0)->key) >= GRAPH_ENDPOINT_MAX,
 
 int memory_graph_related(char **seed_keys, int seed_count, graph_related_t *out, int max);
 
-/* --- Typed graph walk (ontology-filtered) --- */
-
-/* One hop entry returned by memory_graph_walk(). */
-typedef struct
-{
-   char source[GRAPH_ENDPOINT_MAX];
-   char relation[64];
-   char target[GRAPH_ENDPOINT_MAX];
-   int relation_id;  /* memory_relation_kind_t integer code */
-   int subject_kind; /* memory_node_kind_t integer code */
-   int object_kind;  /* memory_node_kind_t integer code */
-   int weight;
-   int hop; /* 1-based hop index from seed */
-} graph_walk_entry_t;
-
-/* Walk entity_edges BFS from |seed_entity|, up to |max_hops| hops, filtering
- * by |relation_mask| (bitmask of memory_relation_kind_t bits; use
- * RELATION_MASK_ALL for all relations).  Returns count of entries written. */
-int memory_graph_walk(const char *seed_entity, unsigned int relation_mask, int max_hops,
-                      graph_walk_entry_t *out, int max);
-
 /* The embed command that selects the in-process lexical fixture. TEST BUILDS ONLY —
  * it is compiled out of aimee-kb, so passing it there is an ordinary (failing) exec.
  * There is no implicit embedder: an empty command embeds nothing and returns 0. */

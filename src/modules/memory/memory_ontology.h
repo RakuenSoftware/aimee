@@ -65,25 +65,6 @@ typedef enum
    REL_OTHER = 99
 } memory_relation_kind_t;
 
-/* Bitmask helpers for memory_graph_walk relation filtering.
- * Use RELATION_MASK(x) to build a mask, then pass to memory_graph_walk(). */
-#define RELATION_MASK(r)  (1u << (unsigned)(r))
-#define RELATION_MASK_ALL (~0u)
-
-/* ---- Ontology helpers --------------------------------------------------- */
-
-/* Map a relation text label to its integer code.
- * Returns REL_OTHER for unknown labels. */
-memory_relation_kind_t memory_ontology_relation_from_text(const char *label);
-
-/* Map an integer code to the canonical relation text label.
- * Returns "other" for unknown codes. */
-const char *memory_ontology_relation_to_text(memory_relation_kind_t rel);
-
-/* Map a node-kind text label to its integer code.
- * Returns NODE_OTHER for unknown labels. */
-memory_node_kind_t memory_ontology_node_kind_from_text(const char *label);
-
 /* Map an integer code to the canonical node-kind text label.
  * Returns "other" for unknown codes. */
 const char *memory_ontology_node_kind_to_text(memory_node_kind_t kind);

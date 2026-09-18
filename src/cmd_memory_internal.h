@@ -9,7 +9,6 @@
 #include "commands.h"
 #include "cJSON.h"
 #include "json_fluent.h"
-#include "modules/memory/memory_ontology.h"
 
 /* File-scope config, loaded once by cmd_memory before dispatch. */
 

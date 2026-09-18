@@ -679,44 +679,8 @@ int main(void)
       /* should not crash */
    }
 
-   /* --- memory_ontology_relation_from_text: known relations --- */
-   {
-      assert(memory_ontology_relation_from_text("co_edited") == REL_CO_EDITED);
-      assert(memory_ontology_relation_from_text("co_discussed") == REL_CO_DISCUSSED);
-      assert(memory_ontology_relation_from_text("fixes") == REL_FIXES);
-      assert(memory_ontology_relation_from_text("depends_on") == REL_DEPENDS_ON);
-      assert(memory_ontology_relation_from_text("unknown_xyz") == REL_OTHER);
-      assert(memory_ontology_relation_from_text(NULL) == REL_OTHER);
-   }
-
-   /* --- memory_ontology_relation_to_text: round-trip --- */
-   {
-      assert(strcmp(memory_ontology_relation_to_text(REL_FIXES), "fixes") == 0);
-      assert(strcmp(memory_ontology_relation_to_text(REL_CO_DISCUSSED), "co_discussed") == 0);
-      assert(strcmp(memory_ontology_relation_to_text(REL_OTHER), "other") == 0);
-   }
-
-   /* --- memory_ontology_node_kind_from_text --- */
-   {
-      assert(memory_ontology_node_kind_from_text("file") == NODE_FILE);
-      assert(memory_ontology_node_kind_from_text("commit") == NODE_COMMIT);
-      assert(memory_ontology_node_kind_from_text("bogus") == NODE_OTHER);
-      assert(memory_ontology_node_kind_from_text(NULL) == NODE_OTHER);
-   }
-
-   /* --- memory_graph_walk: empty DB returns 0 entries --- */
-   {
-      graph_walk_entry_t entries[16];
-      int n = memory_graph_walk("nonexistent_entity", RELATION_MASK_ALL, 2, entries, 16);
-      assert(n == 0);
-   }
-
-   /* --- memory_graph_walk: NULL params return 0 --- */
-   {
-      graph_walk_entry_t entries[4];
-      assert(memory_graph_walk(NULL, RELATION_MASK_ALL, 1, entries, 4) == 0);
-      assert(memory_graph_walk("e", RELATION_MASK_ALL, 1, NULL, 4) == 0);
-   }
+   /* Ontology names and graph traversal coverage moved to TestOntologyNames
+    * and TestPublicOntologyWalkPostgres at the shared Go owner. */
 
    /* --- memory_detect_aggregation_shape: structural heuristic ---
     * Covers the positive shapes from the proposal, entity seed extraction,

@@ -29,6 +29,8 @@ const (
 )
 
 type DataRequest struct {
+	Hops           int               `json:"hops,omitempty"`
+	Relations      []string          `json:"relations"`
 	FactWork       *MemoryFactWork   `json:"fact_work,omitempty"`
 	GraphPath      []GraphPathEntry  `json:"graph_path,omitempty"`
 	CodePointIDs   []int64           `json:"code_point_ids,omitempty"`
@@ -832,6 +834,8 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	}
 	maxLimit := 100
 	switch request.Operation {
+	case "ontology-walk":
+		maxLimit = 128
 	case "scene-members":
 		maxLimit = 512
 	case "vector-repair-prepare", "vector-embed-prepare":
@@ -1115,6 +1119,24 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
+	case "ontology-walk":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Entity == "" || len(request.Entity) > 1024 || request.Hops < 0 || request.Hops > 128 || len(request.Relations) > 32 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		for _, name := range request.Relations {
+			if name == "" || len(name) > 128 {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+		}
+		var entries []ontologyWalkEntry
+		entries, err = backend.ontologyWalk(ctx, request, explicitScope)
+		if err == nil {
+			response.Payload, err = json.Marshal(entries)
+		}
 	case "demotion-run", "demotion-check":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil || request.Demotion == nil {

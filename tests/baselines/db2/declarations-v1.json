@@ -7145,7 +7145,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 253
+          "line": 236
         }
       ],
       "signature": "int db2_entity_edge_backfill_utility_touched_at ( void )",
@@ -7158,7 +7158,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 283
+          "line": 266
         }
       ],
       "signature": "int db2_entity_edge_build_unique_index ( int * out_already_exists )",
@@ -7199,7 +7199,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 268
+          "line": 251
         }
       ],
       "signature": "int db2_entity_edge_dedup_audit ( db2_entity_edge_dedup_report_t * out )",
@@ -7212,7 +7212,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 274
+          "line": 257
         }
       ],
       "signature": "int db2_entity_edge_dedup_migrate ( const char * rollback_path , int dry_run , db2_entity_edge_dedup_report_t * out )",
@@ -7231,7 +7231,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 188
+          "line": 171
         }
       ],
       "signature": "int db2_entity_edge_explain_by_entity ( const char * entity , db2_entity_edge_explain_t * out , int max )",
@@ -7290,7 +7290,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 226
+          "line": 209
         }
       ],
       "signature": "int db2_entity_edge_neighbors_weighted ( const char * entity , db2_entity_edge_weighted_neighbor_t * out , int max , int limit_sql , int utility_scoring_enabled )",
@@ -7305,7 +7305,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 246
+          "line": 229
         }
       ],
       "signature": "int db2_entity_edge_neighbors_weighted_batch ( const char * const * nodes , int node_count , db2_entity_edge_weighted_neighbor_t * out , int max , int limit_per_node , int utility_scoring_enabled )",
@@ -7359,7 +7359,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 220
+          "line": 203
         }
       ],
       "signature": "double db2_entity_edge_prune_priority ( int weight , double decayed_utility , double utility_weight )",
@@ -7426,7 +7426,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 278
+          "line": 261
         }
       ],
       "signature": "int db2_entity_edge_unique_index_exists ( void )",
@@ -7472,7 +7472,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 214
+          "line": 197
         }
       ],
       "signature": "double db2_entity_edge_utility_decay ( double raw_score , const char * touched_at , int half_life_days )",
@@ -21230,7 +21230,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "df3d409621e544faaa87c8ebafb65e1af7b4252785d990b124be9e032f309797",
+  "fingerprint": "277de7a02a5537e7d2c1cb5bde97d5ad07f68eaa4975c6fc674752975767c7d4",
   "module": "db2",
   "schema_version": 1,
   "summary": {

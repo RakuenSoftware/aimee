@@ -5,7 +5,6 @@
 #include "decision_log.h"  /* db2_decision_log_row_t */
 #include "index.h"         /* project_info_t, term_hit_t, blast_radius_t */
 #include "memory.h"        /* memory_t, edge_t */
-#include "entity_edges.h"  /* db2_relation_schema_row_t */
 #include "memory_query.h"  /* db2_memory_low_eff_row_t etc. */
 #include "rules.h"         /* rule_t */
 #include "tasks.h"         /* aimee_task_t */
@@ -700,7 +699,6 @@ int kb_client_mcp_call(const char *qualified_name, const cJSON *args, int timeou
 
 /* List the memory_relation_schema rows owned by aimee-kb.  Writes up
  * to |max| rows into |out| and returns the number written. */
-int kb_client_relations_schema_list(db2_relation_schema_row_t *out, int max);
 
 /* Diagnose a query (returns memory_t + memory_score_parts_t per row)
  * via aimee-kb.  Returns row count.  Mirrors memory_diagnose() and
