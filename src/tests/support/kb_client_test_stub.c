@@ -79,11 +79,6 @@ int kb_client_memory_list(const char *tier, const char *kind, int limit, memory_
    return 0;
 }
 
-char *kb_client_memory_lint_json(void)
-{
-   return NULL;
-}
-
 /* The endogeneity gate is answered by the knowledge service. A test that does
  * not link one gets NULL, which the caller reads as "no reachable ledger" —
  * the same path a real deployment takes when the KB is down. */

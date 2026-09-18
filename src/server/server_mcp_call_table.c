@@ -649,7 +649,11 @@ static cJSON *mcph_memory_maintain(struct mcp_call *c)
                           "operator action (`aimee memory maintain`). Other modes: replay, "
                           "compact, summarize.");
 
-   char *envelope = kb_client_memory_maintenance_run_json(run_modes, force, dry_run);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddNumberToObject(request, "modes", (double)run_modes);
+   cJSON_AddBoolToObject(request, "force", force);
+   cJSON_AddBoolToObject(request, "dry_run", dry_run);
+   char *envelope = kb_v1_action_request("memory.maintenance_run", request);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *summary = resp ? cJSON_GetObjectItemCaseSensitive(resp, "summary") : NULL;

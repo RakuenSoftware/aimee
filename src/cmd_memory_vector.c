@@ -37,7 +37,9 @@ void mem_reindex(app_ctx_t *ctx, int argc, char **argv)
    opt_parse(argc, argv, NULL, &opts);
    int limit = opt_get_int(&opts, "limit", 0);
 
-   char *resp_json = kb_client_memory_reindex_json(limit);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddNumberToObject(request, "limit", limit);
+   char *resp_json = kb_v1_action_request_with_timeout("memory.reindex", request, 5 * 60 * 1000);
    cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
    free(resp_json);
 
@@ -52,7 +54,6 @@ void mem_reindex(app_ctx_t *ctx, int argc, char **argv)
          if (cJSON_IsString(m) && m->valuestring[0])
             msg = m->valuestring;
       }
-      cJSON_Delete(resp);
       fatal("%s", msg);
    }
 
@@ -87,8 +88,16 @@ void mem_repair(app_ctx_t *ctx, int argc, char **argv)
       single_id = atoll(opts.positional[0]);
 
    const char *embed_cmd = config_embedder_command_current(NULL);
-   char *resp_json =
-       kb_client_memory_repair_json(limit, failed_only, reset_stuck, single_id, embed_cmd);
+   cJSON *request = cJSON_CreateObject();
+   if (limit > 0)
+      cJSON_AddNumberToObject(request, "limit", limit);
+   cJSON_AddBoolToObject(request, "failed_only", failed_only);
+   cJSON_AddBoolToObject(request, "reset_stuck", reset_stuck);
+   if (single_id > 0)
+      cJSON_AddNumberToObject(request, "memory_id", (double)single_id);
+   if (embed_cmd && embed_cmd[0])
+      cJSON_AddStringToObject(request, "embedding_command", embed_cmd);
+   char *resp_json = kb_v1_action_request_with_timeout("memory.repair", request, 10 * 60 * 1000);
    cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
    free(resp_json);
 
@@ -103,7 +112,6 @@ void mem_repair(app_ctx_t *ctx, int argc, char **argv)
          if (cJSON_IsString(m) && m->valuestring[0])
             msg = m->valuestring;
       }
-      cJSON_Delete(resp);
       fatal("%s", msg);
    }
 
@@ -212,7 +220,6 @@ void mem_reconcile(app_ctx_t *ctx, int argc, char **argv)
          if (cJSON_IsString(m) && m->valuestring[0])
             msg = m->valuestring;
       }
-      cJSON_Delete(resp);
       fatal("%s", msg);
    }
 
@@ -270,7 +277,10 @@ void mem_rebuild(app_ctx_t *ctx, int argc, char **argv)
    opt_parse(argc, argv, NULL, &opts);
    const char *version = opt_get(&opts, "version");
 
-   char *resp_json = kb_client_memory_rebuild_json(version);
+   cJSON *request = cJSON_CreateObject();
+   if (version && version[0])
+      cJSON_AddStringToObject(request, "version", version);
+   char *resp_json = kb_v1_action_request_with_timeout("memory.rebuild", request, 10 * 60 * 1000);
    cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
    free(resp_json);
 
@@ -285,7 +295,6 @@ void mem_rebuild(app_ctx_t *ctx, int argc, char **argv)
          if (cJSON_IsString(m) && m->valuestring[0])
             msg = m->valuestring;
       }
-      cJSON_Delete(resp);
       fatal("%s", msg);
    }
 
@@ -338,7 +347,11 @@ static void mem_verify_run_repair(app_ctx_t *ctx, const char *embed_cmd,
    int repaired_failed = 0;
    if (ops_summary.failed_ops > 0)
    {
-      char *rjson = kb_client_memory_repair_json(0, 1, 0, 0, embed_cmd);
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddBoolToObject(request, "failed_only", 1);
+      if (embed_cmd && embed_cmd[0])
+         cJSON_AddStringToObject(request, "embedding_command", embed_cmd);
+      char *rjson = kb_v1_action_request_with_timeout("memory.repair", request, 10 * 60 * 1000);
       cJSON *r = rjson ? cJSON_Parse(rjson) : NULL;
       free(rjson);
       if (r)
@@ -369,7 +382,9 @@ static void mem_verify_run_repair(app_ctx_t *ctx, const char *embed_cmd,
       }
       else if (active_ver[0])
       {
-         char *bjson = kb_client_memory_rebuild_json(active_ver);
+         cJSON *request = cJSON_CreateObject();
+         cJSON_AddStringToObject(request, "version", active_ver);
+         char *bjson = kb_v1_action_request_with_timeout("memory.rebuild", request, 10 * 60 * 1000);
          cJSON *b = bjson ? cJSON_Parse(bjson) : NULL;
          free(bjson);
          if (b)

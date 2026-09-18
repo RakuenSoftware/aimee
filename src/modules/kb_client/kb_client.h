@@ -270,19 +270,6 @@ char *kb_client_corpus_pipeline_drain_json(int limit);
  * {"status":"error","message":"..."}. */
 char *kb_client_reconcile_json(int dry_run);
 
-/* Rebuild derived retrieval indexes for memories.  Sends
- * `memory.reindex` with {limit} and returns the heap-allocated JSON
- * response (caller frees).  A limit of 0 means "as many as the
- * server wants to do in one call". */
-char *kb_client_memory_reindex_json(int limit);
-
-/* Rebuild the memory vector index from DB2 embeddings for a
- * specific embedder version.  Sends `memory.rebuild` with {version}
- * (version may be empty/NULL, in which case aimee-kb resolves the
- * active embedder) and returns the heap-allocated JSON response
- * (caller frees). */
-char *kb_client_memory_rebuild_json(const char *version);
-
 /* Create a memory directive via the aimee-kb sidecar.  Sends
  * `memory.directive_create` with the usual field set and returns
  * {"status":"ok","dedup":0|1,"directive":{...}} on success.  dedup=1
@@ -541,8 +528,6 @@ char *kb_client_session_briefing_directives(int limit);
 /* Run memory maintenance (replay/compact/prune/summarize) inside aimee-kb.
  * Returns the kb response envelope as JSON (caller frees) including the
  * summary object.  Mirrors memory_maintenance_run(). */
-char *kb_client_memory_maintenance_run_json(unsigned int modes, int force, int dry_run);
-char *kb_client_memory_lint_json(void);
 
 /* Memory alerts / session recall via aimee-kb.  Each returns the kb
  * response envelope as JSON (caller frees) with the bundle nested under
@@ -993,6 +978,8 @@ int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out)
 /* Invoke an action through the authenticated KB transport. Takes ownership of
  * req; the caller frees the returned JSON, including non-success envelopes. */
 char *kb_v1_action_request(const char *action, cJSON *req);
+/* Same ownership and authentication, with a caller-selected operation budget. */
+char *kb_v1_action_request_with_timeout(const char *action, cJSON *req, int timeout_ms);
 
 /* Fetch learning proposals via the aimee-kb sidecar.  Sends
  * `learning.list_proposals` with {state, sink, limit} and returns the
@@ -1074,17 +1061,6 @@ char *kb_client_artifacts_list_proposed_json(const char *target_surface, int lim
 char *kb_client_artifact_set_state_json(const char *id, const char *new_state,
                                         const char *verdict_tag, const char *verdict_scope,
                                         const char *counter_example, const char *reason);
-
-/* Replay vector upserts for memory points.  Sends `memory.repair` with
- * {limit, failed_only, reset_stuck, memory_id, embedding_command} and
- * returns the heap-allocated JSON response (caller frees).  Behaviour:
- *   reset_stuck=1   -> zero attempts on stuck vector-index rows.
- *   memory_id>0     -> repair exactly that memory.
- *   failed_only=1   -> repair rows surfaced by vector-index scan.
- *   otherwise       -> sweep the memories table (limit caps the sweep).
- * On any failure the returned JSON has {"status":"error","message":"..."}. */
-char *kb_client_memory_repair_json(int limit, int failed_only, int reset_stuck, int64_t memory_id,
-                                   const char *embedding_command);
 
 /* Gather memory + kb collection state for `aimee memory verify`.  Sends
  * `memory.verify` with {detail, timings, embedding_command} and returns the

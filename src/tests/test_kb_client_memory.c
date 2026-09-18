@@ -134,6 +134,52 @@ static int empty_ok_post_handler(const char *url, const char *auth_header, const
    return 200;
 }
 
+static int expected_action_timeout;
+static const char *expected_action;
+static int action_refused;
+static int budgeted_action_post(const char *url, const char *auth_header, const char *body,
+                                char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)extra_headers;
+   assert(strstr(url, expected_action));
+   assert(auth_header && strstr(auth_header, "test-token"));
+   assert(timeout_ms == expected_action_timeout);
+   cJSON *request = cJSON_Parse(body);
+   assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(request, "limit")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "project")),
+                 "budget-test") == 0);
+   cJSON_Delete(request);
+   *response_buf = strdup(action_refused ? "{\"status\":\"error\",\"message\":\"scope refused\"}"
+                                         : "{\"status\":\"ok\",\"rebuilt\":12}");
+   return action_refused ? 403 : 200;
+}
+
+static void test_generic_action_preserves_budget_auth_and_refusal(void)
+{
+   const char *actions[] = {"memory.reindex", "memory.rebuild", "memory.repair"};
+   mock_agent_http_set_post_handler(budgeted_action_post);
+   kb_client_memory_scope_context_set("", "budget-test", 0);
+   for (int i = 0; i < 3; i++)
+   {
+      expected_action = actions[i];
+      expected_action_timeout = (i == 0 ? 5 : 10) * 60 * 1000;
+      for (action_refused = 0; action_refused <= 1; action_refused++)
+      {
+         cJSON *request = cJSON_CreateObject();
+         cJSON_AddNumberToObject(request, "limit", 12);
+         kb_client_memory_scope_context_apply(request);
+         char *response =
+             kb_v1_action_request_with_timeout(expected_action, request, expected_action_timeout);
+         assert(response);
+         assert(strstr(response, action_refused ? "scope refused" : "rebuilt"));
+         free(response);
+      }
+   }
+   kb_client_memory_scope_context_clear();
+   mock_agent_http_reset();
+}
+
 static int single_miss_post_handler(const char *url, const char *auth_header, const char *body,
                                     char **response_buf, int timeout_ms, const char *extra_headers)
 {
@@ -698,6 +744,7 @@ int main(void)
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
    assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
+   test_generic_action_preserves_budget_auth_and_refusal();
    test_readers_distinguish_unreachable_from_empty();
    test_single_record_miss_is_not_dependency_failure();
    test_ordered_readers_propagate_active_project_context();

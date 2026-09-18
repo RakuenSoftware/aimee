@@ -1744,7 +1744,7 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
       {
          if (!skip_kb_client && config_memory_maintenance_enabled())
          {
-            char *resp = kb_client_memory_maintenance_run_json(0, 0, 0);
+            char *resp = kb_v1_action_request("memory.maintenance_run", cJSON_CreateObject());
             free(resp);
          }
       }

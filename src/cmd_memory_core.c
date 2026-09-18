@@ -907,7 +907,11 @@ void mem_maintain(app_ctx_t *ctx, int argc, char **argv)
 watch_iter:;
    /* Run maintenance inside the knowledge service and parse the
     * summary back out of the response envelope. */
-   char *envelope = kb_client_memory_maintenance_run_json(modes, force, dry_run);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddNumberToObject(request, "modes", (double)modes);
+   cJSON_AddBoolToObject(request, "force", force);
+   cJSON_AddBoolToObject(request, "dry_run", dry_run);
+   char *envelope = kb_v1_action_request("memory.maintenance_run", request);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *summary_j = resp ? cJSON_GetObjectItemCaseSensitive(resp, "summary") : NULL;

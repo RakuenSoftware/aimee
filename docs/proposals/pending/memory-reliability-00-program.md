@@ -265,6 +265,13 @@ and returned memories, and scope priority precedes result limits. Equal graph
 scores preserve text ordering. Legacy graph feedback/diagnostic integration is
 still part of the remaining migration.
 
+
+The native repair/rebuild/reindex, maintenance and lint clients are retired.
+CLI and MCP consumers use generic authenticated commands; reindex retains its
+five-minute budget and vector repair/rebuild retain ten minutes. Transport tests
+verify bearer authentication, explicit scope, operation budgets and refusal bodies.
+CLI vector failure messages no longer read from a freed response.
+
 The current inventory is four C sources and seven headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

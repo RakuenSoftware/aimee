@@ -12,7 +12,7 @@ void mem_lint(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)argc;
    (void)argv;
-   char *envelope = kb_client_memory_lint_json();
+   char *envelope = kb_v1_action_request("memory.lint", cJSON_CreateObject());
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
 

@@ -1117,31 +1117,6 @@ char *kb_client_reconcile_json(int dry_run)
    return kb_error_json("knowledge service /v1/maintenance/reconcile did not respond");
 }
 
-/* memory.reindex scans the memory corpus and rebuilds derived tables; give
- * it a bounded but generous timeout. */
-#define KB_CLIENT_MEMORY_REINDEX_TIMEOUT_MS (5 * 60 * 1000)
-
-char *kb_client_memory_reindex_json(int limit)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "limit", limit);
-   return kb_v1_action_request_timeout("memory.reindex", req, KB_CLIENT_MEMORY_REINDEX_TIMEOUT_MS,
-                                       kb_error_json);
-}
-
-/* Memory rebuild re-upserts every memory point to pgvector; size the timeout
- * like the repair path. */
-#define KB_CLIENT_MEMORY_REBUILD_TIMEOUT_MS (10 * 60 * 1000)
-
-char *kb_client_memory_rebuild_json(const char *version)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (version && version[0])
-      cJSON_AddStringToObject(req, "version", version);
-   return kb_v1_action_request_timeout("memory.rebuild", req, KB_CLIENT_MEMORY_REBUILD_TIMEOUT_MS,
-                                       kb_error_json);
-}
-
 #define KB_CLIENT_DIRECTIVE_TIMEOUT_MS (60 * 1000)
 
 static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int timeout_ms,
@@ -1188,7 +1163,12 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
                               "knowledge service action did not respond");
 }
 
-/* Shared with kb_client_memory.c — keep external linkage. */
+char *kb_v1_action_request_with_timeout(const char *action, cJSON *req, int timeout_ms)
+{
+   return kb_v1_action_request_timeout(action, req, timeout_ms, kb_error_json);
+}
+
+/* Generic actions share the same authenticated transport and error envelopes. */
 char *kb_v1_action_request(const char *action, cJSON *req)
 {
    return kb_v1_action_request_timeout(action, req, KB_CLIENT_DIRECTIVE_TIMEOUT_MS, kb_error_json);
@@ -1415,26 +1395,6 @@ char *kb_client_artifact_set_state_json(const char *id, const char *new_state,
    if (reason && reason[0])
       cJSON_AddStringToObject(req, "reason", reason);
    return kb_v1_learning_action_request("artifacts.set_state", req);
-}
-
-/* Repair sweeps the memories table and re-upserts into pgvector; size the timeout
- * like the rebuild path (10 minutes). */
-#define KB_CLIENT_MEMORY_REPAIR_TIMEOUT_MS (10 * 60 * 1000)
-
-char *kb_client_memory_repair_json(int limit, int failed_only, int reset_stuck, int64_t memory_id,
-                                   const char *embedding_command)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   cJSON_AddBoolToObject(req, "failed_only", failed_only ? 1 : 0);
-   cJSON_AddBoolToObject(req, "reset_stuck", reset_stuck ? 1 : 0);
-   if (memory_id > 0)
-      cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   return kb_v1_action_request_timeout("memory.repair", req, KB_CLIENT_MEMORY_REPAIR_TIMEOUT_MS,
-                                       kb_error_json);
 }
 
 /* Embed paths are batch-heavy (reembed_start walks every stale memory).

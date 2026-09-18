@@ -393,15 +393,6 @@ static char *kb_client_v1_session_briefing_section(const char *method, int limit
    return out;
 }
 
-char *kb_client_memory_maintenance_run_json(unsigned int modes, int force, int dry_run)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "modes", (double)modes);
-   cJSON_AddBoolToObject(req, "force", force ? 1 : 0);
-   cJSON_AddBoolToObject(req, "dry_run", dry_run ? 1 : 0);
-   return kb_v1_action_request("memory.maintenance_run", req);
-}
-
 char *kb_client_memory_alerts_json(const char *since)
 {
    cJSON *req = cJSON_CreateObject();
@@ -2009,10 +2000,4 @@ char *kb_client_evidence_fidelity_retrieval_event(const char *turn_id)
    /* Pass the KB action's response through verbatim (status + fidelity_status +
     * report + attribution_count). kb_v1_action_request owns req. */
    return kb_v1_action_request("evidence.fidelity_retrieval_event", req);
-}
-
-char *kb_client_memory_lint_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_action_request("memory.lint", req);
 }
