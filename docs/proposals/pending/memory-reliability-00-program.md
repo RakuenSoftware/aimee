@@ -407,6 +407,12 @@ retraction handler, duplicate authority resolver and DB2 JSON adapter are delete
 The KB now declares 98 commands. Legacy native mutation implementations remain
 with dependent rollback fixtures and are still part of the unfinished G0 work.
 
+The obsolete C fact-invalidation implementation and lifecycle retraction API
+are now deleted. Go restricted-role replay covers the remaining native cases:
+nonfunctional sibling values, model/user alias corrections and all three
+immutable relations. Native lifecycle/graph fixtures retain their independent
+review, traversal and rollback checks and pass after the retirement.
+
 The current inventory is four C sources and six headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

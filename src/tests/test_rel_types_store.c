@@ -3,7 +3,7 @@
 #include "../headers/aimee.h"
 #include "../headers/memory.h" /* edge_t (needs aimee.h first) */
 #include "../modules/db2/c/rel_types_store.h"
-#include "../modules/db2/c/fact_lifecycle.h" /* db2_fact_retract */
+#include "../modules/db2/c/fact_lifecycle.h"
 #include "../modules/db2/c/entity_edges.h"
 #include "../modules/db2/c/entity_registry.h"
 #include "../modules/db2/c/db2_test_shim.h"
@@ -170,7 +170,15 @@ int main(void)
     * state that co-occurrence edges do not, so admitting them to the walk is
     * only correct while the walk also constrains them to current rows —
     * otherwise the traversal starts routing through withdrawn facts. */
-   assert(db2_fact_retract("zoe", "works_for", "initech", FACT_AUTHORITY_USER) == 1);
+   /* Seed rejection through the remaining legacy review fixture. Retraction
+    * behavior itself is now exercised against the Go owner and real Postgres. */
+   edge_t rejected[2];
+   assert(db2_entity_edges_semantic_by_entity("zoe", rejected, 2) == 1);
+   fact_actor_t reviewer = {.rank = FACT_ACTOR_OPERATOR, .authenticated = 1};
+   snprintf(reviewer.principal, sizeof(reviewer.principal), "test:graph-read");
+   snprintf(reviewer.role, sizeof(reviewer.role), "operator");
+   snprintf(reviewer.transport_identity, sizeof(reviewer.transport_identity), "test:fixture");
+   assert(db2_fact_mutation_review(&reviewer, rejected[0].id, FACT_REVIEW_REJECT, NULL) == 0);
    w = db2_entity_edge_walk_step("zoe", ze, 16);
    assert(w == 1 && strcmp(ze[0].relation, "co_seen_with") == 0);
    nn = db2_entity_edge_neighbors("zoe", nb, 16, 50);

@@ -19,7 +19,7 @@ func exerciseExplicitRetractionReplay(t *testing.T, ctx context.Context, tx pgx.
 		}
 	}
 	sql(`SELECT set_config('aimee.memory_scope_all','1',true)`)
-	sql(`INSERT INTO rel_types(rel_type,status) VALUES('lives_in','active'),('parent_of','active'),('child_of','active') ON CONFLICT DO NOTHING`)
+	sql(`INSERT INTO rel_types(rel_type,status) VALUES('lives_in','active'),('parent_of','active'),('child_of','active'),('also_known_as','active'),('member_of','active') ON CONFLICT DO NOTHING`)
 	user := FactActor{Principal: "test:explicit-user", TransportIdentity: "verified:explicit", Role: "user", Rank: 30, Authenticated: 1}
 	seed := func(relation, object, source string) factMutationResult {
 		t.Helper()
@@ -86,6 +86,32 @@ func exerciseExplicitRetractionReplay(t *testing.T, ctx context.Context, tx pgx.
 	}
 	if r := call("works_for", "Explicit Corp", "user", verified); r["retracted"] != float64(0) {
 		t.Fatal("repeated correction changed history", r)
+	}
+	// Nonfunctional relations preserve sibling values and still respect the
+	// authority of each assertion, regardless of the old hard-delete label.
+	seed("member_of", "First Group", "explicit-member-first")
+	second := seed("member_of", "Second Group", "explicit-member-second")
+	if r := call("member_of", "First Group", "user", verified); r["retracted"] != float64(1) {
+		t.Fatal(r)
+	}
+	var siblingState string
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state FROM entity_edges WHERE id=$1`, second.AssertionID).Scan(&siblingState); err != nil || siblingState != "persistent" {
+		t.Fatal(siblingState, err)
+	}
+	for _, actor := range []FactActor{modelFactActor(), user} {
+		target := "Alias " + actor.Role
+		_, _, err := s.commitFactCandidate(ctx, FactCandidate{Subject: "explicit user", Relation: "also_known_as", Object: target, SubjectKind: NodePerson, ObjectKind: NodeOther, Actor: actor, AssertionKind: "world_fact", Evidence: FactEvidence{SourceKind: "observation", SourceID: "explicit-alias-" + actor.Role}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := call("also_known_as", target, "model", verified)
+		want := float64(1)
+		if actor.Rank == 30 {
+			want = 0
+		}
+		if r["retracted"] != want {
+			t.Fatal(r)
+		}
 	}
 	var principal string
 	if err := tx.QueryRow(ctx, `SELECT c.actor_principal FROM fact_graph_commits c JOIN entity_edges e ON e.commit_id=c.commit_id WHERE e.id=$1`, work.AssertionID).Scan(&principal); err != nil || principal != user.Principal {

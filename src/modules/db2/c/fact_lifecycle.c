@@ -85,33 +85,6 @@ int db2_fact_promote_durable(int threshold)
    return db2_fact_mutation_promote_supported(&actor, threshold);
 }
 
-int db2_fact_retract(const char *source, const char *relation, const char *target,
-                     fact_authority_t authority)
-{
-   if (!source || !source[0] || !relation || !relation[0])
-      return -1;
-   char norm[REL_TYPE_NAME_MAX];
-   rel_type_normalize(relation, norm, sizeof(norm));
-   if (!norm[0])
-      return -1;
-
-   /* correction_behavior is declared on the rel_type (seed). Unknown / novel
-    * types default to supersede. */
-   const rel_type_def_t *def = rel_types_seed_lookup(norm);
-   correction_behavior_t behavior = def ? def->correction_behavior : CORR_SUPERSEDE;
-
-   /* Authority rule (§4 R1-B1): immutable blocks model/inferred edits, but a user
-    * always wins — a user retraction supersedes even an immutable fact. */
-   if (behavior == CORR_IMMUTABLE && authority != FACT_AUTHORITY_USER)
-      return FACT_RETRACT_IMMUTABLE;
-
-   fact_actor_t actor;
-   if (db2_fact_actor_internal(
-           authority == FACT_AUTHORITY_USER ? FACT_ACTOR_USER : FACT_ACTOR_MODEL, &actor) != 0)
-      return -1;
-   return db2_fact_mutation_invalidate(&actor, source, norm, target, NULL);
-}
-
 int db2_fact_current_count(const char *entity)
 {
    if (!entity || !entity[0])

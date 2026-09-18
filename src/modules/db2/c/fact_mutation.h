@@ -133,15 +133,7 @@ extern "C"
    int db2_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_input_t *input,
                                 fact_mutation_result_t *out);
 
-   /* Ordinary removal contract: reversible invalidation.  Empty target matches
-    * every current value for source+relation.  Lower authority cannot invalidate
-    * a higher-authority assertion. Returns rows changed, or -1. */
-   int db2_fact_mutation_invalidate(const fact_actor_t *actor, const char *source,
-                                    const char *relation, const char *target,
-                                    fact_mutation_result_t *out);
-
-   /* Episode/experience correction is annotation, never retraction.  Returns
-    * -2 from invalidate when this route must be offered to the caller. */
+   /* Episode/experience correction annotates the original assertion. */
    int db2_fact_mutation_annotate(const fact_actor_t *actor, int64_t assertion_id,
                                   const char *annotation, fact_mutation_result_t *out);
 

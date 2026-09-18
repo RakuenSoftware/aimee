@@ -8305,7 +8305,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 176
+          "line": 168
         }
       ],
       "signature": "int db2_fact_commit_preview ( const char * commit_id , fact_commit_change_t * out , int max )",
@@ -8324,7 +8324,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 180
+          "line": 172
         }
       ],
       "signature": "int db2_fact_commit_rollback ( const fact_actor_t * actor , const char * commit_id , char rollback_commit_id [ FACT_COMMIT_ID_MAX ] )",
@@ -8365,7 +8365,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_lifecycle.h",
-          "line": 103
+          "line": 79
         }
       ],
       "signature": "int db2_fact_current_count ( const char * entity )",
@@ -8382,7 +8382,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 200
+          "line": 192
         }
       ],
       "signature": "int db2_fact_erasure_execute ( const fact_actor_t * actor , const char * source , const char * relation , const char * target , fact_erasure_impact_t * out , char commit_id [ FACT_COMMIT_ID_MAX ] )",
@@ -8399,7 +8399,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 198
+          "line": 190
         }
       ],
       "signature": "int db2_fact_erasure_preview ( const char * source , const char * relation , const char * target , fact_erasure_impact_t * out )",
@@ -8427,7 +8427,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 212
+          "line": 204
         }
       ],
       "signature": "int db2_fact_graph_record_external_in_txn ( const fact_actor_t * actor , const char * operation , const char * object_kind , const char * object_key , const char * action , const char * before_state , const char * after_state , int reversible , char commit_id [ FACT_COMMIT_ID_MAX ] )",
@@ -8444,7 +8444,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 185
+          "line": 177
         }
       ],
       "signature": "int db2_fact_ingest_run_preview ( const char * ingest_run_id , fact_commit_change_t * out , int max )",
@@ -8461,7 +8461,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 186
+          "line": 178
         }
       ],
       "signature": "int db2_fact_ingest_run_rollback ( const fact_actor_t * actor , const char * ingest_run_id , char rollback_commit_id [ FACT_COMMIT_ID_MAX ] )",
@@ -8474,7 +8474,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 145
+          "line": 137
         }
       ],
       "signature": "int db2_fact_mutation_annotate ( const fact_actor_t * actor , int64_t assertion_id , const char * annotation , fact_mutation_result_t * out )",
@@ -8503,7 +8503,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 207
+          "line": 199
         }
       ],
       "signature": "int db2_fact_mutation_expire_candidates ( const fact_actor_t * actor , const char * cutoff_iso )",
@@ -8516,20 +8516,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 139
-        }
-      ],
-      "signature": "int db2_fact_mutation_invalidate ( const fact_actor_t * actor , const char * source , const char * relation , const char * target , fact_mutation_result_t * out )",
-      "signature_sha256": "f28f31117e0329f95febddd63df82f8eca79fc166570dd34b214b269ce86c17f",
-      "status": "internal-unconsumed",
-      "symbol": "db2_fact_mutation_invalidate"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 206
+          "line": 198
         }
       ],
       "signature": "int db2_fact_mutation_promote_supported ( const fact_actor_t * actor , int threshold )",
@@ -8541,12 +8528,13 @@
       "consumers": [
         "src/tests/support/kb_http_route_stubs.c",
         "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_graph_scoring.c"
+        "src/tests/test_graph_scoring.c",
+        "src/tests/test_rel_types_store.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 157
+          "line": 149
         }
       ],
       "signature": "int db2_fact_mutation_review ( const fact_actor_t * actor , int64_t assertion_id , fact_review_action_t action , fact_mutation_result_t * out )",
@@ -8568,22 +8556,6 @@
       "signature_sha256": "d4ad97f5d623936199a67b68e6a7c34fbcd6e2953038526957ff052ff7c3a14c",
       "status": "private-test-only",
       "symbol": "db2_fact_promote_durable"
-    },
-    {
-      "consumers": [
-        "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_rel_types_store.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_lifecycle.h",
-          "line": 97
-        }
-      ],
-      "signature": "int db2_fact_retract ( const char * source , const char * relation , const char * target , fact_authority_t authority )",
-      "signature_sha256": "40902aee2ae1f5966df121977eaf720ac13b7133c4815380e61e9685a4887684",
-      "status": "private-test-only",
-      "symbol": "db2_fact_retract"
     },
     {
       "consumers": [],
@@ -23483,15 +23455,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d184bd918ec762b5ee745c0ca003c1ae537c8289931802c85505dff38cbf130c",
+  "fingerprint": "bd5faa28016ad4761e796c0b0af74bb0b0468fc8aa9db74ccd73fa19d2fae5ea",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 462,
-    "declarations": 1336,
+    "declarations": 1334,
     "headers": 136,
-    "internal_unconsumed": 345,
-    "private_test_only": 319,
+    "internal_unconsumed": 344,
+    "private_test_only": 318,
     "reviewed": 210
   }
 }
