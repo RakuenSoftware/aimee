@@ -1,4 +1,5 @@
 #include "module_commands.h"
+#include "support/module_runtime_fixture.h"
 #include "json_fluent.h"
 #include <assert.h>
 /* test_kb_http_routes.c: unit tests for kb_http_route() (Phase 1+5). */
@@ -19,6 +20,7 @@
 #include "command_registry.h"
 #include "cJSON.h"
 #include "kb_http.h"
+extern int handle_get_code_context(const char *query_string, char *out_buf, int out_cap);
 #include "kb_route_acl.h"
 #include "kb_scope.h"
 #include "kb/http/kb_http_search.h"  /* kb_http_search_project_scope: "scope" parsing */
@@ -927,6 +929,8 @@ static char g_code_find_project[128];
 static int g_code_local_first_fixture;
 static int g_code_hybrid_path_collision_fixture;
 static int g_code_context_memory_scope_rank = 3;
+static int g_code_context_owner_available = 1;
+static int64_t g_code_context_generation = 2;
 static int g_code_context_memory_anchored = 1;
 
 int canonical_index_find(const char *identifier, void *out, int max)
@@ -982,7 +986,7 @@ int db2_code_index_project_current_generation(const char *project, int64_t *gene
    if (!project || !project[0])
       return -2;
    if (generation_out)
-      *generation_out = 2;
+      *generation_out = g_code_context_generation;
    return 0;
 }
 
@@ -4484,14 +4488,6 @@ int memory_find_facts_visible_ex(const char *query, const char *workspace, const
    return n;
 }
 
-int memory_scope_visibility_rank(int64_t memory_id, const char *workspace, const char *project)
-{
-   (void)workspace;
-   return memory_id == 7 && project && strcmp(project, "proj-alpha") == 0
-              ? g_code_context_memory_scope_rank
-              : 0;
-}
-
 /* canonical_index_find_callers stub (used by the callers + hybrid route tests
  * below) — moved here from test_kb_http_routes.c to keep that file under the
  * 2000-line build-integrity limit; cast a void* like the other canonical stubs. */
@@ -4658,6 +4654,40 @@ int aimee_module_commands_dispatch_context(const char *method, const cJSON *args
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
                                                     int timeout_ms, cJSON **result)
 {
+   if (strcmp(jo_cstr(args, "operation"), "code-context") == 0)
+   {
+      assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 10000);
+      if (!g_code_context_owner_available)
+      {
+         *result = NULL;
+         return -1;
+      }
+      cJSON *plan = cJSON_Duplicate(args, 1);
+      cJSON_ReplaceItemInObjectCaseSensitive(plan, "operation",
+                                             cJSON_CreateString("code-context-plan"));
+      cJSON *memories = cJSON_AddArrayToObject(plan, "memories");
+      if (strcmp(jo_cstr(args, "query"), "needle") == 0)
+      {
+         cJSON *memory = cJSON_CreateObject();
+         cJSON_AddNumberToObject(memory, "id", 7);
+         cJSON_AddStringToObject(memory, "kind", "decision");
+         cJSON_AddStringToObject(memory, "headline", "why needle exists");
+         cJSON_AddStringToObject(memory, "content",
+                                 g_code_context_memory_anchored
+                                     ? "src/search.c: chose needle over haystack for O(1) lookup"
+                                     : "chose needle over haystack for O(1) lookup");
+         cJSON_AddNumberToObject(memory, "confidence", 0.91);
+         cJSON *scope = cJSON_AddObjectToObject(memory, "scope");
+         cJSON_AddStringToObject(scope, "type",
+                                 g_code_context_memory_scope_rank == 3 ? "project" : "global");
+         cJSON_AddStringToObject(scope, "value",
+                                 g_code_context_memory_scope_rank == 3 ? "proj-alpha" : "_global");
+         cJSON_AddItemToArray(memories, memory);
+      }
+      int rc = module_runtime_fixture_call(plan, result);
+      cJSON_Delete(plan);
+      return rc;
+   }
    assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 120000);
    assert(strcmp(jo_cstr(args, "operation"), "demotion-check") == 0);
    const cJSON *config = cJSON_GetObjectItemCaseSensitive(args, "config");
@@ -5288,6 +5318,20 @@ static void test_code_context_bounded_current_project(void)
  *
  * Genuine abstention — a live embedder that matches nothing — is not reachable through
  * this stub set: g_vec_enabled=1 returns canned hits regardless of the query. */
+static void test_code_context_owner_transport(void)
+{
+   char buf[8192];
+   g_code_context_owner_available = 0;
+   assert(handle_get_code_context("query=needle&project=proj-alpha", buf, sizeof(buf)) == 503);
+   assert(strstr(buf, "\"dependency\":\"memory\"") != NULL);
+   g_code_context_owner_available = 1;
+   assert(handle_get_code_context("query=needle&project=proj-alpha", buf, 64) == 413);
+   g_code_context_generation = INT64_MAX;
+   assert(handle_get_code_context("query=needle&project=proj-alpha", buf, sizeof(buf)) == 200);
+   assert(strstr(buf, "\"generation\":9223372036854775807") != NULL);
+   g_code_context_generation = 2;
+}
+
 static void test_code_context_without_an_embedder_reports_the_dependency(void)
 {
    char buf[2048];
@@ -7781,6 +7825,7 @@ int main(void)
    test_code_context_vector_store_outage_is_not_empty();
    test_code_context_dimension_mismatch_is_stale();
    test_code_context_bounded_current_project();
+   test_code_context_owner_transport();
    test_code_context_without_an_embedder_reports_the_dependency();
    test_code_context_embedder_outage_is_not_no_answer();
    test_code_context_embedder_auth_is_unauthorized();

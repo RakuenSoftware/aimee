@@ -67,6 +67,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\bcontext_(?:row_class|result_copy|memory_kind|memory_duplicates_code|text_has_anchor|memory_anchors_code|memory_code_anchor)\b(?=\s*\()|"
     r"\b(?:kb_demote_run|db2_memory_promotion_demote_id|db2_demotion_score|db2_demotion_profile_write|db2_demotion_profile_read|db2_demotion_candidates)\b(?=\s*\()|"
     r"\b(?:ingress_render_block|ingress_preinject_(?:register_confidence_provider|confidence|format_envelope|format_code_block|format_task_context|task_state_reset|recall_unavailable_total))\b(?=\s*\()|"
     r"\b(?:db2_fact_ingest_text(?:_as_actor|_with_evidence)?|db2_typed_fact_ingress|db2_fact_recall_(?:block|in_query)|aimee_db2_register_fact_(?:extract|scan|recall)_provider)\b(?=\s*\()|"

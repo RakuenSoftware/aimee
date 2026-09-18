@@ -6447,7 +6447,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/json_fluent.o $(OBJDIR)/tests/
                      $(OBJDIR)/kb/modules/vault/vault_server_key.o \
                      $(OBJDIR)/kb/modules/vault/vault_store.o $(OBJDIR)/kb/modules/vault/vault_kek_check.o \
                      $(OBJDIR)/kb/modules/vault/vault_kek_cache.o \
-                     $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS)
+                     $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-http-ingest: $(OBJDIR)/tests/test_kb_http_ingest.o \
