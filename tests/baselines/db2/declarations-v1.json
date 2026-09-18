@@ -8211,7 +8211,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 62
+          "line": 58
         }
       ],
       "signature": "fact_gate_verdict_t db2_fact_commit ( const char * source , memory_node_kind_t head_kind , const char * rel_type , const char * target , memory_node_kind_t tail_kind , fact_authority_t authority , int enabled )",
@@ -8261,7 +8261,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 78
+          "line": 74
         }
       ],
       "signature": "fact_gate_verdict_t db2_fact_commit_with_actor ( const char * source , memory_node_kind_t head_kind , const char * rel_type , const char * target , memory_node_kind_t tail_kind , const fact_actor_t * actor , int enabled , const fact_evidence_input_t * evidence , const char * assertion_kind , const char * valid_from , const char * valid_until )",
@@ -8274,7 +8274,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 70
+          "line": 66
         }
       ],
       "signature": "fact_gate_verdict_t db2_fact_commit_with_evidence ( const char * source , memory_node_kind_t head_kind , const char * rel_type , const char * target , memory_node_kind_t tail_kind , fact_authority_t authority , int enabled , const fact_evidence_input_t * evidence , const char * assertion_kind , const char * valid_from , const char * valid_until )",
@@ -15760,7 +15760,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 44
+          "line": 40
         }
       ],
       "signature": "int db2_rel_types_active ( const char * rel_type )",
@@ -15770,30 +15770,12 @@
     },
     {
       "consumers": [
-        "src/kb/kb_main.c",
-        "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_ontology_evolution.c",
         "src/tests/test_rel_types_store.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
           "line": 36
-        }
-      ],
-      "signature": "int db2_rel_types_ensure_seed ( void )",
-      "signature_sha256": "89136e750d8abcb243767053305dfc9ee9cadcbd6f374135219c3f549902cf7b",
-      "status": "audit-pending",
-      "symbol": "db2_rel_types_ensure_seed"
-    },
-    {
-      "consumers": [
-        "src/tests/test_rel_types_store.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 40
         }
       ],
       "signature": "int db2_rel_types_resolve ( const char * rel_type , long * out_id )",
@@ -15808,7 +15790,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/rel_types_store.h",
-          "line": 49
+          "line": 45
         }
       ],
       "signature": "long db2_rel_types_stage_provisional ( const char * rel_type )",
@@ -21195,12 +21177,12 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "49f2c64f371335d6fda689697adca68dc3c0f61e2900d2bbfb601496eccce046",
+  "fingerprint": "654e7e45d987f47c8b7b7a04fb96800e1a93b2e3c6d04ef20efcf891dc034001",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 457,
-    "declarations": 1169,
+    "audit_pending": 456,
+    "declarations": 1168,
     "headers": 134,
     "internal_unconsumed": 202,
     "private_test_only": 317,

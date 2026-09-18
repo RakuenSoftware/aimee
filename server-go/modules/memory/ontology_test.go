@@ -8,16 +8,8 @@ import (
 	"testing"
 )
 
-// The seed table is generated from src/rel_types.c. testdata/ontology_seed.tsv
-// is the C's own answer -- produced by scripts/gen-memory-ontology-seed.c, which
-// links rel_types.c and walks rel_types_seed_count/rel_types_seed_at rather than
-// parsing the source. Parsing was tried first and silently produced a different
-// row count, which is exactly the failure this fixture exists to catch.
-//
-// The same walk writes ontology_seed.go, so this compares two outputs of one
-// generator. What it still catches is a hand-edit of either, and a regeneration
-// of one without the other.
-func TestSeedTableMatchesTheCAuthority(t *testing.T) {
+// Check the generated compatibility snapshot against the Go authority.
+func TestSeedTableMatchesGeneratedSnapshot(t *testing.T) {
 	file, err := os.Open("testdata/ontology_seed.tsv")
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +55,7 @@ func TestSeedTableMatchesTheCAuthority(t *testing.T) {
 	}
 
 	if len(seedOntology) != len(want) {
-		t.Fatalf("seed rows = %d, C authority = %d", len(seedOntology), len(want))
+		t.Fatalf("seed rows = %d, snapshot rows = %d", len(seedOntology), len(want))
 	}
 	// Order matters: lookup is a linear scan, so a reordering changes which row
 	// wins if the table ever gains a duplicate name.

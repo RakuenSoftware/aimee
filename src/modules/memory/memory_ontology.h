@@ -65,8 +65,4 @@ typedef enum
    REL_OTHER = 99
 } memory_relation_kind_t;
 
-/* Map an integer code to the canonical node-kind text label.
- * Returns "other" for unknown codes. */
-const char *memory_ontology_node_kind_to_text(memory_node_kind_t kind);
-
 #endif /* DEC_MEMORY_ONTOLOGY_H */

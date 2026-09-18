@@ -72,8 +72,6 @@ static int missing_commit_decision(int head_kind, const char *rel_type, int tail
 int main(void)
 {
    db2_test_shim_open();
-   assert(db2_rel_types_ensure_seed() == 0);
-   assert(db2_rel_types_ensure_seed() == 0); /* idempotent */
 
    /* No provider, provider failure, and out-of-range verdicts all defer without
     * writing. The host-installed memory gate is authoritative. */

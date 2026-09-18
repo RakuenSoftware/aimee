@@ -12,7 +12,6 @@
 #include <aimee/memory/module_api.h>
 
 #include "cJSON.h"
-#include "memory_ontology.h"
 #include "memory_query.h"
 #include "memory_scope_query.h"
 #include "memory_bus_context.h"
@@ -168,25 +167,6 @@ int memory_tag_workspace(int64_t id, const char *workspace)
    return memory_tag_scope(id, "workspace", workspace);
 }
 
-static const char *domain_policy_name(const char *operation, const char *text_key, const char *text,
-                                      const char *number_key, int number)
-{
-   static __thread char name[64];
-   cJSON *request = domain_request(operation);
-   if (!request || (text_key && !cJSON_AddStringToObject(request, text_key, text ? text : "")) ||
-       (number_key && !cJSON_AddNumberToObject(request, number_key, number)))
-   {
-      cJSON_Delete(request);
-      return "other";
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *value = response ? cJSON_GetObjectItemCaseSensitive(response, "name") : NULL;
-   snprintf(name, sizeof(name), "%s",
-            cJSON_IsString(value) && value->valuestring ? value->valuestring : "other");
-   cJSON_Delete(response);
-   return name;
-}
-
 static cJSON *domain_payload_call(const char *operation, const char *query, const char *as_of,
                                   int limit_tokens, int session_start)
 {
@@ -219,11 +199,6 @@ cJSON *memory_briefing(int limit_tokens)
 cJSON *memory_alerts(const char *since)
 {
    return domain_payload_call("alerts-bundle", NULL, since ? since : "", 0, 0);
-}
-
-const char *memory_ontology_node_kind_to_text(memory_node_kind_t kind)
-{
-   return domain_policy_name("ontology-node-name", NULL, NULL, "subject_kind", (int)kind);
 }
 
 static int domain_query_records(const char *mode, const char *pattern, int days, memory_t *out,

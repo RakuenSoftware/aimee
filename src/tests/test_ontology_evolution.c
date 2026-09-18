@@ -46,7 +46,6 @@ static void operation_commit(const char *operation, char out[FACT_COMMIT_ID_MAX]
 int main(void)
 {
    db2_test_shim_open();
-   assert(db2_rel_types_ensure_seed() == 0);
 
    /* observe(): first sighting creates the row at 1, repeats bump. Normalized. */
    assert(db2_ontology_eval_observe("frobnicates") == 1);

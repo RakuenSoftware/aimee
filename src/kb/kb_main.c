@@ -45,7 +45,6 @@
 #include "cJSON.h"
 #include "memory.h"
 #include "modules/db2/c/memory_vectors.h"
-#include "modules/db2/c/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include "modules/db2/c/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"     /* kb_vault_policy_select (custody selection, P7 §3) */
 #include "kb/kb_management_runtime.h"
@@ -1922,16 +1921,6 @@ int main(int argc, char **argv)
          attempt++;
       }
    }
-
-   /* Seed the relation-type ontology into the shared rel_types table now that DB2
-    * is up. The fact-commit path resolves each seed relation's id from this table
-    * (db2_fact_commit -> db2_rel_types_resolve); without the seed every seed-relation
-    * commit DEFERs and no typed fact ever lands. ensure_seed is idempotent
-    * (ON CONFLICT DO NOTHING) and cheap, so running it on each start is safe.
-    * Non-fatal: a failure is logged but does not block the KB. */
-   if (db2_rel_types_ensure_seed() != 0)
-      fprintf(stderr, "aimee-kb: warning: rel_types ontology seed failed; typed-fact "
-                      "commits will DEFER until the seed lands on a later start\n");
 
    /* Instance custody stays local in both roles, including enrollment and
     * pre-database keys. Only tenant credentials use the organization store. */

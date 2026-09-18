@@ -24,6 +24,7 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "scripts/gen-memory-ontology-seed.c",
     "src/modules/db2/c/memory_conflicts.h",
     "src/modules/db2/c/memory_lint.h",
     "src/kb/kb_demote.c",
@@ -69,6 +70,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:db2_rel_types_ensure_seed|memory_ontology_node_kind_to_text)\b|"
     r"\b(?:memory_collect_scopes|memory_primary_scope|memory_scope_visibility_rank|db2_memory_scope_context_rank(?:_batch)?|memory_scope_tag_t|memory_scope_level_t|MEMORY_SCOPE_(?:NONE|GLOBAL|WORKSPACE|PROJECT))\b|"
     r"\b(?:kb_client_relations_schema_list|db2_relation_schema_row_t|graph_walk_entry_t|memory_graph_walk|RELATION_MASK(?:_ALL)?|memory_ontology_relation_(?:from|to)_text|memory_ontology_node_kind_from_text)\b|"
     r"\b(?:memory_lint_issue_t|MEMORY_LINT_\w+)\b|"

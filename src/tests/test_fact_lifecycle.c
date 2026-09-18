@@ -172,7 +172,6 @@ int main(void)
 {
    db2_test_shim_open();
    test_memory_policy_register();
-   assert(db2_rel_types_ensure_seed() == 0);
    test_pure();
 
    /* §5 class assignment via the commit point. Model ACCEPT -> Class B. */

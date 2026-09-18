@@ -24,16 +24,12 @@ extern "C"
       DB2_FACT_GATE_BADARG = 3,
    };
 
-   typedef int (*db2_fact_gate_fn)(int head_kind, const char *rel_type, int tail_kind,
-                                   int *verdict, int *commit_allowed);
+   typedef int (*db2_fact_gate_fn)(int head_kind, const char *rel_type, int tail_kind, int *verdict,
+                                   int *commit_allowed);
 
    /* Internal declaration of the host contract exported publicly through
     * <aimee/db2/host_contracts.h>. NULL removes the provider. */
    void aimee_db2_register_fact_gate_provider(db2_fact_gate_fn provider);
-
-   /* Upsert the in-code seed ontology into the `rel_types` table (idempotent —
-    * ON CONFLICT DO NOTHING). Call once at DB2 init / before first commit. 0/-1. */
-   int db2_rel_types_ensure_seed(void);
 
    /* Resolve a rel_type name (normalized) to its `rel_types` row id. Returns 1 and
     * sets *out_id when present, 0 when absent, -1 on error. */
