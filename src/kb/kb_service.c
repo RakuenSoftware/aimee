@@ -707,7 +707,6 @@ static const struct
     {"graph.sync_code", kb_handle_graph_sync_code},
     {"graph.explain", kb_handle_graph_explain},
     {"code.audit", kb_handle_code_audit},
-    {"facts.retract", kb_handle_facts_retract},
     {"entities.merge", kb_handle_entities_merge},
     {"entities.unmerge", kb_handle_entities_unmerge},
     {"task.list", kb_handle_task_list},

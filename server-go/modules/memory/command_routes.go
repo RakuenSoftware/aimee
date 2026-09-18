@@ -59,6 +59,7 @@ var kbCommandRoutes = []commandRoute{
 
 	{"memory", "briefing", "Briefing memories.", handleRuntimeCommand, true},
 	{"memory", "alerts", "Alerts memories.", handleRuntimeCommand, true},
+	{"facts", "retract", "Withdraw a typed fact at verified authority.", handleFactCommand, true},
 	{"memory", "context_block", "Build scoped context and recalled facts.", handleRuntimeCommand, true},
 	{"memory", "facts", "Recall scoped typed facts for a turn.", handleRuntimeCommand, true},
 	{"memory", "assemble_context", "Assemble context memories.", handleRuntimeCommand, true},

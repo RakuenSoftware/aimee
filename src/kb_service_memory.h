@@ -23,7 +23,6 @@ int kb_handle_css_signals(int fd, cJSON *req);
 int kb_handle_memory_search_assertions(int fd, cJSON *req);
 
 /* Typed-fact §4 correction + §3 entity merge/unmerge surface. */
-int kb_handle_facts_retract(int fd, cJSON *req);
 int kb_handle_entities_merge(int fd, cJSON *req);
 int kb_handle_entities_unmerge(int fd, cJSON *req);
 int kb_handle_task_list(int fd, cJSON *req);

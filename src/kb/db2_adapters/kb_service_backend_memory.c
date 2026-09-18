@@ -208,55 +208,6 @@ cJSON *db2_kb_service_task_list_json(const char *state, const char *session_id, 
  * typed-fact layer — without a surface, the layer can learn a wrong fact but
  * cannot be told that it is wrong. */
 
-cJSON *db2_kb_service_facts_retract_json(const char *source, const char *relation,
-                                         const char *target, const char *authority)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-
-   /* §4/§5 authority guard: only an explicit "user" authority may retract a
-    * user-stated Class A fact. Anything else — including an absent or
-    * unrecognised value — is treated as model authority, the conservative
-    * reading, since a caller that cannot name its authority must not inherit the
-    * user's.
-    *
-    * `authority` reaches here ALREADY RESOLVED against the caller's
-    * authentication by the request boundary that has it — kb_handle_facts_retract
-    * (authenticated actor) and facts_retract_command (attested transport). It is
-    * not a field a client can set on the way in; do not add a path that forwards
-    * a request body's value here unresolved. */
-   fact_authority_t auth =
-       (authority && strcmp(authority, "user") == 0) ? FACT_AUTHORITY_USER : FACT_AUTHORITY_MODEL;
-
-   int rc = db2_fact_retract(source ? source : "", relation ? relation : "",
-                             (target && target[0]) ? target : NULL, auth);
-   if (rc == FACT_RETRACT_IMMUTABLE)
-   {
-      /* Distinct from a plain failure: the relation is immutable and this caller
-       * lacks the authority to override it. Naming that lets a client explain the
-       * refusal instead of retrying a request that can never succeed. */
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "reason", "immutable");
-      cJSON_AddStringToObject(resp, "message",
-                              "this relation is immutable; only a user authority may retract it");
-      return resp;
-   }
-   if (rc < 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "fact retraction failed");
-      return resp;
-   }
-
-   cJSON_AddStringToObject(resp, "status", "ok");
-   /* rc == 0 is success with nothing matched, NOT an error: retracting a fact
-    * that is already gone leaves the caller in exactly the state they asked for.
-    * The count is what distinguishes the two cases, so it is always reported. */
-   cJSON_AddNumberToObject(resp, "retracted", rc);
-   return resp;
-}
-
 cJSON *db2_kb_service_entities_merge_json(int64_t from_id, int64_t into_id)
 {
    cJSON *resp = cJSON_CreateObject();

@@ -48,3 +48,13 @@ func factFunctional(relation string) bool {
 	}
 	return false
 }
+
+// Family and birthplace identities refuse inferred retractions. An explicit
+// verified user correction remains authoritative, matching the seed ontology.
+func factImmutable(relation string) bool {
+	switch relation {
+	case "parent_of", "child_of", "born_in":
+		return true
+	}
+	return false
+}

@@ -70,7 +70,7 @@ func exerciseFactContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, s *
 	if state(high.AssertionID) != "persistent" || state(low.AssertionID) != "invalidated" {
 		t.Fatal("authenticated model query acquired user authority")
 	}
-	if r := call("context_block", "please forget my born_in"); r["retraction"] != "operator_required" || state(born.AssertionID) != "candidate" {
+	if r := call("context_block", "please forget my born_in"); r["retraction"] != "immutable" || state(born.AssertionID) != "candidate" {
 		t.Fatal(r)
 	}
 	if r := call("facts", ""); r["facts"] != "" {

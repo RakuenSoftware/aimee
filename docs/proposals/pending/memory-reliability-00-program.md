@@ -396,6 +396,17 @@ bodies; automatic injection rejects malformed or failed responses and reports
 unavailable recall. Actual MCP, ingress, gateway and transport tests preserve
 scope forwarding, long responses and the rendered envelope contract.
 
+Explicit `facts.retract` is now a Go-owned command. Requested authority can
+only lower verified caller authority; anonymous and remote-owner requests stay
+model-authority even when their JSON asks for user privileges. Verified users
+retain the existing right to retract immutable birthplace and parent/child facts,
+while model-generated context queries cannot. Selectors retain target filtering
+and relation normalization, corrections retain history/tombstones/WORM seals,
+and scoped requests cannot mutate hidden memory-backed facts. The native KB
+retraction handler, duplicate authority resolver and DB2 JSON adapter are deleted.
+The KB now declares 98 commands. Legacy native mutation implementations remain
+with dependent rollback fixtures and are still part of the unfinished G0 work.
+
 The current inventory is four C sources and six headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

@@ -67,6 +67,7 @@ RETIRED_NATIVE_SYMBOLS = re.compile(
     r"\b(?:db2_fact_ingest_text(?:_as_actor|_with_evidence)?|db2_typed_fact_ingress|db2_fact_recall_(?:block|in_query)|aimee_db2_register_fact_(?:extract|scan|recall)_provider)\b(?=\s*\()|"
     r"\b(?:db2_kb_service_memory_(?:context_block|facts)_json|kb_handle_memory_(?:context_block|facts)|memory_get_context_block)\b(?=\s*\()|"
     r"\bkb_client_memory_(?:context_block|facts)\b(?=\s*\()|"
+    r"\b(?:db2_kb_service_facts_retract_json|kb_handle_facts_retract)\b(?=\s*\()|"
     r"\bdb2_fact_candidates\b(?=\s*\()|"
     r"\b(?:memory_graph_(?:relation_gravity|confidence_factor|edge_score|detect_code_shape|expand_from_seeds|point_id_to_node_key|populate_score_parts|distribute_path_credit)|memory_fusion_\w+|memory_apply_feedback_path)\b(?=\s*\()|"
     r"\bdb2_memory_(?:reject|restore)\b(?=\s*\()|"

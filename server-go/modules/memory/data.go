@@ -91,6 +91,8 @@ type DataRequest struct {
 	Evidence              string    `json:"evidence,omitempty"`
 	Note                  string    `json:"note,omitempty"`
 	Relation              string    `json:"relation,omitempty"`
+	FactSource            string    `json:"fact_source,omitempty"`
+	FactTarget            string    `json:"fact_target,omitempty"`
 	SourceID              int64     `json:"source_id,omitempty"`
 	TargetID              int64     `json:"target_id,omitempty"`
 	Resolution            string    `json:"resolution,omitempty"`
@@ -843,6 +845,7 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		len(request.SessionID) > 256 || len(request.Client) > 64 || len(request.Tool) > 64 ||
 		len(request.Path) > 4096 || len(request.Home) > 4096 || len(request.Command) > 65536 ||
 		len(request.ProjectsRoot) > 4096 || len(request.MemorySegment) > 256 ||
+		len(request.FactSource) > 1024 || len(request.FactTarget) > 1024 ||
 		len(request.Entity) > 512 || len(request.AsOf) > 64 || len(request.State) > 16 ||
 		len(request.TriggerText) > 511 || len(request.ActionText) > 1023 ||
 		len(request.AnchorEntity) > 127 || len(request.AnchorFile) > 127 ||
@@ -1106,6 +1109,23 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
+	case "fact-retract":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		actor := modelFactActor()
+		if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+			actor = FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "user", Rank: 30, Authenticated: 1}
+			if actor.TransportIdentity == "" {
+				actor.TransportIdentity = actor.Principal
+			}
+		}
+		var count int
+		count, err = backend.invalidateFacts(ctx, actor, request.FactSource, request.Relation, request.FactTarget)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "retracted": count, "authority": actor.Role})
+		}
 	case "fact-candidates":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB {
@@ -2078,6 +2098,22 @@ set_config('aimee.correlation_id',$9,true)`,
 			return nil, bus.ModuleStatusCancelled
 		}
 
+		if request.Operation == "fact-retract" {
+			reason, message := "", ""
+			switch {
+			case errors.Is(err, errFactImmutable):
+				reason, message = "immutable", "immutable facts require verified user authority"
+			case errors.Is(err, errFactAnnotateOnly):
+				reason, message = "annotate_only", "historical facts may only be annotated"
+			case errors.Is(err, errFactOperatorOnly):
+				reason, message = "operator_required", "policy facts require operator authority"
+			}
+			if reason != "" {
+				payload, _ := json.Marshal(map[string]any{"status": "error", "kind": "conflict", "reason": reason, "message": message})
+				raw, _ := json.Marshal(DataResponse{Payload: payload})
+				return raw, bus.ModuleStatusOK
+			}
+		}
 		if request.Operation == "fact-review" {
 			kind := ""
 			if errors.Is(err, ErrMemoryNotFound) {

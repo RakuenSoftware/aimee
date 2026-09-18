@@ -17,8 +17,6 @@
 #include "modules/db2/c/fidelity.h" /* db2_fidelity_report_by_turn (auditable-correctness P3) */
 #include "modules/db2/c/fact_mutation.h"
 #include "modules/db2/c/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
-#include "kb/kb_login_throttle.h" /* kb_login_throttle_peer_is_loopback — the canonical local test */
-#include "kb_reqctx.h"            /* kb_reqctx_actor — authenticated caller for write authority */
 #include "kb_service_memory.h"
 #include "log.h"
 
@@ -30,90 +28,6 @@
 int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
-
-/* The typed-fact write authority of the request being served (typed-fact §5).
- *
- * Derived from the request's AUTHENTICATED actor and nothing else — never from a
- * field in the request (verify-then-trust, kb_verifier.h). Class A is reserved
- * for a direct assertion by the user, so only a named human identity qualifies:
- * an OIDC subject, or a host account the calling service asserted over the mTLS
- * listener after its certificate, bearer and service identity all verified
- * (kb_tls_serve.c -> kb_reqctx_apply_asserted). Everything else is an agent-side
- * or service origin and gets MODEL authority — a bearer/owner credential, an
- * mTLS machine identity, and an unauthenticated caller alike.
- *
- * The actor answers WHO is calling. It does not answer whether the payload is
- * that person's own words: an agent's tool call, made mid-turn, inherits the
- * human's request context. So a caller that relays model-composed text must not
- * use this. Go memory.context_block structurally caps query authority.
- *
- * The owner bearer from a LOOPBACK PEER is the third case, and it is a
- * deployment fact rather than a weaker rule. Only the plain HTTP listener
- * records a peer address (kb_http_listener.c), so this condition means
- * specifically "arrived over plain loopback HTTP" — never mTLS, never a remote
- * peer, and never a direct in-process call, all of which leave the peer empty
- * and are not local. That listener serves exactly one client, aimee-server on
- * this host, because kb_client refuses to put the bearer on a cleartext link to
- * anywhere else; and it has no peer certificate to bind a caller assertion to,
- * so kb_http_conn.c rejects the caller header outright (B5). aimee-server has
- * already derived the authority from the kernel-attested peer of ITS OWN socket
- * and only asks for "user" when it attested a person. Nothing the model can
- * reach bypasses that: its tool calls go through the server, which resolves
- * authority from attestation and never from the payload. Over mTLS the human
- * arrives as an asserted host actor instead, handled above. */
-/* Who is this request, in the only terms that decide whether it may speak as the
- * user: is there an authenticated account?
- *
- * Authentication happens once, at message receipt -- the channel, the session
- * and the account are each verified there, and a request that fails any of them
- * never reaches an action. `actor` IS that result, so this reads it rather than
- * re-deriving anything: only the constructors in kb_identity.h set
- * authenticated = 1, and a zero-initialized principal is unauthenticated.
- *
- * An account NAMES SOMEONE, and that is what separates the four kinds:
- *
- *   OIDC   an issuer-scoped subject -- the same account whatever carried it
- *   HOST   a local host account PAM accepted
- *   CERT   a verified mTLS peer, which names one enrolled machine
- *   OWNER  a SHARED install credential, which names nobody in particular
- *
- * The first three identify a principal, so no transport qualifier applies to
- * them: an OIDC subject is the same person over any socket, and a client cert
- * names one enrolled machine.
- *
- * OWNER is different in kind, not merely weaker. It is one bearer for the whole
- * install, so it cannot say WHICH person is acting; loopback is what makes it
- * stand for "the operator at this machine" rather than "whoever holds the
- * token". Dropping that qualifier was measured, from a genuinely non-loopback
- * peer, and it let a remote holder of the bearer destroy a user-stated Class-A
- * fact:
- *
- *     alice before: A current
- *     remote peer, authority=user -> {"status":"ok","retracted":1}
- *     alice after:  A gone
- *
- * That is a real widening of what a leaked bearer can do, and it is not what
- * the account model argues for -- the model says the ACCOUNT decides, and a
- * shared credential is precisely the case where there is no account to decide
- * with. The qualifier is kept for OWNER alone.
- *
- * CERT was previously excluded, mirroring a matching exclusion of
- * ATTEST_MTLS_CLIENT on the server, and the two together were the bug: a client
- * presenting a verified certificate was an authenticated principal everywhere
- * else in the tree (vault_capability.c puts it with UDS/webchat precisely
- * because it "makes the grant expressible per client") yet an anonymous agent
- * here. A caller could be a person to one daemon and not to the other. */
-static fact_authority_t kb_memory_request_authority(void)
-{
-   const kb_principal_t *actor = kb_reqctx_actor(); /* NULL unless authenticated */
-   if (!actor || !actor->authenticated || actor->kind == KB_PRIN_NONE)
-      return FACT_AUTHORITY_MODEL;
-   /* A shared install bearer only stands for a person at the machine it is
-    * installed on. Every other kind names one. */
-   if (actor->kind == KB_PRIN_OWNER)
-      return kb_login_throttle_peer_is_loopback() ? FACT_AUTHORITY_USER : FACT_AUTHORITY_MODEL;
-   return FACT_AUTHORITY_USER;
-}
 
 static int kb_memory_scope_begin(cJSON *req, int force, int *missing_out)
 {
@@ -614,48 +528,6 @@ int kb_handle_memory_search_assertions(int fd, cJSON *req)
 /* §4 retraction: withdraw a typed fact the layer got wrong. `target` is optional
  * and scopes the retraction to one value; omitting it retracts every current
  * value of (source, relation). */
-int kb_handle_facts_retract(int fd, cJSON *req)
-{
-   cJSON *src_j = cJSON_GetObjectItemCaseSensitive(req, "source");
-   cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(req, "relation");
-   cJSON *tgt_j = cJSON_GetObjectItemCaseSensitive(req, "target");
-   cJSON *auth_j = cJSON_GetObjectItemCaseSensitive(req, "authority");
-   if (!cJSON_IsString(src_j) || !src_j->valuestring[0] || !cJSON_IsString(rel_j) ||
-       !rel_j->valuestring[0])
-      return kb_send_error(fd, "facts.retract requires a non-empty source and relation");
-   if (tgt_j && !cJSON_IsString(tgt_j))
-      return kb_send_error(fd, "facts.retract target must be a string");
-   if (auth_j && !cJSON_IsString(auth_j))
-      return kb_send_error(fd, "facts.retract authority must be a string");
-
-   /* This action is reachable from outside (POST /v1/actions/facts.retract), so
-    * the body's `authority` is a request, not a grant: it may only lower what the
-    * caller authenticated as. Without an authenticated human actor a "user"
-    * retraction is served at model authority, and db2_fact_retract then leaves
-    * Class-A facts and immutable relations alone.
-    *
-    * aimee-server carries the human across this hop as X-Aimee-Caller-Subject,
-    * which the mTLS listener turns into a KB_PRIN_HOST actor after the peer
-    * certificate, bearer and service identity have verified. The PLAIN listener
-    * has no peer to attest and rejects that header by design (B5), so on a
-    * plain-loopback kb a user retraction lands at model authority and reports
-    * retracted: 0. That is a deployment property, not a silent failure — say so,
-    * because "nothing happened and nothing was logged" is the hard version. */
-   const char *requested = cJSON_IsString(auth_j) ? auth_j->valuestring : NULL;
-   int wants_user = requested && strcmp(requested, "user") == 0;
-   int granted_user = wants_user && kb_memory_request_authority() == FACT_AUTHORITY_USER;
-   const char *authority = granted_user ? "user" : "model";
-   if (wants_user && !granted_user)
-      LOG_WARN("kb.facts",
-               "user retraction of %s/%s served at model authority: the request "
-               "carries no authenticated human actor",
-               src_j->valuestring, rel_j->valuestring);
-
-   cJSON *resp = db2_kb_service_facts_retract_json(
-       src_j->valuestring, rel_j->valuestring, cJSON_IsString(tgt_j) ? tgt_j->valuestring : NULL,
-       authority);
-   return kb_reply_or_error(fd, resp, "failed to retract fact");
-}
 
 /* §3 entity merge: collapse two records of the same real entity into one. */
 int kb_handle_entities_merge(int fd, cJSON *req)

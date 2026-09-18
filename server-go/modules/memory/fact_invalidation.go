@@ -8,6 +8,7 @@ import (
 )
 
 var errFactAnnotateOnly = errors.New("memory: historical evidence may only be annotated")
+var errFactImmutable = errors.New("memory: immutable fact requires user authority")
 var errFactOperatorOnly = errors.New("memory: fact requires operator authority")
 
 // invalidateFacts makes an explicit correction, retaining both history and a
@@ -16,8 +17,8 @@ func (s *postgresDataStore) invalidateFacts(ctx context.Context, actor FactActor
 	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !validMutationActor(actor) || source == "" || relation == "" {
 		return 0, errors.New("memory: fact invalidation requires an actor transaction")
 	}
-	if relation == "born_in" && actor.Rank != 40 {
-		return 0, errFactOperatorOnly
+	if factImmutable(relation) && actor.Rank < 30 {
+		return 0, errFactImmutable
 	}
 	if _, err := s.db.Exec(ctx, `SELECT pg_advisory_xact_lock(4704387788844163412)`); err != nil {
 		return 0, err
@@ -101,6 +102,9 @@ func (s *postgresDataStore) retractContextQuery(ctx context.Context, query strin
 	count, err := s.invalidateFacts(ctx, modelFactActor(), "user", attr, "")
 	if errors.Is(err, errFactAnnotateOnly) {
 		return "annotate_only", nil
+	}
+	if errors.Is(err, errFactImmutable) {
+		return "immutable", nil
 	}
 	if errors.Is(err, errFactOperatorOnly) {
 		return "operator_required", nil

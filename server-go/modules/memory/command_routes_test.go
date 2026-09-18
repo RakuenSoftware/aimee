@@ -35,6 +35,9 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			group, verb := string(response[offset:offset+groupLen]), string(response[offset+groupLen:offset+groupLen+verbLen])
 			offset += groupLen + verbLen + summaryLen
 			wantGroup := "memory"
+			if verb == "retract" {
+				wantGroup = "facts"
+			}
 			if verb == "schema_list" {
 				wantGroup = "relations"
 			}
@@ -53,7 +56,7 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			}
 			continue
 		}
-		if offset != len(response) || len(seen) != 97 {
+		if offset != len(response) || len(seen) != 98 {
 			t.Fatalf("routes=%d bytes=%d/%d", len(seen), offset, len(response))
 		}
 		for _, verb := range []string{"recall", "directive_create", "prospective_match", "list_unused_l2", "stats", "cognify", "cognify_drain", "cognify_status"} {

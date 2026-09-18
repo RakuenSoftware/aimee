@@ -880,7 +880,8 @@ cJSON *tool_get_context_block(cJSON *args)
           &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
    dstr_append_str(&body, block);
    const char *retraction = jo_cstr(response, "retraction");
-   if (strcmp(retraction, "annotate_only") == 0 || strcmp(retraction, "operator_required") == 0)
+   if (strcmp(retraction, "annotate_only") == 0 || strcmp(retraction, "operator_required") == 0 ||
+       strcmp(retraction, "immutable") == 0)
       dstr_appendf(&body, "\nFact retraction declined: %s.\n", retraction);
    cJSON *result = text_content(dstr_cstr(&body));
    dstr_free(&body);
