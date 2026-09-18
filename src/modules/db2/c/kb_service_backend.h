@@ -147,16 +147,7 @@ extern "C"
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
    cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
-   /* `authority` is the typed-fact write authority for the §4 retraction this
-    * turn may perform; the RPC handler derives it from the request's
-    * authenticated actor, never from the request body. See db2_typed_fact_ingress
-    * (fact_ingest.h). */
-   cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *block_type,
-                                                   int limit, fact_authority_t authority);
-   /* Read-only typed-fact recall for the turn: facts about entities named in the
-    * query, PII-gated. Returns {status, facts} (facts="" when off/none). Lets the
-    * server auto-inject facts without the full context-block assembly. */
-   cJSON *db2_kb_service_memory_facts_json(const char *query);
+
    cJSON *db2_kb_service_memory_search_assertions_json(const char *query, const char *valid_at,
                                                        const char *believed_at,
                                                        int include_historical, int max_hops,

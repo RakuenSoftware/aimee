@@ -376,6 +376,19 @@ Schema version 10 grants the Go owner access to the review journal. The old
 native review implementation remains only with legacy lifecycle fixtures until
 the dependent rollback/invalidation coverage is ported.
 
+The public context-block and typed-fact recall routes now execute entirely in
+Go. Query retraction remains structurally model-authority, including inside an
+authenticated user session, and reports annotate-only/operator-only refusals.
+Allowed corrections commit history, tombstones and WORM seals atomically; an
+oversized matching set fails without a partial retraction. Fact recall now
+filters hidden or inactive memory-backed evidence, closing a private-source
+leak. The C endpoint composition, pattern-ingest/recall implementations, host
+providers and their obsolete ABI fixtures are removed. Go tests retain pattern
+seed-kind correction and sensitive recall coverage; restricted-role replay
+covers public context authority, scope, historical evidence, bounds and rollback.
+The KB now declares 97 commands; the Server still declares four. Native fact
+rollback, other mutation consumers and gateway integration remain G0 work.
+
 The current inventory is four C sources and six headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

@@ -356,11 +356,6 @@ char *memory_assemble_context(const char *task_hint)
    return domain_context_call(task_hint ? task_hint : "", NULL, 12);
 }
 
-char *memory_get_context_block(const char *query, const char *block_type, int limit)
-{
-   return domain_context_call(query ? query : "", block_type ? block_type : "general", limit);
-}
-
 static int domain_policy_code(const char *operation, const char *key, const char *value)
 {
    cJSON *request = domain_request(operation);

@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "a2eb6a98c3fecfa0523a3153d3bd4488f43c8232",
-  "source_fingerprint": "89626b27a583247b427109899774ad258c8a8cdebc6264a365de1ed970c4ad59",
+  "source_revision": "727cefde2e798c0171476b441d9a5f0097943404",
+  "source_fingerprint": "578d825eb16c55458f0c4ff30fc42fea8de2f77d5f386fb4ce7ed62155acbefe",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -68,10 +68,8 @@
     "src/modules/db2/c/evidence_vectors.c",
     "src/modules/db2/c/fact_identity.c",
     "src/modules/db2/c/fact_identity_unicode.c",
-    "src/modules/db2/c/fact_ingest.c",
     "src/modules/db2/c/fact_lifecycle.c",
     "src/modules/db2/c/fact_mutation.c",
-    "src/modules/db2/c/fact_recall.c",
     "src/modules/db2/c/failed_queries.c",
     "src/modules/db2/c/feature_rows.c",
     "src/modules/db2/c/feedback.c",
@@ -2218,7 +2216,6 @@
       "symbol": "memchr",
       "references": [
         "src/modules/db2/c/canonical_index.c",
-        "src/modules/db2/c/fact_recall.c",
         "src/modules/db2/c/management_jwks_runtime.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/support/runtime_config_primitives.c"
@@ -3062,7 +3059,7 @@
     }
   ],
   "summary": {
-    "translation_units": 123,
+    "translation_units": 121,
     "descriptor_support_units": 19,
     "unresolved_symbols": 144,
     "dispositions": {
@@ -3074,5 +3071,5 @@
       "system-link": 140
     }
   },
-  "fingerprint": "2995214eb24e2f0980f8b6ef81aa68d2a053c2032770b85e11842dbf9aec56af"
+  "fingerprint": "e7e34b353a772b017461224f284f19a86ca503fb68763be2f51765db77f612d7"
 }

@@ -9,8 +9,6 @@
 int kb_handle_session_briefing_commitments(int fd, cJSON *req);
 int kb_handle_session_briefing_directives(int fd, cJSON *req);
 int kb_handle_memory_assemble_typed_context(int fd, cJSON *req);
-int kb_handle_memory_context_block(int fd, cJSON *req);
-int kb_handle_memory_facts(int fd, cJSON *req);
 /* Auditable-correctness P1: record a per-turn retrieval_event keyed by turn_id. */
 int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req);
 /* Auditable-correctness P1.5: merge typed code/doc refs into the turn's event. */

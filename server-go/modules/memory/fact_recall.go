@@ -64,10 +64,11 @@ const (
 // inspect the database or make memory decisions.
 func (s *postgresDataStore) recallFactBlock(ctx context.Context, entity string,
 	turnRequestsSensitive bool, capacity int) (string, int, error) {
-	rows, err := s.db.Query(ctx, `SELECT relation, target, confidence FROM entity_edges
+	rows, err := s.db.Query(ctx, `SELECT relation, target, confidence FROM entity_edges e
 WHERE source = $1 AND edge_class = 'semantic'
   AND lifecycle_state IN ('persistent','promoted')
   AND superseded_at = '' AND invalidated_at = '' AND suppressed = 0
+  AND `+factEvidenceVisible+`
 ORDER BY confidence DESC, id ASC LIMIT $2`, entity, factRecallMaxFacts)
 	if err != nil {
 		return "", 0, err
@@ -137,10 +138,11 @@ LIMIT $2`, query, factRecallMaxEntities)
 	if len(names) >= factRecallMaxEntities {
 		return names
 	}
-	rows, err = s.db.Query(ctx, `SELECT DISTINCT source FROM entity_edges
+	rows, err = s.db.Query(ctx, `SELECT DISTINCT source FROM entity_edges e
 WHERE edge_class = 'semantic' AND source <> 'user' AND length(source) >= 3
   AND lifecycle_state IN ('persistent','promoted')
   AND superseded_at = '' AND invalidated_at = '' AND suppressed = 0
+  AND `+factEvidenceVisible+`
   AND lower($1) LIKE '%' || lower(source) || '%'
 ORDER BY source LIMIT $2`, query, factRecallMaxEntities)
 	if err != nil {

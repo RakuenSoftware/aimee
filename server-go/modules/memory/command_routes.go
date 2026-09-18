@@ -59,6 +59,8 @@ var kbCommandRoutes = []commandRoute{
 
 	{"memory", "briefing", "Briefing memories.", handleRuntimeCommand, true},
 	{"memory", "alerts", "Alerts memories.", handleRuntimeCommand, true},
+	{"memory", "context_block", "Build scoped context and recalled facts.", handleRuntimeCommand, true},
+	{"memory", "facts", "Recall scoped typed facts for a turn.", handleRuntimeCommand, true},
 	{"memory", "assemble_context", "Assemble context memories.", handleRuntimeCommand, true},
 	{"memory", "compact_windows", "Compact windows memories.", handleRuntimeCommand, true},
 	{"memory", "query_edges", "Query edges memories.", handleRuntimeCommand, true},

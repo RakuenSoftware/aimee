@@ -166,6 +166,7 @@ func TestFactMutationRuntimeReplay(t *testing.T) {
 	}
 	exerciseFactWorkerReplay(t, ctx, tx, s)
 	exerciseFactReviewReplay(t, ctx, tx, s)
+	exerciseFactContextReplay(t, ctx, tx, s)
 	// Deferred semantic evidence guards run before the test rolls back its data.
 	sql(`SET CONSTRAINTS ALL IMMEDIATE`)
 	var missing int

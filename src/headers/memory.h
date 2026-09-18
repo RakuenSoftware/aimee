@@ -412,7 +412,6 @@ int memory_profile_card_build(const char *entity_id, int min_obs, char *out_json
                               size_t out_json_len);
 int memory_profile_card_get(const char *entity, char *out_json, size_t out_json_len);
 int memory_profile_card_refresh(int min_obs, int stale_secs);
-char *memory_get_context_block(const char *query, const char *block_type, int limit);
 int memory_query_plan(const char *query, int limit, int hard_cap, memory_query_plan_t *out);
 const char *memory_query_route_name(memory_query_route_t route);
 const char *memory_query_shape_name(memory_query_shape_t shape);

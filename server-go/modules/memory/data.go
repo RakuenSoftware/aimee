@@ -1984,7 +1984,7 @@ set_config('aimee.correlation_id',$9,true)`,
 		case "tier-kind-counts":
 			response.TierKindCounts, err = queries.TierKindCounts(ctx, request.Limit)
 		}
-	case "recall-bundle", "briefing-bundle", "alerts-bundle", "assemble-context", "context-block",
+	case "recall-bundle", "briefing-bundle", "alerts-bundle", "assemble-context", "context-block", "context-ingress",
 		"diagnose", "explain", "ask":
 		if options.placement != PlacementKB && request.Operation != "recall-bundle" {
 			return nil, bus.ModuleStatusInvalidRequest
@@ -2009,14 +2009,31 @@ set_config('aimee.correlation_id',$9,true)`,
 			response.Payload, err = retrieval.BriefingBundle(ctx, request.LimitTokens)
 		case "alerts-bundle":
 			response.Payload, err = retrieval.AlertsBundle(ctx, request.AsOf)
-		case "assemble-context", "context-block":
+		case "assemble-context", "context-block", "context-ingress":
 			var block string
+			if request.Operation == "context-ingress" {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok || transaction == nil {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				response.Reason, err = backend.retractContextQuery(ctx, request.Query)
+				if err != nil {
+					break
+				}
+			}
 			if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
 				var records []Record
 				records, err = backend.SearchVisible(ctx, request)
 				block = renderMemoryContext(records, request.BlockType)
 			} else {
 				block, err = retrieval.AssembleContext(ctx, scope, request.Query, request.BlockType, request.Limit)
+			}
+			if err == nil && request.Operation == "context-ingress" && request.Query != "" {
+				var facts string
+				facts, _, err = options.data.(*postgresDataStore).RecallFacts(ctx, "", request.Query, false, 2048)
+				if facts != "" {
+					block += "\n## Known facts\n" + facts
+				}
 			}
 			response.Block = &block
 		case "diagnose":

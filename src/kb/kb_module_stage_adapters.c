@@ -294,60 +294,6 @@ static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, i
    return rc;
 }
 
-_Static_assert(sizeof(((aimee_db2_fact_candidate_t *)0)->subject) ==
-                   AIMEE_MEMORY_TRIPLE_SUBJECT_MAX,
-               "memory wire subject capacity must match the DB2 host contract");
-_Static_assert(sizeof(((aimee_db2_fact_candidate_t *)0)->rel_type) ==
-                   AIMEE_MEMORY_TRIPLE_REL_TYPE_MAX,
-               "memory wire relation capacity must match the DB2 host contract");
-_Static_assert(sizeof(((aimee_db2_fact_candidate_t *)0)->object) == AIMEE_MEMORY_TRIPLE_OBJECT_MAX,
-               "memory wire object capacity must match the DB2 host contract");
-
-static int extract_facts(const char *text, aimee_db2_fact_candidate_t *out, int max, int *count)
-{
-   if (!text || !out || max <= 0 || !count)
-      return -1;
-   size_t request_len = aimee_memory_extract_request_size(text);
-   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
-      return -1;
-
-   size_t response_cap = AIMEE_MEMORY_EXTRACT_RESPONSE_MAX(max);
-   uint8_t *request = malloc(request_len);
-   aimee_memory_triple_t *triples = calloc((size_t)max, sizeof(*triples));
-   uint8_t *response = malloc(response_cap);
-   uint32_t response_len = 0, found = 0;
-   int rc = -1;
-   if (request && triples && response && response_cap <= UINT32_MAX &&
-       aimee_memory_extract_request_encode(text, (uint32_t)max, request, request_len) == 0 &&
-       call_module(AIMEE_MEMORY_EVENT_EXTRACT_INDEX, AIMEE_MEMORY_STAGE_EXTRACT_INDEX, request,
-                   (uint32_t)request_len, response, (uint32_t)response_cap, &response_len) == 0 &&
-       aimee_memory_extract_response_decode(response, response_len, triples, (uint32_t)max,
-                                            &found) == 0)
-   {
-      rc = 0;
-      for (uint32_t i = 0; i < found; ++i)
-      {
-         if (triples[i].subject_kind > INT_MAX || triples[i].object_kind > INT_MAX)
-         {
-            rc = -1;
-            break;
-         }
-         memset(&out[i], 0, sizeof(out[i]));
-         memcpy(out[i].subject, triples[i].subject, sizeof(out[i].subject));
-         memcpy(out[i].rel_type, triples[i].rel_type, sizeof(out[i].rel_type));
-         memcpy(out[i].object, triples[i].object, sizeof(out[i].object));
-         out[i].subject_kind = (int)triples[i].subject_kind;
-         out[i].object_kind = (int)triples[i].object_kind;
-      }
-      if (rc == 0)
-         *count = (int)found;
-   }
-   free(request);
-   free(triples);
-   free(response);
-   return rc;
-}
-
 cJSON *kb_module_memory_data(const cJSON *request_json)
 {
    if (!request_json)
@@ -366,71 +312,6 @@ cJSON *kb_module_memory_data(const cJSON *request_json)
    free(request);
    free(response);
    return root;
-}
-
-static int recall_facts(const char *entity, const char *query, int turn_requests_sensitive,
-                        char *out, size_t cap, int *count)
-{
-   if ((!entity && !query) || (entity && query) || !out || !cap || !count)
-      return -1;
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "fact-recall") ||
-       (entity && !cJSON_AddStringToObject(request, "entity", entity)) ||
-       (query && !cJSON_AddStringToObject(request, "query", query)) ||
-       !cJSON_AddBoolToObject(request, "turn_requests_sensitive", turn_requests_sensitive != 0) ||
-       !cJSON_AddNumberToObject(request, "content_capacity", (double)cap))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = kb_module_memory_data(request);
-   cJSON_Delete(request);
-   const cJSON *block = response ? cJSON_GetObjectItemCaseSensitive(response, "block") : NULL;
-   const cJSON *written = response ? cJSON_GetObjectItemCaseSensitive(response, "count") : NULL;
-   if ((!cJSON_IsString(block) && !cJSON_IsNull(block)) || !cJSON_IsNumber(written) ||
-       written->valueint < 0)
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   const char *text = cJSON_IsString(block) && block->valuestring ? block->valuestring : "";
-   size_t len = strlen(text);
-   if (len >= cap)
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   memcpy(out, text, len + 1);
-   *count = written->valueint;
-   cJSON_Delete(response);
-   return 0;
-}
-
-_Static_assert(AIMEE_DB2_FACT_ATTR_MAX == AIMEE_MEMORY_SCAN_ATTR_MAX,
-               "memory wire attribute capacity must match the DB2 host contract");
-
-static int scan_fact_turn(const char *text, int *is_retraction, int *has_attr,
-                          char attr[AIMEE_DB2_FACT_ATTR_MAX])
-{
-   if (!text || !is_retraction || !has_attr || !attr)
-      return -1;
-   size_t request_len = aimee_memory_scan_request_size(text);
-   if (!request_len || request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || request_len > UINT32_MAX)
-      return -1;
-   uint8_t *request = malloc(request_len);
-   uint8_t response[AIMEE_MEMORY_SCAN_RESPONSE_MAX];
-   uint32_t response_len = 0;
-   if (!request)
-      return -1;
-   int rc = aimee_memory_scan_request_encode(text, request, request_len) == 0 &&
-                    call_module(AIMEE_MEMORY_EVENT_EXTRACT_INDEX, AIMEE_MEMORY_STAGE_EXTRACT_INDEX,
-                                request, (uint32_t)request_len, response, sizeof(response),
-                                &response_len) == 0
-                ? aimee_memory_scan_response_decode(response, response_len, is_retraction, has_attr,
-                                                    attr, AIMEE_DB2_FACT_ATTR_MAX)
-                : -1;
-   free(request);
-   return rc;
 }
 
 static int json_optional_flag(const cJSON *root, const char *name, int *value)
@@ -586,9 +467,6 @@ void kb_module_stage_adapters_configure(void)
 {
    aimee_db2_register_mdl_score_provider(score_mdl);
    aimee_db2_register_fact_gate_provider(check_fact_gate);
-   aimee_db2_register_fact_extract_provider(extract_facts);
-   aimee_db2_register_fact_scan_provider(scan_fact_turn);
-   aimee_db2_register_fact_recall_provider(recall_facts);
    aimee_db2_register_embed_provider(embed_text);
    aimee_db2_register_identity_key_provider(kb_identity_key_from_fields);
    aimee_db2_register_css_render_compare_provider(css_render_compare);

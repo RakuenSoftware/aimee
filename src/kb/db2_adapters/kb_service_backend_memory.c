@@ -1,20 +1,12 @@
-/* kb/db2_adapters/kb_service_backend_memory.c: caller-side memory RPC adapters for
- * aimee-kb (find_facts, list, get, insert, briefing, context_block,
- * entity_profile, entity_edges). This policy/JSON composition layer remains
- * with aimee-kb while its storage calls migrate to the generated DB2 client. */
+/* Legacy session-briefing, task and graph services awaiting module cutover. */
 
 #include "kb_service_backend.h"
 
 #include "aimee.h"
-#include "log.h" /* aimee_log — a failed recall must not read as an empty one */
 #include "config.h"
 #include "modules/db2/c/entity_registry.h" /* db2_entity_merge / db2_entity_unmerge */
-#include "modules/db2/c/fact_ingest.h"     /* db2_typed_fact_ingress */
-#include "modules/db2/c/fact_lifecycle.h"  /* db2_fact_retract, FACT_RETRACT_IMMUTABLE */
-#include "modules/db2/c/fact_recall.h"     /* db2_fact_recall_in_query */
 #include "modules/db2/c/kb_payload.h"      /* db2_kb_async_enqueue */
 #include "modules/db2/c/decision_log.h"
-#include "memory.h"
 #include "session_briefing.h"
 #include "modules/db2/c/tasks.h"
 
@@ -45,83 +37,8 @@ cJSON *db2_kb_service_session_briefing_directives_json(int limit)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *block_type,
-                                                int limit, fact_authority_t authority)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-
-   /* typed-fact ingress (§4/§6/§7), KB-side (db2 is live here). Unconditional:
-    * the config.typed_facts_enabled master gate is retired. Orchestration lives
-    * in fact_ingest.
-    * `authority` is the caller's authenticated write authority, resolved by the
-    * RPC handler — this call can retract facts, so it must not be inferred from
-    * `query`, which the caller supplies. */
-   char facts[2048] = "";
-   (void)db2_typed_fact_ingress(query, authority, facts, sizeof(facts));
-
-   char *block = memory_get_context_block(query ? query : "",
-                                          (block_type && block_type[0]) ? block_type : "general",
-                                          limit > 0 ? limit : 5);
-
-   cJSON_AddStringToObject(resp, "status", "ok");
-   if (facts[0])
-   {
-      const char *bl = block ? block : "";
-      size_t need = strlen(bl) + strlen(facts) + 32;
-      char *combined = malloc(need);
-      if (combined)
-      {
-         snprintf(combined, need, "%s\n## Known facts\n%s", bl, facts);
-         cJSON_AddStringToObject(resp, "block", combined);
-         free(combined);
-      }
-      else
-      {
-         cJSON_AddStringToObject(resp, "block", bl);
-      }
-   }
-   else
-   {
-      cJSON_AddStringToObject(resp, "block", block ? block : "");
-   }
-   free(block);
-   return resp;
-}
-
 /* Read-only typed-fact recall (§7), PII-gated: the cheap path ingress_preinject
  * calls every turn. No write; facts="" when there are none. */
-cJSON *db2_kb_service_memory_facts_json(const char *query)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   char facts[2048] = "";
-   if (query && query[0])
-   {
-      /* A FAILED RECALL IS NOT AN EMPTY ONE. This discarded the return, so a
-       * negative (db2 unavailable) produced facts="" and a "status":"ok"
-       * response -- indistinguishable from "this turn has no facts", on the path
-       * ingress_preinject calls EVERY turn. The model would then answer without
-       * the user's facts and nothing would say why.
-       *
-       * db2_typed_fact_ingress() already logs this exact condition, with the
-       * note that "recall affects prompt content, so a persistent failure is
-       * worth surfacing". The same call on this sibling path was left silent --
-       * the defect repeating where the reasoning had already been written down.
-       *
-       * Still a soft failure: the turn proceeds without facts rather than
-       * erroring, which is the right trade for a read. It must not be silent. */
-      int fr = db2_fact_recall_in_query(query, facts, sizeof(facts));
-      if (fr < 0)
-         aimee_log(LOG_WARN, "memory",
-                   "typed-fact recall failed (db2 unavailable?); answering with no facts");
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "facts", facts);
-   return resp;
-}
 
 static cJSON *kbs_task_row_to_json(const aimee_task_t *t)
 {

@@ -25,6 +25,11 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    'src/modules/db2/c/fact_ingest.c',
+    'src/modules/db2/c/fact_ingest.h',
+    'src/modules/db2/c/fact_recall.c',
+    'src/modules/db2/c/fact_recall.h',
+
     "src/modules/memory/memory_graph_fusion.h",
     "src/modules/kb_client/kb_client_prospective.c",
     "src/modules/db2/c/epistemic_directives.c",
@@ -59,6 +64,8 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:db2_fact_ingest_text(?:_as_actor|_with_evidence)?|db2_typed_fact_ingress|db2_fact_recall_(?:block|in_query)|aimee_db2_register_fact_(?:extract|scan|recall)_provider)\b(?=\s*\()|"
+    r"\b(?:db2_kb_service_memory_(?:context_block|facts)_json|kb_handle_memory_(?:context_block|facts)|memory_get_context_block)\b(?=\s*\()|"
     r"\bdb2_fact_candidates\b(?=\s*\()|"
     r"\b(?:memory_graph_(?:relation_gravity|confidence_factor|edge_score|detect_code_shape|expand_from_seeds|point_id_to_node_key|populate_score_parts|distribute_path_credit)|memory_fusion_\w+|memory_apply_feedback_path)\b(?=\s*\()|"
     r"\bdb2_memory_(?:reject|restore)\b(?=\s*\()|"
@@ -123,9 +130,7 @@ FORBIDDEN_STORE_CALLS = (
     "aimee_pg_",
 )
 
-EXTERNAL_CONNECTION_C = {
-    "src/modules/db2/c/fact_recall.c",
-}
+EXTERNAL_CONNECTION_C: set[str] = set()
 
 KB_CONNECTION_C = {
     "src/kb/kb_memory_facts.c",

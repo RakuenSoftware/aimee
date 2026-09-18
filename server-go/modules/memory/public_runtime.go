@@ -93,6 +93,18 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	case "alerts":
 		request.Operation, request.AsOf = "alerts-bundle", args.stringOr("since", "")
 		scoped = commandScope(args, &request)
+	case "context_block", "facts":
+		var ok bool
+		request.Query, ok = args.stringValue("query")
+		if !ok {
+			return invalid("missing query")
+		}
+		request.Operation, request.ContentCapacity = "fact-recall", 2048
+		if verb == "context_block" {
+			request.Operation = "context-ingress"
+			request.BlockType, request.Limit = args.stringOr("block_type", "general"), args.limit("limit", 5, 100)
+		}
+		scoped = commandScope(args, &request)
 	case "assemble_context":
 		request.Operation, request.Query, request.Limit = "assemble-context", args.stringOr("task_hint", ""), 12
 		scoped = commandScope(args, &request)
@@ -114,6 +126,9 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		request.Operation, request.Path, request.Command = "check-drift", args.stringOr("file_path", ""), args.stringOr("command", "")
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if verb == "facts" && request.Query == "" {
+		return commandResult(map[string]any{"status": "ok", "facts": "", "active_context_missing": request.Workspace == "" && request.Project == ""})
 	}
 	encoded, err := json.Marshal(request)
 	if err != nil {
@@ -184,6 +199,18 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			return nil, bus.ModuleStatusInternal
 		}
 		result[verb] = response.Payload
+	case "context_block", "facts":
+		if response.Block == nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		field := "block"
+		if verb == "facts" {
+			field = "facts"
+		}
+		result[field] = *response.Block
+		if response.Reason != "" {
+			result["retraction"] = response.Reason
+		}
 	case "assemble_context":
 		if response.Block == nil {
 			return nil, bus.ModuleStatusInternal

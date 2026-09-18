@@ -790,15 +790,7 @@
     },
     {
       "classification": "private-implementation-test",
-      "path": "src/tests/test_fact_ingest.c"
-    },
-    {
-      "classification": "private-implementation-test",
       "path": "src/tests/test_fact_lifecycle.c"
-    },
-    {
-      "classification": "private-implementation-test",
-      "path": "src/tests/test_fact_recall.c"
     },
     {
       "classification": "private-implementation-test",
@@ -1211,21 +1203,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_fact_ingest.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 40
-        }
-      ],
-      "signature": "void aimee_db2_register_fact_extract_provider ( db2_fact_extract_fn provider )",
-      "signature_sha256": "13d592fd1c7dc0e9416cd39e7911f080042abd2aa9c46537b64280161e84dd91",
-      "status": "private-test-only",
-      "symbol": "aimee_db2_register_fact_extract_provider"
-    },
-    {
-      "consumers": [
         "src/tests/test_rel_types_store.c"
       ],
       "locations": [
@@ -1238,36 +1215,6 @@
       "signature_sha256": "8f2225aa4902b730d36b0d307d6312d7ad44dc383db012512b86283e2c93ef94",
       "status": "private-test-only",
       "symbol": "aimee_db2_register_fact_gate_provider"
-    },
-    {
-      "consumers": [
-        "src/tests/test_fact_recall.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_recall.h",
-          "line": 22
-        }
-      ],
-      "signature": "void aimee_db2_register_fact_recall_provider ( aimee_db2_fact_recall_fn provider )",
-      "signature_sha256": "199a66c3ef24a11fd7884fa2de60365af5676eeb5d9e55291109e9b1460a761a",
-      "status": "private-test-only",
-      "symbol": "aimee_db2_register_fact_recall_provider"
-    },
-    {
-      "consumers": [
-        "src/tests/test_fact_ingest.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 41
-        }
-      ],
-      "signature": "void aimee_db2_register_fact_scan_provider ( db2_fact_scan_fn provider )",
-      "signature_sha256": "778769db9a9b8ed08848a401aaac428b3a2886f97b72b9d2ab1671285aba7401",
-      "status": "private-test-only",
-      "symbol": "aimee_db2_register_fact_scan_provider"
     },
     {
       "consumers": [
@@ -7639,7 +7586,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_fact_ingest.c",
         "src/tests/test_rel_types_store.c"
       ],
       "locations": [
@@ -8334,7 +8280,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_rel_types_store.c",
         "src/tests/test_typed_facts.c"
@@ -8415,7 +8360,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c"
       ],
       "locations": [
@@ -8526,47 +8470,6 @@
       "symbol": "db2_fact_ingest_run_rollback"
     },
     {
-      "consumers": [
-        "src/tests/test_fact_ingest.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 56
-        }
-      ],
-      "signature": "int db2_fact_ingest_text ( const char * text , fact_authority_t authority , int enabled )",
-      "signature_sha256": "c644d1da326a00955a1de2fdae33a52e9b83192d8a7c9c62ab26d755ca5efdce",
-      "status": "private-test-only",
-      "symbol": "db2_fact_ingest_text"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 61
-        }
-      ],
-      "signature": "int db2_fact_ingest_text_as_actor ( const char * text , const fact_actor_t * actor , int enabled , const fact_evidence_input_t * evidence , const char * assertion_kind , const char * valid_from , const char * valid_until )",
-      "signature_sha256": "3f9b210dc8a264719b2ffe9528f8ed391b00906fd5e096587dfcfad87e625ebd",
-      "status": "internal-unconsumed",
-      "symbol": "db2_fact_ingest_text_as_actor"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 57
-        }
-      ],
-      "signature": "int db2_fact_ingest_text_with_evidence ( const char * text , fact_authority_t authority , int enabled , const fact_evidence_input_t * evidence , const char * assertion_kind , const char * valid_from , const char * valid_until )",
-      "signature_sha256": "bc87b9089de828b7905c917b7fe83404bfcf6aae68d326875d3e05fb3e26ab90",
-      "status": "internal-unconsumed",
-      "symbol": "db2_fact_ingest_text_with_evidence"
-    },
-    {
       "consumers": [],
       "locations": [
         {
@@ -8665,37 +8568,6 @@
       "signature_sha256": "d4ad97f5d623936199a67b68e6a7c34fbcd6e2953038526957ff052ff7c3a14c",
       "status": "private-test-only",
       "symbol": "db2_fact_promote_durable"
-    },
-    {
-      "consumers": [
-        "src/tests/test_fact_recall.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_recall.h",
-          "line": 32
-        }
-      ],
-      "signature": "int db2_fact_recall_block ( const char * entity , int turn_requests_sensitive , char * out , size_t cap )",
-      "signature_sha256": "23683d3aaa6d5cc4eac963b5b8f299306b10f98849edd0fb246e16bb05bd1b6d",
-      "status": "private-test-only",
-      "symbol": "db2_fact_recall_block"
-    },
-    {
-      "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_memory.c",
-        "src/tests/test_fact_recall.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_recall.h",
-          "line": 41
-        }
-      ],
-      "signature": "int db2_fact_recall_in_query ( const char * query , char * out , size_t cap )",
-      "signature_sha256": "30613e79f49935225625575d9ccd2da842ccb7177df7f57d6a373388ac2dd68b",
-      "status": "audit-pending",
-      "symbol": "db2_fact_recall_in_query"
     },
     {
       "consumers": [
@@ -9780,7 +9652,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 220
+          "line": 211
         }
       ],
       "signature": "int db2_kb_file_index_delete_current_project ( const char * project )",
@@ -9796,7 +9668,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 219
+          "line": 210
         }
       ],
       "signature": "int db2_kb_file_index_delete_project ( const char * project )",
@@ -9811,7 +9683,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 216
+          "line": 207
         }
       ],
       "signature": "int db2_kb_file_index_get ( const char * project , const char * file_path , char * hash_out , size_t hash_cap , char * ingested_at_out , size_t ingested_at_cap )",
@@ -9827,7 +9699,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 218
+          "line": 209
         }
       ],
       "signature": "char * db2_kb_file_index_get_content ( const char * project , const char * file_path )",
@@ -9842,7 +9714,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 221
+          "line": 212
         }
       ],
       "signature": "cJSON * db2_kb_file_index_snapshot_json ( const char * project )",
@@ -9858,7 +9730,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 214
+          "line": 205
         }
       ],
       "signature": "int db2_kb_file_index_upsert ( const char * project , const char * file_path , const char * file_hash , const char * content )",
@@ -9900,7 +9772,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 207
+          "line": 198
         }
       ],
       "signature": "int db2_kb_ingest_queue_claim_next ( db2_kb_ingest_job_t * out )",
@@ -9916,7 +9788,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 208
+          "line": 199
         }
       ],
       "signature": "int db2_kb_ingest_queue_complete ( int64_t job_id , int files_indexed , int chunks_added , int embeddings_added )",
@@ -9935,7 +9807,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 205
+          "line": 196
         }
       ],
       "signature": "int db2_kb_ingest_queue_enqueue ( const char * project , const char * root_path , const char * workspace , int force , int priority )",
@@ -9951,7 +9823,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 210
+          "line": 201
         }
       ],
       "signature": "int db2_kb_ingest_queue_fail ( int64_t job_id , const char * error_message )",
@@ -9966,7 +9838,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 212
+          "line": 203
         }
       ],
       "signature": "int db2_kb_ingest_queue_recent ( db2_kb_ingest_recent_t * rows , int max_rows )",
@@ -9981,7 +9853,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 192
+          "line": 183
         }
       ],
       "signature": "int db2_kb_ingest_queue_reset_running ( void )",
@@ -9996,7 +9868,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 211
+          "line": 202
         }
       ],
       "signature": "int db2_kb_ingest_queue_stats ( db2_kb_ingest_queue_stats_t * out )",
@@ -10628,7 +10500,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 224
+          "line": 215
         }
       ],
       "signature": "int db2_kb_service_async_job_get ( int64_t job_id , db2_kb_service_async_job_t * out )",
@@ -10646,7 +10518,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 228
+          "line": 219
         }
       ],
       "signature": "int db2_kb_service_async_queue_drain ( const char * claimed_by , const char * embedding_cmd , int timeout_secs , const char * vector_collection , db2_kb_service_vector_upsert_fn vector_upsert , void * vector_upsert_ctx , db2_kb_service_async_queue_stats_t * out )",
@@ -10661,7 +10533,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 225
+          "line": 216
         }
       ],
       "signature": "int db2_kb_service_async_queue_spawn_worker ( void )",
@@ -10679,7 +10551,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 223
+          "line": 214
         }
       ],
       "signature": "int db2_kb_service_async_queue_status ( db2_kb_service_async_queue_stats_t * out )",
@@ -10697,7 +10569,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 236
+          "line": 227
         }
       ],
       "signature": "int db2_kb_service_clear_current_project ( const char * project )",
@@ -10714,7 +10586,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 235
+          "line": 226
         }
       ],
       "signature": "int db2_kb_service_clear_project ( const char * project )",
@@ -10899,7 +10771,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 233
+          "line": 224
         }
       ],
       "signature": "int db2_kb_service_collect_project_status ( const char * project , db2_kb_service_project_status_t * out )",
@@ -11308,7 +11180,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 238
+          "line": 229
         }
       ],
       "review": {
@@ -11328,7 +11200,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 237
+          "line": 228
         }
       ],
       "review": {
@@ -11385,7 +11257,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 239
+          "line": 230
         }
       ],
       "review": {
@@ -11416,48 +11288,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_memory.c",
-        "src/kb/kb_service_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 154
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "The context-block cJSON envelope is caller presentation; a typed bounded query returns the context block and provenance fields."
-      },
-      "signature": "cJSON * db2_kb_service_memory_context_block_json ( const char * query , const char * block_type , int limit , fact_authority_t authority )",
-      "signature_sha256": "8c9ed979ae2752b963bdb0ea04561b2590970bc66a458d9dd6c6f21cb31d87a0",
-      "status": "reviewed",
-      "symbol": "db2_kb_service_memory_context_block_json"
-    },
-    {
-      "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_memory.c",
-        "src/kb/kb_service_memory.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 159
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "The cJSON facts response is a compatibility view; a bounded typed memory query returns canonical fact records."
-      },
-      "signature": "cJSON * db2_kb_service_memory_facts_json ( const char * query )",
-      "signature_sha256": "f53ea5067a8a2713878057ac5b889ef937a03a61afcc78ba880b80f254e7bc31",
-      "status": "reviewed",
-      "symbol": "db2_kb_service_memory_facts_json"
-    },
-    {
-      "consumers": [
         "src/kb/http/kb_http.c",
         "src/tests/test_kb_http_routes.c"
       ],
@@ -11480,7 +11310,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_service_backend.h",
-          "line": 160
+          "line": 151
         }
       ],
       "signature": "cJSON * db2_kb_service_memory_search_assertions_json ( const char * query , const char * valid_at , const char * believed_at , int include_historical , int max_hops , int limit )",
@@ -17279,7 +17109,6 @@
     {
       "consumers": [
         "src/kb/http/kb_http_console.c",
-        "src/tests/test_fact_ingest.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_ontology_evolution.c"
       ],
@@ -18069,7 +17898,6 @@
     {
       "consumers": [
         "src/kb/kb_main.c",
-        "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_rel_types_store.c"
@@ -19758,7 +19586,6 @@
         "src/tests/test_embedding_dim.c",
         "src/tests/test_entity_registry.c",
         "src/tests/test_evidence_embed.c",
-        "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_feedback_shadow.c",
@@ -19896,7 +19723,6 @@
         "src/tests/test_entity_registry.c",
         "src/tests/test_eval_candidates.c",
         "src/tests/test_evidence_embed.c",
-        "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
@@ -20138,22 +19964,6 @@
       "signature_sha256": "3b1700549c5382807a3279cd5e7ac0c31f31eb00c2b1bdca549ea97ec506a64e",
       "status": "private-test-only",
       "symbol": "db2_typed_fact_by_relation"
-    },
-    {
-      "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_memory.c",
-        "src/tests/test_fact_ingest.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_ingest.h",
-          "line": 81
-        }
-      ],
-      "signature": "int db2_typed_fact_ingress ( const char * query , fact_authority_t authority , char * facts_out , size_t facts_cap )",
-      "signature_sha256": "6168a4026ed0e1eabcc53a358e84e8f0cd2ae86dec3661ebddf0cba0f42c9159",
-      "status": "audit-pending",
-      "symbol": "db2_typed_fact_ingress"
     },
     {
       "consumers": [
@@ -23690,15 +23500,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ee97c5fcee3223a80ec1cbfa5068c301121a032a54d983e374f1f40f273ab283",
+  "fingerprint": "5e547a5863ec4d4026440dd73f40b4e900e1c8ed5e716fd802dbec7c4863047b",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 466,
-    "declarations": 1348,
-    "headers": 138,
-    "internal_unconsumed": 347,
-    "private_test_only": 323,
-    "reviewed": 212
+    "audit_pending": 464,
+    "declarations": 1337,
+    "headers": 136,
+    "internal_unconsumed": 345,
+    "private_test_only": 318,
+    "reviewed": 210
   }
 }

@@ -459,20 +459,6 @@
       "reason": "The legacy cJSON mutation wrapper is retired at the process boundary; DB2 performs rejection and returns the bounded typed proposal before any caller-specific JSON encoding."
     },
     {
-      "symbol": "db2_kb_service_memory_context_block_json",
-      "signature_sha256": "8c9ed979ae2752b963bdb0ea04561b2590970bc66a458d9dd6c6f21cb31d87a0",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The context-block cJSON envelope is caller presentation; a typed bounded query returns the context block and provenance fields."
-    },
-    {
-      "symbol": "db2_kb_service_memory_facts_json",
-      "signature_sha256": "f53ea5067a8a2713878057ac5b889ef937a03a61afcc78ba880b80f254e7bc31",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON facts response is a compatibility view; a bounded typed memory query returns canonical fact records."
-    },
-    {
       "symbol": "db2_kb_service_note_create_json",
       "signature_sha256": "b38f3d397de14bdd287340a701dad79c0a8d60ef73e6b0d66c505fa0a2c96b50",
       "disposition": "private-db2",

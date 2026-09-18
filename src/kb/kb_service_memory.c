@@ -45,7 +45,7 @@ int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
  * The actor answers WHO is calling. It does not answer whether the payload is
  * that person's own words: an agent's tool call, made mid-turn, inherits the
  * human's request context. So a caller that relays model-composed text must not
- * use this — see kb_handle_memory_context_block.
+ * use this. Go memory.context_block structurally caps query authority.
  *
  * The owner bearer from a LOOPBACK PEER is the third case, and it is a
  * deployment fact rather than a weaker rule. Only the plain HTTP listener
@@ -177,45 +177,6 @@ int kb_handle_session_briefing_directives(int fd, cJSON *req)
    return kb_handle_session_briefing_section(fd, req,
                                              db2_kb_service_session_briefing_directives_json,
                                              "failed to render session-briefing directives");
-}
-
-int kb_handle_memory_context_block(int fd, cJSON *req)
-{
-   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
-   cJSON *block_j = cJSON_GetObjectItemCaseSensitive(req, "block_type");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   if (!cJSON_IsString(query_j))
-      return kb_send_error(fd, "memory.context_block requires query");
-   const char *block_type = cJSON_IsString(block_j) ? block_j->valuestring : NULL;
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 5;
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   /* MODEL authority, structurally — not kb_memory_request_authority(). This
-    * action's only caller is the get_context_block MCP tool, so `query` is a
-    * string the MODEL composed, even though the request carries the human's
-    * authenticated identity (a tool call runs inside the user's turn and inherits
-    * its context). Authenticating the caller therefore proves nothing about who
-    * wrote the text, and the §4 retraction this query can trigger deletes facts.
-    * A future caller that really does relay the user's own turn should pass
-    * FACT_AUTHORITY_USER here — and nothing else should. */
-   cJSON *resp = db2_kb_service_memory_context_block_json(query_j->valuestring, block_type, limit,
-                                                          FACT_AUTHORITY_MODEL);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to build context block");
-}
-
-int kb_handle_memory_facts(int fd, cJSON *req)
-{
-   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
-   if (!cJSON_IsString(query_j))
-      return kb_send_error(fd, "memory.facts requires query");
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_facts_json(query_j->valuestring);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to recall facts");
 }
 
 /* Auditable-correctness P1: record one per-turn retrieval_event keyed by the

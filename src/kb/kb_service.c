@@ -716,8 +716,6 @@ static const struct
     {"task.delete", kb_handle_task_delete},
     {"task.add_edge", kb_handle_task_add_edge},
     {"task.get_edges", kb_handle_task_get_edges},
-    {"memory.context_block", kb_handle_memory_context_block},
-    {"memory.facts", kb_handle_memory_facts},
     {"evidence.emit_retrieval_event", kb_handle_evidence_emit_retrieval_event},
     {"evidence.merge_retrieval_event", kb_handle_evidence_merge_retrieval_event},
     {"evidence.trace_retrieval_event", kb_handle_evidence_trace_retrieval_event},
