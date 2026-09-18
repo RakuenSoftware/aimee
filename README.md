@@ -43,6 +43,8 @@ Synthesis is optional; no KB is installed.
 
 Open <https://localhost:8443> and use the generated first-boot login from the application log.
 The wizard configures your account, provider, local memory models, Git identity, and workspaces.
+Open a conversation from its session tab along the top; the left panel contains tools.
+Each session keeps its own project and chat history.
 Connect an existing shared KB later in Settings. `compose.server-managed.yaml` additionally lets
 the wizard manage local model containers through the Docker socket.
 

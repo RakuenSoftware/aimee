@@ -10,7 +10,6 @@
 export type Tab = { label: string; icon: string; route: string; hint: string };
 
 export const NAV_ITEMS: Tab[] = [
-  { label: 'Chat', icon: '💬', route: '/chat', hint: 'Talk to Aimee for the active session — attach files, run slash-commands, turn a reply into a proposal.' },
   { label: 'Dashboard', icon: '📊', route: '/dashboard', hint: 'Live instance health: readiness, LSP, per-agent success and tokens, latency, provider mix, traces.' },
   { label: 'Logs', icon: '📜', route: '/logs', hint: 'The audit trail — every recorded action, newest first. Click a row for full detail.' },
   { label: 'Edit Workflows', icon: '🔀', route: '/edit-workflows', hint: 'Design multi-step workflows — each step sets a task, persona, delegate, and role.' },

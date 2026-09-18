@@ -9,7 +9,8 @@
     "build:console": "tsc -b && vite build --config vite.console.config.ts",
     "check": "tsc -b",
     "test": "vitest run",
-    "test:browser": "node ../scripts/test-setup-browser.cjs"
+    "test:browser": "node ../scripts/test-setup-browser.cjs",
+    "test:browser:webchat": "node ../scripts/test-webchat-browser.cjs"
   },
   "dependencies": {
     "@rakuensoftware/smoothgui": "file:vendor/rakuensoftware-smoothgui-0.11.0.tgz",
