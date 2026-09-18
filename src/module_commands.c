@@ -835,9 +835,17 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
 
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   if (!method || !result)
+   return aimee_module_commands_dispatch_internal_timeout(method, args, 125000, result);
+}
+
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
+                                                    int timeout_ms, cJSON **result)
+{
+   if (!result)
       return 0;
    *result = NULL;
+   if (!method || timeout_ms <= 0)
+      return -1;
    (void)aimee_module_commands_refresh(2000);
    uint32_t kind = 0, stage = 0;
    char verb[128] = "";
@@ -860,7 +868,7 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    pthread_mutex_unlock(&g_collect_lock);
    if (matches != 1 || !kind)
       return matches ? -1 : 0;
-   *result = command_call_timeout(kind, stage, verb, args, NULL, 125000);
+   *result = command_call_timeout(kind, stage, verb, args, NULL, timeout_ms);
    return *result ? 1 : -1;
 }
 

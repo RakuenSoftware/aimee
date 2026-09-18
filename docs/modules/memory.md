@@ -624,3 +624,15 @@ adapter retains HTTP classification and overrides untrusted operation fields
 without mutating caller arguments. Native consumer tests preserve long briefing
 text and reject malformed/error responses; PostgreSQL tests exercise the named
 briefing/dashboard routes. Both live placements and the private scope tests pass.
+
+Gateway session-start detection, exact shell-tool selection, enable-token parsing
+and recall-gate telemetry now live in Go. Host-only plans preserve compaction and
+second-turn behavior. Native IR code applies a validated descending index patch;
+malformed patches cannot partially remove tools. Recall audit payloads use query
+fingerprints rather than raw user text, and audit failure cannot change the gate.
+The native session-start, persona-wrapper and recall-counter APIs are retired.
+Generic named calls now accept an explicit invocation budget: fast gateway and
+confidence decisions use 500 ms, and migrated private commands/views retain
+60 seconds. Tests cover authority-separated rendering, complete responses,
+fail-open recall, concurrent Go counters, invalid patches and protocol/IR seams.
+The gateway transport and remaining pre-injection policy are still G0 work.

@@ -753,6 +753,7 @@ WHERE id = $1 AND scope_type = $2 AND scope_value = $3 AND lifecycle_state = 'ac
 }
 
 type handlerOptions struct {
+	gateway        *gatewayState
 	executor       egress.Executor
 	placement      Placement
 	data           DataStore

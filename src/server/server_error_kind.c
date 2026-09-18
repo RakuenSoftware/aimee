@@ -93,7 +93,7 @@ cJSON *server_invoke_module_operation(const char *method, const char *operation,
    cJSON *reply = NULL;
    int rc = -1;
    if (cJSON_AddStringToObject(request, "operation", operation))
-      rc = aimee_module_commands_dispatch_internal(method, request, &reply);
+      rc = aimee_module_commands_dispatch_internal_timeout(method, request, 60000, &reply);
    cJSON_Delete(request);
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
    if (rc <= 0 || !cJSON_IsObject(reply) || !status ||

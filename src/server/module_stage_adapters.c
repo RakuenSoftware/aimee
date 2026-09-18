@@ -146,7 +146,8 @@ static int memory_confidence(double score, const char **confidence)
       return -1;
    cJSON_AddStringToObject(request, "operation", "confidence");
    cJSON_AddNumberToObject(request, "score", score);
-   int dispatched = aimee_module_commands_dispatch_internal("memory.runtime", request, &response);
+   int dispatched =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 500, &response);
    cJSON_Delete(request);
    const char *value =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "confidence"));

@@ -79,7 +79,8 @@ char *session_briefing_render_commitments(int limit)
    cJSON_AddNumberToObject(args, "limit", limit);
    cJSON *response = NULL;
    cJSON_AddStringToObject(args, "operation", "prospective-briefing");
-   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   int rc =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
    if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
    {
       cJSON_Delete(response);
@@ -101,7 +102,8 @@ char *session_briefing_render_directives(int limit)
    cJSON_AddNumberToObject(args, "limit", limit);
    cJSON *response = NULL;
    cJSON_AddStringToObject(args, "operation", "directive-briefing");
-   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   int rc =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
    if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
    {
       cJSON_Delete(response);

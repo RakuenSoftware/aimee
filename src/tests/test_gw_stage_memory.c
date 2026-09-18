@@ -42,13 +42,51 @@ int config_integrity_dry_run(void)
    return 0;
 }
 
-/* The recall decision itself is covered in server-go/modules/memory. This C
- * suite exercises only the IR adapter and therefore models a successful
- * fail-open module response. */
-cJSON *server_module_memory_data(const cJSON *request)
+/* The policy is tested in Go. Here the host consumes fixture plans and must
+ * preserve typed authority, query selection and complete rendered bytes. */
+static int fixture_session_start = 1;
+static const char *fixture_remove_tools = "[]";
+static int fixture_transport_result = 1;
+static const char *fixture_gate;
+static int fixture_audits;
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
+                                                    int timeout_ms, cJSON **result)
 {
-   assert(cJSON_IsObject(request));
-   return cJSON_CreateObject();
+   assert(timeout_ms == 500);
+   assert(strcmp(method, "memory.runtime") == 0 && cJSON_IsObject(request));
+   const char *operation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
+   assert(operation);
+   *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(*result, "status", "ok");
+   if (strcmp(operation, "gateway-plan") == 0)
+   {
+      const cJSON *roles = cJSON_GetObjectItemCaseSensitive(request, "roles");
+      const cJSON *tools = cJSON_GetObjectItemCaseSensitive(request, "tools");
+      assert(cJSON_IsArray(roles) && cJSON_IsArray(tools));
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(roles, 0)), "user") == 0);
+      if (!fixture_session_start)
+         assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(roles, 1)), "assistant") == 0);
+      cJSON_AddBoolToObject(*result, "append_guidance", fixture_session_start);
+      cJSON_AddItemToObject(*result, "remove_tools", cJSON_Parse(fixture_remove_tools));
+   }
+   else if (strcmp(operation, "gateway-recall") == 0 && fixture_gate)
+   {
+      cJSON_Delete(*result);
+      *result = cJSON_Parse(fixture_gate);
+   }
+   else
+      assert(strcmp(operation, "gateway-recall") == 0 || strcmp(operation, "gateway-enabled") == 0);
+   return fixture_transport_result;
+}
+int learning_evidence_write_retrieval_event(const char *fingerprint, const char *role,
+                                            const int64_t *ids, int count, char *out, int cap)
+{
+   assert(strcmp(fingerprint, "opaque-digest") == 0);
+   assert(strcmp(role, "RecallGateEnforcedSkip/acknowledgement") == 0);
+   assert(ids == NULL && count == 0 && out == NULL && cap == 0);
+   fixture_audits++;
+   return -1; /* Audit outage cannot change the Go recall decision. */
 }
 void obs_bus_emit_durable_event(const char *event_type, const char *subject, const char *verdict,
                                 const char *detail)
@@ -278,6 +316,8 @@ static void test_disabled_noop(void)
  * aimee_request_free reclaims everything). */
 static void mk_user_ir(aimee_request_t *ir, const char *user_text)
 {
+   fixture_session_start = 1;
+   fixture_remove_tools = "[]";
    memset(ir, 0, sizeof *ir);
    ir->messages = calloc(1, sizeof *ir->messages);
    ir->n_messages = 1;
@@ -290,6 +330,7 @@ static void mk_user_ir(aimee_request_t *ir, const char *user_text)
 
 static void mk_assistant_turn(aimee_request_t *ir)
 {
+   fixture_session_start = 0;
    ir->messages = realloc(ir->messages, (size_t)(ir->n_messages + 1) * sizeof *ir->messages);
    aimee_message_t *m = &ir->messages[ir->n_messages];
    memset(m, 0, sizeof *m);
@@ -419,6 +460,7 @@ static void test_first_turn_withholds_shell(void)
    mk_tool(&ir, "exec_command");
    mk_tool(&ir, "apply_patch");
    mk_tool(&ir, "mcp__aimee__find_symbol");
+   fixture_remove_tools = "[0]";
    assert(ir_stage_first_turn_shell_block(&ir, NULL) == 1);
    assert(!has_tool(&ir, "exec_command"));           /* the shell is withheld */
    assert(has_tool(&ir, "apply_patch"));             /* editing is untouched */
@@ -473,12 +515,12 @@ static void test_persona_prepends_first_user_message_once(void)
        "<aimee-persona schema=\"1\" name=\"user-edited\">\ncustom\n</aimee-persona>\n";
    aimee_request_t ir;
    mk_user_ir(&ir, "fix the cache");
-   assert(ir_stage_persona_instructions(&ir, (void *)persona) == 1);
+   assert(aimee_ir_prepend_persona_instructions(&ir, (void *)persona) == 1);
    assert(ir.messages[0].n_blocks == 2);
    assert(strcmp(ir.messages[0].blocks[0].text, persona) == 0);
    assert(strcmp(ir.messages[0].blocks[1].text, "fix the cache") == 0);
    /* Marker present -> terminal. */
-   assert(ir_stage_persona_instructions(&ir, (void *)persona) == 0);
+   assert(aimee_ir_prepend_persona_instructions(&ir, (void *)persona) == 0);
    assert(ir.messages[0].n_blocks == 2);
    aimee_request_free(&ir);
 
@@ -486,32 +528,55 @@ static void test_persona_prepends_first_user_message_once(void)
     * assistant history is on its own sufficient to prevent a second prefix. */
    mk_user_ir(&ir, "fix the cache");
    mk_assistant_turn(&ir);
-   assert(ir_stage_persona_instructions(&ir, (void *)persona) == 0);
+   assert(aimee_ir_prepend_persona_instructions(&ir, (void *)persona) == 0);
    assert(ir.messages[0].n_blocks == 1);
    assert(strcmp(ir.messages[0].blocks[0].text, "fix the cache") == 0);
    aimee_request_free(&ir);
    printf("persona_prepends_first_user_message_once OK\n");
 }
 
-static void test_recall_gate_error_directions_are_separate(void)
+static void test_tool_patch_validation(void)
 {
-   gw_memory_recall_gate_metrics_t before = {0};
-   gw_memory_recall_gate_metrics_t after = {0};
-   gw_stage_memory_recall_gate_metrics(&before);
-   gw_stage_memory_recall_gate_record_outcome(1, 1); /* needed, but gate skipped */
-   gw_stage_memory_recall_gate_record_outcome(0, 0); /* ran, but was unnecessary */
-   gw_stage_memory_recall_gate_metrics(&after);
-   assert(after.wrongly_skipped == before.wrongly_skipped + 1);
-   assert(after.wrongly_performed == before.wrongly_performed + 1);
-   printf("  recall_gate_error_directions_are_separate: ok\n");
+   aimee_request_t ir;
+   mk_user_ir(&ir, "fix the cache");
+   mk_tool(&ir, "exec_command");
+   mk_tool(&ir, "apply_patch");
+   const char *invalid[] = {
+       "[1,0,0]", "[0,1]", "[1,-1]", "[1,0.5]", "[1,999999999999999999999999999999]", "null"};
+   for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+   {
+      fixture_remove_tools = invalid[i];
+      assert(ir_stage_first_turn_shell_block(&ir, NULL) == 0);
+      assert(ir.n_tools == 2 && has_tool(&ir, "exec_command") && has_tool(&ir, "apply_patch"));
+   }
+   fixture_remove_tools = "[0]";
+   fixture_transport_result = -1;
+   assert(ir_stage_first_turn_shell_block(&ir, NULL) == 0 && ir.n_tools == 2);
+   fixture_transport_result = 1;
+   fixture_remove_tools = "[1,0]";
+   assert(ir_stage_first_turn_shell_block(&ir, NULL) == 1 && ir.n_tools == 0);
+   aimee_request_free(&ir);
+}
+
+static void test_gate_reply_and_audit(void)
+{
+   fixture_gate =
+       "{\"status\":\"ok\",\"skip\":true,\"enforced\":true,\"audit_role\":\"RecallGateEnforcedSkip/"
+       "acknowledgement\",\"query_fingerprint\":\"opaque-digest\"}";
+   assert(gw_memory_system_prompt("private query") == NULL && fixture_audits == 1);
+   fixture_gate = "{\"status\":\"error\",\"enforced\":true}";
+   char *env = gw_memory_system_prompt("deploy matrix");
+   assert(env != NULL); /* An unavailable policy keeps recall enabled. */
+   free(env);
+   fixture_gate = NULL;
 }
 
 int main(void)
 {
    printf("test_gw_stage_memory:\n");
-   test_recall_gate_error_directions_are_separate();
    ingress_preinject_register_confidence_provider(test_confidence_provider);
    test_system_prompt_raw_env();
+   test_gate_reply_and_audit();
    test_disabled_noop();
    test_ir_stage_appends_system_block();
    test_ir_stage_prefers_supplied_query();
@@ -519,6 +584,7 @@ int main(void)
    test_ir_stage_session_start_guidance_without_recall();
    test_ir_stage_guidance_not_repeated_midsession();
    test_first_turn_withholds_shell();
+   test_tool_patch_validation();
    test_shell_returns_after_first_turn();
    test_persona_prepends_first_user_message_once();
    printf("all gw_stage_memory tests passed\n");

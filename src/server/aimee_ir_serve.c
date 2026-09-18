@@ -225,7 +225,7 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
    char *persona_instructions = persona_first > 0 ? ir_resolve_persona_instructions() : NULL;
    int persona_inserted = 0;
    if (persona_instructions && persona_instructions[0])
-      persona_inserted = ir_stage_persona_instructions(ir, persona_instructions);
+      persona_inserted = aimee_ir_prepend_persona_instructions(ir, persona_instructions);
    int persona_delivered = persona_inserted || ir_persona_delivery_already_satisfied(ir);
    if (persona_first > 0)
       session_persona_delivery_finish(sid, persona_delivered);

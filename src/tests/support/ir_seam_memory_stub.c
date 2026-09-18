@@ -45,10 +45,6 @@ int ir_stage_memory(aimee_request_t *ir, void *ud)
 /* Keep the production persona transform on the shared IR seam.  Tests which do
  * not select a session/persona remain byte-identical; the ingress coverage below
  * can exercise real placement without linking the rest of the server. */
-int ir_stage_persona_instructions(aimee_request_t *ir, void *ud)
-{
-   return aimee_ir_prepend_persona_instructions(ir, (const char *)ud);
-}
 
 const char *server_http_identity_session_hdr(void)
 {

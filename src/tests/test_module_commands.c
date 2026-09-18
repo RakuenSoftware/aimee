@@ -12,6 +12,7 @@
 
 static int fixed_present = 1, malformed, empty, reset_during_call;
 static uint32_t last_kind, last_stage;
+static uint64_t last_deadline;
 static int expect_context;
 static const char *expect_verb = "stats";
 static void put32(unsigned char *out, uint32_t v)
@@ -97,6 +98,7 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
       assert(body_len == header + 5 + get32(req + 12) + sizeof(expected) - 1);
       assert(memcmp(req + header + 5 + get32(req + 12), expected, sizeof(expected) - 1) == 0);
    }
+   last_deadline = deadline;
    last_kind = kind;
    last_stage = stage;
    if (reset_during_call)
@@ -160,6 +162,18 @@ int main(void)
    assert(aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply) == 1);
    assert(last_kind == 5896 && last_stage == 8);
    cJSON_Delete(reply);
+   assert(last_deadline == 125000);
+   assert(aimee_module_commands_dispatch_internal_timeout("memory.embed_text", args, 500, &reply) ==
+          1);
+   assert(last_kind == 5896 && last_stage == 8 && last_deadline == 500);
+   cJSON_Delete(reply);
+   assert(aimee_module_commands_dispatch_internal_timeout("memory.embed_text", args, 0, &reply) ==
+              -1 &&
+          reply == NULL);
+   assert(aimee_module_commands_dispatch_internal_timeout("memory.embed_text", args, -1, &reply) ==
+              -1 &&
+          reply == NULL);
+
    for (malformed = 1; malformed <= 4; ++malformed)
    {
       assert(aimee_module_commands_collect() == 1);

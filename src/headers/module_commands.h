@@ -59,6 +59,10 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
 /* Host-only fixed-module commands (zero declared surfaces). These are absent
  * from CLI/RPC/MCP/ACP discovery and cannot be invoked by public dispatch. */
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result);
+/* Same host-only route, with a positive invocation budget in milliseconds.
+ * Discovery and route copying retain their normal behavior. */
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
+                                                    int timeout_ms, cJSON **result);
 /* Verified request context stays separate from untrusted command arguments.
  * Only fixed modules receive the v2 frame; plugin invocation remains v1. */
 int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,

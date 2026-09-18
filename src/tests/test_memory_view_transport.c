@@ -18,8 +18,10 @@ int db2_is_initialized(void)
 {
    return initialized;
 }
-int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
+                                                    int timeout_ms, cJSON **result)
 {
+   assert(timeout_ms == 60000);
    assert(strcmp(method, "memory.runtime") == 0);
    assert(strcmp(jo_cstr(args, "operation"), expected_operation) == 0);
    if (strstr(expected_operation, "briefing"))

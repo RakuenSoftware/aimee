@@ -158,7 +158,7 @@ char *api_memory_stats(void)
    cJSON *req = cJSON_CreateObject();
    cJSON *resp = NULL;
    cJSON_AddStringToObject(req, "operation", "stats-dashboard");
-   int rc = aimee_module_commands_dispatch_internal("memory.runtime", req, &resp);
+   int rc = aimee_module_commands_dispatch_internal_timeout("memory.runtime", req, 60000, &resp);
    if (rc <= 0 || !cJSON_IsObject(resp) || strcmp(jo_cstr(resp, "status"), "ok") != 0)
    {
       cJSON_Delete(resp);
@@ -243,7 +243,8 @@ char *api_dashboard_reminders(void)
       return NULL;
    cJSON *response = NULL;
    cJSON_AddStringToObject(args, "operation", "prospective-dashboard");
-   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   int rc =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
    if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
    {
       cJSON_Delete(response);
@@ -261,7 +262,8 @@ char *api_dashboard_recall(void)
 {
    cJSON *args = cJSON_CreateObject(), *response = NULL;
    cJSON_AddStringToObject(args, "operation", "recall-dashboard");
-   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   int rc =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
    cJSON_Delete(args);
    if (rc <= 0 || !cJSON_IsObject(response))
    {
@@ -282,7 +284,8 @@ char *api_dashboard_directives(void)
       return NULL;
    cJSON *response = NULL;
    cJSON_AddStringToObject(args, "operation", "directive-dashboard");
-   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   int rc =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
    if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
    {
       cJSON_Delete(response);

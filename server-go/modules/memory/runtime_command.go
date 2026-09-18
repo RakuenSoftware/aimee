@@ -16,6 +16,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "gateway-plan", "gateway-recall", "gateway-outcome", "gateway-metrics", "gateway-enabled":
+		return handleGatewayCommand(options, invocation, args)
 	case "user-store", "user-get", "user-list", "user-search", "user-delete", "user-supersede", "user-stats":
 		return handleUserCommand(options, invocation, operation[len("user-"):], args)
 	case "prospective-dashboard", "prospective-briefing", "directive-dashboard", "directive-briefing", "stats-dashboard":

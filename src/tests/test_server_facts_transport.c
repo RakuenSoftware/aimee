@@ -35,8 +35,10 @@ void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, c
 extern cJSON *server_invoke_module_operation(const char *method, const char *operation,
                                              const cJSON *args, const char *unavailable_message);
 static int internal_result = 1;
-int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
+                                                    int timeout_ms, cJSON **result)
 {
+   assert(timeout_ms == 60000);
    assert(strcmp(method, "memory.runtime") == 0);
    assert(strcmp(jo_cstr(args, "operation"), "user-get") == 0);
    assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "id")) == 42);

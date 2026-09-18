@@ -100,7 +100,9 @@
     "server-go/modules/memory/negation.go",
     "server-go/modules/memory/reembed.go",
     "server-go/modules/memory/public_reembed.go",
-    "server-go/modules/memory/public_facts.go"
+    "server-go/modules/memory/public_facts.go",
+    "server-go/modules/memory/gateway.go",
+    "server-go/modules/memory/gateway_test.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
