@@ -166,11 +166,9 @@
   ],
   "private_headers": [
     "src/modules/db2/c/memory_briefing.h",
-    "src/modules/db2/c/memory_conflicts.h",
     "src/modules/db2/c/memory_export.h",
     "src/modules/db2/c/memory_health.h",
     "src/modules/db2/c/memory_lifecycle.h",
-    "src/modules/db2/c/memory_lint.h",
     "src/modules/db2/c/memory_promotion.h",
     "src/modules/db2/c/memory_relations.h",
     "src/modules/db2/c/admin_grant.h",

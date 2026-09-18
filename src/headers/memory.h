@@ -251,34 +251,7 @@ typedef struct
    char redacted_content[2048]; /* set when result == GATE_REDACT */
 } gate_verdict_t;
 
-int memory_gate_check(const char *tier, const char *kind, const char *key, const char *content,
-                      double confidence, gate_verdict_t *verdict);
-
 /* --- Functional Tier Helpers --- */
-
-/* Returns a numeric priority for a tier string (higher = higher priority in
- * context assembly).  Unknown tiers return 0. */
-int memory_tier_priority(const char *tier);
-
-/* Returns the functional name for a tier: "Experience", "Observation",
- * "World", "MentalModel", "Pattern", or "Unknown". */
-const char *memory_functional_tier_name(const char *tier);
-
-/* Reclassify L3 directives (kind='policy' or 'workflow') to L4, writing a
- * migration summary to the log.  Safe to call repeatedly (idempotent).
- * Returns number of rows reclassified, or -1 on DB error. */
-int memory_reclassify_directives(void);
-
-/* Approval-gated variant: when require_approval is non-zero, policies only
- * promote if a row exists in memory_promotion_approvals.  Workflows bypass
- * the gate (they already require explicit operator approval via
- * store_workflow). */
-int memory_reclassify_directives_ex(int require_approval);
-
-/* Promote stable L2 facts/preferences to L3 when confidence >= 0.95,
- * use_count >= 5, and updated_at is older than 30 days.  Returns number of
- * rows promoted, or -1 on DB error.  Safe to call repeatedly. */
-int memory_promote_stable_l2_to_l3(void);
 
 /* Synthesize L5 pattern memories from L2 facts observed across >= 3
  * distinct sessions.  Returns number of L5 patterns synthesized, or -1 on
@@ -355,14 +328,6 @@ int memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int 
 
 /* Returns 1 if answer contains at least one citation marker ([#N]). */
 int memory_citation_gate_check(const char *answer);
-int memory_get_episode(const char *episode_key, memory_episode_t *out);
-
-/* As-of variant: filter memory_relations to those where valid_at <= as_of and
- * (invalid_at is empty OR invalid_at > as_of). Pass NULL for as_of to get all. */
-int memory_search_graph_as_of(const char *query, const char *as_of, int limit,
-                              memory_relation_t *out, int max);
-
-int memory_get_entity_edges(const char *entity, int limit, memory_relation_t *out, int max);
 
 /* Lineage record: tracks which session/source produced a graph node or edge.
  * object_type: "memory", "relation", or "edge".
@@ -384,10 +349,6 @@ typedef struct
  * Returns the new rowid on success, -1 on failure. */
 int64_t memory_lineage_insert(const char *object_type, int64_t object_id, const char *source_kind,
                               const char *source_ref, double confidence);
-
-/* Fetch lineage rows for a given object.
- * Returns count written into out (up to max). */
-int memory_lineage_get(const char *object_type, int64_t object_id, memory_lineage_t *out, int max);
 
 /* Recursively validate declared memory sources before a derived write. The
  * walk fails closed on a rejected/suppressed/missing source, cycle, row cap or
@@ -415,11 +376,6 @@ int memory_profile_card_refresh(int min_obs, int stale_secs);
 int memory_query_plan(const char *query, int limit, int hard_cap, memory_query_plan_t *out);
 const char *memory_query_route_name(memory_query_route_t route);
 const char *memory_query_shape_name(memory_query_shape_t shape);
-
-/* Combine token-count specificity with shape-aware width into a single
- * scaling factor for the dynamic fetch budget. Returns a positive
- * double; 1.0 means "no scaling". See memory_core_helpers.inc. */
-double memory_fetch_budget_factor(memory_query_shape_t shape, int ntokens);
 
 /* --- Aggregation-Aware Query Routing ---
  *
@@ -463,27 +419,6 @@ int memory_aggregate(const memory_aggregation_hint_t *hint, const char *query, i
 
 /* Promotion/demotion/expiry. Returns count of affected memories. */
 int memory_promote(void);
-int memory_promote_delegation_patterns(void);
-int memory_demote(void);
-int memory_expire(void);
-
-/* Health metrics: record maintenance cycle stats and prune old data. */
-void memory_record_health(int promotions, int demotions, int expirations);
-
-/* Consecutive maintenance cycles that produced no promotions, demotions or
- * expirations. Reset by any cycle that produces output; process-local, so a
- * restart legitimately clears it. */
-int memory_quiet_cycles(void);
-
-/* Should a quiet maintenance cycle alarm? Pure over its inputs so the rule is
- * testable without a database or a log sink.
- *
- * Deliberately two-sided: zero output WITH a backlog is a wedged lane, zero
- * output with an empty backlog is a healthy idle system. Alarming on the second
- * teaches operators to ignore the first. Returns 1 only when a lane has produced
- * nothing for enough consecutive cycles while memories were pending. */
-int memory_quiet_lane_alarm(int changes, int64_t pending, int consecutive_quiet);
-void memory_prune_health(void);
 
 /* Health query: rolling 7-day stats. */
 typedef struct
@@ -505,10 +440,6 @@ typedef struct
 
 int memory_query_health(memory_health_t *out);
 
-/* Contradiction audit log. */
-void memory_log_contradiction(int64_t mem_a, int64_t mem_b, const char *resolution,
-                              const char *details);
-
 /* Provenance surfacing. */
 typedef struct
 {
@@ -522,7 +453,6 @@ typedef struct
 
 #define MAX_PROVENANCE_ENTRIES 64
 
-int memory_get_provenance(int64_t memory_id, provenance_entry_t *out, int max);
 void add_provenance(int64_t memory_id, const char *session_id, const char *action,
                     const char *details);
 
@@ -559,11 +489,9 @@ typedef struct
    char value[128];
 } memory_scope_tag_t;
 
-const char *memory_scope_level_name(memory_scope_level_t level);
 int memory_tag_global(int64_t memory_id);
 int memory_tag_project(int64_t memory_id, const char *project);
 int memory_tag_workspace(int64_t memory_id, const char *workspace);
-int memory_auto_tag_workspace(int64_t memory_id, const char *key, const char *content);
 int memory_tag_scope(int64_t memory_id, const char *scope_type, const char *scope_value);
 int memory_collect_scopes(int64_t memory_id, memory_scope_tag_t *out, int max);
 memory_scope_level_t memory_primary_scope(int64_t memory_id, char *value, size_t value_len);
@@ -650,17 +578,6 @@ typedef struct
    char sub_questions[MEMORY_REWRITE_MAX_SUBQUERIES][512];
 } memory_query_rewrite_t;
 
-/* Call the external rewrite command (memory.rewrite.command) and parse results
- * into out. Silently no-ops if rewriting is disabled or the command fails.
- * cfg must be loaded by the caller. */
-void memory_query_rewrite(const char *query, memory_query_rewrite_t *out);
-
-/* Conversational window expansion: for each result with a source_session,
- * fetch up to window_radius neighbours (earlier and later memories from the
- * same session, ordered by id) and inject them into out[] without duplicates.
- * Returns the new count (may be larger than the input count, capped at max). */
-int memory_expand_to_session_window(memory_t *out, int count, int max, int window_radius);
-
 /* --- Retrieval Planner --- */
 
 typedef enum
@@ -681,14 +598,6 @@ typedef struct
    int include_l3;                /* include L3 failure episodes */
    double recency_weight;         /* 0.0=no bias, 1.0=strongly prefer recent */
 } retrieval_plan_t;
-
-task_intent_t classify_intent(const char *task_hint);
-void retrieval_plan_for_intent(task_intent_t intent, retrieval_plan_t *plan);
-
-/* Return 1 if task_hint is a session-shaped query (e.g. "what happened",
- * "how did the trip go", "recap"), 0 otherwise.  Session-shaped queries
- * should preferentially surface episode cards. */
-int memory_is_session_query(const char *task_hint);
 
 /* --- Quantitative / Date-Arithmetic Deriver --- */
 
@@ -813,18 +722,11 @@ typedef struct
 
 void memory_graph_boost(char **query_terms, int term_count, boost_map_t *out);
 
-/* Context cache storage lives in src/db1/caches.h (db1_context_cache_*). */
-char *cache_input_hash(char *buf, size_t buf_len);
-
 /* --- Conflict Detection --- */
 int64_t memory_detect_conflict(const char *key, const char *content);
 int memory_record_conflict(int64_t mem_a, int64_t mem_b);
 int memory_list_conflicts(conflict_t *out, int max);
 int memory_resolve_conflict(int64_t conflict_id, const char *resolution);
-int memory_scan_retroactive_conflicts(void);
-
-/* --- L3 Failure Episodes --- */
-int memory_synthesize_failure_episodes(void);
 
 /* --- Anti-Patterns ---
  * Storage primitives (insert/list/check/bump/delete/exists_*) live in
@@ -834,16 +736,6 @@ int memory_synthesize_failure_episodes(void);
 /* Escalate high-hit anti-patterns to hard directive rules. */
 
 /* --- Temporal Facts --- */
-/* Returns -2 when an episode/experience must be annotated and -3 when an
- * instruction/policy must be revoked instead of corrected. */
-int memory_fact_history(const char *key, memory_t *out, int max);
-
-/* Retire a memory without a replacement: rename the row to `key#vN` and stamp
- * valid_until, so it no longer answers recall under `key` but remains readable
- * via memory_fact_history(). This is the non-destructive half of supersede — the
- * "this no longer holds, and nothing takes its place" case. Returns 0 on
- * success, -1 if the id does not resolve or the rename fails. */
-int memory_retire(int64_t id, const char *session_id);
 
 /* --- Drift Detection --- */
 typedef struct
@@ -871,9 +763,6 @@ typedef struct
    char target[GRAPH_ENDPOINT_MAX];
    int weight;
 } edge_t;
-
-int memory_extract_edges(int64_t window_id, char **file_refs, int file_count, char **terms,
-                         int term_count);
 
 /* Graph-powered related memory retrieval: given seed memory keys, walk
  * co_discussed edges (1-hop) and return related memory IDs scored by weight.
@@ -911,12 +800,6 @@ typedef struct
 int memory_graph_walk(const char *seed_entity, unsigned int relation_mask, int max_hops,
                       graph_walk_entry_t *out, int max);
 
-/* Prune edges where both source and target have no corresponding L1+ memory. */
-int memory_graph_prune(void);
-
-/* Normalize edge weights per relation type so max weight is 1.0. */
-int memory_graph_normalize(void);
-
 /* The embed command that selects the in-process lexical fixture. TEST BUILDS ONLY —
  * it is compiled out of aimee-kb, so passing it there is an ordinary (failing) exec.
  * There is no implicit embedder: an empty command embeds nothing and returns 0. */
@@ -938,23 +821,6 @@ typedef struct
    uint64_t suppressed_calls;
 } memory_embedder_health_t;
 
-void memory_embedder_health(memory_embedder_health_t *out);
-void memory_embedder_dependency_reset_for_tests(void);
-void memory_embedder_dependency_set_clock_for_tests(int64_t (*now_ms)(void));
-double cosine_similarity(const float *a, const float *b, int dim);
-
-/* Test hooks for the per-recall query-embedding memo (memory_core_helpers.inc).
- * Not used in production paths; exposed so unit tests can drive the memoized
- * runtime embed and reset the cache between cases. */
-int memory_query_embed_runtime_test(const char *text, const char *command, float *out, int max_dim);
-void memory_query_embed_cache_reset_test(void);
-void memory_query_embed_cache_stats_test(int *requests, int *misses);
-void memory_query_embed_prewarm_test(const char *const *texts, int n, const char *command);
-
-/* Test hooks for the embedder-aware semantic-recall gate + floor scale. */
-int memory_semantic_dim_ok_test(int qdim);
-double memory_semantic_floor_scale_test(void);
-
 /* --- Effectiveness Tracking --- */
 
 typedef struct
@@ -966,12 +832,6 @@ typedef struct
    double effectiveness;
 } memory_effectiveness_t;
 
-/* Compute effectiveness scores for all memories with enough data. Returns count updated. */
-int memory_compute_effectiveness(void);
-
-/* Demote memories with low effectiveness. Returns count demoted. */
-int memory_demote_low_effectiveness(void);
-
 /* Get effectiveness stats for display */
 typedef struct
 {
@@ -981,7 +841,6 @@ typedef struct
    int never_surfaced_l2;
 } effectiveness_stats_t;
 
-int memory_effectiveness_stats(effectiveness_stats_t *out);
 /* --- Memory-to-Memory Linking --- */
 typedef struct
 {
@@ -993,16 +852,11 @@ typedef struct
 } memory_link_t;
 
 int memory_link_create(int64_t source_id, int64_t target_id, const char *relation);
-int memory_link_query(int64_t memory_id, memory_link_t *out, int max);
-int memory_link_delete(int64_t link_id);
 /* --- Content Safety --- */
 
 #define SCAN_BLOCK    0 /* never persist */
 #define SCAN_REDACT   1 /* persist with value masked */
 #define SCAN_CLASSIFY 2 /* persist but mark sensitive */
-
-/* Enforce retention policies: delete expired sensitive/restricted memories */
-int memory_enforce_retention(void);
 
 /* --- Memory Improve Loop --- */
 
@@ -1017,17 +871,6 @@ int memory_improve_dedupe(int dry_run);
 int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confidence);
 
 /* --- Scene Clustering --- */
-
-/* K-means clustering of memory unit embeddings.
- * Uses pgvector memory unit vectors, runs k-means.
- * Returns number of scenes created, -1 on error.
- * workspace_id: empty string means all workspaces. */
-int memory_cluster_scenes(const char *workspace_id);
-
-/* Assign a single memory to the nearest existing scene.
- * Called after a new memory is embedded.  No-op if no scenes exist.
- * Returns 0 on success. */
-int memory_assign_scene(int64_t memory_id);
 
 /* --- Session Briefing ---
  *
@@ -1130,12 +973,6 @@ int memory_prospective_match(const char *turn_text, const char *active_entity,
  * `once` reminders, transitions state to `triggered`.  `repeat` reminders
  * stay `armed`.  Returns 0 on success, -1 on error. */
 int memory_prospective_mark_triggered(int64_t id);
-
-/* Read current process-local prospective-memory metrics.  Any out-parameter
- * may be NULL.  Counts are cumulative since process start. */
-void memory_prospective_metrics(int64_t *triggered_total, int64_t *completed_total,
-                                int64_t *expired_total, int64_t *match_calls, double *match_ms_avg,
-                                double *match_ms_max);
 
 /* --- Epistemic Directives and Active Clarification ---
  *
@@ -1245,19 +1082,6 @@ int memory_directive_mark_surfaced(int64_t id);
  * directive and returns the new directive id; otherwise returns 0. */
 int64_t memory_directive_record_retrieval_failure(const char *query_norm, int threshold,
                                                   const char *source_session);
-
-/* Auto-create a contradiction directive keyed to (memory_a_id, memory_b_id).
- * Caller should supply the two memory contents for a human-readable
- * question. Idempotent on the unique dedup index. Returns the directive id,
- * 0 if dedup rejected, -1 on error. */
-int64_t memory_directive_record_contradiction(int64_t memory_a_id, int64_t memory_b_id,
-                                              const char *topic, const char *anchor_entity,
-                                              const char *content_a, const char *content_b,
-                                              const char *source_session);
-
-/* Resolve open contradiction directives linked to this pair of memories. */
-int memory_directive_resolve_contradiction(int64_t memory_a_id, int64_t memory_b_id,
-                                           int64_t resolution_memory_id, const char *note);
 
 /* Counts per state, written into |out|. */
 typedef struct

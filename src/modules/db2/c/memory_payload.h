@@ -17,21 +17,6 @@ extern "C"
 {
 #endif
 
-   /* Build the vector payload JSON for a memory point. Returns a
-    * heap-allocated string the caller must free(), or NULL on error
-    * (missing row, SQL failure). */
-   char *db2_memory_build_memory_payload(int64_t memory_id);
-
-   /* Build the vector payload JSON for a memory_unit point. Same
-    * ownership contract.  `memory_id_out` is filled with the parent
-    * memory_id when non-NULL and the build succeeds. */
-   char *db2_memory_build_unit_payload(int64_t unit_id, int64_t *memory_id_out);
-
-   /* Fetch just the key + content fields for a memory row; used to build
-    * the shared Go embed input.  0 on hit, -1 on miss. */
-   int db2_memory_get_key_content(int64_t memory_id, char *key_out, int key_len, char *content_out,
-                                  int content_len);
-
    /* Returns 1 if any memories row matches `key` exactly, 0 if not, -1
     * on error. Cheap exact-match probe used by trace mining etc. */
    int db2_memory_key_exists(const char *key);

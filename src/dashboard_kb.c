@@ -18,7 +18,6 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "modules/db2/c/decision_log.h"
-#include "modules/db2/c/memory_conflicts.h"
 #include "modules/db2/c/memory_query.h"
 #include "dashboard.h"
 #include "lifecycle.h"

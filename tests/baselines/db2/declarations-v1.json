@@ -13551,84 +13551,6 @@
       "symbol": "db2_membership_teams"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 560
-        }
-      ],
-      "signature": "int db2_memory_activation_policy_set ( int64_t memory_id , int sticky_turns , int cooldown_turns , int delay_turns , int suppressed )",
-      "signature_sha256": "bce77e3f3f50af5a1d65bfec87f5cf018048c4bc341e94b6ddb6edea50b13a43",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_activation_policy_set"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 254
-        }
-      ],
-      "signature": "int db2_memory_active_kind_dedupe_candidates ( const char * kind , db2_memory_dedupe_candidate_t * out , int max )",
-      "signature_sha256": "74fffa0821274a5be355558251a5b6d669ccbcbfe49fa2a7c01095d037379726",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_active_kind_dedupe_candidates"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 745
-        }
-      ],
-      "signature": "int db2_memory_aggregate ( const char * entity_seed , const char * keyword , memory_t * out , int max , int * truncated_out )",
-      "signature_sha256": "2b4bbe10bbd4148aad468434802c105c23b04b24d00775c01125f187b5062375",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_aggregate"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1050
-        }
-      ],
-      "signature": "void db2_memory_alias_insert ( int64_t memory_id , const char * alias , double weight )",
-      "signature_sha256": "6b6f4347992a122fa250d71a7c1917641dc70768812749801480683db002682a",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_alias_insert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 975
-        }
-      ],
-      "signature": "void db2_memory_aliases_delete_for_memory ( int64_t memory_id )",
-      "signature_sha256": "227c42b68e1cc57ee503bd21761cc6c7f434c2827e20214557c4a6bf33cbbdd4",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_aliases_delete_for_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 884
-        }
-      ],
-      "signature": "int db2_memory_alloc_all_ids ( int64_t * * out_ids , size_t * out_count )",
-      "signature_sha256": "bafd563d1e186d9898426dbbed39943b1a64f1d7238a79e715544cfc1f3d21ab",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_alloc_all_ids"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
@@ -13674,234 +13596,13 @@
       "symbol": "db2_memory_briefing_list_recent_activity"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_payload.h",
-          "line": 23
-        }
-      ],
-      "signature": "char * db2_memory_build_memory_payload ( int64_t memory_id )",
-      "signature_sha256": "1aa713d3a09c49334079bc26ee08128527499a887428126a043308b7da4c56e2",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_build_memory_payload"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_payload.h",
-          "line": 28
-        }
-      ],
-      "signature": "char * db2_memory_build_unit_payload ( int64_t unit_id , int64_t * memory_id_out )",
-      "signature_sha256": "e31b405f6ae958b13281cfee4fb87842308495417847b6658704fa4d34094902",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_build_unit_payload"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1046
-        }
-      ],
-      "signature": "void db2_memory_chunk_upsert ( int64_t memory_id , int chunk_index , const char * chunk_text )",
-      "signature_sha256": "864fed8dd3b3b0294e1c368f9a68555ad7dcf6435e926623d7047e48e02978ff",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_chunk_upsert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 972
-        }
-      ],
-      "signature": "void db2_memory_chunks_delete_for_memory ( int64_t memory_id )",
-      "signature_sha256": "70dd6b5d6e641c277a0c3b92dd66af40e721f1eb26b1edc922688f8008edd237",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_chunks_delete_for_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1042
-        }
-      ],
-      "signature": "int db2_memory_chunks_list ( int64_t memory_id , db2_memory_chunk_row_t * out , int max )",
-      "signature_sha256": "4d94e402dfdaf4cc656a26b52b3916b07644e7917e5fb86cce194b50486eb8eb",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_chunks_list"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 58
-        }
-      ],
-      "signature": "int db2_memory_collect_alias_matches ( const char * alias , int limit , memory_t * out , int max )",
-      "signature_sha256": "a50f37b1226481d8bea97023d0abba86c95df4e26264f6ee6d8fc14de24ed5c8",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_collect_alias_matches"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 63
-        }
-      ],
-      "signature": "int db2_memory_collect_entity_matches ( const char * term , int limit , memory_t * out , int max )",
-      "signature_sha256": "4836fc601581f3e2866cc8b388662e4917ce22a9a886d9f9b07d2cd3282c266f",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_collect_entity_matches"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 76
-        }
-      ],
-      "signature": "int db2_memory_collect_event_frame_matches ( const char * term , int limit , memory_t * out , int max )",
-      "signature_sha256": "1d06656a12e0c3a08621fce537f4554292e6ecbc768fd85efacb2d6d9bd179ba",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_collect_event_frame_matches"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 697
-        }
-      ],
-      "signature": "int db2_memory_collect_relation_token_matches ( const char * token , int limit , memory_t * out , int max )",
-      "signature_sha256": "0925135abfebc1d84f16bd49ea2ef5f100bfea812178912665a2bfc6940bf1fe",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_collect_relation_token_matches"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 71
-        }
-      ],
-      "signature": "int db2_memory_collect_summary_matches ( const char * term , int limit , memory_t * out , int max )",
-      "signature_sha256": "e586a300c5f952fa1ca472db921e7c2c497cb3a21f4b311631fcd001ecb6e95b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_collect_summary_matches"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 67
-        }
-      ],
-      "signature": "int db2_memory_collect_temporal_matches ( const char * term , int limit , memory_t * out , int max )",
-      "signature_sha256": "ce23a49eeb98dbe1933233caf5dafb025555fc05646f1ab245ebd4c80306cf68",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_collect_temporal_matches"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_conflicts.h",
-          "line": 32
-        }
-      ],
-      "signature": "int db2_memory_conflict_get_pair ( int64_t conflict_id , int64_t * mem_a , int64_t * mem_b )",
-      "signature_sha256": "fafe72ad1e37fb1a5a9c7189dfbb0c5bc8f3f9305738f2f30c575decac8beeb8",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_conflict_get_pair"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_conflicts.h",
-          "line": 28
-        }
-      ],
-      "signature": "int db2_memory_conflict_list ( conflict_t * out , int max )",
-      "signature_sha256": "d4c30481649165c3612c47ec97caaa6faaab378da8cb9f87ae501a47f3b8fbf5",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_conflict_list"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_conflicts.h",
-          "line": 43
-        }
-      ],
-      "signature": "int db2_memory_conflict_pair_resolved ( int64_t mem_a , int64_t mem_b )",
-      "signature_sha256": "4e4a964a1b6cb2c53b576f8c5c134988210f54fc394e6a40e5429123809bbbe8",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_conflict_pair_resolved"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_conflicts.h",
-          "line": 19
-        }
-      ],
-      "signature": "int db2_memory_conflict_record ( int64_t mem_a , int64_t mem_b )",
-      "signature_sha256": "3bd891b026c6470570fe4e24c292ada8d962b708e0ccf957a42f775eae2d4bdd",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_conflict_record"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_conflicts.h",
-          "line": 36
-        }
-      ],
-      "signature": "int db2_memory_conflict_resolve ( int64_t conflict_id , const char * resolution )",
-      "signature_sha256": "b74db619b0f8844fe8fd1c60daf982f9c877965acaf2de564250b3d01be8894b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_conflict_resolve"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_conflicts.h",
-          "line": 23
-        }
-      ],
-      "signature": "void db2_memory_contradiction_log ( int64_t mem_a , int64_t mem_b , const char * resolution , const char * details )",
-      "signature_sha256": "2f228e53e1db07542ececa5b198b0e6896b4c73c973a08ffe6f1f6cd035ea0ae",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_contradiction_log"
-    },
-    {
       "consumers": [
         "src/cmd_doctor.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_payload.h",
-          "line": 40
+          "line": 25
         }
       ],
       "review": {
@@ -13915,39 +13616,13 @@
       "symbol": "db2_memory_count"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 477
-        }
-      ],
-      "signature": "int db2_memory_count_and_max_updated ( int * out_count , char * out_ts , int out_ts_len )",
-      "signature_sha256": "0cf3ea950395ad7e74e707148a22f9dfa9077e3b38d948e3543d32b653efee6b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_count_and_max_updated"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 873
-        }
-      ],
-      "signature": "int db2_memory_count_by_tier_kind ( db2_memory_tier_kind_count_t * out , int max )",
-      "signature_sha256": "0c0a3433a43ba84d81cba1759417bd3328f314ddebaab6776995f32b988844ce",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_count_by_tier_kind"
-    },
-    {
       "consumers": [
         "src/cmd_doctor.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 636
+          "line": 321
         }
       ],
       "review": {
@@ -13965,7 +13640,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 621
+          "line": 318
         }
       ],
       "review": {
@@ -13985,7 +13660,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 639
+          "line": 324
         }
       ],
       "review": {
@@ -14006,7 +13681,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 644
+          "line": 329
         }
       ],
       "review": {
@@ -14020,148 +13695,13 @@
       "symbol": "db2_memory_count_orphaned_l0"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 304
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "Counting version suffixes is private read-modify-write state for the future composite memory.supersede operation; exposing the count separately would race concurrent supersedes and split one logical DB2 mutation."
-      },
-      "signature": "int db2_memory_count_versions ( const char * key_prefix )",
-      "signature_sha256": "0e9657771c2772838c537e3c9c5739a336443a54250cda10fa23cd786fb605ac",
-      "status": "reviewed",
-      "symbol": "db2_memory_count_versions"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 412
-        }
-      ],
-      "signature": "void db2_memory_decay_confidence ( int64_t memory_id )",
-      "signature_sha256": "6a364956b28d4c657a3fc39f7a874fd3ae483903a31a89019efff33cf3e015af",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_decay_confidence"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 752
-        }
-      ],
-      "signature": "int db2_memory_dedupe_by_key ( int dry_run )",
-      "signature_sha256": "23d3c4a65507b410bda4fa07e4826b9082f497d5107475e79de07cb32abdef6e",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_dedupe_by_key"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 787
-        }
-      ],
-      "signature": "int db2_memory_delete_row ( int64_t memory_id )",
-      "signature_sha256": "b9e88857118459c3be0d1328af8c32642bb24af70246b95a1fd09f2dba9336fb",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_delete_row"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 389
-        }
-      ],
-      "signature": "int db2_memory_derivation_source_refused ( int64_t memory_id )",
-      "signature_sha256": "c5f0fb150d8f1f780a6c7591f31559a502b272bd596674e046af3275deba383b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_derivation_source_refused"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 897
-        }
-      ],
-      "signature": "void db2_memory_entities_delete_for_memory ( int64_t memory_id )",
-      "signature_sha256": "21ecdf62abf3d569fea8420acb462e6f4590713e79ade9f205647706e3c02a86",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_entities_delete_for_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1032
-        }
-      ],
-      "signature": "int db2_memory_entities_list_weighted ( int64_t memory_id , db2_memory_entity_row_t * out , int max )",
-      "signature_sha256": "54ed0ef5e8da860ba31e7448b2b0e89c46a9864d8e9fd1223e48e955bcd7b2e5",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_entities_list_weighted"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 888
-        }
-      ],
-      "signature": "void db2_memory_entity_insert ( int64_t memory_id , const char * entity , const char * role , double weight )",
-      "signature_sha256": "2255e7c2cc997aefd1b495955510e589dfe4010f857e9afa213727b3a6967dc5",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_entity_insert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_relations.h",
-          "line": 92
-        }
-      ],
-      "signature": "int db2_memory_entity_profile_stats ( const char * normalized_entity , int * mention_count , int * relation_count , char * latest_episode , int latest_episode_len , char * summary , int summary_len )",
-      "signature_sha256": "0261b514056a09da2f5de40933e0a2af51f5d715ed6c7e1d60ee640e61484684",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_entity_profile_stats"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 25
-        }
-      ],
-      "signature": "int db2_memory_episode_cards_query ( const char * source_session , char * * out , int max )",
-      "signature_sha256": "9bc9178c59ed4cc4d2a52515c85928f269c9b503a9c68b0131764e93e998a874",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_episode_cards_query"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 927
+          "line": 452
         }
       ],
       "signature": "int64_t db2_memory_episode_insert ( int64_t memory_id , const char * episode_key , const char * episode_text , const char * source_session , const char * reference_time )",
@@ -14170,39 +13710,13 @@
       "symbol": "db2_memory_episode_insert"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1055
-        }
-      ],
-      "signature": "int db2_memory_episode_unit_ids_for_session ( int64_t memory_id , const char * source_session , int64_t * out , int max )",
-      "signature_sha256": "242f4a82b2de8e1e051b8e653bb9f4765049e5d0019c98a41ae0f841f58b2eef",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_episode_unit_ids_for_session"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1061
-        }
-      ],
-      "signature": "int db2_memory_episode_unit_ids_supersedes ( int64_t source_memory_id , int64_t * out , int max )",
-      "signature_sha256": "7f7e787ff203b346c0c655afcb5dad58a5745057b48f4f7759e553d8215aff83",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_episode_unit_ids_supersedes"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 158
+          "line": 70
         }
       ],
       "signature": "int db2_memory_episodes_search ( const char * query , int limit , memory_episode_t * out , int max )",
@@ -14211,104 +13725,13 @@
       "symbol": "db2_memory_episodes_search"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 295
-        }
-      ],
-      "signature": "int db2_memory_epistemic_kind ( int64_t memory_id , char * out , size_t out_cap )",
-      "signature_sha256": "1379dfe5868e78278b01f783fedfc1b7074f0468f347958e6e979acd2d1e268a",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_epistemic_kind"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 964
-        }
-      ],
-      "signature": "void db2_memory_event_frame_insert ( int64_t memory_id , const char * actor , const char * action , const char * object , const char * location , const char * event_time , const char * evidence_kind )",
-      "signature_sha256": "a0912bc43ca9af930803524396ae9d0c27a71c45374b699c1bad8dc168447727",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_event_frame_insert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 969
-        }
-      ],
-      "signature": "void db2_memory_event_frames_delete_for_memory ( int64_t memory_id )",
-      "signature_sha256": "3aca3d4e16f13ff37e52998bd58e48deebe9aca53813edfdfcbd9f64a5962b69",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_event_frames_delete_for_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 960
-        }
-      ],
-      "signature": "int db2_memory_event_frames_list ( int64_t memory_id , db2_memory_event_frame_row_t * out , int max )",
-      "signature_sha256": "198dafbfe879e72eafe9b5c0d677788bc1b57e97d187a4a2a21c7a5b4b8cdecc",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_event_frames_list"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 20
-        }
-      ],
-      "signature": "int db2_memory_fact_history ( const char * normalized_key , memory_t * out , int max )",
-      "signature_sha256": "ca5164ffeb8bad8e86dfe6e7928579c7902068cdf1344e8bda3c6fa46754d324",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_fact_history"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 711
-        }
-      ],
-      "signature": "int db2_memory_filter_archived_ids ( const int64_t * ids , int n , int64_t * out , int max )",
-      "signature_sha256": "518ae9f337d38998a09fc802355e03a9ccf00c0c73f39c785fc4ffb984f47449",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_filter_archived_ids"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 827
-        }
-      ],
-      "signature": "int db2_memory_find_conflicting_l2 ( const char * key , const char * content , double * existing_confidence_out )",
-      "signature_sha256": "2b0623710e96f534174086d37713bfafdfcb4d61a36771990d024665f9af13a9",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_find_conflicting_l2"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 48
+          "line": 35
         }
       ],
       "signature": "int db2_memory_find_facts_fts ( const char * query , int limit , memory_t * out , int max )",
@@ -14325,7 +13748,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 43
+          "line": 30
         }
       ],
       "signature": "int db2_memory_find_facts_like ( const char * query , int limit , memory_t * out , int max )",
@@ -14338,7 +13761,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 834
+          "line": 402
         }
       ],
       "review": {
@@ -14350,162 +13773,6 @@
       "signature_sha256": "702e7ac3ac2ee62f32188dc2b85e8e9df635f51cdf51b8e699e56d1948269804",
       "status": "reviewed",
       "symbol": "db2_memory_find_id_by_key_kind"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 934
-        }
-      ],
-      "signature": "int db2_memory_get_by_unit_id ( int64_t unit_id , memory_t * out )",
-      "signature_sha256": "5a6658a87dbafefdb168a44ffe454f4d940e2a0356d62d62580cd4664e417268",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_get_by_unit_id"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 162
-        }
-      ],
-      "signature": "int db2_memory_get_confidence_by_key ( const char * key , double * confidence_out )",
-      "signature_sha256": "f2ae9d6f883b3c802ae0ecbb87d20c669443f19258bf936e2f52febf254b73e3",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_get_confidence_by_key"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 366
-        }
-      ],
-      "signature": "int db2_memory_get_content ( int64_t memory_id , char * out , int out_len )",
-      "signature_sha256": "45147cad822329064bfe4f49e6259586766da0199382cb8d31a2205c1536cc05",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_get_content"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 93
-        }
-      ],
-      "signature": "int db2_memory_get_evidence_fields ( int64_t memory_id , double * evidence , int * observations )",
-      "signature_sha256": "f3a837e5d09d1a5d48eb38576a9f20a2161a2b0bb3cf7c9b46c63ddc3afc59d3",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_get_evidence_fields"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_payload.h",
-          "line": 32
-        }
-      ],
-      "signature": "int db2_memory_get_key_content ( int64_t memory_id , char * key_out , int key_len , char * content_out , int content_len )",
-      "signature_sha256": "2fe084e691dd158bdfbe8266de8cfb87e43a12e0f099989676a16064ba94e170",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_get_key_content"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 97
-        }
-      ],
-      "signature": "double db2_memory_get_salience ( int64_t memory_id , double default_value )",
-      "signature_sha256": "52899370e84dc229154b09ad55f7bf6ba64ad50eb2636db5724560e84b1869c7",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_get_salience"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1007
-        }
-      ],
-      "signature": "int db2_memory_get_session_kinds ( int64_t memory_id , char * session_out , int session_len , char * kind_out , int kind_len , char * explicit_kind_out , int explicit_kind_len )",
-      "signature_sha256": "44decf525d3a6eb1e653684216a006c427c17df2f25c540900c983e4c705ec7f",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_get_session_kinds"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 908
-        }
-      ],
-      "signature": "int db2_memory_get_source_session ( int64_t memory_id , char * out , int out_len )",
-      "signature_sha256": "bd63250d7a681a703a521ae5351d2c10a1bed14d3fcc53d7600415631f01aedb",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_get_source_session"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 108
-        }
-      ],
-      "signature": "int db2_memory_get_state_fields ( int64_t memory_id , int * has_valid_until , int * observations , int * use_count )",
-      "signature_sha256": "2f09e05300ac185f058754ae740d380775cc2bb9c509171baa6e6d0c1b896cf3",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_get_state_fields"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 101
-        }
-      ],
-      "signature": "double db2_memory_get_surprise ( int64_t memory_id , double default_value )",
-      "signature_sha256": "f3201a7ea26108cbe468bee80292f524c3b147fc0339b7edf394c6c2e09cc187",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_get_surprise"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 130
-        }
-      ],
-      "signature": "int db2_memory_has_any_workspace_tag ( int64_t memory_id )",
-      "signature_sha256": "0f7d1a01cc7c7305aa6812b65a8bc2a9b5052a79f6e069f716d8b4faebb84d90",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_has_any_workspace_tag"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 125
-        }
-      ],
-      "signature": "int db2_memory_has_scope_type ( int64_t memory_id , const char * scope_type )",
-      "signature_sha256": "a4af0ed0efe65338bbd76bc17e4ee2046cd5699c6483724e4ac93be8271d3962",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_has_scope_type"
     },
     {
       "consumers": [],
@@ -14720,7 +13987,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_payload.h",
-          "line": 37
+          "line": 22
         }
       ],
       "review": {
@@ -14740,7 +14007,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 839
+          "line": 407
         }
       ],
       "review": {
@@ -14754,117 +14021,13 @@
       "symbol": "db2_memory_key_exists_in_tier_pair"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 574
-        }
-      ],
-      "signature": "int db2_memory_l1_session_clusters ( const char * excluded_source , int min_count , db2_memory_l1_cluster_row_t * rows , int max )",
-      "signature_sha256": "c850a034b2e74d879efc0610697cd92648996b8d366ae6c0ba0cbf93022da7c8",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_l1_session_clusters"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 599
-        }
-      ],
-      "signature": "int db2_memory_l1_session_content ( const char * session_id , db2_memory_content_row_t * rows , int max )",
-      "signature_sha256": "fa71d387ef5832e34de5c4a10810194a9237d2765b5a80cfe41813c2be7b605e",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_l1_session_content"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 585
-        }
-      ],
-      "signature": "int db2_memory_l1_session_created_at ( const char * session_id , db2_memory_created_at_row_t * rows , int max )",
-      "signature_sha256": "a5ede5ca072d65657ec11783dc3fae264afe5b211ce58f0ec039a9d44dca76a2",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_l1_session_created_at"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 665
-        }
-      ],
-      "signature": "int db2_memory_l2_cross_key_pairs ( int max_pairs , db2_memory_pair_row_t * out , int max )",
-      "signature_sha256": "6f0721f230e908692ff419c4f8975a5a71ee7939125c7b569fa4c18181325dfb",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_l2_cross_key_pairs"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 670
-        }
-      ],
-      "signature": "int db2_memory_l2_fact_vs_decision_pairs ( int max_pairs , db2_memory_pair_row_t * out , int max )",
-      "signature_sha256": "0e814b3759eb1dc88286b2a2697eee514d3cc7f30205c3fe7b4bf34dae383881",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_l2_fact_vs_decision_pairs"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 633
-        }
-      ],
-      "signature": "int db2_memory_last_retro_scan ( char * out , int out_len )",
-      "signature_sha256": "ea3f487b73847bbb93a4967188f10a29cd44bf0385e1b3f159227a4185b02dcb",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_last_retro_scan"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 77
-        }
-      ],
-      "signature": "int db2_memory_lifecycle_counts ( db2_memory_lifecycle_counts_t * out )",
-      "signature_sha256": "84d0cbe650292df9c1adfc7bcea7f5984231a33a0932343d7acfd81e2cc9fe45",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_lifecycle_counts"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 61
-        }
-      ],
-      "signature": "int db2_memory_lifecycle_get_state ( int64_t memory_id , char * out , size_t out_len )",
-      "signature_sha256": "39201ba57c9323a5a0eba1b88741785a848d2a2ec0ed71833863543e7dfd14f2",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_lifecycle_get_state"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 103
+          "line": 84
         }
       ],
       "signature": "int db2_memory_lifecycle_list_newly_superseded ( const char * since , db2_memory_lifecycle_superseded_t * out , int max )",
@@ -14873,65 +14036,13 @@
       "symbol": "db2_memory_lifecycle_list_newly_superseded"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 100
-        }
-      ],
-      "signature": "int db2_memory_lifecycle_list_stale_pending ( db2_memory_lifecycle_stale_t * out , int max )",
-      "signature_sha256": "f4ad7c36d7160ee5b0d2ef0981018e624f2b621a95e6ca4e625d6b852f0dd721",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_lifecycle_list_stale_pending"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 101
-        }
-      ],
-      "signature": "int db2_memory_lifecycle_list_unresolved_contradictions ( db2_memory_lifecycle_conflict_t * out , int max )",
-      "signature_sha256": "4e76fe6f59262e7ec4dcbd85c50a143bfe1b9eedc600dd23505dc18faaac382a",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_lifecycle_list_unresolved_contradictions"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 70
-        }
-      ],
-      "signature": "int db2_memory_lifecycle_mark_pending ( int64_t memory_id , int ttl_days )",
-      "signature_sha256": "097028fd4e99b43e70c24715c33cda20a790e4cf77c8021a07873f1a2a3fe0ba",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_lifecycle_mark_pending"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 74
-        }
-      ],
-      "signature": "int db2_memory_lifecycle_sweep_expired ( void )",
-      "signature_sha256": "a376eab483cc4e760da1f31e68d1358cb1d233584830b790ef1a162eefd4fa4b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_lifecycle_sweep_expired"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 66
+          "line": 62
         }
       ],
       "signature": "int db2_memory_lifecycle_update_state ( int64_t memory_id , const char * new_state , const char * archive_reason )",
@@ -14940,91 +14051,13 @@
       "symbol": "db2_memory_lifecycle_update_state"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 813
-        }
-      ],
-      "signature": "int db2_memory_lineage_get ( const char * object_type , int64_t object_id , memory_lineage_t * out , int max )",
-      "signature_sha256": "05eed0cac88618f3237c143c4583d3b6fd993fbbd28b587c2785e88c1fcacf4f",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_lineage_get"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 678
-        }
-      ],
-      "signature": "int64_t db2_memory_lineage_insert ( const char * object_type , int64_t object_id , const char * source_kind , const char * source_ref , double confidence )",
-      "signature_sha256": "8ebfba5edb24b447eb4542ac22f20882f0fbc6ba68f14b83a3e6efa2ff900278",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_lineage_insert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_relations.h",
-          "line": 19
-        }
-      ],
-      "signature": "int db2_memory_link_create ( int64_t source_id , int64_t target_id , const char * relation )",
-      "signature_sha256": "92caf6689844003ea3101627c7b0acfc65e87bda1c7dd8a7c0ff1779d757f419",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_link_create"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_relations.h",
-          "line": 28
-        }
-      ],
-      "signature": "int db2_memory_link_delete ( int64_t link_id )",
-      "signature_sha256": "1bfa3b6e1cc6270bbaa0a291044e810a1f8dd15720184d91c077499bb9abb3c3",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_link_delete"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_relations.h",
-          "line": 24
-        }
-      ],
-      "signature": "int db2_memory_link_query ( int64_t memory_id , memory_link_t * out , int max )",
-      "signature_sha256": "0922c174699bf892e662963a04716a8aa84a09919ee2108be22840b687e0e6b6",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_link_query"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 988
-        }
-      ],
-      "signature": "int db2_memory_links_with_targets ( int64_t memory_id , db2_memory_link_target_row_t * out , int max )",
-      "signature_sha256": "1c6295888eb82504535196acf9224de8265a2f747f9c8cbb60ef408bbcd1d2e8",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_links_with_targets"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 820
+          "line": 395
         }
       ],
       "signature": "int db2_memory_list ( const char * tier , const char * kind , int hide_archived , int limit , memory_t * out , int max )",
@@ -15033,52 +14066,13 @@
       "symbol": "db2_memory_list"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 407
-        }
-      ],
-      "signature": "int db2_memory_list_artifact_hashed ( db2_memory_artifact_row_t * rows , int max )",
-      "signature_sha256": "c5fdd3451ab71ad8cc4c7d2bb7bc24aed73d646c2fb4583a6892ebb65cc8fb72",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_artifact_hashed"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 174
-        }
-      ],
-      "signature": "int db2_memory_list_by_key ( const char * key , db2_memory_id_content_row_t * out , int max )",
-      "signature_sha256": "fd0e4589b229b43e524024d09eea5b0fea9eae11de11ee0712e424c77c06af84",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_by_key"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 181
-        }
-      ],
-      "signature": "int db2_memory_list_by_key_after ( const char * key , int64_t after_id , db2_memory_id_content_row_t * out , int max )",
-      "signature_sha256": "2155992d843b4b744e2564fa7db0d80704f37b4454fbb43c5d814742c8ffa288",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_by_key_after"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 555
+          "line": 270
         }
       ],
       "signature": "int db2_memory_list_candidates ( db2_memory_cand_filter_t filter , db2_memory_cand_row_t * rows , int max )",
@@ -15087,117 +14081,13 @@
       "symbol": "db2_memory_list_candidates"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 519
-        }
-      ],
-      "signature": "int db2_memory_list_depends_on_keys ( int64_t memory_id , db2_memory_key_row_t * rows , int max )",
-      "signature_sha256": "2dd8535bb45e65c8ae402e6a329cbe9b5cbced15fda46b654df951385de7da4f",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_depends_on_keys"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 443
-        }
-      ],
-      "signature": "int db2_memory_list_episode_cards ( db2_memory_episode_card_row_t * rows , int max )",
-      "signature_sha256": "66477935dc581eff63dbc1ae08164d9e7cb048837e72305312577c807c774431",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_episode_cards"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 448
-        }
-      ],
-      "signature": "int db2_memory_list_global_constraints ( db2_memory_kv_row_t * rows , int max )",
-      "signature_sha256": "d0330bb0ba2539e391bf02246ee149d06917fea27836c4773f3f269f806e4656",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_global_constraints"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1072
-        }
-      ],
-      "signature": "int db2_memory_list_id_key_content ( int limit , db2_memory_id_key_content_row_t * out , int max )",
-      "signature_sha256": "b05b8e61f2d1dcc63daf74f0f5f1cdbe51e514fb39f1d6da593f36720f52e415",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_id_key_content"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 471
-        }
-      ],
-      "signature": "int db2_memory_list_id_kv_ws_section ( db2_memory_ws_section_t section , db2_memory_id_kv_row_t * rows , int max )",
-      "signature_sha256": "e543345357229dc111e798b791694e20a755211991b6fd72ab41c0b2a1acdb78",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_id_kv_ws_section"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 509
-        }
-      ],
-      "signature": "int db2_memory_list_key_facts_with_provenance ( db2_memory_key_fact_row_t * rows , int max )",
-      "signature_sha256": "4fac2dab5bdf23f81755bf5ea20421fed8d4baacd407ef8b12e5249c4e82d7a7",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_key_facts_with_provenance"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 433
-        }
-      ],
-      "signature": "int db2_memory_list_kv_section ( db2_memory_section_t section , db2_memory_kv_row_t * rows , int max )",
-      "signature_sha256": "c26d34b99dae0d6ea6cde2d9e1dec0aa07d8e61c7c8aee054d2bf209122a07b5",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_kv_section"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 326
-        }
-      ],
-      "signature": "int db2_memory_list_low_effectiveness ( double threshold , int limit , db2_memory_low_eff_row_t * rows , int max )",
-      "signature_sha256": "597215ce6155dfb239cfb309a6bcc211367d0996f873c7159e999bc049845842",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_low_effectiveness"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 615
+          "line": 312
         }
       ],
       "signature": "int db2_memory_list_recall_section ( db2_memory_recall_section_t section , db2_memory_cand_row_t * rows , int max )",
@@ -15206,26 +14096,13 @@
       "symbol": "db2_memory_list_recall_section"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 53
-        }
-      ],
-      "signature": "int db2_memory_list_retryable_index_failures ( int max_attempts , int limit , int64_t * out , int max )",
-      "signature_sha256": "4740271f35489731eac458c27cf61af69ddc7551e0eeb04c826ee6df182a86d0",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_retryable_index_failures"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 851
+          "line": 419
         }
       ],
       "signature": "int db2_memory_list_session_scope_priority ( memory_t * out , int max )",
@@ -15240,7 +14117,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 859
+          "line": 427
         }
       ],
       "signature": "int db2_memory_list_session_scope_priority_like ( const char * pattern , memory_t * out , int max )",
@@ -15249,91 +14126,13 @@
       "symbol": "db2_memory_list_session_scope_priority_like"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 352
-        }
-      ],
-      "signature": "int db2_memory_list_superseded_keys ( int min_versions , db2_memory_superseded_row_t * rows , int max )",
-      "signature_sha256": "1cddee581ed39678e5485e8781fd37a2701a2e403debdeff1d9f9b9369dd1a80",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_superseded_keys"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 341
-        }
-      ],
-      "signature": "int db2_memory_list_unused_l2 ( int days , db2_memory_unused_l2_row_t * rows , int max )",
-      "signature_sha256": "57e089ea96a05290a3ee0922c3c55e97fc47d05adc7485821b34a9a8645dc49a",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_list_unused_l2"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 219
-        }
-      ],
-      "signature": "int db2_memory_lookup_by_key ( const char * key , int64_t * id_out , char * content_out , int content_len , double * confidence_out , char * tier_out , int tier_len )",
-      "signature_sha256": "3b945550c4f9d4ea094d57e81299a3801688782b51d01e9062047d9a115cbd38",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_lookup_by_key"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 232
-        }
-      ],
-      "signature": "int db2_memory_lookup_merge_fields ( const char * key , int64_t * id_out , char * * content_out , double * confidence_out , int * use_count_out , double * surprise_out , int * observation_count_out , double * evidence_out )",
-      "signature_sha256": "b4ebf60a69a0be8061c3411174bfff18cb58e2af1e1dca393ac3ca56f0791cd9",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_lookup_merge_fields"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 393
-        }
-      ],
-      "signature": "void db2_memory_mark_merged_into ( int64_t merged_into , const char * session_id , double max_confidence )",
-      "signature_sha256": "6159089d164c5611c4768b8252fe40190302e0bdd24c577ed96d714959b23344",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_mark_merged_into"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 265
-        }
-      ],
-      "signature": "int db2_memory_merge_update ( int64_t memory_id , const char * content , double confidence , int use_count , int observation_count , double evidence_strength , double salience , double surprise , const char * ts )",
-      "signature_sha256": "a84f998c3ddf419865f3e8c096ce0be51406c8964ad7f6a4569dba2795a4048d",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_merge_update"
-    },
-    {
       "consumers": [
         "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 261
+          "line": 111
         }
       ],
       "signature": "int db2_memory_merge_update_ex ( int64_t memory_id , const char * content , const char * use_cases , double confidence , int use_count , int observation_count , double evidence_strength , double salience , double surprise , const char * ts )",
@@ -15345,47 +14144,8 @@
       "consumers": [],
       "locations": [
         {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 296
-        }
-      ],
-      "signature": "double db2_memory_outcome_adjustment ( int64_t memory_id )",
-      "signature_sha256": "c5ad2e13f4623c0499c6bd340b58b4f25199a596520a028f9f1a28d0dba11fcb",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_outcome_adjustment"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 904
-        }
-      ],
-      "signature": "int db2_memory_parse_created_date ( int64_t memory_id , int * year , int * month , int * day )",
-      "signature_sha256": "1943b45177004930b9bc56812a36f5c9c6ac584173a5eb98bda2da92b3020e76",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_parse_created_date"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 737
-        }
-      ],
-      "signature": "int db2_memory_pick_first_temporal_ref ( int64_t memory_id , char * out , int out_len )",
-      "signature_sha256": "b9b0e7e56a1300bb929cf94e524e05dcdeea6d18c4edf740a270a894c5f68b7c",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_pick_first_temporal_ref"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 55
+          "line": 38
         }
       ],
       "review": {
@@ -15403,7 +14163,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 54
+          "line": 37
         }
       ],
       "review": {
@@ -15421,7 +14181,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 60
+          "line": 43
         }
       ],
       "review": {
@@ -15439,7 +14199,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 59
+          "line": 42
         }
       ],
       "review": {
@@ -15457,7 +14217,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 51
+          "line": 34
         }
       ],
       "review": {
@@ -15475,7 +14235,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 46
+          "line": 29
         }
       ],
       "review": {
@@ -15487,32 +14247,6 @@
       "signature_sha256": "1a8dc69de29ad0e38b3465d730a1963cb251cabd32cdefa2e0243ea4c93c5f7f",
       "status": "reviewed",
       "symbol": "db2_memory_promotion_demote_kind"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 111
-        }
-      ],
-      "signature": "int db2_memory_promotion_l5_pattern_candidates ( db2_memory_l5_candidate_t * out , int max )",
-      "signature_sha256": "e9530081ed44f35e252fb9872f5eb8deec464a285e5c4d13b3c5367ca93619c5",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_promotion_l5_pattern_candidates"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 27
-        }
-      ],
-      "signature": "int db2_memory_promotion_list_epistemic_kinds_in_tier ( const char * tier , db2_memory_promotion_kind_t * out , int max )",
-      "signature_sha256": "ce48bd963532011487d217fd3c6b6a6be04f367ca4786bcbef447f50d3faa775",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_promotion_list_epistemic_kinds_in_tier"
     },
     {
       "consumers": [],
@@ -15532,59 +14266,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 69
-        }
-      ],
-      "signature": "int db2_memory_promotion_list_unembedded_l2 ( const char * version , int64_t * ids_out , int max )",
-      "signature_sha256": "da213df8e6109fff189b002bc664bd82eeb0aa2666ffeb6884c16f4c9eb4fd4e",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_promotion_list_unembedded_l2"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 65
-        }
-      ],
-      "signature": "int db2_memory_promotion_match_error_keys ( const char * error_lowered , int64_t * ids_out , int max )",
-      "signature_sha256": "aa7e33b0982d91f02e43a26ef2616cf1fa70adad2ba4f155623c6c5c3a0879ee",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_promotion_match_error_keys"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 32
-        }
-      ],
-      "signature": "int db2_memory_promotion_promote_kind ( const char * ts , const char * kind , int promote_use_count , double promote_confidence )",
-      "signature_sha256": "91b67ac98a71376fa03bd76d17e75f6bbfb34a6c2cdb1d603cf41136db09feb4",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_promotion_promote_kind"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 39
-        }
-      ],
-      "signature": "int db2_memory_promotion_promote_kind_slot ( const char * ts , const char * kind , int promote_use_count , double promote_confidence , int slot_modulo , int slot_remainder , int slot_match )",
-      "signature_sha256": "b615487f5b1670bc3140c8d781d95faa7b1053ed12952670b415450507715254",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_promotion_promote_kind_slot"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 74
+          "line": 48
         }
       ],
       "review": {
@@ -15602,7 +14284,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 80
+          "line": 54
         }
       ],
       "review": {
@@ -15620,7 +14302,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_promotion.h",
-          "line": 84
+          "line": 58
         }
       ],
       "review": {
@@ -15634,57 +14316,13 @@
       "symbol": "db2_memory_promotion_record_l4_approval"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 772
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "Provenance cleanup is an internal compatibility step of the complete memory.delete operation; it must commit with canonical row, vector, relation, and derived-state deletion rather than cross the bus independently."
-      },
-      "signature": "void db2_memory_provenance_delete ( int64_t memory_id )",
-      "signature_sha256": "914917a0c85169d571d2b2615ac28b6612a305ff3d2773f7240b59502a30c267",
-      "status": "reviewed",
-      "symbol": "db2_memory_provenance_delete"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_relations.h",
-          "line": 38
-        }
-      ],
-      "signature": "void db2_memory_provenance_insert ( int64_t memory_id , const char * session_id , const char * action , const char * details )",
-      "signature_sha256": "7967d5f15c77b186c19625be958017cf1de5c7c2cab13ced0dfcd9d9fa1e23fa",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_provenance_insert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_relations.h",
-          "line": 33
-        }
-      ],
-      "signature": "int db2_memory_provenance_list ( int64_t memory_id , provenance_entry_t * out , int max )",
-      "signature_sha256": "502b1cd58b923f56c8bd898ef8560a3307b28e09a55657a600ef3d402fd0dd04",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_provenance_list"
-    },
-    {
       "consumers": [
         "src/cmd_doctor.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 649
+          "line": 334
         }
       ],
       "signature": "int db2_memory_prune_orphaned_l0 ( void )",
@@ -15693,65 +14331,13 @@
       "symbol": "db2_memory_prune_orphaned_l0"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 674
-        }
-      ],
-      "signature": "void db2_memory_record_retro_scan_marker ( const char * ts )",
-      "signature_sha256": "5147e3b3b913d2382c2e6eb3ebf20badb744e6622a90870c20f6f1d498d5324c",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_record_retro_scan_marker"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 294
-        }
-      ],
-      "signature": "int db2_memory_rejection_blocks ( const char * key , const char * content )",
-      "signature_sha256": "8093928ce91839644d2faa9fc8b4dc6b261a74f79b1b7ca3a860a690a0e961af",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_rejection_blocks"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_relations.h",
-          "line": 79
-        }
-      ],
-      "signature": "int db2_memory_relation_dates_for_memory ( int64_t memory_id , db2_memory_relation_date_row_t * rows , int max )",
-      "signature_sha256": "9a001ba17de42a621320489549e074ec973ad2e6c28135521b352a0469c2ffae",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_relation_dates_for_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_relations.h",
-          "line": 43
-        }
-      ],
-      "signature": "void db2_memory_relation_insert ( int64_t memory_id , const char * src_entity , const char * relation , const char * dst_entity , const char * fact_text )",
-      "signature_sha256": "af24c649363ba48f3e5f85a923c47cb92e7a7ac24eb94ccf84bc35be7e6d1076",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_relation_insert"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_relations.h",
-          "line": 48
+          "line": 19
         }
       ],
       "signature": "void db2_memory_relation_upsert_full ( int64_t memory_id , int64_t episode_id , const char * src_entity , const char * relation , const char * dst_entity , const char * fact_text , const char * valid_at , const char * invalid_at , double weight )",
@@ -15766,7 +14352,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_relations.h",
-          "line": 61
+          "line": 32
         }
       ],
       "signature": "int db2_memory_relations_for_entity ( const char * entity , int limit , memory_relation_t * out , int max )",
@@ -15781,7 +14367,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_relations.h",
-          "line": 57
+          "line": 28
         }
       ],
       "signature": "int db2_memory_relations_search ( const char * query , int limit , memory_relation_t * out , int max )",
@@ -15796,7 +14382,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_relations.h",
-          "line": 86
+          "line": 54
         }
       ],
       "signature": "int db2_memory_relations_search_as_of ( const char * query , const char * as_of , int limit , memory_relation_t * out , int max )",
@@ -15811,7 +14397,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_relations.h",
-          "line": 68
+          "line": 39
         }
       ],
       "signature": "int db2_memory_relations_supporting ( const char * entity_token , int limit , memory_relation_t * out , int max )",
@@ -15826,7 +14412,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 809
+          "line": 389
         }
       ],
       "signature": "int db2_memory_review_list ( const char * state , int limit , db2_memory_review_row_t * out , int max )",
@@ -15838,71 +14424,14 @@
       "consumers": [],
       "locations": [
         {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 297
-        }
-      ],
-      "signature": "int64_t db2_memory_row_insert ( const char * tier , const char * kind , const char * key , const char * content , double confidence , const char * session_id , const char * ts , const char * sensitivity , double evidence_strength , double salience , double surprise )",
-      "signature_sha256": "51b021c48e17ccba4e0270acae897b0b73a322714350759a99472b7b0ed54db6",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_row_insert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 286
-        }
-      ],
-      "signature": "int64_t db2_memory_row_insert_epistemic_ex ( const char * tier , const char * kind , const char * epistemic_kind , const char * key , const char * content , const char * use_cases , double confidence , const char * session_id , const char * ts , const char * sensitivity , double evidence_strength , double salience , double surprise , const char * provenance_category )",
-      "signature_sha256": "33c276a4af6c4bad4259de16c7e0ef52088943d2d18058a81618aa036b84cc9c",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_row_insert_epistemic_ex"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 281
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "The raw row insert is private implementation of a complete memory.insert operation, which must validate input, insert the canonical row, attach provenance and scope, and commit before replying."
-      },
-      "signature": "int64_t db2_memory_row_insert_ex ( const char * tier , const char * kind , const char * key , const char * content , const char * use_cases , double confidence , const char * session_id , const char * ts , const char * sensitivity , double evidence_strength , double salience , double surprise , const char * provenance_category )",
-      "signature_sha256": "de78809fdd631d91ea77d8459db864e2672c99ec225f4cc1540687b8dee46786",
-      "status": "reviewed",
-      "symbol": "db2_memory_row_insert_ex"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 64
+          "line": 62
         }
       ],
       "signature": "void db2_memory_scope_bind_current ( aimee_pg_stmt_t * st )",
       "signature_sha256": "093697bbecdca2cd69a7fcbead866e9612a1ecd44ea3080c981c8436c258f84d",
       "status": "internal-unconsumed",
       "symbol": "db2_memory_scope_bind_current"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 63
-        }
-      ],
-      "signature": "int db2_memory_scope_context_allows ( int64_t memory_id )",
-      "signature_sha256": "dff76433588a980c8b2dbf23b45861db5e1212f0804bafdf84c67af36796d26b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_scope_context_allows"
     },
     {
       "consumers": [
@@ -15914,7 +14443,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 55
+          "line": 54
         }
       ],
       "review": {
@@ -15935,7 +14464,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 56
+          "line": 55
         }
       ],
       "review": {
@@ -15955,7 +14484,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 57
+          "line": 56
         }
       ],
       "review": {
@@ -15975,26 +14504,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 62
+          "line": 61
         }
       ],
       "signature": "int db2_memory_scope_context_rank_batch ( const int64_t * ids , int n , int * out_ranks )",
       "signature_sha256": "869d561d1b609e2cd140ab99a45f58cb08ab768e957bac3787c253d2e73679aa",
       "status": "private-test-only",
       "symbol": "db2_memory_scope_context_rank_batch"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 54
-        }
-      ],
-      "signature": "void db2_memory_scope_context_restore ( const db2_memory_scope_context_t * context )",
-      "signature_sha256": "86bf15e7fce10d89a521208b75553fe55210d6db47ab87820cfb5065293c7754",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_scope_context_restore"
     },
     {
       "consumers": [
@@ -16034,44 +14550,13 @@
       "symbol": "db2_memory_scope_context_set_exact"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 117
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
-      },
-      "signature": "int db2_memory_scope_matches ( int64_t memory_id , const char * scope_type , const char * scope_value )",
-      "signature_sha256": "be1d8067178fc0a27dc4174b1f972632a318b6cdb1fa64c38769be0408f196d6",
-      "status": "reviewed",
-      "symbol": "db2_memory_scope_matches"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 152
-        }
-      ],
-      "signature": "int db2_memory_scope_replace ( int64_t memory_id , const char * scope_type , const char * scope_value )",
-      "signature_sha256": "f7e0a21f10e466380081dc51e676a5f41204f1a88822081f6b9bb27b20637275",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_scope_replace"
-    },
-    {
       "consumers": [
         "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 146
+          "line": 63
         }
       ],
       "signature": "void db2_memory_scope_tag_insert ( int64_t memory_id , const char * scope_type , const char * scope_value )",
@@ -16086,176 +14571,13 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 143
+          "line": 60
         }
       ],
       "signature": "int db2_memory_scopes_list ( int64_t memory_id , db2_memory_scope_tag_row_t * out , int max )",
       "signature_sha256": "94f9ed5b86fa54a3558d2ce8d8013b12a017cc1fe464a38372b4f63d5ffc050e",
       "status": "private-test-only",
       "symbol": "db2_memory_scopes_list"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 37
-        }
-      ],
-      "signature": "int db2_memory_search_by_pattern ( const char * pattern , db2_memory_search_match_t * out , int max )",
-      "signature_sha256": "822904145d69c977d046009183cf6f7402fd925c2c993afc420dd5efe72b502b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_search_by_pattern"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 199
-        }
-      ],
-      "signature": "int db2_memory_session_id_content_list ( const char * session_id , int limit , db2_memory_id_content_row_t * out , int max )",
-      "signature_sha256": "0502f33ceb13c0552c5b57663f939802719fd1908710d5dd4c84947ff8c4f6ac",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_session_id_content_list"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 194
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "Listing a session's L0 rows is a private step of the future memory.session_fold operation; exposing the list separately would race the L1 checkpoint insert and subsequent provenance-aware purge."
-      },
-      "signature": "int db2_memory_session_l0_list ( const char * session_id , db2_memory_session_l0_row_t * out , int max )",
-      "signature_sha256": "b8dbcc2d55245e60afc0709039bfa0ee50f80c82e9ed488b02e6305f44f024f8",
-      "status": "reviewed",
-      "symbol": "db2_memory_session_l0_list"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 627
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "Purging the exact L0 source set and its provenance is a private transactional step of memory.session_fold; exposing it independently would permit deletion without the derived checkpoint and its complete lineage."
-      },
-      "signature": "int db2_memory_session_l0_purge ( const char * session_id , const int64_t * memory_ids , int count )",
-      "signature_sha256": "5ed60bf8363726a7f84f87b4fe0a1e25059e3d0fe9106fc8159157d015c990a5",
-      "status": "reviewed",
-      "symbol": "db2_memory_session_l0_purge"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 729
-        }
-      ],
-      "signature": "int db2_memory_session_neighbors_after ( const char * session_id , int64_t after_id , int limit , memory_t * out , int max )",
-      "signature_sha256": "7d8e162251b372c6aa483d04145fdba60753c71000c2acb8e6caaae3e07a0353",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_session_neighbors_after"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 724
-        }
-      ],
-      "signature": "int db2_memory_session_neighbors_before ( const char * session_id , int64_t before_id , int limit , memory_t * out , int max )",
-      "signature_sha256": "a65c958b3ec62ebc5740f4f163da4a7c7cef221e9435f95e94151bb24eac8e08",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_session_neighbors_before"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 358
-        }
-      ],
-      "signature": "int db2_memory_set_artifact ( int64_t memory_id , const char * artifact_type , const char * artifact_ref , const char * artifact_hash )",
-      "signature_sha256": "e47b9d38a6c66c333fefd3e95c5e05eb9a43037666fb8c99d75bfb3e81769f93",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_set_artifact"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 362
-        }
-      ],
-      "signature": "void db2_memory_set_cognified_kind ( int64_t memory_id , const char * kind )",
-      "signature_sha256": "55aeffe8c671bad6ba68e92b467bb548a4ab0b5a6a36e7b97db178091dfc94dc",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_set_cognified_kind"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 203
-        }
-      ],
-      "signature": "void db2_memory_set_source_session ( int64_t memory_id , const char * session_id )",
-      "signature_sha256": "091af59361b0b17f8f520fbec34d57184b49c1012b850b4f836a19fe052df30e",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_set_source_session"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 311
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "Setting replacement validity is an internal post-insert step of the future composite memory.supersede transaction and cannot be exposed as a separately committed caller mutation."
-      },
-      "signature": "void db2_memory_set_valid_from ( int64_t memory_id , const char * ts )",
-      "signature_sha256": "c4e1e242a8f75d2d21c7d46f6210348f825cd8ca4f673abd91396d865e6aa444",
-      "status": "reviewed",
-      "symbol": "db2_memory_set_valid_from"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 308
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "Renaming and closing the prior row is an internal step of the future composite memory.supersede transaction; callers cannot safely sequence this mutation across the event bus."
-      },
-      "signature": "int db2_memory_set_versioned_key ( int64_t memory_id , const char * versioned_key , const char * ts )",
-      "signature_sha256": "a1b55c1fd8914ff4b89841bda0d051b2f0d1b7a515c69fd71eeefe410d099e4f",
-      "status": "reviewed",
-      "symbol": "db2_memory_set_versioned_key"
     },
     {
       "consumers": [],
@@ -16276,117 +14598,13 @@
       "symbol": "db2_memory_stats_counts"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 946
-        }
-      ],
-      "signature": "void db2_memory_summaries_delete_for_memory ( int64_t memory_id )",
-      "signature_sha256": "02f64792cb0f42ca11ca1b76326a20dda3ab7c60b3d8a34e63dda6a9287d02c5",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_summaries_delete_for_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 379
-        }
-      ],
-      "signature": "int db2_memory_summarise_clusters ( double max_confidence , int min_count , db2_memory_summary_cluster_t * rows , int max )",
-      "signature_sha256": "523bd2558837832de5f37ae561efc258bcfe013fef51efed62e650541794570a",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_summarise_clusters"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 384
-        }
-      ],
-      "signature": "int db2_memory_summary_source_ids ( const char * session_id , double max_confidence , int64_t * ids , int max )",
-      "signature_sha256": "a6cc0faf5be29bf872588a0664671142f924e61923e8bb1df3dc9b085141d53b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_summary_source_ids"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 943
-        }
-      ],
-      "signature": "void db2_memory_summary_upsert ( int64_t memory_id , const char * scope , const char * summary )",
-      "signature_sha256": "284b9790fca2322b53b94259222893e58113e289e8475fdb359067f78046699f",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_summary_upsert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 494
-        }
-      ],
-      "signature": "int db2_memory_supersede_lookup ( int64_t new_memory_id , db2_memory_supersede_pair_t * out )",
-      "signature_sha256": "0ece140b0bb02ad13284811a7cc3551c2bcc9935983e70754e21d6b0145d1d43",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_supersede_lookup"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 893
-        }
-      ],
-      "signature": "void db2_memory_temporal_insert ( int64_t memory_id , const char * ref_key , const char * granularity , double weight )",
-      "signature_sha256": "1581a0553af150dc1c380bec8d90dde3e3e6e0ccce7dce272ff832e1dfcb2500",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_temporal_insert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 900
-        }
-      ],
-      "signature": "void db2_memory_temporal_refs_delete_for_memory ( int64_t memory_id )",
-      "signature_sha256": "b10603b3b6e7ce0d2139627d5d7ae50a317f3650ac0fa5863479f19ef3d7c329",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_temporal_refs_delete_for_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1020
-        }
-      ],
-      "signature": "int db2_memory_temporal_refs_list ( int64_t memory_id , db2_memory_temporal_ref_row_t * out , int max )",
-      "signature_sha256": "fb36b7ac611e6e64313e45083e1d3855434fc6a9462b3fec01df6fe01f019205",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_temporal_refs_list"
-    },
-    {
       "consumers": [
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 844
+          "line": 412
         }
       ],
       "signature": "int db2_memory_top_l2_facts ( memory_t * out , int max )",
@@ -16395,91 +14613,13 @@
       "symbol": "db2_memory_top_l2_facts"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 756
-        }
-      ],
-      "signature": "int db2_memory_touch ( int64_t memory_id )",
-      "signature_sha256": "20d10f1335b7b4dc04a34fde264a3ef5d5c17bf9cf00662a46bb7701925b4890",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_touch"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 763
-        }
-      ],
-      "signature": "int db2_memory_touch_many ( const int64_t * ids , int n )",
-      "signature_sha256": "72056e96cf93a3648766c905adc0cbef9bc4284b2669d373ebf118f5d4e9020e",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_touch_many"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 718
-        }
-      ],
-      "signature": "int db2_memory_unit_active_meta ( int64_t unit_id , double * weight_out , char * unit_type_out , int unit_type_len , char * unit_kind_out , int unit_kind_len )",
-      "signature_sha256": "3340c6ca39b6dafbd02fa08e51b9ac525006656e88e454387679add1856aa3eb",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_unit_active_meta"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 113
-        }
-      ],
-      "signature": "int db2_memory_unit_edge_exists ( int64_t unit_id_a , int64_t unit_id_b )",
-      "signature_sha256": "0f0f9800a7cc7a749c31f7beb80de944d286f1e25f848b8e9e0a93d482241649",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_unit_edge_exists"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 938
-        }
-      ],
-      "signature": "void db2_memory_unit_edge_insert ( int64_t src_unit_id , int64_t dst_unit_id , const char * edge_type , double weight )",
-      "signature_sha256": "76c0b6227d8c6e50da4583b9f3dab239089a9eb0644f4c624e25009e0326a1c9",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_unit_edge_insert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1000
-        }
-      ],
-      "signature": "void db2_memory_unit_edges_delete_for_memory ( int64_t memory_id )",
-      "signature_sha256": "a46e03404fb58c3f868a5a281039bd6e7e60d4723110aacdb579051604e269ba",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_unit_edges_delete_for_memory"
-    },
-    {
       "consumers": [
         "src/tests/test_context_assembly.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 208
+          "line": 90
         }
       ],
       "signature": "void db2_memory_unit_episode_card_insert ( int64_t memory_id , const char * unit_key , const char * unit_text )",
@@ -16488,52 +14628,13 @@
       "symbol": "db2_memory_unit_episode_card_insert"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 213
-        }
-      ],
-      "signature": "int64_t db2_memory_unit_first_episode_card_id ( int64_t memory_id )",
-      "signature_sha256": "677d1cb81a0f5888dccbdf7c1c3e9a102f314e26dd1732191c649e0c4cee7a5a",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_unit_first_episode_card_id"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 995
-        }
-      ],
-      "signature": "int64_t db2_memory_unit_insert ( int64_t memory_id , const char * unit_type , const char * memory_kind , const char * unit_key , const char * unit_text , double weight )",
-      "signature_sha256": "b454c3f08118d186e1a85c85c568074f7c2333d8d556459ca8616613a1390785",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_unit_insert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 777
-        }
-      ],
-      "signature": "int db2_memory_unit_list_ids ( int64_t memory_id , int64_t * out , int max )",
-      "signature_sha256": "53f02e3058073001f1ec7363ce4142ca4a7735019c4ef30ad1ec1475b159286b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_unit_list_ids"
-    },
-    {
       "consumers": [
         "src/tests/test_context_assembly.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
-          "line": 783
+          "line": 369
         }
       ],
       "signature": "int db2_memory_unit_list_ids_after ( int64_t memory_id , int64_t after_id , int64_t * out , int max , int * has_more_out )",
@@ -16542,76 +14643,19 @@
       "symbol": "db2_memory_unit_list_ids_after"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 1003
-        }
-      ],
-      "signature": "void db2_memory_units_delete_for_memory ( int64_t memory_id )",
-      "signature_sha256": "f51c3a633f3051b88ddd62f7a0c9e40ebcaeecc99155236e191510711ef8d91b",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_units_delete_for_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 921
-        }
-      ],
-      "signature": "int db2_memory_units_list ( int64_t memory_id , db2_memory_unit_row_t * out , int max )",
-      "signature_sha256": "310fe46c742ca5e8df5d19dc1fed110420fd607c06c2d60d288b2a5d41726e1c",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_units_list"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 790
-        }
-      ],
-      "signature": "int db2_memory_update_content ( int64_t memory_id , const char * content )",
-      "signature_sha256": "c2b8755e73dc6589156aa188fa5b0cd37581030c803584fff6682465aad881e8",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_update_content"
-    },
-    {
       "consumers": [
         "src/tests/test_memory_advanced.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_lifecycle.h",
-          "line": 96
+          "line": 82
         }
       ],
       "signature": "int db2_memory_valid_at ( int64_t memory_id , const char * as_of )",
       "signature_sha256": "30ac433991f28055c0180963e01ef95786d77a1300b1d429f697d667d235567f",
       "status": "private-test-only",
       "symbol": "db2_memory_valid_at"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 121
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "memory",
-        "reason": "The legacy-workspace membership probe remains an internal compatibility predicate folded into scoped memory operations, not a separately callable bus capability."
-      },
-      "signature": "int db2_memory_workspace_matches ( int64_t memory_id , const char * workspace )",
-      "signature_sha256": "20497944db190512bcd0cfe009a9d24fb48a73d301cb1d4ad2c9bee4dbb21732",
-      "status": "reviewed",
-      "symbol": "db2_memory_workspace_matches"
     },
     {
       "consumers": [
@@ -17851,32 +15895,6 @@
       "signature_sha256": "a532153d9ec0b5f8be415c3ecd89df4e0f86a303c7be21f4026640304616208b",
       "status": "private-test-only",
       "symbol": "db2_report_enrichment_upsert"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 767
-        }
-      ],
-      "signature": "int db2_retrieval_shortcut_lookup ( const char * normalized_query , int64_t * ids , int max , int * promoted_out , int64_t * hit_count_out )",
-      "signature_sha256": "809484dcb2d763f9f7e27a8a43d64ad5a040969ecc2b46603e1bde19095202a9",
-      "status": "internal-unconsumed",
-      "symbol": "db2_retrieval_shortcut_lookup"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_query.h",
-          "line": 769
-        }
-      ],
-      "signature": "int db2_retrieval_shortcut_observe ( const char * normalized_query , const int64_t * ids , int count )",
-      "signature_sha256": "a119f6ecb2b15751f4ef262b12583689b8f54ff0262c8c495354b1223110d0de",
-      "status": "internal-unconsumed",
-      "symbol": "db2_retrieval_shortcut_observe"
     },
     {
       "consumers": [],
@@ -21694,19 +19712,6 @@
       "symbol": "kb_maintenance_run"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_lint.h",
-          "line": 28
-        }
-      ],
-      "signature": "int memory_lint_run ( memory_lint_issue_t * out , int max )",
-      "signature_sha256": "caff5c88ace0ea5c51d9e6cb92a96fa579fd25b7d47e48c6ef233a1ca5e46b0a",
-      "status": "internal-unconsumed",
-      "symbol": "memory_lint_run"
-    },
-    {
       "consumers": [
         "src/kb/http/kb_http_telemetry.c",
         "src/kb/kb_main.c",
@@ -22835,49 +20840,13 @@
       "symbol": "pgvec_memory_upsert"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 8
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "index",
-        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-      },
-      "signature": "int pgvec_memory_vector_collection_exists ( void )",
-      "signature_sha256": "970a6597e3d80bf37c459184affec3b199a1ce4f302bca36fe4e1d5eb88e20f1",
-      "status": "reviewed",
-      "symbol": "pgvec_memory_vector_collection_exists"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 11
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "index",
-        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-      },
-      "signature": "const char * pgvec_memory_vector_collection_name ( void )",
-      "signature_sha256": "57f73e52f17277bcf9060901228faf957a6c3cd7dfacbe7d8a7c40bf9fc1e5fe",
-      "status": "reviewed",
-      "symbol": "pgvec_memory_vector_collection_name"
-    },
-    {
       "consumers": [
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 9
+          "line": 8
         }
       ],
       "review": {
@@ -22897,7 +20866,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 16
+          "line": 11
         }
       ],
       "review": {
@@ -22911,44 +20880,13 @@
       "symbol": "pgvec_memory_vector_delete_point"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 24
-        }
-      ],
-      "signature": "int pgvec_memory_vector_delete_points_for_memory ( int64_t memory_id , int include_base )",
-      "signature_sha256": "aa9616a04950fe644c3c5cde702c2d00015a3e6bf0d1cd2dd3cd7bb5ed197552",
-      "status": "internal-unconsumed",
-      "symbol": "pgvec_memory_vector_delete_points_for_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 10
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "index",
-        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-      },
-      "signature": "int pgvec_memory_vector_ensure_payload_indexes ( void )",
-      "signature_sha256": "72d24c8dd27be2b744b45cf51f5e1eaca3ba300ca9bfd81b4d50bfd38aa46156",
-      "status": "reviewed",
-      "symbol": "pgvec_memory_vector_ensure_payload_indexes"
-    },
-    {
       "consumers": [
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 47
+          "line": 29
         }
       ],
       "review": {
@@ -22962,67 +20900,13 @@
       "symbol": "pgvec_memory_vector_near_duplicate_pairs"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 29
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "index",
-        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-      },
-      "signature": "void pgvec_memory_vector_scope_hint_clear ( void )",
-      "signature_sha256": "695496a9f1cada5b20d5a2b4830e0f5f6123995f0181a99be9fb25b4d2fd9b65",
-      "status": "reviewed",
-      "symbol": "pgvec_memory_vector_scope_hint_clear"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 28
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "index",
-        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-      },
-      "signature": "void pgvec_memory_vector_scope_hint_set ( const char * workspace , const char * project )",
-      "signature_sha256": "1f7f43922a05e55657831b84d8296102e1ebbc9d4f1e616a3054ede3aeee5e58",
-      "status": "reviewed",
-      "symbol": "pgvec_memory_vector_scope_hint_set"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 25
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "index",
-        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-      },
-      "signature": "int pgvec_memory_vector_search_with_kinds ( const float * vec , int dim , const char * const * kinds , int n_kinds , int limit , int64_t * ids , double * scores , int max )",
-      "signature_sha256": "56b8ac66e565b078b3450caf4e5729c2765277fa18fa89b3dd12882b8607ec9f",
-      "status": "reviewed",
-      "symbol": "pgvec_memory_vector_search_with_kinds"
-    },
-    {
       "consumers": [
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 12
+          "line": 9
         }
       ],
       "review": {
@@ -23034,24 +20918,6 @@
       "signature_sha256": "629d7ab90d15ee8f0b91eab9d4b81b4c0efd45602189c162437e33fa9b6d59e0",
       "status": "reviewed",
       "symbol": "pgvec_memory_vector_upsert_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_vectors.h",
-          "line": 14
-        }
-      ],
-      "review": {
-        "disposition": "private-db2",
-        "family": "index",
-        "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-      },
-      "signature": "int pgvec_memory_vector_upsert_unit ( int64_t unit_id , const float * vec , int dim , const char * payload_json )",
-      "signature_sha256": "4ebd3a8cfe08c36894061425adf0462c8f6bd27b37600b0803219b3ee289f30e",
-      "status": "reviewed",
-      "symbol": "pgvec_memory_vector_upsert_unit"
     },
     {
       "consumers": [],
@@ -23364,15 +21230,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "0315b785c353db7e94bdc27909f213bf79770c76d027f11d5c3e7128f4dd4377",
+  "fingerprint": "df3d409621e544faaa87c8ebafb65e1af7b4252785d990b124be9e032f309797",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 457,
-    "declarations": 1329,
-    "headers": 136,
-    "internal_unconsumed": 344,
+    "declarations": 1171,
+    "headers": 134,
+    "internal_unconsumed": 202,
     "private_test_only": 318,
-    "reviewed": 210
+    "reviewed": 194
   }
 }

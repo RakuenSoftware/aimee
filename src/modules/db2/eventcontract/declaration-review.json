@@ -718,13 +718,6 @@
       "reason": "The typed memory.orphaned_l0_count operation replaces the bounded integrity diagnostic for unlinked short-term memories; canonical relational links remain DB2 authority."
     },
     {
-      "symbol": "db2_memory_count_versions",
-      "signature_sha256": "0e9657771c2772838c537e3c9c5739a336443a54250cda10fa23cd786fb605ac",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Counting version suffixes is private read-modify-write state for the future composite memory.supersede operation; exposing the count separately would race concurrent supersedes and split one logical DB2 mutation."
-    },
-    {
       "symbol": "db2_memory_find_id_by_key_kind",
       "signature_sha256": "702e7ac3ac2ee62f32188dc2b85e8e9df635f51cdf51b8e699e56d1948269804",
       "disposition": "wire-operation",
@@ -879,20 +872,6 @@
       "reason": "The typed memory.record_l4_approval operation fixes the approved tier and carries the bounded approver and note an operator supplies; DB2 owns the approval row that memory.reclassify_directives later reads under its gate."
     },
     {
-      "symbol": "db2_memory_provenance_delete",
-      "signature_sha256": "914917a0c85169d571d2b2615ac28b6612a305ff3d2773f7240b59502a30c267",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Provenance cleanup is an internal compatibility step of the complete memory.delete operation; it must commit with canonical row, vector, relation, and derived-state deletion rather than cross the bus independently."
-    },
-    {
-      "symbol": "db2_memory_row_insert_ex",
-      "signature_sha256": "de78809fdd631d91ea77d8459db864e2672c99ec225f4cc1540687b8dee46786",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The raw row insert is private implementation of a complete memory.insert operation, which must validate input, insert the canonical row, attach provenance and scope, and commit before replying."
-    },
-    {
       "symbol": "db2_memory_scope_context_clear",
       "signature_sha256": "5d6ec5c28d8a03daa5e5943336638a584b47a7cd8e2c566b97945cf896cc2461",
       "disposition": "private-db2",
@@ -921,53 +900,11 @@
       "reason": "A setter for thread-local workspace and project scope cannot cross a process boundary; typed memory requests carry the bounded scope with the operation that consumes it."
     },
     {
-      "symbol": "db2_memory_scope_matches",
-      "signature_sha256": "be1d8067178fc0a27dc4174b1f972632a318b6cdb1fa64c38769be0408f196d6",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
-    },
-    {
-      "symbol": "db2_memory_session_l0_list",
-      "signature_sha256": "b8dbcc2d55245e60afc0709039bfa0ee50f80c82e9ed488b02e6305f44f024f8",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Listing a session's L0 rows is a private step of the future memory.session_fold operation; exposing the list separately would race the L1 checkpoint insert and subsequent provenance-aware purge."
-    },
-    {
-      "symbol": "db2_memory_session_l0_purge",
-      "signature_sha256": "5ed60bf8363726a7f84f87b4fe0a1e25059e3d0fe9106fc8159157d015c990a5",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Purging the exact L0 source set and its provenance is a private transactional step of memory.session_fold; exposing it independently would permit deletion without the derived checkpoint and its complete lineage."
-    },
-    {
-      "symbol": "db2_memory_set_valid_from",
-      "signature_sha256": "c4e1e242a8f75d2d21c7d46f6210348f825cd8ca4f673abd91396d865e6aa444",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Setting replacement validity is an internal post-insert step of the future composite memory.supersede transaction and cannot be exposed as a separately committed caller mutation."
-    },
-    {
-      "symbol": "db2_memory_set_versioned_key",
-      "signature_sha256": "a1b55c1fd8914ff4b89841bda0d051b2f0d1b7a515c69fd71eeefe410d099e4f",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Renaming and closing the prior row is an internal step of the future composite memory.supersede transaction; callers cannot safely sequence this mutation across the event bus."
-    },
-    {
       "symbol": "db2_memory_stats_counts",
       "signature_sha256": "efca90ae907b5403f429a06f1db17932f70a1941071d46e86b4e5630ab4a4a3b",
       "disposition": "wire-operation",
       "family": "memory",
       "reason": "The typed memory.stats_counts operation returns the complete tier, kind, and conflict breakdown of the canonical relational corpus; the host layers its own PageRank timings on top and DB2 owns none of those."
-    },
-    {
-      "symbol": "db2_memory_workspace_matches",
-      "signature_sha256": "20497944db190512bcd0cfe009a9d24fb48a73d301cb1d4ad2c9bee4dbb21732",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The legacy-workspace membership probe remains an internal compatibility predicate folded into scoped memory operations, not a separately callable bus capability."
     },
     {
       "symbol": "db2_pg_stat_summary",
@@ -1376,20 +1313,6 @@
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
     },
     {
-      "symbol": "pgvec_memory_vector_collection_exists",
-      "signature_sha256": "970a6597e3d80bf37c459184affec3b199a1ce4f302bca36fe4e1d5eb88e20f1",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_memory_vector_collection_name",
-      "signature_sha256": "57f73e52f17277bcf9060901228faf957a6c3cd7dfacbe7d8a7c40bf9fc1e5fe",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
       "symbol": "pgvec_memory_vector_collection_recreate",
       "signature_sha256": "823a421c4008dea0a9caaf2b7c8df064c77d4d9946ffb96c8d592d7237cf7f15",
       "disposition": "private-db2",
@@ -1404,13 +1327,6 @@
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
     },
     {
-      "symbol": "pgvec_memory_vector_ensure_payload_indexes",
-      "signature_sha256": "72d24c8dd27be2b744b45cf51f5e1eaca3ba300ca9bfd81b4d50bfd38aa46156",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
       "symbol": "pgvec_memory_vector_near_duplicate_pairs",
       "signature_sha256": "0ba356f46dad8fb5f7811ae8ccd560c370484662068a90cc8f40552402602e89",
       "disposition": "private-db2",
@@ -1418,36 +1334,8 @@
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
     },
     {
-      "symbol": "pgvec_memory_vector_scope_hint_clear",
-      "signature_sha256": "695496a9f1cada5b20d5a2b4830e0f5f6123995f0181a99be9fb25b4d2fd9b65",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_memory_vector_scope_hint_set",
-      "signature_sha256": "1f7f43922a05e55657831b84d8296102e1ebbc9d4f1e616a3054ede3aeee5e58",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_memory_vector_search_with_kinds",
-      "signature_sha256": "56b8ac66e565b078b3450caf4e5729c2765277fa18fa89b3dd12882b8607ec9f",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
       "symbol": "pgvec_memory_vector_upsert_memory",
       "signature_sha256": "629d7ab90d15ee8f0b91eab9d4b81b4c0efd45602189c162437e33fa9b6d59e0",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_memory_vector_upsert_unit",
-      "signature_sha256": "4ebd3a8cfe08c36894061425adf0462c8f6bd27b37600b0803219b3ee289f30e",
       "disposition": "private-db2",
       "family": "index",
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."

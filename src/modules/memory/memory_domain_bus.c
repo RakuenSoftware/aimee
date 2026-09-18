@@ -264,42 +264,6 @@ static const char *domain_policy_name(const char *operation, const char *text_ke
    return name;
 }
 
-const char *memory_scope_level_name(memory_scope_level_t level)
-{
-   return domain_policy_name("scope-level-name", NULL, NULL, "level", (int)level);
-}
-
-int memory_fact_history(const char *key, memory_t *out, int max)
-{
-   if (!key || !key[0] || !out || max <= 0)
-      return -1;
-   cJSON *request = domain_request("fact-history");
-   if (!request || !cJSON_AddStringToObject(request, "key", key) ||
-       !cJSON_AddNumberToObject(request, "limit", max))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *rows = response ? cJSON_GetObjectItemCaseSensitive(response, "records") : NULL;
-   if (!cJSON_IsArray(rows))
-   {
-      cJSON_Delete(response);
-      return -1;
-   }
-   int n = cJSON_GetArraySize(rows);
-   if (n > max)
-      n = max;
-   for (int i = 0; i < n; ++i)
-      if (domain_memory_from_json(cJSON_GetArrayItem(rows, i), &out[i]) != 0)
-      {
-         cJSON_Delete(response);
-         return -1;
-      }
-   cJSON_Delete(response);
-   return n;
-}
-
 static cJSON *domain_payload_call(const char *operation, const char *query, const char *as_of,
                                   int limit_tokens, int session_start)
 {
@@ -457,22 +421,6 @@ int db2_memory_key_exists(const char *key)
    int result = cJSON_IsBool(allowed) ? cJSON_IsTrue(allowed) : -1;
    cJSON_Delete(response);
    return result;
-}
-
-int db2_memory_epistemic_kind(int64_t memory_id, char *out, size_t out_cap)
-{
-   if (memory_id <= 0 || !out || !out_cap)
-      return -1;
-   cJSON *request = domain_request("epistemic-kind");
-   if (!request || !cJSON_AddNumberToObject(request, "id", (double)memory_id))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = domain_call(request);
-   int rc = domain_copy(out, out_cap, response, "name");
-   cJSON_Delete(response);
-   return rc;
 }
 
 void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type, const char *scope_value)

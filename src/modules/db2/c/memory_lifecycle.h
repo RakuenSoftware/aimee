@@ -56,25 +56,11 @@ extern "C"
       char superseded_at[32];
    } db2_memory_lifecycle_superseded_t;
 
-   /* Look up the current lifecycle_state for a memory id. Returns 0 on
-    * hit, -1 on miss. `out` is filled with the state string. */
-   int db2_memory_lifecycle_get_state(int64_t memory_id, char *out, size_t out_len);
-
    /* Apply a lifecycle transition to a memory id. Caller has already
     * verified the transition is allowed; this just runs the UPDATE.
     * Returns 0 on a row-changed success, -1 on miss / SQL failure. */
    int db2_memory_lifecycle_update_state(int64_t memory_id, const char *new_state,
                                          const char *archive_reason);
-
-   /* Move an active row to pending and stamp ttl_at = now + ttl_days. */
-   int db2_memory_lifecycle_mark_pending(int64_t memory_id, int ttl_days);
-
-   /* Bulk transition pending rows whose ttl_at has passed into archived.
-    * Idempotent. Returns count archived. */
-   int db2_memory_lifecycle_sweep_expired(void);
-
-   /* Per-state counts. Returns 0 on success. */
-   int db2_memory_lifecycle_counts(db2_memory_lifecycle_counts_t *out);
 
    /* Was this memory true at `as_of`, in EVENT time?
     *
@@ -95,11 +81,6 @@ extern "C"
     * the interval is open. */
    int db2_memory_valid_at(int64_t memory_id, const char *as_of);
 
-   /* Alert rows. Each fills up to `max` entries and returns the count
-    * written. */
-   int db2_memory_lifecycle_list_stale_pending(db2_memory_lifecycle_stale_t *out, int max);
-   int db2_memory_lifecycle_list_unresolved_contradictions(db2_memory_lifecycle_conflict_t *out,
-                                                           int max);
    int db2_memory_lifecycle_list_newly_superseded(const char *since,
                                                   db2_memory_lifecycle_superseded_t *out, int max);
 

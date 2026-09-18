@@ -51,7 +51,6 @@ void db2_memory_scope_context_set(const char *workspace, const char *project, in
 void db2_memory_scope_context_set_exact(const char *workspace, const char *project,
                                         const char *scope_type, const char *scope_value,
                                         int include_all);
-void db2_memory_scope_context_restore(const db2_memory_scope_context_t *context);
 void db2_memory_scope_context_clear(void);
 void db2_memory_scope_context_get(db2_memory_scope_context_t *out);
 int db2_memory_scope_context_rank(int64_t memory_id);
@@ -60,7 +59,6 @@ int db2_memory_scope_context_rank(int64_t memory_id);
  * ints; an id with no row keeps rank 0. Returns the number of positions
  * ranked. Prefer this wherever a whole candidate set is being ranked. */
 int db2_memory_scope_context_rank_batch(const int64_t *ids, int n, int *out_ranks);
-int db2_memory_scope_context_allows(int64_t memory_id);
 void db2_memory_scope_bind_current(aimee_pg_stmt_t *st);
 
 #endif

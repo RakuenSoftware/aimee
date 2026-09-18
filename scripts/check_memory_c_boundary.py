@@ -24,6 +24,8 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/db2/c/memory_conflicts.h",
+    "src/modules/db2/c/memory_lint.h",
     "src/kb/kb_demote.c",
     "src/kb_demote.h",
     "src/modules/memory/gw_stage_memory.c",
@@ -67,6 +69,8 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:memory_lint_issue_t|MEMORY_LINT_\w+)\b|"
+    r"\b(?:memory_fact_history|memory_scope_level_name|db2_memory_epistemic_kind)\b(?=\s*\()|"
     r"\bcontext_(?:row_class|result_copy|memory_kind|memory_duplicates_code|text_has_anchor|memory_anchors_code|memory_code_anchor)\b(?=\s*\()|"
     r"\b(?:kb_demote_run|db2_memory_promotion_demote_id|db2_demotion_score|db2_demotion_profile_write|db2_demotion_profile_read|db2_demotion_candidates)\b(?=\s*\()|"
     r"\b(?:ingress_render_block|ingress_preinject_(?:register_confidence_provider|confidence|format_envelope|format_code_block|format_task_context|task_state_reset|recall_unavailable_total))\b(?=\s*\()|"
