@@ -338,7 +338,16 @@ Restricted-role replay covers scope isolation, blocked re-extraction, review
 visibility and restore, while native HTTP tests distinguish missing/forbidden
 responses from unavailable or malformed replies and reject fractional IDs.
 
-The current inventory is four C sources and seven headers; the table above
+Graph traversal, code-vector seed resolution and path feedback now share the
+Go owner. Seeds require current project generations; hidden memory evidence
+cannot provide an intermediate graph bridge. Diagnostics retain raw graph and
+code-proximity scores, and host-owned feedback conserves credit, clamps utility
+and excludes authority-controlled semantic facts. The obsolete graph/fusion C
+header and ported C fixtures are removed; DB2 provenance coverage remains.
+Schema version 8 adds only code identity/generation read grants for the runtime
+role, without exposing vector payloads or project writes.
+
+The current inventory is four C sources and six headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.

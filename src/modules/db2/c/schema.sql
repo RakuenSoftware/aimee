@@ -17758,7 +17758,10 @@ BEGIN
   -- columns for every input kind, never indexed file contents or outcome bodies.
   GRANT SELECT(id,hash,generation) ON files TO aimee_store_runtime;
   GRANT SELECT(id,project,state) ON code_projection_generations TO aimee_store_runtime;
-  GRANT SELECT(name,lifecycle_state) ON projects TO aimee_store_runtime;
+  GRANT SELECT(name,lifecycle_state,current_generation) ON projects TO aimee_store_runtime;
+  IF to_regclass('code_embeddings') IS NOT NULL THEN
+    GRANT SELECT(point_id,project,generation,node_key) ON code_embeddings TO aimee_store_runtime;
+  END IF;
   GRANT SELECT(outcome_id) ON work_outcomes TO aimee_store_runtime;
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id) ON artifacts TO aimee_store_runtime;
@@ -17792,5 +17795,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '7')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '8')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

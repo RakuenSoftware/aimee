@@ -50,7 +50,7 @@ func graphScopeArgs(req DataRequest, exact bool) []any {
 // Bounded breadth-first traversal across all seeds together. Each level is one
 // store read, with a per-node neighbor cap and a total visit budget. Direct seed
 // attachments are evidence too; they do not require an unrelated outgoing edge.
-func (s *postgresDataStore) expandGraph(ctx context.Context, seeds []string, code bool) ([]graphVisit, error) {
+func (s *postgresDataStore) expandGraph(ctx context.Context, seeds []string, code bool, req DataRequest, exact bool) ([]graphVisit, error) {
 	visits := make([]graphVisit, 0, graphNodeBudget)
 	seen := map[string]int{}
 	for _, node := range seeds {
@@ -84,10 +84,16 @@ func (s *postgresDataStore) expandGraph(ctx context.Context, seeds []string, cod
  AND (e.edge_class<>'semantic' OR (e.suppressed=0 AND e.superseded_at='' AND e.invalidated_at=''
  AND e.lifecycle_state IN ('persistent','promoted')
  AND (e.valid_until='' OR e.valid_until>pg_now_text()) AND (e.valid_from='' OR e.valid_from<=pg_now_text())))
+ AND (NOT EXISTS(SELECT 1 FROM fact_evidence fe WHERE fe.assertion_id=e.id AND fe.source_kind='memory')
+ OR EXISTS(SELECT 1 FROM fact_evidence fe JOIN memories m ON fe.source_id='memory:'||m.id::text
+ WHERE fe.assertion_id=e.id AND fe.source_kind='memory' AND m.lifecycle_state='active' AND m.activation_suppressed=0
+ AND CASE WHEN $2 THEN m.scope_type=$3 AND m.scope_value=$4 ELSE $5 OR m.scope_type='global'
+ OR (m.scope_type='project' AND m.scope_value=$6) OR (m.scope_type='workspace' AND m.scope_value=$7) END))
  AND (e.edge_origin<>'code_projection' OR EXISTS(SELECT 1 FROM code_projection_generations g
- JOIN projects p ON p.name=g.project WHERE g.id=e.projection_generation_id AND g.state='visible' AND p.lifecycle_state='current'))
+ JOIN projects p ON p.name=g.project WHERE g.id=e.projection_generation_id AND g.state='visible' AND p.lifecycle_state='current'
+ AND CASE WHEN $2 THEN $3='project' AND p.name=$4 ELSE $5 OR p.name=$6 END))
  ORDER BY e.weight DESC,e.id LIMIT 32
- ) edge ORDER BY f.node,edge.weight DESC,edge.id`, string(encoded))
+ ) edge ORDER BY f.node,edge.weight DESC,edge.id`, string(encoded), exact, req.Scope.Type, req.Scope.Value, req.IncludeAll, req.Project, req.Workspace)
 		if err != nil {
 			return nil, err
 		}
@@ -164,7 +170,12 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	if err != nil {
 		return nil, err
 	}
-	visits, err := s.expandGraph(ctx, seeds, graphCodeQuery(req.Query))
+	codeSeeds, err := s.graphCodeSeeds(ctx, req, exact)
+	if err != nil {
+		return nil, err
+	}
+	seeds = append(seeds, codeSeeds...)
+	visits, err := s.expandGraph(ctx, seeds, graphCodeQuery(req.Query), req, exact)
 	if err != nil {
 		return nil, err
 	}
@@ -179,8 +190,9 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	args = append(graphScopeArgs(req, exact), string(encoded), limit, memoryIDsParameter(ids))
 	rows, err = s.db.Query(ctx, `WITH visible AS MATERIALIZED (`+graphVisible+`), reached AS (
  SELECT * FROM jsonb_to_recordset($9::jsonb) AS n(node text,score double precision,hop int)), ranked AS (
- SELECT e.memory_id,max(n.score) AS score FROM reached n JOIN memory_entities e ON e.entity=n.node GROUP BY e.memory_id)
- SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence
+ SELECT e.memory_id,max(n.score) AS score,COALESCE(max(n.score) FILTER(WHERE n.node ~ '^(file|symbol|import|export|route|project):'),0) AS code
+ FROM reached n JOIN memory_entities e ON e.entity=n.node GROUP BY e.memory_id)
+ SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,r.score,r.code
  FROM ranked r JOIN visible m ON m.id=r.memory_id
  ORDER BY CASE WHEN $1 THEN 0 WHEN m.scope_type='project' AND m.scope_value=$5 THEN 0
  WHEN m.scope_type='workspace' AND m.scope_value=$6 THEN 1 WHEN m.scope_type='global' THEN 2 ELSE 3 END,
@@ -188,11 +200,29 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	if err != nil {
 		return nil, err
 	}
-	graph, err := scanRecordRows(rows)
+	graph := []Record{}
+	signals := map[int64]Record{}
+	for rows.Next() {
+		var r Record
+		if err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.graphScore, &r.codeProximity); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		graph = append(graph, r)
+		signals[r.ID] = r
+	}
+	err = rows.Err()
+	rows.Close()
 	if err != nil {
 		return nil, err
 	}
 	out := fusePersonal(base, graph, len(base)+len(graph))
+	for i := range out {
+		if signal, ok := signals[out[i].ID]; ok {
+			out[i].graphScore = signal.graphScore
+			out[i].codeProximity = signal.codeProximity
+		}
+	}
 	// Project/workspace priority is a visibility contract, not a text score. RRF
 	// may reorder within a scope but cannot push a global match ahead of a local one.
 	if !exact {

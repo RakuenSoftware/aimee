@@ -462,6 +462,7 @@ func rankText(input rankingInput, query string) DiagnosticParts {
 func diagnosticFor(record Record, query string) Diagnostic {
 	parts := rankText(rankingInput{record.Key, record.Content}, query)
 	parts.Confidence = record.Confidence
+	parts.GraphScore, parts.CodeProximity = record.graphScore, record.codeProximity
 	return Diagnostic{Memory: record, Parts: parts}
 }
 

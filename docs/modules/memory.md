@@ -174,7 +174,7 @@ Authenticated admission and the server-to-KB transport remain native callers.
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host
 directories. Passing a pure-Go process/client build does not complete G0 while
-those C paths remain. The module currently retains four C sources and seven
+those C paths remain. The module currently retains four C sources and six
 headers. The descriptor's `ownership_complete` flag verifies the declared file
 inventory; it does not assert that the Go migration is complete.
 
@@ -527,3 +527,12 @@ old reject/restore adapters are deleted. Restore retains the verified actor.
 Restricted-role replay covers scope isolation, blocked re-extraction, review
 visibility and restore, while native HTTP tests distinguish missing/forbidden
 responses from unavailable or malformed replies and reject fractional IDs.
+
+Graph traversal, code-vector seed resolution and path feedback now share the
+Go owner. Seeds require current project generations; hidden memory evidence
+cannot provide an intermediate graph bridge. Diagnostics retain raw graph and
+code-proximity scores, and host-owned feedback conserves credit, clamps utility
+and excludes authority-controlled semantic facts. The obsolete graph/fusion C
+header and ported C fixtures are removed; DB2 provenance coverage remains.
+Schema version 8 adds only code identity/generation read grants for the runtime
+role, without exposing vector payloads or project writes.

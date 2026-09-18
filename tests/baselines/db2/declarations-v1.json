@@ -477,10 +477,6 @@
       "path": "src/modules/learning/learning_router.c"
     },
     {
-      "classification": "kb-generated-client",
-      "path": "src/modules/memory/memory_graph_fusion.h"
-    },
-    {
       "classification": "module-placement-audit",
       "path": "src/modules/roadmap/roadmap_auto.c"
     },
@@ -14430,10 +14426,7 @@
       "symbol": "db2_memory_entities_list_weighted"
     },
     {
-      "consumers": [
-        "src/tests/test_graph_fusion.c",
-        "src/tests/test_memory_retrieval_eval.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
@@ -14442,7 +14435,7 @@
       ],
       "signature": "void db2_memory_entity_insert ( int64_t memory_id , const char * entity , const char * role , double weight )",
       "signature_sha256": "2255e7c2cc997aefd1b495955510e589dfe4010f857e9afa213727b3a6967dc5",
-      "status": "private-test-only",
+      "status": "internal-unconsumed",
       "symbol": "db2_memory_entity_insert"
     },
     {
@@ -16846,9 +16839,7 @@
       "symbol": "db2_memory_unit_insert"
     },
     {
-      "consumers": [
-        "src/tests/test_memory_retrieval_eval.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_query.h",
@@ -16857,7 +16848,7 @@
       ],
       "signature": "int db2_memory_unit_list_ids ( int64_t memory_id , int64_t * out , int max )",
       "signature_sha256": "53f02e3058073001f1ec7363ce4142ca4a7735019c4ef30ad1ec1475b159286b",
-      "status": "private-test-only",
+      "status": "internal-unconsumed",
       "symbol": "db2_memory_unit_list_ids"
     },
     {
@@ -23246,7 +23237,6 @@
     },
     {
       "consumers": [
-        "src/tests/test_memory_retrieval_eval.c",
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
@@ -23719,15 +23709,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "10f3d81f505b1f3c103a62ce87ab1c55b06e919bcc338bc54391666e4444356e",
+  "fingerprint": "b9ceafa7645aa0ec2a2dbe213a961de2723da5cb2f2a137a112fc1d784540386",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 469,
     "declarations": 1349,
     "headers": 138,
-    "internal_unconsumed": 344,
-    "private_test_only": 324,
+    "internal_unconsumed": 346,
+    "private_test_only": 322,
     "reviewed": 212
   }
 }

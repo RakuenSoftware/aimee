@@ -127,11 +127,11 @@ func exerciseGraphFusionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	if err != nil || has(records, hidden.ID) {
 		t.Fatal("exact scope lost", records, err)
 	}
-	visits, err := backend.expandGraph(ctx, []string{"symbol:graph:retry"}, false)
+	visits, err := backend.expandGraph(ctx, []string{"symbol:graph:retry"}, false, req, false)
 	if err != nil || len(visits) != 0 {
 		t.Fatal("code seed gate lost", visits, err)
 	}
-	visits, err = backend.expandGraph(ctx, []string{"graph-shared-entity", "graph-shared-entity"}, true)
+	visits, err = backend.expandGraph(ctx, []string{"graph-shared-entity", "graph-shared-entity"}, true, req, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func exerciseGraphFusionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	for i := range seeds {
 		seeds[i] = fmt.Sprintf("bounded-seed-%d", i)
 	}
-	visits, err = backend.expandGraph(ctx, seeds, true)
+	visits, err = backend.expandGraph(ctx, seeds, true, req, false)
 	if err != nil || len(visits) != graphNodeBudget {
 		t.Fatal("node budget", len(visits), err)
 	}
@@ -159,7 +159,7 @@ func exerciseGraphFusionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	for i := 1; i <= 8; i++ {
 		seeds = append(seeds, fmt.Sprintf("budget-root-%d", i))
 	}
-	visits, err = backend.expandGraph(ctx, seeds, true)
+	visits, err = backend.expandGraph(ctx, seeds, true, req, false)
 	if err != nil || len(visits) != graphNodeBudget {
 		t.Fatal("fan-out escaped global budget", len(visits), err)
 	}

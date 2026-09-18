@@ -17,7 +17,6 @@
 #include "../modules/db2/c/db_postgres.h"
 #include "../modules/db2/c/lifecycle.h"
 #include "memory.h"
-#include "modules/memory/memory_graph_fusion.h"
 #include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/memory_vectors.h"
 #include "config.h"
@@ -188,85 +187,6 @@ static void test_production_corpus_load(void)
  * With fusion off it must not appear; with fusion on it must. Exercises the full
  * recall path (memory_find_facts → memory_find_facts_scoped fusion block), not
  * just the expansion primitive. */
-static void test_fusion_surfaces_bridged_memory(void)
-{
-   assert(mem_eval_open_temp_db() == 0);
-
-   /* The product deliberately has no implicit embedder fallback. This retrieval
-    * test selects the explicit deterministic test backend by name. */
-   assert(setenv("EMBEDDER_URL", MEMORY_EMBED_TEST_FIXTURE, 1) == 0);
-
-   const char *embed = config_embedder_command_current(NULL);
-
-   /* Base hit: lexically/semantically matches the query. */
-   memory_t base;
-   assert(memory_insert(TIER_L2, KIND_FACT, "nginx deployment",
-                        "nginx deployment listens on port 443", 0.9, "sess", &base) == 0);
-   cJSON *embed_args = cJSON_CreateObject(), *embed_reply = NULL;
-   cJSON_AddNumberToObject(embed_args, "memory_id", (double)base.id);
-   cJSON_AddStringToObject(embed_args, "embedding_command", embed);
-   int embed_rc = aimee_module_commands_dispatch("memory.embed", embed_args, &embed_reply);
-   cJSON_Delete(embed_args);
-   int embedded = embed_rc > 0 && strcmp(jo_cstr(embed_reply, "status"), "ok") == 0;
-   cJSON_Delete(embed_reply);
-   assert(embedded);
-
-   /* Bridge: zero query-term overlap. The write path embeds derived units, so
-    * remove both its top-level and unit points to make this a deliberately
-    * graph-only fixture on sqlite and real Postgres alike. */
-   memory_t bridge;
-   assert(memory_insert(TIER_L2, KIND_DECISION, "retry policy",
-                        "we cap delegate retries at three attempts", 0.9, "sess", &bridge) == 0);
-   assert(pgvec_memory_vector_delete_point(bridge.id) == 0);
-   int64_t bridge_unit_ids[64];
-   int bridge_unit_count = db2_memory_unit_list_ids(
-       bridge.id, bridge_unit_ids, (int)(sizeof(bridge_unit_ids) / sizeof(bridge_unit_ids[0])));
-   assert(bridge_unit_count > 0);
-   for (int i = 0; i < bridge_unit_count; i++)
-      assert(pgvec_memory_vector_delete_point(PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET +
-                                              bridge_unit_ids[i]) == 0);
-
-   /* Link both to a shared non-code canonical entity node whose key shares NO
-    * token with the query, so plain entity-candidate retrieval can't reach the
-    * bridge from the query — only fusion, seeding from the base hit's own node,
-    * can. */
-   const char *node = "concept:zzz-bridge-marker-001";
-   db2_memory_entity_insert(base.id, node, "mentions", 2.0);
-   db2_memory_entity_insert(bridge.id, node, "mentions", 2.0);
-
-   const char *query = "nginx deployment port";
-   memory_t results[20];
-
-   /* Fusion off → the irrelevant bridge memory must not surface. */
-   memory_fusion_state_clear();
-   int n_off = memory_find_facts(query, 20, results, 20);
-   assert(n_off >= 0);
-   int bridge_off = 0, base_off = 0;
-   for (int i = 0; i < n_off; i++)
-   {
-      if (results[i].id == bridge.id)
-         bridge_off = 1;
-      if (results[i].id == base.id)
-         base_off = 1;
-   }
-   assert(base_off && "base hit retrieved with fusion off");
-   assert(!bridge_off && "graph-only bridge absent with fusion off");
-
-   /* Fusion on → the base hit's shared node bridges to the memory. */
-   memory_fusion_state_set("on");
-   int n_on = memory_find_facts(query, 20, results, 20);
-   memory_fusion_state_clear();
-   assert(n_on >= 0);
-   int bridge_on = 0;
-   for (int i = 0; i < n_on; i++)
-      if (results[i].id == bridge.id)
-         bridge_on = 1;
-   assert(bridge_on && "fusion surfaces the graph-bridged memory");
-
-   mem_eval_close_temp_db();
-   unsetenv("EMBEDDER_URL");
-}
-
 static void test_corpus_load_multi_expected(void)
 {
    static const char *corpus_json =
@@ -834,10 +754,6 @@ int main(int argc, char **argv)
 
    printf("test_production_corpus_load... ");
    test_production_corpus_load();
-   printf("ok\n");
-
-   printf("test_fusion_surfaces_bridged_memory... ");
-   test_fusion_surfaces_bridged_memory();
    printf("ok\n");
 
    printf("test_corpus_load_multi_expected... ");

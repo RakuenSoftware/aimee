@@ -163,6 +163,7 @@ func TestKBGraphFusionUsesInstancePolicyAndVisibility(t *testing.T) {
 CREATE TABLE memories(id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,content text,
  confidence double precision,lifecycle_state text,activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',updated_at timestamptz DEFAULT now());
 CREATE TABLE memory_entities(memory_id bigint,entity text,weight double precision DEFAULT 1);
+CREATE TABLE fact_evidence(assertion_id bigint,source_kind text,source_id text);
 CREATE TABLE projects(name text,lifecycle_state text);
 CREATE TABLE code_projection_generations(id bigint,project text,state text);
 CREATE TABLE entity_edges(id bigint,source text,target text,confidence_class text,utility_score double precision,

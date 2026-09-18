@@ -29,6 +29,8 @@ const (
 )
 
 type DataRequest struct {
+	GraphPath      []GraphPathEntry  `json:"graph_path,omitempty"`
+	CodePointIDs   []int64           `json:"code_point_ids,omitempty"`
 	AutomaticLimit bool              `json:"automatic_limit,omitempty"`
 	Detail         bool              `json:"detail,omitempty"`
 	Timings        bool              `json:"timings,omitempty"`
@@ -129,13 +131,15 @@ type DataRequest struct {
 }
 
 type Record struct {
-	ID         int64   `json:"id"`
-	Scope      Scope   `json:"scope"`
-	Tier       string  `json:"tier"`
-	Kind       string  `json:"kind"`
-	Key        string  `json:"key"`
-	Content    string  `json:"content"`
-	Confidence float64 `json:"confidence"`
+	graphScore    float64
+	codeProximity float64
+	ID            int64   `json:"id"`
+	Scope         Scope   `json:"scope"`
+	Tier          string  `json:"tier"`
+	Kind          string  `json:"kind"`
+	Key           string  `json:"key"`
+	Content       string  `json:"content"`
+	Confidence    float64 `json:"confidence"`
 }
 
 type DataResponse struct {
@@ -556,10 +560,10 @@ func (s *postgresDataStore) Feedback(ctx context.Context, scope Scope, ids []int
 			continue
 		}
 		_, err := s.db.Exec(ctx, `WITH cited AS MATERIALIZED (
- SELECT id,key FROM memories WHERE id=$2 AND lifecycle_state='active'
+ SELECT id,key FROM memories WHERE id=$2 AND lifecycle_state='active' AND activation_suppressed=0
 ), edges AS (
- UPDATE entity_edges SET utility_score=GREATEST(-1.0,LEAST(1.0,COALESCE(utility_score,0)+$1)),utility_touched_at=pg_now_text()
- WHERE source IN (SELECT key FROM cited) OR target IN (SELECT key FROM cited) RETURNING 1
+ UPDATE entity_edges SET utility_score=GREATEST(-5.0,LEAST(5.0,COALESCE(utility_score,0)+$1)),utility_touched_at=pg_now_text()
+ WHERE edge_class<>'semantic' AND (source IN (SELECT key FROM cited) OR target IN (SELECT key FROM cited)) RETURNING 1
 ) INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text)
  SELECT id,key,'corrected_by',key,'Feedback correction' FROM cited WHERE $1<0`, delta, id)
 		if err != nil {
@@ -1535,6 +1539,13 @@ set_config('aimee.correlation_id',$9,true)`,
 		default:
 			response.Records = []Record{record}
 		}
+	case "feedback-path":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		err = backend.feedbackPath(ctx, request)
+		response.Updated = err == nil
 	case "feedback":
 		if len(request.IDs) == 0 || len(request.IDs) > 64 {
 			return nil, bus.ModuleStatusInvalidRequest
@@ -1992,7 +2003,15 @@ set_config('aimee.correlation_id',$9,true)`,
 			}
 			response.Block = &block
 		case "diagnose":
-			response.Diagnostics, err = retrieval.Diagnose(ctx, scope, request.Query, request.Limit)
+			if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
+				var records []Record
+				records, err = backend.SearchVisible(ctx, request)
+				for _, record := range records {
+					response.Diagnostics = append(response.Diagnostics, diagnosticFor(record, request.Query))
+				}
+			} else {
+				response.Diagnostics, err = retrieval.Diagnose(ctx, scope, request.Query, request.Limit)
+			}
 		case "explain":
 			if request.ID <= 0 {
 				return nil, bus.ModuleStatusInvalidRequest

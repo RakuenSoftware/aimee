@@ -1017,22 +1017,6 @@ int memory_improve_dedupe(int dry_run);
  * Returns the number of summary memories created; -1 on error. */
 int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confidence);
 
-/* Apply correctness feedback to edge weights.  When success=1, increment
- * utility_score on entity_edges touching the cited memories.  When success=0,
- * decrement and write a REL_CORRECTED_BY relation in memory_relations.
- * Returns 0 on success, -1 on error. */
-
-/* Phase 7: apply correctness feedback distributed across a retrieval path.
- * The total |delta| (+0.1 success / -0.1 failure) is split across the path
- * edges by relation gravity and hop decay (memory_graph_distribute_path_credit),
- * so a directly-cited edge gets the full delta and a 2-hop bridge gets less.
- * |path_node_keys| are the canonical graph node keys along the path (seed→hit),
- * |relations| the relation label of each hop, |hops| the 1-based hop index.
- * When path_len<=0 this falls back to memory_apply_feedback() semantics for
- * the cited keys.  Returns 0 on success, -1 on error. */
-int memory_apply_feedback_path(int success, const char **path_node_keys, const char **relations,
-                               const int *hops, int path_len);
-
 /* --- Scene Clustering --- */
 
 /* K-means clustering of memory unit embeddings.

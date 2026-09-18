@@ -23,6 +23,12 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	request := DataRequest{IncludeAll: true}
 	switch operation {
+	case "feedback-path":
+		request.Operation = operation
+		request.Success = args.boolean("success")
+		if json.Unmarshal(args["path"], &request.GraphPath) != nil || len(request.GraphPath) == 0 || len(request.GraphPath) > 32 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
 	case "record":
 		request.Operation = "get"
 		var valid bool
@@ -70,6 +76,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInternal
 	}
 	switch operation {
+	case "feedback-path":
+		return commandResult(map[string]any{"status": "ok", "updated": response.Updated})
 	case "record":
 		if len(response.Records) == 0 {
 			return commandResult(commandError("not_found", "memory not found"))
