@@ -98,26 +98,6 @@ static int records_from_response(cJSON *response, memory_t *out, int max)
    return count;
 }
 
-int memory_find_facts(const char *query, int limit, memory_t *out, int max)
-{
-   if (!out || max <= 0 || limit <= 0)
-      return -1;
-   if (limit > max)
-      limit = max;
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "search") ||
-       !cJSON_AddStringToObject(request, "query", query ? query : "") ||
-       !cJSON_AddNumberToObject(request, "limit", limit))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = memory_data_call(request);
-   int count = records_from_response(response, out, max);
-   cJSON_Delete(response);
-   return count;
-}
-
 int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,
                                const char *key, const char *content, const char *use_cases,
                                double confidence, const char *session_id,

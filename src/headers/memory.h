@@ -431,8 +431,6 @@ void add_provenance(int64_t memory_id, const char *session_id, const char *actio
  * when the source set is over the bound, recursively refused, or cannot be
  * persisted completely. `summary_out` is published only on success. */
 
-/* --- Search --- */
-int memory_find_facts(const char *query, int limit, memory_t *out, int max);
 /* --- Conversation Scanning --- */
 
 /* --- Window Compaction --- */

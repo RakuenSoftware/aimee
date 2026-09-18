@@ -1015,11 +1015,9 @@ int main(void)
          assert(strcmp(aimee_pg_column_text(archived_stmt, 0), "sm:active") == 0);
          aimee_pg_finalize(archived_stmt);
 
-         /* Recall must hide archived rows even with the archival feature flags
-          * at their default-off values. History/get remains available above. */
-         memory_t recall_rows[4];
-         /* Public list archival coverage moved to Go checkpoint replay. */
-         assert(memory_find_facts("review next week", 4, recall_rows, 4) == 0);
+         /* Archived-row exclusion now runs through Go owner retrieval in
+          * benchmark_score_test.go; historical list coverage is in
+          * public_checkpoint_test.go. The native search ABI is retired. */
       }
 
       /* Sweep: rows whose ttl_at is in the past transition to archived

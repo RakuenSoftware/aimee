@@ -99,6 +99,30 @@ func exerciseBenchmarkScoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	if result["mrr"] != float64(1) || !reflect.DeepEqual(result["retrieved_ids"], []any{strconv.FormatInt(local, 10), strconv.FormatInt(global, 10)}) {
 		t.Fatal(result)
 	}
+	// Port the native curiosity recall regression through the actual Go
+	// operation called by db2_kb_service_curiosity_route_top_json. Queue routing
+	// has its own native tests; this checks the memory owner side of that boundary.
+	before := result
+	for _, cause := range []string{"retrieval_failure", "contradiction"} {
+		request := map[string]any{"operation": "directive-create", "question": "Investigate benchmark-score-replay", "topic": "benchmark-score-replay-" + cause, "cause": cause, "entity": "Alice", "evidence": "two mentions differ", "priority": 50, "session": "benchmark-score-replay"}
+		raw, _ := json.Marshal(request)
+		created := runHostRuntime(t, handler, string(raw))
+		if created["status"] != "ok" || created["dedup"] != false {
+			t.Fatal("directive write failed", created)
+		}
+		if !reflect.DeepEqual(before, run()) {
+			t.Fatal("directive write changed retrieval")
+		}
+		// Retrieval-failure topics deduplicate; unanchored contradictions may
+		// insert again. Both canonical outcomes must leave recall alone.
+		repeated := runHostRuntime(t, handler, string(raw))
+		if repeated["status"] != "ok" || (cause == "retrieval_failure" && repeated["dedup"] != true) {
+			t.Fatal("unexpected directive repeat receipt", repeated)
+		}
+		if !reflect.DeepEqual(before, run()) {
+			t.Fatal("repeated directive write changed retrieval")
+		}
+	}
 	args["expected_ids"] = []string{strconv.FormatInt(private, 10), strconv.FormatInt(archived, 10)}
 	result = run()
 	if result["mrr"] != float64(0) || result["recall_10"] != float64(0) {

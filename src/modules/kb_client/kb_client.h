@@ -493,9 +493,8 @@ char *kb_client_dashboard_directives_json(void);
 
 /* Search stored memory facts via aimee-kb (the DB2 owner).  Returns
  * the number of rows written into |out| (0..|max|), or -1 if kb is
- * unreachable or the vector index is unavailable.  Mirrors
- * memory_find_facts() in shape so daemon-side handlers can swap the
- * direct call for this RPC without changing their downstream code. */
+ * unreachable or the vector index is unavailable. This legacy native RPC
+ * adapter remains until its server-side consumers migrate to Go. */
 int kb_client_memory_find_facts(const char *query, int limit, memory_t *out, int max);
 
 /* ABI-compatible legacy form. graph_code_fusion_state is ignored; every

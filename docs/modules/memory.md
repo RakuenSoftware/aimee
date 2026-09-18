@@ -777,3 +777,15 @@ packaged. The full benchmark runners still have retired query-plan references,
 native loaders, scratch-store isolation and native transports to migrate.
 Strict G0 is now 168 findings; the immutable baseline and memory-tree inventory
 (two C sources, 224 lines, five headers) are unchanged.
+
+The unused `memory_find_facts` C adapter and public declaration are now removed.
+The transitional boundary check rejects restoration. Its remaining memory
+regressions run through the Go owner: archived rows stay out of retrieval, and
+canonical directive creation/repeat receipts leave the returned IDs and scores
+unchanged. Restricted-role replay requires a successful nonempty search before
+and after actual writes; two failed reads cannot satisfy the invariant. The
+native curiosity tests retain their queue selection/state-transition assertions;
+this change does not claim that the broader legacy native suite is migrated.
+Two C sources (204 lines) and five headers remain in the memory tree. Strict G0
+still reports 168 findings; insertion adapters, scope transport and other native
+clients remain unfinished.

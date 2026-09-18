@@ -373,45 +373,10 @@ int main(void)
       assert(late_frontier > late_known);
    }
 
-   /* --- acceptance 5: curiosity routing does not regress recall.
-    *     memory_find_facts output before and after a route must match. */
-   {
-      setup();
-      db2_curiosity_reset();
-      /* Seed a small corpus that the hybrid retrieval path can hit
-       * without pgvector (aggregation fallback + lexical). */
-      memory_t m1, m2;
-      memory_insert(TIER_L2, KIND_FACT, "alice:role", "Alice is the project lead", 0.9, "s1", &m1);
-      memory_insert(TIER_L2, KIND_FACT, "bob:role", "Bob writes documentation", 0.9, "s1", &m2);
-      /* memory_find_facts may return -1 when pgvector is unavailable
-       * (which it is in a test :memory: db). That's fine for the
-       * regression check — we just need identical outputs pre/post. */
-
-      memory_t pre[8];
-      int pre_n = memory_find_facts("alice lead", 5, pre, 8);
-
-      /* Build a curiosity backlog and route it. */
-      db2_curiosity_create(CURIOSITY_GAP_MISSING_FACT, "", "alice pet", "", 0, 0, "", NULL);
-      db2_curiosity_create(CURIOSITY_GAP_CONTRADICTION, "Bob", "hobby", "two mentions differ", 0, 0,
-                           "", NULL);
-      db2_curiosity_rescore_all();
-      cJSON *route_resp3 = db2_kb_service_curiosity_route_top_json(4, "");
-      cJSON_Delete(route_resp3);
-
-      memory_t post[8];
-      int post_n = memory_find_facts("alice lead", 5, post, 8);
-
-      /* memory_find_facts is read-only w.r.t. the corpus that
-       * matters here. Routing creates directives (separate table),
-       * curiosity items (separate table), and updates curiosity_items
-       * row state — none of which touch the memories / memory_units
-       * tables that memory_find_facts reads. The identity-of-results
-       * assertion catches any future change that accidentally couples
-       * routing to retrieval. */
-      assert(pre_n == post_n);
-      for (int i = 0; i < pre_n && i < post_n; i++)
-         assert(pre[i].id == post[i].id);
-   }
+   /* Memory retrieval invariance across the canonical directive writes used by
+    * routing is covered by Go benchmark_score_test.go. That replay requires
+    * successful retrieval before and after writes (including deduplication).
+    * Queue selection/state transitions remain covered by the routing tests above. */
 
    /* --- maintenance maybe_run rescored curiosity once, then the idle
     *     guard skipped the immediate scheduler hot path --- */

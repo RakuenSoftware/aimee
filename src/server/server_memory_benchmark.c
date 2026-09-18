@@ -4,12 +4,10 @@
  * / agent_eval, but the `aimee` CLI is a thin RPC client and never links it, so
  * `aimee memory benchmark code-graph-fusion` had no runnable entrypoint.
  *
- * The shared harness (mem_eval_run_with_latency) retrieves via the in-process
- * memory_find_facts, which is a no-op stub in aimee-server (this target is built
- * without DB2 — see the $(SERVER) Makefile rule). So this handler runs the
- * corpus against the LIVE store the way the server reaches it: per query through
- * kb_client_memory_find_facts_ex(), which forwards the arm's
- * graph_code_fusion_state to aimee-kb, where the graph-code fusion rerank runs.
+ * The local benchmark harness now retrieves and scores through the Go memory
+ * owner. This remaining native remote harness evaluates the live KB through
+ * kb_client_memory_find_facts_ex(); its legacy fusion-state argument is ignored
+ * in favor of the KB instance's configured policy.
  * Recall/MRR/nDCG and latency summaries are requested from the separately
  * supervised benchmarks process over the event bus. Raw latency is measured
  * around the kb RPC so it includes the kb hop, as the latency-budget AC
