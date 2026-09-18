@@ -1506,54 +1506,22 @@ cJSON *tool_list_attempts(cJSON *args)
 
 cJSON *tool_store_workflow(cJSON *args)
 {
-   cJSON *jr = cJSON_GetObjectItemCaseSensitive(args, "rule");
-   cJSON *jsig = cJSON_GetObjectItemCaseSensitive(args, "signal_type");
-   if (!cJSON_IsString(jr) || !jr->valuestring[0] || !cJSON_IsString(jsig) || !jsig->valuestring[0])
-      return text_content("error: missing 'rule' and/or 'signal_type' parameter");
-
-   /* Project: prefer explicit arg; fall back to cwd-derived workspace label. */
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(args, "project");
-   char workspace[128] = "";
-   if (cJSON_IsString(jp) && jp->valuestring[0])
-      snprintf(workspace, sizeof(workspace), "%s", jp->valuestring);
-   else
-   {
-      char cwd[MAX_PATH_LEN];
-      if (getcwd(cwd, sizeof(cwd)))
-      {
-         if (config_present())
-         {
-            for (int i = 0; i < config_workspace_count(); i++)
-            {
-               size_t wlen = strlen(config_workspaces(i));
-               if (wlen == 0)
-                  continue;
-               if (strncmp(cwd, config_workspaces(i), wlen) == 0 &&
-                   (cwd[wlen] == '/' || cwd[wlen] == '\0'))
-               {
-                  const char *slash = strrchr(config_workspaces(i), '/');
-                  const char *name = slash ? slash + 1 : config_workspaces(i);
-                  snprintf(workspace, sizeof(workspace), "%s", name);
-                  break;
-               }
-            }
-         }
-      }
-   }
-
-   if (!workspace[0])
-      return text_content("error: no workspace determined from cwd; pass 'project' explicitly");
-
-   /* User-explicit store: high confidence. */
-   int64_t id = kb_client_memory_upsert_workflow(workspace, jsig->valuestring, jr->valuestring, 1.0,
-                                                 session_id());
-   if (id <= 0)
-      return text_content("error: failed to store workflow memory");
-
-   char buf[256];
-   snprintf(buf, sizeof(buf), "Stored workflow:%s:%s (memory id %lld)", workspace,
-            jsig->valuestring, (long long)id);
-   return text_content(buf);
+   cJSON *request = args ? cJSON_Duplicate(args, 1) : cJSON_CreateObject();
+   if (!request)
+      return text_content("error: workflow owner unavailable");
+   while (cJSON_HasObjectItem(request, "mode"))
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "mode");
+   while (cJSON_HasObjectItem(request, "session_id"))
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "session_id");
+   cJSON_AddStringToObject(request, "mode", "explicit");
+   cJSON_AddStringToObject(request, "session_id", session_id());
+   cJSON *result = workflow_execute(request);
+   cJSON_Delete(request);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(result, "output");
+   cJSON *content = text_content(cJSON_IsString(output) ? output->valuestring
+                                                        : "error: workflow owner unavailable");
+   cJSON_Delete(result);
+   return content;
 }
 
 /* --- Note tool handlers --- */

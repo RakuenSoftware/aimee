@@ -3925,78 +3925,6 @@ static void test_read_tracking_state_roundtrip(void)
    db1_session_state_delete(sid);
 }
 
-static void test_workflow_parse_pr_target(void)
-{
-   char sig[64] = "", rule[512] = "";
-   int ok = workflow_parse_bash_signal("gh pr create --base testing --title foo", sig, sizeof(sig),
-                                       rule, sizeof(rule));
-   assert(ok == 1);
-   assert(strcmp(sig, "pr-target") == 0);
-   assert(strstr(rule, "testing") != NULL);
-
-   /* Quoted target and equals form both accepted. */
-   ok = workflow_parse_bash_signal("gh pr create --base='develop'", sig, sizeof(sig), rule,
-                                   sizeof(rule));
-   assert(ok == 1);
-   assert(strstr(rule, "develop") != NULL);
-
-   /* Missing --base → no signal */
-   ok =
-       workflow_parse_bash_signal("gh pr create --title foo", sig, sizeof(sig), rule, sizeof(rule));
-   assert(ok == 0);
-}
-
-static void test_workflow_parse_test_command(void)
-{
-   char sig[64] = "", rule[512] = "";
-   int ok = workflow_parse_bash_signal("make test", sig, sizeof(sig), rule, sizeof(rule));
-   assert(ok == 1);
-   assert(strcmp(sig, "test-command") == 0);
-   assert(strstr(rule, "make test") != NULL);
-
-   ok = workflow_parse_bash_signal("pytest tests/", sig, sizeof(sig), rule, sizeof(rule));
-   assert(ok == 1);
-   assert(strcmp(sig, "test-command") == 0);
-   assert(strstr(rule, "pytest") != NULL);
-
-   ok = workflow_parse_bash_signal("cd src && make unit-tests", sig, sizeof(sig), rule,
-                                   sizeof(rule));
-   assert(ok == 1);
-   assert(strstr(rule, "make unit-tests") != NULL);
-
-   /* `grep make test file` must not trip the heuristic. */
-   ok = workflow_parse_bash_signal("grep 'make test' README.md", sig, sizeof(sig), rule,
-                                   sizeof(rule));
-   assert(ok == 0);
-}
-
-static void test_workflow_parse_active_branch(void)
-{
-   char sig[64] = "", rule[512] = "";
-   int ok = workflow_parse_bash_signal("git push origin feat/login", sig, sizeof(sig), rule,
-                                       sizeof(rule));
-   assert(ok == 1);
-   assert(strcmp(sig, "active-branch") == 0);
-   assert(strstr(rule, "feat/login") != NULL);
-
-   /* Pushes to main/master are too generic to learn from. */
-   ok = workflow_parse_bash_signal("git push origin main", sig, sizeof(sig), rule, sizeof(rule));
-   assert(ok == 0);
-
-   ok = workflow_parse_bash_signal("git push -u origin master", sig, sizeof(sig), rule,
-                                   sizeof(rule));
-   assert(ok == 0);
-}
-
-static void test_workflow_parse_negative(void)
-{
-   char sig[64] = "", rule[512] = "";
-   int ok = workflow_parse_bash_signal("ls -la", sig, sizeof(sig), rule, sizeof(rule));
-   assert(ok == 0);
-   ok = workflow_parse_bash_signal("", sig, sizeof(sig), rule, sizeof(rule));
-   assert(ok == 0);
-}
-
 int main(void)
 {
    /* Don't try to autospawn aimee-kb from kb_client; the test fixture
@@ -4148,10 +4076,6 @@ int main(void)
    test_git_push_delete_skips_merged_pr_gate();
    test_git_push_delete_does_not_skip_later_push_gate();
    test_bash_git_push_detection_ignores_quoted_text();
-   test_workflow_parse_pr_target();
-   test_workflow_parse_test_command();
-   test_workflow_parse_active_branch();
-   test_workflow_parse_negative();
    obs_bus_stop();
    db1_shutdown();
    unlink(db_path);

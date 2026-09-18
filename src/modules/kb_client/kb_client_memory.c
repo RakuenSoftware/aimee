@@ -1139,39 +1139,6 @@ int kb_client_memory_link_delete(int64_t link_id)
    return rc;
 }
 
-int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *signal_type,
-                                         const char *rule, double observed_confidence,
-                                         const char *session_id)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "workspace", workspace ? workspace : "");
-   cJSON_AddStringToObject(req, "signal_type", signal_type ? signal_type : "");
-   /* The learned rule is prose; workspace and signal_type are enumerated
-    * handles the kb groups on. */
-   if (kb_client_pii_add_string_required(req, "rule", rule ? rule : "") != 0)
-   {
-      cJSON_Delete(req);
-      return KB_CLIENT_WITHHELD_PII;
-   }
-   cJSON_AddNumberToObject(req, "observed_confidence", observed_confidence);
-   if (session_id && session_id[0])
-      cJSON_AddStringToObject(req, "session_id", session_id);
-   char *json = kb_v1_action_request("memory.upsert_workflow", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(resp, "id");
-   int64_t id = -1;
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsNumber(id_j))
-      id = (int64_t)id_j->valuedouble;
-   cJSON_Delete(resp);
-   return id;
-}
-
 /* Proposal 2 Phase 1: recall assembly runs IN aimee-kb (the shared, db2-only,
  * many-user store) which has no access to this user's db1, so the db1<->db2
  * merge happens here in aimee-server (1:1 per user) — the single proxy seam

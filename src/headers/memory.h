@@ -508,6 +508,8 @@ double memory_effective_importance(const memory_t *m, time_t now_sec);
  * working directory. Silent no-op when no signal is detected, no workspace
  * matches, or the DB write fails. */
 void workflow_observe_bash(const char *command);
+/* Host transport for the shared Go workflow plan and authenticated KB write. */
+struct cJSON *workflow_execute(const struct cJSON *input);
 
 /* --- HyDE and Query Decomposition --- */
 

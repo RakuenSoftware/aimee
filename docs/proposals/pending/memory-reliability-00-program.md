@@ -505,8 +505,23 @@ restricted-role replay covers failed work whose retry bookkeeping still commits.
 Publication acknowledges enqueue only; transactional SQL WORM remains the durable
 mutation record. Server pre-dispatch refusal hooks and other native memory
 clients still require migration. The current inventory is three C sources
-(353 lines) and five headers in the memory tree, with 169 strict repository-wide
+(353 lines) and five headers in the memory tree, with 168 strict repository-wide
 G0 findings; the immutable baseline is unchanged and G0 remains incomplete.
+
+Workflow observation policy now lives in the shared Go memory owner: literal
+shell invocation recognition, configured-workspace matching, signal precedence,
+rule generation, privacy screening and write-receipt validation. Observed shell
+commands and explicit MCP stores use the same owner; the host captures local
+context and transports the Go-generated request through the authenticated KB
+connection. Only a successful canonical receipt enables the existing learning
+notification. Exact decimal int64 IDs survive receipt rendering, and malformed
+or refused writes cannot report success. The C parser and native workflow
+upsert client are deleted; their tests are ported to Go, with actual native host
+connections tested against the real Go handler and canonical writes replayed as
+the restricted PostgreSQL role. Strict G0 now reports 168 findings, with its
+immutable baseline unchanged. Three C sources (353 lines) and five headers
+remain in the memory tree, along with other native consumers outside it.
+
 
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.
 

@@ -722,8 +722,6 @@ static void test_every_content_wrapper_screens(void)
             (void)kb_client_decision_log_insert(1, "opts", "chosen", secret, "assume", &dec));
    PII_CASE("collab_rules.propose", (void)kb_client_collab_rules_propose(secret, "why", "me"));
    PII_CASE("task.create", (void)kb_client_task_create(secret, "s", 0, &task));
-   PII_CASE("memory.upsert_workflow",
-            (void)kb_client_memory_upsert_workflow("ws", "sig", secret, 1.0, "s"));
    PII_CASE("memory.reject", (void)kb_client_memory_reject(42, secret));
 
    /* And the screen must not have turned these into blanket refusals: clean

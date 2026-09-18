@@ -85,6 +85,23 @@ func exerciseLearningMutationReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 		t.Fatal(interval, scope, principal, job, err)
 	}
 	client := clientForHandler(t, handler)
+	// Host observation plan -> canonical KB workflow write under the packaged
+	// runtime role. Repeat observations keep one scoped row and provenance cap.
+	plan := runHostRuntime(t, handler, `{"operation":"workflow-plan","mode":"observe","command":"make test","cwd":"/dev/ObservedTeam/src","workspaces":["/dev/ObservedTeam"]}`)
+	planned, err := json.Marshal(plan["request"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := runPublicCommand(t, client, "upsert_workflow", string(planned))
+	if observed["status"] != "ok" {
+		t.Fatal(observed)
+	}
+	var observedScope, observedSession, observedContent string
+	var observedConfidence float64
+	if err := tx.QueryRow(ctx, `SELECT scope_value,source_session,content,confidence FROM memories WHERE id=$1`, int64(observed["id"].(float64))).Scan(&observedScope, &observedSession, &observedContent, &observedConfidence); err != nil || observedScope != "ObservedTeam" || observedSession != "post_tool_update" || observedContent != "Test command: `make test`" || observedConfidence != 0.6 {
+		t.Fatal(observedScope, observedSession, observedContent, observedConfidence, err)
+	}
+
 	first := runPublicCommand(t, client, "upsert_workflow", `{"workspace":"LearningTeam","signal_type":"PR","rule":"run tests","observed_confidence":0.6}`)
 	if first["status"] != "ok" {
 		t.Fatal(first)

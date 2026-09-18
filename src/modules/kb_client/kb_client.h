@@ -539,13 +539,6 @@ char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_token
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
                                       const char *graph_code_fusion_state);
 
-/* Upsert a workflow:<workspace>:<signal_type> memory via aimee-kb.
- * Returns the new memory id (>0) or -1 on failure / kb unreachable.
- * Uses the shared Go workflow command. */
-int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *signal_type,
-                                         const char *rule, double observed_confidence,
-                                         const char *session_id);
-
 /* Memory-to-memory link CRUD via aimee-kb.  Mirror memory_link_create
  * / _query / _delete.  Return 0/-1 on success/failure for create+delete,
  * row count for query (0 on failure / kb unreachable). */
