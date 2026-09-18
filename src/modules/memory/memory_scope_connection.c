@@ -1,8 +1,8 @@
 /* Per-request memory scope carried by the KB connection thread.
  *
  * Temporary connection boundary while the remaining native DB2 callers migrate.
- * It binds request context onto their PostgreSQL connection; ranking and
- * visibility decisions belong to the Go memory owner.
+ * It carries context to their Go module requests; ranking and visibility
+ * decisions belong to the Go memory owner.
  */
 #include "aimee.h"
 #include "memory_scope_query.h"
@@ -42,16 +42,4 @@ void db2_memory_scope_context_get(db2_memory_scope_context_t *out)
 {
    if (out)
       *out = current_scope;
-}
-
-void db2_memory_scope_bind_current(aimee_pg_stmt_t *statement)
-{
-   if (!statement)
-      return;
-   aimee_pg_bind_int(statement, "?101", current_scope.active);
-   aimee_pg_bind_int(statement, "?102", current_scope.include_all);
-   aimee_pg_bind_text(statement, "?103", current_scope.workspace);
-   aimee_pg_bind_text(statement, "?104", current_scope.project);
-   aimee_pg_bind_text(statement, "?105", current_scope.scope_type);
-   aimee_pg_bind_text(statement, "?106", current_scope.scope_value);
 }

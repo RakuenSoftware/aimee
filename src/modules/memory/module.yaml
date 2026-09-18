@@ -135,7 +135,8 @@
     "server-go/modules/memory/trace_store.go",
     "server-go/modules/memory/benchmark_context.go",
     "server-go/modules/memory/benchmark_diagnostics.go",
-    "server-go/modules/memory/benchmark_score.go"
+    "server-go/modules/memory/benchmark_score.go",
+    "server-go/modules/memory/assertion_search.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -226,7 +227,8 @@
     "server-go/modules/memory/trace_store_test.go",
     "server-go/modules/memory/benchmark_context_test.go",
     "server-go/modules/memory/benchmark_diagnostics_test.go",
-    "server-go/modules/memory/benchmark_score_test.go"
+    "server-go/modules/memory/benchmark_score_test.go",
+    "server-go/modules/memory/assertion_search_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

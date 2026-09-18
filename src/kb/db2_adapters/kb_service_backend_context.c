@@ -7,405 +7,76 @@
 #include "kb_service_backend.h"
 
 #include "aimee.h"
-#include "config.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "db2_learning.h"
 #include "lifecycle.h"
-#include "memory.h"
 #include "memory_scope_query.h"
-#include "memory_vectors.h"
-#include "pgvec_transport.h"
-#include "typed_facts.h"
+#include "modules/memory/memory_bus_context.h"
+#include <errno.h>
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static int kbs_semantic_assertion_index_refresh(int max_rows)
-{
-   int indexed = 0;
-   semantic_assertion_index_row_t rows[32];
-   while (indexed < max_rows)
-   {
-      int want = max_rows - indexed;
-      if (want > 32)
-         want = 32;
-      int n = db2_semantic_assertion_index_list(0, rows, want);
-      if (n <= 0)
-         return n < 0 && indexed == 0 ? -1 : indexed;
-      for (int i = 0; i < n; i++)
-      {
-         float vec[EMBED_MAX_DIM];
-         const char *embed_cmd = config_embedder_command_current(NULL);
-         cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
-         cJSON_AddStringToObject(embed_0_args, "base_url", embed_cmd);
-         cJSON_AddStringToObject(embed_0_args, "input_type", "document");
-         cJSON_AddStringToObject(embed_0_args, "text", rows[i].canonical_rendering);
-         cJSON_AddNumberToObject(embed_0_args, "max_dim", EMBED_MAX_DIM);
-         (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
-                                                       &embed_0_reply);
-         cJSON_Delete(embed_0_args);
-         int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
-                                  EMBED_MAX_DIM);
-         cJSON_Delete(embed_0_reply);
-         if (dim <= 0 || dim != db2_embedding_dim())
-            return indexed > 0 ? indexed : -1;
-         cJSON *payload = cJSON_CreateObject();
-         if (!payload)
-            return indexed > 0 ? indexed : -1;
-         char kind[64];
-         snprintf(kind, sizeof(kind), "assertion_v%d", rows[i].version);
-         cJSON_AddStringToObject(payload, "record_type", "semantic_assertion");
-         cJSON_AddStringToObject(payload, "kind", kind);
-         cJSON_AddNumberToObject(payload, "assertion_id", (double)rows[i].assertion_id);
-         cJSON_AddNumberToObject(payload, "assertion_version", rows[i].version);
-         cJSON_AddStringToObject(payload, "canonical_rendering", rows[i].canonical_rendering);
-         cJSON_AddStringToObject(payload, "model_version", config_embedder_model());
-         char *payload_json = cJSON_PrintUnformatted(payload);
-         cJSON_Delete(payload);
-         if (!payload_json)
-            return indexed > 0 ? indexed : -1;
-         int rc = pgvec_memory_upsert(SEMANTIC_ASSERTION_VECTOR_POINT_OFFSET + rows[i].assertion_id,
-                                      vec, dim, payload_json);
-         free(payload_json);
-         if (rc != 0)
-            return indexed > 0 ? indexed : -1;
-         indexed++;
-      }
-      if (n < want)
-         break;
-   }
-   return indexed;
-}
-
-static int kbs_semantic_hit_index(semantic_assertion_hit_t *hits, int n, int64_t assertion_id)
-{
-   for (int i = 0; i < n; i++)
-      if (hits[i].assertion_id == assertion_id)
-         return i;
-   return -1;
-}
-
-static void kbs_semantic_add_trace(semantic_assertion_hit_t *hit, const char *channel, double raw,
-                                   int rank)
-{
-   if (!hit || hit->retrieval_count >= SEMANTIC_ASSERTION_TRACE_MAX)
-      return;
-   semantic_assertion_retrieval_trace_t *trace = &hit->retrieval[hit->retrieval_count++];
-   snprintf(trace->channel, sizeof(trace->channel), "%s", channel);
-   trace->raw_score = raw;
-   trace->rank = rank;
-}
-
-static int kbs_semantic_hit_cmp(const void *a, const void *b)
-{
-   const semantic_assertion_hit_t *ha = a;
-   const semantic_assertion_hit_t *hb = b;
-   if (ha->fused_score != hb->fused_score)
-      return ha->fused_score < hb->fused_score ? 1 : -1;
-   if (ha->authority_rank != hb->authority_rank)
-      return hb->authority_rank - ha->authority_rank;
-   if (ha->assertion_id == hb->assertion_id)
-      return 0;
-   return ha->assertion_id < hb->assertion_id ? 1 : -1;
-}
-
-static int kbs_semantic_assertion_hybrid(const char *query, const char *valid_at,
-                                         const char *believed_at, int include_historical,
-                                         int max_hops, semantic_assertion_hit_t *hits, int max,
-                                         int *vector_available, int *indexed_out,
-                                         int *lexical_only_out, int *vector_only_out,
-                                         int *overlap_out)
-{
-   int gather = max * 4;
-   if (gather > 64)
-      gather = 64;
-   int n = db2_semantic_assertion_search(query, valid_at, believed_at, include_historical, gather,
-                                         hits, max);
-   if (n < 0)
-      return n;
-   int lexical_n = n;
-   *vector_available = 0;
-   *indexed_out = kbs_semantic_assertion_index_refresh(256);
-
-   float qvec[EMBED_MAX_DIM];
-   const char *embed_cmd = config_embedder_command_current(NULL);
-   cJSON *embed_1_args = cJSON_CreateObject(), *embed_1_reply = NULL;
-   cJSON_AddStringToObject(embed_1_args, "base_url", embed_cmd);
-   cJSON_AddStringToObject(embed_1_args, "input_type", "query");
-   cJSON_AddStringToObject(embed_1_args, "text", query);
-   cJSON_AddNumberToObject(embed_1_args, "max_dim", EMBED_MAX_DIM);
-   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_1_args, &embed_1_reply);
-   cJSON_Delete(embed_1_args);
-   int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), qvec,
-                             EMBED_MAX_DIM);
-   cJSON_Delete(embed_1_reply);
-   int64_t vector_ids[64];
-   double vector_scores[64];
-   int vector_n = 0;
-   if (qdim > 0 && qdim == db2_embedding_dim())
-   {
-      db2_memory_scope_context_t vector_scope;
-      memset(&vector_scope, 0, sizeof(vector_scope));
-      db2_memory_scope_context_get(&vector_scope);
-      cJSON *vector_args = cJSON_CreateObject(), *vector_reply = NULL;
-      cJSON_AddStringToObject(vector_args, "operation", "vector-search");
-      cJSON_AddStringToObject(vector_args, "record_type", "semantic_assertion");
-      cJSON_AddNumberToObject(vector_args, "max_results", gather);
-      cJSON_AddBoolToObject(vector_args, "scope_context", 1);
-      cJSON_AddStringToObject(vector_args, "workspace", vector_scope.workspace);
-      cJSON_AddStringToObject(vector_args, "project", vector_scope.project);
-      cJSON_AddBoolToObject(vector_args, "include_all", vector_scope.include_all);
-      if (vector_scope.scope_type[0])
-      {
-         cJSON_AddStringToObject(vector_args, "scope_type", vector_scope.scope_type);
-         cJSON_AddStringToObject(vector_args, "scope_value", vector_scope.scope_value);
-      }
-      cJSON *vector_values = cJSON_AddArrayToObject(vector_args, "vector");
-      for (int v = 0; v < qdim; ++v)
-         cJSON_AddItemToArray(vector_values, cJSON_CreateNumber(qvec[v]));
-      (void)aimee_module_commands_dispatch_internal("memory.runtime", vector_args, &vector_reply);
-      cJSON_Delete(vector_args);
-      const cJSON *vector_hits = cJSON_GetObjectItemCaseSensitive(vector_reply, "hits");
-      vector_n = cJSON_IsArray(vector_hits) ? cJSON_GetArraySize(vector_hits) : -1;
-      if (vector_n > 64)
-         vector_n = 64;
-      for (int v = 0; v < vector_n; ++v)
-      {
-         const cJSON *hit = cJSON_GetArrayItem(vector_hits, v);
-         const cJSON *id = cJSON_GetObjectItemCaseSensitive(hit, "id");
-         const cJSON *score = cJSON_GetObjectItemCaseSensitive(hit, "score");
-         if (!cJSON_IsNumber(id) || !cJSON_IsNumber(score))
-         {
-            vector_n = -1;
-            break;
-         }
-         vector_ids[v] = (int64_t)id->valuedouble;
-         vector_scores[v] = score->valuedouble;
-      }
-      cJSON_Delete(vector_reply);
-      if (vector_n >= 0)
-         *vector_available = 1;
-   }
-   if (vector_n < 0)
-      vector_n = 0;
-
-   int overlap = 0;
-   for (int i = 0; i < vector_n; i++)
-   {
-      /* Top-k always returns the nearest rows, even when every row is
-       * unrelated. Do not let tail neighbors become depth-zero evidence or
-       * short-circuit graph-hop provenance. Lexical recall remains available
-       * when no vector candidate clears this conservative cosine floor. */
-      if (vector_scores[i] < 0.20)
-         continue;
-      int64_t assertion_id = vector_ids[i] - SEMANTIC_ASSERTION_VECTOR_POINT_OFFSET;
-      if (assertion_id <= 0)
-         continue;
-      int at = kbs_semantic_hit_index(hits, n, assertion_id);
-      if (at < 0)
-      {
-         if (n >= max || db2_semantic_assertion_get_filtered(assertion_id, valid_at, believed_at,
-                                                             include_historical, &hits[n]) != 1)
-            continue;
-         at = n++;
-         snprintf(hits[at].inclusion_reason, sizeof(hits[at].inclusion_reason),
-                  "vector semantic match after lifecycle, authority, scope, and temporal filters");
-      }
-      else
-         overlap++;
-      kbs_semantic_add_trace(&hits[at], "vector", vector_scores[i], i + 1);
-   }
-
-   /* Bounded graph expansion is deliberately late and reuses the filtered
-    * semantic query for every hop, so no historical or unauthorized edge can
-    * re-enter through traversal. */
-   int frontier_start = 0;
-   int frontier_end = n;
-   for (int hop = 1; hop <= max_hops && frontier_start < frontier_end; hop++)
-   {
-      int next_end = n;
-      for (int i = frontier_start; i < frontier_end && n < max; i++)
-      {
-         const char *anchors[2] = {hits[i].subject, hits[i].object};
-         for (int a = 0; a < 2 && n < max; a++)
-         {
-            semantic_assertion_hit_t expanded[16];
-            int en = db2_semantic_assertion_search(anchors[a], valid_at, believed_at,
-                                                   include_historical, 16, expanded, 16);
-            for (int e = 0; e < en && n < max; e++)
-            {
-               if (expanded[e].assertion_id == hits[i].assertion_id ||
-                   (strcmp(expanded[e].subject, anchors[a]) != 0 &&
-                    strcmp(expanded[e].object, anchors[a]) != 0) ||
-                   kbs_semantic_hit_index(hits, n, expanded[e].assertion_id) >= 0)
-                  continue;
-               hits[n] = expanded[e];
-               hits[n].hop_depth = hop;
-               kbs_semantic_add_trace(&hits[n], "semantic_graph", 1.0 / (double)(hop + 1), n + 1);
-               snprintf(hits[n].inclusion_reason, sizeof(hits[n].inclusion_reason),
-                        "bounded semantic hop %d with temporal and scope filters reapplied", hop);
-               n++;
-            }
-         }
-      }
-      frontier_start = frontier_end;
-      frontier_end = n;
-      if (frontier_end == next_end)
-         break;
-   }
-
-   int lexical_only = 0;
-   int vector_only = 0;
-   for (int i = 0; i < n; i++)
-   {
-      double fused = 0.0;
-      int has_lexical = 0;
-      int has_vector = 0;
-      for (int t = 0; t < hits[i].retrieval_count; t++)
-      {
-         semantic_assertion_retrieval_trace_t *trace = &hits[i].retrieval[t];
-         fused += 1.0 / (60.0 + (double)(trace->rank > 0 ? trace->rank : 1));
-         has_lexical |= strcmp(trace->channel, "lexical") == 0;
-         has_vector |= strcmp(trace->channel, "vector") == 0;
-      }
-      hits[i].fused_score = fused;
-      if (has_lexical && !has_vector)
-         lexical_only++;
-      if (has_vector && !has_lexical)
-         vector_only++;
-   }
-   qsort(hits, (size_t)n, sizeof(hits[0]), kbs_semantic_hit_cmp);
-   for (int i = 0; i < n; i++)
-   {
-      hits[i].rank = i + 1;
-      for (int t = 0; t < hits[i].retrieval_count; t++)
-         hits[i].retrieval[t].fused_score = hits[i].fused_score;
-   }
-   *lexical_only_out = lexical_only;
-   *vector_only_out = vector_only;
-   *overlap_out = overlap > lexical_n ? lexical_n : overlap;
-   return n > max ? max : n;
-}
-
-static cJSON *kbs_semantic_assertion_to_json(const semantic_assertion_hit_t *hit)
-{
-   cJSON *obj = cJSON_CreateObject();
-   if (!obj)
-      return NULL;
-   cJSON_AddNumberToObject(obj, "assertion_id", (double)hit->assertion_id);
-   cJSON_AddNumberToObject(obj, "version", hit->version);
-   cJSON_AddStringToObject(obj, "subject", hit->subject);
-   cJSON_AddStringToObject(obj, "relation", hit->relation);
-   cJSON_AddStringToObject(obj, "object", hit->object);
-   cJSON_AddStringToObject(obj, "assertion_kind", hit->assertion_kind);
-   cJSON_AddStringToObject(obj, "lifecycle_state", hit->lifecycle_state);
-   cJSON_AddNumberToObject(obj, "authority_rank", hit->authority_rank);
-   cJSON_AddStringToObject(obj, "confidence_class", hit->confidence_class);
-   cJSON_AddNumberToObject(obj, "confidence", hit->confidence);
-   cJSON_AddStringToObject(obj, "valid_from", hit->valid_from);
-   cJSON_AddStringToObject(obj, "valid_until", hit->valid_until);
-   cJSON_AddStringToObject(obj, "asserted_at", hit->asserted_at);
-   cJSON_AddStringToObject(obj, "superseded_at", hit->superseded_at);
-   cJSON_AddBoolToObject(obj, "historical", hit->historical);
-   cJSON_AddNumberToObject(obj, "support_count", hit->support_count);
-   cJSON_AddNumberToObject(obj, "contradiction_count", hit->contradiction_count);
-   cJSON *evidence = cJSON_AddArrayToObject(obj, "evidence");
-   cJSON *retrieval = cJSON_AddArrayToObject(obj, "retrieval");
-   if (!evidence || !retrieval)
-   {
-      cJSON_Delete(obj);
-      return NULL;
-   }
-   for (int i = 0; i < hit->evidence_count; i++)
-   {
-      const semantic_assertion_evidence_t *ev = &hit->evidence[i];
-      cJSON *item = cJSON_CreateObject();
-      if (!item)
-         continue;
-      cJSON_AddStringToObject(item, "source_kind", ev->source_kind);
-      cJSON_AddStringToObject(item, "source_id", ev->source_id);
-      cJSON_AddStringToObject(item, "source_span", ev->source_span);
-      cJSON_AddStringToObject(item, "observed_at", ev->observed_at);
-      cJSON_AddStringToObject(item, "stance", ev->stance);
-      cJSON_AddItemToArray(evidence, item);
-   }
-   for (int i = 0; i < hit->retrieval_count; i++)
-   {
-      cJSON *trace = cJSON_CreateObject();
-      if (!trace)
-         continue;
-      cJSON_AddStringToObject(trace, "channel", hit->retrieval[i].channel);
-      cJSON_AddNumberToObject(trace, "raw_score", hit->retrieval[i].raw_score);
-      cJSON_AddNumberToObject(trace, "fused_score", hit->retrieval[i].fused_score);
-      cJSON_AddNumberToObject(trace, "rank", hit->retrieval[i].rank);
-      cJSON_AddItemToArray(retrieval, trace);
-   }
-   cJSON_AddNumberToObject(obj, "hop_depth", hit->hop_depth);
-   cJSON_AddStringToObject(obj, "inclusion_reason", hit->inclusion_reason);
-   return obj;
-}
-
+/* Transitional transport for the Go owner's complete assertion result. */
 cJSON *db2_kb_service_memory_search_assertions_json(const char *query, const char *valid_at,
                                                     const char *believed_at, int include_historical,
                                                     int max_hops, int limit)
 {
-   if (limit < 1)
-      limit = 10;
-   if (limit > 64)
-      limit = 64;
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "assertions") : NULL;
-   if (!resp || !arr)
+   cJSON *request = cJSON_CreateObject(), *response = NULL;
+   if (!request || !cJSON_AddStringToObject(request, "operation", "assertion-search") ||
+       !cJSON_AddStringToObject(request, "query", query ? query : "") ||
+       !cJSON_AddStringToObject(request, "valid_at", valid_at ? valid_at : "") ||
+       !cJSON_AddStringToObject(request, "believed_at", believed_at ? believed_at : "") ||
+       !cJSON_AddBoolToObject(request, "include_historical", include_historical) ||
+       !cJSON_AddNumberToObject(request, "max_hops", max_hops) ||
+       !cJSON_AddNumberToObject(request, "limit", limit) || memory_bus_add_context(request) != 0)
    {
-      cJSON_Delete(resp);
+      cJSON_Delete(request);
       return NULL;
    }
-   semantic_assertion_hit_t hits[64];
-   int vector_available = 0, indexed = 0, lexical_only = 0, vector_only = 0, overlap = 0;
-   int n = kbs_semantic_assertion_hybrid(query ? query : "", valid_at ? valid_at : "",
-                                         believed_at ? believed_at : "", include_historical,
-                                         max_hops, hits, limit, &vector_available, &indexed,
-                                         &lexical_only, &vector_only, &overlap);
-   if (n == SEMANTIC_ASSERTION_SEARCH_INVALID_TIME)
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", request, &response);
+   cJSON_Delete(request);
+   if (rc <= 0 || !cJSON_IsObject(response))
    {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "error_type", "invalid_timestamp");
-      cJSON_AddStringToObject(resp, "message",
-                              "timestamps must be second-precision UTC date-times");
-      return resp;
+      cJSON_Delete(response);
+      return NULL;
    }
-   if (n < 0)
+   cJSON *assertions = cJSON_GetObjectItemCaseSensitive(response, "assertions");
+   if (!cJSON_IsArray(assertions) || cJSON_GetArraySize(assertions) > 64)
    {
-      cJSON_AddStringToObject(resp, "status", "degraded");
-      cJSON_AddStringToObject(resp, "channel", "semantic_assertion");
-      cJSON_AddStringToObject(resp, "reason", "semantic retrieval unavailable");
-      return resp;
+      cJSON_Delete(response);
+      return NULL;
    }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "channel", "semantic_assertion");
-   cJSON_AddStringToObject(resp, "mode", vector_available ? "hybrid_shadow" : "lexical_degraded");
-   cJSON_AddStringToObject(resp, "channel_status", vector_available ? "ok" : "degraded");
-   if (!vector_available)
-      cJSON_AddStringToObject(resp, "degraded_reason", "embedding or vector index unavailable");
-   cJSON_AddNumberToObject(resp, "max_hops", max_hops);
-   cJSON_AddNumberToObject(resp, "indexed_assertions", indexed > 0 ? indexed : 0);
-   cJSON *delta = cJSON_AddObjectToObject(resp, "shadow_delta");
-   cJSON_AddNumberToObject(delta, "lexical_only", lexical_only);
-   cJSON_AddNumberToObject(delta, "vector_only", vector_only);
-   cJSON_AddNumberToObject(delta, "overlap", overlap);
-   cJSON_AddStringToObject(resp, "valid_at", valid_at ? valid_at : "");
-   cJSON_AddStringToObject(resp, "believed_at", believed_at ? believed_at : "");
-   cJSON_AddBoolToObject(resp, "include_historical", include_historical);
-   for (int i = 0; i < n; i++)
+   cJSON *item;
+   cJSON_ArrayForEach(item, assertions)
    {
-      cJSON *obj = kbs_semantic_assertion_to_json(&hits[i]);
-      if (obj)
-         cJSON_AddItemToArray(arr, obj);
+      const char *id = jo_cstr(item, "stable_id");
+      char *end = NULL;
+      errno = 0;
+      long long parsed = strtoll(id, &end, 10);
+      char canonical[32];
+      snprintf(canonical, sizeof(canonical), "%lld", parsed);
+      if (errno || !end || *end || parsed <= 0 || strcmp(id, canonical) ||
+          !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(item, "rendered")) ||
+          !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(item, "historical")))
+      {
+         cJSON_Delete(response);
+         return NULL;
+      }
+      /* cJSON parses numbers as doubles. Reinstall the Go owner's exact token
+       * before this transitional response is serialized or copied again. */
+      cJSON *exact = cJSON_CreateRaw(id);
+      if (!exact || !cJSON_ReplaceItemInObjectCaseSensitive(item, "assertion_id", exact))
+      {
+         cJSON_Delete(exact);
+         cJSON_Delete(response);
+         return NULL;
+      }
    }
-   return resp;
+   return response;
 }
 
 static int kbs_typed_flag(const cJSON *req, const char *name, int fallback)
@@ -621,8 +292,6 @@ cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req)
 
    if (semantic_enabled)
    {
-      semantic_assertion_hit_t hits[32];
-      int vector_available = 0, indexed = 0, lexical_only = 0, vector_only = 0, overlap = 0;
       int hops = 0;
       const cJSON *hops_j = cJSON_GetObjectItemCaseSensitive(req, "max_hops");
       if (cJSON_IsNumber(hops_j))
@@ -631,10 +300,11 @@ cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req)
          hops = 0;
       if (hops > 2)
          hops = 2;
-      int n = kbs_semantic_assertion_hybrid(query, valid_at, believed_at, historical_enabled, hops,
-                                            hits, 32, &vector_available, &indexed, &lexical_only,
-                                            &vector_only, &overlap);
-      if (n == SEMANTIC_ASSERTION_SEARCH_INVALID_TIME)
+      cJSON *semantic = db2_kb_service_memory_search_assertions_json(query, valid_at, believed_at,
+                                                                     historical_enabled, hops, 32);
+      cJSON *hits = cJSON_GetObjectItemCaseSensitive(semantic, "assertions");
+      int vector_available = strcmp(jo_cstr(semantic, "channel_status"), "ok") == 0;
+      if (strcmp(jo_cstr(semantic, "error_type"), "invalid_timestamp") == 0)
       {
          cJSON_ReplaceItemInObjectCaseSensitive(resp, "status", cJSON_CreateString("error"));
          cJSON_AddStringToObject(resp, "error_type", "invalid_timestamp");
@@ -647,9 +317,10 @@ cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req)
          cJSON_AddStringToObject(resp, "context_sufficiency", "insufficient");
          cJSON_AddStringToObject(resp, "sufficiency_reason",
                                  "invalid temporal request; no context assembled");
+         cJSON_Delete(semantic);
          return resp;
       }
-      if (n < 0)
+      if (!semantic || !cJSON_IsArray(hits) || strcmp(jo_cstr(semantic, "status"), "degraded") == 0)
       {
          degraded = 1;
          cJSON_ReplaceItemInObjectCaseSensitive(current_ch, "status",
@@ -665,15 +336,13 @@ cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req)
                                                    cJSON_CreateString("degraded"));
             cJSON_AddStringToObject(current_ch, "reason", "lexical fallback; vector unavailable");
          }
-         for (int i = 0; i < n; i++)
+         cJSON *hit;
+         cJSON_ArrayForEach(hit, hits)
          {
-            cJSON *item = kbs_semantic_assertion_to_json(&hits[i]);
-            char rendered[1200];
-            snprintf(rendered, sizeof(rendered), "%s %s %s%s", hits[i].subject, hits[i].relation,
-                     hits[i].object, hits[i].historical ? " [HISTORICAL]" : "");
-            char stable_id[64];
-            snprintf(stable_id, sizeof(stable_id), "%lld", (long long)hits[i].assertion_id);
-            if (hits[i].historical)
+            cJSON *item = cJSON_Duplicate(hit, 1);
+            const char *rendered = jo_cstr(hit, "rendered");
+            const char *stable_id = jo_cstr(hit, "stable_id");
+            if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(hit, "historical")))
             {
                if (historical_enabled)
                   included_count += kbs_channel_try_add(
@@ -693,6 +362,7 @@ cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req)
                                                      current_budget, &total_used, total_budget);
          }
       }
+      cJSON_Delete(semantic);
    }
 
    db2_memory_scope_context_t scope;

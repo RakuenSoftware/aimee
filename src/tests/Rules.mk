@@ -661,6 +661,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-memory-reflect-transport \
                $(TESTPREFIX)/unit-test-workflow-transport \
                $(TESTPREFIX)/unit-test-trace-transport \
+               $(TESTPREFIX)/unit-test-assertion-transport \
                $(TESTPREFIX)/unit-test-benchmark-context-transport \
                $(TESTPREFIX)/unit-test-kb-memory-facts-connection \
                $(TESTPREFIX)/unit-test-server-facts-transport \
@@ -1321,7 +1322,6 @@ $(TESTPREFIX)/unit-test-css-insights: \
 $(TESTPREFIX)/unit-test-typed-facts: \
                                        $(OBJDIR)/tests/test_typed_facts.o \
                                        $(OBJDIR)/db2/typed_facts.o \
-                                       $(OBJDIR)/modules/memory/memory_scope_connection.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/db2/rel_types_store.o \
                                        $(OBJDIR)/db2/entity_edges.o \
@@ -7937,4 +7937,7 @@ $(TESTPREFIX)/unit-test-trace-transport: $(OBJDIR)/tests/test_trace_transport.o 
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
 
 $(TESTPREFIX)/unit-test-benchmark-context-transport: $(OBJDIR)/tests/test_benchmark_context_transport.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
+
+$(TESTPREFIX)/unit-test-assertion-transport: $(OBJDIR)/tests/test_assertion_transport.o $(OBJDIR)/kb/db2_adapters/kb_service_backend_context.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread

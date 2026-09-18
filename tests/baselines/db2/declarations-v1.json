@@ -1902,7 +1902,6 @@
         "src/tests/test_schema_subst.c",
         "src/tests/test_tool_prompts.c",
         "src/tests/test_tool_validation.c",
-        "src/tests/test_typed_facts.c",
         "src/tests/test_vault_reseal_orchestrator_live.c",
         "src/tests/test_witness_checkpoint_produce_pg.c",
         "src/tests/test_witness_tamper_pg.c",
@@ -5066,7 +5065,6 @@
         "src/tests/test_rules.c",
         "src/tests/test_tool_prompts.c",
         "src/tests/test_tool_validation.c",
-        "src/tests/test_typed_facts.c",
         "src/tests/test_vault_pg.c",
         "src/tests/test_vault_reseal_orchestrator_live.c",
         "src/tests/test_witness_canary_pg.c",
@@ -6727,7 +6725,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/http/kb_http.c",
         "src/kb/http/kb_http_code.c",
         "src/kb/kb_service_code_embed.c",
@@ -14261,29 +14258,15 @@
       "symbol": "db2_memory_review_list"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 56
-        }
-      ],
-      "signature": "void db2_memory_scope_bind_current ( aimee_pg_stmt_t * st )",
-      "signature_sha256": "093697bbecdca2cd69a7fcbead866e9612a1ecd44ea3080c981c8436c258f84d",
-      "status": "internal-unconsumed",
-      "symbol": "db2_memory_scope_bind_current"
-    },
-    {
       "consumers": [
         "src/kb/kb_service_memory.c",
         "src/tests/support/kb_http_route_stubs.c",
-        "src/tests/test_typed_facts.c",
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 54
+          "line": 20
         }
       ],
       "review": {
@@ -14304,7 +14287,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 55
+          "line": 21
         }
       ],
       "review": {
@@ -14322,13 +14305,12 @@
         "src/kb/kb_service_memory.c",
         "src/tests/support/kb_http_route_stubs.c",
         "src/tests/test_memory_advanced.c",
-        "src/tests/test_typed_facts.c",
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 50
+          "line": 16
         }
       ],
       "review": {
@@ -14346,7 +14328,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
-          "line": 51
+          "line": 17
         }
       ],
       "signature": "void db2_memory_scope_context_set_exact ( const char * workspace , const char * project , const char * scope_type , const char * scope_value , int include_all )",
@@ -15954,54 +15936,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
-        "src/tests/test_typed_facts.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/typed_facts.h",
-          "line": 141
-        }
-      ],
-      "signature": "int db2_semantic_assertion_get_filtered ( int64_t assertion_id , const char * valid_at , const char * believed_at , int include_historical , semantic_assertion_hit_t * out )",
-      "signature_sha256": "1f1b4057903b220d072b2fd0aa47168af21d5730d12a2f621c924dae4751dc81",
-      "status": "audit-pending",
-      "symbol": "db2_semantic_assertion_get_filtered"
-    },
-    {
-      "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
-        "src/tests/test_typed_facts.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/typed_facts.h",
-          "line": 144
-        }
-      ],
-      "signature": "int db2_semantic_assertion_index_list ( int64_t after_assertion_id , semantic_assertion_index_row_t * out , int max )",
-      "signature_sha256": "7d19dc9a8a0791dd22c89ead3414a2cccaf8ec859444b21c1a42ebaaa54ce1b7",
-      "status": "audit-pending",
-      "symbol": "db2_semantic_assertion_index_list"
-    },
-    {
-      "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
-        "src/tests/test_typed_facts.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/typed_facts.h",
-          "line": 138
-        }
-      ],
-      "signature": "int db2_semantic_assertion_search ( const char * query , const char * valid_at , const char * believed_at , int include_historical , int limit , semantic_assertion_hit_t * out , int max )",
-      "signature_sha256": "5e91a6ae1debe82d8df4086dabcb788a3a5f9274e39e020fc235b09bfa85e752",
-      "status": "audit-pending",
-      "symbol": "db2_semantic_assertion_search"
-    },
-    {
-      "consumers": [
         "src/kb/http/kb_tls_serve.c",
         "src/tests/support/kb_http_route_stubs.c"
       ],
@@ -17549,7 +17483,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/typed_facts.h",
-          "line": 121
+          "line": 55
         }
       ],
       "signature": "int db2_typed_fact_assert ( const char * subject , const char * subject_kind , const char * relation , const char * object , const char * object_kind , int confidence , const char * source , const char * now_iso )",
@@ -17564,7 +17498,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/typed_facts.h",
-          "line": 132
+          "line": 66
         }
       ],
       "signature": "int db2_typed_fact_by_relation ( const char * relation , typed_fact_t * out , int max )",
@@ -17581,7 +17515,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/typed_facts.h",
-          "line": 127
+          "line": 61
         }
       ],
       "signature": "int db2_typed_fact_recall ( const char * subject , const char * relation_filter , typed_fact_t * out , int max )",
@@ -20525,7 +20459,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/tests/test_pgvec.c"
       ],
       "locations": [
@@ -20732,7 +20665,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/typed_facts.h",
-          "line": 116
+          "line": 50
         }
       ],
       "signature": "int typed_fact_relation_known ( const char * relation )",
@@ -20935,14 +20868,14 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "795b32a796fec14342887b6a8a8423ef911324edf2b2b68be75df8b0e2ced048",
+  "fingerprint": "eed6ecc83d0ae60e21437f7952bd9282f8b613d6f517a93873ffcfd945542935",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 450,
-    "declarations": 1154,
+    "audit_pending": 447,
+    "declarations": 1150,
     "headers": 131,
-    "internal_unconsumed": 202,
+    "internal_unconsumed": 201,
     "private_test_only": 310,
     "reviewed": 192
   }

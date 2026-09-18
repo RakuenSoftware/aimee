@@ -814,3 +814,29 @@ and the remaining native pgvector suite pass. Strict G0 falls from 168 to 166
 findings without changing its baseline. Native semantic assertion retrieval,
 indexing and vector writes outside the memory directory still need migration;
 the memory-tree inventory remains two C sources (204 lines) and five headers.
+
+Semantic assertion search now runs in the shared Go owner. The native KB search
+and typed-context callers use its result instead of performing SQL selection,
+embedding, hybrid ranking or graph expansion themselves. Go preserves independent
+valid/transaction-time filters, historical labels, evidence locators, reciprocal
+rank fusion, the cosine floor and bounded graph hops. Candidate filtering applies
+before caps; every live memory evidence source must resolve to an active visible
+parent, so a visible source cannot mask a hidden one. Explicit scope remains
+binding even with include-all authority. Assertion vectors use canonical rendering
+and version-checked publication; embedding input is screened and bounded. Optional
+vector failures roll back derived writes to a savepoint and retain lexical results.
+Required retrieval failures produce the existing explicit degraded result.
+
+Go owns complete assertion text and exact numeric IDs. The transitional native
+transport restores the owner's canonical decimal token after cJSON parsing and
+uses the owner's full rendering in typed-context packing. It no longer truncates
+assertions into the native hit structure. Restricted-role PostgreSQL replay covers
+time axes, scope and mixed evidence, graph/vector retrieval, repeated indexing,
+wrong dimensions, unavailable vector/required stores and pre-egress screening.
+The native transport test covers scope propagation, malformed receipts and exact
+IDs through copying and serialization. CLI/Server/KB builds, Go race tests and
+live Server/KB process checks pass. The obsolete C search/get/index functions,
+semantic result structs, SQL scope macros and binding function are deleted. The
+memory tree now has two C sources totaling 192 lines and five headers. Strict G0
+remains 166 findings; typed-context channel selection, packing and watermarks,
+native typed-fact writes, benchmark loaders and other clients remain unfinished.

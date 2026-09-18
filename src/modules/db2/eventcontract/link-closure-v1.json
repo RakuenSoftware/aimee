@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "e007dd7cab57c0ea08da05ef8f0f183655638447",
-  "source_fingerprint": "9b39357c97e4bad56b5dfbbe0132b5983984979523909be5bd5145049d1740b1",
+  "source_revision": "342907d268708926f2b057baad96ba55c70813d5",
+  "source_fingerprint": "f06020e760d79b1f4429582da2b4cb8a08fdcb6a59296434fe16e68b0f9641c9",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -1809,7 +1809,6 @@
         "src/modules/db2/c/entity_registry.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
-        "src/modules/db2/c/typed_facts.c",
         "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/rel_type_primitives.c"
       ],
@@ -1825,7 +1824,6 @@
         "src/modules/db2/c/entity_registry.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
-        "src/modules/db2/c/typed_facts.c",
         "src/modules/db2/support/cert_serial_primitives.c",
         "src/modules/db2/support/cjson.c",
         "src/modules/db2/support/rel_type_primitives.c"
@@ -1915,8 +1913,7 @@
     {
       "symbol": "atoi",
       "references": [
-        "src/modules/db2/c/db_postgres.c",
-        "src/modules/db2/c/typed_facts.c"
+        "src/modules/db2/c/db_postgres.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -1961,14 +1958,6 @@
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
-    },
-    {
-      "symbol": "db2_memory_scope_bind_current",
-      "references": [
-        "src/modules/db2/c/typed_facts.c"
-      ],
-      "disposition": "injected-module-contract",
-      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
     },
     {
       "symbol": "difftime",
@@ -2801,7 +2790,6 @@
         "src/modules/db2/c/project.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/server_registry.c",
-        "src/modules/db2/c/typed_facts.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/c/vault_operator_status_runtime.c",
         "src/modules/db2/c/vault_pg.c",
@@ -3030,15 +3018,15 @@
   "summary": {
     "translation_units": 120,
     "descriptor_support_units": 19,
-    "unresolved_symbols": 142,
+    "unresolved_symbols": 141,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 1,
+      "injected-module-contract": 0,
       "portable-core-promotion": 1,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 140
     }
   },
-  "fingerprint": "b8948f5d0b1bc90be5c9a07ed626d794d127206525d9c0896e6d8d06af7066d7"
+  "fingerprint": "fa77eb207aedcab9f5fcc36bd99dc186060283750c0b410356dc5c401dc3f4b6"
 }

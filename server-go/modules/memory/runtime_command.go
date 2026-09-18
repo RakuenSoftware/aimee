@@ -16,6 +16,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "assertion-search":
+		return handleAssertionSearch(options, invocation, args)
 	case "benchmark-score":
 		return handleBenchmarkScore(options, invocation, args)
 	case "benchmark-hard-negative":

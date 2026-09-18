@@ -131,6 +131,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseBenchmarkContextReplay(t, ctx, tx, handler)
 	exerciseBenchmarkDiagnosticsReplay(t, ctx, tx, handler)
 	exerciseBenchmarkScoreReplay(t, ctx, tx, handler)
+	exerciseAssertionSearchReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseCheckpointReplay(t, ctx, tx, handler)
 	exerciseConventionReplay(t, ctx, tx, handler)
 	exerciseHybridReplay(t, ctx, tx, handler)

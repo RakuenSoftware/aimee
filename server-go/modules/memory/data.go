@@ -30,24 +30,25 @@ const (
 )
 
 type DataRequest struct {
-	TraceBatch     *traceMiningBatch  `json:"trace_batch,omitempty"`
-	Reflection     *reflectionOptions `json:"reflection,omitempty"`
-	Hops           int                `json:"hops,omitempty"`
-	Relations      []string           `json:"relations"`
-	FactWork       *MemoryFactWork    `json:"fact_work,omitempty"`
-	GraphPath      []GraphPathEntry   `json:"graph_path,omitempty"`
-	CodePointIDs   []int64            `json:"code_point_ids,omitempty"`
-	AutomaticLimit bool               `json:"automatic_limit,omitempty"`
-	Detail         bool               `json:"detail,omitempty"`
-	Timings        bool               `json:"timings,omitempty"`
-	FailedOnly     bool               `json:"failed_only,omitempty"`
-	ResetStuck     bool               `json:"reset_stuck,omitempty"`
-	TagScope       *Scope             `json:"tag_scope,omitempty"`
-	PublicView     bool               `json:"public_view,omitempty"`
-	Activation     json.RawMessage    `json:"activation,omitempty"`
-	FactWrite      *FactWriteRequest  `json:"fact_write,omitempty"`
-	CodeIndex      *CodeIndexRequest  `json:"code_index,omitempty"`
-	Demotion       *DemotionConfig    `json:"demotion,omitempty"`
+	Assertions     *assertionSearchRequest `json:"assertions,omitempty"`
+	TraceBatch     *traceMiningBatch       `json:"trace_batch,omitempty"`
+	Reflection     *reflectionOptions      `json:"reflection,omitempty"`
+	Hops           int                     `json:"hops,omitempty"`
+	Relations      []string                `json:"relations"`
+	FactWork       *MemoryFactWork         `json:"fact_work,omitempty"`
+	GraphPath      []GraphPathEntry        `json:"graph_path,omitempty"`
+	CodePointIDs   []int64                 `json:"code_point_ids,omitempty"`
+	AutomaticLimit bool                    `json:"automatic_limit,omitempty"`
+	Detail         bool                    `json:"detail,omitempty"`
+	Timings        bool                    `json:"timings,omitempty"`
+	FailedOnly     bool                    `json:"failed_only,omitempty"`
+	ResetStuck     bool                    `json:"reset_stuck,omitempty"`
+	TagScope       *Scope                  `json:"tag_scope,omitempty"`
+	PublicView     bool                    `json:"public_view,omitempty"`
+	Activation     json.RawMessage         `json:"activation,omitempty"`
+	FactWrite      *FactWriteRequest       `json:"fact_write,omitempty"`
+	CodeIndex      *CodeIndexRequest       `json:"code_index,omitempty"`
+	Demotion       *DemotionConfig         `json:"demotion,omitempty"`
 	// Accepted for old callers, but never used to override instance configuration.
 	GraphCodeFusionState  string    `json:"graph_code_fusion_state,omitempty"`
 	Operation             string    `json:"operation"`
@@ -1069,7 +1070,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if request.Operation == "cognify" || request.Operation == "cognify-drain" || request.Operation == "reflect" {
 		budget = 60 * time.Second
 	}
-	if request.Operation == "vector-verify" {
+	if request.Operation == "vector-verify" || request.Operation == "assertion-search" {
 		budget = 30 * time.Second
 	}
 	if request.Operation == "vector-repair-record" || request.Operation == "episode-card-generate" {
@@ -1158,6 +1159,25 @@ set_config('aimee.correlation_id',$9,true)`,
 	}
 
 	switch request.Operation {
+	case "assertion-search":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Assertions == nil || request.Query == "" || request.Limit < 1 || request.Limit > 64 || request.Assertions.Hops < 0 || request.Assertions.Hops > 2 || !assertionTimestamp(request.Assertions.ValidAt) || !assertionTimestamp(request.Assertions.BelievedAt) {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if explicitScope {
+			request.Scope = scope
+		}
+		var result map[string]any
+		result, err = backend.searchAssertions(ctx, invocation.TraceID, options.executor, request, explicitScope)
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+			if len(response.Payload) > maxDataBody {
+				err = errors.New("memory: assertion response exceeds capacity")
+			}
+		}
 	case "trace-state", "trace-apply":
 		backend, ok := options.data.(*postgresDataStore)
 		if invocation.PrincipalRef != 0 {
