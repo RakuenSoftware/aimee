@@ -695,44 +695,82 @@ cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req)
       }
    }
 
-   if (episodes_enabled)
-   {
-      memory_episode_t episodes[16];
-      int n = memory_list_episodes(query, 16, episodes, 16);
-      for (int i = 0; i < n; i++)
-      {
-         cJSON *item = cJSON_CreateObject();
-         char stable_id[64];
-         snprintf(stable_id, sizeof(stable_id), "%lld", (long long)episodes[i].id);
-         cJSON_AddStringToObject(item, "stable_id", stable_id);
-         cJSON_AddStringToObject(item, "episode_key", episodes[i].episode_key);
-         cJSON_AddStringToObject(item, "excerpt", episodes[i].episode_text);
-         cJSON_AddStringToObject(item, "source_session", episodes[i].source_session);
-         cJSON_AddStringToObject(item, "reference_time", episodes[i].reference_time);
-         cJSON_AddStringToObject(item, "trust", "untrusted_data");
-         included_count += kbs_channel_try_add(episodes_ch, trace, "episodes", stable_id, item,
-                                               episodes[i].episode_text, &episodes_used,
-                                               episodes_budget, &total_used, total_budget);
-      }
-   }
-
-   if (summaries_enabled)
-   {
-      memory_entity_profile_t profile;
-      if (memory_get_entity_profile(query, &profile) == 0 && profile.summary[0])
-      {
-         cJSON *item = cJSON_CreateObject();
-         cJSON_AddStringToObject(item, "entity", profile.entity);
-         cJSON_AddStringToObject(item, "summary", profile.summary);
-         cJSON_AddStringToObject(item, "authority", "derived_noncanonical");
-         included_count += kbs_channel_try_add(summaries_ch, trace, "summaries", profile.entity,
-                                               item, profile.summary, &summaries_used,
-                                               summaries_budget, &total_used, total_budget);
-      }
-   }
-
    db2_memory_scope_context_t scope;
    db2_memory_scope_context_get(&scope);
+   if (episodes_enabled || summaries_enabled)
+   {
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddBoolToObject(request, "scope_context", scope.active);
+      cJSON_AddBoolToObject(request, "include_all", scope.include_all);
+      cJSON_AddStringToObject(request, "workspace", scope.workspace);
+      cJSON_AddStringToObject(request, "project", scope.project);
+      cJSON_AddStringToObject(request, "scope_type", scope.scope_type);
+      cJSON_AddStringToObject(request, "scope_value", scope.scope_value);
+      cJSON_AddStringToObject(request, "query", query);
+      cJSON_AddStringToObject(request, "entity", query);
+      cJSON_AddNumberToObject(request, "limit", 16);
+      if (episodes_enabled)
+      {
+         cJSON_AddStringToObject(request, "operation", "episode-list");
+         cJSON *response = NULL;
+         int rc = aimee_module_commands_dispatch_internal("memory.runtime", request, &response);
+         cJSON *episodes = cJSON_GetObjectItemCaseSensitive(response, "episodes");
+         if (rc <= 0 || !cJSON_IsArray(episodes))
+         {
+            degraded = 1;
+            cJSON_ReplaceItemInObjectCaseSensitive(episodes_ch, "status",
+                                                   cJSON_CreateString("degraded"));
+            cJSON_AddStringToObject(episodes_ch, "reason", "episode retrieval unavailable");
+         }
+         cJSON *episode;
+         cJSON_ArrayForEach(episode, episodes)
+         {
+            cJSON *item = cJSON_CreateObject();
+            char stable_id[64];
+            snprintf(stable_id, sizeof(stable_id), "%.0f", jo_num(episode, "id", 0));
+            cJSON_AddStringToObject(item, "stable_id", stable_id);
+            cJSON_AddStringToObject(item, "episode_key", jo_cstr(episode, "episode_key"));
+            cJSON_AddStringToObject(item, "excerpt", jo_cstr(episode, "episode_text"));
+            cJSON_AddStringToObject(item, "source_session", jo_cstr(episode, "source_session"));
+            cJSON_AddStringToObject(item, "reference_time", jo_cstr(episode, "reference_time"));
+            cJSON_AddStringToObject(item, "trust", "untrusted_data");
+            included_count += kbs_channel_try_add(episodes_ch, trace, "episodes", stable_id, item,
+                                                  jo_cstr(episode, "episode_text"), &episodes_used,
+                                                  episodes_budget, &total_used, total_budget);
+         }
+         cJSON_Delete(response);
+         cJSON_DeleteItemFromObjectCaseSensitive(request, "operation");
+      }
+      if (summaries_enabled && query[0])
+      {
+         cJSON_AddStringToObject(request, "operation", "entity-profile");
+         cJSON *response = NULL;
+         int rc = aimee_module_commands_dispatch_internal("memory.runtime", request, &response);
+         cJSON *profile = cJSON_GetObjectItemCaseSensitive(response, "profile");
+         if (rc <= 0 ||
+             (!cJSON_IsObject(profile) && strcmp(jo_cstr(response, "kind"), "not_found")))
+         {
+            degraded = 1;
+            cJSON_ReplaceItemInObjectCaseSensitive(summaries_ch, "status",
+                                                   cJSON_CreateString("degraded"));
+            cJSON_AddStringToObject(summaries_ch, "reason", "entity summary unavailable");
+         }
+         if (cJSON_IsObject(profile) && jo_cstr(profile, "summary")[0])
+         {
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "entity", jo_cstr(profile, "entity"));
+            cJSON_AddStringToObject(item, "summary", jo_cstr(profile, "summary"));
+            cJSON_AddStringToObject(item, "authority", "derived_noncanonical");
+            included_count +=
+                kbs_channel_try_add(summaries_ch, trace, "summaries", jo_cstr(profile, "entity"),
+                                    item, jo_cstr(profile, "summary"), &summaries_used,
+                                    summaries_budget, &total_used, total_budget);
+         }
+         cJSON_Delete(response);
+      }
+      cJSON_Delete(request);
+   }
+
    if (observations_enabled)
    {
       learning_observation_t observations[64];

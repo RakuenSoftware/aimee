@@ -152,7 +152,7 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		result["episode"] = response.Episodes[0]
 	case "entity_profile":
 		if response.EntityProfile == nil {
-			return nil, bus.ModuleStatusInternal
+			return commandResult(commandError("not_found", "entity profile not found"))
 		}
 		result["profile"] = response.EntityProfile
 	case "entity_edges", "search_graph", "search_graph_as_of":

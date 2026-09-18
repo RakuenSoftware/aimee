@@ -6406,7 +6406,7 @@ $(TESTPREFIX)/unit-test-session-degraded-notice: $(OBJDIR)/tests/test_session_de
 $(TESTPREFIX)/unit-test-kb-http-json: $(OBJDIR)/tests/test_kb_http_json.o $(OBJDIR)/kb/http/kb_http_json.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o $(OBJDIR)/kb/http/kb_http_json.o \
+$(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/json_fluent.o $(OBJDIR)/tests/test_kb_http_routes.o $(OBJDIR)/kb/http/kb_http_json.o \
                      $(OBJDIR)/tests/support/corpus_jobs_http_stub.o \
                      $(OBJDIR)/tests/support/pdf_route_stubs.o \
                      $(OBJDIR)/kb/http/kb_http_grants.o \

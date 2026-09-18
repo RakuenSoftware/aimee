@@ -180,17 +180,8 @@ static void test_withheld_memories_cannot_reenter_production_reads(void)
    assert(strstr(ctx, "NEGATIVE_SUPPRESSED_HIDDEN") == NULL);
    free(ctx);
 
-   /* Graph recall is a separate production lane and must apply the same
-    * negative predicate rather than trusting envelope filtering downstream. */
-   db2_memory_relation_insert(active.id, "neggraph-active", "rel", "target", "active relation");
-   db2_memory_relation_insert(archived.id, "neggraph-archived", "rel", "target",
-                              "archived relation");
-   db2_memory_relation_insert(suppressed.id, "neggraph-suppressed", "rel", "target",
-                              "suppressed relation");
-   memory_relation_t relations[8];
-   assert(memory_search_graph("neggraph-active", 8, relations, 8) == 1);
-   assert(memory_search_graph("neggraph-archived", 8, relations, 8) == 0);
-   assert(memory_search_graph("neggraph-suppressed", 8, relations, 8) == 0);
+   /* Graph parent currency is exercised through the shared Go owner in
+    * TestDomainPublicPostgres, including archived/suppressed high-weight rows. */
 
    /* Episode cards bypass the ordinary fact candidate pool, so exercise that
     * production query too. */

@@ -486,3 +486,14 @@ and the actual MCP tools use generic authenticated commands and retain full JSON
 strings. MCP rendering preserves long results and dependency/authorization errors;
 episode reads now carry the same caller scope as graph/entity reads. PostgreSQL
 regression coverage rejects cross-project episode access through the public route.
+
+The KB HTTP entity routes and typed-context episode/summary channels now call
+the shared Go owner directly; the native graph/profile/episode domain adapters
+are retired. Graph and episode reads require active, unsuppressed parents, and
+local scope ranks ahead of global scope before result limits. Entity profiles
+count distinct memory mentions and current semantic assertions, exclude hidden
+memory-backed evidence, and return an explicit miss for unknown entities. Runtime
+context queries preserve exact scope, full text and host-only access. HTTP reads
+retain the verified request context, preserve long JSON strings and distinguish
+missing entities from unavailable services. Failed context channels report degraded
+status instead of an empty success.

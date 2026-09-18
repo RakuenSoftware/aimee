@@ -1147,22 +1147,6 @@ int canonical_index_code_search_excluding_project(const char *query, const char 
 
 /* canonical_index_find_callers stub lives in the _code.inc (line-count limit). */
 
-int memory_get_entity_profile(const char *e, void *out)
-{
-   (void)e;
-   (void)out;
-   return -1;
-}
-
-int memory_search_graph(const char *q, int l, void *out, int m)
-{
-   (void)q;
-   (void)l;
-   (void)out;
-   (void)m;
-   return 0;
-}
-
 int db2_artifact_read(const char *id, void *out, void *c, int mc, int *cc)
 {
    (void)id;
@@ -1270,9 +1254,29 @@ static int g_reconcile_rc;
 static kb_service_ctx_t g_test_kb_ctx = {.worker_count = 2};
 kb_service_ctx_t *g_kb_ctx = &g_test_kb_ctx;
 
+static const char *entity_reply;
+static int entity_status = 200;
 int kb_dispatch_action_json(const char *action, const char *body, int body_len, char *out_buf,
                             int out_cap)
 {
+   if (strcmp(action, "memory.search_graph") == 0 || strcmp(action, "memory.entity_profile") == 0)
+   {
+      cJSON *request = cJSON_ParseWithLength(body, (size_t)body_len);
+      assert(cJSON_IsObject(request));
+      if (strcmp(action, "memory.search_graph") == 0)
+      {
+         assert(strcmp(jo_cstr(request, "query"), "alice") == 0);
+         assert(jo_int(request, "limit", 0) == 10);
+      }
+      else
+         assert(strcmp(jo_cstr(request, "entity"), "nobody") == 0);
+      cJSON_Delete(request);
+      const char *fallback = strcmp(action, "memory.search_graph") == 0
+                                 ? "{\"status\":\"ok\",\"relations\":[]}"
+                                 : "{\"status\":\"error\",\"kind\":\"not_found\"}";
+      snprintf(out_buf, (size_t)out_cap, "%s", entity_reply ? entity_reply : fallback);
+      return entity_status;
+   }
    assert(strcmp(action, "memory.directive_sweep_expired") == 0);
    assert(body && body_len == 2);
    snprintf(out_buf, (size_t)out_cap, "{\"status\":\"ok\",\"expired\":1}");
@@ -6717,6 +6721,42 @@ static void test_entity_search_ok(void)
                             "{\"query\":\"alice\"}", 16, buf, sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"entities\"") != NULL);
+   const char *failures[] = {"not-json", "{\"status\":\"ok\"}",
+                             "{\"status\":\"error\",\"kind\":\"unavailable\"}",
+                             "{\"status\":\"error\",\"kind\":\"forbidden\"}"};
+   for (size_t i = 0; i < sizeof(failures) / sizeof(failures[0]); i++)
+   {
+      entity_reply = failures[i];
+      s = kb_http_route_ex("POST", "/v1/entities/search", NULL, NULL, NULL, "{\"query\":\"alice\"}",
+                           17, buf, sizeof(buf));
+      assert(s == (i == 3 ? 403 : 503));
+      s = kb_http_route_ex("GET", "/v1/entities/nobody", NULL, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf));
+      assert(s == (i == 3 ? 403 : 503));
+   }
+   entity_status = 503;
+   assert(kb_http_route_ex("POST", "/v1/entities/search", NULL, NULL, NULL, "{\"query\":\"alice\"}",
+                           17, buf, sizeof(buf)) == 503);
+   entity_status = 200;
+   char long_summary[12001], large[16000];
+   memset(long_summary, 'x', 12000);
+   long_summary[12000] = 0;
+   cJSON *response = cJSON_Parse("{\"status\":\"ok\",\"profile\":{\"entity\":\"nobody\"}}");
+   cJSON_AddStringToObject(cJSON_GetObjectItemCaseSensitive(response, "profile"), "summary",
+                           long_summary);
+   char *raw = cJSON_PrintUnformatted(response);
+   entity_reply = raw;
+   s = kb_http_route_ex("GET", "/v1/entities/nobody", NULL, NULL, NULL, NULL, 0, large,
+                        sizeof(large));
+   assert(s == 200);
+   cJSON *result = cJSON_Parse(large);
+   assert(result && strcmp(jo_cstr(result, "summary"), long_summary) == 0);
+   cJSON_Delete(result);
+   assert(kb_http_route_ex("GET", "/v1/entities/nobody", NULL, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 503);
+   free(raw);
+   cJSON_Delete(response);
+   entity_reply = NULL;
 }
 
 static void test_phase5_auth_rejected(void)

@@ -44,6 +44,10 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		request.Scope = Scope{Type: args.stringOr("scope_type", ""), Value: args.stringOr("scope_value", "")}
+	case "episode-list", "entity-profile":
+		request.Operation, request.Query, request.Entity = operation, args.stringOr("query", ""), args.stringOr("entity", "")
+		request.Limit = args.limit("limit", 16, 64)
+		request.Scope = Scope{Type: args.stringOr("scope_type", ""), Value: args.stringOr("scope_value", "")}
 	case "fusion-state":
 		request.Operation = "fusion-state-get"
 	case "recall-metrics":
@@ -84,6 +88,16 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 			response.VectorHits = []VectorHit{}
 		}
 		return commandResult(map[string]any{"hits": response.VectorHits})
+	case "episode-list":
+		if response.Episodes == nil {
+			response.Episodes = []Episode{}
+		}
+		return commandResult(map[string]any{"status": "ok", "episodes": response.Episodes})
+	case "entity-profile":
+		if response.EntityProfile == nil {
+			return commandResult(commandError("not_found", "entity profile not found"))
+		}
+		return commandResult(map[string]any{"status": "ok", "profile": response.EntityProfile})
 	case "fusion-state":
 		if response.Allowed == nil {
 			return nil, bus.ModuleStatusInternal

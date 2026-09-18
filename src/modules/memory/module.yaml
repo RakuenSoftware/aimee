@@ -23,6 +23,7 @@
     "server-go/modules/memory/data.go",
     "server-go/modules/memory/directives.go",
     "server-go/modules/memory/domain.go",
+    "server-go/modules/memory/domain_graph.go",
     "server-go/modules/memory/embed.go",
     "server-go/modules/memory/export.go",
     "server-go/modules/memory/extract.go",

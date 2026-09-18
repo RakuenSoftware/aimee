@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -66,10 +67,14 @@ func TestDomainPublicPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA domain_command_test;
  CREATE FUNCTION domain_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
  SET LOCAL search_path TO pg_temp,domain_command_test,public;
- CREATE TEMP TABLE memories(id bigint PRIMARY KEY,tier text,kind text,scope_type text,scope_value text,created_at text DEFAULT pg_now_text(),last_used_at text,use_count int DEFAULT 0,confidence double precision DEFAULT 1);
+ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,tier text,kind text,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,created_at text DEFAULT pg_now_text(),last_used_at text,use_count int DEFAULT 0,confidence double precision DEFAULT 1);
  INSERT INTO memories(id,tier,kind,scope_type,scope_value) VALUES (1,'L2','fact','global','_global'),(2,'L1','episode','workspace','repo'),(3,'L2','preference','project','app');
  CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text);
  INSERT INTO memory_scopes VALUES (1,'workspace','repo'),(1,'project','app');
+ CREATE TEMP TABLE memory_entities(memory_id bigint,entity text,role text DEFAULT 'mention');
+ INSERT INTO memory_entities(memory_id,entity) VALUES (1,'app'),(3,'app');
+ CREATE TEMP TABLE entity_edges(id bigint,source text,target text,edge_class text,lifecycle_state text,suppressed int,superseded_at text,invalidated_at text,valid_from text,valid_until text);
+ CREATE TEMP TABLE fact_evidence(assertion_id bigint,source_kind text,source_id text,invalidated_at text,stance text);
  CREATE TEMP TABLE memory_conflicts(id bigserial PRIMARY KEY,memory_a bigint,memory_b bigint,detected_at text DEFAULT pg_now_text(),resolved int DEFAULT 0,resolution text DEFAULT '');
  INSERT INTO memory_conflicts(memory_a,memory_b) VALUES (1,2);
  CREATE TEMP TABLE memory_provenance(id bigserial PRIMARY KEY,memory_id bigint,session_id text,action text,details text,created_at text DEFAULT pg_now_text());
@@ -172,7 +177,7 @@ func TestDomainPublicPostgres(t *testing.T) {
 	// policy, with a real non-owner connection and transaction-local scope.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_domain_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA domain_command_test TO memory_domain_test;
-GRANT SELECT ON memories,memory_scopes,memory_conflicts,memory_relations,memory_episodes,memory_provenance,memory_links TO memory_domain_test;
+GRANT SELECT ON memories,memory_scopes,memory_conflicts,memory_relations,memory_episodes,memory_provenance,memory_links,memory_entities,entity_edges,fact_evidence TO memory_domain_test;
 GRANT INSERT,DELETE ON memory_links TO memory_domain_test;
 GRANT USAGE,SELECT ON SEQUENCE memory_links_id_seq TO memory_domain_test;
 UPDATE memories SET scope_type='project',scope_value='app' WHERE id=2;
@@ -182,6 +187,31 @@ VALUES (4,1,'app','uses','secret','private graph detail','','',2);
 INSERT INTO memory_provenance(memory_id,session_id,action,details) VALUES (4,'private','created','secret');
 INSERT INTO memory_links(source_id,target_id,relation) VALUES (1,4,'secret');
 INSERT INTO memory_conflicts(memory_a,memory_b) VALUES (1,4);
+INSERT INTO memories(id,tier,kind,scope_type,scope_value,lifecycle_state,activation_suppressed) VALUES
+ (5,'L2','fact','project','app','archived',0),(6,'L2','fact','project','app','active',1);
+INSERT INTO memory_entities(memory_id,entity,role) VALUES (5,'hidden-entity','mention'),(6,'hidden-entity','mention'),(3,'app','actor');
+INSERT INTO memory_relations(memory_id,episode_id,src_entity,relation,dst_entity,fact_text,valid_at,invalid_at,weight) VALUES
+ (5,1,'hidden-entity','uses','archived','hidden archived','','',100),
+ (6,1,'hidden-entity','uses','suppressed','hidden suppressed','','',100),
+ (1,1,'rank-entity','uses','global','global high weight','','',100),
+ (3,1,'rank-entity','uses','local','local low weight','','',0.1);
+INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session,reference_time) VALUES
+ (5,'hidden-episode-archived','hidden','','2099'),(6,'hidden-episode-suppressed','hidden','','2099'),
+ (1,'rank-episode-global','rank-episode','','2099'),(3,'rank-episode-local','rank-episode','','2020');
+INSERT INTO entity_edges(id,source,target,edge_class,lifecycle_state,suppressed,superseded_at,invalidated_at,valid_from,valid_until) VALUES
+ (1,'typed-only','one','semantic','persistent',0,'','','',''),
+ (2,'typed-only','two','semantic','promoted',0,'','','',''),
+ (3,'typed-only','candidate','semantic','candidate',0,'','','',''),
+ (4,'typed-only','suppressed','semantic','persistent',1,'','','',''),
+ (5,'typed-only','invalid','semantic','persistent',0,'','2026','',''),
+ (6,'typed-only','superseded','semantic','persistent',0,'2026','','',''),
+ (7,'typed-only','private','semantic','persistent',0,'','','',''),
+ (8,'typed-only','future','semantic','persistent',0,'','','2999',''),
+ (9,'typed-only','cooccur','cooccurrence','persistent',0,'','','',''),
+ (10,'typed-only','expired','semantic','persistent',0,'','','','2000'),
+ (11,'typed-only','retired-memory','semantic','persistent',0,'','','','');
+INSERT INTO fact_evidence(assertion_id,source_kind,source_id,invalidated_at,stance) VALUES
+ (2,'memory','memory:3','','supports'),(7,'memory','memory:4','','supports'),(11,'memory','memory:5','','supports');
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY test_memory_visibility ON memories USING
  (scope_type='global' OR current_setting('aimee.memory_scope_all',true)='1' OR
@@ -208,7 +238,7 @@ SET LOCAL ROLE memory_domain_test;`)
 		t.Fatal(scopedProfile)
 	}
 	privateProfile := run("entity_profile", `{"entity":"app","scope_context":true,"project":"private"}`)["profile"].(map[string]any)
-	if privateProfile["mention_count"] != float64(2) || privateProfile["latest_episode"] != "" {
+	if privateProfile["mention_count"] != float64(1) || privateProfile["latest_episode"] != "" {
 		t.Fatal(privateProfile)
 	}
 	if got := runPublicCommand(t, client, "get_episode", `{"episode_key":"release","scope_context":true,"project":"private"}`); got["kind"] != "not_found" {
@@ -228,6 +258,57 @@ SET LOCAL ROLE memory_domain_test;`)
 		}
 		if len(response.Provenance) != 0 || len(response.Links) != 0 || len(response.Episodes) != 0 {
 			t.Fatalf("scoped %s leaked: %+v", req.Operation, response)
+		}
+	}
+
+	for _, verb := range []string{"search_graph", "search_graph_as_of", "entity_edges"} {
+		key := "relations"
+		if verb == "entity_edges" {
+			key = "edges"
+		}
+		got := run(verb, `{"query":"hidden-entity","entity":"hidden-entity","as_of":"2026-09-01","scope_context":true,"project":"app"}`)
+		if len(got[key].([]any)) != 0 {
+			t.Fatalf("%s recalled retired parents: %v", verb, got)
+		}
+		got = run(verb, `{"query":"rank-entity","entity":"rank-entity","as_of":"2026-09-01","limit":1,"scope_context":true,"project":"app"}`)
+		if rows := got[key].([]any); len(rows) != 1 || rows[0].(map[string]any)["dst_entity"] != "local" {
+			t.Fatalf("%s lost local-first cap: %v", verb, got)
+		}
+	}
+	for _, entity := range []string{"hidden-entity", "missing-entity"} {
+		if got := runPublicCommand(t, client, "entity_profile", `{"entity":"`+entity+`","scope_context":true,"project":"app"}`); got["kind"] != "not_found" {
+			t.Fatal(got)
+		}
+	}
+	for _, key := range []string{"hidden-episode-archived", "hidden-episode-suppressed"} {
+		if got := runPublicCommand(t, client, "get_episode", `{"episode_key":"`+key+`","scope_context":true,"project":"app"}`); got["kind"] != "not_found" {
+			t.Fatal(got)
+		}
+	}
+	profile = run("entity_profile", `{"entity":"typed-only","scope_context":true,"project":"app"}`)["profile"].(map[string]any)
+	if profile["mention_count"] != float64(0) || profile["relation_count"] != float64(2) {
+		t.Fatalf("typed-only profile currency/scope: %v", profile)
+	}
+	profile = run("entity_profile", `{"entity":"rank-entity","scope_context":true,"project":"app"}`)["profile"].(map[string]any)
+	if profile["summary"] != "local low weight" || profile["relation_count"] != float64(2) {
+		t.Fatal(profile)
+	}
+	for _, operation := range []string{"episode-list", "entity-profile"} {
+		handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
+		args := `{"operation":"` + operation + `","entity":"typed-only","query":"rank-episode","limit":1,"scope_context":true,"project":"app"}`
+		got, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "runtime", args)
+		if status != bus.ModuleStatusOK || got["status"] != "ok" {
+			t.Fatal(got, status)
+		}
+		if _, status := invokeContextCommand(t, handler, 200, bus.CommandContext{}, "runtime", args); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal(status)
+		}
+		if operation == "episode-list" {
+			if rows := got["episodes"].([]any); len(rows) != 1 || rows[0].(map[string]any)["episode_key"] != "rank-episode-local" {
+				t.Fatal(got)
+			}
+		} else if got["profile"].(map[string]any)["relation_count"] != float64(2) {
+			t.Fatal(got)
 		}
 	}
 

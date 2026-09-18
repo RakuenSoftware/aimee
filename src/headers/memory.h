@@ -355,16 +355,13 @@ int memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int 
 
 /* Returns 1 if answer contains at least one citation marker ([#N]). */
 int memory_citation_gate_check(const char *answer);
-int memory_list_episodes(const char *query, int limit, memory_episode_t *out, int max);
 int memory_get_episode(const char *episode_key, memory_episode_t *out);
-int memory_search_graph(const char *query, int limit, memory_relation_t *out, int max);
 
 /* As-of variant: filter memory_relations to those where valid_at <= as_of and
  * (invalid_at is empty OR invalid_at > as_of). Pass NULL for as_of to get all. */
 int memory_search_graph_as_of(const char *query, const char *as_of, int limit,
                               memory_relation_t *out, int max);
 
-int memory_get_entity_profile(const char *entity, memory_entity_profile_t *out);
 int memory_get_entity_edges(const char *entity, int limit, memory_relation_t *out, int max);
 
 /* Lineage record: tracks which session/source produced a graph node or edge.

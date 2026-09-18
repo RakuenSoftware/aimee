@@ -1819,7 +1819,11 @@ set_config('aimee.correlation_id',$9,true)`,
 			}
 			var profile EntityProfile
 			profile, err = domain.EntityProfile(ctx, request.Entity)
-			response.EntityProfile = &profile
+			if errors.Is(err, ErrMemoryNotFound) {
+				err = nil
+			} else if err == nil {
+				response.EntityProfile = &profile
+			}
 		case "fact-history":
 			if request.Key == "" {
 				return nil, bus.ModuleStatusInvalidRequest

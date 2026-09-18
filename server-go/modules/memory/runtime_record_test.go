@@ -49,4 +49,47 @@ func exerciseRuntimeRecordReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 	if r, status := call(map[string]any{"id": 999999999}, 0); status != bus.ModuleStatusOK || r["kind"] != "not_found" {
 		t.Fatal(r, status)
 	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aimee.memory_scope_all','1',true)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO memory_entities(memory_id,entity) VALUES($1,'runtime-profile');
+`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session,reference_time)
+ VALUES($1,'runtime-episode',$2,$3,pg_now_text())`, id, content, source); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text)
+ VALUES($1,'runtime-profile','uses','target',$2)`, id, content); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"episode-list", "entity-profile"} {
+		for _, project := range []string{"record-private", "other"} {
+			got, status := call(map[string]any{"operation": operation, "query": "runtime-episode", "entity": "runtime-profile", "scope_context": true, "project": project}, 0)
+			if status != bus.ModuleStatusOK {
+				t.Fatal(got, status)
+			}
+			if operation == "episode-list" {
+				rows := got["episodes"].([]any)
+				if project == "other" {
+					if len(rows) != 0 {
+						t.Fatal(rows)
+					}
+				} else if len(rows) != 1 || rows[0].(map[string]any)["episode_text"] != content {
+					t.Fatal(got)
+				}
+			} else if project == "other" {
+				if got["kind"] != "not_found" {
+					t.Fatal(got)
+				}
+			} else {
+				profile := got["profile"].(map[string]any)
+				if profile["summary"] != content || profile["mention_count"] != float64(1) || profile["relation_count"] != float64(1) {
+					t.Fatal(got)
+				}
+			}
+		}
+	}
+
 }
