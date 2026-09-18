@@ -7,7 +7,7 @@
 #include "aimee.h"
 #include "cmd_memory_internal.h"
 #include "db1_client/db1.h"
-#include "modules/db2/c/collab_rules.h"
+#include "dogfood.h"
 #include "modules/db2/c/memory_query.h"
 #include "kb_client.h"
 #include "platform_process.h"
@@ -428,334 +428,64 @@ void mem_answer(app_ctx_t *ctx, int argc, char **argv)
    cJSON_Delete(result);
 }
 
-/* --- reflect ---
- *
- * Deep-reasoning command: retrieve across all visible scopes, detect
- * contradictions between memories with the same key, show cited results,
- * and optionally propose a draft L4 rule if the --draft-rule flag is set.
- *
- * Usage:
- *   aimee memory reflect <query> [--scope auto|global|workspace|project]
- *                                [--limit N] [--draft-rule] [--synthesize]
- *
- * --scope auto (default): uses memory_find_facts_visible, which
- *   evaluates all scope tags and ranks by visibility proximity.
- * --scope global|workspace|project: restricts to that scope via
- *   memory_find_facts_scoped.
- * --draft-rule: if ≥ REFLECT_RULE_THRESHOLD results are returned, propose
- *   a draft L4 rule summarising the recurring pattern for human approval.
- *   The draft rule is never activated automatically.
- * --synthesize: after retrieval, run an LLM synthesis pass that produces a
- *   cited narrative answer, a contradiction explanation, and a confidence
- *   score. Requires memory.cognify.enabled=true and a cognify command.
- */
-
-#define REFLECT_MAX_RESULTS    32
-#define REFLECT_RULE_THRESHOLD 5
-
-typedef struct
-{
-   char narrative[2048];                 /* cited narrative answer */
-   char contradiction_explanation[1024]; /* why contradictions exist */
-   char rule_proposal[512];              /* proposed rule text, if any */
-   double confidence;                    /* synthesis confidence [0,1] */
-} reflect_synthesis_result_t;
-
-/* Build a JSON payload for the cognify command describing the reflect task,
- * call it, and parse the synthesis response.  Returns 0 on success. */
-static int reflect_call_synthesis_agent(const char *query, const memory_t *facts, int count,
-                                        int conflict_a, int conflict_b, int nconflicts,
-                                        reflect_synthesis_result_t *out)
-{
-   (void)conflict_a;
-   (void)conflict_b;
-   memset(out, 0, sizeof(*out));
-   out->confidence = 0.0;
-
-   /* Copied out: handed to platform_exec_pipe well below, past other reads. */
-   char cognify_command[CONFIG_COPY_MAX];
-   config_memory_cognify_command_copy(cognify_command, sizeof(cognify_command));
-   if (!config_memory_cognify_enabled() || !cognify_command[0])
-      return -1;
-
-   /* Build memories array */
-   cJSON *mems_arr = cJSON_CreateArray();
-   if (!mems_arr)
-      return -1;
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *m = cJSON_CreateObject();
-      cJSON_AddNumberToObject(m, "id", (double)facts[i].id);
-      cJSON_AddStringToObject(m, "key", facts[i].key);
-      cJSON_AddStringToObject(m, "content", facts[i].content);
-      cJSON_AddStringToObject(m, "tier", facts[i].tier);
-      cJSON_AddStringToObject(m, "kind", facts[i].kind);
-      cJSON_AddNumberToObject(m, "confidence", facts[i].confidence);
-      cJSON_AddItemToArray(mems_arr, m);
-   }
-
-   cJSON *input = cJSON_CreateObject();
-   if (!input)
-   {
-      cJSON_Delete(mems_arr);
-      return -1;
-   }
-   cJSON_AddStringToObject(input, "task", "reflect_synthesis");
-   cJSON_AddStringToObject(input, "query", query);
-   cJSON_AddItemToObject(input, "memories", mems_arr);
-   cJSON_AddNumberToObject(input, "nconflicts", (double)nconflicts);
-   cJSON_AddStringToObject(
-       input, "instruction",
-       "Produce a cited narrative answer synthesizing the retrieved memories. "
-       "For any contradictions, explain why they might exist (different sessions, "
-       "projects, or outdated data). Return JSON with fields: "
-       "narrative (string, cite memory IDs as [#N]), "
-       "contradiction_explanation (string, empty if none), "
-       "rule_proposal (string, proposed standing rule if pattern is clear, else empty), "
-       "confidence (number 0-1).");
-
-   char *input_str = cJSON_PrintUnformatted(input);
-   cJSON_Delete(input);
-   if (!input_str)
-      return -1;
-
-   char *resp = NULL;
-   size_t resp_len = 0;
-   int rc = platform_exec_pipe(cognify_command, input_str, strlen(input_str), &resp, &resp_len);
-   free(input_str);
-   if (rc != 0 || !resp || resp_len == 0)
-   {
-      free(resp);
-      return -1;
-   }
-
-   cJSON *j = cJSON_Parse(resp);
-   free(resp);
-   if (!j)
-      return -1;
-
-   cJSON *narr = cJSON_GetObjectItemCaseSensitive(j, "narrative");
-   cJSON *expl = cJSON_GetObjectItemCaseSensitive(j, "contradiction_explanation");
-   cJSON *rule = cJSON_GetObjectItemCaseSensitive(j, "rule_proposal");
-   cJSON *conf = cJSON_GetObjectItemCaseSensitive(j, "confidence");
-
-   if (cJSON_IsString(narr) && narr->valuestring[0])
-      snprintf(out->narrative, sizeof(out->narrative), "%s", narr->valuestring);
-   if (cJSON_IsString(expl) && expl->valuestring[0])
-      snprintf(out->contradiction_explanation, sizeof(out->contradiction_explanation), "%s",
-               expl->valuestring);
-   if (cJSON_IsString(rule) && rule->valuestring[0])
-      snprintf(out->rule_proposal, sizeof(out->rule_proposal), "%s", rule->valuestring);
-   if (cJSON_IsNumber(conf))
-      out->confidence = conf->valuedouble;
-
-   cJSON_Delete(j);
-   return out->narrative[0] ? 0 : -1;
-}
-
+/* The shared Go owner implements reflection, synthesis and draft-rule policy. */
 void mem_reflect(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
       fatal("usage: aimee memory reflect <query> [--scope auto|global|workspace|project] "
-            "[--limit N] [--draft-rule] [--synthesize]");
-
+            "[--scope-value VALUE] [--limit N] [--draft-rule] [--synthesize]");
    opt_parsed_t opts;
    opt_parse(argc, argv, NULL, &opts);
    cmd_memory_apply_rerank_mode(&opts);
-
-   int limit = opt_get_int(&opts, "limit", 10);
-   if (limit < 1 || limit > REFLECT_MAX_RESULTS)
-      limit = 10;
-
-   int want_draft_rule = opt_get_flag(&opts, "draft-rule");
-   int want_synthesize = opt_get_flag(&opts, "synthesize");
-
-   /* Build query string from positional args */
-   char query[2048];
-   int qpos = 0;
-   query[0] = '\0';
+   char query[2048] = "";
+   size_t used = 0;
    for (int i = 0; i < opts.pos_count; i++)
    {
+      size_t len = strlen(opts.positional[i]);
+      if (used + len + (i > 0) >= sizeof(query))
+         fatal("memory reflect query exceeds 2047 bytes");
       if (i > 0)
-         qpos = str_appendf(query, qpos, (int)sizeof(query), " ");
-      qpos = str_appendf(query, qpos, (int)sizeof(query), "%s", opts.positional[i]);
+         query[used++] = ' ';
+      memcpy(query + used, opts.positional[i], len + 1);
+      used += len;
    }
    if (!query[0])
       fatal("memory reflect requires query terms");
-
-   /* Determine scope */
-   const char *scope_str = opt_get(&opts, "scope");
-   if (!scope_str || strcmp(scope_str, "auto") == 0)
-      scope_str = NULL; /* auto → visible */
-
-   /* Retrieve */
-   memory_t facts[REFLECT_MAX_RESULTS];
-   int count;
-
-   if (scope_str == NULL)
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "query", query);
+   cJSON_AddNumberToObject(request, "limit", opt_get_int(&opts, "limit", 10));
+   cJSON_AddBoolToObject(request, "draft_rule", opt_get_flag(&opts, "draft-rule"));
+   cJSON_AddBoolToObject(request, "synthesize", opt_get_flag(&opts, "synthesize"));
+   cJSON_AddStringToObject(request, "format", ctx->json_output ? "json" : "text");
+   if (ctx->json_fields)
+      cJSON_AddStringToObject(request, "fields", ctx->json_fields);
+   const char *scope = opt_get(&opts, "scope");
+   if (scope && strcmp(scope, "auto") != 0)
    {
-      /* Auto: use workspace/project from config if available, else NULL */
-      const char *workspace = (config_workspace_count() > 0) ? config_workspaces(0) : NULL;
-      count = kb_client_memory_find_facts_visible(query, workspace, NULL, limit, facts,
-                                                  REFLECT_MAX_RESULTS);
+      const char *value = opt_get(&opts, "scope-value");
+      cJSON_AddStringToObject(request, "scope_type", scope);
+      cJSON_AddStringToObject(request, "scope_value", value && value[0] ? value : scope);
    }
    else
    {
-      /* Explicit scope: treat scope value from --scope-value or fall back to the scope name itself
-       */
-      const char *scope_value = cmd_memory_scope_value(&opts);
-      if (!scope_value || !scope_value[0])
-         scope_value = scope_str;
-      count = kb_client_memory_find_facts_scoped(query, scope_str, scope_value, limit, facts,
-                                                 REFLECT_MAX_RESULTS);
+      if (config_workspace_count() > 0)
+         cJSON_AddStringToObject(request, "workspace", config_workspaces(0));
+      cJSON_AddBoolToObject(request, "scope_context", 1);
+      kb_client_memory_scope_context_apply(request);
    }
-   cmd_memory_require_runtime(count, "memory reflect");
-
-   /* Detect contradictions: memories with the same key but different content */
-   typedef struct
+   cJSON *result =
+       mem_rpc_unwrap(kb_v1_action_request_with_timeout("memory.reflect", request, 60000),
+                      "memory reflect failed");
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(result, "output");
+   if (!cJSON_IsString(output))
    {
-      int a;
-      int b;
-   } conflict_pair_t;
-   conflict_pair_t conflicts[16];
-   int nconflicts = 0;
-
-   for (int i = 0; i < count && nconflicts < 16; i++)
-      for (int j = i + 1; j < count && nconflicts < 16; j++)
-         if (facts[i].key[0] && strcmp(facts[i].key, facts[j].key) == 0 &&
-             strcmp(facts[i].content, facts[j].content) != 0)
-         {
-            conflicts[nconflicts].a = i;
-            conflicts[nconflicts].b = j;
-            nconflicts++;
-         }
-
-   /* Draft-rule: propose if enough evidence and flag is set */
-   int rule_id = -1;
-   if (want_draft_rule && count >= REFLECT_RULE_THRESHOLD)
-   {
-      char rule_text[COLLAB_RULE_TEXT_LEN + 1];
-      char rule_reason[COLLAB_RULE_REASON_LEN + 1];
-      snprintf(rule_text, sizeof(rule_text), "Recurring pattern detected for: %.120s", query);
-      snprintf(rule_reason, sizeof(rule_reason),
-               "reflect found %d memories matching \"%.*s\" — pattern may warrant a standing rule",
-               count, 180, query);
-      rule_id = kb_client_collab_rules_propose(rule_text, rule_reason, "reflect");
+      cJSON_Delete(result);
+      fatal("memory reflect returned malformed output");
    }
-
-   /* LLM synthesis pass (--synthesize) */
-   reflect_synthesis_result_t synthesis;
-   int have_synthesis = 0;
-   if (want_synthesize)
-   {
-      if (config_present())
-      {
-         int ca = nconflicts > 0 ? conflicts[0].a : -1;
-         int cb = nconflicts > 0 ? conflicts[0].b : -1;
-         if (reflect_call_synthesis_agent(query, facts, count, ca, cb, nconflicts, &synthesis) == 0)
-         {
-            have_synthesis = 1;
-            /* If synthesis produced a rule proposal and --draft-rule was set but
-             * threshold not yet met, propose it now */
-            if (want_draft_rule && rule_id < 0 && synthesis.rule_proposal[0])
-            {
-               char reason[COLLAB_RULE_REASON_LEN + 1];
-               snprintf(reason, sizeof(reason), "reflect --synthesize proposed rule for: %.180s",
-                        query);
-               rule_id = kb_client_collab_rules_propose(synthesis.rule_proposal, reason, "reflect");
-            }
-         }
-      }
-   }
-
-   /* Output */
+   fputs(output->valuestring, stdout);
    if (ctx->json_output)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      jo_add_str(obj, "query", query);
-      cJSON *results_arr = cJSON_CreateArray();
-      for (int i = 0; i < count; i++)
-      {
-         cJSON *entry = cJSON_CreateObject();
-         cJSON_AddNumberToObject(entry, "id", (double)facts[i].id);
-         cJSON_AddStringToObject(entry, "tier", facts[i].tier);
-         cJSON_AddStringToObject(entry, "kind", facts[i].kind);
-         cJSON_AddStringToObject(entry, "key", facts[i].key);
-         cJSON_AddStringToObject(entry, "content", facts[i].content);
-         cJSON_AddNumberToObject(entry, "confidence", facts[i].confidence);
-         cJSON_AddItemToArray(results_arr, entry);
-      }
-      cJSON_AddItemToObject(obj, "results", results_arr);
-
-      cJSON *confl_arr = cJSON_CreateArray();
-      for (int k = 0; k < nconflicts; k++)
-      {
-         cJSON *c = cJSON_CreateObject();
-         cJSON_AddNumberToObject(c, "id_a", (double)facts[conflicts[k].a].id);
-         cJSON_AddNumberToObject(c, "id_b", (double)facts[conflicts[k].b].id);
-         cJSON_AddStringToObject(c, "key", facts[conflicts[k].a].key);
-         cJSON_AddItemToArray(confl_arr, c);
-      }
-      cJSON_AddItemToObject(obj, "contradictions", confl_arr);
-
-      if (rule_id > 0)
-         cJSON_AddNumberToObject(obj, "draft_rule_id", (double)rule_id);
-
-      if (have_synthesis)
-      {
-         cJSON *syn = cJSON_CreateObject();
-         cJSON_AddStringToObject(syn, "narrative", synthesis.narrative);
-         cJSON_AddStringToObject(syn, "contradiction_explanation",
-                                 synthesis.contradiction_explanation);
-         cJSON_AddStringToObject(syn, "rule_proposal", synthesis.rule_proposal);
-         cJSON_AddNumberToObject(syn, "confidence", synthesis.confidence);
-         cJSON_AddItemToObject(obj, "synthesis", syn);
-      }
-
-      emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
-      return;
-   }
-
-   /* Human-readable output */
-   printf("Reflect: %s\n", query);
-   printf("Found %d relevant %s\n\n", count, count == 1 ? "memory" : "memories");
-
-   for (int i = 0; i < count; i++)
-   {
-      printf("[%d] #%lld  tier=%s  kind=%s\n", i + 1, (long long)facts[i].id, facts[i].tier,
-             facts[i].kind);
-      printf("    Key: %s\n", facts[i].key[0] ? facts[i].key : "(none)");
-      printf("    %s\n\n", facts[i].content);
-   }
-
-   if (nconflicts > 0)
-   {
-      printf("CONTRADICTIONS DETECTED (%d)\n", nconflicts);
-      for (int k = 0; k < nconflicts; k++)
-      {
-         int a = conflicts[k].a, b = conflicts[k].b;
-         printf("  Key \"%s\" has conflicting entries:\n", facts[a].key);
-         printf("    [#%lld] %s\n", (long long)facts[a].id, facts[a].content);
-         printf("    [#%lld] %s\n\n", (long long)facts[b].id, facts[b].content);
-      }
-   }
-
-   if (have_synthesis)
-   {
-      printf("\nSYNTHESIS (confidence=%.2f)\n%s\n", synthesis.confidence, synthesis.narrative);
-      if (synthesis.contradiction_explanation[0])
-         printf("\nContradiction explanation: %s\n", synthesis.contradiction_explanation);
-      if (synthesis.rule_proposal[0] && rule_id > 0)
-         printf("Draft rule proposed (id=%d) from synthesis — use `aimee rules approve %d` to "
-                "activate.\n",
-                rule_id, rule_id);
-   }
-
-   if (rule_id > 0 && !have_synthesis)
-      printf("Draft rule proposed (id=%d) — use `aimee rules approve %d` to activate.\n", rule_id,
-             rule_id);
-   else if (want_draft_rule && count < REFLECT_RULE_THRESHOLD && !have_synthesis)
-      printf("(--draft-rule: fewer than %d results, no rule proposed)\n", REFLECT_RULE_THRESHOLD);
+      fputc('\n', stdout);
+   cJSON_Delete(result);
 }
 
 typedef struct

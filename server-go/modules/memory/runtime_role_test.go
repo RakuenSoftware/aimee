@@ -131,6 +131,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseConventionReplay(t, ctx, tx, handler)
 	exerciseHybridReplay(t, ctx, tx, handler)
 	exerciseSessionQueryReplay(t, ctx, tx, handler)
+	exerciseReflectionReplay(t, ctx, tx, backend.(*postgresDataStore))
 	call := func(request DataRequest) DataResponse {
 		t.Helper()
 		reply, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, request))
