@@ -463,8 +463,6 @@ func (s *postgresDataStore) replaceDerivedText(ctx context.Context, id int64, d 
  DELETE FROM memory_temporal_refs WHERE memory_id=$1
 ), frames AS (
  DELETE FROM memory_event_frames WHERE memory_id=$1 AND evidence_kind IN ('derived','chunk')
-), summaries AS (
- DELETE FROM memory_summaries WHERE memory_id=$1 AND scope IN ('headline','signals')
 ) DELETE FROM memory_chunks WHERE memory_id=$1`, id); err != nil {
 		return err
 	}
@@ -492,10 +490,18 @@ func (s *postgresDataStore) replaceDerivedText(ctx context.Context, id int64, d 
 	}
 	for _, summary := range []struct{ scope, text string }{{"headline", d.Headline}, {"signals", d.Signals}} {
 		if summary.text != "" {
-			if _, err := s.db.Exec(ctx, `INSERT INTO memory_summaries(memory_id,scope,summary) VALUES($1,$2,$3)`, id, summary.scope, summary.text); err != nil {
+			if _, err := s.db.Exec(ctx, `INSERT INTO memory_summaries(memory_id,scope,summary) VALUES($1,$2,$3) ON CONFLICT(memory_id,scope) DO UPDATE SET summary=EXCLUDED.summary`, id, summary.scope, summary.text); err != nil {
 				return err
 			}
 		}
+	}
+	if _, err := s.db.Exec(ctx, `WITH stale AS MATERIALIZED (
+ SELECT id FROM memory_summaries WHERE memory_id=$1 AND ((scope='headline' AND $2='') OR (scope='signals' AND $3=''))
+), deps AS (DELETE FROM derived_memory_dependencies WHERE derived_kind='summary' AND derived_memory_id IN(SELECT id::text FROM stale)),
+ queues AS (DELETE FROM derived_rederivation_queue WHERE derived_kind='summary' AND derived_memory_id IN(SELECT id::text FROM stale)),
+ registry AS (DELETE FROM derived_memory_registry WHERE derived_kind='summary' AND derived_memory_id IN(SELECT id::text FROM stale))
+ DELETE FROM memory_summaries WHERE id IN(SELECT id FROM stale)`, id, d.Headline, d.Signals); err != nil {
+		return err
 	}
 	for _, f := range d.Frames {
 		if _, err := s.db.Exec(ctx, `INSERT INTO memory_event_frames(memory_id,actor,action,object,location,event_time,evidence_kind) VALUES($1,$2,$3,$4,$5,$6,$7)`, id, f.Actor, f.Action, f.Object, f.Location, f.Time, f.Evidence); err != nil {

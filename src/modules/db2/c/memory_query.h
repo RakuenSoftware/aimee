@@ -954,16 +954,6 @@ extern "C"
    /* List memory_units for a memory_id. Returns count written. */
    int db2_memory_units_list(int64_t memory_id, db2_memory_unit_row_t *out, int max);
 
-   /* Pick the highest-priority entity attached to a memory (actor >
-    * subject > person > other; tiebreak by weight desc / id asc). */
-   void db2_memory_lookup_primary_entity(int64_t memory_id, char *out, int out_len);
-
-   /* Compute (valid_at, invalid_at) for a memory by combining
-    * memories.valid_from / valid_until with the strongest temporal_ref
-    * and falling back to created_at. */
-   void db2_memory_lookup_time_bounds(int64_t memory_id, char *valid_at_out, int valid_len,
-                                      char *invalid_at_out, int invalid_len);
-
    /* INSERT OR REPLACE into memory_episodes and return the row id of
     * the inserted/looked-up episode (0 on failure). The follow-up
     * SELECT handles the OR REPLACE case where last_insert_rowid
@@ -981,12 +971,6 @@ extern "C"
     * Self-edges are silently skipped. Best-effort. */
    void db2_memory_unit_edge_insert(int64_t src_unit_id, int64_t dst_unit_id, const char *edge_type,
                                     double weight);
-
-   /* DELETE FROM memory_relations WHERE memory_id = ?. Best-effort. */
-   void db2_memory_relations_delete_for_memory(int64_t memory_id);
-
-   /* DELETE FROM memory_episodes WHERE memory_id = ?. Best-effort. */
-   void db2_memory_episodes_delete_for_memory(int64_t memory_id);
 
    /* INSERT OR UPDATE memory_summaries(memory_id, scope, summary).
     * Empty `scope` defaults to "headline". Best-effort; no return. */

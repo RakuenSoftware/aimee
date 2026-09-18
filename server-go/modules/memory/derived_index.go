@@ -59,6 +59,9 @@ func (s *postgresDataStore) RebuildDerivedIndexes(ctx context.Context, limit int
 		if err = s.replaceDerivedText(ctx, id, deriveText(key, content, created)); err != nil {
 			return 0, err
 		}
+		if err = s.replaceDerivedRelations(ctx, id); err != nil {
+			return 0, err
+		}
 		if err = s.replaceDerivedUnits(ctx, id); err != nil {
 			return 0, err
 		}

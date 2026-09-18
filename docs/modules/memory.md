@@ -412,3 +412,11 @@ and retry limits. Collection rebuild queues parents and units; a partial scope
 cannot reset the whole collection. Runtime grants expose only identity/version
 columns needed by dependency freshness checks, not file or outcome content.
 Episode-relation and coreference rebuild parity remains open.
+
+Episode and event/link relation indexing now runs in Go. Matching legacy C
+episodes and their generated relations are adopted once through lineage; later
+rebuilds replace only generated rows. Authored/cognified relations and custom
+episodes survive. Episode and summary identities remain stable across rebuilds,
+obsolete generated facts are removed, and inaccessible linked content cannot be
+copied into a visible parent. Summary replacement also retains its dependency
+registry identity. Coreference and negation refresh remain open migration work.

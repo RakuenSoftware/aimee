@@ -159,7 +159,6 @@ memory_query_shape_t memory_query_shape(const char *raw_query, const char *norm_
 memory_rank_weights_t memory_rank_weights(void);
 void memory_refresh_coref_entities(int64_t memory_id, const char *content);
 void memory_refresh_derived_metadata(int64_t memory_id, const char *key, const char *content);
-void memory_refresh_episode_relations(int64_t memory_id, const char *key, const char *content);
 int memory_rerank_is_slow(void);
 void memory_runtime_state_increment(const char *key, int delta);
 int memory_salience_enabled(void);
