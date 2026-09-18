@@ -433,8 +433,6 @@ void add_provenance(int64_t memory_id, const char *session_id, const char *actio
 
 /* --- Search --- */
 int memory_find_facts(const char *query, int limit, memory_t *out, int max);
-int memory_find_facts_scoped(const char *query, const char *scope_type, const char *scope_value,
-                             int limit, memory_t *out, int max);
 /* --- Conversation Scanning --- */
 
 /* --- Window Compaction --- */
@@ -442,8 +440,6 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
 /* --- Workspace Scoping --- */
 int memory_tag_global(int64_t memory_id);
 int memory_tag_project(int64_t memory_id, const char *project);
-int memory_tag_workspace(int64_t memory_id, const char *workspace);
-int memory_tag_scope(int64_t memory_id, const char *scope_type, const char *scope_value);
 
 /* --- Canonical filter / scope contract (memory-public-contract) --- */
 

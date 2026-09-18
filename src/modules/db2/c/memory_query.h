@@ -58,10 +58,6 @@ extern "C"
     * priority order described above. Returns count written. */
    int db2_memory_scopes_list(int64_t memory_id, db2_memory_scope_tag_row_t *out, int max);
 
-   /* INSERT OR IGNORE into memory_scopes. Best-effort. */
-   void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type,
-                                    const char *scope_value);
-
    /* List memory_episodes rows whose key/text/source_session contains `query`
     * (or all rows when `query` is empty). Ordered by exact-key match,
     * has-reference-time, then created_at DESC. Up to min(limit, max) rows.

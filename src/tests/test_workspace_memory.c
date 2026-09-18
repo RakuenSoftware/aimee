@@ -82,87 +82,23 @@ static void teardown(void)
    (void)system(cmd);
 }
 
-static void test_tag_workspace(void)
+/* Scope mutation, projection idempotence/rollback and delete cascades are
+ * exercised by Go scope_owner_test.go. KB rejects user/agent scopes; private
+ * scope storage belongs to the Server placement. This legacy, unbuilt fixture
+ * retains context assertions still awaiting migration. */
+static int seed_workspace_scope(int64_t id, const char *workspace)
 {
-   setup();
-   memory_t m;
-   memory_insert(TIER_L2, KIND_FACT, "db-host", "host at 10.0.0.5", 0.9, "s1", &m);
-
-   int rc = memory_tag_workspace(m.id, "wol");
-   assert(rc == 0);
-
-   /* Verify tag exists */
-   assert(count_for_memory(
-              "SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1 AND workspace = 'wol'",
-              m.id) == 1);
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_scopes WHERE memory_id = ?1"
-                           " AND scope_type = 'workspace' AND scope_value = 'wol'",
-                           m.id) == 1);
-
-   teardown();
-}
-
-static void test_tag_generic_scope(void)
-{
-   setup();
-   memory_t m;
-   memory_insert(TIER_L2, KIND_FACT, "persona", "Alice prefers short summaries", 0.9, "s1", &m);
-
-   assert(memory_tag_scope(m.id, "user", "alice") == 0);
-
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_scopes WHERE memory_id = ?1"
-                           " AND scope_type = 'user' AND scope_value = 'alice'",
-                           m.id) == 1);
-
-   teardown();
-}
-
-static void test_tag_multiple_workspaces(void)
-{
-   setup();
-   memory_t m;
-   memory_insert(TIER_L2, KIND_FACT, "shared-fact", "network topology", 0.9, "s1", &m);
-
-   memory_tag_workspace(m.id, "wol");
-   memory_tag_workspace(m.id, "infrastructure");
-   memory_tag_workspace(m.id, SHARED_WORKSPACE);
-
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1", m.id) ==
-          3);
-
-   teardown();
-}
-
-static void test_tag_idempotent(void)
-{
-   setup();
-   memory_t m;
-   memory_insert(TIER_L2, KIND_FACT, "key1", "content", 0.9, "s1", &m);
-
-   /* Tag same workspace twice — should not duplicate */
-   memory_tag_workspace(m.id, "wol");
-   memory_tag_workspace(m.id, "wol");
-
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1", m.id) ==
-          1);
-
-   teardown();
-}
-
-static void test_cascade_delete(void)
-{
-   setup();
-   memory_t m;
-   memory_insert(TIER_L2, KIND_FACT, "deleteme", "content", 0.9, "s1", &m);
-   memory_tag_workspace(m.id, "wol");
-
-   memory_delete(m.id);
-
-   /* Tags should be gone due to CASCADE */
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1", m.id) ==
-          0);
-
-   teardown();
+   /* Fixture setup only: scope mutation policy is exercised in Go. */
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "UPDATE memories SET scope_type='workspace',scope_value=?2 WHERE id=?1", err,
+       sizeof(err));
+   assert(st);
+   assert(aimee_pg_bind_int64(st, "?1", id) == 0);
+   assert(aimee_pg_bind_text(st, "?2", workspace) == 0);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(st);
+   return 0;
 }
 
 static void test_ws_context_scoped_memories_first(void)
@@ -172,16 +108,16 @@ static void test_ws_context_scoped_memories_first(void)
 
    /* Insert a wol-scoped fact */
    memory_insert(TIER_L2, KIND_FACT, "wol-config", "WOL uses mTLS on port 8443", 0.9, "s1", &m);
-   memory_tag_workspace(m.id, "wol");
+   seed_workspace_scope(m.id, "wol");
 
    /* Insert an aimee-scoped fact */
    memory_insert(TIER_L2, KIND_FACT, "aimee-config", "aimee uses SQLite for storage", 0.9, "s1",
                  &m);
-   memory_tag_workspace(m.id, "aimee");
+   seed_workspace_scope(m.id, "aimee");
 
    /* Insert a shared fact */
    memory_insert(TIER_L2, KIND_FACT, "infra-fact", "all services run on Proxmox VE", 0.9, "s1", &m);
-   memory_tag_workspace(m.id, SHARED_WORKSPACE);
+   seed_workspace_scope(m.id, SHARED_WORKSPACE);
 
    /* Assemble context for "wol" workspace */
    char *ctx = memory_assemble_context_ws(NULL, "wol");
@@ -231,7 +167,7 @@ static void test_ws_cross_workspace_high_confidence(void)
    assert(memory_insert_ex(TIER_L2, KIND_FACT, "other-ws-fact",
                            "critical pattern from other project", "", 0.95, "s1",
                            MEMORY_AUTHORITY_USER, &m) == 0);
-   memory_tag_workspace(m.id, "other-project");
+   seed_workspace_scope(m.id, "other-project");
 
    /* Fixture state only. Touch behavior is covered by the Go owner replay. */
    assert(count_for_memory("UPDATE memories SET use_count=5 WHERE id=?1 RETURNING use_count",
@@ -310,30 +246,6 @@ static void test_auto_tag_shared_keywords(void)
    teardown();
 }
 
-static void test_scoped_retrieval_filters_results(void)
-{
-   setup();
-   memory_t user_mem, agent_mem;
-   memory_insert(TIER_L2, KIND_FACT, "summary-style", "Alice prefers terse summaries", 0.9, "s1",
-                 &user_mem);
-   memory_insert(TIER_L2, KIND_FACT, "summary-style-agent",
-                 "Reviewer agent prefers exhaustive summaries", 0.9, "s2", &agent_mem);
-
-   assert(memory_tag_scope(user_mem.id, "user", "alice") == 0);
-   assert(memory_tag_scope(agent_mem.id, "agent", "reviewer") == 0);
-
-   memory_t results[8];
-   int count = memory_find_facts_scoped("prefers summaries", "user", "alice", 5, results, 8);
-   assert(count >= 1);
-   assert(results[0].id == user_mem.id);
-
-   count = memory_find_facts_scoped("exhaustive summaries", "agent", "reviewer", 5, results, 8);
-   assert(count >= 1);
-   assert(results[0].id == agent_mem.id);
-
-   teardown();
-}
-
 static void test_local_first_applies_before_limits_across_memory_surfaces(void)
 {
    setup();
@@ -354,7 +266,7 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
                  "workspace-session", &workspace_mem);
    /* An explicit ownership change stamps both the compatibility projection
     * and the memory row used by authorization. */
-   assert(memory_tag_workspace(workspace_mem.id, "active-workspace") == 0);
+   assert(seed_workspace_scope(workspace_mem.id, "active-workspace") == 0);
 
    /* Both buckets exceed every one-row request below. Their much higher
     * relevance/confidence and later insertion order reproduce the old failure:
@@ -469,7 +381,7 @@ static void test_ws_context_prefers_project_scope_when_available(void)
                  &project_mem);
 
    assert(memory_tag_global(global_mem.id) == 0);
-   assert(memory_tag_workspace(workspace_mem.id, "wol") == 0);
+   assert(seed_workspace_scope(workspace_mem.id, "wol") == 0);
    assert(memory_tag_project(project_mem.id, project_name) == 0);
 
    char *ctx = memory_assemble_context_ws(NULL, "wol");
@@ -531,7 +443,7 @@ static void test_api_memory_stats_includes_scope_counts(void)
    memory_insert(TIER_L2, KIND_FACT, "stats-project", "stats project", 0.9, "s3", &project_mem);
 
    assert(memory_tag_global(global_mem.id) == 0);
-   assert(memory_tag_workspace(workspace_mem.id, "wol") == 0);
+   assert(seed_workspace_scope(workspace_mem.id, "wol") == 0);
    assert(memory_tag_project(project_mem.id, project_name) == 0);
 
    char conf_err[128] = "";
@@ -681,17 +593,11 @@ int main(void)
 {
    test_indexed_lexical_recall_and_substring_compatibility();
    test_memory_link_batch_matches_single_query_surface();
-   test_tag_workspace();
-   test_tag_generic_scope();
-   test_tag_multiple_workspaces();
-   test_tag_idempotent();
-   test_cascade_delete();
    test_ws_context_scoped_memories_first();
    test_ws_untagged_treated_as_shared();
    test_ws_cross_workspace_high_confidence();
    test_ws_null_workspace_falls_back();
    test_auto_tag_shared_keywords();
-   test_scoped_retrieval_filters_results();
    test_local_first_applies_before_limits_across_memory_surfaces();
    test_ws_context_prefers_project_scope_when_available();
    test_api_memory_stats_includes_scope_counts();

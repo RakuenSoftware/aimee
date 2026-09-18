@@ -128,8 +128,10 @@ SELECT set_config('aimee.memory_scope_all','1',true);`)
 	if primary(6) != (ScopeTag{Type: "global", Value: "_global"}) || len(collect(6)) != 4 {
 		t.Fatal("partial scope mutation committed")
 	}
-	if _, status := call(DataRequest{Operation: "scope-tag", ID: 6, TagScope: &Scope{Type: "user", Value: "alice"}, IncludeAll: true}); status != bus.ModuleStatusInvalidRequest {
-		t.Fatal("KB accepted private scope", status)
+	for _, private := range []Scope{{Type: "user", Value: "alice"}, {Type: "agent", Value: "reviewer"}} {
+		if _, status := call(DataRequest{Operation: "scope-tag", ID: 6, TagScope: &private, IncludeAll: true}); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal("KB accepted private scope", private, status)
+		}
 	}
 	ids := []int64{1, 2, 3, 4, 1, 9999, 5}
 	sql(`SELECT set_config('aimee.memory_scope_all','1',true)`)

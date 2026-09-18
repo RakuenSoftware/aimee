@@ -100,10 +100,10 @@ const queryRecordColumns = `id,scope_type,scope_value,tier,kind,key,content,conf
 
 // Scope priority belongs ahead of relevance and LIMIT on scoped session reads.
 // The transaction installs these values alongside RLS; missing context promotes
-// only global rows and never invents a project or workspace.
+// only global/shared rows and never invents a project or workspace.
 const queryScopeOrder = `CASE WHEN scope_type='project' AND scope_value=current_setting('aimee.memory_project',true) THEN 1
  WHEN scope_type='workspace' AND scope_value=current_setting('aimee.memory_workspace',true) THEN 2
- WHEN scope_type='global' THEN 3 ELSE 4 END`
+ WHEN scope_type='global' OR (scope_type='workspace' AND scope_value='_shared') THEN 3 ELSE 4 END`
 
 func (s *postgresDataStore) QueryRecords(ctx context.Context, mode, pattern string, days, limit int) ([]Record, error) {
 	if err := s.requireKBDomain(); err != nil {

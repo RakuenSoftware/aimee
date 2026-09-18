@@ -61,6 +61,12 @@ func exerciseHybridReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 		t.Fatal(err)
 	}
 
+	var sharedID int64
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,confidence,scope_type,scope_value)
+ VALUES('L2','fact','hybrid-replay','shared',.1,'workspace','_shared') RETURNING id`).Scan(&sharedID); err != nil {
+		t.Fatal(err)
+	}
+
 	var current, stale int64
 	if err := tx.QueryRow(ctx, `INSERT INTO code_projection_generations(project,state) VALUES('hybrid-fixture','visible') RETURNING id`).Scan(&current); err != nil {
 		t.Fatal(err)
@@ -93,6 +99,8 @@ func exerciseHybridReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 	exec(`UPDATE entity_edges SET edge_class='semantic',commit_id='hybrid-replay-seed',ontology_version=1 WHERE id=$1`, edge)
 	edge = add("hybrid:evidence", "hybrid-fixture", "private-evidence.go", "memory_extraction", 0, 100, "", 0)
 	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id) SELECT $1,'memory','memory:'||id::text FROM memories WHERE key='hybrid-replay' AND scope_value='hybrid-private' LIMIT 1`, edge)
+	edge = add("hybrid:shared-evidence", "hybrid-fixture", "shared.go", "memory_extraction", 0, 3, "", 0)
+	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id) VALUES($1,'memory','memory:'||$2::bigint::text)`, edge, sharedID)
 	exec(`SET LOCAL ROLE aimee_store_runtime`)
 	// Port the former visible-search/LIKE native assertions through the actual
 	// Go transaction boundary, with both distractor buckets larger than LIMIT.
@@ -120,16 +128,16 @@ func exerciseHybridReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 		}
 		req.IncludeAll, req.Limit = true, 64
 		rows = read(req)
-		if len(rows) != 26 || rows[0].ID != largeID || rows[1].ID != workspaceID || rows[len(rows)-1].Scope.Value != "hybrid-private" {
+		if len(rows) != 27 || rows[0].ID != largeID || rows[1].ID != workspaceID || rows[len(rows)-1].Scope.Value != "hybrid-private" {
 			t.Fatalf("%s all scope order: %+v", operation, rows)
 		}
 		req.IncludeAll, req.Project, req.Workspace = false, "", ""
 		rows = read(req)
-		if len(rows) != 12 {
+		if len(rows) != 13 {
 			t.Fatalf("%s missing context count %d", operation, len(rows))
 		}
 		for _, row := range rows {
-			if row.Scope.Type != ScopeGlobal {
+			if row.Scope.Type != ScopeGlobal && row.ID != sharedID {
 				t.Fatal(row)
 			}
 		}
@@ -146,7 +154,7 @@ func exerciseHybridReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 		return result
 	}
 	result := run("hybrid-fixture", false, "lookup")
-	if result.Status != "ok" || len(result.Files) != 1 || result.Files[0].Path != "main.go" || result.Files[0].StructuralWeight != 2 {
+	if result.Status != "ok" || len(result.Files) != 2 || result.Files[0].Path != "main.go" || result.Files[0].StructuralWeight != 2 || result.Files[1].Path != "shared.go" {
 		t.Fatalf("%+v", result.Files)
 	}
 	var why []hybridMemoryWhy

@@ -98,19 +98,7 @@ static int records_from_response(cJSON *response, memory_t *out, int max)
    return count;
 }
 
-static int add_scope(cJSON *request, const char *type, const char *value)
-{
-   if (!type || !type[0])
-      return 0;
-   cJSON *scope = cJSON_AddObjectToObject(request, "scope");
-   return scope && cJSON_AddStringToObject(scope, "type", type) &&
-                  (!value || !value[0] || cJSON_AddStringToObject(scope, "value", value))
-              ? 0
-              : -1;
-}
-
-static int search_bus(const char *query, const char *scope_type, const char *scope_value,
-                      const char *tier, const char *kind, int limit, memory_t *out, int max)
+int memory_find_facts(const char *query, int limit, memory_t *out, int max)
 {
    if (!out || max <= 0 || limit <= 0)
       return -1;
@@ -119,10 +107,7 @@ static int search_bus(const char *query, const char *scope_type, const char *sco
    cJSON *request = cJSON_CreateObject();
    if (!request || !cJSON_AddStringToObject(request, "operation", "search") ||
        !cJSON_AddStringToObject(request, "query", query ? query : "") ||
-       !cJSON_AddNumberToObject(request, "limit", limit) ||
-       (tier && tier[0] && !cJSON_AddStringToObject(request, "tier", tier)) ||
-       (kind && kind[0] && !cJSON_AddStringToObject(request, "kind", kind)) ||
-       add_scope(request, scope_type, scope_value) != 0)
+       !cJSON_AddNumberToObject(request, "limit", limit))
    {
       cJSON_Delete(request);
       return -1;
@@ -131,17 +116,6 @@ static int search_bus(const char *query, const char *scope_type, const char *sco
    int count = records_from_response(response, out, max);
    cJSON_Delete(response);
    return count;
-}
-
-int memory_find_facts(const char *query, int limit, memory_t *out, int max)
-{
-   return search_bus(query, NULL, NULL, NULL, NULL, limit, out, max);
-}
-
-int memory_find_facts_scoped(const char *query, const char *scope_type, const char *scope_value,
-                             int limit, memory_t *out, int max)
-{
-   return search_bus(query, scope_type, scope_value, NULL, NULL, limit, out, max);
 }
 
 int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,

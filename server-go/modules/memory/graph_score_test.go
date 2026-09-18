@@ -171,6 +171,28 @@ func exerciseGraphFusionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	if err != nil || len(records) != 1 || records[0].Scope.Value != "graph-visible" {
 		t.Fatal("scope priority lost before limit", records, err)
 	}
+	shared := seed("graph-shared-workspace", "temporary-graph-scope", "graph-shared-entity")
+	execSQL(`UPDATE memories SET scope_type='workspace',scope_value='_shared' WHERE id=$1`, shared.ID)
+	// Shared memory evidence may support a graph edge for every workspace.
+	var sharedEdge int64
+	if err := tx.QueryRow(ctx, `INSERT INTO entity_edges(source,relation,target,weight)
+ VALUES('graph-shared-entity','related_to','graph-shared-evidence-target',2) RETURNING id`).Scan(&sharedEdge); err != nil {
+		t.Fatal(err)
+	}
+	execSQL(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id) VALUES($1,'memory','memory:'||$2::bigint::text)`, sharedEdge, shared.ID)
+	sharedTarget := seed("graph-shared-evidence-result", "graph-visible", "graph-shared-evidence-target")
+	execSQL(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_project','graph-visible',true),set_config('aimee.memory_workspace','graph-team',true)`)
+	sharedReq := DataRequest{Query: "graph-shared-entity", Project: "graph-visible", Workspace: "graph-team", Limit: 64}
+	records, err = backend.fuseMemoryGraph(ctx, sharedReq, false, nil)
+	if err != nil || !has(records, shared.ID) || !has(records, sharedTarget.ID) || has(records, hidden.ID) {
+		t.Fatal("shared graph visibility", records, err)
+	}
+	sharedReq.Scope, sharedReq.IncludeAll = Scope{Type: ScopeProject, Value: "graph-visible"}, true
+	records, err = backend.fuseMemoryGraph(ctx, sharedReq, true, nil)
+	if err != nil || has(records, shared.ID) || has(records, sharedTarget.ID) || has(records, hidden.ID) || !has(records, first.ID) {
+		t.Fatal("exact graph scope widened", records, err)
+	}
+	execSQL(`SELECT set_config('aimee.memory_scope_all','1',true)`)
 	// An off instance does not query the graph at all.
 	backend.fusionEnabled = false
 	records, err = backend.fuseMemoryGraph(ctx, req, false, []Record{first})

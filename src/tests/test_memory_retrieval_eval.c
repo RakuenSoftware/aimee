@@ -181,12 +181,7 @@ static void test_production_corpus_load(void)
    free(path);
 }
 
-/* End-to-end: graph_code_fusion_state="on" surfaces a memory that is only
- * reachable through the graph (shares a canonical entity node with a base hit)
- * and is otherwise irrelevant to the query — the "bridge" the fusion targets.
- * With fusion off it must not appear; with fusion on it must. Exercises the full
- * recall path (memory_find_facts → memory_find_facts_scoped fusion block), not
- * just the expansion primitive. */
+/* Graph-fusion admission and scope coverage now lives in Go graph_score_test.go. */
 static void test_corpus_load_multi_expected(void)
 {
    static const char *corpus_json =

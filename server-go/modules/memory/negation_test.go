@@ -58,13 +58,17 @@ func exerciseNegationReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backen
 	negative := seed("sentinelRedis runs without persistence.", "neg-visible", "2020-01-01", .1)
 	positive := seed("sentinelRedis uses persistence.", "neg-visible", "2026-09-18", .99)
 	hidden := seed("sentinelRedis runs without persistence.", "neg-hidden", "2027-01-01", 1)
-	var extra, retired int64
+	var extra, retired, shared int64
 	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
  VALUES('L2','fact','alternate deployment','deployment never writes disk','project','neg-visible') RETURNING id`).Scan(&extra); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,lifecycle_state,negation_tokens)
  VALUES('L2','fact','archived deployment','retired','project','neg-visible','archived','not_disk') RETURNING id`).Scan(&retired); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+ VALUES('L2','fact','shared deployment','deployment never writes disk','workspace','_shared') RETURNING id`).Scan(&shared); err != nil {
 		t.Fatal(err)
 	}
 	originalSettings := backend.settings
@@ -102,15 +106,29 @@ func exerciseNegationReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backen
 		t.Fatal("positive query order changed", control, got)
 	}
 	ids := search("sentinelRedis not disk")
-	found := false
+	found, foundShared := false, false
 	for _, id := range ids {
 		found = found || id == extra
+		foundShared = foundShared || id == shared
 		if id == hidden || id == retired {
 			t.Fatal("negation lane leaked ineligible record", ids)
 		}
 	}
-	if !found {
+	if !found || !foundShared {
 		t.Fatal("negation index failed to widen recall", ids)
+	}
+	// An exact project request still excludes shared rows even with IncludeAll.
+	exact, err := backend.finalizeRecall(ctx, DataRequest{Query: "sentinelRedis not disk", Scope: Scope{Type: ScopeProject, Value: "neg-visible"}, Project: "neg-visible", IncludeAll: true, Limit: 8}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exact) == 0 {
+		t.Fatal("exact negation recall lost local result")
+	}
+	for _, row := range exact {
+		if row.Scope.Type != ScopeProject || row.Scope.Value != "neg-visible" {
+			t.Fatal("exact negation scope widened", exact)
+		}
 	}
 	enabled = false
 	for _, id := range search("sentinelRedis not disk") {

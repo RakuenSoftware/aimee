@@ -103,12 +103,12 @@ func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest,
 	if s.placement == PlacementKB {
 		rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM memories
  WHERE lifecycle_state='active' AND activation_suppressed=0 AND
- CASE WHEN $1 THEN scope_type=$2 AND scope_value=$3 ELSE $4 OR scope_type='global'
+ CASE WHEN $1 THEN scope_type=$2 AND scope_value=$3 ELSE $4 OR scope_type='global' OR (scope_type='workspace' AND scope_value='_shared')
  OR (scope_type='project' AND scope_value=$5) OR (scope_type='workspace' AND scope_value=$6) END
  AND ($7='' OR kind=$7) AND ($8='' OR tier=$8)
  AND memory_negation_fts_tsv @@ websearch_to_tsquery('simple',$9)
  ORDER BY CASE WHEN scope_type='project' AND scope_value=$5 THEN 0
- WHEN scope_type='workspace' AND scope_value=$6 THEN 1 WHEN scope_type='global' THEN 2 ELSE 3 END,
+ WHEN scope_type='workspace' AND scope_value=$6 THEN 1 WHEN scope_type='global' OR (scope_type='workspace' AND scope_value='_shared') THEN 2 ELSE 3 END,
  ts_rank_cd(memory_negation_fts_tsv,websearch_to_tsquery('simple',$9)) DESC,id DESC LIMIT 64`,
 			exact, req.Scope.Type, req.Scope.Value, req.IncludeAll, req.Project, req.Workspace, req.Kind, req.Tier, strings.Join(query, " or "))
 		if err != nil {
@@ -139,7 +139,7 @@ func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest,
 				scope = 0
 			case r.Scope.Type == ScopeWorkspace && r.Scope.Value == req.Workspace:
 				scope = 1
-			case r.Scope.Type == ScopeGlobal:
+			case r.Scope.Type == ScopeGlobal || (r.Scope.Type == ScopeWorkspace && r.Scope.Value == "_shared"):
 				scope = 2
 			default:
 				scope = 3

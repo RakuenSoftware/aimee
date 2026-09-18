@@ -373,8 +373,18 @@ int main(void)
       project_a.id = insert_raw_fact("scope-isolated-pattern", "scope isolated evidence");
       project_b.id = insert_raw_fact("scope-isolated-pattern", "scope isolated evidence");
       unresolved.id = insert_raw_fact("scope-unresolved-pattern", "unresolved evidence");
-      db2_memory_scope_tag_insert(project_a.id, "project", "project-a");
-      db2_memory_scope_tag_insert(project_b.id, "project", "project-b");
+      /* Seed canonical ownership directly; scope-tag policy lives in Go. */
+      char scope_err[256] = "";
+      aimee_pg_stmt_t *scope_stmt =
+          aimee_pg_prepare(db2_conn(),
+                           "UPDATE memories SET scope_type='project',scope_value=CASE id WHEN ?1 "
+                           "THEN 'project-a' ELSE 'project-b' END WHERE id IN (?1,?2)",
+                           scope_err, sizeof(scope_err));
+      assert(scope_stmt);
+      assert(aimee_pg_bind_int64(scope_stmt, "?1", project_a.id) == 0);
+      assert(aimee_pg_bind_int64(scope_stmt, "?2", project_b.id) == 0);
+      assert(aimee_pg_step(scope_stmt, scope_err, sizeof(scope_err)) == AIMEE_PG_DONE);
+      aimee_pg_finalize(scope_stmt);
       for (int i = 0; i < 3; i++)
       {
          char session[32];
