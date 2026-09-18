@@ -16,7 +16,6 @@
 #include "modules/db2/c/kb_service_backend.h" /* async queue status */
 #include "modules/db2/c/fact_mutation.h"      /* assertion review/rollback/removal */
 #include "modules/db2/c/evidence_lifecycle.h" /* P1-P9 operator evidence surface */
-#include "modules/db2/c/entity_registry.h"    /* entity merge/unmerge review */
 #include "runtime_secret.h"
 #include <math.h>
 #include <openssl/crypto.h> /* wipe transient credential request copies */
@@ -171,7 +170,7 @@ static int console_memory_owner_response(int rc, cJSON *reply, char *out_buf, in
    int status = 503;
    if (rc == 1 && !strcmp(jo_cstr(reply, "status"), "ok") && cJSON_IsNumber(code) &&
        (code->valuedouble == 200 || code->valuedouble == 400 || code->valuedouble == 403 ||
-        code->valuedouble == 500 || code->valuedouble == 503) &&
+        code->valuedouble == 409 || code->valuedouble == 500 || code->valuedouble == 503) &&
        strlen(body) <= 1048576)
    {
       cJSON *parsed = cJSON_ParseWithOpts(body, NULL, 1);
@@ -349,7 +348,9 @@ static int console_typed_facts_config(const char *body, char *out_buf, int out_c
 }
 
 /* The verified operator context is separate from the untrusted request. */
-static int console_typed_facts_relation(const char *body, char *out_buf, int out_cap)
+static int console_graph_mutation(const char *body, const char *operation,
+                                  const char *const *fields, size_t field_count, char *out_buf,
+                                  int out_cap)
 {
    cJSON *req = body && body[0] ? cJSON_ParseWithOpts(body, NULL, 1) : NULL;
    if (!cJSON_IsObject(req))
@@ -366,9 +367,8 @@ static int console_typed_facts_relation(const char *body, char *out_buf, int out
       return 403;
    }
    cJSON *args = cJSON_CreateObject(), *context = cJSON_CreateObject(), *reply = NULL;
-   cJSON_AddStringToObject(args, "operation", "ontology-review");
-   const char *fields[] = {"action", "relation", "target"};
-   for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
+   cJSON_AddStringToObject(args, "operation", operation);
+   for (size_t i = 0; i < field_count; i++)
    {
       cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);
       if (value)
@@ -385,6 +385,12 @@ static int console_typed_facts_relation(const char *body, char *out_buf, int out
    cJSON_Delete(context);
    cJSON_Delete(req);
    return console_memory_owner_response(rc, reply, out_buf, out_cap);
+}
+
+static int console_typed_facts_relation(const char *body, char *out_buf, int out_cap)
+{
+   const char *fields[] = {"action", "relation", "target"};
+   return console_graph_mutation(body, "ontology-review", fields, 3, out_buf, out_cap);
 }
 
 /* POST /v1/console/typed_facts/assertion
@@ -455,68 +461,8 @@ static int console_typed_facts_assertion(const char *body, char *out_buf, int ou
  * exclusively from the verified console request context. */
 static int console_typed_facts_entity(const char *body, char *out_buf, int out_cap)
 {
-   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
-   const char *action =
-       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
-   fact_actor_t actor;
-   if (!action || (strcmp(action, "merge") != 0 && strcmp(action, "unmerge") != 0))
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be merge or unmerge\"}");
-      return 400;
-   }
-   if (db2_fact_actor_from_request(1, &actor) != 0)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
-      return 403;
-   }
-   char cid[FACT_COMMIT_ID_MAX];
-   if (strcmp(action, "merge") == 0)
-   {
-      cJSON *fj = cJSON_GetObjectItemCaseSensitive(req, "from_id");
-      cJSON *tj = cJSON_GetObjectItemCaseSensitive(req, "into_id");
-      int64_t from = cJSON_IsNumber(fj) && fj->valuedouble > 0 ? (int64_t)fj->valuedouble : 0;
-      int64_t into = cJSON_IsNumber(tj) && tj->valuedouble > 0 ? (int64_t)tj->valuedouble : 0;
-      if (!from || !into || from == into || fj->valuedouble != (double)from ||
-          tj->valuedouble != (double)into)
-      {
-         cJSON_Delete(req);
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"distinct positive integer from_id and into_id required\"}");
-         return 400;
-      }
-      int64_t mid = db2_entity_merge_as(&actor, from, into, cid);
-      cJSON_Delete(req);
-      if (mid <= 0)
-      {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"entities are not both active or merge would be invalid\"}");
-         return 409;
-      }
-      snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
-               (long long)mid, cid);
-      return 200;
-   }
-   cJSON *mj = cJSON_GetObjectItemCaseSensitive(req, "merge_id");
-   int64_t mid = cJSON_IsNumber(mj) && mj->valuedouble > 0 ? (int64_t)mj->valuedouble : 0;
-   if (!mid || mj->valuedouble != (double)mid)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"positive integer merge_id required\"}");
-      return 400;
-   }
-   int rc = db2_entity_unmerge_as(&actor, mid, cid);
-   cJSON_Delete(req);
-   if (rc != 0)
-   {
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":\"merge is unknown, already undone, or no longer current\"}");
-      return 409;
-   }
-   snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
-            (long long)mid, cid);
-   return 200;
+   const char *fields[] = {"action", "from_id", "into_id", "merge_id"};
+   return console_graph_mutation(body, "entity-review", fields, 4, out_buf, out_cap);
 }
 
 /* POST /v1/console/typed_facts/commit

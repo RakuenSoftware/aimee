@@ -1338,6 +1338,28 @@ set_config('aimee.correlation_id',$9,true)`,
 		if err == nil {
 			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "retracted": count, "authority": actor.Role})
 		}
+	case "entity-review", "entity-mutate":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		actor := FactActor{Principal: "system:kb-maintenance", TransportIdentity: "internal", Role: "system", Rank: 20}
+		if request.Operation == "entity-review" {
+			caller := options.commandContext
+			if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			actor = FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "operator", Rank: 40, Authenticated: 1}
+			if actor.TransportIdentity == "" {
+				actor.TransportIdentity = actor.Principal
+			}
+		}
+		var result map[string]any
+		result, err = backend.mutateEntity(ctx, actor, request.State, request.SourceID, request.TargetID, request.ID)
+		if err == nil {
+			response.Updated = true
+			response.Payload, err = json.Marshal(result)
+		}
 	case "ontology-dashboard", "ontology-review":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
@@ -2372,6 +2394,15 @@ set_config('aimee.correlation_id',$9,true)`,
 				raw, _ := json.Marshal(DataResponse{Payload: payload})
 				return raw, bus.ModuleStatusOK
 			}
+		}
+		if (request.Operation == "entity-review" || request.Operation == "entity-mutate") && errors.Is(err, errEntityTransition) {
+			kind := "conflict"
+			if request.Operation == "entity-mutate" {
+				kind = "not_found"
+			}
+			payload, _ := json.Marshal(commandError(kind, "entity transition refused: unknown, inactive, already undone, or no longer current"))
+			raw, _ := json.Marshal(DataResponse{Payload: payload})
+			return raw, bus.ModuleStatusOK
 		}
 		if request.Operation == "fact-review" {
 			kind := ""

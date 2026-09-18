@@ -4,8 +4,7 @@
 
 #include "aimee.h"
 #include "config.h"
-#include "modules/db2/c/entity_registry.h" /* db2_entity_merge / db2_entity_unmerge */
-#include "modules/db2/c/kb_payload.h"      /* db2_kb_async_enqueue */
+#include "modules/db2/c/kb_payload.h" /* db2_kb_async_enqueue */
 #include "modules/db2/c/decision_log.h"
 #include "session_briefing.h"
 #include "modules/db2/c/tasks.h"
@@ -196,50 +195,5 @@ cJSON *db2_kb_service_task_list_json(const char *state, const char *session_id, 
       cJSON_AddStringToObject(obj, "session_id", rows[i].session_id);
       cJSON_AddItemToArray(arr, obj);
    }
-   return resp;
-}
-
-/* --- Typed-fact §4 retraction and §3 entity merge/unmerge ---
- *
- * These three primitives were built, tested, and left with no production caller:
- * a wrong entity merge was recorded and reversible in principle, with no way to
- * reverse one outside a test, and retraction was reachable only from the
- * pattern-extraction path in fact_ingest. They are the correction half of the
- * typed-fact layer — without a surface, the layer can learn a wrong fact but
- * cannot be told that it is wrong. */
-
-cJSON *db2_kb_service_entities_merge_json(int64_t from_id, int64_t into_id)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int64_t merge_id = db2_entity_merge(from_id, into_id);
-   if (merge_id <= 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message",
-                              "merge refused: both ids must be distinct active entities");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   /* The audit id is the only handle a caller can later unmerge with, so it is
-    * the one field this response must always carry. */
-   cJSON_AddNumberToObject(resp, "merge_id", (double)merge_id);
-   return resp;
-}
-
-cJSON *db2_kb_service_entities_unmerge_json(int64_t merge_id)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   if (db2_entity_unmerge(merge_id) != 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "no such merge, or it was already undone");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "merge_id", (double)merge_id);
    return resp;
 }

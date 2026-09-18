@@ -14,6 +14,7 @@
 #include "kb_client.h"
 
 #include <string.h>
+#include <math.h>
 #include <stdlib.h>
 
 /* All three are gated on CAP_MEMORY_WRITE, matching memory.supersede — the
@@ -94,30 +95,53 @@ int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, facts_retract_command(req, server_request_account()));
 }
 
+/* Preserve the complete Go-owned reply, including exact integer tokens. */
+static cJSON *entities_command(const char *method, cJSON *req)
+{
+   cJSON *request = cJSON_CreateObject();
+   const char *fields[] = {"from_id", "into_id", "merge_id"};
+   for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
+   {
+      cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);
+      if (value)
+         cJSON_AddItemToObject(request, fields[i], cJSON_Duplicate(value, 1));
+   }
+   char *raw = request ? kb_v1_action_request(method, request) : NULL;
+   cJSON *parsed = raw && strlen(raw) <= 1048576 ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   const char *status = jo_cstr(parsed, "status");
+   cJSON *result = NULL;
+   cJSON *id = cJSON_GetObjectItemCaseSensitive(parsed, "merge_id");
+   int valid_id = cJSON_IsNumber(id) && isfinite(id->valuedouble) && id->valuedouble > 0 &&
+                  trunc(id->valuedouble) == id->valuedouble;
+   if (cJSON_IsObject(parsed) && !strcmp(status, "ok") && valid_id &&
+       jo_cstr(parsed, "commit_id")[0])
+      result = cJSON_CreateRaw(raw);
+   else if (cJSON_IsObject(parsed) && !strcmp(status, "error"))
+   {
+      const char *kind = jo_cstr(parsed, "kind");
+      char *owned = strdup(kind[0] ? kind : SERVER_ERR_UNAVAILABLE);
+      if (owned)
+      {
+         server_error_kind_apply(parsed, owned);
+         free(owned);
+         result = parsed;
+         parsed = NULL;
+      }
+   }
+   cJSON_Delete(parsed);
+   free(raw);
+   return result
+              ? result
+              : server_error_kind_json(SERVER_ERR_UNAVAILABLE, "entity mutation unavailable", NULL);
+}
+
 cJSON *entities_merge_command(cJSON *req)
 {
-   int64_t from_id = 0;
-   int64_t into_id = 0;
-   if (memory_request_positive_id(req, "from_id", &from_id) != 0)
-      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
-                                    "entities.merge requires a positive integer from_id", NULL);
-   if (memory_request_positive_id(req, "into_id", &into_id) != 0)
-      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
-                                    "entities.merge requires a positive integer into_id", NULL);
-   if (from_id == into_id)
-      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
-                                    "entities.merge cannot merge an entity into itself", NULL);
-
-   int64_t merge_id = 0;
-   if (kb_client_entities_merge(from_id, into_id, &merge_id) != 0)
-      return server_error_kind_json(
-          SERVER_ERR_NOT_FOUND, "merge refused: both ids must be distinct active entities", NULL);
-
-   cJSON *resp = jo_ok();
-   /* The audit id is what makes the merge reversible. Returning it is the whole
-    * difference between "reversible in principle" and "reversible". */
-   cJSON_AddNumberToObject(resp, "merge_id", (double)merge_id);
-   return resp;
+   return entities_command("entities.merge", req);
+}
+cJSON *entities_unmerge_command(cJSON *req)
+{
+   return entities_command("entities.unmerge", req);
 }
 
 int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -125,24 +149,6 @@ int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    return server_send_ok(conn, entities_merge_command(req));
 }
-
-cJSON *entities_unmerge_command(cJSON *req)
-{
-   int64_t merge_id = 0;
-   if (memory_request_positive_id(req, "merge_id", &merge_id) != 0)
-      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
-                                    "entities.unmerge requires a positive integer merge_id", NULL);
-
-   if (kb_client_entities_unmerge(merge_id) != 0)
-      return server_error_kind_json(SERVER_ERR_NOT_FOUND, "no such merge, or it was already undone",
-                                    NULL);
-
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "merge_id", (double)merge_id);
-   cJSON_AddBoolToObject(resp, "undone", 1);
-   return resp;
-}
-
 int handle_entities_unmerge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

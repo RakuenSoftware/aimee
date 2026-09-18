@@ -198,7 +198,7 @@ func exerciseOntologyReviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		t.Fatal(entities[0])
 	}
 	var forbidden bool
-	if err := tx.QueryRow(ctx, `SELECT has_column_privilege(current_user,'rel_types','sensitivity','UPDATE') OR has_table_privilege(current_user,'entity_merges','UPDATE') OR has_column_privilege(current_user,'entity_merges','created_at','SELECT')`).Scan(&forbidden); err != nil || forbidden {
+	if err := tx.QueryRow(ctx, `SELECT has_column_privilege(current_user,'rel_types','sensitivity','UPDATE') OR has_column_privilege(current_user,'entity_merges','from_id','UPDATE') OR has_column_privilege(current_user,'entity_merges','created_at','SELECT')`).Scan(&forbidden); err != nil || forbidden {
 		t.Fatal(forbidden, err)
 	}
 	bound.settings = func() (map[string]any, error) { return nil, errors.New("unavailable") }

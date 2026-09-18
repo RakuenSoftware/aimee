@@ -10,38 +10,6 @@
 #include <stdio.h>
 #include <string.h>
 
-static void merge_commit(int64_t merge_id, char out[FACT_COMMIT_ID_MAX])
-{
-   char key[32], err[256] = "";
-   snprintf(key, sizeof(key), "%lld", (long long)merge_id);
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
-                        "SELECT commit_id FROM fact_graph_changes WHERE object_kind='entity_merge'"
-                        " AND object_key=?1 AND action='merge' LIMIT 1",
-                        err, sizeof(err));
-   assert(st);
-   aimee_pg_bind_text(st, "?1", key);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-   snprintf(out, FACT_COMMIT_ID_MAX, "%s", aimee_pg_column_text(st, 0));
-   aimee_pg_finalize(st);
-}
-
-static void assert_commit_actor(const char *commit_id, const char *principal, int rank)
-{
-   char err[256] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
-                        "SELECT actor_principal,authority_rank FROM fact_graph_commits"
-                        " WHERE commit_id=?1 LIMIT 1",
-                        err, sizeof(err));
-   assert(st);
-   aimee_pg_bind_text(st, "?1", commit_id);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-   assert(strcmp(aimee_pg_column_text(st, 0), principal) == 0);
-   assert(aimee_pg_column_int(st, 1) == rank);
-   aimee_pg_finalize(st);
-}
-
 static void test_normalize(void)
 {
    char out[64];
@@ -111,32 +79,27 @@ int main(void)
    assert(db2_entity_alias_bind("", cid, 1) == -1);
    assert(db2_entity_alias_bind("dangle", 999999, 1) == -1); /* target must exist */
 
-   /* first-class merge / unmerge (reversible via the merged_into follow). */
+   /* The Go producer is tested against PostgreSQL. Retain the native rollback
+    * consumer fixture with the external merge record's exact shape. */
    int64_t m_from = db2_entity_register_named("oldname box", NODE_DEVICE);
    int64_t m_into = db2_entity_register_named("newname box", NODE_DEVICE);
-   assert(m_from > 0 && m_into > 0);
-   int64_t mid = db2_entity_merge(m_from, m_into);
-   assert(mid > 0);
-   assert(db2_entity_resolve("oldname box") == m_into); /* merged -> follows */
-   char cid_commit[FACT_COMMIT_ID_MAX], rollback_commit[FACT_COMMIT_ID_MAX];
-   merge_commit(mid, cid_commit);
-   fact_actor_t operator_actor = {.rank = FACT_ACTOR_OPERATOR, .authenticated = 1};
-   snprintf(operator_actor.principal, sizeof(operator_actor.principal), "test:operator");
-   snprintf(operator_actor.role, sizeof(operator_actor.role), "operator");
-   assert(db2_fact_commit_rollback(&operator_actor, cid_commit, rollback_commit) == 1);
-   assert(db2_entity_resolve("oldname box") == m_from); /* batch rollback restored merge */
-   char direct_commit[FACT_COMMIT_ID_MAX], unmerge_commit[FACT_COMMIT_ID_MAX];
-   mid = db2_entity_merge_as(&operator_actor, m_from, m_into, direct_commit);
-   assert(mid > 0);
-   assert(direct_commit[0] != '\0');
-   assert_commit_actor(direct_commit, "test:operator", FACT_ACTOR_OPERATOR);
-   assert(db2_entity_unmerge_as(&operator_actor, mid, unmerge_commit) == 0);
-   assert(unmerge_commit[0] != '\0');
-   assert_commit_actor(unmerge_commit, "test:operator", FACT_ACTOR_OPERATOR);
-   assert(db2_entity_resolve("oldname box") == m_from); /* restored */
-   assert(db2_entity_unmerge(mid) == -1);               /* already undone */
-   assert(db2_entity_merge(m_from, m_from) == -1);      /* self-merge rejected */
-   assert(db2_entity_merge(m_from, 999999) == -1);      /* missing target rejected */
+   char err[256] = "", sql[512];
+   assert(aimee_pg_exec(db2_conn(), "BEGIN", err, sizeof(err)) == 0);
+   snprintf(sql, sizeof(sql),
+            "INSERT INTO entity_merges(id,from_id,into_id) VALUES(4321,%lld,%lld)",
+            (long long)m_from, (long long)m_into);
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   assert(db2_entity_mark_merged(m_from, m_into) == 0);
+   fact_actor_t actor = {.rank = FACT_ACTOR_OPERATOR, .authenticated = 1};
+   snprintf(actor.principal, sizeof(actor.principal), "test:operator");
+   snprintf(actor.role, sizeof(actor.role), "operator");
+   char commit[FACT_COMMIT_ID_MAX], rollback[FACT_COMMIT_ID_MAX];
+   assert(db2_fact_graph_record_external_in_txn(&actor, "entity.merge", "entity_merge", "4321",
+                                                "merge", "active", "merged", 1, commit) == 0);
+   assert(aimee_pg_exec(db2_conn(), "COMMIT", err, sizeof(err)) == 0);
+   assert(db2_entity_resolve("oldname box") == m_into);
+   assert(db2_fact_commit_rollback(&actor, commit, rollback) == 1);
+   assert(db2_entity_resolve("oldname box") == m_from);
 
    /* entity_name_conflicts queue. */
    int64_t conf = db2_entity_conflict_record("ambiguous theo");
@@ -153,25 +116,6 @@ int main(void)
    assert(db2_entity_conflict_priority("ambiguous theo") == 3);
    assert(db2_entity_conflict_count("open") == 0);
    assert(db2_entity_conflict_priority("never recorded") == -1);
-
-   /* merge state machine: cycle, already-merged, and single-hop after a chain. */
-   int64_t x = db2_entity_register_named("xenon box", NODE_DEVICE);
-   int64_t y = db2_entity_register_named("yttrium box", NODE_DEVICE);
-   int64_t z = db2_entity_register_named("zinc box", NODE_DEVICE);
-   assert(x > 0 && y > 0 && z > 0);
-   int64_t mxy = db2_entity_merge(x, y); /* X -> Y */
-   assert(mxy > 0);
-   assert(db2_entity_resolve("xenon box") == y);
-   assert(db2_entity_merge(y, x) == -1);         /* cycle: target X no longer active */
-   assert(db2_entity_resolve("xenon box") == y); /* X still merged into Y */
-   assert(db2_entity_merge(x, z) == -1);         /* X already merged -> not active */
-   int64_t myz = db2_entity_merge(y, z);         /* Y -> Z (Y still active) */
-   assert(myz > 0);
-   assert(db2_entity_resolve("xenon box") == y); /* single hop: Y, not Z */
-   assert(db2_entity_resolve("yttrium box") == z);
-   /* unmerging X->Y restores X even though Y is itself now merged. */
-   assert(db2_entity_unmerge(mxy) == 0);
-   assert(db2_entity_resolve("xenon box") == x);
 
    db2_test_shim_close();
    printf("entity_registry: all tests passed\n");

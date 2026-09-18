@@ -127,8 +127,6 @@ extern "C"
    cJSON *db2_kb_service_feedback_record_json(const char *polarity, const char *title,
                                               const char *description, int weight);
    /* §3 entity merge/unmerge. merge returns the audit id needed to reverse it. */
-   cJSON *db2_kb_service_entities_merge_json(int64_t from_id, int64_t into_id);
-   cJSON *db2_kb_service_entities_unmerge_json(int64_t merge_id);
    cJSON *db2_kb_service_directive_expire_session_json(void);
    /* Dashboard endpoints that walk DB2 tables.  Each returns
     * {"status":"ok","payload":<api_* output>}. */

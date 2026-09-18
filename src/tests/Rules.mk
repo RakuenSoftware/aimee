@@ -7881,7 +7881,7 @@ $(TESTPREFIX)/unit-test-cmd-memory-cognify: $(OBJDIR)/cmd_util.o $(OBJDIR)/tests
 $(TESTPREFIX)/unit-test-kb-memory-facts-connection: $(OBJDIR)/tests/test_kb_memory_facts_connection.o $(OBJDIR)/kb/kb_memory_facts.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-server-facts-transport: $(OBJDIR)/tests/test_server_facts_transport.o $(OBJDIR)/server/server_facts.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+$(TESTPREFIX)/unit-test-server-facts-transport: $(OBJDIR)/tests/test_server_facts_transport.o $(OBJDIR)/kb/kb_service_memory.o $(OBJDIR)/server/server_facts.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-memory-view-transport: $(OBJDIR)/tests/test_memory_view_transport.o $(OBJDIR)/session_briefing.o $(OBJDIR)/dashboard_kb.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o

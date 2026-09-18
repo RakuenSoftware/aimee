@@ -781,15 +781,6 @@ int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind);
 int kb_client_memory_supersede(int64_t old_id, const char *new_content, double confidence,
                                const char *session_id, memory_t *out);
 
-/* §3 entity merge via aimee-kb: collapse from_id into into_id.  *out_merge_id
- * receives the audit id, which is the handle kb_client_entities_unmerge needs —
- * a caller that discards it cannot reverse the merge.  0 / -1. */
-int kb_client_entities_merge(int64_t from_id, int64_t into_id, int64_t *out_merge_id);
-
-/* Reverse a recorded merge by its audit id.  0 on success, -1 if unknown or
- * already undone. */
-int kb_client_entities_unmerge(int64_t merge_id);
-
 /* Fetch the version history for a memory key via aimee-kb.  Returns
  * the number of rows written into |out| (0 if kb is unreachable).
  * Mirrors memory_fact_history(). */

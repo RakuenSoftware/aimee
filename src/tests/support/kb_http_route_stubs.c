@@ -8,7 +8,6 @@
 #include "kb_http_telemetry.h"
 #include "modules/db2/c/server_registry.h"
 #include "modules/db2/c/evidence_lifecycle.h"
-#include "modules/db2/c/entity_registry.h"
 #include "modules/db2/c/management_identity_journal.h"
 #include "memory.h"
 #include "modules/db2/c/memory_query.h"
@@ -391,27 +390,6 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
    (void)assertion_id;
    (void)action;
    (void)out;
-   return -1;
-}
-
-int64_t db2_entity_merge_as(const fact_actor_t *actor, int64_t from_id, int64_t into_id,
-                            char commit_id[FACT_COMMIT_ID_MAX])
-{
-   (void)actor;
-   (void)from_id;
-   (void)into_id;
-   if (commit_id)
-      commit_id[0] = '\0';
-   return -1;
-}
-
-int db2_entity_unmerge_as(const fact_actor_t *actor, int64_t merge_id,
-                          char commit_id[FACT_COMMIT_ID_MAX])
-{
-   (void)actor;
-   (void)merge_id;
-   if (commit_id)
-      commit_id[0] = '\0';
    return -1;
 }
 

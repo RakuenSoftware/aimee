@@ -140,7 +140,8 @@
     "server-go/modules/memory/typed_context.go",
     "server-go/modules/memory/css_conventions.go",
     "server-go/modules/memory/fact_maintenance.go",
-    "server-go/modules/memory/ontology_review.go"
+    "server-go/modules/memory/ontology_review.go",
+    "server-go/modules/memory/entity_mutation.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -236,7 +237,8 @@
     "server-go/modules/memory/typed_context_test.go",
     "server-go/modules/memory/css_conventions_test.go",
     "server-go/modules/memory/fact_ingestion_parity_test.go",
-    "server-go/modules/memory/ontology_review_test.go"
+    "server-go/modules/memory/ontology_review_test.go",
+    "server-go/modules/memory/entity_mutation_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

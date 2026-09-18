@@ -140,6 +140,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseTypedContextReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseCSSConventionsReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseOntologyReviewReplay(t, ctx, tx, backend.(*postgresDataStore))
+	exerciseEntityMutationReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseCheckpointReplay(t, ctx, tx, handler)
 	exerciseConventionReplay(t, ctx, tx, handler)
 	exerciseHybridReplay(t, ctx, tx, handler)

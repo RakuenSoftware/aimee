@@ -46,6 +46,12 @@ func mutationAudit(request DataRequest, response DataResponse, status bus.Module
 	case "update-content", "reject", "restore":
 		a.Tool = map[string]string{"update-content": "memory.update", "reject": "memory.reject", "restore": "memory.restore"}[request.Operation]
 		success = success && response.Updated
+	case "entity-review", "entity-mutate":
+		a.Tool = "entities." + request.State
+		if request.State == "merge" {
+			a.TaskID = request.SourceID
+		}
+		success = success && response.Updated
 	case "delete", "delete-as":
 		a.Tool = "memory.delete"
 		if request.Operation == "delete-as" && request.Authority == AuthorityModel {

@@ -20,6 +20,7 @@
 #include "kb_service_memory.h"
 #include "log.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -526,35 +527,48 @@ int kb_handle_memory_search_assertions(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to search semantic assertions");
 }
 
-/* §4 retraction: withdraw a typed fact the layer got wrong. `target` is optional
- * and scopes the retraction to one value; omitting it retracts every current
- * value of (source, relation). */
-
-/* §3 entity merge: collapse two records of the same real entity into one. */
-int kb_handle_entities_merge(int fd, cJSON *req)
+/* Only transport remains: Go owns validation, authority, mutation and replies. */
+static int kb_entities_mutation(int fd, cJSON *req, const char *action)
 {
-   cJSON *from_j = cJSON_GetObjectItemCaseSensitive(req, "from_id");
-   cJSON *into_j = cJSON_GetObjectItemCaseSensitive(req, "into_id");
-   if (!cJSON_IsNumber(from_j) || !cJSON_IsNumber(into_j))
-      return kb_send_error(fd, "entities.merge requires numeric from_id and into_id");
-   if (from_j->valuedouble <= 0 || into_j->valuedouble <= 0)
-      return kb_send_error(fd, "entities.merge ids must be positive");
-
-   cJSON *resp = db2_kb_service_entities_merge_json((int64_t)from_j->valuedouble,
-                                                    (int64_t)into_j->valuedouble);
-   return kb_reply_or_error(fd, resp, "failed to merge entities");
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "entity-mutate");
+   cJSON_AddStringToObject(args, "action", action);
+   const char *fields[] = {"from_id", "into_id", "merge_id"};
+   for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
+   {
+      cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);
+      if (value)
+         cJSON_AddItemToObject(args, fields[i], cJSON_Duplicate(value, 1));
+   }
+   int rc = args ? aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) : -1;
+   cJSON_Delete(args);
+   const char *json = jo_cstr(reply, "json");
+   cJSON *result = NULL;
+   if (rc == 1 && !strcmp(jo_cstr(reply, "status"), "ok") && strlen(json) <= 1048576)
+   {
+      cJSON *parsed = cJSON_ParseWithOpts(json, NULL, 1);
+      const char *status = jo_cstr(parsed, "status");
+      cJSON *id = cJSON_GetObjectItemCaseSensitive(parsed, "merge_id");
+      int valid_id = cJSON_IsNumber(id) && isfinite(id->valuedouble) && id->valuedouble > 0 &&
+                     trunc(id->valuedouble) == id->valuedouble;
+      if (cJSON_IsObject(parsed) &&
+          ((!strcmp(status, "ok") && valid_id && jo_cstr(parsed, "commit_id")[0]) ||
+           !strcmp(status, "error")))
+         result = cJSON_CreateRaw(json);
+      cJSON_Delete(parsed);
+   }
+   cJSON_Delete(reply);
+   return kb_reply_or_error(fd, result, "entity mutation unavailable");
 }
 
-/* §3 unmerge: reverse a recorded merge. Without this the merge audit row was
- * reversible only in principle — nothing outside a test could undo one. */
+int kb_handle_entities_merge(int fd, cJSON *req)
+{
+   return kb_entities_mutation(fd, req, "merge");
+}
+
 int kb_handle_entities_unmerge(int fd, cJSON *req)
 {
-   cJSON *mid_j = cJSON_GetObjectItemCaseSensitive(req, "merge_id");
-   if (!cJSON_IsNumber(mid_j) || mid_j->valuedouble <= 0)
-      return kb_send_error(fd, "entities.unmerge requires a positive merge_id");
-
-   cJSON *resp = db2_kb_service_entities_unmerge_json((int64_t)mid_j->valuedouble);
-   return kb_reply_or_error(fd, resp, "failed to unmerge entities");
+   return kb_entities_mutation(fd, req, "unmerge");
 }
 
 int kb_handle_task_create(int fd, cJSON *req)

@@ -2732,6 +2732,21 @@ static void test_console_ontology_owner(void)
    assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
                            sizeof(buf)) == 403);
    assert(before == ontology_calls);
+   path = "/v1/console/typed_facts/entity";
+   body =
+       "{\"action\":\"merge\",\"from_id\":\"9007199254740993\",\"into_id\":2,\"actor\":\"forged\"}";
+   test_kb_fact_actor_set(1);
+   ontology_status = 200;
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 200);
+   assert(!strcmp(buf, ontology_json));
+   ontology_status = 409;
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 409);
+   test_kb_fact_actor_set(0);
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 403);
+   ontology_status = 200;
    puts("  PASS: ontology owner transport preserves JSON and verified context");
 }
 
@@ -4618,6 +4633,18 @@ int aimee_module_commands_dispatch_context(const char *method, const cJSON *args
       assert(!strcmp(jo_cstr(args, "action"), "map"));
       assert(!strcmp(jo_cstr(args, "relation"), "novel"));
       assert(!strcmp(jo_cstr(args, "target"), "works_for"));
+      assert(!cJSON_GetObjectItemCaseSensitive(args, "actor"));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
+      assert(!strcmp(jo_cstr(context, "principal"), "test:operator"));
+      assert(!strcmp(jo_cstr(context, "transport_identity"), "test-transport"));
+      return ontology_owner_fixture(result);
+   }
+   if (!strcmp(method, "memory.runtime") && !strcmp(jo_cstr(args, "operation"), "entity-review"))
+   {
+      assert(!strcmp(jo_cstr(args, "action"), "merge"));
+      assert(!strcmp(jo_cstr(args, "from_id"), "9007199254740993"));
+      assert(jo_int((cJSON *)args, "into_id", 0) == 2);
       assert(!cJSON_GetObjectItemCaseSensitive(args, "actor"));
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));

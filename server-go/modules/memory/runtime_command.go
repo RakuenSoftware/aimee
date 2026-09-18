@@ -16,6 +16,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "entity-review", "entity-mutate":
+		return handleEntityMutation(options, invocation, args)
 	case "ontology-dashboard", "ontology-review":
 		return handleOntologyConsole(options, invocation, args)
 	case "css-convention-sync", "css-conventions":

@@ -68,66 +68,6 @@ int kb_client_memory_supersede(int64_t old_id, const char *new_content, double c
    return ok ? 0 : -1;
 }
 
-/* Typed-fact §4 retraction. Reports the number of edges affected via
- * *out_retracted (0 is a legitimate success: nothing current matched), and
- * distinguishes a refusal on an immutable relation from a generic failure so the
- * caller can say which happened. */
-
-int kb_client_entities_merge(int64_t from_id, int64_t into_id, int64_t *out_merge_id)
-{
-   if (out_merge_id)
-      *out_merge_id = 0;
-   if (from_id <= 0 || into_id <= 0)
-      return -1;
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "from_id", (double)from_id);
-   cJSON_AddNumberToObject(req, "into_id", (double)into_id);
-   char *json = kb_v1_action_request("entities.merge", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
-   if (ok && out_merge_id)
-   {
-      cJSON *mid = cJSON_GetObjectItemCaseSensitive(resp, "merge_id");
-      if (cJSON_IsNumber(mid))
-         *out_merge_id = (int64_t)mid->valuedouble;
-   }
-   cJSON_Delete(resp);
-   kb_client_memory_audit_note("entities.merge", from_id, NULL, NULL, NULL, 0.0, NULL, ok);
-   return ok ? 0 : -1;
-}
-
-int kb_client_entities_unmerge(int64_t merge_id)
-{
-   if (merge_id <= 0)
-      return -1;
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "merge_id", (double)merge_id);
-   char *json = kb_v1_action_request("entities.unmerge", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
-   cJSON_Delete(resp);
-   kb_client_memory_audit_note("entities.unmerge", merge_id, NULL, NULL, NULL, 0.0, NULL, ok);
-   return ok ? 0 : -1;
-}
-
 int kb_client_memory_fact_history(const char *key, memory_t *out, int max)
 {
    if (!key || !out || max <= 0)
