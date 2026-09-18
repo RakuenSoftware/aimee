@@ -1106,6 +1106,31 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
+	case "fact-candidates":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var candidates []map[string]any
+		candidates, err = backend.factCandidates(ctx, request.Limit)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "candidates": candidates})
+		}
+	case "fact-review":
+		backend, ok := options.data.(*postgresDataStore)
+		caller := options.commandContext
+		if !ok || invocation.PrincipalRef != 0 || caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		actor := FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "operator", Rank: 40, Authenticated: 1}
+		if actor.TransportIdentity == "" {
+			actor.TransportIdentity = actor.Principal
+		}
+		var result factMutationResult
+		result, err = backend.reviewFact(ctx, actor, request.ID, request.State)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "ok": true, "assertion_id": result.AssertionID, "lifecycle": result.Lifecycle, "commit_id": result.CommitID})
+		}
 	case "cognify", "cognify-drain", "cognify-status":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || transaction == nil {
@@ -2034,6 +2059,20 @@ set_config('aimee.correlation_id',$9,true)`,
 	if err != nil {
 		if invocation.Cancelled() || ctx.Err() != nil {
 			return nil, bus.ModuleStatusCancelled
+		}
+
+		if request.Operation == "fact-review" {
+			kind := ""
+			if errors.Is(err, ErrMemoryNotFound) {
+				kind = "not_found"
+			} else if errors.Is(err, errFactReviewConflict) || errors.Is(err, errFactTombstoned) {
+				kind = "conflict"
+			}
+			if kind != "" {
+				payload, _ := json.Marshal(commandError(kind, "fact review transition refused"))
+				raw, _ := json.Marshal(DataResponse{Payload: payload})
+				return raw, bus.ModuleStatusOK
+			}
 		}
 		return nil, bus.ModuleStatusInternal
 	}

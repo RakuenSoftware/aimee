@@ -2236,45 +2236,6 @@ int db2_fact_erasure_execute(const fact_actor_t *actor, const char *source, cons
    return removed;
 }
 
-int db2_fact_candidates(fact_candidate_t *out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-   char err[FM_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "SELECT e.id,e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,"
-       " e.authority_rank,(SELECT COUNT(*) FROM fact_evidence fe WHERE fe.assertion_id=e.id"
-       " AND fe.stance='supports' AND fe.invalidated_at=''),e.commit_id FROM entity_edges e"
-       " WHERE e.edge_class='semantic' AND e.lifecycle_state='candidate'"
-       " AND e.superseded_at='' AND e.invalidated_at='' AND e.suppressed=0"
-       " ORDER BY e.id LIMIT ?1",
-       err, sizeof(err));
-   if (!st)
-      return -1;
-   aimee_pg_bind_int(st, "?1", max);
-   int n = 0;
-   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      memset(&out[n], 0, sizeof(out[n]));
-      out[n].id = aimee_pg_column_int64(st, 0);
-      fm_copy(out[n].source, sizeof(out[n].source), aimee_pg_column_text(st, 1));
-      fm_copy(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 2));
-      fm_copy(out[n].target, sizeof(out[n].target), aimee_pg_column_text(st, 3));
-      fm_copy(out[n].assertion_kind, sizeof(out[n].assertion_kind), aimee_pg_column_text(st, 4));
-      fm_copy(out[n].lifecycle, sizeof(out[n].lifecycle), aimee_pg_column_text(st, 5));
-      out[n].authority_rank = aimee_pg_column_int(st, 6);
-      out[n].evidence_count = aimee_pg_column_int(st, 7);
-      fm_copy(out[n].commit_id, sizeof(out[n].commit_id), aimee_pg_column_text(st, 8));
-      n++;
-   }
-   aimee_pg_finalize(st);
-   return n;
-}
-
 static int fm_maintenance_transition(const fact_actor_t *actor, int promote, int threshold,
                                      const char *cutoff)
 {

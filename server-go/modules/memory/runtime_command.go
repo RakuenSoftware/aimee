@@ -23,6 +23,18 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	request := DataRequest{IncludeAll: true}
 	switch operation {
+	case "fact-review":
+		caller := options.commandContext
+		if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
+			return commandResult(commandError("unauthorized", "verified operator context required"))
+		}
+		request.Operation = operation
+		var valid bool
+		request.ID, valid = args.positiveID("id")
+		request.State = args.stringOr("action", "")
+		if !valid || (request.State != "approve" && request.State != "reject" && request.State != "undo") {
+			return commandResult(commandError("invalid_argument", "positive assertion ID and review action required"))
+		}
 	case "feedback-path":
 		request.Operation = operation
 		request.Success = args.boolean("success")
@@ -50,7 +62,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		request.Scope = Scope{Type: args.stringOr("scope_type", ""), Value: args.stringOr("scope_value", "")}
-	case "episode-list", "entity-profile":
+	case "episode-list", "entity-profile", "fact-candidates":
 		request.Operation, request.Query, request.Entity = operation, args.stringOr("query", ""), args.stringOr("entity", "")
 		request.Limit = args.limit("limit", 16, 64)
 		request.Scope = Scope{Type: args.stringOr("scope_type", ""), Value: args.stringOr("scope_value", "")}
@@ -76,6 +88,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInternal
 	}
 	switch operation {
+	case "fact-review", "fact-candidates":
+		return commandResult(response.Payload)
 	case "feedback-path":
 		return commandResult(map[string]any{"status": "ok", "updated": response.Updated})
 	case "record":

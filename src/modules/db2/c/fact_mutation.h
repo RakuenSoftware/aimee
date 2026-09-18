@@ -201,21 +201,6 @@ extern "C"
                                 const char *target, fact_erasure_impact_t *out,
                                 char commit_id[FACT_COMMIT_ID_MAX]);
 
-   typedef struct
-   {
-      int64_t id;
-      char source[128];
-      char relation[128];
-      char target[128];
-      char assertion_kind[24];
-      char lifecycle[24];
-      int authority_rank;
-      int evidence_count;
-      char commit_id[FACT_COMMIT_ID_MAX];
-   } fact_candidate_t;
-
-   int db2_fact_candidates(fact_candidate_t *out, int max);
-
    /* Maintenance transitions also use one commit/diff/audit batch.  Recurrent
     * candidates become persistent; stale unsupported candidates are invalidated. */
    int db2_fact_mutation_promote_supported(const fact_actor_t *actor, int threshold);

@@ -34,6 +34,7 @@
     "server-go/modules/memory/fact_identity.go",
     "server-go/modules/memory/fact_mutation.go",
     "server-go/modules/memory/fact_commit.go",
+    "server-go/modules/memory/fact_review.go",
     "server-go/modules/memory/legacy.go",
     "server-go/modules/memory/memory.go",
     "server-go/modules/memory/maintenance.go",

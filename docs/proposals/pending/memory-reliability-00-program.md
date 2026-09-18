@@ -364,6 +364,18 @@ existing curator connection. Other native fact-ingest/review paths remain G0
 work. Schema version 9 adds the bounded runtime writer's evidence/ontology
 grants while WORM chain writes remain unavailable to it.
 
+Typed-fact operator review and candidate listing now execute in Go through
+verified host commands. Approve/reject/undo preserve functional incumbents,
+authority, tombstones, review history and atomic WORM seals. Undo refuses to
+clobber subsequent independent changes, including changes to an incumbent it
+would restore; failures roll back partial transitions. Candidate reads and
+reviews filter memory-backed evidence by source visibility and lifecycle.
+The native candidate-list API is deleted, and HTTP tests cover verified actor
+transport, malformed responses and distinct missing/conflict/outage results.
+Schema version 10 grants the Go owner access to the review journal. The old
+native review implementation remains only with legacy lifecycle fixtures until
+the dependent rollback/invalidation coverage is ported.
+
 The current inventory is four C sources and six headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 

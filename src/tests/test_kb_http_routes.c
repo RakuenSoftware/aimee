@@ -2779,6 +2779,42 @@ static void test_console_memories(void)
    printf("  PASS: console memory review (list + reject + restore)\n");
 }
 
+static void test_console_fact_review(void)
+{
+   extern void test_kb_fact_actor_set(int enabled);
+   test_kb_fact_actor_set(1);
+   char buf[2048];
+   const char *body = "{\"assertion_id\":42,\"action\":\"approve\",\"actor\":\"forged\"}";
+   assert(kb_http_route_ex("POST", "/v1/console/typed_facts/assertion", NULL, NULL, NULL, body,
+                           (int)strlen(body), buf, sizeof(buf)) == 200);
+   assert(strstr(buf, "verified-commit") && strstr(buf, "promoted"));
+   const char *failures[] = {"{}", "{\"status\":\"ok\"}",
+                             "{\"status\":\"error\",\"kind\":\"conflict\"}",
+                             "{\"status\":\"error\",\"kind\":\"not_found\"}",
+                             "{\"status\":\"error\",\"kind\":\"unauthorized\"}"};
+   const int codes[] = {503, 503, 409, 404, 403};
+   for (unsigned i = 0; i < sizeof(codes) / sizeof(codes[0]); i++)
+   {
+      review_reply = failures[i];
+      assert(kb_http_route_ex("POST", "/v1/console/typed_facts/assertion", NULL, NULL, NULL, body,
+                              (int)strlen(body), buf, sizeof(buf)) == codes[i]);
+   }
+   review_reply = NULL;
+   review_transport = -1;
+   assert(kb_http_route_ex("POST", "/v1/console/typed_facts/assertion", NULL, NULL, NULL, body,
+                           (int)strlen(body), buf, sizeof(buf)) == 503);
+   review_transport = 1;
+   const char *fraction = "{\"assertion_id\":42.5,\"action\":\"approve\"}";
+   int before = review_calls;
+   assert(kb_http_route_ex("POST", "/v1/console/typed_facts/assertion", NULL, NULL, NULL, fraction,
+                           (int)strlen(fraction), buf, sizeof(buf)) == 400);
+   test_kb_fact_actor_set(0);
+   assert(kb_http_route_ex("POST", "/v1/console/typed_facts/assertion", NULL, NULL, NULL, body,
+                           (int)strlen(body), buf, sizeof(buf)) == 403);
+   assert(review_calls == before);
+   puts("  PASS: Go fact review transport and verified operator context");
+}
+
 static void test_console_settings(void)
 {
    g_stub_secret_configured = 0;
@@ -4631,7 +4667,10 @@ int aimee_module_commands_dispatch_context(const char *method, const cJSON *args
                                            const cJSON *context, cJSON **result)
 {
    review_calls++;
-   assert(strcmp(method, "memory.reject") == 0 || strcmp(method, "memory.restore") == 0);
+   assert(strcmp(method, "memory.reject") == 0 || strcmp(method, "memory.restore") == 0 ||
+          strcmp(method, "memory.runtime") == 0);
+   if (!strcmp(method, "memory.runtime"))
+      assert(!strcmp(jo_cstr(args, "operation"), "fact-review"));
    assert(jo_i64((cJSON *)args, "id", 0) == 42);
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
@@ -4639,7 +4678,13 @@ int aimee_module_commands_dispatch_context(const char *method, const cJSON *args
    assert(strcmp(jo_cstr(context, "transport_identity"), "test-transport") == 0);
    assert(!cJSON_GetObjectItemCaseSensitive(args, "actor"));
    *result = review_transport == 1
-                 ? cJSON_Parse(review_reply ? review_reply : "{\"status\":\"ok\"}")
+                 ? cJSON_Parse(
+                       review_reply
+                           ? review_reply
+                           : (!strcmp(method, "memory.runtime")
+                                  ? "{\"status\":\"ok\",\"ok\":true,\"assertion_id\":42,"
+                                    "\"lifecycle\":\"promoted\",\"commit_id\":\"verified-commit\"}"
+                                  : "{\"status\":\"ok\"}"))
                  : NULL;
    return review_transport;
 }
@@ -4654,6 +4699,11 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    }
    if (strcmp(method, "memory.runtime") == 0)
    {
+      if (!strcmp(jo_cstr(args, "operation"), "fact-candidates"))
+      {
+         *result = cJSON_Parse("{\"status\":\"ok\",\"candidates\":[]}");
+         return 1;
+      }
       if (strcmp(jo_cstr(args, "operation"), "record") == 0)
       {
          *result = cJSON_CreateObject();
@@ -7682,6 +7732,7 @@ int main(void)
    test_console_admin_requires_authorization_module();
    test_console_pipeline();
    test_console_memories();
+   test_console_fact_review();
    test_console_settings();
    test_console_evidence_operator_boundary();
    test_accounts_routes();

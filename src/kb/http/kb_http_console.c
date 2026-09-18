@@ -215,26 +215,25 @@ static int console_typed_facts(char *out_buf, int out_cap)
 
    /* Assertion candidates are quarantined from recall until this queue approves
     * them.  Evidence count is independent of the graph weight. */
-   cJSON *assertions = cJSON_AddArrayToObject(root, "assertion_candidates");
-   fact_candidate_t fc[64];
-   int nfc = db2_fact_candidates(fc, 64);
-   for (int i = 0; i < nfc && assertions; i++)
+   cJSON *candidate_args = cJSON_CreateObject(), *candidate_reply = NULL;
+   cJSON_AddStringToObject(candidate_args, "operation", "fact-candidates");
+   cJSON_AddNumberToObject(candidate_args, "limit", 64);
+   int candidate_rc =
+       aimee_module_commands_dispatch_internal("memory.runtime", candidate_args, &candidate_reply);
+   cJSON_Delete(candidate_args);
+   cJSON *assertions = cJSON_DetachItemFromObjectCaseSensitive(candidate_reply, "candidates");
+   if (candidate_rc != 1 || strcmp(jo_cstr(candidate_reply, "status"), "ok") ||
+       !cJSON_IsArray(assertions))
    {
-      cJSON *o = cJSON_CreateObject();
-      if (!o)
-         continue;
-      cJSON_AddNumberToObject(o, "id", (double)fc[i].id);
-      cJSON_AddStringToObject(o, "subject", fc[i].source);
-      cJSON_AddStringToObject(o, "relation", fc[i].relation);
-      cJSON_AddStringToObject(o, "object", fc[i].target);
-      cJSON_AddStringToObject(o, "assertion_kind", fc[i].assertion_kind);
-      cJSON_AddStringToObject(o, "lifecycle", fc[i].lifecycle);
-      cJSON_AddNumberToObject(o, "authority_rank", fc[i].authority_rank);
-      cJSON_AddNumberToObject(o, "evidence_count", fc[i].evidence_count);
-      cJSON_AddStringToObject(o, "commit_id", fc[i].commit_id);
-      cJSON_AddItemToArray(assertions, o);
+      cJSON_Delete(assertions);
+      cJSON_Delete(candidate_reply);
+      cJSON_Delete(root);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fact candidates unavailable\"}");
+      return 503;
    }
-   cJSON_AddNumberToObject(root, "assertion_candidate_count", nfc < 0 ? 0 : nfc);
+   cJSON_AddNumberToObject(root, "assertion_candidate_count", cJSON_GetArraySize(assertions));
+   cJSON_AddItemToObject(root, "assertion_candidates", assertions);
+   cJSON_Delete(candidate_reply);
 
    /* Canonical entities and merge history share the typed-fact operator surface:
     * merge is a graph mutation with the same commit/rollback/audit contract. */
@@ -535,31 +534,18 @@ static int console_typed_facts_relation(const char *body, char *out_buf, int out
 static int console_typed_facts_assertion(const char *body, char *out_buf, int out_cap)
 {
    cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
-   const char *action =
-       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
-   cJSON *idj = req ? cJSON_GetObjectItemCaseSensitive(req, "assertion_id") : NULL;
+   const char *action = jo_cstr(req, "action");
+   cJSON *idj = cJSON_GetObjectItemCaseSensitive(req, "assertion_id");
    int64_t id = cJSON_IsNumber(idj) && isfinite(idj->valuedouble) && idj->valuedouble > 0 &&
                         idj->valuedouble <= 9007199254740991.0 &&
                         trunc(idj->valuedouble) == idj->valuedouble
                     ? (int64_t)idj->valuedouble
                     : 0;
-   fact_review_action_t review;
-   if (action && strcmp(action, "approve") == 0)
-      review = FACT_REVIEW_APPROVE;
-   else if (action && strcmp(action, "reject") == 0)
-      review = FACT_REVIEW_REJECT;
-   else if (action && strcmp(action, "undo") == 0)
-      review = FACT_REVIEW_UNDO;
-   else
+   if (!id || (strcmp(action, "approve") && strcmp(action, "reject") && strcmp(action, "undo")))
    {
       cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be approve, reject, or undo\"}");
-      return 400;
-   }
-   if (!id)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"positive assertion_id required\"}");
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"positive assertion_id and approve/reject/undo action required\"}");
       return 400;
    }
    fact_actor_t actor;
@@ -569,19 +555,39 @@ static int console_typed_facts_assertion(const char *body, char *out_buf, int ou
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
       return 403;
    }
-   fact_mutation_result_t result;
-   int rc = db2_fact_mutation_review(&actor, id, review, &result);
+   cJSON *args = cJSON_CreateObject(), *context = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "fact-review");
+   cJSON_AddStringToObject(args, "action", action);
+   cJSON_AddNumberToObject(args, "id", (double)id);
+   cJSON_AddBoolToObject(context, "authenticated", 1);
+   cJSON_AddBoolToObject(context, "user_authority", 1);
+   cJSON_AddStringToObject(context, "principal", actor.principal);
+   cJSON_AddStringToObject(context, "transport_identity", actor.transport_identity);
+   int rc = args && context
+                ? aimee_module_commands_dispatch_context("memory.runtime", args, context, &reply)
+                : -1;
+   cJSON_Delete(args);
+   cJSON_Delete(context);
    cJSON_Delete(req);
-   if (rc != 0)
+   if (rc != 1 || !cJSON_IsObject(reply) || strcmp(jo_cstr(reply, "status"), "ok"))
    {
+      int status = rc == 1 && !strcmp(jo_cstr(reply, "kind"), "not_found")      ? 404
+                   : rc == 1 && !strcmp(jo_cstr(reply, "kind"), "conflict")     ? 409
+                   : rc == 1 && !strcmp(jo_cstr(reply, "kind"), "unauthorized") ? 403
+                                                                                : 503;
+      cJSON_Delete(reply);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fact review transition failed\"}");
-      return 409;
+      return status;
    }
-   snprintf(out_buf, (size_t)out_cap,
-            "{\"ok\":true,\"assertion_id\":%lld,\"lifecycle\":\"%s\","
-            "\"commit_id\":\"%s\"}",
-            (long long)result.assertion_id, result.lifecycle, result.commit_id);
-   return 200;
+   if (!cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(reply, "assertion_id")) ||
+       !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "lifecycle")) ||
+       !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "commit_id")))
+   {
+      cJSON_Delete(reply);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid fact review response\"}");
+      return 503;
+   }
+   return console_send(reply, 200, "{\"error\":\"fact review render failed\"}", out_buf, out_cap);
 }
 
 /* POST /v1/console/typed_facts/entity
