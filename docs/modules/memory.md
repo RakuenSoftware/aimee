@@ -1,5 +1,45 @@
 # memory module
 
+## Isolated Go evaluation transport
+
+`server-go/modules/memory/cmd/aimee-memory-eval` runs the ordinary Go KB memory
+handler against a fresh PostgreSQL database. The PostgreSQL provider owns the
+database lifecycle and the same SQL client/provider wire used by production.
+Seeding, searches, context construction, diagnostics and scoring within one
+process therefore share one store. Each new process starts with an empty store.
+
+Set `AIMEE_DB2_EVAL_URL` to an explicit disposable PostgreSQL admin DSN with
+database-creation rights. There is no fallback to live store configuration.
+The provider creates a random database from `template0`, applies the supplied
+packaged schema there, and drops that database at EOF, on protocol failure or
+on a handled termination signal. Cleanup rolls back abandoned transactions;
+failed drops produce an error naming the database so cleanup can be retried.
+A forced process kill can still leave a database requiring cleanup.
+
+From `server-go`, with the environment variable already set:
+
+```sh
+go run ./modules/memory/cmd/aimee-memory-eval \
+  -schema ../src/modules/db2/c/schema.sql -embedding-dim 1024 <<'JSONL'
+{"stage":"data","body":{"operation":"insert-epistemic","tier":"L2","kind":"fact","key":"eval-fixture","content":"eval-fixture content","confidence":0.9,"project":"evaluation"}}
+{"stage":"data","body":{"operation":"search","query":"eval-fixture","project":"evaluation","limit":10}}
+{"stage":"command","command":"runtime","body":{"operation":"benchmark-context","query":"eval-fixture","project":"evaluation"}}
+JSONL
+```
+
+One JSON response per input line carries the owner's numeric module `status`
+and JSON `body`; nonzero statuses remain failures. IDs retain their integer
+precision. Requests and responses use the owner contracts, not a second memory
+implementation. The local evaluation transport has no model/network executor:
+operations needing one report that absence. This is not a replacement for an
+embedding-enabled retrieval benchmark. SQL uses the disposable database owner's
+permissions; the separate restricted-runtime-role replay remains necessary.
+
+The native benchmark loaders still use their old temporary-store lifecycle and
+have not yet been connected to this transport. Their native scratch connection
+does not redirect the Go owner. They must not be treated as validating this
+isolated Go path until their seeding, embeddings and reads are migrated together.
+
 ## Purpose and non-goals
 
 Memory is one Go module deployed in two placements. `AIMEE_MODULE_PLACEMENT` is

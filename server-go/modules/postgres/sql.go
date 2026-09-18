@@ -443,6 +443,10 @@ func NewSQLHandler() bus.ModuleHandler {
 }
 
 func (h *sqlHandler) handle(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+	return h.handleContext(context.Background(), invocation, frame)
+}
+
+func (h *sqlHandler) handleContext(parent context.Context, invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
 	if invocation.StageID != StageSQL {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -455,7 +459,7 @@ func (h *sqlHandler) handle(invocation bus.ModuleInvocation, frame []byte) ([]by
 	if op == opMigrate || op == opCurrentVersion {
 		poolFn = h.migrationPoolFn
 	}
-	pool, err := poolFn(context.Background())
+	pool, err := poolFn(parent)
 	if err != nil || pool == nil {
 		// No database. Refused IN BAND with the reason rather than at the
 		// transport, because a caller that can read "AIMEE_STORE_URL is unset"
@@ -483,7 +487,7 @@ func (h *sqlHandler) handle(invocation bus.ModuleInvocation, frame []byte) ([]by
 		return refuse(statusFailed, "", "the request's deadline passed before the "+
 			"store could run it"), bus.ModuleStatusOK
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	ctx, cancel := context.WithTimeout(parent, deadline)
 	defer cancel()
 
 	switch op {
