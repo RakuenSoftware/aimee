@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -71,18 +70,9 @@ func handleBenchmarkContext(options handlerOptions, invocation bus.ModuleInvocat
 	if !ok || capacity < 1 || capacity > 512*1024 {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	request := DataRequest{Operation: "search", Query: query, Limit: min(32, topK*4), Project: args.stringOr("project", ""), Workspace: args.stringOr("workspace", ""), IncludeAll: args.boolean("include_all")}
-	if raw, ok := args["scope"]; ok && json.Unmarshal(raw, &request.Scope) != nil {
-		return nil, bus.ModuleStatusInvalidRequest
-	}
-	raw, _ := json.Marshal(request)
-	encoded, status := handleData(options, invocation, raw)
+	response, status := benchmarkRead(options, invocation, args, DataRequest{Operation: "search", Query: query, Limit: min(32, topK*4)})
 	if status != bus.ModuleStatusOK {
 		return nil, status
-	}
-	var response DataResponse
-	if json.Unmarshal(encoded, &response) != nil {
-		return nil, bus.ModuleStatusInternal
 	}
 	return commandResult(buildBenchmarkContext(response.Records, topK, budget, capacity))
 }

@@ -12,6 +12,10 @@
 #include <stdio.h>
 #include <time.h>
 
+int mem_eval_dispatch_diagnostic(cJSON *args, cJSON **reply);
+int mem_eval_write_hard_negative(FILE *fp, const char *suite, const eval_task_t *task,
+                                 const agent_result_t *result);
+
 #define CORPUS_FID_LEN 64
 
 typedef struct

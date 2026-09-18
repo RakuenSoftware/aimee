@@ -16,6 +16,10 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "benchmark-hard-negative":
+		return handleBenchmarkHardNegative(options, invocation, args)
+	case "benchmark-miss":
+		return handleBenchmarkMiss(options, invocation, args)
 	case "benchmark-context":
 		return handleBenchmarkContext(options, invocation, args)
 	case "trace-patterns":

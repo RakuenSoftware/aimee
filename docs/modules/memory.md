@@ -736,3 +736,22 @@ by G0; this does not certify completion of the native migration.
 This checkpoint has 169 strict G0 findings: the new wiki transport test adds a
 counted scope-context reference while the production list adapter is retired.
 The inventory remains three C sources (353 lines) and five memory-tree headers.
+
+Benchmark context, hard-negative artifacts and miss diagnostics now use the
+shared Go owner. Context assembly budgets complete numbered UTF-8 snippets.
+Hard-negative selection retains the top-five cap and explicit retrieval-error
+field; Go serializes the complete JSON line so native output cannot round int64
+IDs or truncate content. The legacy salience field remains zero because search
+does not provide that signal. Miss reports send decimal expected IDs, classify
+failures and render full expected/top-result text in Go. Missing and hidden
+expected rows are omitted; failed reads remain errors. Explicit scope constrains
+expected rows even when the host has include-all authority. Reports above 1 MiB
+fail without partial output. Native hosts retain file I/O and progress counters;
+these transports remain migration work. Restricted-role PostgreSQL replay and
+the actual native-to-Go connection cover visibility, exact IDs, full content,
+malformed replies and failed writes.
+
+The latest inventory is two C sources (224 lines) and five headers in the memory
+tree, with 169 strict repository-wide G0 findings. The baseline is unchanged.
+Benchmark scoring, seed/load operations, scratch-store isolation and other native
+memory clients remain pending; this checkpoint does not satisfy G0.

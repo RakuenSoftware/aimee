@@ -16,8 +16,11 @@ import (
 
 type benchmarkStore struct{}
 
-func (benchmarkStore) Get(context.Context, memory.Scope, int64) (memory.Record, error) {
-	return memory.Record{}, errors.New("fixture read unsupported")
+func (benchmarkStore) Get(_ context.Context, _ memory.Scope, id int64) (memory.Record, error) {
+	if id != 9007199254740993 {
+		return memory.Record{}, memory.ErrMemoryNotFound
+	}
+	return memory.Record{ID: id, Key: "large", Content: strings.Repeat("界", 2100)}, nil
 }
 func (benchmarkStore) Put(context.Context, memory.Scope, memory.Record) (memory.Record, error) {
 	return memory.Record{}, errors.New("fixture write unsupported")
@@ -32,7 +35,7 @@ func (benchmarkStore) Search(_ context.Context, _ memory.Scope, query, _, _ stri
 	if query == "empty" {
 		return []memory.Record{}, nil
 	}
-	return []memory.Record{{ID: 1, Content: strings.Repeat("界", 2100)}, {ID: 2, Content: "second"}}, nil
+	return []memory.Record{{ID: 9007199254740993, Key: "large", Content: strings.Repeat("界", 2100)}, {ID: 2, Content: "second"}}, nil
 }
 func main() {
 	var data memory.DataStore

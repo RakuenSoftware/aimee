@@ -264,78 +264,19 @@ static void eval_store_result(const char *suite, const eval_task_t *task,
    (void)db1_eval_result_insert(&row);
 }
 
-/* Emit a hard-negative artefact when an eval task fails: write a JSONL record
- * with the task name, expected answer, agent response, and top memory candidates
- * (with score breakdowns) to the configured log file. */
+/* The Go owner retrieves and serializes the artifact; the host owns the file. */
 static void eval_log_hard_negative(const char *suite_name, const eval_task_t *task,
                                    const agent_result_t *result)
 {
    if (!config_present() || !config_memory_hard_negative_log()[0])
       return;
-
    FILE *fp = fopen(config_memory_hard_negative_log(), "a");
    if (!fp)
       return;
-
-   /* Fetch top memory candidates for the failed query */
-   memory_t candidates[8];
-   int cand_count = 0;
-   if (task->prompt[0])
-      cand_count = memory_find_facts(task->prompt, 5, candidates, 8);
-   const char *memory_error = NULL;
-   if (cand_count < 0)
-   {
-      cand_count = 0;
-      memory_error = "memory retrieval index unavailable";
-   }
-
-   cJSON *rec = cJSON_CreateObject();
-   if (!rec)
-   {
-      fclose(fp);
-      return;
-   }
-
-   char ts[32];
-   time_t now = time(NULL);
-   struct tm tm_buf;
-   gmtime_r(&now, &tm_buf);
-   strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
-
-   cJSON_AddStringToObject(rec, "ts", ts);
-   cJSON_AddStringToObject(rec, "suite", suite_name ? suite_name : "");
-   cJSON_AddStringToObject(rec, "task", task->name);
-   cJSON_AddStringToObject(rec, "query", task->prompt);
-   cJSON_AddStringToObject(rec, "expected",
-                           task->success_check_value[0] ? task->success_check_value : "");
-   cJSON_AddStringToObject(rec, "got", result->response ? result->response : "");
-   cJSON_AddStringToObject(rec, "error", result->error[0] ? result->error : "");
-   if (memory_error)
-      cJSON_AddStringToObject(rec, "memory_error", memory_error);
-
-   cJSON *cands = cJSON_CreateArray();
-   for (int i = 0; i < cand_count; i++)
-   {
-      cJSON *c = cJSON_CreateObject();
-      cJSON_AddNumberToObject(c, "id", (double)candidates[i].id);
-      cJSON_AddStringToObject(c, "key", candidates[i].key);
-      cJSON_AddStringToObject(c, "content", candidates[i].content);
-      cJSON_AddNumberToObject(c, "confidence", candidates[i].confidence);
-      cJSON_AddNumberToObject(c, "salience", candidates[i].salience);
-      cJSON_AddStringToObject(c, "tier", candidates[i].tier);
-      cJSON_AddStringToObject(c, "kind", candidates[i].kind);
-      cJSON_AddItemToArray(cands, c);
-   }
-   cJSON_AddItemToObject(rec, "top_candidates", cands);
-
-   char *line = cJSON_PrintUnformatted(rec);
-   if (line)
-   {
-      fprintf(fp, "%s\n", line);
-      free(line);
-   }
-   cJSON_Delete(rec);
-   fclose(fp);
+   if (mem_eval_write_hard_negative(fp, suite_name, task, result) != 0)
+      fprintf(stderr, "Unable to write memory hard-negative artifact\n");
+   if (fclose(fp) != 0)
+      fprintf(stderr, "Unable to close memory hard-negative log\n");
 }
 
 int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
@@ -642,56 +583,6 @@ int mem_eval_run(mem_eval_case_t *cases, int n_cases, mem_eval_scores_t *out)
 
 double elapsed_ms(const struct timespec *start, const struct timespec *end);
 
-static int mem_eval_find_rank(const int64_t *retrieved, int n_retrieved, const int64_t *relevant,
-                              int n_relevant)
-{
-   for (int i = 0; i < n_retrieved; i++)
-   {
-      for (int j = 0; j < n_relevant; j++)
-      {
-         if (retrieved[i] == relevant[j])
-            return i + 1;
-      }
-   }
-   return 0;
-}
-
-static int mem_eval_query_has_temporal_intent(const char *query)
-{
-   if (!query || !query[0])
-      return 0;
-   return strstr(query, "when") != NULL || strstr(query, "date") != NULL ||
-          strstr(query, "before") != NULL || strstr(query, "after") != NULL ||
-          strstr(query, "year") != NULL || strstr(query, "month") != NULL ||
-          strstr(query, "today") != NULL || strstr(query, "yesterday") != NULL;
-}
-
-static const char *mem_eval_bucket_failure(const char *query, const cJSON *expected)
-{
-   if (!cJSON_IsObject(expected))
-      return "missing";
-   cJSON *parts = cJSON_GetObjectItemCaseSensitive(expected, "parts");
-   const char *content = jo_cstr(cJSON_GetObjectItemCaseSensitive(expected, "memory"), "content");
-   if (mem_eval_query_has_temporal_intent(query) && jo_num(parts, "temporal", 0) <= 0.0 &&
-       (strstr(content, "20") || strstr(content, "Jan") || strstr(content, "Feb") ||
-        strstr(content, "Mar") || strstr(content, "Apr") || strstr(content, "May") ||
-        strstr(content, "Jun") || strstr(content, "Jul") || strstr(content, "Aug") ||
-        strstr(content, "Sep") || strstr(content, "Oct") || strstr(content, "Nov") ||
-        strstr(content, "Dec")))
-      return "temporal_miss";
-   if (jo_num(parts, "entity", 0) <= 0.0)
-      return "entity_miss";
-   if (jo_num(parts, "lexical", 0) <= 0.0 && jo_num(parts, "semantic", 0) > 0.0)
-      return "lexical_gap";
-   if (jo_num(parts, "semantic", 0) <= 0.0 && jo_num(parts, "lexical", 0) < 1.5)
-      return "semantic_gap";
-   if (jo_num(parts, "state", 0) < -0.1)
-      return "state_penalty";
-   if (jo_num(parts, "coverage", 0) < 0.5)
-      return "granularity_gap";
-   return "ranking_gap";
-}
-
 static void mem_eval_increment_bucket(const char *bucket, int *temporal_miss, int *entity_miss,
                                       int *lexical_gap, int *semantic_gap, int *state_penalty,
                                       int *granularity_gap, int *ranking_gap, int *missing)
@@ -817,6 +708,18 @@ static int mem_eval_shape_bucket_index(memory_query_shape_t shape)
    }
 }
 
+static int mem_eval_valid_miss_bucket(const char *bucket, int miss)
+{
+   if (!miss)
+      return strcmp(bucket, "hit") == 0;
+   const char *buckets[] = {"temporal_miss", "entity_miss",     "lexical_gap", "semantic_gap",
+                            "state_penalty", "granularity_gap", "ranking_gap", "missing"};
+   for (size_t i = 0; i < sizeof(buckets) / sizeof(buckets[0]); i++)
+      if (!strcmp(bucket, buckets[i]))
+         return 1;
+   return 0;
+}
+
 void mem_eval_print_miss_report(FILE *fp, mem_eval_case_t *cases, int n_cases, int limit,
                                 int max_misses, int *reported_io, int *misses_io,
                                 int *temporal_miss_io, int *entity_miss_io, int *lexical_gap_io,
@@ -829,98 +732,74 @@ void mem_eval_print_miss_report(FILE *fp, mem_eval_case_t *cases, int n_cases, i
 
    for (int c = 0; c < n_cases; c++)
    {
-      memory_t results[20];
-      int n_results = memory_find_facts(cases[c].query, 20, results, 20);
-      if (n_results < 0)
+      cJSON *args = cJSON_CreateObject(), *reply = NULL;
+      cJSON *ids = args ? cJSON_AddArrayToObject(args, "expected_ids") : NULL;
+      int valid = ids && cases[c].n_expected >= 0 && cases[c].n_expected <= 20;
+      for (int i = 0; valid && i < cases[c].n_expected; i++)
       {
-         fprintf(fp,
-                 "ERROR query=%s memory retrieval index unavailable; server-side maintenance is "
-                 "required\n",
-                 cases[c].query);
+         char id[32];
+         snprintf(id, sizeof(id), "%lld", (long long)cases[c].expected_ids[i]);
+         cJSON *item = cJSON_CreateString(id);
+         if (!item || !cJSON_AddItemToArray(ids, item))
+         {
+            cJSON_Delete(item);
+            valid = 0;
+         }
+      }
+      int render = *reported_io < max_misses;
+      if (valid && cJSON_AddStringToObject(args, "operation", "benchmark-miss") &&
+          cJSON_AddStringToObject(args, "query", cases[c].query) &&
+          cJSON_AddNumberToObject(args, "limit", limit) &&
+          cJSON_AddBoolToObject(args, "render", render))
+         valid = mem_eval_dispatch_diagnostic(args, &reply) > 0;
+      else
+         valid = 0;
+      cJSON_Delete(args);
+      const cJSON *rank_value = cJSON_GetObjectItemCaseSensitive(reply, "rank");
+      const cJSON *miss_value = cJSON_GetObjectItemCaseSensitive(reply, "is_miss");
+      const cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "text");
+      const char *bucket = jo_cstr(reply, "bucket");
+      if (!valid || strcmp(jo_cstr(reply, "status"), "ok") || !cJSON_IsNumber(rank_value) ||
+          !isfinite(rank_value->valuedouble) || rank_value->valuedouble < 0 ||
+          rank_value->valuedouble > 20 ||
+          floor(rank_value->valuedouble) != rank_value->valuedouble || !cJSON_IsBool(miss_value) ||
+          !cJSON_IsString(text) || strlen(text->valuestring) > 1048576 ||
+          !mem_eval_valid_miss_bucket(bucket, cJSON_IsTrue(miss_value)))
+      {
+         cJSON_Delete(reply);
+         fprintf(fp, "ERROR query=%s memory diagnostic unavailable\n", cases[c].query);
          return;
       }
-      int64_t retrieved[20];
-      for (int i = 0; i < n_results; i++)
-         retrieved[i] = results[i].id;
-      int rank =
-          mem_eval_find_rank(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected);
+      int rank = (int)rank_value->valuedouble;
+      int miss = cJSON_IsTrue(miss_value);
+      if ((miss && render) != (text->valuestring[0] != '\0'))
+      {
+         cJSON_Delete(reply);
+         fprintf(fp, "ERROR query=%s invalid memory diagnostic\n", cases[c].query);
+         return;
+      }
       if (cases_scanned_io)
          (*cases_scanned_io)++;
-      if (rank > 0 && rank <= limit)
+      if (miss)
       {
-         mem_eval_append_miss_progress_row(progress_fp, dataset ? dataset : "unknown",
-                                           cases[c].query, cases_scanned_io ? *cases_scanned_io : 0,
-                                           misses_io ? *misses_io : 0, 0, rank, "hit");
-         continue;
+         (*misses_io)++;
+         mem_eval_increment_bucket(bucket, temporal_miss_io, entity_miss_io, lexical_gap_io,
+                                   semantic_gap_io, state_penalty_io, granularity_gap_io,
+                                   ranking_gap_io, missing_io);
       }
-
-      (*misses_io)++;
-      int64_t expected_id = cases[c].expected_ids[0];
-      const char *bucket = "missing";
-      memory_t expected_mem;
-      memset(&expected_mem, 0, sizeof(expected_mem));
-
-      cJSON *args = cJSON_CreateObject(), *reply = NULL;
-      cJSON_AddStringToObject(args, "query", cases[c].query);
-      cJSON_AddNumberToObject(args, "memory_id", (double)expected_id);
-      if (expected_id > 0)
-         (void)aimee_module_commands_dispatch("memory.explain_match", args, &reply);
-      cJSON_Delete(args);
-      const cJSON *expected = cJSON_GetObjectItemCaseSensitive(reply, "row");
-      if (cJSON_IsObject(expected))
-      {
-         bucket = mem_eval_bucket_failure(cases[c].query, expected);
-         const cJSON *row = cJSON_GetObjectItemCaseSensitive(expected, "memory");
-         expected_mem.id = expected_id;
-         snprintf(expected_mem.key, sizeof(expected_mem.key), "%s", jo_cstr(row, "key"));
-         snprintf(expected_mem.content, sizeof(expected_mem.content), "%s",
-                  jo_cstr(row, "content"));
-      }
-      else if (expected_id > 0)
-      {
-         cJSON *get_args = cJSON_CreateObject(), *get_reply = NULL;
-         cJSON_AddStringToObject(get_args, "operation", "record");
-         cJSON_AddNumberToObject(get_args, "id", (double)expected_id);
-         if (aimee_module_commands_dispatch_internal("memory.runtime", get_args, &get_reply) == 1)
-         {
-            const cJSON *record = cJSON_GetObjectItemCaseSensitive(get_reply, "memory");
-            expected_mem.id = expected_id;
-            snprintf(expected_mem.key, sizeof(expected_mem.key), "%s", jo_cstr(record, "key"));
-            snprintf(expected_mem.content, sizeof(expected_mem.content), "%s",
-                     jo_cstr(record, "content"));
-         }
-         cJSON_Delete(get_reply);
-         cJSON_Delete(get_args);
-      }
-
-      cJSON_Delete(reply);
-      mem_eval_increment_bucket(bucket, temporal_miss_io, entity_miss_io, lexical_gap_io,
-                                semantic_gap_io, state_penalty_io, granularity_gap_io,
-                                ranking_gap_io, missing_io);
       mem_eval_append_miss_progress_row(progress_fp, dataset ? dataset : "unknown", cases[c].query,
                                         cases_scanned_io ? *cases_scanned_io : 0,
-                                        misses_io ? *misses_io : 0, 1, rank, bucket);
-
-      if (*reported_io >= max_misses)
+                                        misses_io ? *misses_io : 0, miss, rank, bucket);
+      if (!miss || !render)
+      {
+         cJSON_Delete(reply);
          continue;
+      }
+      int written = fputs(text->valuestring, fp);
+      cJSON_Delete(reply);
+      if (written == EOF)
+         return;
 
-      if (rank > 0)
-         fprintf(fp, "MISS rank=%d bucket=%s query=%s\n", rank, bucket, cases[c].query);
-      else
-         fprintf(fp, "MISS rank=missing bucket=%s query=%s\n", bucket, cases[c].query);
-      if (expected_mem.id > 0)
-      {
-         fprintf(fp, "  expected_id=%lld key=%s\n", (long long)expected_mem.id, expected_mem.key);
-         fprintf(fp, "  expected_content=%s\n", expected_mem.content);
-      }
-      if (n_results > 0)
-      {
-         fprintf(fp, "  top_results:");
-         int shown = n_results < 5 ? n_results : 5;
-         for (int i = 0; i < shown; i++)
-            fprintf(fp, " [%d]%lld:%s", i + 1, (long long)results[i].id, results[i].key);
-         fprintf(fp, "\n");
-      }
       (*reported_io)++;
    }
 }

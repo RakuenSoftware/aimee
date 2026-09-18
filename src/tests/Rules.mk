@@ -7934,5 +7934,5 @@ $(TESTPREFIX)/unit-test-workflow-transport: $(OBJDIR)/tests/test_workflow_transp
 $(TESTPREFIX)/unit-test-trace-transport: $(OBJDIR)/tests/test_trace_transport.o $(OBJDIR)/trace_analysis.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
 
-$(TESTPREFIX)/unit-test-benchmark-context-transport: $(OBJDIR)/tests/test_benchmark_context_transport.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
+$(TESTPREFIX)/unit-test-benchmark-context-transport: $(OBJDIR)/tests/test_benchmark_context_transport.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread

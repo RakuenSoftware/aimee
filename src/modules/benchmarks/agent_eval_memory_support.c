@@ -371,6 +371,47 @@ void mem_eval_append_miss_setup_progress_row(FILE *fp, const char *dataset, cons
    cJSON_Delete(root);
 }
 
+/* Temporary host transport while the remaining benchmark runner migrates. */
+int mem_eval_dispatch_diagnostic(cJSON *args, cJSON **reply)
+{
+   *reply = NULL;
+   if (memory_bus_add_context(args) != 0)
+      return -1;
+   return aimee_module_commands_dispatch_internal("memory.runtime", args, reply);
+}
+
+int mem_eval_write_hard_negative(FILE *fp, const char *suite, const eval_task_t *task,
+                                 const agent_result_t *result)
+{
+   if (!fp || !task || !result)
+      return -1;
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   if (!args || !cJSON_AddStringToObject(args, "operation", "benchmark-hard-negative") ||
+       !cJSON_AddStringToObject(args, "suite", suite ? suite : "") ||
+       !cJSON_AddStringToObject(args, "task", task->name) ||
+       !cJSON_AddStringToObject(args, "query", task->prompt) ||
+       !cJSON_AddStringToObject(args, "expected", task->success_check_value) ||
+       !cJSON_AddStringToObject(args, "got", result->response ? result->response : "") ||
+       !cJSON_AddStringToObject(args, "error", result->error))
+   {
+      cJSON_Delete(args);
+      return -1;
+   }
+   int rc = mem_eval_dispatch_diagnostic(args, &reply);
+   cJSON_Delete(args);
+   const cJSON *line = cJSON_GetObjectItemCaseSensitive(reply, "line");
+   if (rc <= 0 || strcmp(jo_cstr(reply, "status"), "ok") || !cJSON_IsString(line) ||
+       !line->valuestring[0] || strlen(line->valuestring) > 1048576 ||
+       strchr(line->valuestring, '\n') || strchr(line->valuestring, '\r'))
+   {
+      cJSON_Delete(reply);
+      return -1;
+   }
+   rc = fprintf(fp, "%s\n", line->valuestring) < 0 || fflush(fp) != 0 ? -1 : 0;
+   cJSON_Delete(reply);
+   return rc;
+}
+
 int mem_eval_build_retrieval_context(const char *query, int top_k, int token_budget,
                                      char *context_out, size_t context_len,
                                      int *retrieved_tokens_out)
