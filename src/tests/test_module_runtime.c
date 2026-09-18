@@ -951,6 +951,7 @@ int main(int argc, char **argv)
    memcpy(requested, served, serve_count * sizeof(*requested));
    requested[serve_count] = EMPTY_KIND;
    const uint32_t postgres_request[] = {AIMEE_POSTGRES_EVENT_SQL};
+   const uint32_t action_publish[] = {3000u};
    const uint32_t provider_request[] = {12290u, 12295u, 4609u};
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
                                     .principal_ref = module_ref,
@@ -965,7 +966,7 @@ int main(int argc, char **argv)
                                     .request = requested,
                                     .request_count = serve_count + 1},
                                    /* The migrated memory process owns its SQL
-                                    * through a second, request-only identity.
+                                    * and action observations through a second identity.
                                     * The smoke calls below are deliberately
                                     * store-free, but startup must still prove
                                     * that the shipped process can attach the
@@ -974,6 +975,8 @@ int main(int argc, char **argv)
                                     .principal_ref = memory_process ? 73 : 74,
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = module_executable,
+                                    .publish = memory_process ? action_publish : NULL,
+                                    .publish_count = memory_process ? 1 : 0,
                                     .request = memory_process ? postgres_request : provider_request,
                                     .request_count = memory_process ? 1 : 3},
                                    {.principal_class = 1,

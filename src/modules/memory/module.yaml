@@ -4,7 +4,8 @@
   "dependencies": [
     "config",
     "ir",
-    "module-runtime"
+    "module-runtime",
+    "audit"
   ],
   "runtime_toggle": {
     "supported": false
@@ -123,7 +124,8 @@
     "server-go/modules/memory/briefing.go",
     "server-go/modules/memory/briefing_view.go",
     "server-go/modules/memory/alerts.go",
-    "server-go/modules/memory/recall.go"
+    "server-go/modules/memory/recall.go",
+    "server-go/modules/memory/mutation_audit.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -204,7 +206,8 @@
     "server-go/modules/memory/briefing_test.go",
     "server-go/modules/memory/briefing_view_test.go",
     "server-go/modules/memory/alerts_test.go",
-    "server-go/modules/memory/recall_test.go"
+    "server-go/modules/memory/recall_test.go",
+    "server-go/modules/memory/mutation_audit_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

@@ -14,6 +14,7 @@ import (
 
 	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/JBailes/aimee/server-go/modules/audit"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
@@ -422,6 +423,7 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
+	auditAction    func(context.Context, audit.Action) error
 	episodeCommand func(context.Context, string, []byte) ([]byte, error)
 	settings       func() (map[string]any, error)
 	fusionEnabled  bool
@@ -443,6 +445,11 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 		return nil, err
 	}
 	backend := &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled}
+	if publisher, ok := db.(interface {
+		MemoryAuditAction(context.Context, audit.Action) error
+	}); ok {
+		backend.auditAction = publisher.MemoryAuditAction
+	}
 	if configured, ok := db.(interface {
 		MemorySettings() (map[string]any, error)
 	}); ok {
@@ -882,7 +889,7 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	return request, nil
 }
 
-func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []byte) (result []byte, status bus.ModuleStatus) {
 	request, err := decodeDataRequest(body)
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -1073,6 +1080,11 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return encoded, bus.ModuleStatusOK
 	}
 
+	response := DataResponse{}
+	if backend, ok := options.data.(*postgresDataStore); ok && backend.auditAction != nil {
+		defer func() { publishMutationAudit(backend.auditAction, request, response, status) }()
+	}
+
 	// Request scope used to live on the C connection. Pin it to the Go store
 	// transaction now, so the non-owner runtime sees precisely this request's
 	// rows and pooled connections cannot retain another request's scope.
@@ -1118,7 +1130,6 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 	}
 
-	response := DataResponse{}
 	switch request.Operation {
 	case "reflect":
 		backend, ok := options.data.(*postgresDataStore)

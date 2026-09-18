@@ -146,6 +146,18 @@ with hard rules last. If the required empty envelope alone exceeds a tiny budget
 the remaining native Server composition still needs final merged-payload
 budgeting during its migration.
 
+Go data-stage store/update/supersede/delete/reject/restore operations now publish
+content-free action observations on the owning daemon's audit bus after the
+request transaction commits or rolls back. Only a fingerprint of the kind/key
+identity is emitted; content and prose reasons are excluded. Publication uses
+the existing ACTION wire and a narrowly granted notification capability on
+principal 73. Ring backpressure is bounded, and a publish failure is logged
+without misreporting a committed mutation as rolled back. Enqueue success is
+not a durability acknowledgement: the KB's transactional SQL WORM record remains
+the durable mutation record. Background/direct-store mutations and pre-dispatch
+refusals still need observation coverage before the native audit hooks can be
+retired; the current request-level events do not claim that coverage.
+
 KB recall decodes conversation activation snapshots in Go. Cooldown, delay, and
 suppression are applied before each section cap; sticky state can preserve
 relevance but cannot override cooldown. Graph-expanded candidates pass the same

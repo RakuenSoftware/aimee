@@ -24,6 +24,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peer"
 	"github.com/JBailes/aimee/server-go/modules/aimee/peerwire"
+	"github.com/JBailes/aimee/server-go/modules/audit"
 	"github.com/JBailes/aimee/server-go/modules/benchmarks"
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
@@ -79,10 +80,10 @@ const economizerStorePrincipalRef uint32 = 66
 // contests. Declared as aimee-postgres in src/modules/process-contracts.json.
 const storePrincipalRef uint32 = 69
 
-// memoryStorePrincipalRef is the memory module's storage-only identity.  The
-// same executable runs on both buses; each instance reaches only the postgres
-// module on that bus, while AIMEE_MODULE_PLACEMENT selects whether its SQL is
-// confined to user_memories (server) or scoped memories (kb).
+// memoryStorePrincipalRef reaches storage/config and publishes content-free
+// action observations on the same daemon's bus. AIMEE_MODULE_PLACEMENT confines
+// SQL to user_memories (server) or scoped memories (kb); no cross-owner database
+// capability is granted.
 const memoryStorePrincipalRef uint32 = 73
 
 // aimeeDirectoryPrincipalRef is the aimee module's OUTBOUND identity, used only
@@ -258,8 +259,13 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (database.Store, 
 }
 
 type memoryResources struct {
+	auditPublisher audit.Publisher
 	database.Store
 	config *configclient.Client
+}
+
+func (r memoryResources) MemoryAuditAction(ctx context.Context, action audit.Action) error {
+	return audit.PublishAction(ctx, r.auditPublisher, action)
 }
 
 func (r memoryResources) MemorySettings() (map[string]any, error) { return r.config.Snapshot() }
@@ -303,7 +309,7 @@ func memoryStoreBackend(ctx context.Context, moduleBusSocket string) (database.S
 		busClient.Detach()
 		return nil, err
 	}
-	return memoryResources{Store: db, config: config}, nil
+	return memoryResources{Store: db, config: config, auditPublisher: busClient}, nil
 }
 
 // moduleEgress attaches a second, request-only identity for outbound transport.

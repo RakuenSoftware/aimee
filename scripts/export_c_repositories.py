@@ -719,6 +719,7 @@ GO_SHARED_CONTRACTS = {
     "server-go/modules/module-runtime/supervisor": {"server", "kb"},
     "server-go/config": {"config", "providers"},
     "server-go/modules/egress": {"providers", "memory"},
+    "server-go/modules/audit": {"memory"},
     "server-go/delegate": {"delegates", "roundtable"},
     "server-go/aimee": {"aimee", "economizer"},
     "server-go/db": {"aimee", "memory"},
@@ -1176,12 +1177,13 @@ serve={serve}
     contract_doc = load_json(process_contracts.CONTRACTS)
     for client in contract_doc.get("clients", []):
         request = ",".join(str(kind) for kind in client["request"])
+        publish = ",".join(str(kind) for kind in client.get("publish", []))
         client_grant = f"""version=1
 principal_class={PRINCIPAL_CLASS}
 principal_ref={client["principal_ref"]}
 uid=self
 executable={client["executable"]}
-publish=
+publish={publish}
 subscribe=
 request={request}
 serve=

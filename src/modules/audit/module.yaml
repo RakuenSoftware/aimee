@@ -34,5 +34,11 @@
   ],
   "docs": [
     "docs/modules/audit.md"
+  ],
+  "go_sources": [
+    "server-go/modules/audit/action.go"
+  ],
+  "go_tests": [
+    "server-go/modules/audit/action_test.go"
   ]
 }
