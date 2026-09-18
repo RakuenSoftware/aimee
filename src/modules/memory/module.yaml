@@ -11,7 +11,6 @@
   },
   "ownership_complete": true,
   "sources": [
-    "src/modules/memory/gw_stage_memory.c",
     "src/modules/memory/memory_data_bus.c",
     "src/modules/memory/memory_domain_bus.c",
     "src/modules/memory/memory_scope_connection.c"
@@ -170,15 +169,12 @@
     "src/modules/memory/include/aimee/memory/module_api.h"
   ],
   "private_headers": [
-    "src/modules/memory/gw_stage_memory.h",
     "src/modules/memory/memory_bus_context.h",
     "src/modules/memory/memory_core_internal.h",
     "src/modules/memory/memory_fact_gate.h",
     "src/modules/memory/memory_ontology.h"
   ],
-  "tests": [
-    "src/tests/test_gw_stage_memory.c"
-  ],
+  "tests": [],
   "docs": [
     "docs/modules/memory.md"
   ]

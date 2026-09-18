@@ -900,7 +900,8 @@ set(CLI_SRCS
 
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
-    ${AIMEE_SRC_DIR}/modules/memory/gw_stage_memory.c
+    ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
+    ${AIMEE_SRC_DIR}/server/ir_host_bindings.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
     ${AIMEE_SRC_DIR}/server/obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/server/module_routing_adapter.c

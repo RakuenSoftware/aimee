@@ -21,7 +21,7 @@
 #include "openai_shape.h"
 #include "ingress_preinject.h"
 #include <aimee/gateway/gateway_pipeline.h> /* gw_request_t + gw_pipeline_run_request — shared seam */
-#include "modules/memory/gw_stage_memory.h"     /* gw_stage_memory + gw_memory_system_prompt (P3) */
+#include "ir_host_bindings.h"
 #include "gw_stage_registry.h"                  /* Slice 7: config-driven stage catalog */
 #include "gw_stage_governance.h"                /* response seam Slice 2: togglable governance */
 #include "gw_stage_completion.h"                /* bounded incomplete-repair continuation */
@@ -223,7 +223,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * the injected memory/context changes). On a cache miss it is reused for the
     * provider call below; on a hit it is freed unused. */
    int first_turn = !chat || !openai_request_has_assistant(body);
-   char *pi_env = gw_memory_system_prompt(prompt);
+   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt);
    char *persona_txt = legacy_persona_text(prompt, !first_turn);
    if (persona_txt)
    {
@@ -790,7 +790,7 @@ static int responses_handler(const char *body, char *resp, int cap)
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
    int first_turn = !prev_id[0] && !openai_request_has_assistant(body);
-   char *pi_env = gw_memory_system_prompt(full);
+   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", full);
    /* `full` aliases `prompt` or `combined`, both freed on the exit paths below,
     * so it must NOT be freed here. Pass the persona-prefixed copy when there is
     * one and free only that. */
@@ -978,7 +978,7 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
    int first_turn = !openai_request_has_assistant(body);
-   char *pi_env = gw_memory_system_prompt(prompt);
+   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt);
    char *persona_txt = legacy_persona_text(prompt, !first_turn);
    if (persona_txt)
    {
@@ -1057,7 +1057,7 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
-   char *pi_env = gw_memory_system_prompt(prompt);
+   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt);
    char *persona_txt = legacy_persona_text(prompt, 0);
    if (persona_txt)
    {

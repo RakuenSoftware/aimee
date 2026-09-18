@@ -2,13 +2,13 @@
 #include "aimee_ir_serve.h"
 #include "request_context.h"
 
-/* Matches IR_MEMORY_QUERY_MAX in gw_stage_memory.c: the same message is being
- * captured, just before the persona is prepended to it. */
+/* Capture the original user text before persona insertion. The module receives
+ * this immutable snapshot separately from the transformed transcript. */
 #define IR_STAGE_QUERY_MAX 16384
 
 #include <aimee/translation/aimee_backend.h>
 #include <aimee/translation/aimee_frontend.h>
-#include "modules/memory/gw_stage_memory.h" /* ir_stage_memory + gw_stage_memory_enabled */
+#include "ir_host_bindings.h"
 #include "config.h" /* legacy_config_read + config_module_enabled (modules.memory) */
 #include "persona.h"
 #include "server_http.h"          /* session_persona_get */
@@ -52,13 +52,14 @@ int aimee_ir_stream_relay_enabled(void)
 }
 
 /* Resolve the memory module toggle: config-store modules.memory (canonical) -> env
- * default (gw_stage_memory_enabled). Cached legacy_config_read, so an operator toggle applies
- * without a restart; keeps ir_stage_memory itself config-free. Resolved at the seam
+ * default parsed by the Go owner. Cached legacy_config_read applies operator
+ * toggles without restarting. Resolved at the seam
  * call site, mirroring the legacy gw_stage_slot_t catalogs. */
 static int ir_memory_enabled(void)
 {
    int tri = config_present() ? config_module_memory() : -1;
-   return config_module_enabled(tri, gw_stage_memory_enabled());
+   return config_module_enabled(tri, server_ir_plan_enabled("memory.runtime", "gateway-enabled",
+                                                            getenv("AIMEE_STAGE_MEMORY")));
 }
 
 static int ir_stage_context_authority(aimee_request_t *ir, void *ud)
@@ -229,14 +230,22 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
    int persona_delivered = persona_inserted || ir_persona_delivery_already_satisfied(ir);
    if (persona_first > 0)
       session_persona_delivery_finish(sid, persona_delivered);
+   aimee_ir_module_plan_t context_plan = {.method = "memory.runtime",
+                                          .operation = "gateway-plan",
+                                          .phase = "context",
+                                          .provided_query = pristine_query,
+                                          .bindings = server_ir_plan_bindings,
+                                          .resources = server_ir_plan_resources};
+   aimee_ir_module_plan_t tools_plan = context_plan;
+   tools_plan.phase = "tools";
    const aimee_ir_transform_t stages[] = {
        {"context_authority", ir_stage_context_authority, NULL, 1},
        {"knowledge_freshness", ir_stage_knowledge_freshness, NULL, 1},
-       {"memory", ir_stage_memory, pristine_query, memory_enabled},
+       {"memory", aimee_ir_stage_module_plan, &context_plan, memory_enabled},
        /* Runs AFTER memory, so the opening turn already carries the guidance that
         * names what replaces the shell it is about to lose. Always on: an agent
         * that never reaches aimee's tools is not using aimee. */
-       {"first_turn_shell_block", ir_stage_first_turn_shell_block, NULL, 1},
+       {"first_turn_shell_block", aimee_ir_stage_module_plan, &tools_plan, 1},
        /* Reads the transcript the other stages just shaped, so it judges the turn
         * that will actually be sent rather than the one that arrived. */
        {"session_assist", aimee_ir_stage_session_assist, NULL, 1},

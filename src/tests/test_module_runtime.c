@@ -1,4 +1,6 @@
 #define _GNU_SOURCE
+#include "cJSON.h"
+#include <sys/socket.h>
 
 #include <aimee/core/event_bus/bus_client.h>
 #include <aimee/core/event_bus/bus_endpoint.h>
@@ -751,6 +753,101 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    }
 }
 
+/* Attach the trusted embedding host before opening the external admission
+ * socket, matching the daemon's principal-zero in-process connection. */
+typedef struct
+{
+   bus_host_t *host;
+   int socket;
+} trusted_attach_t;
+static void *trusted_attach(void *arg)
+{
+   trusted_attach_t *a = arg;
+   assert(bus_host_serve_attach(a->host, a->socket) == BUS_HOST_OK);
+   return NULL;
+}
+static void trusted_client(bus_host_t *host, bus_client_t *client)
+{
+   int sockets[2];
+   assert(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets) == 0);
+   trusted_attach_t args = {host, sockets[1]};
+   pthread_t thread;
+   assert(pthread_create(&thread, NULL, trusted_attach, &args) == 0);
+   assert(bus_client_attach(sockets[0], client) == BUS_CLIENT_OK);
+   assert(pthread_join(thread, NULL) == 0);
+   close(sockets[0]);
+   close(sockets[1]);
+}
+static void command_word(uint8_t *p, uint32_t value)
+{
+   p[0] = value;
+   p[1] = value >> 8;
+   p[2] = value >> 16;
+   p[3] = value >> 24;
+}
+static cJSON *host_plan(aimee_module_client_t *client, const char *args)
+{
+   uint8_t request[2048] = {0}, reply[8192] = {0};
+   size_t length = strlen(args);
+   assert(length + 23 < sizeof(request));
+   command_word(request, 0x51504d43u);
+   command_word(request + 4, 1);
+   command_word(request + 8, 7);
+   command_word(request + 12, (uint32_t)length);
+   memcpy(request + 16, "runtime", 7);
+   memcpy(request + 23, args, length);
+   struct timespec now;
+   assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+   uint64_t deadline = (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec + 2000000000ULL;
+   uint32_t reply_length = 0;
+   assert(aimee_module_client_call(client, 4096u + 7u * 256u + 8u, 8u, 8801, deadline, request,
+                                   (uint32_t)(23 + length), reply, sizeof(reply), &reply_length,
+                                   NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(reply_length > 12 && memcmp(reply, "CMPS", 4) == 0 && reply[4] == 1);
+   cJSON *json = cJSON_ParseWithLength((const char *)reply + 12, reply_length - 12);
+   assert(json && strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "status")),
+                         "ok") == 0);
+   return json;
+}
+static const char *json_string(const cJSON *object, const char *key)
+{
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(object, key));
+   assert(value);
+   return value;
+}
+static void smoke_host_gateway_plan(bus_client_t *host)
+{
+   aimee_module_client_t client;
+   assert(aimee_module_client_init(&client, host) == 0);
+   cJSON *plan = host_plan(
+       &client,
+       "{\"operation\":\"gateway-plan\",\"phase\":\"context\",\"roles\":[\"user\"],\"tools\":[],"
+       "\"provided_query\":\"deploy matrix\",\"last_user_text\":\"persona text\"}");
+   cJSON *steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
+   assert(cJSON_GetArraySize(steps) == 4);
+   cJSON *retrieve = cJSON_GetArrayItem(steps, 0);
+   assert(strcmp(json_string(retrieve, "binding"), "context") == 0);
+   assert(strcmp(json_string(cJSON_GetObjectItemCaseSensitive(retrieve, "args"), "query"),
+                 "deploy matrix") == 0);
+   cJSON *guidance = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 1), "context");
+   cJSON *evidence = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 3), "context");
+   assert(strcmp(json_string(guidance, "origin"), "platform") == 0 &&
+          strcmp(json_string(guidance, "authority"), "task_instruction") == 0);
+   assert(strcmp(json_string(evidence, "origin"), "retrieval") == 0 &&
+          strcmp(json_string(evidence, "authority"), "evidence") == 0);
+   cJSON_Delete(plan);
+   plan = host_plan(&client, "{\"operation\":\"gateway-plan\",\"phase\":\"tools\",\"roles\":["
+                             "\"user\"],\"tools\":[\"exec_command\",\"apply_patch\",\"shell\"]}");
+   steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
+   assert(cJSON_GetArraySize(steps) == 1);
+   cJSON *indices = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 0), "indices");
+   assert(cJSON_GetArraySize(indices) == 2 && cJSON_GetArrayItem(indices, 0)->valueint == 2 &&
+          cJSON_GetArrayItem(indices, 1)->valueint == 0);
+   cJSON_Delete(plan);
+   aimee_module_client_destroy(&client);
+   puts("memory: authenticated host/Go process gateway plans passed");
+}
+
 int main(int argc, char **argv)
 {
    assert(argc >= 1 && argc <= 4);
@@ -837,6 +934,9 @@ int main(int argc, char **argv)
                                     .arena_size = 16384};
    bus_host_t host;
    assert(bus_host_create(&host, &host_config, NULL, NULL) == BUS_HOST_OK);
+   bus_client_t embedding_host;
+   if (memory_process)
+      trusted_client(&host, &embedding_host);
    pthread_mutex_t host_lock = PTHREAD_MUTEX_INITIALIZER;
    bus_runtime_config_t runtime_config = {.instance_role = role,
                                           .socket_path = socket_path,
@@ -885,7 +985,7 @@ int main(int argc, char **argv)
    assert(bus_endpoint_connect(socket_path, &caller_fd) == 0);
    assert(bus_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == BUS_CLIENT_OK);
    assert(bus_endpoint_close(&caller_fd) == 0);
-   wait_for_clients(&host, &host_lock, (memory_process || provider_process) ? 3 : 2, module_pid);
+   wait_for_clients(&host, &host_lock, memory_process ? 4 : provider_process ? 3 : 2, module_pid);
 
    pump_thread_t pump_state = {.host = &host, .lock = &host_lock};
    atomic_init(&pump_state.stop, 0);
@@ -894,6 +994,8 @@ int main(int argc, char **argv)
 
    aimee_module_client_t module_client;
    assert(aimee_module_client_init(&module_client, &caller) == 0);
+   if (memory_process)
+      smoke_host_gateway_plan(&embedding_host);
 
    if (argc >= 3)
    {
@@ -989,6 +1091,8 @@ finish:
    atomic_store_explicit(&pump_state.stop, 1, memory_order_release);
    assert(pthread_join(pump_thread, NULL) == 0);
    bus_client_detach(&caller);
+   if (memory_process)
+      bus_client_detach(&embedding_host);
    bus_runtime_stop(&runtime);
    bus_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);

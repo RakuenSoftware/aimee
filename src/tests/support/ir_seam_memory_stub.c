@@ -7,7 +7,7 @@
  * -> 0) with an inert transform, and config_present() reports "no config" so
  * enablement falls to that env default. With memory off the seam is a no-op and every byte-exact
  * assertion in those suites is unchanged. */
-#include <aimee/ir/aimee_ir.h>
+#include <aimee/ir/module_plan.h>
 #include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -35,7 +35,7 @@ void ir_seam_test_claim_error_once(void)
    g_test_claim_error_once = 1;
 }
 
-int ir_stage_memory(aimee_request_t *ir, void *ud)
+int aimee_ir_stage_module_plan(aimee_request_t *ir, void *ud)
 {
    (void)ir;
    (void)ud;
@@ -97,7 +97,7 @@ char *persona_compose_primary_instructions(const char *name, const char *cwd)
    return g_test_persona[0] ? strdup(g_test_persona) : NULL;
 }
 
-int gw_stage_memory_enabled(void)
+int server_ir_plan_enabled(const char *method, const char *operation, const char *value)
 {
    return 0;
 }
@@ -132,14 +132,5 @@ void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls
    (void)tool_transport;
 }
 
-/* The first-turn shell block is registered on the same seam, so these suites link
- * it too. Inert here for the same reason as ir_stage_memory: they assert on the
- * BUILD and TRANSLATION bytes, and a stage that withheld a tool would change the
- * tools array they compare. Returning 0 keeps every byte-exact parity assertion
- * measuring what it was written to measure. */
-int ir_stage_first_turn_shell_block(aimee_request_t *ir, void *ud)
-{
-   (void)ir;
-   (void)ud;
-   return 0;
-}
+const aimee_ir_plan_binding_t server_ir_plan_bindings[] = {{NULL, NULL}};
+const aimee_ir_plan_resource_t server_ir_plan_resources[] = {{NULL, NULL}};

@@ -174,7 +174,7 @@ Authenticated admission and the server-to-KB transport remain native callers.
 Production C memory clients, native headers and gateway integration still need
 replacement by Go callers. They must be deleted at cutover, not moved into host
 directories. Passing a pure-Go process/client build does not complete G0 while
-those C paths remain. The module currently retains four C sources and six
+those C paths remain. The module currently retains three C sources and five
 headers. The descriptor's `ownership_complete` flag verifies the declared file
 inventory; it does not assert that the Go migration is complete.
 
@@ -233,19 +233,15 @@ The remaining C transport and host integration is migration debt:
 - `memory_data_bus.c` and `memory_domain_bus.c` encode/decode bounded event-bus
   messages. `memory_scope_connection.c` only binds caller scope to an already
   prepared connection request.
-- `gw_stage_memory.c` connects the gateway IR stage to the module.
 - `server_hooks.c` connects retired local memory-file writes to the Go policy over
   memory stage 7; classification and shell-write detection live in `redirect.go`.
-- `fact_recall.c` preserves the old DB2 ABI but is now only a stage-7 JSON
-  adapter. Typed-fact SQL, entity matching, ordering, formatting, and PII
-  decisions live in `fact_recall.go`.
 - `kb_memory_facts.c` connects the KB drain to its existing curator provider and
   transactional fact-commit connection. Job leasing/reclaim, retry policy,
   exponential jittered backoff, prompt construction, deterministic extraction, model-output parsing,
   grounding, relation canonicalization, kind selection, and provenance are in
   `memory_facts.go`.
 
-`scripts/check_memory_c_boundary.py` reduces that boundary: only the six named
+`scripts/check_memory_c_boundary.py` reduces that boundary: only the three named
 bus/integration translation units may exist under the memory module, none may
 include a DB client, and DB2 may not regain a `memory_*.c` implementation.
 The same check prevents the former POSIX/Windows regex-policy files and the
@@ -645,3 +641,18 @@ count extra recalls. The generic native plan executor is not wired yet; existing
 production consumers still use the previous adapter. This checkpoint is not G0
 completion. Validation: memory/module race tests with PostgreSQL, a CGO-disabled
 module build, module inventory and the transitional C boundary check.
+
+The native gateway memory stage and header are deleted. Structured ingress and
+legacy text handlers now execute Go context-injection plans through the generic
+IR module-plan executor. Go selects query precedence/bounds, gate/audit behavior,
+guidance/evidence ordering, typed authority and tool removals. The executor only
+validates/applies IR edits and invokes explicitly supplied host connections;
+existing authenticated KB retrieval and audit transport remain in those bindings.
+Malformed plans cannot partially change tools or perform earlier effects, and
+retrieval-origin text cannot acquire instruction authority. Native tests retain
+full text, 64-bit epochs, cache metadata and protocol parity. A real trusted-host
+bus fixture verifies Go plans in both placements. An unavailable plan produces
+no injection; recall-gate off/observe/enforce behavior stays in Go.
+Three C sources and five headers remain in the memory tree. The strict immutable
+G0 audit still reports 254 violations across the remaining files, callers and
+build registrations; pre-injection policy and legacy clients remain migration work.

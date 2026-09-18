@@ -11,17 +11,20 @@
   "sources": [
     "src/modules/ir/aimee_ir.c",
     "src/modules/ir/aimee_ir_metrics.c",
-    "src/modules/ir/aimee_ir_session.c"
+    "src/modules/ir/aimee_ir_session.c",
+    "src/modules/ir/aimee_ir_module_plan.c"
   ],
   "public_headers": [
     "src/modules/ir/include/aimee/ir/aimee_ir.h",
     "src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
-    "src/modules/ir/include/aimee/ir/panel_result.h"
+    "src/modules/ir/include/aimee/ir/panel_result.h",
+    "src/modules/ir/include/aimee/ir/module_plan.h"
   ],
   "tests": [
     "src/tests/test_aimee_ir.c",
     "src/tests/test_aimee_ir_metrics.c",
-    "src/tests/test_panel_ir_contract.c"
+    "src/tests/test_panel_ir_contract.c",
+    "src/tests/test_ir_module_plan.c"
   ],
   "docs": [
     "docs/modules/ir.md"

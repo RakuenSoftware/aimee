@@ -1,26 +1,16 @@
-/* test_gw_stage_memory.c: unit tests for the ONE shared memory-injection stage
- * (universal-gateway P3, gw_stage_memory.c). The point of P3 is consolidation
- * WITHOUT changing rendered bytes, so these are byte-identity tests across the
- * three render targets:
- *   - OPENAI_SYSTEM_PROMPT (legacy text handlers): the RAW envelope, byte-for-
- *     byte what ingress_preinject_build(query, 0) returned inline before P3 —
- *     crucially NO trailing "\n\n".
- *   - OPENAI_INSTRUCTIONS (/v1/responses): env + "\n\n" + prior, via apply().
- *   - ANTHROPIC_MESSAGES: dispatch + the parity gate (the Anthropic applier
- *     itself, messages_apply_preinject, lives in anthropic_http.c and is covered
- *     by the anthropic tests; here it is stubbed to assert dispatch/gating).
- *
- * The kb client / config are stubbed (as in test_ingress_preinject.c) so
- * ingress_preinject_build produces a deterministic envelope; platform_random is
- * FIXED here so two build() calls render identically and can be compared. */
+/* Generic IR plan execution against the production host connections. Go owns
+ * plan selection; these fixed plan fixtures exercise rendered byte identity,
+ * typed authority, audit connections and fail-atomic validation. */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "modules/memory/gw_stage_memory.h"
+#include <aimee/ir/module_plan.h>
+#include "server/ir_host_bindings.h"
 #include "ingress_preinject.h"
 #include "cJSON.h"
 #include "config.h"
+#include "platform_test_util.h"
 #include "kb_client.h"
 
 /* When set, the recall stubs return nothing so ingress_preinject_build → NULL
@@ -45,6 +35,7 @@ int config_integrity_dry_run(void)
 /* The policy is tested in Go. Here the host consumes fixture plans and must
  * preserve typed authority, query selection and complete rendered bytes. */
 static int fixture_session_start = 1;
+static const char *fixture_query = "deploy matrix";
 static const char *fixture_remove_tools = "[]";
 static int fixture_transport_result = 1;
 static const char *fixture_gate;
@@ -59,7 +50,10 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    assert(operation);
    *result = cJSON_CreateObject();
    cJSON_AddStringToObject(*result, "status", "ok");
-   if (strcmp(operation, "gateway-plan") == 0)
+   assert(strcmp(operation, "gateway-plan") == 0);
+   const char *phase = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "phase"));
+   assert(phase);
+   if (strcmp(phase, "text") != 0)
    {
       const cJSON *roles = cJSON_GetObjectItemCaseSensitive(request, "roles");
       const cJSON *tools = cJSON_GetObjectItemCaseSensitive(request, "tools");
@@ -67,17 +61,81 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
       assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(roles, 0)), "user") == 0);
       if (!fixture_session_start)
          assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(roles, 1)), "assistant") == 0);
-      cJSON_AddBoolToObject(*result, "append_guidance", fixture_session_start);
-      cJSON_AddItemToObject(*result, "remove_tools", cJSON_Parse(fixture_remove_tools));
    }
-   else if (strcmp(operation, "gateway-recall") == 0 && fixture_gate)
+   if (fixture_gate)
    {
       cJSON_Delete(*result);
       *result = cJSON_Parse(fixture_gate);
+      return fixture_transport_result;
+   }
+   cJSON *steps = cJSON_AddArrayToObject(*result, "steps");
+   if (strcmp(phase, "tools") == 0)
+   {
+      cJSON *step = cJSON_CreateObject();
+      cJSON_AddStringToObject(step, "kind", "remove_tools");
+      cJSON_AddItemToObject(step, "indices", cJSON_Parse(fixture_remove_tools));
+      cJSON_AddItemToArray(steps, step);
    }
    else
-      assert(strcmp(operation, "gateway-recall") == 0 || strcmp(operation, "gateway-enabled") == 0);
+   {
+      const char *supplied =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "provided_query"));
+      const char *fallback =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "last_user_text"));
+      assert((supplied && strcmp(supplied, fixture_query) == 0) ||
+             (fallback && strcmp(fallback, fixture_query) == 0));
+      cJSON *step = cJSON_Parse(
+          "{\"kind\":\"invoke\",\"binding\":\"context\",\"output\":\"evidence\",\"args\":{}}");
+      cJSON_AddStringToObject(cJSON_GetObjectItemCaseSensitive(step, "args"), "query",
+                              fixture_query);
+      cJSON_AddItemToArray(steps, step);
+      cJSON_AddStringToObject(*result, "result", "evidence");
+      if (strcmp(phase, "context") == 0)
+      {
+         if (fixture_session_start)
+            cJSON_AddItemToArray(
+                steps,
+                cJSON_Parse("{\"kind\":\"append_context\",\"resource\":\"guidance\",\"context\":{"
+                            "\"origin\":\"platform\",\"authority\":\"task_instruction\",\"trust\":"
+                            "\"verified\",\"sensitivity\":\"internal\",\"model_visible\":true}}"));
+         cJSON_AddItemToArray(
+             steps,
+             cJSON_Parse(
+                 "{\"kind\":\"invoke\",\"binding\":\"epoch\",\"args\":{\"domain\":\"knowledge\","
+                 "\"scope\":\"global\"},\"output\":\"epoch\",\"when_output\":\"evidence\"}"));
+         cJSON_AddItemToArray(
+             steps,
+             cJSON_Parse("{\"kind\":\"append_context\",\"output\":\"evidence\",\"when_output\":"
+                         "\"evidence\",\"epoch_output\":\"epoch\",\"context\":{\"origin\":"
+                         "\"retrieval\",\"authority\":\"evidence\",\"trust\":\"unverified\","
+                         "\"sensitivity\":\"internal\",\"model_visible\":true,\"revision_domain\":"
+                         "\"knowledge\",\"revision_scope\":\"global\"}}"));
+      }
+   }
    return fixture_transport_result;
+}
+static int apply_plan(aimee_request_t *ir, const char *query, const char *phase)
+{
+   aimee_ir_module_plan_t config = {.method = "memory.runtime",
+                                    .operation = "gateway-plan",
+                                    .phase = phase,
+                                    .provided_query = query,
+                                    .bindings = server_ir_plan_bindings,
+                                    .resources = server_ir_plan_resources};
+   return aimee_ir_stage_module_plan(ir, &config);
+}
+static int apply_context(aimee_request_t *ir, void *query)
+{
+   return apply_plan(ir, query, "context");
+}
+static int apply_tools(aimee_request_t *ir, void *unused)
+{
+   (void)unused;
+   return apply_plan(ir, NULL, "tools");
+}
+static char *render_text(const char *query)
+{
+   return server_ir_plan_text("memory.runtime", "gateway-plan", "text", query);
 }
 int learning_evidence_write_retrieval_event(const char *fingerprint, const char *role,
                                             const int64_t *ids, int count, char *out, int cap)
@@ -222,7 +280,9 @@ int config_kb_evidence_emit_enabled(void)
 }
 const char *config_default_dir(void)
 {
-   return "/tmp/aimee-test";
+   static char directory[512];
+   snprintf(directory, sizeof(directory), "%s/aimee-test", platform_tmpdir());
+   return directory;
 }
 int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
                                             const char *query_fingerprint, const int64_t *ids,
@@ -287,11 +347,11 @@ static int test_confidence_provider(double score, const char **confidence)
    return 0;
 }
 
-/* OPENAI_SYSTEM_PROMPT: gw_memory_system_prompt(q) == ingress_preinject_build(q,0)
+/* OPENAI_SYSTEM_PROMPT: render_text(q) == ingress_preinject_build(q,0)
  * byte-for-byte (the raw env, no trailing "\n\n"). */
 static void test_system_prompt_raw_env(void)
 {
-   char *sys = gw_memory_system_prompt("deploy matrix");
+   char *sys = render_text("deploy matrix");
    char *direct = ingress_preinject_build("deploy matrix", 0);
    assert(sys != NULL && direct != NULL);
    assert(strcmp(sys, direct) == 0);
@@ -307,7 +367,7 @@ static void test_system_prompt_raw_env(void)
 static void test_disabled_noop(void)
 {
    g_no_recall = 1;
-   assert(gw_memory_system_prompt("deploy matrix") == NULL);
+   assert(render_text("deploy matrix") == NULL);
    g_no_recall = 0;
    printf("disabled_noop OK\n");
 }
@@ -317,6 +377,7 @@ static void test_disabled_noop(void)
 static void mk_user_ir(aimee_request_t *ir, const char *user_text)
 {
    fixture_session_start = 1;
+   fixture_query = user_text;
    fixture_remove_tools = "[]";
    memset(ir, 0, sizeof *ir);
    ir->messages = calloc(1, sizeof *ir->messages);
@@ -344,7 +405,7 @@ static void test_ir_stage_appends_system_block(void)
 {
    aimee_request_t ir;
    mk_user_ir(&ir, "deploy matrix");
-   int rc = ir_stage_memory(&ir, NULL);
+   int rc = apply_context(&ir, NULL);
    assert(rc == 1);          /* changed typed fields -> runner marks ir->mutated */
    assert(ir.n_system == 2); /* guidance + evidence */
    assert(ir.system[0].type == AIMEE_BLK_TEXT);
@@ -377,7 +438,8 @@ static void test_ir_stage_prefers_supplied_query(void)
    /* The message as it looks AFTER a persona prepend: the real question is in
     * there, buried, exactly as the stage would otherwise read it. */
    mk_user_ir(&ir, "<aimee-persona>lots of persona guidance here</aimee-persona> deploy matrix");
-   assert(ir_stage_memory(&ir, (void *)"deploy matrix") == 1);
+   fixture_query = "deploy matrix";
+   assert(apply_context(&ir, (void *)"deploy matrix") == 1);
 
    /* The envelope must be the one the CLEAN query produces. */
    char *direct = ingress_preinject_build("deploy matrix", 0);
@@ -390,7 +452,7 @@ static void test_ir_stage_prefers_supplied_query(void)
     * nothing behave exactly as before. */
    aimee_request_t ir2;
    mk_user_ir(&ir2, "deploy matrix");
-   assert(ir_stage_memory(&ir2, NULL) == 1);
+   assert(apply_context(&ir2, NULL) == 1);
    assert(ir2.n_system == 2);
    aimee_request_free(&ir2);
    printf("ir_stage_prefers_supplied_query OK\n");
@@ -404,7 +466,7 @@ static void test_ir_stage_no_recall_midsession_noop(void)
    aimee_request_t ir;
    mk_user_ir(&ir, "deploy matrix");
    mk_assistant_turn(&ir); /* the model has spoken -> not a session start */
-   int rc = ir_stage_memory(&ir, NULL);
+   int rc = apply_context(&ir, NULL);
    assert(rc == 0);
    assert(ir.n_system == 0 && ir.system == NULL);
    aimee_request_free(&ir);
@@ -422,7 +484,7 @@ static void test_ir_stage_session_start_guidance_without_recall(void)
    g_no_recall = 1;
    aimee_request_t ir;
    mk_user_ir(&ir, "deploy matrix");
-   int rc = ir_stage_memory(&ir, NULL);
+   int rc = apply_context(&ir, NULL);
    assert(rc == 1);
    assert(ir.n_system == 1 && ir.system[0].text);
    assert(strstr(ir.system[0].text, "explore-with: ") != NULL);
@@ -461,7 +523,7 @@ static void test_first_turn_withholds_shell(void)
    mk_tool(&ir, "apply_patch");
    mk_tool(&ir, "mcp__aimee__find_symbol");
    fixture_remove_tools = "[0]";
-   assert(ir_stage_first_turn_shell_block(&ir, NULL) == 1);
+   assert(apply_tools(&ir, NULL) == 1);
    assert(!has_tool(&ir, "exec_command"));           /* the shell is withheld */
    assert(has_tool(&ir, "apply_patch"));             /* editing is untouched */
    assert(has_tool(&ir, "mcp__aimee__find_symbol")); /* aimee's tools remain */
@@ -478,7 +540,7 @@ static void test_shell_returns_after_first_turn(void)
    mk_user_ir(&ir, "fix the cache");
    mk_assistant_turn(&ir);
    mk_tool(&ir, "exec_command");
-   assert(ir_stage_first_turn_shell_block(&ir, NULL) == 0);
+   assert(apply_tools(&ir, NULL) == 0);
    assert(has_tool(&ir, "exec_command"));
    aimee_request_free(&ir);
    printf("shell_returns_after_first_turn OK\n");
@@ -490,7 +552,7 @@ static void test_ir_stage_guidance_not_repeated_midsession(void)
    aimee_request_t ir;
    mk_user_ir(&ir, "deploy matrix");
    mk_assistant_turn(&ir);
-   int rc = ir_stage_memory(&ir, NULL);
+   int rc = apply_context(&ir, NULL);
    assert(rc == 1); /* recall still injects its envelope */
    assert(ir.n_system == 1 && ir.system[0].text);
    assert(strstr(ir.system[0].text, "explore-with: ") == NULL);
@@ -546,34 +608,109 @@ static void test_tool_patch_validation(void)
    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
    {
       fixture_remove_tools = invalid[i];
-      assert(ir_stage_first_turn_shell_block(&ir, NULL) == 0);
+      assert(apply_tools(&ir, NULL) == 0);
       assert(ir.n_tools == 2 && has_tool(&ir, "exec_command") && has_tool(&ir, "apply_patch"));
    }
    fixture_remove_tools = "[0]";
    fixture_transport_result = -1;
-   assert(ir_stage_first_turn_shell_block(&ir, NULL) == 0 && ir.n_tools == 2);
+   assert(apply_tools(&ir, NULL) == 0 && ir.n_tools == 2);
    fixture_transport_result = 1;
    fixture_remove_tools = "[1,0]";
-   assert(ir_stage_first_turn_shell_block(&ir, NULL) == 1 && ir.n_tools == 0);
+   assert(apply_tools(&ir, NULL) == 1 && ir.n_tools == 0);
    aimee_request_free(&ir);
 }
 
 static void test_gate_reply_and_audit(void)
 {
    fixture_gate =
-       "{\"status\":\"ok\",\"skip\":true,\"enforced\":true,\"audit_role\":\"RecallGateEnforcedSkip/"
-       "acknowledgement\",\"query_fingerprint\":\"opaque-digest\"}";
-   assert(gw_memory_system_prompt("private query") == NULL && fixture_audits == 1);
-   fixture_gate = "{\"status\":\"error\",\"enforced\":true}";
-   char *env = gw_memory_system_prompt("deploy matrix");
-   assert(env != NULL); /* An unavailable policy keeps recall enabled. */
-   free(env);
+       "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"audit\",\"args\":{"
+       "\"role\":\"RecallGateEnforcedSkip/"
+       "acknowledgement\",\"query_fingerprint\":\"opaque-digest\"}}],\"result\":\"evidence\"}";
+   assert(render_text("private query") == NULL && fixture_audits == 1);
+   fixture_gate = "{\"status\":\"error\",\"steps\":[]}";
+   assert(render_text("deploy matrix") == NULL);
    fixture_gate = NULL;
+}
+
+static void test_invalid_plans_have_no_effects(void)
+{
+   aimee_request_t ir;
+   mk_user_ir(&ir, "deploy matrix");
+   mk_tool(&ir, "exec_command");
+   int audits = fixture_audits;
+   const char *invalid[] = {
+       "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"audit\",\"args\":{"
+       "\"role\":\"RecallGateEnforcedSkip/"
+       "acknowledgement\",\"query_fingerprint\":\"opaque-digest\"}},{\"kind\":\"unknown\"}]}",
+       "{\"status\":\"ok\",\"steps\":[{\"kind\":\"remove_tools\",\"indices\":[0]},{\"kind\":"
+       "\"invoke\",\"binding\":\"undeclared\",\"args\":{}}]}",
+       "{\"status\":\"ok\",\"steps\":[{\"kind\":\"append_context\",\"resource\":\"guidance\","
+       "\"context\":{\"origin\":\"retrieval\",\"authority\":\"task_instruction\",\"trust\":"
+       "\"verified\",\"sensitivity\":\"internal\",\"model_visible\":true}}]}",
+       "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"audit\",\"args\":[],"
+       "\"output\":\"\"}]}",
+       "{\"status\":\"ok\",\"steps\":null}"};
+   for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+   {
+      fixture_gate = invalid[i];
+      assert(apply_context(&ir, NULL) == 0 && ir.n_system == 0 && ir.n_tools == 1);
+      assert(fixture_audits == audits);
+   }
+   fixture_gate = NULL;
+   aimee_request_free(&ir);
+}
+static const char *opaque_payload;
+static cJSON *payload_binding(const cJSON *args, void *context)
+{
+   (void)args;
+   assert(context == (void *)&opaque_payload);
+   return cJSON_CreateString(opaque_payload);
+}
+static cJSON *clock_binding(const cJSON *args, void *context)
+{
+   (void)args;
+   (void)context;
+   return cJSON_CreateString("18446744073709551615");
+}
+static void test_generic_bindings_full_text_and_epoch(void)
+{
+   char payload[12001];
+   memset(payload, 'x', sizeof(payload) - 1);
+   payload[sizeof(payload) - 1] = 0;
+   opaque_payload = payload;
+   const aimee_ir_plan_binding_t bindings[] = {
+       {"payload", payload_binding}, {"clock", clock_binding}, {NULL, NULL}};
+   aimee_ir_module_plan_t config = {.method = "memory.runtime",
+                                    .operation = "gateway-plan",
+                                    .phase = "text",
+                                    .bindings = bindings,
+                                    .context = &opaque_payload};
+   fixture_gate = "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"payload\","
+                  "\"args\":{},\"output\":\"value\"}],\"result\":\"value\"}";
+   char *text = aimee_ir_module_plan_text(&config);
+   assert(text && strcmp(text, payload) == 0);
+   free(text);
+   aimee_request_t ir;
+   mk_user_ir(&ir, "deploy matrix");
+   config.phase = "context";
+   fixture_gate =
+       "{\"status\":\"ok\",\"steps\":[{\"kind\":\"invoke\",\"binding\":\"payload\",\"args\":{},"
+       "\"output\":\"value\"},{\"kind\":\"invoke\",\"binding\":\"clock\",\"args\":{},\"output\":"
+       "\"clock\"},{\"kind\":\"append_context\",\"output\":\"value\",\"epoch_output\":\"clock\","
+       "\"context\":{\"origin\":\"retrieval\",\"authority\":\"evidence\",\"trust\":\"unverified\","
+       "\"sensitivity\":\"internal\",\"model_visible\":true,\"revision_domain\":\"domain\","
+       "\"revision_scope\":\"scope\"}}]}";
+   assert(aimee_ir_stage_module_plan(&ir, &config) == 1);
+   assert(ir.n_system == 1 && strcmp(ir.system[0].text, payload) == 0);
+   assert(ir.system[0].context.revision_epoch == UINT64_MAX);
+   assert(strcmp(ir.system[0].context.revision_domain, "domain") == 0);
+   fixture_gate = NULL;
+   aimee_request_free(&ir);
 }
 
 int main(void)
 {
-   printf("test_gw_stage_memory:\n");
+   printf("test_ir_module_plan:\n");
    ingress_preinject_register_confidence_provider(test_confidence_provider);
    test_system_prompt_raw_env();
    test_gate_reply_and_audit();
@@ -585,8 +722,10 @@ int main(void)
    test_ir_stage_guidance_not_repeated_midsession();
    test_first_turn_withholds_shell();
    test_tool_patch_validation();
+   test_invalid_plans_have_no_effects();
+   test_generic_bindings_full_text_and_epoch();
    test_shell_returns_after_first_turn();
    test_persona_prepends_first_user_message_once();
-   printf("all gw_stage_memory tests passed\n");
+   printf("all IR module plan tests passed\n");
    return 0;
 }

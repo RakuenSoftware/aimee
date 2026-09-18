@@ -447,7 +447,22 @@ confidence decisions use 500 ms, and migrated private commands/views retain
 fail-open recall, concurrent Go counters, invalid patches and protocol/IR seams.
 The gateway transport and remaining pre-injection policy are still G0 work.
 
-The current inventory is four C sources and six headers; the table above
+The native gateway memory stage and header are deleted. Structured ingress and
+legacy text handlers now execute Go context-injection plans through the generic
+IR module-plan executor. Go selects query precedence/bounds, gate/audit behavior,
+guidance/evidence ordering, typed authority and tool removals. The executor only
+validates/applies IR edits and invokes explicitly supplied host connections;
+existing authenticated KB retrieval and audit transport remain in those bindings.
+Malformed plans cannot partially change tools or perform earlier effects, and
+retrieval-origin text cannot acquire instruction authority. Native tests retain
+full text, 64-bit epochs, cache metadata and protocol parity. A real trusted-host
+bus fixture verifies Go plans in both placements. An unavailable plan produces
+no injection; recall-gate off/observe/enforce behavior stays in Go.
+Three C sources and five headers remain in the memory tree. The strict immutable
+G0 audit still reports 254 violations across the remaining files, callers and
+build registrations; pre-injection policy and legacy clients remain migration work.
+
+The current inventory is three C sources and five headers; the table above
 records the original pinned inventory, and G0 remains incomplete.
 
 G0 completion requires no native files in either memory implementation tree, no C entries in the memory descriptor and no memory-specific C communication or implementation elsewhere. Build the memory executable and Go caller tooling with `CGO_ENABLED=0`; inspect their dependency closure as well as the source inventory. Exercise supported CLI/MCP/HTTP/bus operations through Go communication in both placements, then run repository-wide source, descriptor and build-registration checks. Prove unavailable-module, malformed-response, unsupported-version, cancellation, deadline, restart and concurrent-call behavior. A successful pure-Go module build does not certify unconverted C callers. Later feature slices must preserve this boundary.
