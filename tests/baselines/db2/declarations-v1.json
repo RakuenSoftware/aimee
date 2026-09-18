@@ -16084,9 +16084,7 @@
       "symbol": "db2_memory_relation_dates_for_memory"
     },
     {
-      "consumers": [
-        "src/tests/test_context_assembly.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_relations.h",
@@ -16095,7 +16093,7 @@
       ],
       "signature": "void db2_memory_relation_insert ( int64_t memory_id , const char * src_entity , const char * relation , const char * dst_entity , const char * fact_text )",
       "signature_sha256": "af24c649363ba48f3e5f85a923c47cb92e7a7ac24eb94ccf84bc35be7e6d1076",
-      "status": "private-test-only",
+      "status": "internal-unconsumed",
       "symbol": "db2_memory_relation_insert"
     },
     {
@@ -23763,15 +23761,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "58d4b5e62de72a87d1e0dd5e7bd2fbaf965d784c3fc87fb382e34941b0ec85c2",
+  "fingerprint": "d405370729c69aa7b804dad917857d8cd4f2a8035aea1d1d59ae5e0ea9fa5d79",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 471,
     "declarations": 1351,
     "headers": 138,
-    "internal_unconsumed": 342,
-    "private_test_only": 326,
+    "internal_unconsumed": 343,
+    "private_test_only": 325,
     "reviewed": 212
   }
 }
