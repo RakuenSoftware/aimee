@@ -1,5 +1,12 @@
 # What's new
 
+## Unreleased
+
+- Webchat opens conversations from the top session tabs; Chat no longer appears in the left panel.
+  Final answer polling updates the existing reply instead of adding a duplicate. Refreshes preserve
+  newer messages and pending session changes, and project pickers change the session binding only
+  when you select or clone a project.
+
 ## 0.4.4 repairs setup, private indexing, and worktree enforcement
 
 0.4.4 is a patch for existing 0.4.x installations. Keep the instance volumes, account,

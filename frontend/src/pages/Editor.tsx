@@ -49,7 +49,7 @@ export default function Editor() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <ProjectPicker
         key={active?.id}
-        storageKey={`aimee_session_project_${active?.id ?? ''}`}
+        value={active?.projectRoot ?? ''}
         onChange={sel => {
           const r = sel ? `${sel.root}/${sel.project}` : '';
           if (active) patchSession(active.id, { projectRoot: r, projectName: sel?.project ?? '' });
