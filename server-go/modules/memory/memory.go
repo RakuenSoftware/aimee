@@ -299,14 +299,19 @@ func handleRerank(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 	}
 
 	score := int64(binary.LittleEndian.Uint64(request[8:16]))
-	confidence := uint32(ConfidenceLow)
-	if score >= 660000 {
-		confidence = ConfidenceHigh
-	} else if score >= 330000 {
-		confidence = ConfidenceMedium
-	}
+	confidence := confidenceForMicros(float64(score))
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], confidence)
 	return response, bus.ModuleStatusOK
+}
+
+func confidenceForMicros(score float64) uint32 {
+	if score >= 660000 {
+		return ConfidenceHigh
+	}
+	if score >= 330000 {
+		return ConfidenceMedium
+	}
+	return ConfidenceLow
 }

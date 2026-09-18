@@ -610,3 +610,9 @@ refusal envelope. Missing/malformed replies are unavailable rather than not-foun
 invalid counts cannot become success. Runtime-web maps explicit conflicts to
 HTTP 409. Native consumer tests cover authority, valid zero-count responses,
 refusals, malformed counts and HTTP classification; Go tests cover the status map.
+
+Confidence display thresholds now run through the shared host-only Go command.
+The native adapter validates the response and exposes the existing label. All
+unused fixed-wire extraction, scanning and confidence codecs are deleted from
+the native module header; only remaining stage identifiers and a relation bound
+remain. Go boundary tests, both live placements and all 77 lint checks pass.

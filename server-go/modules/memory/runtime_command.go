@@ -23,6 +23,17 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	request := DataRequest{IncludeAll: true}
 	switch operation {
+	case "confidence":
+		score, ok := args.number("score")
+		if !ok {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		// Compare the fixed-point scale in Go. This preserves the legacy
+		// threshold rounding and avoids undefined native float-to-int casts.
+		band := confidenceForMicros(score * 1000000)
+		name := map[uint32]string{ConfidenceLow: "low", ConfidenceMedium: "medium", ConfidenceHigh: "high"}[band]
+		return commandResult(map[string]any{"status": "ok", "confidence": name})
+
 	case "fact-review":
 		caller := options.commandContext
 		if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {

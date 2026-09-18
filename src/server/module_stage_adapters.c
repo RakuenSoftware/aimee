@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "module_stage_adapters.h"
+#include "module_commands.h"
 
 #include <aimee/tools/agent_tools.h>
 #include <aimee/delegates/delegate_xml_fallback.h>
@@ -140,22 +141,37 @@ static int memory_confidence(double score, const char **confidence)
 {
    if (!confidence)
       return -1;
-   double scaled = score * 1000000.0;
-   int64_t micros = scaled >= (double)INT64_MAX   ? INT64_MAX
-                    : scaled <= (double)INT64_MIN ? INT64_MIN
-                                                  : (int64_t)scaled;
-   uint8_t request[AIMEE_MEMORY_REQUEST_LEN], response[AIMEE_MEMORY_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   aimee_memory_confidence_t result;
-   if (aimee_memory_request_encode(micros, request, sizeof(request)) != 0 ||
-       call_module(AIMEE_MEMORY_EVENT_RERANK, AIMEE_MEMORY_STAGE_RERANK, request, sizeof(request),
-                   response, sizeof(response), &response_len) != 0 ||
-       aimee_memory_response_decode(response, response_len, &result) != 0)
+   cJSON *request = cJSON_CreateObject(), *response = NULL;
+   if (!request)
       return -1;
-   *confidence = result == AIMEE_MEMORY_CONFIDENCE_HIGH     ? "high"
-                 : result == AIMEE_MEMORY_CONFIDENCE_MEDIUM ? "medium"
-                                                            : "low";
-   return 0;
+   cJSON_AddStringToObject(request, "operation", "confidence");
+   cJSON_AddNumberToObject(request, "score", score);
+   int dispatched = aimee_module_commands_dispatch_internal("memory.runtime", request, &response);
+   cJSON_Delete(request);
+   const char *value =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "confidence"));
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+   int result = -1;
+   if (dispatched > 0 && status && strcmp(status, "ok") == 0 && value)
+   {
+      if (strcmp(value, "high") == 0)
+      {
+         *confidence = "high";
+         result = 0;
+      }
+      else if (strcmp(value, "medium") == 0)
+      {
+         *confidence = "medium";
+         result = 0;
+      }
+      else if (strcmp(value, "low") == 0)
+      {
+         *confidence = "low";
+         result = 0;
+      }
+   }
+   cJSON_Delete(response);
+   return result;
 }
 
 static int learning_classify(const char *signal, uint32_t *sink_mask)

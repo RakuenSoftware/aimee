@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/JBailes/aimee/server-go/bus"
 	"testing"
 )
@@ -54,4 +55,25 @@ func runHostRuntime(t *testing.T, handler bus.ModuleHandler, args string) map[st
 		t.Fatal(err)
 	}
 	return result
+}
+
+func TestRuntimeConfidenceBothPlacements(t *testing.T) {
+	for _, placement := range []Placement{PlacementServer, PlacementKB} {
+		handler := NewHandler(nil, WithDataStore(placement, nil))
+		for _, test := range []struct {
+			score float64
+			want  string
+		}{{-1e200, "low"}, {0, "low"}, {.329999, "low"}, {.33, "medium"}, {.659999, "medium"}, {.66, "high"}, {1e200, "high"}} {
+			r := runHostRuntime(t, handler, fmt.Sprintf(`{"operation":"confidence","score":%g}`, test.score))
+			if r["confidence"] != test.want {
+				t.Fatal(test, r)
+			}
+		}
+		for _, raw := range []string{`{"operation":"confidence"}`, `{"operation":"confidence","score":null}`, `{"operation":"confidence","score":"high"}`} {
+			frame, _ := bus.EncodeCommand("runtime", json.RawMessage(raw))
+			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+				t.Fatal(raw, status)
+			}
+		}
+	}
 }
