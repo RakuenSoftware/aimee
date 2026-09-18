@@ -921,8 +921,6 @@ int memory_graph_prune(void);
 /* Normalize edge weights per relation type so max weight is 1.0. */
 int memory_graph_normalize(void);
 
-int memory_embed(int64_t memory_id, const char *command);
-
 /* The embed command that selects the in-process lexical fixture. TEST BUILDS ONLY —
  * it is compiled out of aimee-kb, so passing it there is an ordinary (failing) exec.
  * There is no implicit embedder: an empty command embeds nothing and returns 0. */

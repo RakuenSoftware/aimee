@@ -55,6 +55,13 @@ const method_policy_t method_registry[] = {
     {"memory.reject", CAP_MEMORY_WRITE, "reject a memory"},
     {"memory.restore", CAP_MEMORY_ADMIN, "restore a rejected memory"},
     {"memory.review_list", CAP_MEMORY_READ, "review visible memories"},
+    {"memory.reembed_start", CAP_INDEX_ADMIN, "stage a memory embedding version"},
+    {"memory.reembed_cutover", CAP_INDEX_ADMIN, "activate a memory embedding version"},
+    {"memory.reembed_rollback", CAP_INDEX_ADMIN, "restore a memory embedding version"},
+    {"memory.reembed_status", CAP_MEMORY_READ, "inspect memory embedding progress"},
+    {"memory.repair", CAP_INDEX_ADMIN, "repair memory vectors"},
+    {"memory.rebuild", CAP_INDEX_ADMIN, "rebuild memory vectors"},
+    {"memory.reindex", CAP_INDEX_ADMIN, "rebuild memory metadata"},
     /* Typed-fact corrections sit at WRITE, not the ADMIN tier memory.delete was
      * just moved to, and for exactly the reason given there: writing and
      * destroying are different privileges. None of these destroys anything.

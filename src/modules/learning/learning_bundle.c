@@ -98,7 +98,7 @@ int learning_bundle_build(const char *query, const char *embed_cmd, int k, learn
    cJSON_AddStringToObject(embed_0_args, "input_type", "query");
    cJSON_AddStringToObject(embed_0_args, "text", query);
    cJSON_AddNumberToObject(embed_0_args, "max_dim", BUNDLE_EMBED_DIM);
-   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
    int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), qvec,
                              BUNDLE_EMBED_DIM);

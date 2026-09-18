@@ -8,6 +8,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/jackc/pgx/v5/pgconn"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -268,6 +269,19 @@ func TestSharedIndexConcurrentClaims(t *testing.T) {
 	case <-started:
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+	// Cutover cannot pass the shared lock held by an in-flight vector write.
+	cutoverTx, err := b.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contender := makeOwner(cutoverTx)
+	if _, err = contender.cutoverReembed(ctx, "not-yet-staged"); err == nil || !strings.Contains(err.Error(), "another vector rebuild") {
+		_ = cutoverTx.Rollback(context.Background())
+		t.Fatal("cutover bypassed active embedding", err)
+	}
+	if err = cutoverTx.Rollback(ctx); err != nil {
+		t.Fatal(err)
 	}
 	if _, err = b.Exec(ctx, `SET lock_timeout='100ms'; SELECT set_config('aimee.authority','user',false)`); err != nil {
 		t.Fatal(err)

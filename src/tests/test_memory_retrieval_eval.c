@@ -1,3 +1,5 @@
+#include "json_fluent.h"
+#include "module_commands.h"
 /* test_memory_retrieval_eval.c: unit tests for corpus-based memory retrieval evaluation */
 #include <assert.h>
 #include "modules/db2/c/db2_test_shim.h"
@@ -200,7 +202,14 @@ static void test_fusion_surfaces_bridged_memory(void)
    memory_t base;
    assert(memory_insert(TIER_L2, KIND_FACT, "nginx deployment",
                         "nginx deployment listens on port 443", 0.9, "sess", &base) == 0);
-   assert(memory_embed(base.id, embed) == 0);
+   cJSON *embed_args = cJSON_CreateObject(), *embed_reply = NULL;
+   cJSON_AddNumberToObject(embed_args, "memory_id", (double)base.id);
+   cJSON_AddStringToObject(embed_args, "embedding_command", embed);
+   int embed_rc = aimee_module_commands_dispatch("memory.embed", embed_args, &embed_reply);
+   cJSON_Delete(embed_args);
+   int embedded = embed_rc > 0 && strcmp(jo_cstr(embed_reply, "status"), "ok") == 0;
+   cJSON_Delete(embed_reply);
+   assert(embedded);
 
    /* Bridge: zero query-term overlap. The write path embeds derived units, so
     * remove both its top-level and unit points to make this a deliberately

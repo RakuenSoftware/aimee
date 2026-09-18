@@ -209,6 +209,12 @@ static void test_authenticated_identity_is_not_capability(void)
 
 int main(void)
 {
+   const char *index_methods[] = {
+       "memory.embed",  "memory.reembed_start", "memory.reembed_cutover", "memory.reembed_rollback",
+       "memory.repair", "memory.rebuild",       "memory.reindex"};
+   for (size_t i = 0; i < sizeof(index_methods) / sizeof(index_methods[0]); ++i)
+      assert(server_capability_for_method(index_methods[i]) == CAP_INDEX_ADMIN);
+   assert(server_capability_for_method("memory.reembed_status") == CAP_MEMORY_READ);
    printf("mcp_memory_gate:\n");
    test_authenticated_identity_is_not_capability();
    test_verb_methods();

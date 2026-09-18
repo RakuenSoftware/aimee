@@ -16,6 +16,11 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "embed", "Embed current memory records.", handleRepairCommand, true},
+	{"memory", "reembed_start", "Stage a resumable embedding version.", handleReembedCommand, true},
+	{"memory", "reembed_status", "Inspect versioned embedding progress.", handleReembedCommand, true},
+	{"memory", "reembed_cutover", "Atomically activate a complete embedding version.", handleReembedCommand, true},
+	{"memory", "reembed_rollback", "Restore a retained current embedding version.", handleReembedCommand, true},
 	{"memory", "find_facts", "Find scoped facts with the configured retrieval policy.", handleRecordCommand, true},
 	{"maintenance", "fold_session", "Fold a scoped session and capture learning evidence.", handleRuntimeCommand, true},
 	{"memory", "scene_list", "List visible memory scenes.", handleDomainCommand, true},
@@ -116,7 +121,7 @@ func describeCommandRoutes(options handlerOptions, invocation bus.ModuleInvocati
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
-	commands := []bus.CommandDefinition{{Group: "memory", Verb: "embed", Summary: "Embed trusted host input."}, {Group: "memory", Verb: "runtime", Summary: "Read host runtime views."}}
+	commands := []bus.CommandDefinition{{Group: "memory", Verb: "embed_text", Summary: "Embed trusted host input."}, {Group: "memory", Verb: "runtime", Summary: "Read host runtime views."}}
 	// The Server's shared-KB transport is still being migrated. Do not shadow
 	// those handlers with private-only commands under the same public name.
 	routes := sharedCommandRoutes

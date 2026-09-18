@@ -1397,60 +1397,6 @@ char *kb_client_artifact_set_state_json(const char *id, const char *new_state,
    return kb_v1_learning_action_request("artifacts.set_state", req);
 }
 
-/* Embed paths are batch-heavy (reembed_start walks every stale memory).
- * Share the 10-minute budget used by repair/rebuild. */
-#define KB_CLIENT_MEMORY_EMBED_TIMEOUT_MS (10 * 60 * 1000)
-
-static char *kb_v1_memory_embed_action_request(const char *method, cJSON *req)
-{
-   return kb_v1_action_request_timeout(method, req, KB_CLIENT_MEMORY_EMBED_TIMEOUT_MS,
-                                       kb_error_json);
-}
-
-char *kb_client_memory_embed_json(int all, int64_t memory_id, const char *version,
-                                  const char *embedding_command)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddBoolToObject(req, "all", all ? 1 : 0);
-   if (memory_id > 0)
-      cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
-   if (version && version[0])
-      cJSON_AddStringToObject(req, "version", version);
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   return kb_v1_memory_embed_action_request("memory.embed", req);
-}
-
-char *kb_client_memory_reembed_start_json(const char *version, const char *embedding_command)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (version && version[0])
-      cJSON_AddStringToObject(req, "version", version);
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   return kb_v1_memory_embed_action_request("memory.reembed_start", req);
-}
-
-char *kb_client_memory_reembed_status_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_memory_embed_action_request("memory.reembed_status", req);
-}
-
-char *kb_client_memory_reembed_cutover_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_memory_embed_action_request("memory.reembed_cutover", req);
-}
-
-char *kb_client_memory_reembed_rollback_json(const char *version)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (version && version[0])
-      cJSON_AddStringToObject(req, "version", version);
-   return kb_v1_memory_embed_action_request("memory.reembed_rollback", req);
-}
-
 /* Search may embed a query and hit pgvector; be generous but bounded so
  * a hung sidecar doesn't wedge the CLI indefinitely. */
 #define KB_CLIENT_SEARCH_TIMEOUT_MS (2 * 60 * 1000)

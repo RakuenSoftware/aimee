@@ -17694,6 +17694,29 @@ INSERT INTO kb_async_jobs(kind,document_id,project,status)
   SELECT 'memory_index',id,'memory','pending' FROM memories WHERE lifecycle_state='active'
   ON CONFLICT(kind,document_id) DO NOTHING;
 
+-- Versioned drafts never replace the active retrieval vectors until cutover.
+-- Commands are runtime configuration, never returned by the public status API.
+CREATE TABLE IF NOT EXISTS memory_embedder_versions (
+ version TEXT PRIMARY KEY CHECK(length(version) BETWEEN 1 AND 256),
+ command TEXT NOT NULL, dimension INTEGER NOT NULL CHECK(dimension BETWEEN 1 AND 4000),
+ serving_id TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL DEFAULT pg_now_text()
+);
+ALTER TABLE memory_embedder_versions ADD COLUMN IF NOT EXISTS serving_id TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS memory_embedding_versions (
+ version TEXT NOT NULL REFERENCES memory_embedder_versions(version),
+ point_id BIGINT NOT NULL, memory_id BIGINT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+ input_hash TEXT NOT NULL, embedding vector, attempts INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT pg_now_text(),
+ PRIMARY KEY(version,point_id)
+);
+ALTER TABLE memory_embedding_versions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_embedding_versions_parent ON memory_embedding_versions;
+CREATE POLICY memory_embedding_versions_parent ON memory_embedding_versions
+ USING(EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id))
+ WITH CHECK(EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id));
+
+
 -- The embedded Go store has a separate, non-owner runtime role. The KB owner
 -- creates these objects, so the Go migrator's default privileges do not cover
 -- them. Grant only the memory domain's relations, never the Vault/control or
@@ -17712,6 +17735,7 @@ BEGIN
     'epistemic_directives','fact_graph_changes','fact_graph_commits',
     'kb_async_jobs','kb_meta','memories','memory_conflicts',
     'memory_aliases','memory_chunks','memory_coref_audit','memory_event_frames','memory_temporal_refs',
+    'memory_embedder_versions','memory_embedding_versions','memory_active_embedder','memory_reembed_progress',
     'memory_embeddings','memory_entities','memory_episodes','memory_evidence_events','memory_fact_actors',
     'memory_health','memory_lineage','memory_links','memory_provenance',
     'memory_rejection_tombstones','memory_relations','memory_scene_members',
@@ -17768,5 +17792,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '6')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '7')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

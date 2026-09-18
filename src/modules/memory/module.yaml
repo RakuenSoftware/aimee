@@ -87,7 +87,9 @@
     "server-go/modules/memory/unit_vectors.go",
     "server-go/modules/memory/derived_relations.go",
     "server-go/modules/memory/coreference.go",
-    "server-go/modules/memory/negation.go"
+    "server-go/modules/memory/negation.go",
+    "server-go/modules/memory/reembed.go",
+    "server-go/modules/memory/public_reembed.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -145,7 +147,8 @@
     "server-go/modules/memory/coreference_test.go",
     "server-go/modules/memory/graph_score_test.go",
     "server-go/modules/memory/shared_index_test.go",
-    "server-go/modules/memory/negation_test.go"
+    "server-go/modules/memory/negation_test.go",
+    "server-go/modules/memory/reembed_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

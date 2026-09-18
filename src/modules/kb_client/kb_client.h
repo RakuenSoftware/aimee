@@ -1073,31 +1073,6 @@ char *kb_client_artifact_set_state_json(const char *id, const char *new_state,
  *   failed_ops[] (when detail=1), timings{trials,total_us,max_us} (when
  *   timings=1).  On any failure {"status":"error","message":"..."}. */
 
-/* Embed one memory (memory_id>0) or all stale L1/L2 memories (all=1).  For
- * batch mode the caller must pass `version` — the active embedder version —
- * so aimee-kb does not need to consult CLI-side config.  Returns the
- * heap-allocated JSON response (caller frees). */
-char *kb_client_memory_embed_json(int all, int64_t memory_id, const char *version,
-                                  const char *embedding_command);
-
-/* Begin or resume a versioned re-embed job.  The caller passes the target
- * version and embedder command; aimee-kb upserts memory_reembed_progress,
- * loops memory_embed over every stale memory, and returns counts.  This is
- * long-running for large corpora — plan timeouts accordingly. */
-char *kb_client_memory_reembed_start_json(const char *version, const char *embedding_command);
-
-/* Report active embedder version + current memory_reembed_progress row. */
-char *kb_client_memory_reembed_status_json(void);
-
-/* Activate the completed target version of the in-flight re-embed job.
- * Writes memory_active_embedder, marks memory_reembed_progress finished,
- * and rebuilds the vector index at the new version. */
-char *kb_client_memory_reembed_cutover_json(void);
-
-/* Activate an arbitrary previously-embedded version and rebuild the vector index at it. Fails
- * cleanly if the version has no pgvector memory rows. */
-char *kb_client_memory_reembed_rollback_json(const char *version);
-
 /* List the 100 most recent scenes (memory_scenes).  Returns
  * {"status":"ok","scenes":[{id, workspace_id, turn_count, created_at}, ...]}. */
 

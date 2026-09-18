@@ -72,7 +72,7 @@ func TestEmbedDimensionAndTruncation(t *testing.T) {
 		t.Fatal(got)
 	}
 	handler := NewHandler(&batchExecutor{reply: `[1,2,3]`})
-	frame, _ := bus.EncodeCommand("embed", []byte(`{"base_url":"http://embedder","text":"probe","max_dim":2}`))
+	frame, _ := bus.EncodeCommand("embed_text", []byte(`{"base_url":"http://embedder","text":"probe","max_dim":2}`))
 	encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
 	body, err := bus.DecodeCommandResult(encoded)
 	if status != bus.ModuleStatusOK || err != nil || strings.Contains(string(body), `"vector"`) || !strings.Contains(string(body), `"truncated":true`) {

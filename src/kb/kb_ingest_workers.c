@@ -797,7 +797,8 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
       cJSON_AddStringToObject(embed_0_args, "input_type", "document");
       cJSON_AddStringToObject(embed_0_args, "text", embed_text);
       cJSON_AddNumberToObject(embed_0_args, "max_dim", EMBED_MAX_DIM);
-      (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+      (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
+                                                    &embed_0_reply);
       cJSON_Delete(embed_0_args);
       int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
                                EMBED_MAX_DIM);
@@ -1006,7 +1007,8 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
       cJSON_AddStringToObject(embed_1_args, "input_type", "document");
       cJSON_AddStringToObject(embed_1_args, "text", embed_text);
       cJSON_AddNumberToObject(embed_1_args, "max_dim", EMBED_MAX_DIM);
-      (void)aimee_module_commands_dispatch_internal("memory.embed", embed_1_args, &embed_1_reply);
+      (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_1_args,
+                                                    &embed_1_reply);
       cJSON_Delete(embed_1_args);
       int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), vec,
                                EMBED_MAX_DIM);

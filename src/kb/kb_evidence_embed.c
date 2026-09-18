@@ -138,7 +138,7 @@ int kb_evidence_embed_one(const char *embed_cmd)
    cJSON_AddStringToObject(embed_0_args, "input_type", "document");
    cJSON_AddStringToObject(embed_0_args, "text", content);
    cJSON_AddNumberToObject(embed_0_args, "max_dim", EVIDENCE_EMBED_DIM);
-   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
    int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
                             EVIDENCE_EMBED_DIM);

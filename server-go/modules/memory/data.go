@@ -509,6 +509,9 @@ ON CONFLICT (point_id) DO UPDATE SET
   project = EXCLUDED.project, kind = EXCLUDED.kind, payload_json = EXCLUDED.payload_json`,
 		record.ID, vectorText, primaryScope, workspace, project, record.Kind, string(payload))
 	if err == nil {
+		err = s.retainActiveEmbedding(ctx, record.ID, vector)
+	}
+	if err == nil {
 		_, err = s.db.Exec(ctx, `INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,indexed_at,updated_at)
 VALUES($1,'memory',$1,'ok',0,'',pg_now_text(),pg_now_text()) ON CONFLICT(point_id) DO UPDATE SET
 status='ok',last_error='',indexed_at=pg_now_text(),updated_at=pg_now_text()`, record.ID)
@@ -813,7 +816,7 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	switch request.Operation {
 	case "scene-members":
 		maxLimit = 512
-	case "vector-repair-prepare":
+	case "vector-repair-prepare", "vector-embed-prepare":
 		maxLimit = 1024
 	case "rebuild-derived":
 		maxLimit = 100000
@@ -1087,6 +1090,12 @@ set_config('aimee.correlation_id',$9,true)`,
 
 	response := DataResponse{}
 	switch request.Operation {
+	case "reembed-prepare", "reembed-next", "reembed-point", "reembed-status", "reembed-cutover":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.reembedData(ctx, invocation.TraceID, options.executor, request)
 	case "episode-cards":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {
@@ -1108,12 +1117,16 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 		response.Payload, err = backend.verifyVectors(ctx, invocation.TraceID, options.executor, request)
 
-	case "vector-repair-prepare":
+	case "vector-repair-prepare", "vector-embed-prepare":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
-		response, err = backend.prepareVectorRepair(ctx, request)
+		if request.Operation == "vector-embed-prepare" {
+			response, err = backend.prepareVectorEmbed(ctx, request)
+		} else {
+			response, err = backend.prepareVectorRepair(ctx, request)
+		}
 	case "vector-repair-record":
 		if options.placement != PlacementKB || request.ID <= 0 {
 			return nil, bus.ModuleStatusInvalidRequest

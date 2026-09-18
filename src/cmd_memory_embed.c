@@ -42,8 +42,6 @@ static cJSON *mem_rpc_unwrap(char *resp_json, const char *what)
 
 void mem_embed(app_ctx_t *ctx, int argc, char **argv)
 {
-   const char *embed_cmd = config_embedder_command_current(NULL);
-
    int all = 0;
    int64_t single_id = 0;
    for (int i = 0; i < argc; i++)
@@ -59,19 +57,21 @@ void mem_embed(app_ctx_t *ctx, int argc, char **argv)
 
    if (single_id > 0)
    {
-      cJSON *resp = mem_rpc_unwrap(kb_client_memory_embed_json(0, single_id, NULL, embed_cmd),
-                                   "memory embed failed");
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddNumberToObject(request, "memory_id", (double)single_id);
+      cJSON *resp =
+          mem_rpc_unwrap(kb_v1_action_request_with_timeout("memory.embed", request, 10 * 60 * 1000),
+                         "memory embed failed");
       cJSON_Delete(resp);
       printf("Embedded memory %lld\n", (long long)single_id);
       return;
    }
 
-   /* Copied out: held alongside embed_cmd through the work below. */
-   char embed_model[CONFIG_COPY_MAX];
-   config_embedder_model_copy(embed_model, sizeof(embed_model));
-   const char *embed_ver = embed_model[0] ? embed_model : embed_cmd;
-   cJSON *resp = mem_rpc_unwrap(kb_client_memory_embed_json(1, 0, embed_ver, embed_cmd),
-                                "memory embed failed");
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddBoolToObject(request, "all", 1);
+   cJSON *resp =
+       mem_rpc_unwrap(kb_v1_action_request_with_timeout("memory.embed", request, 10 * 60 * 1000),
+                      "memory embed failed");
    int success = 0, fail = 0;
    cJSON *n = cJSON_GetObjectItemCaseSensitive(resp, "embedded");
    if (cJSON_IsNumber(n))
@@ -104,152 +104,88 @@ void mem_embed(app_ctx_t *ctx, int argc, char **argv)
  */
 void mem_reembed(app_ctx_t *ctx, int argc, char **argv)
 {
-   int do_start = 0, do_status = 0, do_cutover = 0;
-   const char *rollback_version = NULL;
-   const char *target_version = NULL;
-
-   for (int i = 0; i < argc; i++)
+   const char *verb = NULL, *version = NULL;
+   int start = 0, status = 0;
+   for (int i = 0; i < argc; ++i)
    {
       if (strcmp(argv[i], "--start") == 0)
-         do_start = 1;
+      {
+         verb = "memory.reembed_start";
+         start = 1;
+      }
       else if (strcmp(argv[i], "--status") == 0)
-         do_status = 1;
+      {
+         verb = "memory.reembed_status";
+         status = 1;
+      }
       else if (strcmp(argv[i], "--cutover") == 0)
-         do_cutover = 1;
+         verb = "memory.reembed_cutover";
       else if (strcmp(argv[i], "--rollback") == 0 && i + 1 < argc)
-         rollback_version = argv[++i];
+      {
+         verb = "memory.reembed_rollback";
+         version = argv[++i];
+      }
       else if (strcmp(argv[i], "--version") == 0 && i + 1 < argc)
-         target_version = argv[++i];
+         version = argv[++i];
    }
-
-   if (!do_start && !do_status && !do_cutover && !rollback_version)
+   if (!verb)
       fatal("usage: aimee memory reembed --start [--version <v>] | --status | --cutover | "
             "--rollback <version>");
-
-   if (rollback_version)
+   start = strcmp(verb, "memory.reembed_start") == 0;
+   status = strcmp(verb, "memory.reembed_status") == 0;
+   cJSON *request = cJSON_CreateObject();
+   char model[CONFIG_COPY_MAX];
+   if (start)
    {
-      cJSON *resp =
-          mem_rpc_unwrap(kb_client_memory_reembed_rollback_json(rollback_version), "rollback");
-      int count = 0, rebuilt = 0, rebuild_failed = 0;
-      cJSON *n = cJSON_GetObjectItemCaseSensitive(resp, "embedding_count");
-      if (cJSON_IsNumber(n))
-         count = (int)n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(resp, "rebuilt");
-      if (cJSON_IsNumber(n))
-         rebuilt = (int)n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(resp, "rebuild_failed");
-      if (cJSON_IsNumber(n))
-         rebuild_failed = (int)n->valuedouble;
-      cJSON_Delete(resp);
-      printf("Active embedder set to '%s' (%d embeddings, %d vector points rebuilt, %d failed)\n",
-             rollback_version, count, rebuilt, rebuild_failed);
-      return;
+      const char *command = config_embedder_command_current(NULL);
+      config_embedder_model_copy(model, sizeof(model));
+      if (!version)
+         version = model[0] ? model : command;
+      cJSON_AddStringToObject(request, "embedding_command", command);
    }
-
-   if (do_status)
-   {
-      cJSON *resp = mem_rpc_unwrap(kb_client_memory_reembed_status_json(), "reembed status");
-      cJSON *av = cJSON_GetObjectItemCaseSensitive(resp, "active_version");
-      const char *active_ver = (cJSON_IsString(av) && av->valuestring) ? av->valuestring : "";
-      printf("Active embedder version: %s\n", active_ver[0] ? active_ver : "(unset)");
-
-      cJSON *job = cJSON_GetObjectItemCaseSensitive(resp, "job");
-      if (job)
-      {
-         cJSON *tv = cJSON_GetObjectItemCaseSensitive(job, "target_version");
-         cJSON *lj = cJSON_GetObjectItemCaseSensitive(job, "last_id");
-         cJSON *tj = cJSON_GetObjectItemCaseSensitive(job, "total");
-         cJSON *dj = cJSON_GetObjectItemCaseSensitive(job, "done");
-         cJSON *sj = cJSON_GetObjectItemCaseSensitive(job, "started_at");
-         cJSON *fj = cJSON_GetObjectItemCaseSensitive(job, "finished_at");
-         printf("Job target: %s\n", cJSON_IsString(tv) ? tv->valuestring : "");
-         printf("Progress:   %d / %d (last_id=%d)\n", cJSON_IsNumber(dj) ? (int)dj->valuedouble : 0,
-                cJSON_IsNumber(tj) ? (int)tj->valuedouble : 0,
-                cJSON_IsNumber(lj) ? (int)lj->valuedouble : 0);
-         printf("Started:    %s\n", cJSON_IsString(sj) ? sj->valuestring : "");
-         const char *finished = cJSON_IsString(fj) ? fj->valuestring : "";
-         printf("Finished:   %s\n", (finished && finished[0]) ? finished : "(in progress)");
-      }
-      else
-      {
-         printf("No re-embed job recorded.\n");
-      }
-      cJSON_Delete(resp);
-      return;
-   }
-
-   if (do_cutover)
-   {
-      cJSON *resp = mem_rpc_unwrap(kb_client_memory_reembed_cutover_json(), "reembed cutover");
-      cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "version");
-      const char *tv_buf = (cJSON_IsString(v) && v->valuestring) ? v->valuestring : "";
-      int done_count = 0, rebuilt = 0, rebuild_failed = 0;
-      cJSON *n = cJSON_GetObjectItemCaseSensitive(resp, "done");
-      if (cJSON_IsNumber(n))
-         done_count = (int)n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(resp, "rebuilt");
-      if (cJSON_IsNumber(n))
-         rebuilt = (int)n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(resp, "rebuild_failed");
-      if (cJSON_IsNumber(n))
-         rebuild_failed = (int)n->valuedouble;
-      printf("Cutover complete. Active embedder is now '%s' (%d embeddings, %d vector points "
-             "rebuilt, %d failed).\n",
-             tv_buf, done_count, rebuilt, rebuild_failed);
-      cJSON_Delete(resp);
-      return;
-   }
-
-   /* --start */
-   const char *embed_cmd = config_embedder_command_current(NULL);
-   char ver_buf[256];
-   if (target_version)
-      snprintf(ver_buf, sizeof(ver_buf), "%s", target_version);
-   else
-   {
-      if (config_embedder_model()[0])
-         snprintf(ver_buf, sizeof(ver_buf), "%s", config_embedder_model());
-      else
-         snprintf(ver_buf, sizeof(ver_buf), "%s", embed_cmd);
-   }
-
-   cJSON *resp =
-       mem_rpc_unwrap(kb_client_memory_reembed_start_json(ver_buf, embed_cmd), "reembed --start");
-   int success = 0, fail = 0, total = 0, resume = 0;
-   cJSON *n = cJSON_GetObjectItemCaseSensitive(resp, "embedded");
-   if (cJSON_IsNumber(n))
-      success = (int)n->valuedouble;
-   n = cJSON_GetObjectItemCaseSensitive(resp, "failed");
-   if (cJSON_IsNumber(n))
-      fail = (int)n->valuedouble;
-   n = cJSON_GetObjectItemCaseSensitive(resp, "total");
-   if (cJSON_IsNumber(n))
-      total = (int)n->valuedouble;
-   n = cJSON_GetObjectItemCaseSensitive(resp, "resume_last_id");
-   if (cJSON_IsNumber(n))
-      resume = (int)n->valuedouble;
-   cJSON_Delete(resp);
-
-   if (resume > 0)
-      printf("Resumed re-embed for version '%s' from id %d (%d total memories).\n", ver_buf, resume,
-             total);
-   else
-      printf("Started re-embed for version '%s' (%d memories).\n", ver_buf, total);
-
+   if (version)
+      cJSON_AddStringToObject(request, "version", version);
+   cJSON *response = mem_rpc_unwrap(
+       kb_v1_action_request_with_timeout(verb, request, 10 * 60 * 1000), "re-embedding failed");
    if (ctx->json_output)
    {
-      cJSON *j = cJSON_CreateObject();
-      cJSON_AddStringToObject(j, "version", ver_buf);
-      cJSON_AddNumberToObject(j, "embedded", success);
-      cJSON_AddNumberToObject(j, "failed", fail);
-      emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
+      emit_json_ctx(response, ctx->json_fields, ctx->response_profile);
+      return;
+   }
+   if (status)
+   {
+      const char *active = jo_cstr(response, "active_version");
+      printf("Active embedder version: %s\n", active[0] ? active : "(unset)");
+      cJSON *job = cJSON_GetObjectItemCaseSensitive(response, "job");
+      if (cJSON_IsObject(job))
+      {
+         printf("Job target: %s\n", jo_cstr(job, "target_version"));
+         printf("Progress: %lld / %lld (last_id=%lld)\n", (long long)jo_i64(job, "done", 0),
+                (long long)jo_i64(job, "total", 0), (long long)jo_i64(job, "last_id", 0));
+         printf("Started: %s\n", jo_cstr(job, "started_at"));
+         printf("Ready for cutover: %s\n",
+                cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(job, "ready")) ? "yes" : "no");
+         printf("Pending metadata jobs: %lld\n", (long long)jo_i64(job, "pending_metadata", 0));
+      }
+      else
+         printf("No re-embed job recorded.\n");
+   }
+   else if (start)
+   {
+      printf("Version '%s': %lld embedded, %lld failed; %lld / %lld current vectors.\n",
+             jo_cstr(response, "version"), (long long)jo_i64(response, "embedded", 0),
+             (long long)jo_i64(response, "failed", 0), (long long)jo_i64(response, "done", 0),
+             (long long)jo_i64(response, "total", 0));
+      if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "ready")))
+         printf("Run 'aimee memory reembed --cutover' to activate this version.\n");
+      else
+         printf("Version is not ready. Check --status and resume --start after resolving failures "
+                "or pending indexing.\n");
    }
    else
-   {
-      printf("Re-embed complete: %d embedded, %d failed (version '%s').\n"
-             "Run 'aimee memory reembed --cutover' to activate this index.\n",
-             success, fail, ver_buf);
-   }
+      printf("Active embedder set to '%s' (%lld vector points).\n", jo_cstr(response, "version"),
+             (long long)jo_i64(response, "rebuilt", 0));
+   cJSON_Delete(response);
 }
 
 cJSON *memory_score_parts_to_json(const memory_score_parts_t *parts)

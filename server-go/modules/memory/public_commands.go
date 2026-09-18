@@ -110,7 +110,7 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if verb == "runtime" {
 		return handleRuntimeView(options, invocation, args)
 	}
-	if verb == "embed" {
+	if verb == "embed_text" {
 		if invocation.PrincipalRef != 0 {
 			return nil, bus.ModuleStatusInvalidRequest
 		}

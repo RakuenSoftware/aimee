@@ -189,6 +189,18 @@ CREATE TABLE IF NOT EXISTS memory_scene_members (  scene_id INTEGER NOT NULL REF
 CREATE TABLE IF NOT EXISTS memory_relation_schema (  id INTEGER PRIMARY KEY AUTOINCREMENT,  relation_id INTEGER NOT NULL,  subject_kind INTEGER NOT NULL DEFAULT 99,  object_kind  INTEGER NOT NULL DEFAULT 99);
 CREATE TABLE IF NOT EXISTS memory_active_embedder (  id         INTEGER PRIMARY KEY CHECK (id = 1),  version    TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory_reembed_progress (  id             INTEGER PRIMARY KEY CHECK (id = 1),  target_version TEXT    NOT NULL DEFAULT '',  last_id        INTEGER NOT NULL DEFAULT 0,  total          INTEGER NOT NULL DEFAULT 0,  done           INTEGER NOT NULL DEFAULT 0,  started_at     TEXT    NOT NULL DEFAULT (datetime('now')),  finished_at    TEXT    DEFAULT NULL);
+-- Shape-only compatibility for native DB2 fixtures; versioned memory behavior is Go-owned.
+CREATE TABLE IF NOT EXISTS memory_embedder_versions (
+ version TEXT PRIMARY KEY, command TEXT NOT NULL, dimension INTEGER NOT NULL,
+ serving_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS memory_embedding_versions (
+ version TEXT NOT NULL REFERENCES memory_embedder_versions(version), point_id INTEGER NOT NULL,
+ memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE, input_hash TEXT NOT NULL,
+ embedding TEXT, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '',
+ updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY(version,point_id)
+);
+
 CREATE TABLE IF NOT EXISTS memory_coref_audit (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  session_id TEXT NOT NULL DEFAULT '',  outcome TEXT NOT NULL DEFAULT 'none',  entity TEXT NOT NULL DEFAULT '',  mode TEXT NOT NULL DEFAULT '',  confidence REAL NOT NULL DEFAULT 0.0,  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS curator_invalidation_events (  id INTEGER PRIMARY KEY AUTOINCREMENT,  source_kind TEXT NOT NULL DEFAULT '',  source_id TEXT NOT NULL DEFAULT '',  artifacts_stale INTEGER NOT NULL DEFAULT 0,  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS code_index_ops (  point_id INTEGER PRIMARY KEY,  project TEXT NOT NULL DEFAULT '',  node_key TEXT NOT NULL DEFAULT '',  file_path TEXT NOT NULL DEFAULT '',  status TEXT NOT NULL DEFAULT 'pending',  attempts INTEGER NOT NULL DEFAULT 0,  last_error TEXT NOT NULL DEFAULT '',  indexed_at TEXT,  updated_at TEXT NOT NULL DEFAULT (datetime('now')));

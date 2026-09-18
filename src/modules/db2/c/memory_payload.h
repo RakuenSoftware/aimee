@@ -28,7 +28,7 @@ extern "C"
    char *db2_memory_build_unit_payload(int64_t unit_id, int64_t *memory_id_out);
 
    /* Fetch just the key + content fields for a memory row; used to build
-    * the embed text in memory_embed().  0 on hit, -1 on miss. */
+    * the shared Go embed input.  0 on hit, -1 on miss. */
    int db2_memory_get_key_content(int64_t memory_id, char *key_out, int key_len, char *content_out,
                                   int content_len);
 

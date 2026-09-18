@@ -1189,7 +1189,8 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       cJSON_AddStringToObject(embed_0_args, "input_type", "query");
       cJSON_AddStringToObject(embed_0_args, "text", query);
       cJSON_AddNumberToObject(embed_0_args, "max_dim", EMBED_MAX_DIM);
-      (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+      (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
+                                                    &embed_0_reply);
       cJSON_Delete(embed_0_args);
       int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), qvec,
                                 EMBED_MAX_DIM);

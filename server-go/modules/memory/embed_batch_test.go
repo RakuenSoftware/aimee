@@ -87,7 +87,7 @@ func TestEmbedCommandIsHostOnly(t *testing.T) {
 	for _, placement := range []Placement{PlacementServer, PlacementKB} {
 		executor := &batchExecutor{reply: `[1,2,3]`}
 		handler := NewHandler(executor, WithDataStore(placement, nil))
-		frame, _ := bus.EncodeCommand("embed", json.RawMessage(`{"base_url":"http://embedder","text":"probe","max_dim":3}`))
+		frame, _ := bus.EncodeCommand("embed_text", json.RawMessage(`{"base_url":"http://embedder","text":"probe","max_dim":3}`))
 		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 99}, frame); status != bus.ModuleStatusInvalidRequest || executor.calls != 0 {
 			t.Fatal("untrusted embed accepted")
 		}

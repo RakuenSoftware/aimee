@@ -87,7 +87,7 @@ func (s *postgresDataStore) clearVectorCollection(ctx context.Context, dim int) 
 	if !allScopes {
 		return errors.New("memory: vector collection reset requires all-scope maintenance")
 	}
-	_, err = s.db.Exec(ctx, `DELETE FROM memory_embeddings`)
+	_, err = s.db.Exec(ctx, `DELETE FROM memory_embeddings WHERE record_type IN ('memory','unit')`)
 	return err
 }
 
@@ -104,6 +104,13 @@ func (s *postgresDataStore) RebuildVectorIndex(ctx context.Context, version stri
 	}
 	queued := 0
 	err := s.vectorTransaction(ctx, func(bound *postgresDataStore) error {
+		active, _, _, err := bound.activeEmbeddingVersion(ctx)
+		if err != nil {
+			return err
+		}
+		if active != "" && active != version {
+			return errors.New("memory: rebuild version is not active; use a validated cutover or rollback")
+		}
 		dim, err := bound.vectorDimension(ctx)
 		if err != nil {
 			return err

@@ -44,7 +44,7 @@ static int kbs_semantic_assertion_index_refresh(int max_rows)
          cJSON_AddStringToObject(embed_0_args, "input_type", "document");
          cJSON_AddStringToObject(embed_0_args, "text", rows[i].canonical_rendering);
          cJSON_AddNumberToObject(embed_0_args, "max_dim", EMBED_MAX_DIM);
-         (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args,
+         (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
                                                        &embed_0_reply);
          cJSON_Delete(embed_0_args);
          int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
@@ -137,7 +137,7 @@ static int kbs_semantic_assertion_hybrid(const char *query, const char *valid_at
    cJSON_AddStringToObject(embed_1_args, "input_type", "query");
    cJSON_AddStringToObject(embed_1_args, "text", query);
    cJSON_AddNumberToObject(embed_1_args, "max_dim", EMBED_MAX_DIM);
-   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_1_args, &embed_1_reply);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_1_args, &embed_1_reply);
    cJSON_Delete(embed_1_args);
    int qdim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), qvec,
                              EMBED_MAX_DIM);

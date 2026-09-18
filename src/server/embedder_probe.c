@@ -34,7 +34,7 @@ static int probe_once(void)
    cJSON_AddStringToObject(args, "operation", "dimension");
    cJSON_AddStringToObject(args, "base_url", g_embed_cmd);
    cJSON_AddNumberToObject(args, "max_dim", EMBED_MAX_DIM);
-   (void)aimee_module_commands_dispatch_internal("memory.embed", args, &reply);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply);
    cJSON_Delete(args);
    int dim = jo_int(reply, "dim", 0);
    cJSON_Delete(reply);
@@ -104,7 +104,7 @@ static int embedder_probe_serving_id(char *out, size_t out_len, char *err, size_
       cJSON *args = cJSON_CreateObject(), *reply = NULL;
       cJSON_AddStringToObject(args, "operation", "serving-id");
       cJSON_AddStringToObject(args, "base_url", g_embed_cmd);
-      (void)aimee_module_commands_dispatch_internal("memory.embed", args, &reply);
+      (void)aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply);
       cJSON_Delete(args);
       const cJSON *identity = cJSON_GetObjectItemCaseSensitive(reply, "serving_id");
       int ready = cJSON_IsString(identity) && !jo_cstr(reply, "error")[0];

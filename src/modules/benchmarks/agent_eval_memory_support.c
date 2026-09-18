@@ -1,3 +1,5 @@
+#include "json_fluent.h"
+#include "module_commands.h"
 /* _GNU_SOURCE: strcasestr/memmem are GNU extensions; declare them before any
  * libc header so gcc-12 (the container toolchain) does not implicit-decl + -Werror. */
 #ifndef _GNU_SOURCE
@@ -989,7 +991,14 @@ int mem_eval_load_corpus(const char *corpus_path, const char *embed_cmd, mem_eva
       }
 
       {
-         if (memory_embed(m.id, embed_cmd) != 0)
+         cJSON *embed_args = cJSON_CreateObject(), *embed_reply = NULL;
+         cJSON_AddNumberToObject(embed_args, "memory_id", (double)m.id);
+         cJSON_AddStringToObject(embed_args, "embedding_command", embed_cmd);
+         int embed_rc = aimee_module_commands_dispatch("memory.embed", embed_args, &embed_reply);
+         cJSON_Delete(embed_args);
+         int embedded = embed_rc > 0 && strcmp(jo_cstr(embed_reply, "status"), "ok") == 0;
+         cJSON_Delete(embed_reply);
+         if (!embedded)
          {
             fprintf(stderr, "mem_eval_load_corpus: memory_embed failed for fixture %s\n",
                     j_fid->valuestring);

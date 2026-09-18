@@ -367,6 +367,9 @@ func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, 
 		if _, ok := backend.db.(store.Tx); !ok {
 			return EmbedResponse{Error: "embed: transaction required"}
 		}
+		if err := backend.activeEmbeddingGuard(ctx, command, maxDim); err != nil {
+			return EmbedResponse{Error: err.Error()}
+		}
 		var locked int64
 		if err := backend.db.QueryRow(ctx, `SELECT id FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, memoryID).Scan(&locked); err != nil {
 			return EmbedResponse{Error: "embed: memory record unavailable"}
@@ -383,11 +386,21 @@ func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, 
 	if record.Key != "" {
 		text = record.Key + "\n" + record.Content
 	}
-	response := Embed(ctx, traceID, executor, EmbedRequest{
-		BaseURL: command, InputType: "document", Text: text, MaxDim: maxDim,
-	})
+	request := EmbedRequest{BaseURL: command, InputType: "document", Text: text, MaxDim: maxDim}
+	var response EmbedResponse
+	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB {
+		response = backend.embedActiveVersion(ctx, traceID, executor, request)
+	} else {
+		response = Embed(ctx, traceID, executor, request)
+	}
+
 	if response.Error != "" || response.Unavailable || response.Unauthorized || response.Truncated {
 		return failed(response)
+	}
+	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB {
+		if err := backend.checkActiveEmbeddingIdentity(ctx, response.ServingID); err != nil {
+			return failed(EmbedResponse{Error: err.Error()})
+		}
 	}
 	embeddings, ok := data.(embeddingDataStore)
 	if !ok {

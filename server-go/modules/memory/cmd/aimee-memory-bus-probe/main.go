@@ -67,7 +67,7 @@ func probeDecisions(ctx context.Context, client *memory.Client, caller memory.St
 	declaration, err := caller.Call(ctx, 6143, bus.StageDescribeCommands, 2112, time.Second, []byte{'D', 'C', 'M', 'D', 2, 0, 0, 0})
 	wantCommands := uint32(4)
 	if os.Getenv("AIMEE_TEST_MEMORY_PLACEMENT") == "kb" {
-		wantCommands = 87
+		wantCommands = 92
 	}
 	if err != nil || len(declaration) < 16 || string(declaration[:4]) != "DCMR" ||
 		binary.LittleEndian.Uint32(declaration[4:]) != 2 ||
@@ -76,7 +76,7 @@ func probeDecisions(ctx context.Context, client *memory.Client, caller memory.St
 		return fmt.Errorf("public command discovery: %x %v", declaration, err)
 	}
 	// Declared internal commands must remain unavailable to non-host principals.
-	internal, _ := bus.EncodeCommand("embed", []byte(`{"base_url":"printf '[1,2,3]'","text":"probe","max_dim":3}`))
+	internal, _ := bus.EncodeCommand("embed_text", []byte(`{"base_url":"printf '[1,2,3]'","text":"probe","max_dim":3}`))
 	if _, err := caller.Call(ctx, memory.EventCommand, memory.StageCommand, 2115, time.Second, internal); err == nil {
 		return fmt.Errorf("host-only embedding accepted from module principal")
 	}

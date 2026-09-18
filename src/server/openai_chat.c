@@ -653,7 +653,8 @@ static int embeddings_handler(const char *body, char *resp, int cap)
       cJSON_AddStringToObject(embed_0_args, "input_type", "document");
       cJSON_AddStringToObject(embed_0_args, "text", inputs[i]);
       cJSON_AddNumberToObject(embed_0_args, "max_dim", EMBED_MAX_DIM);
-      (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+      (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
+                                                    &embed_0_reply);
       cJSON_Delete(embed_0_args);
       int d = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vecs[i],
                              EMBED_MAX_DIM);

@@ -42,7 +42,7 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			case "fold_session", "anti_pattern_extract_from_feedback", "anti_pattern_extract_from_failures", "anti_pattern_escalate", "memory_learn_style", "scan_conversations":
 				wantGroup = "maintenance"
 			}
-			if group != wantGroup || (surfaces != SurfaceRPC && !((verb == "embed" || verb == "runtime") && surfaces == 0)) || seen[verb] {
+			if group != wantGroup || (surfaces != SurfaceRPC && !((verb == "embed_text" || verb == "runtime") && surfaces == 0)) || seen[verb] {
 				t.Fatalf("bad route %s.%s mask=%d", group, verb, surfaces)
 			}
 			seen[verb] = true
@@ -53,7 +53,7 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			}
 			continue
 		}
-		if offset != len(response) || len(seen) != 87 {
+		if offset != len(response) || len(seen) != 92 {
 			t.Fatalf("routes=%d bytes=%d/%d", len(seen), offset, len(response))
 		}
 		for _, verb := range []string{"recall", "directive_create", "prospective_match", "list_unused_l2", "stats"} {

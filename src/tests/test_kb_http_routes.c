@@ -4627,7 +4627,7 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
       cJSON_AddBoolToObject(*result, "enabled", instance_fusion_enabled);
       return 1;
    }
-   assert(strcmp(method, "memory.embed") == 0);
+   assert(strcmp(method, "memory.embed_text") == 0);
    *result = cJSON_CreateObject();
    int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
    cJSON_AddBoolToObject(*result, "unauthorized", g_vec_unauthorized);

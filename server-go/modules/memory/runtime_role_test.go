@@ -122,6 +122,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	if err != nil {
 		t.Fatal(err)
 	}
+	exerciseReembedReplay(t, ctx, tx, backend.(*postgresDataStore))
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	call := func(request DataRequest) DataResponse {
 		t.Helper()

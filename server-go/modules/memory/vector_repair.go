@@ -17,6 +17,15 @@ func vectorRetryLimit() int {
 }
 
 func (s *postgresDataStore) embeddingCommand(requested string) (string, error) {
+	if requested == "" && s.placement == PlacementKB && s.db != nil {
+		version, command, _, err := s.activeEmbeddingVersion(context.Background())
+		if err != nil {
+			return "", err
+		}
+		if version != "" {
+			return command, nil
+		}
+	}
 	if requested != "" {
 		return requested, nil
 	}
@@ -135,4 +144,36 @@ func (s *postgresDataStore) withEmbeddingWrite(ctx context.Context, write func(*
 		return err
 	}
 	return releaseErr
+}
+
+func (s *postgresDataStore) prepareVectorEmbed(ctx context.Context, request DataRequest) (DataResponse, error) {
+	prepared, err := s.prepareVectorRepair(ctx, request)
+	if err != nil || request.ID > 0 {
+		return prepared, err
+	}
+	var active string
+	if err = s.db.QueryRow(ctx, `SELECT COALESCE((SELECT version FROM memory_active_embedder WHERE id=1),'')`).Scan(&active); err != nil {
+		return DataResponse{}, err
+	}
+	if active != "" && request.Version != "" && request.Version != active {
+		return DataResponse{}, errors.New("memory: requested version is not active; use reembed_start")
+	}
+	rows, err := s.db.Query(ctx, `SELECT point FROM (
+ SELECT m.id AS point FROM memories m WHERE lifecycle_state='active'
+ UNION ALL SELECT $1+u.id FROM memory_units u JOIN memories m ON m.id=u.memory_id WHERE m.lifecycle_state='active') candidates
+ LEFT JOIN memory_embeddings e ON e.point_id=point LEFT JOIN vector_index_ops o ON o.point_id=point
+ WHERE e.point_id IS NULL OR o.status IN ('pending','failed') ORDER BY point LIMIT $2`, unitPointOffset, request.Limit)
+	if err != nil {
+		return DataResponse{}, err
+	}
+	defer rows.Close()
+	prepared.IDs = []int64{}
+	for rows.Next() {
+		var point int64
+		if err = rows.Scan(&point); err != nil {
+			return DataResponse{}, err
+		}
+		prepared.IDs = append(prepared.IDs, point)
+	}
+	return prepared, rows.Err()
 }

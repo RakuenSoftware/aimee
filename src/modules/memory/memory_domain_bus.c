@@ -52,28 +52,6 @@ static cJSON *domain_request(const char *operation)
    return request;
 }
 
-int memory_embed(int64_t memory_id, const char *command)
-{
-   if (memory_id <= 0 || !command || !command[0])
-      return -1;
-   cJSON *request = cJSON_CreateObject();
-   if (!request || !cJSON_AddStringToObject(request, "operation", "record") ||
-       !cJSON_AddNumberToObject(request, "memory_id", (double)memory_id) ||
-       !cJSON_AddStringToObject(request, "base_url", command) ||
-       !cJSON_AddNumberToObject(request, "max_dim", EMBED_MAX_DIM))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
-   cJSON *response = aimee_module_json_call(AIMEE_MEMORY_EVENT_EMBED, AIMEE_MEMORY_STAGE_EMBED,
-                                            request, AIMEE_MODULE_MESSAGE_MAX_BODY, 25000, &result);
-   const cJSON *embedded = response ? cJSON_GetObjectItemCaseSensitive(response, "embedded") : NULL;
-   int ok = cJSON_IsBool(embedded) && cJSON_IsTrue(embedded);
-   cJSON_Delete(response);
-   return ok ? 0 : -1;
-}
-
 static int domain_copy(char *out, size_t cap, const cJSON *obj, const char *key)
 {
    const cJSON *value = cJSON_GetObjectItemCaseSensitive(obj, key);

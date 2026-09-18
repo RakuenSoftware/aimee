@@ -15,23 +15,6 @@ extern "C"
 
    typedef struct
    {
-      char target_version[256];
-      int last_id;
-      int total;
-      int done;
-      char started_at[64];
-      char finished_at[64];
-      int have_job;
-   } db2_kb_service_reembed_status_t;
-
-   typedef struct
-   {
-      int total_count;
-      int resume_last_id;
-   } db2_kb_service_reembed_start_t;
-
-   typedef struct
-   {
       int pending;
       int running;
       int done;
@@ -64,18 +47,6 @@ extern "C"
       int embeddings;
       db2_kb_service_async_queue_stats_t queue;
    } db2_kb_service_project_status_t;
-
-   int db2_kb_service_get_active_embedder_version(char *out, size_t out_len);
-   int db2_kb_service_set_active_embedder_version(const char *version, const char *updated_at);
-   int db2_kb_service_collect_reembed_status(db2_kb_service_reembed_status_t *out);
-   int db2_kb_service_mark_reembed_finished(const char *finished_at);
-   int db2_kb_service_prepare_reembed_start(const char *version, const char *started_at,
-                                            db2_kb_service_reembed_start_t *out);
-   int db2_kb_service_update_reembed_progress(int last_id, int done);
-   int db2_kb_service_list_unembedded_memory_ids(const char *version, int64_t *ids, int max_ids);
-   int db2_kb_service_list_pending_reembed_memory_ids(const char *version, int resume_last_id,
-                                                      int64_t *ids, int max_ids);
-   int db2_kb_service_count_embeddings_for_version(const char *version);
 
    int db2_kb_service_memory_record_exists(int64_t record_id);
    int db2_kb_service_kb_document_exists(int64_t document_id);

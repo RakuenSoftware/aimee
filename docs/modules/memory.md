@@ -462,3 +462,21 @@ CLI and MCP consumers use generic authenticated commands; reindex retains its
 five-minute budget and vector repair/rebuild retain ten minutes. Transport tests
 verify bearer authentication, explicit scope, operation budgets and refusal bodies.
 CLI vector failure messages no longer read from a freed response.
+
+Versioned re-embedding now runs in Go. Draft vectors retain their exact parent/unit
+input hashes and provider configuration; failed attempts and resumed runs preserve
+completed drafts and the live index. Cutover/rollback checks every current input
+and pending metadata job under the rebuild lock, then switches vectors and the
+active provider in one transaction. Unrelated semantic vectors survive. HTTP
+provider identity is checked before and after embedding; legacy command versions
+bind the configured command and dimension. Ordinary indexing uses the active
+provider and maintains its retained vectors. Rollback requires a retained version
+that covers current inputs; untracked legacy vectors cannot be relabeled as a
+historical version. The DB2 schema version is 7.
+
+The native embed/re-embed handlers, version-query helpers and typed clients are
+retired. Host-only text embedding is `memory.embed_text`; the public
+`memory.embed` command uses scoped Go storage. Normal CLI embed/repair operations
+let the Go owner select the active provider. CLI progress preserves 64-bit IDs and
+reports readiness, incomplete work and pending metadata without claiming a failed
+batch is complete. Vector mutation routes require index-admin capabilities at Server.

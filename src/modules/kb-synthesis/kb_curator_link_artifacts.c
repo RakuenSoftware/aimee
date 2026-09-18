@@ -148,7 +148,7 @@ static int link_concept_semantic(const char *code_id, const char *concept, const
    cJSON_AddStringToObject(embed_0_args, "input_type", "document");
    cJSON_AddStringToObject(embed_0_args, "text", concept);
    cJSON_AddNumberToObject(embed_0_args, "max_dim", CURATOR_LINK_ENTITY_DIM);
-   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
    int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
                             CURATOR_LINK_ENTITY_DIM);

@@ -115,7 +115,7 @@ int kb_curator_index_narrative_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddStringToObject(embed_0_args, "input_type", "document");
    cJSON_AddStringToObject(embed_0_args, "text", text);
    cJSON_AddNumberToObject(embed_0_args, "max_dim", CURATOR_NARRATIVE_DIM);
-   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
    int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
                             CURATOR_NARRATIVE_DIM);

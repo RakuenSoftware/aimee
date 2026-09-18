@@ -40,7 +40,7 @@ func handleVectorCommand(options handlerOptions, invocation bus.ModuleInvocation
 	return commandResult(result)
 }
 
-func handleRepairCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleRepairCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
 	var failedOnly, reset bool
 	_ = json.Unmarshal(args["failed_only"], &failedOnly)
 	_ = json.Unmarshal(args["reset_stuck"], &reset)
@@ -48,8 +48,20 @@ func handleRepairCommand(options handlerOptions, invocation bus.ModuleInvocation
 	if _, present := args["memory_id"]; present && !validID {
 		return commandResult(commandError("invalid_argument", "memory_id must be positive"))
 	}
+	if verb == "embed" {
+		var all bool
+		_ = json.Unmarshal(args["all"], &all)
+		if !validID && !all {
+			return commandResult(commandError("invalid_argument", "memory.embed requires memory_id>0 or all=true"))
+		}
+
+		failedOnly, reset = false, false
+	}
 	request := DataRequest{Operation: "vector-repair-prepare", IncludeAll: true, ID: memoryID,
 		Limit: args.limit("limit", 1024, 1024), FailedOnly: failedOnly, ResetStuck: reset}
+	if verb == "embed" {
+		request.Operation, request.Version = "vector-embed-prepare", strings.TrimSpace(args.stringOr("version", ""))
+	}
 	commandScope(args, &request)
 	call := func(request DataRequest) (DataResponse, bus.ModuleStatus) {
 		body, _ := json.Marshal(request)
@@ -114,6 +126,13 @@ func handleRepairCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	if failedOnly {
 		result["failed_only"] = true
+	}
+	if verb == "embed" {
+		delete(result, "repaired")
+		result["embedded"] = repaired
+		if request.ID > 0 && repaired != 1 {
+			return commandResult(commandError("embedding_failed", "memory embed failed"))
+		}
 	}
 	return commandResult(result)
 }

@@ -124,7 +124,7 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddStringToObject(embed_0_args, "input_type", "document");
    cJSON_AddStringToObject(embed_0_args, "text", intent_text);
    cJSON_AddNumberToObject(embed_0_args, "max_dim", CURATOR_CODE_UNIT_DIM);
-   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args, &embed_0_reply);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
    cJSON_Delete(embed_0_args);
    int d1 = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), intent_vec,
                            CURATOR_CODE_UNIT_DIM);
@@ -134,7 +134,7 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddStringToObject(embed_1_args, "input_type", "document");
    cJSON_AddStringToObject(embed_1_args, "text", sig_text);
    cJSON_AddNumberToObject(embed_1_args, "max_dim", CURATOR_CODE_UNIT_DIM);
-   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_1_args, &embed_1_reply);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_1_args, &embed_1_reply);
    cJSON_Delete(embed_1_args);
    int d2 = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), sig_vec,
                            CURATOR_CODE_UNIT_DIM);
@@ -144,7 +144,7 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddStringToObject(embed_2_args, "input_type", "document");
    cJSON_AddStringToObject(embed_2_args, "text", body_text);
    cJSON_AddNumberToObject(embed_2_args, "max_dim", CURATOR_CODE_UNIT_DIM);
-   (void)aimee_module_commands_dispatch_internal("memory.embed", embed_2_args, &embed_2_reply);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_2_args, &embed_2_reply);
    cJSON_Delete(embed_2_args);
    int d3 = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_2_reply, "vector"), body_vec,
                            CURATOR_CODE_UNIT_DIM);

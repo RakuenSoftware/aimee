@@ -73,13 +73,15 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
       {
          memcpy(out + offset + 37, out + offset, 37);
          put32(out + offset + 37, 0); /* host-only */
-         memcpy(out + offset + 59, "embed", 5);
-         *result_len += 37;
+         out[offset + 47] = 10;
+         memcpy(out + offset + 59, "embed_textStatistics", 20);
+         *result_len += 42;
       }
       if (version == 2 && malformed == 4)
       {
          put32(out + 8, 2);
          memcpy(out + offset + 37, out + offset, 37);
+         *result_len = offset + 74;
       }
       if (version == 2 && malformed == 1)
          --*result_len;
@@ -151,35 +153,35 @@ int main(void)
    cJSON_Delete(reply);
    assert(aimee_module_commands_plugin_count() == 1);
    assert(aimee_command_count() == 2);
-   assert(aimee_command_find_method("memory.embed") == NULL);
-   assert(aimee_module_commands_dispatch("memory.embed", args, &reply) == 0 && reply == NULL);
+   assert(aimee_command_find_method("memory.embed_text") == NULL);
+   assert(aimee_module_commands_dispatch("memory.embed_text", args, &reply) == 0 && reply == NULL);
    assert(aimee_module_commands_dispatch_internal("memory.stats", args, &reply) == 0);
-   expect_verb = "embed";
-   assert(aimee_module_commands_dispatch_internal("memory.embed", args, &reply) == 1);
+   expect_verb = "embed_text";
+   assert(aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply) == 1);
    assert(last_kind == 5896 && last_stage == 8);
    cJSON_Delete(reply);
    for (malformed = 1; malformed <= 4; ++malformed)
    {
       assert(aimee_module_commands_collect() == 1);
       assert(aimee_command_find_method("memory.stats") != NULL);
-      assert(aimee_module_commands_dispatch_internal("memory.embed", args, &reply) == 1);
+      assert(aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply) == 1);
       cJSON_Delete(reply);
    }
    malformed = 0;
    empty = 1;
    assert(aimee_module_commands_collect() == 1);
    assert(aimee_command_find_method("memory.stats") == NULL);
-   assert(aimee_module_commands_dispatch_internal("memory.embed", args, &reply) == 0);
+   assert(aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply) == 0);
    empty = 0;
    assert(aimee_module_commands_collect() == 2);
    fixed_present = 0;
    assert(aimee_module_commands_collect() == 1);
    assert(aimee_command_find_method("memory.stats") == NULL);
-   assert(aimee_module_commands_dispatch_internal("memory.embed", args, &reply) == 0);
+   assert(aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply) == 0);
    fixed_present = 1;
    assert(aimee_module_commands_collect() == 2);
    reset_during_call = 1;
-   assert(aimee_module_commands_dispatch_internal("memory.embed", args, &reply) == 1);
+   assert(aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply) == 1);
    cJSON_Delete(reply);
    expect_verb = "stats";
    assert(aimee_module_commands_dispatch("memory.stats", args, &reply) == 1);

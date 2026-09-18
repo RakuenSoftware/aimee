@@ -30,6 +30,9 @@ func (s *postgresDataStore) embedUnit(ctx context.Context, trace uint64, executo
 		return EmbedResponse{Error: "embed: unit transaction required"}
 	}
 
+	if err := s.activeEmbeddingGuard(ctx, command, dimension); err != nil {
+		return EmbedResponse{Error: err.Error()}
+	}
 	var u derivedUnit
 	var parent Record
 	// Acquire the parent before its unit, matching the reindex lock order.
@@ -44,7 +47,7 @@ func (s *postgresDataStore) embedUnit(ctx context.Context, trace uint64, executo
 		&u.ID, &u.Type, &u.Key, &u.Text, &u.Kind, &u.Weight, &parent.ID, &parent.Kind, &parent.Scope.Type, &parent.Scope.Value); err != nil {
 		return EmbedResponse{Error: "embed: memory unit unavailable"}
 	}
-	response := Embed(ctx, trace, executor, EmbedRequest{BaseURL: command, InputType: "document", Text: unitEmbeddingText(u), MaxDim: dimension})
+	response := s.embedActiveVersion(ctx, trace, executor, EmbedRequest{BaseURL: command, InputType: "document", Text: unitEmbeddingText(u), MaxDim: dimension})
 	failed := func(response EmbedResponse) EmbedResponse {
 		detail := response.Error
 		if detail == "" {
@@ -55,6 +58,9 @@ func (s *postgresDataStore) embedUnit(ctx context.Context, trace uint64, executo
 	}
 	if response.Error != "" || response.Unavailable || response.Unauthorized || response.Truncated {
 		return failed(response)
+	}
+	if err := s.checkActiveEmbeddingIdentity(ctx, response.ServingID); err != nil {
+		return failed(EmbedResponse{Error: err.Error()})
 	}
 	if err := s.withEmbeddingWrite(ctx, func(bound *postgresDataStore) error {
 		return bound.upsertUnitEmbedding(ctx, u, parent, response.Vector)
@@ -89,6 +95,9 @@ func (s *postgresDataStore) upsertUnitEmbedding(ctx context.Context, u derivedUn
  VALUES($1,$2::vector,'unit',$3,$4,$5,$6,$7) ON CONFLICT(point_id) DO UPDATE SET
  embedding=EXCLUDED.embedding,record_type=EXCLUDED.record_type,primary_scope=EXCLUDED.primary_scope,
  workspace=EXCLUDED.workspace,project=EXCLUDED.project,kind=EXCLUDED.kind,payload_json=EXCLUDED.payload_json`, point, "["+strings.Join(components, ",")+"]", parent.Scope.Type, workspace, project, parent.Kind, string(payload)); err != nil {
+		return err
+	}
+	if err = s.retainActiveEmbedding(ctx, point, vector); err != nil {
 		return err
 	}
 	_, err = s.db.Exec(ctx, `INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,indexed_at,updated_at)

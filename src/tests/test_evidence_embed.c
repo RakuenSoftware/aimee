@@ -41,7 +41,7 @@ static char g_embed_last_text[4096];
 
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   assert(strcmp(method, "memory.embed") == 0);
+   assert(strcmp(method, "memory.embed_text") == 0);
    *result = cJSON_CreateObject();
    int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
    g_embed_calls++;

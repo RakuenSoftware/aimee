@@ -86,7 +86,7 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
    cJSON_AddStringToObject(args, "input_type", "document");
    cJSON_AddNumberToObject(args, "max_dim", embed_dim);
    cJSON_AddItemToObject(args, "texts", cJSON_CreateStringArray(texts, n));
-   (void)aimee_module_commands_dispatch_internal("memory.embed", args, &reply);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply);
    cJSON_Delete(args);
    int batch_count =
        jo_float_matrix(cJSON_GetObjectItemCaseSensitive(reply, "vectors"), vecs, n, embed_dim);
@@ -108,7 +108,7 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
          cJSON_AddStringToObject(embed_0_args, "input_type", "document");
          cJSON_AddStringToObject(embed_0_args, "text", pend[i].text);
          cJSON_AddNumberToObject(embed_0_args, "max_dim", embed_dim);
-         (void)aimee_module_commands_dispatch_internal("memory.embed", embed_0_args,
+         (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
                                                        &embed_0_reply);
          cJSON_Delete(embed_0_args);
          int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), slot,
