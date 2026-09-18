@@ -293,7 +293,6 @@ int memory_touch(int64_t id);
  * rather than one UPDATE per memory injected into a turn. */
 int memory_touch_many(const int64_t *ids, int n);
 int memory_reject(int64_t id, const char *reason);
-int memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max);
 int memory_stats(memory_stats_t *out);
 
 /* Legacy direct mutation consumers; public authority-preserving edits are

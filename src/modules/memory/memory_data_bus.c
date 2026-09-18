@@ -187,11 +187,6 @@ int memory_find_facts_visible_ex(const char *query, const char *workspace, const
    return count;
 }
 
-int memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max)
-{
-   return search_bus("", NULL, NULL, tier, kind, limit, out, max);
-}
-
 int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,
                                const char *key, const char *content, const char *use_cases,
                                double confidence, const char *session_id,

@@ -16,6 +16,7 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "checkpoint", "Snapshot facts or restore checkpoint content into scoped memory.", handleCheckpointCommand, true},
 	{"memory", "ontology", "List the ontology or walk its scoped graph.", handleOntologyCommand, true},
 	{"memory", "cognify", "Derive scoped claims and relations from a memory.", handleCognifyCommand, true},
 	{"memory", "cognify_drain", "Process a bounded batch of scoped cognification jobs.", handleCognifyCommand, true},

@@ -1948,7 +1948,8 @@ void mem_checkpoint(app_ctx_t *ctx, int argc, char **argv)
       const char *session = opt_get(&rsopts, "session");
       if (!session)
          session = "";
-      tasks_checkpoint_restore(id, session);
+      if (tasks_checkpoint_restore(id, session) != 0)
+         fatal("failed to restore checkpoint");
       if (ctx->json_output)
          emit_ok_ctx(ctx->json_fields, ctx->response_profile);
    }

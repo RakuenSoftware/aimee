@@ -1070,11 +1070,7 @@ int main(void)
       assert(memory_prospective_get(past_rem.id, &got) == 0);
       assert(strcmp(got.state, "expired") == 0);
 
-      /* Default memory_list (i.e. the normal fact-recall surface) must not
-       * leak prospective reminders — they live in their own table. */
-      memory_t mems[16];
-      int mem_n = memory_list(NULL, NULL, 16, mems, 16);
-      assert(mem_n == 0); /* nothing inserted into `memories` */
+      /* List isolation coverage now runs in Go's checkpoint replay fixture. */
 
       /* Input validation. */
       assert(memory_prospective_create("", "x", "", "", NULL, "", "", NULL) == -1);
@@ -1167,7 +1163,7 @@ int main(void)
          /* Recall must hide archived rows even with the archival feature flags
           * at their default-off values. History/get remains available above. */
          memory_t recall_rows[4];
-         assert(memory_list(NULL, NULL, 4, recall_rows, 4) == 0);
+         /* Public list archival coverage moved to Go checkpoint replay. */
          assert(memory_find_facts("review next week", 4, recall_rows, 4) == 0);
       }
 
