@@ -7915,7 +7915,9 @@ $(TESTPREFIX)/unit-test-memory-view-transport: $(OBJDIR)/tests/test_memory_view_
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 # Real shared Go memory owner behind native compatibility fixtures.
-$(OBJDIR)/aimee-memory-fixture: $(wildcard ../server-go/modules/memory/*.go) ../server-go/modules/memory/testdata/nativefixture/main.go
+# Track the same Go source set as the module executable: the memory fixture also
+# imports shared bus, store, audit and metric helpers outside the memory tree.
+$(OBJDIR)/aimee-memory-fixture: $(AIMEE_MODULE_GO_SRCS)
 	@mkdir -p $(dir $@)
 	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../src/$@ ./modules/memory/testdata/nativefixture
 
