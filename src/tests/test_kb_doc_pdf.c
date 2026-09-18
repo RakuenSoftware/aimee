@@ -320,24 +320,8 @@ static void test_search_chunks_shim(void)
           400);                                                                     /* no query */
    assert(handle_get_pdf_search_route("POST", "query=x", buf, sizeof(buf)) == 405); /* method */
 
-   /* doc_kind exclusion also covers content-reading sweeps outside search: a PDF named like
-    * a convention source must NOT be pulled into agent-facing conventions (the same filter
-    * the curator extraction queue uses to keep PDF content out of derived artifacts). */
-   assert(kb_doc_pdf_ingest_xhtml("proj", "docs/adr/0001.pdf", "ha", FIXTURE_2PAGE, "internal",
-                                  &stats) == 2);
-   assert(db2_kb_documents_insert_chunk("proj", "docs/adr/0002.md", "hb", 0, "", 0, 0,
-                                        "decision content", 2) > 0);
-   db2_kb_convention_row_t conv[16];
-   int cn = db2_kb_documents_list_convention_candidates(conv, 16);
-   int saw_md = 0, saw_pdf = 0;
-   for (int i = 0; i < cn; i++)
-   {
-      if (strstr(conv[i].file_path, ".md"))
-         saw_md = 1;
-      if (strstr(conv[i].file_path, ".pdf"))
-         saw_pdf = 1;
-   }
-   assert(saw_md && !saw_pdf); /* the .md candidate is surfaced; the .pdf is excluded */
+   /* Convention-source PDF exclusion moved with the producer to the Go
+    * memory owner's packaged-schema replay tests. */
 
    db2_test_shim_close();
    PASS("search_chunks_shim");

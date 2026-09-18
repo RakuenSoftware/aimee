@@ -150,55 +150,6 @@ int db2_kb_document_fetch(int64_t id, const char *project, db2_kb_document_row_t
    return hit;
 }
 
-int db2_kb_documents_list_convention_candidates(db2_kb_convention_row_t *out, int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   void *conn = db2_conn();
-   if (!conn)
-      return 0;
-
-   /* doc_kind <> 'pdf': a PDF whose file_path happens to match a convention pattern
-    * (e.g. docs/adr/0007.pdf) must not have its content pulled into agent-facing
-    * conventions — PDF content stays behind the access-gated search_chunks tool. */
-   static const char *sql = "SELECT d.project,d.file_path,d.heading_path,d.content"
-                            " FROM kb_documents d JOIN projects p ON p.name=d.project"
-                            " WHERE p.lifecycle_state='current'"
-                            " AND d.generation=p.current_generation AND d.doc_kind <> 'pdf' AND ("
-                            "       d.file_path LIKE '%CONTRIBUTING%'"
-                            "    OR d.file_path LIKE '%AGENTS.md'"
-                            "    OR d.file_path LIKE '%STYLE%'"
-                            "    OR d.file_path LIKE '%CODING%'"
-                            "    OR d.file_path LIKE '%.aimee-rules%'"
-                            "    OR d.file_path LIKE '%.aimee/rules.md'"
-                            "    OR d.file_path LIKE '%.aimee/context.md'"
-                            "    OR d.file_path LIKE '%/adr/%')"
-                            " ORDER BY d.project,d.file_path,d.chunk_index"
-                            " LIMIT ?1";
-   char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return 0;
-   aimee_pg_bind_int(st, "?1", max);
-
-   int n = 0;
-   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      memset(&out[n], 0, sizeof(out[n]));
-      const char *p = aimee_pg_column_text(st, 0);
-      const char *fp = aimee_pg_column_text(st, 1);
-      const char *hp = aimee_pg_column_text(st, 2);
-      const char *ct = aimee_pg_column_text(st, 3);
-      snprintf(out[n].project, sizeof(out[n].project), "%s", p ? p : "");
-      snprintf(out[n].file_path, sizeof(out[n].file_path), "%s", fp ? fp : "");
-      snprintf(out[n].heading_path, sizeof(out[n].heading_path), "%s", hp ? hp : "");
-      snprintf(out[n].content, sizeof(out[n].content), "%s", ct ? ct : "");
-      n++;
-   }
-   aimee_pg_finalize(st);
-   return n;
-}
-
 int db2_kb_documents_get_stored_hash(const char *project, const char *file_path, char *out,
                                      size_t out_len)
 {

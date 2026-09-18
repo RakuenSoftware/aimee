@@ -657,7 +657,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/kb/kb.c
     ${AIMEE_SRC_DIR}/kb/kb_fusion.c
     ${AIMEE_SRC_DIR}/kb/kb_neardup.c
-    ${AIMEE_SRC_DIR}/kb/kb_conventions.c
     ${AIMEE_SRC_DIR}/sketch.c
     ${AIMEE_SRC_DIR}/modules/learning/learning_evidence.c
     ${AIMEE_SRC_DIR}/kb/kb_calibrate.c
@@ -1150,7 +1149,6 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/kb/kb.c
     ${AIMEE_SRC_DIR}/kb/kb_fusion.c
     ${AIMEE_SRC_DIR}/kb/kb_neardup.c
-    ${AIMEE_SRC_DIR}/kb/kb_conventions.c
     ${AIMEE_SRC_DIR}/sketch.c
     ${AIMEE_SRC_DIR}/modules/learning/learning_evidence.c
     ${AIMEE_SRC_DIR}/kb/kb_calibrate.c

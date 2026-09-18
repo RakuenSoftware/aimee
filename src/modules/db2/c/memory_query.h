@@ -401,9 +401,7 @@ extern "C"
     * memory without leaking SQL outside src/modules/db2/c/. */
    int64_t db2_memory_find_id_by_key_kind(const char *key, const char *kind);
 
-   /* Returns 1 if a memory row exists matching `key` AND tier ∈
-    * {tier_a, tier_b}, else 0. Used by kb_extract_convention_candidates
-    * to skip duplicates before promoting a chunk to L3/L4. */
+   /* Legacy DB2 wire compatibility. Convention extraction is owned by Go. */
    int db2_memory_key_exists_in_tier_pair(const char *key, const char *tier_a, const char *tier_b);
 
    /* Top-N L2 fact memories ordered by request scope, then use_count and

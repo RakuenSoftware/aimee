@@ -56,6 +56,11 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	request := DataRequest{IncludeAll: true}
 
 	switch operation {
+	case "convention-extract":
+		if options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		request.Operation = operation
 	case "demotion-run", "demotion-check":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusCapabilityAbsent
@@ -143,6 +148,11 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInternal
 	}
 	switch operation {
+	case "convention-extract":
+		if response.Count == nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		return commandResult(map[string]any{"status": "ok", "emitted": *response.Count})
 	case "fact-review", "fact-candidates", "demotion-run", "demotion-check":
 		return commandResult(response.Payload)
 	case "feedback-path":
