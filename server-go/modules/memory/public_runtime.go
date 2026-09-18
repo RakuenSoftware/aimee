@@ -107,6 +107,9 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		scoped = commandScope(args, &request)
 	case "assemble_context":
 		request.Operation, request.Query, request.Limit = "assemble-context", args.stringOr("task_hint", ""), 12
+		if raw, exists := args["explain"]; exists && (string(raw) == "null" || json.Unmarshal(raw, &request.Detail) != nil) {
+			return invalid("explain must be a boolean")
+		}
 		scoped = commandScope(args, &request)
 	case "compact_windows":
 		request.Operation = "compact-legacy"
@@ -216,6 +219,16 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			return nil, bus.ModuleStatusInternal
 		}
 		result["context"] = *response.Block
+		if request.Detail {
+			if response.ContextAssembly == nil {
+				return nil, bus.ModuleStatusInternal
+			}
+			result["budget"] = response.ContextAssembly.Budget
+			result["candidates"] = response.ContextAssembly.Candidates
+			result["explain_text"] = response.ContextAssembly.ExplainText()
+			result["candidate_scope"] = "returned_rows"
+			result["token_estimator"] = "utf8_bytes_divided_by_four"
+		}
 	case "compact_windows":
 		result["summaries"], result["facts"] = response.SummaryCount, response.FactCount
 	case "query_edges":

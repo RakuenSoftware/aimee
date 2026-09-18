@@ -12,7 +12,7 @@ import (
 func TestRuntimePublicValidation(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
 	for _, tt := range []struct{ verb, args string }{
-		{"query_edges", `{}`}, {"query_edges", `{"entity":""}`}, {"check_drift", `{"task_id":0}`},
+		{"assemble_context", `{"explain":"yes"}`}, {"assemble_context", `{"explain":null}`}, {"query_edges", `{}`}, {"query_edges", `{"entity":""}`}, {"check_drift", `{"task_id":0}`},
 	} {
 		if r := runPublicCommand(t, client, tt.verb, tt.args); r["kind"] != "invalid_argument" {
 			t.Fatal(r)
@@ -91,6 +91,25 @@ SET LOCAL ROLE memory_runtime_test;`)
 	block := run("assemble_context", `{"scope_context":true,"project":"app"}`)["context"].(string)
 	if !strings.Contains(block, "release the app") || !strings.Contains(block, "common conventions") || strings.Contains(block, "secret") {
 		t.Fatal(block)
+	}
+	explained := run("assemble_context", `{"scope_context":true,"project":"app","explain":true}`)
+	if explained["context"] != block || explained["candidate_scope"] != "returned_rows" || strings.Contains(explained["explain_text"].(string), "secret") {
+		t.Fatal(explained)
+	}
+	candidates := explained["candidates"].([]any)
+	if len(candidates) != 2 {
+		t.Fatal(explained)
+	}
+	for _, value := range candidates {
+		candidate := value.(map[string]any)
+		id, ok := candidate["id"].(string)
+		if !ok || (id != "1" && id != "2") || candidate["selected"] != true || candidate["tokens"].(float64) <= 0 {
+			t.Fatal(candidate)
+		}
+	}
+	empty := run("assemble_context", `{"scope_context":true,"project":"app","task_hint":"absent-sentinel","explain":true}`)
+	if len(empty["candidates"].([]any)) != 0 || empty["context"] != "# Memory Context\n" {
+		t.Fatal(empty)
 	}
 	if block := run("assemble_context", `{"scope_context":true,"task_hint":"common"}`)["context"].(string); !strings.Contains(block, "common conventions") || strings.Contains(block, "release the app") {
 		t.Fatal(block)

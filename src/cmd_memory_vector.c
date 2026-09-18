@@ -1076,89 +1076,33 @@ void mem_assemble(app_ctx_t *ctx, int argc, char **argv)
       thpos += snprintf(task_hint + thpos, sizeof(task_hint) - thpos, "%s", opts.positional[i]);
    }
 
-   if (explain)
+   cJSON *args = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(args);
+   cJSON_AddStringToObject(args, "task_hint", task_hint);
+   cJSON_AddBoolToObject(args, "explain", explain);
+   char *raw = kb_v1_action_request("memory.assemble_context", args);
+   cJSON *result = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   const char *field = explain ? "explain_text" : "context";
+   if (strcmp(jo_cstr(result, "status"), "ok") != 0 ||
+       !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, field)) ||
+       (explain && (!cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(result, "budget")) ||
+                    !cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(result, "candidates")))))
+      fatal("memory assembly failed: %s",
+            jo_str(result, "message", "invalid or unavailable response"));
+
+   if (ctx->json_output)
    {
-#define EXPLAIN_MAX 128
-      context_assemble_explain_entry_t entries[EXPLAIN_MAX];
-      int ecount = 0;
-      context_budget_metrics_t metrics;
-      memset(&metrics, 0, sizeof(metrics));
-
-      char *ctx_text = memory_assemble_context_explain(task_hint[0] ? task_hint : NULL, entries,
-                                                       &ecount, EXPLAIN_MAX, &metrics);
-
-      if (ctx->json_output)
-      {
-         cJSON *obj = cJSON_CreateObject();
-         if (task_hint[0])
-            cJSON_AddStringToObject(obj, "task_hint", task_hint);
-         cJSON *budget = cJSON_AddObjectToObject(obj, "budget");
-         cJSON_AddNumberToObject(budget, "budget_tokens", metrics.budget_tokens);
-         cJSON_AddNumberToObject(budget, "used_tokens", metrics.used_tokens);
-         cJSON_AddNumberToObject(budget, "rejected_for_budget", metrics.rejected_for_budget);
-         cJSON_AddNumberToObject(budget, "deferred_for_origin_quota",
-                                 metrics.deferred_for_origin_quota);
-         cJSON_AddNumberToObject(budget, "held_for_activation", metrics.held_for_activation);
-         cJSON *arr = cJSON_AddArrayToObject(obj, "candidates");
-         for (int i = 0; i < ecount; i++)
-         {
-            context_assemble_explain_entry_t *e = &entries[i];
-            cJSON *item = cJSON_CreateObject();
-            cJSON_AddNumberToObject(item, "id", (double)e->id);
-            cJSON_AddStringToObject(item, "tier", e->tier);
-            cJSON_AddStringToObject(item, "kind", e->kind);
-            cJSON_AddStringToObject(item, "key", e->key);
-            cJSON_AddStringToObject(item, "scope", e->scope);
-            cJSON_AddNumberToObject(item, "score", e->score);
-            cJSON_AddNumberToObject(item, "tokens", e->tokens);
-            cJSON_AddNumberToObject(item, "score_per_token", e->score_per_token);
-            cJSON_AddBoolToObject(item, "selected", e->selected);
-            if (!e->selected)
-               cJSON_AddStringToObject(item, "rejection_reason", e->rejection_reason);
-            cJSON_AddItemToArray(arr, item);
-         }
-         emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         printf("## Context Assembly Explain\n");
-         if (metrics.budget_tokens > 0)
-            printf("budget: %d tokens | used: %d | rejected_for_budget: %d\n\n",
-                   metrics.budget_tokens, metrics.used_tokens, metrics.rejected_for_budget);
-         printf("%-8s %-4s %-12s %-6s %-10s %-8s %-8s %-6s\n", "ID", "Tier", "Kind", "Tok",
-                "Score/Tok", "Score", "Scope", "Status");
-         printf("%s\n", "------------------------------------------------------------------------");
-         for (int i = 0; i < ecount; i++)
-         {
-            context_assemble_explain_entry_t *e = &entries[i];
-            printf("%-8lld %-4s %-12s %-6d %-10.4f %-8.4f %-8s %s  %s\n", (long long)e->id, e->tier,
-                   e->kind, e->tokens, e->score_per_token, e->score, e->scope[0] ? e->scope : "-",
-                   e->selected ? "SELECTED" : "rejected", e->selected ? "" : e->rejection_reason);
-         }
-         printf("\n--- Assembled Context ---\n%s\n", ctx_text ? ctx_text : "");
-      }
-      free(ctx_text);
-#undef EXPLAIN_MAX
+      cJSON_DeleteItemFromObjectCaseSensitive(result, "status");
+      cJSON_DeleteItemFromObjectCaseSensitive(result, "explain_text");
+      if (task_hint[0])
+         cJSON_AddStringToObject(result, "task_hint", task_hint);
+      emit_json_ctx(result, ctx->json_fields, ctx->response_profile);
    }
    else
    {
-      char *ctx_text = memory_assemble_context(task_hint[0] ? task_hint : NULL);
-      if (!ctx_text)
-         ctx_text = safe_strdup("");
-
-      if (ctx->json_output)
-      {
-         cJSON *obj = cJSON_CreateObject();
-         if (task_hint[0])
-            cJSON_AddStringToObject(obj, "task_hint", task_hint);
-         cJSON_AddStringToObject(obj, "context", ctx_text);
-         emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         printf("%s\n", ctx_text);
-      }
-      free(ctx_text);
+      printf("%s\n", jo_cstr(result, field));
+      cJSON_Delete(result);
    }
 }
 

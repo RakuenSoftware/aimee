@@ -147,6 +147,7 @@ type Record struct {
 }
 
 type DataResponse struct {
+	ContextAssembly    *ContextAssembly     `json:"context_assembly,omitempty"`
 	Dimension          int                  `json:"dimension,omitempty"`
 	Embedding          *EmbedResponse       `json:"embedding,omitempty"`
 	Version            string               `json:"version,omitempty"`
@@ -2061,7 +2062,19 @@ set_config('aimee.correlation_id',$9,true)`,
 					break
 				}
 			}
-			if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
+			if request.Operation == "assemble-context" {
+				var records []Record
+				if backend, ok := options.data.(*postgresDataStore); ok && !explicitScope {
+					records, err = backend.SearchVisible(ctx, request)
+				} else {
+					records, err = options.data.Search(ctx, scope, request.Query, "", "", request.Limit)
+				}
+				assembly := assembleMemoryContext(records, request.Query, request.BlockType)
+				block = assembly.Context
+				if request.Detail {
+					response.ContextAssembly = &assembly
+				}
+			} else if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
 				var records []Record
 				records, err = backend.SearchVisible(ctx, request)
 				block = renderMemoryContext(records, request.BlockType)

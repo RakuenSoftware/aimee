@@ -9,11 +9,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+void mem_assemble(app_ctx_t *, int, char **);
 void mem_cognify(app_ctx_t *, int, char **);
 void mem_drain(app_ctx_t *, int, char **);
 static cJSON *captured;
 static const char *forced;
 static int unavailable;
+static int assembly_explain;
 static char text[16001];
 void emit_json_ctx(cJSON *json, const char *fields, const char *profile)
 {
@@ -60,11 +62,34 @@ char *kb_v1_action_request_with_timeout(const char *method, cJSON *args, int tim
    cJSON_Delete(out);
    return raw;
 }
+char *kb_v1_action_request(const char *method, cJSON *args)
+{
+   assert(!strcmp(method, "memory.assemble_context"));
+   assert(jo_bool(args, "scope_context", 0));
+   assert(!strcmp(jo_cstr(args, "project"), "cognify-test"));
+   assert(!strcmp(jo_cstr(args, "task_hint"), "cert auth"));
+   assert(jo_bool(args, "explain", 0) == assembly_explain);
+   cJSON_Delete(args);
+   if (unavailable)
+      return NULL;
+   if (forced)
+      return strdup(forced);
+   return strdup(
+       "{\"status\":\"ok\",\"context\":\"shared Go context\",\"explain_text\":\"shared Go "
+       "explanation\",\"budget\":{\"used_tokens\":8},\"candidates\":[{\"id\":"
+       "\"9223372036854775807\",\"selected\":true}]}");
+}
+
 static void run(int drain)
 {
    app_ctx_t ctx = {.json_output = 1};
    char *args[] = {"--unit=42"};
-   if (drain)
+   if (drain == 2)
+   {
+      char *assembly_args[] = {"cert", "auth", "--explain"};
+      mem_assemble(&ctx, assembly_explain ? 3 : 2, assembly_args);
+   }
+   else if (drain)
       mem_drain(&ctx, 0, NULL);
    else
       mem_cognify(&ctx, 1, args);
@@ -102,15 +127,32 @@ int main(void)
    assert(!strcmp(jo_cstr(cJSON_GetObjectItemCaseSensitive(captured, "cognify"), "status"),
                   "disabled"));
    cJSON_Delete(captured);
+   forced = NULL;
+   for (assembly_explain = 0; assembly_explain <= 1; assembly_explain++)
+   {
+      run(2);
+      assert(!strcmp(jo_cstr(captured, "context"), "shared Go context"));
+      assert(!strcmp(jo_cstr(captured, "task_hint"), "cert auth"));
+      assert(!cJSON_HasObjectItem(captured, "explain_text"));
+      cJSON *candidate =
+          cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(captured, "candidates"), 0);
+      assert(!strcmp(jo_cstr(candidate, "id"), "9223372036854775807"));
+      cJSON_Delete(captured);
+   }
+   assembly_explain = 1;
    const char *errors[] = {"bad-json", "{}", "{\"status\":\"error\",\"kind\":\"forbidden\"}"};
    for (unsigned i = 0; i < sizeof(errors) / sizeof(errors[0]); i++)
    {
       forced = errors[i];
       rejected(0);
       rejected(1);
+      rejected(2);
    }
+   forced = "{\"status\":\"ok\",\"context\":\"partial\"}";
+   rejected(2);
    unavailable = 1;
    rejected(0);
    rejected(1);
+   rejected(2);
    return 0;
 }

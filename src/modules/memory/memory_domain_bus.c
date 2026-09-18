@@ -298,28 +298,6 @@ cJSON *memory_alerts(const char *since)
    return domain_payload_call("alerts-bundle", NULL, since ? since : "", 0, 0);
 }
 
-static char *domain_context_call(const char *query, const char *block_type, int limit)
-{
-   cJSON *request = domain_request(block_type ? "context-block" : "assemble-context");
-   if (!request || !cJSON_AddStringToObject(request, "query", query ? query : "") ||
-       (block_type && !cJSON_AddStringToObject(request, "block_type", block_type)) ||
-       !cJSON_AddNumberToObject(request, "limit", limit > 0 ? limit : 12))
-   {
-      cJSON_Delete(request);
-      return NULL;
-   }
-   cJSON *response = domain_call(request);
-   const cJSON *block = response ? cJSON_GetObjectItemCaseSensitive(response, "block") : NULL;
-   char *result = cJSON_IsString(block) && block->valuestring ? strdup(block->valuestring) : NULL;
-   cJSON_Delete(response);
-   return result;
-}
-
-char *memory_assemble_context(const char *task_hint)
-{
-   return domain_context_call(task_hint ? task_hint : "", NULL, 12);
-}
-
 static int domain_policy_code(const char *operation, const char *key, const char *value)
 {
    cJSON *request = domain_request(operation);
