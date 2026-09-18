@@ -718,3 +718,21 @@ connections tested against the real Go handler and canonical writes replayed as
 the restricted PostgreSQL role. Strict G0 now reports 168 findings, with its
 immutable baseline unchanged. Three C sources (353 lines) and five headers
 remain in the memory tree, along with other native consumers outside it.
+
+Memory wiki selection and Markdown rendering now belong to the Go owner through
+`memory.list` with `format=wiki`. It retains the five page categories (including
+the all-kind facts page), independent 500-row caps, provenance display, UTC
+index timestamp and seven-file output. Scope is applied before the cap; full
+UTF-8 content reaches the client without native memory buffers. The complete
+serialized export has a 4 MiB limit and returns a capacity error rather than
+truncating a page. Retrieval/metadata failure returns no files. The native host
+validates basenames and the complete bundle before opening local output, checks
+write/close failures, and preserves existing log content. It no longer requires
+DB1 to export shared KB memory. Filesystem publication is per file, not an
+atomic directory transaction; an I/O failure is reported even after earlier
+files have been written. The remaining scope-context transport is still counted
+by G0; this does not certify completion of the native migration.
+
+This checkpoint has 169 strict G0 findings: the new wiki transport test adds a
+counted scope-context reference while the production list adapter is retired.
+The inventory remains three C sources (353 lines) and five memory-tree headers.

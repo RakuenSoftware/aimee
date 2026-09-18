@@ -132,6 +132,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseHybridReplay(t, ctx, tx, handler)
 	exerciseSessionQueryReplay(t, ctx, tx, handler)
 	exerciseSearchViewReplay(t, ctx, tx, handler)
+	exerciseWikiReplay(t, ctx, tx, handler)
 	exerciseBriefingReplay(t, ctx, tx, handler)
 	exerciseAlertsReplay(t, ctx, tx, handler)
 	exerciseRecallReplay(t, ctx, tx, handler)

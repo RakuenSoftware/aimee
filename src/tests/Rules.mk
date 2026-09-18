@@ -6271,9 +6271,8 @@ $(TESTPREFIX)/unit-test-eval-candidates: $(OBJDIR)/tests/test_eval_candidates.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wiki-render: $(OBJDIR)/tests/test_wiki_render.o \
-                     $(OBJDIR)/wiki_render.o $(TEST_DATA_OBJS_MOCK) \
-                     $(OBJDIR)/tests/support/kb_client_test_stub.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+                     $(OBJDIR)/wiki_render.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(filter %/platform_path.o,$(PLATFORM_BASIC_OBJS))
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-integrity-gate: $(OBJDIR)/tests/test_integrity_gate.o \
                      $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o

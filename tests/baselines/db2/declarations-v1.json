@@ -17416,7 +17416,6 @@
         "src/tests/test_tool_prompts.c",
         "src/tests/test_tool_validation.c",
         "src/tests/test_typed_facts.c",
-        "src/tests/test_wiki_render.c",
         "src/tests/test_workspace_memory.c"
       ],
       "locations": [
@@ -21005,7 +21004,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "d8ea4545d43f306520237240bd0ae94c67335b1184e1853916a2a9c0eca0aa7b",
+  "fingerprint": "f493b928afc403b6ddcbb0bc54d22372c807efd4d0c78c3c5093763d5a3cadb6",
   "module": "db2",
   "schema_version": 1,
   "summary": {

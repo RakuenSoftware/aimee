@@ -1157,6 +1157,12 @@ set_config('aimee.correlation_id',$9,true)`,
 	}
 
 	switch request.Operation {
+	case "wiki-bundle":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.wiki(ctx, request)
 	case "reflect":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB || transaction == nil {

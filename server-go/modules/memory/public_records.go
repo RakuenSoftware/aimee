@@ -143,6 +143,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	case "list":
 		request.Operation, request.Tier, request.Kind, request.Limit = "list", args.stringOr("tier", ""), args.stringOr("kind", ""), args.limit("limit", 20, 64)
 		scoped = commandScope(args, &request)
+		if args.stringOr("format", "") == "wiki" {
+			request.Operation, request.PublicView = "wiki-bundle", false
+		}
 	case "fact_history":
 		var ok bool
 		request.Key, ok = args.stringValue("key")
@@ -197,6 +200,12 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
+	}
+	if request.Operation == "wiki-bundle" {
+		if len(response.Payload) == 0 {
+			return nil, bus.ModuleStatusInternal
+		}
+		return commandResult(response.Payload)
 	}
 	if verb == "find_facts_visible" && args.stringOr("format", "") == "mcp" {
 		missing := scoped && !request.IncludeAll && request.Workspace == "" && request.Project == ""
