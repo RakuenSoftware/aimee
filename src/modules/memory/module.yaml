@@ -138,7 +138,8 @@
     "server-go/modules/memory/benchmark_score.go",
     "server-go/modules/memory/assertion_search.go",
     "server-go/modules/memory/typed_context.go",
-    "server-go/modules/memory/css_conventions.go"
+    "server-go/modules/memory/css_conventions.go",
+    "server-go/modules/memory/fact_maintenance.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -232,7 +233,8 @@
     "server-go/modules/memory/benchmark_score_test.go",
     "server-go/modules/memory/assertion_search_test.go",
     "server-go/modules/memory/typed_context_test.go",
-    "server-go/modules/memory/css_conventions_test.go"
+    "server-go/modules/memory/css_conventions_test.go",
+    "server-go/modules/memory/fact_ingestion_parity_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"
@@ -240,7 +242,6 @@
   "private_headers": [
     "src/modules/memory/memory_bus_context.h",
     "src/modules/memory/memory_core_internal.h",
-    "src/modules/memory/memory_fact_gate.h",
     "src/modules/memory/memory_ontology.h"
   ],
   "tests": [],

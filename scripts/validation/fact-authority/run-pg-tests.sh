@@ -104,8 +104,7 @@ unit-test-fact-ingest
 unit-test-fact-recall
 unit-test-entity-nodes
 unit-test-entity-registry
-unit-test-ontology-evolution
-unit-test-rel-types-store"
+unit-test-ontology-evolution"
 
 for t in $TESTS; do
   printf '%-30s ' "$t"

@@ -2,7 +2,6 @@
 #define DEC_DB2_KB_SERVICE_BACKEND_H 1
 
 #include "vector_index_ops.h"
-#include "fact_lifecycle.h" /* fact_authority_t */
 #include "cJSON.h"
 
 #include <stddef.h>

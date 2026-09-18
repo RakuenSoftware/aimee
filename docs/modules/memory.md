@@ -889,3 +889,30 @@ repository lint checks pass after regenerating the declaration ledger. Strict G0
 falls from 165 to 163;
 the memory tree still contains two C sources totaling 192 lines and five headers.
 The complete migration remains unfinished.
+
+The obsolete native fact ingestion writer, KB policy callback, host callback
+contract, confidence/lifecycle implementation and provisional-relation writer
+are retired. The `memory_fact_gate.h` compatibility header and native policy
+stub are removed. Ingestion uses the shared Go gate-to-commit implementation,
+including normalized canonical aliases, literal endpoints, provenance classes,
+provisional/live ontology handling and distinct evidence receipts.
+
+Host-only `fact-maintenance` now implements bounded candidate promotion/expiry
+in Go. It uses the canonical mutation lock, recorded changes and WORM seal, with
+fixed system authority and no upgrade to Class A. Promotion excludes conflicting
+functional candidates before the 64-change batch cap, preventing both displacement
+of human corrections and starvation of later eligible facts. Keyset pages also
+skip unkeyed Unicode legacy conflicts and explicit rejection tombstones. Expiry handles
+legacy space and ISO-T timestamps, retains confirmed candidates and does not
+expire persistent/user assertions. PostgreSQL replay verifies these contracts
+and atomic rollback on a failed seal. The remaining native graph traversal,
+review and rollback fixture retains its coverage independently of ingestion.
+
+Strict G0 falls from 163 to 151. The memory tree contains two C sources totaling
+192 lines and four headers. Benchmark loading still requires isolated Go store
+sessions: replacing the native DB2 scratch connection does not change where the
+Go owner reads or writes. Native graph mutation/review, other clients and the
+previously listed migration work remain incomplete.
+CLI/Server/KB builds, the retained native lifecycle and ontology fixtures, Go
+memory/module race suites, the final restricted-role maintenance replay,
+CGO-disabled builds, both live process placements and all 77 lint checks pass.

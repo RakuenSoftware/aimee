@@ -42,25 +42,6 @@ extern "C"
 
    enum
    {
-      AIMEE_DB2_FACT_GATE_ACCEPT = 0,
-      AIMEE_DB2_FACT_GATE_REJECT_KIND = 1,
-      AIMEE_DB2_FACT_GATE_NOVEL = 2,
-      AIMEE_DB2_FACT_GATE_BADARG = 3,
-   };
-
-   /* The Go owner returns the ontology verdict and commit eligibility together.
-    * The provider writes an AIMEE_DB2_FACT_GATE_* verdict and a 0/1 allowed
-    * flag, or returns -1 when no authoritative decision is available. */
-   typedef int (*aimee_db2_fact_gate_fn)(int head_kind, const char *rel_type, int tail_kind,
-                                         int *verdict, int *commit_allowed);
-
-   /* Install the host's canonical memory fact gate during process startup. NULL
-    * removes it; DB2 then defers typed-fact commits rather than writing without
-    * an authoritative verdict. */
-   void aimee_db2_register_fact_gate_provider(aimee_db2_fact_gate_fn provider);
-
-   enum
-   {
       AIMEE_DB2_EMBED_DOCUMENT = 0,
       AIMEE_DB2_EMBED_QUERY = 1,
    };

@@ -193,11 +193,6 @@ extern "C"
                                 const char *target, fact_erasure_impact_t *out,
                                 char commit_id[FACT_COMMIT_ID_MAX]);
 
-   /* Maintenance transitions also use one commit/diff/audit batch.  Recurrent
-    * candidates become persistent; stale unsupported candidates are invalidated. */
-   int db2_fact_mutation_promote_supported(const fact_actor_t *actor, int threshold);
-   int db2_fact_mutation_expire_candidates(const fact_actor_t *actor, const char *cutoff_iso);
-
    /* Register a non-assertion graph mutation (ontology decision/entity merge)
     * inside the caller's already-open DB transaction.  This keeps its commit id,
     * diff and WORM row atomic with the owning mutation. */

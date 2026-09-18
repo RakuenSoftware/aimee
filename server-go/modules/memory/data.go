@@ -1338,6 +1338,16 @@ set_config('aimee.correlation_id',$9,true)`,
 		if err == nil {
 			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "retracted": count, "authority": actor.Role})
 		}
+	case "fact-maintenance":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var count int
+		count, err = backend.maintainFacts(ctx, request.State, request.Days)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "changed": count})
+		}
 	case "fact-candidates":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB {

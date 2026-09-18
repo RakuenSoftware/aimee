@@ -119,6 +119,14 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		name := map[uint32]string{ConfidenceLow: "low", ConfidenceMedium: "medium", ConfidenceHigh: "high"}[band]
 		return commandResult(map[string]any{"status": "ok", "confidence": name})
 
+	case "fact-maintenance":
+		if options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		request.Operation, request.State, request.Days = operation, args.stringOr("action", ""), args.integer("value", 0)
+		if (request.State != "promote" && request.State != "expire") || request.Days <= 0 || request.Days > 36500 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
 	case "fact-review":
 		caller := options.commandContext
 		if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
@@ -198,7 +206,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 			return nil, bus.ModuleStatusInternal
 		}
 		return commandResult(map[string]any{"status": "ok", "emitted": *response.Count})
-	case "fact-review", "fact-candidates", "demotion-run", "demotion-check":
+	case "fact-maintenance", "fact-review", "fact-candidates", "demotion-run", "demotion-check":
 		return commandResult(response.Payload)
 	case "feedback-path":
 		return commandResult(map[string]any{"status": "ok", "updated": response.Updated})

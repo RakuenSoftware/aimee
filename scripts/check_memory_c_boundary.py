@@ -23,6 +23,10 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/db2/c/fact_lifecycle.c",
+    "src/modules/db2/c/fact_lifecycle.h",
+    "src/modules/memory/memory_fact_gate.h",
+    "src/tests/support/memory_policy_stub.h",
     "src/modules/db2/c/typed_facts.c",
     "src/modules/db2/c/typed_facts.h",
     "src/modules/memory/memory_domain_bus.c",
@@ -75,6 +79,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:aimee_db2_register_fact_gate_provider|db2_rel_types_stage_provisional|db2_fact_commit(?:_with_actor|_with_evidence)?|db2_fact_mutation_promote_supported|db2_fact_mutation_expire_candidates|db2_fact_expire_speculative|db2_fact_promote_durable)\b(?=\s*\()|"
     r"\b(?:kbs_typed_flag|kbs_typed_budget|kbs_estimate_tokens|kbs_pack_trace|kbs_typed_channel|kbs_channel_try_add|kbs_typed_watermarks|kbs_observation_visible|kbs_action_visible)\b(?=\s*\()|"
     r"\b(?:db2_semantic_assertion_search|db2_semantic_assertion_get_filtered|db2_semantic_assertion_index_list|db2_memory_scope_bind_current)\b(?=\s*\()|"
     r"\b(?:memory_find_facts|pgvec_memory_search)\b(?=\s*\()|"

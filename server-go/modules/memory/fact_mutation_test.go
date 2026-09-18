@@ -193,6 +193,7 @@ func TestFactMutationRuntimeReplay(t *testing.T) {
 	if r, _, err := s.commitFactCandidate(ctx, secret); err == nil || r.AssertionID != 0 {
 		t.Fatal("credential persisted", r, err)
 	}
+	exerciseFactIngestionParity(t, ctx, tx, s)
 	exerciseFactWorkerReplay(t, ctx, tx, s)
 	exerciseFactReviewReplay(t, ctx, tx, s)
 	exerciseFactContextReplay(t, ctx, tx, s)

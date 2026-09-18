@@ -2,7 +2,7 @@
  * pipeline, against the sqlite shim. P4. */
 #include "../headers/aimee.h"
 #include "../modules/db2/c/ontology_evolution.h"
-#include "../modules/db2/c/rel_types_store.h"
+#include "../modules/db2/c/fact_mutation.h"
 #include "../modules/db2/c/db2_test_shim.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
@@ -88,7 +88,11 @@ int main(void)
 
    /* approve(): promotes the provisional rel_type to active + marks approved.
     * Stage a provisional row first (as the commit path would). */
-   assert(db2_rel_types_stage_provisional("frobnicates") > 0);
+   char seed_error[256] = "";
+   assert(aimee_pg_exec(db2_conn(),
+                        "INSERT INTO rel_types(rel_type,status,sensitivity) "
+                        "VALUES('frobnicates','provisional','pii')",
+                        seed_error, sizeof(seed_error)) == 0);
    assert(db2_ontology_approve("frobnicates") == 0);
    assert(db2_ontology_eval_status("frobnicates", st, sizeof(st)) == 1);
    assert(strcmp(st, ONTO_EVAL_APPROVED) == 0);

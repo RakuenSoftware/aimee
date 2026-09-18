@@ -253,47 +253,6 @@ static int score_mdl(const char *candidate, const char *evidence, double *l_cand
    return 0;
 }
 
-static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict,
-                           int *commit_allowed)
-{
-   if (!verdict || !commit_allowed)
-      return -1;
-   if (rel_type && strlen(rel_type) > AIMEE_MEMORY_REL_TYPE_MAX)
-   {
-      *verdict = AIMEE_DB2_FACT_GATE_BADARG;
-      *commit_allowed = 0;
-      return 0;
-   }
-   cJSON *request = cJSON_CreateObject();
-   cJSON *fact = request ? cJSON_AddObjectToObject(request, "fact_write") : NULL;
-   if (!fact || !cJSON_AddStringToObject(request, "operation", "fact-write-decision") ||
-       !cJSON_AddNumberToObject(fact, "head", (double)(uint32_t)head_kind) ||
-       !cJSON_AddNumberToObject(fact, "tail", (double)(uint32_t)tail_kind) ||
-       !cJSON_AddStringToObject(fact, "relation", rel_type ? rel_type : ""))
-   {
-      cJSON_Delete(request);
-      return -1;
-   }
-   cJSON *response = kb_module_memory_data(request);
-   cJSON_Delete(request);
-   const cJSON *decision =
-       response ? cJSON_GetObjectItemCaseSensitive(response, "fact_write") : NULL;
-   const cJSON *code = decision ? cJSON_GetObjectItemCaseSensitive(decision, "verdict") : NULL;
-   const cJSON *allowed =
-       decision ? cJSON_GetObjectItemCaseSensitive(decision, "commit_allowed") : NULL;
-   int rc = -1;
-   if (cJSON_IsNumber(code) && code->valuedouble >= AIMEE_DB2_FACT_GATE_ACCEPT &&
-       code->valuedouble <= AIMEE_DB2_FACT_GATE_BADARG &&
-       code->valuedouble == (double)code->valueint && cJSON_IsBool(allowed))
-   {
-      *verdict = code->valueint;
-      *commit_allowed = cJSON_IsTrue(allowed);
-      rc = 0;
-   }
-   cJSON_Delete(response);
-   return rc;
-}
-
 cJSON *kb_module_memory_data(const cJSON *request_json)
 {
    if (!request_json)
@@ -466,7 +425,6 @@ static int learning_classify(const char *signal, uint32_t *sink_mask)
 void kb_module_stage_adapters_configure(void)
 {
    aimee_db2_register_mdl_score_provider(score_mdl);
-   aimee_db2_register_fact_gate_provider(check_fact_gate);
    aimee_db2_register_embed_provider(embed_text);
    aimee_db2_register_identity_key_provider(kb_identity_key_from_fields);
    aimee_db2_register_css_render_compare_provider(css_render_compare);

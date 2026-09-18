@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "f598db93fabad5eaf010b44e3115dd645723be62",
-  "source_fingerprint": "f4d1517f7f6ae8cee388cc68fe642d184936c95beaf6e54b8f80c19ebd5e9ffe",
+  "source_revision": "1cbc5a574d85057bc96865475fd401c2dd2f08af",
+  "source_fingerprint": "13981ae2209eb988fd25ec8d443a05c0c15dfb8318914148bb46d617dcb1cb38",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -68,7 +68,6 @@
     "src/modules/db2/c/evidence_vectors.c",
     "src/modules/db2/c/fact_identity.c",
     "src/modules/db2/c/fact_identity_unicode.c",
-    "src/modules/db2/c/fact_lifecycle.c",
     "src/modules/db2/c/fact_mutation.c",
     "src/modules/db2/c/failed_queries.c",
     "src/modules/db2/c/feature_rows.c",
@@ -2133,7 +2132,6 @@
         "src/modules/db2/c/cross_repo_review.c",
         "src/modules/db2/c/curiosity.c",
         "src/modules/db2/c/entity_profiles.c",
-        "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/support/time_primitives.c"
@@ -2503,7 +2501,6 @@
         "src/modules/db2/c/org_vault_rotation.c",
         "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/project.c",
-        "src/modules/db2/c/rel_types_store.c",
         "src/modules/db2/c/report_enrichments.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/server_registry.c",
@@ -2624,7 +2621,6 @@
         "src/modules/db2/c/enrollments.c",
         "src/modules/db2/c/entity_edges.c",
         "src/modules/db2/c/entity_registry.c",
-        "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/feedback.c",
         "src/modules/db2/c/fidelity.c",
@@ -2734,7 +2730,6 @@
         "src/modules/db2/c/cross_repo_review.c",
         "src/modules/db2/c/curiosity.c",
         "src/modules/db2/c/entity_profiles.c",
-        "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/support/time_primitives.c"
@@ -2967,7 +2962,6 @@
         "src/modules/db2/c/enrollments.c",
         "src/modules/db2/c/entity_edges.c",
         "src/modules/db2/c/entity_profiles.c",
-        "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/kb_service_backend.c",
         "src/modules/db2/c/ontology_evolution.c",
@@ -3013,7 +3007,7 @@
     }
   ],
   "summary": {
-    "translation_units": 119,
+    "translation_units": 118,
     "descriptor_support_units": 19,
     "unresolved_symbols": 141,
     "dispositions": {
@@ -3025,5 +3019,5 @@
       "system-link": 140
     }
   },
-  "fingerprint": "5c27487e3e4ea2bb39db9cfb9fde11fd8679ce9a6f01c6757050167c63daa375"
+  "fingerprint": "d42f71f022bcfba51cb6c57024b51aeb89629cd8c7036d06f3511c65a653ecc0"
 }

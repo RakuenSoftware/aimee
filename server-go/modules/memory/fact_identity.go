@@ -41,10 +41,13 @@ func factIdentity(source, relation, target string) (identity, subject string) {
 	return
 }
 
+var functionalFactRelations = []string{"lives_in", "born_in", "age", "located_in", "has_hostname", "spouse", "works_for", "has_role", "device_has_ip"}
+
 func factFunctional(relation string) bool {
-	switch relation {
-	case "lives_in", "born_in", "age", "located_in", "has_hostname", "spouse", "works_for", "has_role", "device_has_ip":
-		return true
+	for _, name := range functionalFactRelations {
+		if relation == name {
+			return true
+		}
 	}
 	return false
 }
