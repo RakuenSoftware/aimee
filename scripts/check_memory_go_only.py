@@ -26,6 +26,16 @@ COMMENTS_AND_STRINGS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|/\*.*
 GO_IMPORT = re.compile(r'\bimport\s+(?:\([^)]*\)|(?:(?:\w+|\.)\s+)?"[^"]*")', re.S)
 MEMORY_INCLUDE = re.compile(r'#\s*include\s*[<"][^>"\n]*(?:aimee/memory/|modules/memory/)[^>"\n]*[>"]')
 
+# The immutable source snapshot captured `} mode;` from an anonymous enum nested
+# inside memory_temporal_constraint_t as if it were a public typedef. It is a
+# member name, not a memory API: rejecting it globally also rejects unrelated
+# JSON keys, file modes and other structures. Keep the inventory intact and match
+# the defining enum family instead. The enclosing type is independently present
+# in native_symbols, so calls, aliases and a renamed copy of this enum all fail.
+# Evidence: source_commit a705a6d29468860f5d895a94794de954c25301b6,
+# src/modules/memory/memory_core_internal.h, memory_temporal_constraint_t.
+CAPTURED_MEMBERS = {"mode": r"MEM_DATE_CONSTRAINT_\w+"}
+
 
 def without_comments(text: str) -> str:
     # Keep string literals intact: // in a URL is not a comment, and an include
@@ -50,7 +60,9 @@ def violations(root: Path, manifest: dict) -> list[dict[str, str]]:
 
     if manifest.get("version") != 1 or not manifest.get("native_symbols") or not manifest.get("native_files"):
         raise ValueError("missing or invalid immutable native retirement inventory")
-    symbols = re.compile(r"\b(?:" + "|".join(re.escape(s) for s in manifest["native_symbols"])
+    native_patterns = [re.escape(symbol) if symbol not in CAPTURED_MEMBERS
+                       else CAPTURED_MEMBERS[symbol] for symbol in manifest["native_symbols"]]
+    symbols = re.compile(r"\b(?:" + "|".join(native_patterns)
                          + r"|AIMEE_MEMORY_\w+|aimee_memory_\w+|server_module_memory_\w+"
                          + r"|kb_module_memory_\w+|kb_client_memory_\w+)\b")
     native_names = {Path(p).name for p in manifest["native_files"]}

@@ -102,6 +102,29 @@ class GoOnlyMemoryTest(unittest.TestCase):
         path.write_text('const char *url = "http://example/"; memory_get(1);\n', encoding="utf-8")
         self.assertIn("memory-native-api", self.rules())
 
+    def test_captured_member_is_not_a_global_api_name(self):
+        # Run against the real immutable inventory, not a hand-picked list that
+        # would omit the accidental nested-enum member capture.
+        self.manifest = json.loads((checker.ROOT / checker.MANIFEST).read_text())
+        self.assertIn("mode", self.manifest["native_symbols"])
+        self.write("src/host.c", 'struct options { int mode; };\n'
+                   'int configure(struct options *o, int mode) { o->mode = mode; return mode; }\n'
+                   'const char *json = "{\\"mode\\":\\"compact\\"}";\n')
+        self.assertEqual(self.rules(), set())
+
+    def test_actual_temporal_api_and_renamed_enum_are_still_rejected(self):
+        self.manifest = json.loads((checker.ROOT / checker.MANIFEST).read_text())
+        for source in (
+            "memory_temporal_constraint_t request;",
+            "typedef memory_temporal_constraint_t renamed_constraint;",
+            "enum { MEM_DATE_CONSTRAINT_NONE = 0, MEM_DATE_CONSTRAINT_MATCH } mode;",
+            "struct renamed { enum { MEM_DATE_CONSTRAINT_BETWEEN } renamed_mode; };",
+            "#define renamed_mode MEM_DATE_CONSTRAINT_AFTER",
+        ):
+            with self.subTest(source=source):
+                self.write("src/host.c", source)
+                self.assertIn("memory-native-api", self.rules())
+
     def test_empty_retirement_inventory_cannot_turn_gate_green(self):
         self.manifest["native_symbols"] = []
         with self.assertRaises(ValueError):
