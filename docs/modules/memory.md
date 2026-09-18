@@ -636,3 +636,12 @@ confidence decisions use 500 ms, and migrated private commands/views retain
 60 seconds. Tests cover authority-separated rendering, complete responses,
 fail-open recall, concurrent Go counters, invalid patches and protocol/IR seams.
 The gateway transport and remaining pre-injection policy are still G0 work.
+
+A partial context-injection cutover adds Go-owned execution plans for context,
+legacy text and tool filtering. Plans preserve pristine-query precedence,
+bounded UTF-8 fallback queries, separate guidance/evidence authority, conditional
+revision epochs and hashed recall audit payloads. Preview/tool plans do not
+count extra recalls. The generic native plan executor is not wired yet; existing
+production consumers still use the previous adapter. This checkpoint is not G0
+completion. Validation: memory/module race tests with PostgreSQL, a CGO-disabled
+module build, module inventory and the transitional C boundary check.

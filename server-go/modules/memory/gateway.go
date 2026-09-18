@@ -50,54 +50,13 @@ func handleGatewayCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		}
 		return commandResult(map[string]any{"status": "ok", "enabled": gatewayEnabled(value)})
 	case "gateway-plan":
-		var roles, tools []string
-		if json.Unmarshal(args["roles"], &roles) != nil || roles == nil || json.Unmarshal(args["tools"], &tools) != nil || tools == nil {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
-		start := true
-		for _, role := range roles {
-			if role == "assistant" {
-				start = false
-				break
-			}
-		}
-		remove := []int{}
-		if start {
-			// Reverse indices let the host remove entries without invalidating later ones.
-			for i := len(tools) - 1; i >= 0; i-- {
-				switch tools[i] {
-				case "exec_command", "local_shell", "shell", "bash", "run_command", "container.exec":
-					remove = append(remove, i)
-				}
-			}
-		}
-		return commandResult(map[string]any{"status": "ok", "append_guidance": start, "remove_tools": remove})
+		return handleGatewayPlan(options, args)
 	case "gateway-recall":
 		var query *string
 		if json.Unmarshal(args["query"], &query) != nil || query == nil {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
-		enabled, enforce := recallGateMode()
-		skip, reason := false, ""
-		if enabled {
-			skip, reason = recallGateDecision(*query)
-		}
-		result := map[string]any{"status": "ok", "skip": skip, "enforced": skip && enforce}
-		if skip {
-			options.gateway.predictedSkip.Add(1)
-			result["reason"] = reason
-			mode, verb := "Observed", "would skip"
-			if enforce {
-				mode, verb = "Enforced", "skipping"
-			}
-			result["log"] = fmt.Sprintf("recall gate: %s turn (reason=%s)", verb, reason)
-			result["audit_role"] = "RecallGate" + mode + "Skip/" + reason
-			// The evidence API expects a fingerprint, never the raw user message.
-			result["query_fingerprint"] = traceFingerprint(*query)
-		} else {
-			options.gateway.predictedRetrieve.Add(1)
-		}
-		return commandResult(result)
+		return commandResult(gatewayRecall(options.gateway, *query))
 	case "gateway-outcome":
 		var predicted, needed *bool
 		if json.Unmarshal(args["predicted_skip"], &predicted) != nil || json.Unmarshal(args["retrieval_needed"], &needed) != nil || predicted == nil || needed == nil {
@@ -113,4 +72,28 @@ func handleGatewayCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		return commandResult(options.gateway.metrics())
 	}
 	return nil, bus.ModuleStatusInvalidRequest
+}
+
+func gatewayRecall(state *gatewayState, query string) map[string]any {
+	enabled, enforce := recallGateMode()
+	skip, reason := false, ""
+	if enabled {
+		skip, reason = recallGateDecision(query)
+	}
+	result := map[string]any{"status": "ok", "skip": skip, "enforced": skip && enforce}
+	if skip {
+		state.predictedSkip.Add(1)
+		result["reason"] = reason
+		mode, verb := "Observed", "would skip"
+		if enforce {
+			mode, verb = "Enforced", "skipping"
+		}
+		result["log"] = fmt.Sprintf("recall gate: %s turn (reason=%s)", verb, reason)
+		result["audit_role"] = "RecallGate" + mode + "Skip/" + reason
+		// The evidence API expects a fingerprint, never the raw user message.
+		result["query_fingerprint"] = traceFingerprint(query)
+	} else {
+		state.predictedRetrieve.Add(1)
+	}
+	return result
 }
