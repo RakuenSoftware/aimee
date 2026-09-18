@@ -16,6 +16,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "fusion-probe":
+		return handleFusionProbe(options, invocation, args)
 	case "code-context", "code-context-plan":
 		return handleCodeContext(options, invocation, args)
 	case "ingress-begin", "ingress-task-result", "ingress-recall-result", "ingress-metrics":

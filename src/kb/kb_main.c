@@ -703,22 +703,24 @@ static int kb_cmd_enroll(int argc, char **argv)
  * instances externally; a probe never changes live fusion policy. */
 static int kb_run_fusion_probe(const char *query)
 {
-   memory_t results[20];
-   int count = memory_find_facts(query, 20, results, 20);
-   if (count < 0)
+   cJSON *args = cJSON_CreateObject(), *response = NULL;
+   if (!args || !cJSON_AddStringToObject(args, "operation", "fusion-probe") ||
+       !cJSON_AddStringToObject(args, "query", query))
    {
+      cJSON_Delete(args);
+      return 1;
+   }
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   cJSON_Delete(args);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(response, "output");
+   if (rc <= 0 || strcmp(jo_cstr(response, "status"), "ok") || !cJSON_IsString(output))
+   {
+      cJSON_Delete(response);
       fprintf(stderr, "fusion probe: instance memory retrieval unavailable\n");
       return 1;
    }
-   cJSON *state_args = cJSON_CreateObject(), *state = NULL;
-   cJSON_AddStringToObject(state_args, "operation", "fusion-state");
-   int state_rc = aimee_module_commands_dispatch_internal("memory.runtime", state_args, &state);
-   cJSON_Delete(state_args);
-   int fusion_on = state_rc > 0 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(state, "enabled"));
-   cJSON_Delete(state);
-   printf("fusion=%s (instance setting), results=%d\n", fusion_on ? "on" : "off", count);
-   for (int i = 0; i < count; i++)
-      printf("  #%-2d id=%-8lld %s\n", i + 1, (long long)results[i].id, results[i].key);
+   fputs(output->valuestring, stdout);
+   cJSON_Delete(response);
    return 0;
 }
 

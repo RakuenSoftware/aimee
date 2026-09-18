@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/JBailes/aimee/server-go/bus"
 )
 
 // Preserve the canonical MCP filter priority while keeping memory scope policy
@@ -38,4 +40,45 @@ func memorySearchText(query string, records []publicMemoryRecord, missing bool) 
 		}
 	}
 	return out.String()
+}
+
+// The local operator probe uses the same Go retrieval owner and deployment
+// setting as the serving instance. It never overrides fusion policy.
+func handleFusionProbe(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+	if options.placement != PlacementKB {
+		return nil, bus.ModuleStatusCapabilityAbsent
+	}
+	query, ok := args.stringValue("query")
+	if !ok || strings.TrimSpace(query) == "" {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	state, status := handleData(options, invocation, []byte(`{"operation":"fusion-state-get"}`))
+	if status != bus.ModuleStatusOK {
+		return nil, status
+	}
+	var configured DataResponse
+	if json.Unmarshal(state, &configured) != nil || configured.Allowed == nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	// The former local data-stage request had no active scope context. Preserve
+	// that visibility; an operator probe must not turn on include_all implicitly.
+	request, _ := json.Marshal(DataRequest{Operation: "search", Query: query, Limit: 20})
+	encoded, status := handleData(options, invocation, request)
+	if status != bus.ModuleStatusOK {
+		return nil, status
+	}
+	var response DataResponse
+	if json.Unmarshal(encoded, &response) != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	mode := "off"
+	if *configured.Allowed {
+		mode = "on"
+	}
+	var out strings.Builder
+	fmt.Fprintf(&out, "fusion=%s (instance setting), results=%d\n", mode, len(response.Records))
+	for i, row := range response.Records {
+		fmt.Fprintf(&out, "  #%-2d id=%-8d %s\n", i+1, row.ID, row.Key)
+	}
+	return commandResult(map[string]any{"status": "ok", "output": out.String()})
 }

@@ -3,6 +3,8 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -124,6 +126,11 @@ func exerciseSearchViewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 	if result["text"] != "No facts found for 'search-view-fixture'" || result["active_context_missing"] != false {
 		t.Fatal(result)
 	}
+
+	probe := runHostRuntime(t, handler, `{"operation":"fusion-probe","query":"search-view-fixture","include_all":true}`)["output"].(string)
+	if !strings.Contains(probe, "results=20\n") || !strings.Contains(probe, "global-search-view-fixture") || strings.Contains(probe, "local-search") || strings.Contains(probe, "workspace-search") || strings.Contains(probe, "private-search") {
+		t.Fatal("probe visibility/cap", probe)
+	}
 	// The existing structured visible API remains bounded to the visible set.
 	result = run(map[string]any{"format": "", "include_all": true, "limit": 64})
 	if _, ok := result["text"]; ok {
@@ -132,6 +139,55 @@ func exerciseSearchViewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 	for _, v := range result["facts"].([]any) {
 		if v.(map[string]any)["key"] != "global-search-view-fixture" {
 			t.Fatal(v)
+		}
+	}
+}
+
+type fusionProbeStore struct {
+	recordingDataStore
+	rows    []Record
+	failure error
+	query   string
+	limit   int
+}
+
+func (s *fusionProbeStore) Search(_ context.Context, scope Scope, query, _, _ string, limit int) ([]Record, error) {
+	s.scope, s.query, s.limit = scope, query, limit
+	return s.rows, s.failure
+}
+func TestFusionProbe(t *testing.T) {
+	key := strings.Repeat("界", 1000)
+	backend := &fusionProbeStore{rows: []Record{{ID: 9007199254740993, Key: key}, {ID: 7, Key: "short"}}}
+	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
+	for _, mode := range []string{"on", "off"} {
+		t.Setenv("AIMEE_GRAPH_FUSION", mode)
+		got := runHostRuntime(t, handler, `{"operation":"fusion-probe","query":"needle","include_all":true}`)["output"]
+		want := fmt.Sprintf("fusion=%s (instance setting), results=2\n  #1  id=9007199254740993 %s\n  #2  id=7        short\n", mode, key)
+		if got != want || backend.limit != 20 || backend.query != "needle" || backend.scope != (Scope{Type: ScopeGlobal, Value: "_global"}) {
+			t.Fatal(got, backend)
+		}
+	}
+	frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"fusion-probe","query":"needle"}`))
+	backend.failure = errors.New("retrieval unavailable")
+	if raw, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK || len(raw) != 0 {
+		t.Fatal(status, string(raw))
+	}
+	backend.failure = nil
+	t.Setenv("AIMEE_GRAPH_FUSION", "invalid")
+	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status == bus.ModuleStatusOK {
+		t.Fatal("invalid setting reported as off")
+	}
+	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+		t.Fatal(status)
+	}
+	server := NewHandler(nil, WithDataStore(PlacementServer, backend))
+	if _, status := server(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+		t.Fatal(status)
+	}
+	for _, args := range []string{`{"operation":"fusion-probe"}`, `{"operation":"fusion-probe","query":" "}`, `{"operation":"fusion-probe","query":false}`} {
+		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(args))
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal(status)
 		}
 	}
 }

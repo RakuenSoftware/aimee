@@ -696,3 +696,11 @@ mutation record. Server pre-dispatch refusal hooks and other native memory
 clients still require migration. The current inventory is three C sources
 (353 lines) and five headers in the memory tree, with 169 strict repository-wide
 G0 findings; the immutable baseline is unchanged and G0 remains incomplete.
+
+The local KB fusion probe now invokes the host-only Go runtime view. Go performs
+retrieval and renders the configured fusion state and ranked IDs/keys. The C
+host transports the output without fixed memory records or floating-point ID
+conversion. The probe retains the 20-row cap and no-context visibility; supplied
+include-all fields cannot widen it. Missing retrieval/configuration remains an
+error. Tests cover full UTF-8 keys, IDs above 2^53, both fusion settings, public
+principal/Server refusal and restricted-role visibility.
