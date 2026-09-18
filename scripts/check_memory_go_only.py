@@ -52,6 +52,18 @@ def source_files(root: Path):
             yield Path(directory) / name
 
 
+def unrelated_module_api(root: Path, include: str) -> bool:
+    # module_api.h is a shared filename, not a memory-specific basename.
+    # Only exempt a fully qualified, existing sibling module header. Bare,
+    # relocated, missing and forwarding includes remain migration debt, and
+    # every sibling header is still scanned for retired symbols/includes.
+    match = re.fullmatch(r'#\s*include\s*[<"]aimee/([a-z0-9_-]+)/module_api\.h[>"]', include)
+    if not match or match[1] == "memory":
+        return False
+    header = root / "src/modules" / match[1] / "include/aimee" / match[1] / "module_api.h"
+    return header.is_file() and header.resolve() == header.absolute()
+
+
 def violations(root: Path, manifest: dict) -> list[dict[str, str]]:
     failures = []
 
@@ -99,7 +111,10 @@ def violations(root: Path, manifest: dict) -> list[dict[str, str]]:
         suffix = path.suffix.lower()
         if suffix in SOURCE_SUFFIXES:
             text = without_comments(path.read_text(encoding="utf-8"))
-            included = MEMORY_INCLUDE.search(text) or native_include.search(text)
+            included = MEMORY_INCLUDE.search(text) or next(
+                (match for match in native_include.finditer(text)
+                 if not unrelated_module_api(root, match.group())), None
+            )
             matched = symbols.search(text)
             if included:
                 fail("memory-native-include", path, included.group())

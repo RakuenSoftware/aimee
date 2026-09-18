@@ -125,6 +125,35 @@ class GoOnlyMemoryTest(unittest.TestCase):
                 self.write("src/host.c", source)
                 self.assertIn("memory-native-api", self.rules())
 
+    def test_shared_api_basename_does_not_claim_other_module_headers(self):
+        self.manifest = json.loads((checker.ROOT / checker.MANIFEST).read_text())
+        self.write("src/modules/egress/include/aimee/egress/module_api.h", "int egress_run(void);\n")
+        self.write("src/host.c", '#include <aimee/egress/module_api.h>\n')
+        self.assertEqual(self.rules(), set())
+        for included in ("module_api.h", "renamed/module_api.h", "aimee/missing/module_api.h",
+                         "aimee/memory/module_api.h", "modules/memory/elsewhere.h"):
+            with self.subTest(included=included):
+                self.write("src/host.c", '#include <aimee/egress/module_api.h>\n'
+                           f'#include "{included}"\n')
+                self.assertIn("memory-native-include", self.rules())
+
+    def test_sibling_header_cannot_forward_or_restore_memory_symbols(self):
+        self.manifest = json.loads((checker.ROOT / checker.MANIFEST).read_text())
+        self.write("src/host.c", '#include <aimee/egress/module_api.h>\n')
+        for contents, rule in (
+            ('#include <aimee/memory/module_api.h>\n', "memory-native-include"),
+            ('typedef memory_node_kind_t egress_node_t;\n', "memory-native-api"),
+            ('#define egress_get memory_get\n', "memory-native-api"),
+        ):
+            with self.subTest(contents=contents):
+                self.write("src/modules/egress/include/aimee/egress/module_api.h", contents)
+                self.assertIn(rule, self.rules())
+        header = self.root / "src/modules/egress/include/aimee/egress/module_api.h"
+        header.unlink()
+        target = self.write("src/renamed_api.h", "int host_run(void);\n")
+        header.symlink_to(target)
+        self.assertIn("memory-native-include", self.rules())
+
     def test_empty_retirement_inventory_cannot_turn_gate_green(self):
         self.manifest["native_symbols"] = []
         with self.assertRaises(ValueError):
