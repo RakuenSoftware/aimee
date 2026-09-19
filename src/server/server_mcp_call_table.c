@@ -628,39 +628,18 @@ static cJSON *mcph_memory_maintain(struct mcp_call *c)
    cJSON_AddNumberToObject(request, "modes", (double)run_modes);
    cJSON_AddBoolToObject(request, "force", force);
    cJSON_AddBoolToObject(request, "dry_run", dry_run);
+   cJSON_AddStringToObject(request, "view", "model");
+   cJSON_AddBoolToObject(request, "prune_removed", dropped_prune);
    char *envelope = kb_v1_action_request("memory.maintenance_run", request);
-   cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
+   cJSON *resp = envelope ? cJSON_ParseWithOpts(envelope, NULL, 1) : NULL;
    free(envelope);
-   cJSON *summary = resp ? cJSON_GetObjectItemCaseSensitive(resp, "summary") : NULL;
-   char *rendered = NULL;
-   if (cJSON_IsObject(summary))
-   {
-      cJSON *detached = cJSON_DetachItemViaPointer(resp, summary);
-      rendered = detached ? cJSON_PrintUnformatted(detached) : NULL;
-      cJSON_Delete(detached);
-   }
+   cJSON *text = cJSON_GetObjectItemCaseSensitive(resp, "text");
+   cJSON *content;
+   if (strcmp(jo_cstr(resp, "status"), "ok") == 0 && cJSON_IsString(text))
+      content = text_content(text->valuestring);
+   else
+      content = text_content("error: memory maintenance failed or returned an invalid response");
    cJSON_Delete(resp);
-   /* Say when the request was narrowed. Running less than asked and reporting
-    * plain success would read as "pruned" to the caller. */
-   if (dropped_prune)
-   {
-      const char *body = rendered ? rendered : "{}";
-      size_t need = strlen(body) + 256;
-      char *note = (char *)malloc(need);
-      if (note)
-      {
-         snprintf(note, need,
-                  "%s\n(prune was NOT run: it permanently deletes memories and is an operator "
-                  "action, `aimee memory maintain`. The other requested modes ran.)",
-                  body);
-         cJSON *content = text_content(note);
-         free(note);
-         free(rendered);
-         return content;
-      }
-   }
-   cJSON *content = rendered ? text_content(rendered) : text_content("{}");
-   free(rendered);
    return content;
 }
 

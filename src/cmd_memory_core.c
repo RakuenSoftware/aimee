@@ -19,12 +19,9 @@
 
 /* The Go owner supplies JSON and text views; transport failures must not look
  * like a healthy empty store. The action transport takes ownership of request. */
-static cJSON *memory_console_reply(const char *method, int effectiveness)
+static cJSON *memory_console_request(const char *method, cJSON *request)
 {
-   cJSON *request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "view", "console");
-   if (effectiveness)
-      cJSON_AddBoolToObject(request, "effectiveness", 1);
    char *raw = kb_v1_action_request(method, request);
    cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
    free(raw);
@@ -34,6 +31,14 @@ static cJSON *memory_console_reply(const char *method, int effectiveness)
    if (!cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "text")))
       fatal("%s: invalid memory console response", method);
    return reply;
+}
+
+static cJSON *memory_console_reply(const char *method, int effectiveness)
+{
+   cJSON *request = cJSON_CreateObject();
+   if (effectiveness)
+      cJSON_AddBoolToObject(request, "effectiveness", 1);
+   return memory_console_request(method, request);
 }
 
 void mem_store(app_ctx_t *ctx, int argc, char **argv)
@@ -818,117 +823,33 @@ void mem_provenance(app_ctx_t *ctx, int argc, char **argv)
    cJSON_Delete(response);
 }
 
-static unsigned int mem_maintain_parse_modes(const char *csv)
-{
-   if (!csv || !csv[0])
-      return 0;
-   unsigned int modes = 0;
-   const char *p = csv;
-   while (*p)
-   {
-      while (*p == ' ' || *p == ',')
-         p++;
-      if (!*p)
-         break;
-      const char *start = p;
-      while (*p && *p != ',' && *p != ' ')
-         p++;
-      size_t len = (size_t)(p - start);
-      if (len == 6 && strncmp(start, "replay", 6) == 0)
-         modes |= MEMORY_MAINTENANCE_MODE_REPLAY;
-      else if (len == 7 && strncmp(start, "compact", 7) == 0)
-         modes |= MEMORY_MAINTENANCE_MODE_COMPACT;
-      else if (len == 5 && strncmp(start, "prune", 5) == 0)
-         modes |= MEMORY_MAINTENANCE_MODE_PRUNE;
-      else if (len == 9 && strncmp(start, "summarize", 9) == 0)
-         modes |= MEMORY_MAINTENANCE_MODE_SUMMARIZE;
-      else if (len == 5 && strncmp(start, "drift", 5) == 0)
-         modes |= MEMORY_MAINTENANCE_MODE_DRIFT;
-   }
-   return modes;
-}
-
 void mem_maintain(app_ctx_t *ctx, int argc, char **argv)
 {
    opt_parsed_t opts;
    opt_parse(argc, argv, NULL, &opts);
-   unsigned int modes = mem_maintain_parse_modes(opt_get(&opts, "modes"));
-   int dry_run = opt_get_flag(&opts, "dry-run");
-   int force = opt_get_flag(&opts, "force");
+   const char *modes = opt_get(&opts, "modes");
    int watch_secs = opt_get_int(&opts, "watch", 0);
-
-watch_iter:;
-   /* Run maintenance inside the knowledge service and parse the
-    * summary back out of the response envelope. */
-   cJSON *request = cJSON_CreateObject();
-   cJSON_AddNumberToObject(request, "modes", (double)modes);
-   cJSON_AddBoolToObject(request, "force", force);
-   cJSON_AddBoolToObject(request, "dry_run", dry_run);
-   char *envelope = kb_v1_action_request("memory.maintenance_run", request);
-   cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
-   free(envelope);
-   cJSON *summary_j = resp ? cJSON_GetObjectItemCaseSensitive(resp, "summary") : NULL;
-
-   memory_maintenance_summary_t maint_summary;
-   memset(&maint_summary, 0, sizeof(maint_summary));
-   if (cJSON_IsObject(summary_j))
+   do
    {
-#define PICK_INT(field)                                                                            \
-   do                                                                                              \
-   {                                                                                               \
-      cJSON *v = cJSON_GetObjectItemCaseSensitive(summary_j, #field);                              \
-      if (cJSON_IsNumber(v))                                                                       \
-         maint_summary.field = (int)v->valuedouble;                                                \
-   } while (0)
-      PICK_INT(promoted);
-      PICK_INT(demoted);
-      PICK_INT(expired);
-      PICK_INT(skipped);
-      PICK_INT(dry_run);
-      PICK_INT(lifecycle_archived);
-      PICK_INT(merged);
-      PICK_INT(rescored);
-      PICK_INT(modes_run);
-#undef PICK_INT
-      cJSON *elapsed = cJSON_GetObjectItemCaseSensitive(summary_j, "elapsed_ms");
-      if (cJSON_IsNumber(elapsed))
-         maint_summary.elapsed_ms = elapsed->valuedouble;
-   }
-
-   int promoted = maint_summary.promoted;
-   int demoted = maint_summary.demoted;
-   int expired = maint_summary.expired;
-
-   const int vector_maintenance_handoff = (!dry_run && modes == 0 && !maint_summary.skipped);
-
-   if (ctx->json_output)
-   {
-      cJSON *j = summary_j ? cJSON_Duplicate(summary_j, 1) : cJSON_CreateObject();
-      cJSON_AddStringToObject(j, "status", "ok");
-      cJSON_AddStringToObject(j, "vector_maintenance_owner", "knowledge-service");
-      cJSON_AddBoolToObject(j, "vector_maintenance_skipped_here", vector_maintenance_handoff);
-      emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
-   }
-   else
-   {
-      if (maint_summary.skipped)
-         printf("Maintenance cycle skipped (idle guard).\n");
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request, "modes_csv", modes ? modes : "");
+      cJSON_AddBoolToObject(request, "force", opt_get_flag(&opts, "force"));
+      cJSON_AddBoolToObject(request, "dry_run", opt_get_flag(&opts, "dry-run"));
+      cJSON *reply = memory_console_request("memory.maintenance_run", request);
+      cJSON *display = cJSON_DetachItemFromObjectCaseSensitive(reply, "display");
+      if (!cJSON_IsObject(display))
+         fatal("memory.maintenance_run: invalid maintenance response");
+      if (ctx->json_output)
+         emit_json_ctx(display, ctx->json_fields, ctx->response_profile);
       else
-         printf("Maintenance: promoted=%d demoted=%d expired=%d archived=%d merged=%d "
-                "rescored=%d elapsed_ms=%.2f%s\n",
-                promoted, demoted, expired, maint_summary.lifecycle_archived, maint_summary.merged,
-                maint_summary.rescored, maint_summary.elapsed_ms, dry_run ? " (dry-run)" : "");
-      if (vector_maintenance_handoff)
-         printf("Vector maintenance skipped here; ownership belongs to the knowledge service.\n");
-   }
-
-   cJSON_Delete(resp);
-
-   if (watch_secs > 0)
-   {
-      sleep((unsigned)watch_secs);
-      goto watch_iter;
-   }
+      {
+         fputs(jo_cstr(reply, "text"), stdout);
+         cJSON_Delete(display);
+      }
+      cJSON_Delete(reply);
+      if (watch_secs > 0)
+         sleep((unsigned)watch_secs);
+   } while (watch_secs > 0);
 }
 
 void mem_briefing(app_ctx_t *ctx, int argc, char **argv)

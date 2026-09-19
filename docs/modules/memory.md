@@ -91,6 +91,15 @@ The four native stats, raw-stats, effectiveness and health client APIs are retir
 PageRank timing compatibility fields remain zero, and write-to-readable latency
 remains explicitly unmeasured; this migration does not introduce measurements.
 
+The same console view owns maintenance mode parsing, summary rendering and the
+vector-maintenance handoff indicator. The CLI passes mode names and watch timing;
+Go retains the comma/space mode vocabulary, numeric API modes, default-mode
+sentinel, force and dry-run behavior. Skipped cycles use the owner's boolean
+receipt, and failed maintenance cannot be rendered as a successful empty cycle.
+MCP also uses the Go-rendered summary and prune-removal notice, which distinguishes
+completed, skipped and dry-run outcomes. Its existing model-mode restriction and
+capability gate remain at the Server transport boundary pending their migration.
+
 The supervised `aimee-module-memory` process is pure Go. It owns extraction,
 write gating, embedding, retrieval safety, reranking, command declaration, and
 the scoped memory data API.
