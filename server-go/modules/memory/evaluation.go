@@ -44,8 +44,11 @@ type EvaluationScores struct {
 	Cases    int     `json:"n_cases"`
 }
 type EvaluationResult struct {
-	Status string           `json:"status"`
-	Scores EvaluationScores `json:"metrics"`
+	Suite         string           `json:"suite,omitempty"`
+	Samples       int              `json:"samples,omitempty"`
+	ExcludedCases map[string]int   `json:"excluded_cases,omitempty"`
+	Status        string           `json:"status"`
+	Scores        EvaluationScores `json:"metrics"`
 	// Owner latency includes retrieval and governed embedding, but excludes
 	// transport to the standalone evaluator. It is not a live KB hop measurement.
 	LatenciesMS []float64 `json:"owner_latency_ms"`
@@ -53,8 +56,8 @@ type EvaluationResult struct {
 
 // Validate rejects a changed/partial denominator before any fixture is stored.
 func (c EvaluationCorpus) Validate() error {
-	if c.Version != 1 || len(c.Fixtures) < 1 || len(c.Fixtures) > 256 || len(c.Cases) < 1 || len(c.Cases) > 512 {
-		return errors.New("evaluation requires corpus version 1, 1..256 fixtures and 1..512 cases")
+	if c.Version != 1 || len(c.Fixtures) < 1 || len(c.Fixtures) > 4096 || len(c.Cases) < 1 || len(c.Cases) > 4096 {
+		return errors.New("evaluation requires corpus version 1, 1..4096 fixtures and 1..4096 cases")
 	}
 	fixtures := make(map[string]bool)
 	for _, f := range c.Fixtures {
@@ -239,20 +242,38 @@ func FormatEvaluation(result EvaluationResult, path, format, fields, profile str
 	if result.Status != "ok" || result.Scores.Cases < 1 || len(result.LatenciesMS) != result.Scores.Cases {
 		return nil, errors.New("incomplete evaluation result")
 	}
+	suite := result.Suite
+	if suite == "" {
+		suite = "corpus"
+	}
 	s := result.Scores
 	latency := append([]float64(nil), result.LatenciesMS...)
 	sort.Float64s(latency)
 	percentile := func(p float64) float64 { return latency[int(math.Ceil(float64(len(latency))*p))-1] }
 	timing := map[string]any{"p50_ms": percentile(.5), "p95_ms": percentile(.95), "p99_ms": percentile(.99), "min_ms": latency[0], "max_ms": latency[len(latency)-1], "queries": len(latency)}
 	if format == "text" {
-		return []byte(fmt.Sprintf("Memory Benchmark — corpus: %s\nCases: %d\nMRR: %.6f\nnDCG@5: %.6f\nnDCG@10: %.6f\nRecall@5: %.6f\nRecall@10: %.6f\nLatency (owner): p50=%.2fms p95=%.2fms p99=%.2fms\n", path, s.Cases, s.MRR, s.NDCG5, s.NDCG10, s.Recall5, s.Recall10, percentile(.5), percentile(.95), percentile(.99))), nil
+		metadata := ""
+		if result.Suite != "" {
+			excluded, err := json.Marshal(result.ExcludedCases)
+			if err != nil {
+				return nil, err
+			}
+			metadata = fmt.Sprintf("Samples: %d\nExcluded cases: %s\nFixture policy: full-text-raw-query-v1\n", result.Samples, excluded)
+		}
+		return []byte(fmt.Sprintf("Memory Benchmark — %s: %s\n%sCases: %d\nMRR: %.6f\nnDCG@5: %.6f\nnDCG@10: %.6f\nRecall@5: %.6f\nRecall@10: %.6f\nLatency (owner): p50=%.2fms p95=%.2fms p99=%.2fms\n", suite, path, metadata, s.Cases, s.MRR, s.NDCG5, s.NDCG10, s.Recall5, s.Recall10, percentile(.5), percentile(.95), percentile(.99))), nil
 	}
 	if format != "json" {
 		return nil, errors.New("evaluation format must be json or text")
 	}
-	payload, err := json.Marshal(map[string]any{"status": "ok", "suite": "corpus", "dataset": path,
+	view := map[string]any{"status": "ok", "suite": suite, "dataset": path,
 		"metrics": map[string]any{"mrr": s.MRR, "ndcg_5": s.NDCG5, "ndcg_10": s.NDCG10, "recall_5": s.Recall5, "recall_10": s.Recall10, "cases": s.Cases},
-		"latency": timing, "latency_scope": "owner", "route_buckets": map[string]any{}, "shape_buckets": map[string]any{}})
+		"latency": timing, "latency_scope": "owner", "route_buckets": map[string]any{}, "shape_buckets": map[string]any{}}
+	if result.Suite != "" {
+		view["samples"] = result.Samples
+		view["excluded_cases"] = result.ExcludedCases
+		view["fixture_policy"] = "full-text-raw-query-v1"
+	}
+	payload, err := json.Marshal(view)
 	if err != nil {
 		return nil, err
 	}

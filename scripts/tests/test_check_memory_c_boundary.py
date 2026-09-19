@@ -70,6 +70,14 @@ class MemoryCBoundaryTest(unittest.TestCase):
                 with self.assertRaisesRegex(BoundaryError, "memory-go-only"):
                     validate(root)
 
+    def test_rejects_native_benchmark_store_retarget(self) -> None:
+        root = self.fixture()
+        target = root / "src/modules/benchmarks/unsafe_eval.c"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("int setup(void) { return db2_eval_open_temp_store(); }\n")
+        with self.assertRaisesRegex(BoundaryError, "native-evaluation-store-retarget"):
+            validate(root)
+
     def test_keeps_bus_and_host_transport_in_c(self) -> None:
         root = self.fixture()
         path = root / "src/core/event_bus/bus_host.c"

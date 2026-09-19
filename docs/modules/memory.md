@@ -56,10 +56,11 @@ operations needing one report that absence. This is not a replacement for an
 embedding-enabled retrieval benchmark. SQL uses the disposable database owner's
 permissions; the separate restricted-runtime-role replay remains necessary.
 
-The native benchmark loaders still use their old temporary-store lifecycle and
-have not yet been connected to this transport. Their native scratch connection
-does not redirect the Go owner. They must not be treated as validating this
-isolated Go path until their seeding, embeddings and reads are migrated together.
+The `locomo` and `longmemeval` retrieval suites use this Go evaluator, with a
+separate disposable database for each conversation or question. The remaining
+native QA, session-support and miss-report runners refuse their old temporary
+store setup before seeding: a native scratch connection cannot redirect the Go
+owner and therefore cannot isolate their memory operations.
 
 ## Purpose and non-goals
 
@@ -1130,11 +1131,30 @@ has closed successfully. Scores and latency come from the shared Go owner;
 latency does not include a Server-to-KB hop. Legacy route/shape buckets are
 unmeasured and remain empty. This evaluates the Go owner's current retrieval
 behavior; unit/temporal candidate weights now run in Go, but this does not
-certify the entire historical ranking pipeline. Other native dataset/judge runners
-and their scratch-store consumers remain G0 work. The C corpus loader and its dependent corpus fixtures are
+certify the entire historical ranking pipeline. Other native judge/support runners
+remain migration work and now refuse the unsafe scratch-store setup. The C corpus loader and its dependent corpus fixtures are
 retired; production-corpus/agent-manifest C fixtures remain until those runners
 migrate. Go tests cover isolated semantic recall, command and governed HTTP
 embedders, full fixture identities, input failures and baseline protection.
+
+`aimee memory benchmark --suite locomo --dataset <path>` and `--suite longmemeval`
+also launch the Go evaluator. The helper accepts `-suite`, `-dataset` and
+`-max-cases`; the cap counts evaluated conversations for LoCoMo and questions for
+LongMemEval. Each sample gets its own database, including when source IDs repeat
+across samples. Every selected sample is validated before database creation.
+Scores aggregate by evaluated question count, and output is withheld until all
+samples finish and their databases close. Empty relevance sets and LongMemEval
+abstention questions are excluded explicitly; both text and JSON report the
+exclusion counts and sample count. Unknown or duplicate relevance IDs, incomplete
+embeddings and malformed histories fail instead of shrinking the denominator.
+
+The versioned `full-text-raw-query-v1` fixture policy preserves complete Unicode
+source text and natural-language questions. It replaces the native truncation
+and query normalization, so historical native scores are not interchangeable.
+Dataset input is bounded to 512 MiB and each sample to 4096 fixtures and 4096
+questions; the labelled-corpus input retains its 4 MiB bound. Dataset suites do
+not accept corpus baseline options, and Go evaluation rejects legacy weight
+profiles. `AIMEE_DB2_EVAL_URL` remains required; there is no live-store fallback.
 
 The public `memory.search_assertions` and `memory.assemble_typed_context` routes
 now invoke the shared Go owner directly. Their native handlers and receipt

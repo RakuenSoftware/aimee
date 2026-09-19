@@ -1145,7 +1145,7 @@ void mem_eval_normalize_question(const char *question, char *out, size_t out_len
       snprintf(out, out_len, "%s", question);
 }
 
-/* Per-call isolated scratch DB2 store for bench scoring. */
+/* Unported native runners must fail before writing to the shared Go owner. */
 
 void mem_eval_close_temp_db(void)
 {
@@ -1154,20 +1154,9 @@ void mem_eval_close_temp_db(void)
 
 int mem_eval_open_temp_db(void)
 {
-   /* Pin the embedding dim BEFORE the temp store applies its schema: the scratch
-    * store's vector columns are sized by db2_embedding_dim(), and the corpus is
-    * embedded with the caller's embedder. Without this, db2_embedding_dim()'s 1024
-    * default can disagree with the embedder's width and every vector insert fails.
-    * Mirrors bootstrap_db2's pin.
-    * (The sqlite shim ignores vector dim, so this only bites the real-libpq store.) */
-   db2_set_embedding_dim_default(config_embedder_dims_default());
-   db2_set_embedding_dim(config_resolve_embedder_dims_current());
-   db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current());
-
-   if (db2_eval_open_temp_store() != 0)
-   {
-      fprintf(stderr, "mem_eval_open_temp_db: open/schema apply failed\n");
-      return -1;
-   }
-   return 0;
+   /* A C scratch connection cannot redirect the shared Go memory owner.
+    * Refuse before seeding instead of sending benchmark writes to a live owner. */
+   fprintf(stderr, "legacy memory dataset runner lacks isolated Go evaluation; "
+                   "use memory benchmark --suite locomo or --suite longmemeval\n");
+   return -1;
 }

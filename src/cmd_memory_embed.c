@@ -1259,8 +1259,12 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
    if (!suite || !suite[0])
       suite = "corpus";
 
-   if (strcmp(suite, "corpus") == 0 || strcmp(suite, "memory-retrieval") == 0)
+   if (strcmp(suite, "corpus") == 0 || strcmp(suite, "memory-retrieval") == 0 ||
+       strcmp(suite, "locomo") == 0 || strcmp(suite, "longmemeval") == 0)
    {
+      int dataset_suite = strcmp(suite, "locomo") == 0 || strcmp(suite, "longmemeval") == 0;
+      if (benchmark_weight_profile[0])
+         fatal("legacy weight profiles are not supported by Go memory evaluation");
       char helper[4096], dimension[32];
       if (platform_get_exe_path(helper, sizeof(helper)) != 0)
          fatal("cannot locate the Go memory evaluator");
@@ -1277,21 +1281,40 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
          fatal("cannot locate the Go memory evaluator");
       strcpy(slash, suffix);
       snprintf(dimension, sizeof(dimension), "%d", config_resolve_embedder_dims_current());
-      const char *corpus = opt_get(&opts, "corpus");
-      const char *baseline = opt_get(&opts, "baseline");
       const char *embedder = config_embedder_command_current(NULL);
-      const char *args[24] = {helper,
-                              "-corpus",
-                              corpus ? corpus : "tests/eval/memory_retrieval_corpus.json",
-                              "-baseline",
-                              baseline ? baseline : "tests/eval/memory_retrieval_baseline.json",
+      const char *args[32] = {helper,
                               "-embedding-command",
                               embedder ? embedder : "",
                               "-embedding-dim",
                               dimension,
                               "-format",
                               ctx->json_output ? "json" : "text"};
-      int next = 11;
+      int next = 7;
+      if (dataset_suite)
+      {
+         const char *dataset = opt_get(&opts, "dataset");
+         const char *max_cases = opt_get(&opts, "max-cases");
+         args[next++] = "-suite";
+         args[next++] = suite;
+         args[next++] = "-dataset";
+         args[next++] = dataset ? dataset
+                                : (strcmp(suite, "locomo") == 0
+                                       ? "data/locomo/locomo10.json"
+                                       : "data/longmemeval/longmemeval_s_cleaned.json");
+         args[next++] = "-max-cases";
+         args[next++] = max_cases ? max_cases : "0";
+         if (opt_get(&opts, "baseline") || opt_get_flag(&opts, "update-baseline"))
+            fatal("dataset evaluation does not support corpus baselines");
+      }
+      else
+      {
+         const char *corpus = opt_get(&opts, "corpus");
+         const char *baseline = opt_get(&opts, "baseline");
+         args[next++] = "-corpus";
+         args[next++] = corpus ? corpus : "tests/eval/memory_retrieval_corpus.json";
+         args[next++] = "-baseline";
+         args[next++] = baseline ? baseline : "tests/eval/memory_retrieval_baseline.json";
+      }
       if (ctx->json_fields && ctx->json_fields[0])
       {
          args[next++] = "-fields";
@@ -1316,68 +1339,10 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       if (rc != 0 || !output)
       {
          free(output);
-         fatal("Go memory corpus evaluation failed (exit %d)", rc);
+         fatal("Go memory evaluation failed (exit %d)", rc);
       }
       fputs(output, stdout);
       free(output);
-      BENCHMARK_RETURN;
-   }
-
-   if (strcmp(suite, "locomo") == 0)
-   {
-      const char *dataset_path = opt_get(&opts, "dataset");
-      int max_cases = opt_get_int(&opts, "max-cases", 0);
-      if (!dataset_path)
-         dataset_path = "data/locomo/locomo10.json";
-      mem_eval_scores_t scores;
-      mem_eval_latency_t latency;
-      int samples = 0;
-      if (mem_eval_run_locomo(dataset_path, max_cases, &scores, &latency, &samples, NULL) != 0)
-         fatal("LoCoMo benchmark failed for %s", dataset_path);
-      if (ctx->json_output)
-      {
-         mem_emit_eval_json(ctx, "locomo", dataset_path, &scores, &latency,
-                            benchmark_weight_profile);
-         BENCHMARK_RETURN;
-      }
-      char title[1024];
-      if (max_cases > 0)
-         snprintf(title, sizeof(title),
-                  "Memory Benchmark — LoCoMo: %s (%d conversations, capped at %d)", dataset_path,
-                  samples, max_cases);
-      else
-         snprintf(title, sizeof(title), "Memory Benchmark — LoCoMo: %s (%d conversations)",
-                  dataset_path, samples);
-      mem_print_eval_report(title, &scores, &latency);
-      mem_benchmark_print_weight_profile(benchmark_weight_profile);
-      BENCHMARK_RETURN;
-   }
-
-   if (strcmp(suite, "longmemeval") == 0)
-   {
-      const char *dataset_path = opt_get(&opts, "dataset");
-      int max_cases = opt_get_int(&opts, "max-cases", 0);
-      if (!dataset_path)
-         dataset_path = "data/longmemeval/longmemeval_s_cleaned.json";
-      mem_eval_scores_t scores;
-      mem_eval_latency_t latency;
-      int cases = 0;
-      if (mem_eval_run_longmemeval(dataset_path, max_cases, &scores, &latency, &cases, NULL) != 0)
-         fatal("LongMemEval benchmark failed for %s", dataset_path);
-      if (ctx->json_output)
-      {
-         mem_emit_eval_json(ctx, "longmemeval", dataset_path, &scores, &latency,
-                            benchmark_weight_profile);
-         BENCHMARK_RETURN;
-      }
-      char title[1024];
-      if (max_cases > 0)
-         snprintf(title, sizeof(title), "Memory Benchmark — LongMemEval: %s (%d cases)",
-                  dataset_path, cases);
-      else
-         snprintf(title, sizeof(title), "Memory Benchmark — LongMemEval: %s", dataset_path);
-      mem_print_eval_report(title, &scores, &latency);
-      mem_benchmark_print_weight_profile(benchmark_weight_profile);
       BENCHMARK_RETURN;
    }
 

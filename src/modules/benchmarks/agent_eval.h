@@ -194,12 +194,6 @@ int mem_eval_fusion_arm_resolve(const char *matrix_path, const char *arm, char *
  * mem_eval_open_temp_db. Idempotent. */
 void mem_eval_close_temp_db(void);
 
-/* Run retrieval evaluation over LoCoMo. Each QA item is evaluated only against
- * turns from its own conversation. samples_out receives the number of
- * conversations evaluated when non-NULL. */
-int mem_eval_run_locomo(const char *dataset_path, int max_samples, mem_eval_scores_t *out,
-                        mem_eval_latency_t *latency_out, int *samples_out,
-                        const char *progress_path);
 int mem_eval_run_locomo_session_support(const char *dataset_path, int max_samples,
                                         mem_eval_scores_t *out, mem_eval_latency_t *latency_out,
                                         int *samples_out);
@@ -211,12 +205,6 @@ int mem_eval_report_locomo_qa_failures(const char *dataset_path, int max_samples
 int mem_eval_report_locomo_misses(const char *dataset_path, int max_samples, int limit,
                                   int max_misses, FILE *out, const char *progress_path);
 
-/* Run retrieval evaluation over LongMemEval. Each question is evaluated only
- * against sessions from its own haystack history. cases_out receives the
- * number of benchmark instances evaluated when non-NULL. */
-int mem_eval_run_longmemeval(const char *dataset_path, int max_cases, mem_eval_scores_t *out,
-                             mem_eval_latency_t *latency_out, int *cases_out,
-                             const char *progress_path);
 int mem_eval_run_longmemeval_qa(const char *dataset_path, int max_cases, int top_k,
                                 int token_budget, mem_eval_qa_scores_t *out,
                                 mem_eval_latency_t *latency_out, int *cases_out);

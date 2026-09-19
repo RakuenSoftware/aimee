@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
@@ -93,26 +94,11 @@ func runCorpus(ctx context.Context, schema string, dimension int, path, command,
 	if command == "" {
 		return errors.New("corpus evaluation requires an embedding command")
 	}
-	var executor egress.Executor
-	if memory.EmbedIsHTTP(command) {
-		if socket == "" {
-			return errors.New("HTTP embedding requires a module bus socket for governed egress")
-		}
-		client, err := bus.ConnectClient(ctx, socket, 1, egress.MemoryClientRef)
-		if err != nil {
-			return err
-		}
-		caller, err := bus.NewConcurrentModuleCaller(ctx, client)
-		if err != nil {
-			client.Detach()
-			return err
-		}
-		defer func() { caller.CloseAndWait(); client.Detach() }()
-		executor, err = egress.NewBusAuthorizer(caller)
-		if err != nil {
-			return err
-		}
+	executor, closeExecutor, err := evaluationExecutor(ctx, command, socket)
+	if err != nil {
+		return err
 	}
+	defer closeExecutor()
 	var baseline evaluationBaseline
 	if baselinePath != "" && !update {
 		if err := readEvaluationJSON(baselinePath, &baseline); err != nil {
@@ -121,7 +107,7 @@ func runCorpus(ctx context.Context, schema string, dimension int, path, command,
 	}
 	var result memory.EvaluationResult
 	// Close the isolated database before publishing scores or replacing a baseline.
-	err := evaluationSession(ctx, schema, dimension, func(db *postgres.EvaluationStore) error {
+	err = evaluationSession(ctx, schema, dimension, func(db *postgres.EvaluationStore) error {
 		var err error
 		result, err = memory.EvaluateCorpus(ctx, db, executor, corpus, command)
 		return err
@@ -145,4 +131,32 @@ func runCorpus(ctx context.Context, schema string, dimension int, path, command,
 	}
 	_, err = output.Write(rendered)
 	return err
+}
+
+func evaluationExecutor(ctx context.Context, command, socket string) (egress.Executor, func(), error) {
+	if strings.TrimSpace(command) == "" {
+		return nil, nil, errors.New("evaluation requires an embedding command")
+	}
+	if !memory.EmbedIsHTTP(command) {
+		return nil, func() {}, nil
+	}
+	if socket == "" {
+		return nil, nil, errors.New("HTTP embedding requires a module bus socket for governed egress")
+	}
+	client, err := bus.ConnectClient(ctx, socket, 1, egress.MemoryClientRef)
+	if err != nil {
+		return nil, nil, err
+	}
+	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	if err != nil {
+		client.Detach()
+		return nil, nil, err
+	}
+	cleanup := func() { caller.CloseAndWait(); client.Detach() }
+	executor, err := egress.NewBusAuthorizer(caller)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return executor, cleanup, nil
 }

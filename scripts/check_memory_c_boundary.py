@@ -91,6 +91,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\bmem_eval_run_(?:locomo|longmemeval)\b(?=\s*\()|"
     r"\b(?:db2_memory_scope_context_\w+|memory_bus_(?:read_context|set_context_reader|add_context))\b(?=\s*\()|"
     r"\b(?:db2_kb_service_memory_(?:search_assertions|assemble_typed_context)_json|kb_handle_memory_(?:search_assertions|assemble_typed_context)|kb_memory_scope_(?:begin|end))\b(?=\s*\()|"
     r"\bmem_eval_load_corpus\b(?=\s*\()|"
@@ -245,6 +246,8 @@ def validate(root: Path) -> None:
         # Ignore historical comments; declarations, calls and macro aliases
         # must not reintroduce a retired memory client in another native owner.
         source = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(encoding="utf-8"), flags=re.S)
+        if path.is_relative_to(root / "src/modules/benchmarks") and re.search(r"\bdb2_eval_open_temp_store\s*\(", source):
+            raise BoundaryError(f"rule=native-evaluation-store-retarget file={path.relative_to(root)}")
         match = RETIRED_NATIVE_SYMBOLS.search(source)
         if match:
             raise BoundaryError(

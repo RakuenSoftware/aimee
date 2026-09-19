@@ -145,7 +145,8 @@
     "server-go/modules/memory/lane_metrics.go",
     "server-go/modules/memory/pagerank.go",
     "server-go/modules/memory/unit_recall.go",
-    "server-go/modules/memory/pagerank_recall.go"
+    "server-go/modules/memory/pagerank_recall.go",
+    "server-go/modules/memory/cmd/aimee-memory-eval/dataset.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -257,7 +258,8 @@
     "server-go/modules/memory/public_facts_test.go",
     "server-go/modules/memory/pagerank_test.go",
     "server-go/modules/memory/unit_recall_test.go",
-    "server-go/modules/memory/pagerank_recall_test.go"
+    "server-go/modules/memory/pagerank_recall_test.go",
+    "server-go/modules/memory/cmd/aimee-memory-eval/dataset_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

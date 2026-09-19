@@ -143,6 +143,9 @@ func defaultSchema() string {
 func main() {
 	schema := flag.String("schema", defaultSchema(), "path to the packaged KB schema.sql")
 	dimension := flag.Int("embedding-dim", 0, "configured vector width (1..2000)")
+	suite := flag.String("suite", "", "isolated retrieval dataset: locomo or longmemeval")
+	dataset := flag.String("dataset", "", "dataset JSON file")
+	maxCases := flag.Int("max-cases", 0, "maximum conversations (LoCoMo) or questions (LongMemEval); zero means all")
 	corpus := flag.String("corpus", "", "labelled corpus file; otherwise serve JSON lines")
 	command := flag.String("embedding-command", "", "corpus embedder URL or configured command")
 	socket := flag.String("module-bus-socket", os.Getenv("AIMEE_MODULE_BUS_SOCKET"), "governed egress bus socket for HTTP embedding")
@@ -161,7 +164,15 @@ func main() {
 	stop := context.AfterFunc(ctx, func() { _ = os.Stdin.Close() })
 	defer stop()
 	var err error
-	if *corpus == "" {
+	if *suite != "" || *dataset != "" {
+		if *corpus != "" || *baseline != "" || *update {
+			err = errors.New("dataset evaluation cannot use corpus/baseline options")
+		} else {
+			err = runDataset(ctx, *schema, *dimension, *dataset, *suite, *maxCases, *command, *socket, *format, *fields, *profile, os.Stdout)
+		}
+	} else if *maxCases != 0 {
+		err = errors.New("max-cases requires a dataset suite")
+	} else if *corpus == "" {
 		if *command != "" || *baseline != "" || *update || *format != "json" {
 			err = errors.New("corpus options require -corpus")
 		} else {
