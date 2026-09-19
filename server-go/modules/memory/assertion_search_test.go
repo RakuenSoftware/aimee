@@ -24,7 +24,17 @@ func TestAssertionTimestampsAndBoundary(t *testing.T) {
 		}
 	}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, nil))
+	for _, verb := range []string{"search_assertions", "assemble_typed_context"} {
+		frame, _ := bus.EncodeCommand(verb, []byte(`{"query":"x","include_all":true}`))
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal("plugin gained host evidence authority", verb, status)
+		}
+	}
 	for _, raw := range []string{`{"operation":"assertion-search","query":""}`, `{"operation":"assertion-search","query":"x","max_hops":3}`, `{"operation":"assertion-search","query":"x","include_historical":1}`, `{"operation":"assertion-search","query":"x","valid_at":null}`, `{"operation":"assertion-search","query":"x","include_historical":null}`} {
+		public, _ := bus.EncodeCommand("search_assertions", []byte(raw))
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, public); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal("public validation", raw, status)
+		}
 		frame, _ := bus.EncodeCommand("runtime", []byte(raw))
 		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
 			t.Fatal(raw, status)
@@ -90,7 +100,18 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	exec(`SET LOCAL ROLE aimee_store_runtime`)
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	args := map[string]any{"operation": "assertion-search", "query": "AssertionAtlas", "valid_at": "2026-02-01T00:00:00Z", "believed_at": "2026-02-02T00:00:00Z"}
-	call := func() map[string]any { raw, _ := json.Marshal(args); return runHostRuntime(t, handler, string(raw)) }
+	call := func() map[string]any {
+		raw, _ := json.Marshal(args)
+		result := runPublicCommand(t, clientForHandler(t, func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+			// The KB RPC host invokes these fixed-owner data operations.
+			invocation.PrincipalRef = 0
+			return handler(invocation, frame)
+		}), "search_assertions", string(raw))
+		if result["active_context_missing"] != (args["project"] == nil && args["workspace"] == nil) {
+			t.Fatal("missing-context metadata", result)
+		}
+		return result
+	}
 	hits := func(result map[string]any) []any { t.Helper(); return result["assertions"].([]any) }
 	got := call()
 	if got["mode"] != "lexical_degraded" || len(hits(got)) != 1 {
@@ -132,7 +153,7 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	delete(args, "max_hops")
 	// Canonical numeric tokens and the exact decimal ID survive serialization.
 	raw, _ := json.Marshal(args)
-	frame, _ := bus.EncodeCommand("runtime", raw)
+	frame, _ := bus.EncodeCommand("search_assertions", raw)
 	encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
 	if status != bus.ModuleStatusOK || !strings.Contains(string(encoded), `"assertion_id":9007199254742002`) {
 		t.Fatal(string(encoded), status)
@@ -227,10 +248,13 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	// Required SQL failures cannot masquerade as successful empty assertions.
 	exec(`SAVEPOINT assertion_denied; RESET ROLE; REVOKE SELECT ON fact_evidence FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	raw, _ = json.Marshal(args)
-	frame, _ = bus.EncodeCommand("runtime", raw)
+	frame, _ = bus.EncodeCommand("search_assertions", raw)
 	failed, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
 	if status != bus.ModuleStatusOK || !strings.Contains(string(failed), `"status":"degraded"`) {
 		t.Fatal(status, string(failed))
+	}
+	if got := call(); got["status"] != "degraded" {
+		t.Fatal("public client lost degraded receipt", got)
 	}
 	exec(`ROLLBACK TO SAVEPOINT assertion_denied; RELEASE SAVEPOINT assertion_denied`)
 }

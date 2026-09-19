@@ -13,7 +13,6 @@
 #include "support/test_time.h"
 #include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
 #include "modules/db2/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
-#include "modules/db2/c/memory_scope_query.h"
 #include "modules/memory/memory_ontology.h"
 #include "../modules/db2/c/bandit.h"
 #include "../modules/db2/c/db2_internal.h"
@@ -25,72 +24,8 @@ static void reset_db(void)
    db2_test_shim_open();
 }
 
-/* memory_insert used to copy the caller's content through a fixed
- * `char safe_content[2048]`, so anything past 2047 bytes was dropped on the
- * floor: the call still returned 0, nothing was logged, and the row in DB2 held
- * a silently shortened value. The exact-key merge path had the same defect in
- * `preserved_content[2048]`, which could write a shortened copy back over a
- * long row that was merely being re-stored.
- *
- * The assertion reads `length(content)` straight out of DB2 rather than through
- * memory_t, because memory_t.content is itself a fixed char[2048]: a read back
- * through the struct caps at 2047 no matter what the row holds, and would hide
- * exactly the defect under test. (That read-side cap is a separate, wider
- * issue -- it is why `aimee memory get` shows less than `aimee memory search`
- * for the same long memory.)
- *
- * Both the store and the merge path are checked, at the old boundary and well
- * past it, so a future buffer of any fixed size fails rather than moving the
- * cliff. */
-static int stored_content_len(const char *key)
-{
-   char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT length(content) FROM memories WHERE key = ?1", err, sizeof(err));
-   assert(st);
-   aimee_pg_bind_text(st, "?1", key);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-   int n = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return n;
-}
-
-static void test_long_content_survives_store_and_merge(void)
-{
-   reset_db();
-   db2_memory_scope_context_set("", "long-content-project", 0);
-
-   const size_t sizes[] = {2047, 2048, 4096, 40000};
-   for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++)
-   {
-      const size_t n = sizes[s];
-      char *big = malloc(n + 1);
-      assert(big);
-      /* Non-uniform so a truncated value cannot compare equal to the original
-       * by accident, and free of anything the content scanner redacts. */
-      for (size_t i = 0; i < n; i++)
-         big[i] = (char)('a' + (i % 26));
-      big[n] = '\0';
-
-      char key[64];
-      snprintf(key, sizeof(key), "long:content:%zu", n);
-
-      memory_t stored;
-      assert(memory_insert(TIER_L2, KIND_FACT, key, big, 0.9, "long-session", &stored) == 0);
-      assert((size_t)stored_content_len(key) == n);
-
-      /* Re-storing the same key takes the exact-key merge path, which reads the
-       * row back and can write it out again. The row must not shrink. */
-      memory_t merged;
-      assert(memory_insert(TIER_L2, KIND_FACT, key, big, 0.9, "long-session", &merged) == 0);
-      assert((size_t)stored_content_len(key) == n);
-
-      free(big);
-   }
-
-   printf("  long_content_survives_store_and_merge: ok\n");
-}
-
+/* Long-content insert/merge coverage now runs against the Go owner in
+ * runtime_role_test.go, with explicit project scope and full content reads. */
 static int64_t insert_raw_fact(const char *key, const char *content)
 {
    char err[128] = "";
@@ -1545,7 +1480,6 @@ int main(void)
       printf("  timestamp_writers_agree: ok\n");
    }
 
-   test_long_content_survives_store_and_merge();
    db2_test_shim_close();
    db1_shutdown();
 

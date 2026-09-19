@@ -166,6 +166,42 @@ has_schema_privilege(current_user,'public','CREATE') OR
 		}
 		return response
 	}
+	// Replaces the former C fixed-buffer insert/merge regression. Check full
+	// storage and read-back under explicit request scope, across alternating
+	// project requests, so neither TLS state nor a capped ABI can hide loss.
+	for _, size := range []int{2047, 2048, 4096, 40000} {
+		content := strings.Repeat("abcdefghijklmnopqrstuvwxyz", (size+25)/26)[:size] + "界"
+		key := fmt.Sprintf("long-content-%d", size)
+		request := DataRequest{Operation: "insert-epistemic", Project: "long-content-project", Tier: "L2", Kind: "fact", Key: key, Content: content, SessionID: "long-session"}
+		first := call(request)
+		if len(first.Records) != 1 || first.Records[0].Content != content {
+			t.Fatalf("long insert lost content at %d", size)
+		}
+		id := first.Records[0].ID
+		// Same key in another project must not merge with this record.
+		other := request
+		other.Project, other.Content = "other-long-project", "private other content"
+		separate := call(other)
+		if len(separate.Records) != 1 || separate.Records[0].ID == id {
+			t.Fatal("same-key merge crossed projects", separate)
+		}
+		again := call(request)
+		if len(again.Records) != 1 || again.Records[0].ID != id || again.Records[0].Content != content {
+			t.Fatalf("long merge lost content or identity at %d", size)
+		}
+		got := call(DataRequest{Operation: "get", ID: id, Project: request.Project})
+		if len(got.Records) != 1 || got.Records[0].Content != content {
+			t.Fatalf("long read lost content at %d", size)
+		}
+		var stored string
+		if err := tx.QueryRow(ctx, `SELECT content FROM memories WHERE id=$1`, id).Scan(&stored); err != nil || stored != content {
+			t.Fatalf("long stored content at %d: %v", size, err)
+		}
+		missing := call(DataRequest{Operation: "search", Query: key})
+		if len(missing.Records) != 0 {
+			t.Fatal("scope leaked between requests", missing)
+		}
+	}
 	for _, project := range []string{"runtime-project-a", "runtime-project-b"} {
 		written := call(DataRequest{Operation: "insert-epistemic", Project: project,
 			Tier: "L0", Kind: "fact", Key: "runtime-role-probe", Content: project})

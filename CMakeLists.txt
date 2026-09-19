@@ -1050,7 +1050,6 @@ list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c)
 set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_main.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_scope_connection.c
     ${AIMEE_SRC_DIR}/kb/kb_document_inspector.c
     ${AIMEE_SRC_DIR}/kb/kb_obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/kb/kb_background.c

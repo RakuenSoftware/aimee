@@ -104,11 +104,15 @@ func exerciseTypedContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	call := func() (typedContextResult, string) {
 		t.Helper()
 		raw, _ := json.Marshal(args)
-		envelope := runHostRuntime(t, handler, string(raw))
-		body, ok := envelope["json"].(string)
-		if !ok {
-			t.Fatal(envelope)
+		payload, err := clientForHandler(t, func(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
+			// The KB RPC host invokes these fixed-owner data operations.
+			invocation.PrincipalRef = 0
+			return handler(invocation, frame)
+		}).Command(ctx, 73, "assemble_typed_context", raw)
+		if err != nil {
+			t.Fatal(err)
 		}
+		body := string(payload)
 		var result typedContextResult
 		if err := json.Unmarshal([]byte(body), &result); err != nil {
 			t.Fatal(err)

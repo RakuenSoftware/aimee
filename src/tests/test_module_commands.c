@@ -7,6 +7,7 @@
 #include "log.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -14,6 +15,8 @@ static int fixed_present = 1, malformed, empty, reset_during_call;
 static uint32_t last_kind, last_stage;
 static uint64_t last_deadline;
 static int expect_context;
+static const char *invoke_json = "{\"status\":\"ok\"}";
+static int embedded_nul;
 static const char *expect_verb = "stats";
 static void put32(unsigned char *out, uint32_t v)
 {
@@ -103,12 +106,15 @@ obs_bus_module_call(uint32_t kind, uint32_t stage, uint64_t trace, uint64_t dead
    last_stage = stage;
    if (reset_during_call)
       aimee_module_commands_reset();
-   const char json[] = "{\"status\":\"ok\"}";
+   const char *json = invoke_json;
+   size_t json_len = strlen(json) + (embedded_nul ? 5 : 0);
    put32(out, 0x53504d43u);
    put32(out + 4, 1);
-   put32(out + 8, sizeof json - 1);
-   memcpy(out + 12, json, sizeof json - 1);
-   *result_len = 12 + sizeof json - 1;
+   put32(out + 8, json_len);
+   memcpy(out + 12, json, strlen(json));
+   if (embedded_nul)
+      memcpy(out + 12 + strlen(json), "\0junk", 5);
+   *result_len = 12 + json_len;
    return AIMEE_MODULE_CALL_OK;
 }
 uint64_t aimee_module_call_deadline_ns(int timeout_ms)
@@ -146,6 +152,30 @@ int main(void)
    expect_context = 1;
    assert(aimee_module_commands_dispatch_context("memory.stats", args, context, &reply) == 1);
    cJSON_Delete(reply);
+   invoke_json = "{\"status\":\"ok\",\"id\":9007199254740993,\"value\":\"full 界 context\"}";
+   assert(aimee_module_commands_dispatch_raw_context("memory.stats", args, context, &reply) == 1);
+   char *serialized = cJSON_PrintUnformatted(reply);
+   assert(serialized && !strcmp(serialized, invoke_json));
+   free(serialized);
+   cJSON *copy = cJSON_Duplicate(reply, 1);
+   serialized = cJSON_PrintUnformatted(copy);
+   assert(serialized && !strcmp(serialized, invoke_json));
+   free(serialized);
+   cJSON_Delete(copy);
+   cJSON_Delete(reply);
+   const char *invalid[] = {"{}junk", "{} {}", "{broken", ""};
+   for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+   {
+      invoke_json = invalid[i];
+      assert(aimee_module_commands_dispatch_raw_context("memory.stats", args, context, &reply) ==
+                 -1 &&
+             !reply);
+   }
+   invoke_json = "{\"status\":\"ok\"}";
+   embedded_nul = 1;
+   assert(aimee_module_commands_dispatch_raw_context("memory.stats", args, context, &reply) == -1 &&
+          !reply);
+   embedded_nul = 0;
    expect_context = 0;
    assert(aimee_module_commands_dispatch_context("plugin.stats", args, context, &reply) == 1);
    cJSON_Delete(reply);

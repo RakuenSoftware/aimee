@@ -67,6 +67,10 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
  * Only fixed modules receive the v2 frame; plugin invocation remains v1. */
 int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
                                            const cJSON *context, cJSON **result);
+/* For serialization-only callers: validate complete JSON and retain exact
+ * numeric tokens. The owned raw node may be printed/copied, not inspected. */
+int aimee_module_commands_dispatch_raw_context(const char *method, const cJSON *args,
+                                               const cJSON *context, cJSON **result);
 cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id, const char *verb,
                                          const cJSON *args, const cJSON *context);
 

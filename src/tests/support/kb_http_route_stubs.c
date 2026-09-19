@@ -26,17 +26,6 @@ void test_kb_enrollment_authority_set(int status)
    g_enrollment_authority = status;
 }
 
-void db2_memory_scope_context_set(const char *workspace, const char *project, int allow_all)
-{
-   (void)workspace;
-   (void)project;
-   (void)allow_all;
-}
-
-void db2_memory_scope_context_clear(void)
-{
-}
-
 int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t *out, int max)
 {
    (void)state;

@@ -1,4 +1,3 @@
-#include "memory_scope_query.h"
 #include "module_commands.h"
 #include "json_fluent.h"
 #include "aimee.h"
@@ -698,7 +697,6 @@ static const struct
     {"dashboard.directives", kb_handle_dashboard_directives},
     {"session_briefing.commitments", kb_handle_session_briefing_commitments},
     {"session_briefing.directives", kb_handle_session_briefing_directives},
-    {"memory.assemble_typed_context", kb_handle_memory_assemble_typed_context},
     {"rules.export_jsonl", kb_handle_rules_export_jsonl},
     {"rules.insert", kb_handle_rules_insert},
     {"tool_registry.snapshot", kb_handle_tool_registry_snapshot},
@@ -721,7 +719,6 @@ static const struct
     {"evidence.provenance_retrieval_event", kb_handle_evidence_provenance},
     {"evidence.fidelity_retrieval_event", kb_handle_evidence_fidelity},
     {"css.signals", kb_handle_css_signals},
-    {"memory.search_assertions", kb_handle_memory_search_assertions},
     {"artifacts.list_proposed", kb_handle_artifacts_list_proposed},
     {"artifacts.set_state", kb_handle_artifacts_set_state},
     {"roadmap.create_from_decomposition", kb_handle_roadmap_create_from_decomposition},
@@ -807,8 +804,8 @@ static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
    cJSON *command_context = kb_command_context();
    if (!command_context)
       return kb_send_error(fd, "command context unavailable");
-   int dispatched = aimee_module_commands_dispatch_context(method->valuestring, req,
-                                                           command_context, &module_response);
+   int dispatched = aimee_module_commands_dispatch_raw_context(method->valuestring, req,
+                                                               command_context, &module_response);
    cJSON_Delete(command_context);
    if (dispatched)
       return kb_reply_or_error(fd, module_response, "command module unavailable");

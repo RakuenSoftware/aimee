@@ -58,7 +58,6 @@ DB2_DEFINITION = re.compile(
 DB2_ADAPTER_FILES = {
     "memory_data_bus.c",
     "memory_domain_bus.c",
-    "memory_scope_connection.c",
 }
 adapter_definitions = set()
 for adapter_name in DB2_ADAPTER_FILES:

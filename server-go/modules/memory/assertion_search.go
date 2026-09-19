@@ -77,6 +77,29 @@ func assertionTimestamp(value string) bool {
 	return err == nil && stamp.Year() > 0 && stamp.Format("2006-01-02 15:04:05") == normalized
 }
 
+// Public evidence routes share the same scoped data operations as host runtime
+// calls. Preserve raw JSON fields so large assertion IDs never pass through floats.
+func handleEvidenceCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+	// Public RPC discovery does not grant plugins the host's data authority.
+	if invocation.PrincipalRef != 0 {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if verb == "assemble_typed_context" {
+		return handleTypedContextResult(options, invocation, args, false)
+	}
+	raw, status := handleAssertionSearch(options, invocation, args)
+	if status != bus.ModuleStatusOK {
+		return nil, status
+	}
+	body, err := bus.DecodeCommandResult(raw)
+	var result map[string]json.RawMessage
+	if err != nil || json.Unmarshal(body, &result) != nil || result == nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	result["active_context_missing"], _ = json.Marshal(args.stringOr("project", "") == "" && args.stringOr("workspace", "") == "")
+	return commandResult(result)
+}
+
 func handleAssertionSearch(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
 	if options.placement != PlacementKB {
 		return nil, bus.ModuleStatusCapabilityAbsent

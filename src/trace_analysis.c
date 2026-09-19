@@ -4,7 +4,6 @@
 #include "aimee.h"
 #include "db1_client/db1.h"
 #include "headers/module_commands.h"
-#include "modules/memory/memory_bus_context.h"
 #include "trace_analysis.h"
 #include "cJSON.h"
 #include "json_fluent.h"
@@ -44,8 +43,7 @@ int trace_mine(void)
    }
    if (count > MAX_TRACES || !request ||
        !cJSON_AddStringToObject(request, "operation", "trace-apply") ||
-       !cJSON_AddStringToObject(request, "session_id", session_id()) ||
-       memory_bus_add_context(request) != 0)
+       !cJSON_AddStringToObject(request, "session_id", session_id()))
       goto done;
    cJSON *batch = cJSON_AddObjectToObject(request, "batch");
    if (!batch || !cJSON_AddStringToObject(batch, "after_id", decimal))

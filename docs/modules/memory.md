@@ -362,8 +362,8 @@ An expired call still fails rather than retrying indefinitely or changing stores
 The remaining C transport and host integration is migration debt:
 
 - `memory_data_bus.c` and `memory_domain_bus.c` encode/decode bounded event-bus
-  messages. `memory_scope_connection.c` only binds caller scope to an already
-  prepared connection request.
+  messages. Scope travels in explicit Go request fields; the native thread-local
+  context bridge and callback registration have been deleted.
 - `server_hooks.c` connects retired local memory-file writes to the Go policy over
   memory stage 7; classification and shell-write detection live in `redirect.go`.
 - `kb_memory_facts.c` connects the KB drain to its existing curator provider and
@@ -372,8 +372,8 @@ The remaining C transport and host integration is migration debt:
   grounding, relation canonicalization, kind selection, and provenance are in
   `memory_facts.go`.
 
-`scripts/check_memory_c_boundary.py` reduces that boundary: only the three named
-bus/integration translation units may exist under the memory module, none may
+`scripts/check_memory_c_boundary.py` reduces that boundary: only the remaining
+`memory_data_bus.c` translation unit may exist under the memory module, none may
 include a DB client, and DB2 may not regain a `memory_*.c` implementation.
 The same check prevents the former POSIX/Windows regex-policy files and the
 retired in-process C query rewriter from returning; those gates now use
@@ -1042,3 +1042,11 @@ remain G0 work. The C corpus loader and its dependent corpus fixtures are
 retired; production-corpus/agent-manifest C fixtures remain until those runners
 migrate. Go tests cover isolated semantic recall, command and governed HTTP
 embedders, full fixture identities, input failures and baseline protection.
+
+The public `memory.search_assertions` and `memory.assemble_typed_context` routes
+now invoke the shared Go owner directly. Their native handlers and receipt
+decoders are retired. The generic KB command transport validates complete JSON
+and forwards the original tokens, preserving 64-bit IDs and full Unicode text.
+Scope is request-local; assertion responses retain `active_context_missing`, and
+unavailable required evidence remains explicitly degraded. Public discovery does
+not grant plugins the host authority required by these evidence operations.

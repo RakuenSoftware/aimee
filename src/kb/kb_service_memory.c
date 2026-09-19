@@ -13,7 +13,6 @@
 #include "modules/db2/c/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
 #include "modules/db2/c/evidence_lifecycle.h" /* P5 outcome history on provenance export */
 #include "modules/db2/c/memory_query.h"
-#include "modules/db2/c/memory_scope_query.h"
 #include "modules/db2/c/fidelity.h" /* db2_fidelity_report_by_turn (auditable-correctness P3) */
 #include "modules/db2/c/fact_mutation.h"
 #include "modules/db2/c/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
@@ -30,31 +29,6 @@ int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
 
-static int kb_memory_scope_begin(cJSON *req, int force, int *missing_out)
-{
-   cJSON *enabled_j = cJSON_GetObjectItemCaseSensitive(req, "scope_context");
-   if (!force && !(cJSON_IsBool(enabled_j) && cJSON_IsTrue(enabled_j)))
-      return 0;
-   cJSON *workspace_j = cJSON_GetObjectItemCaseSensitive(req, "workspace");
-   cJSON *project_j = cJSON_GetObjectItemCaseSensitive(req, "project");
-   cJSON *all_j = cJSON_GetObjectItemCaseSensitive(req, "include_all");
-   const char *workspace = cJSON_IsString(workspace_j) ? workspace_j->valuestring : "";
-   const char *project = cJSON_IsString(project_j) ? project_j->valuestring : "";
-   int include_all = cJSON_IsBool(all_j) && cJSON_IsTrue(all_j);
-   db2_memory_scope_context_set(workspace, project, include_all);
-   if (missing_out)
-      *missing_out = (!workspace[0] && !project[0]) ? 1 : 0;
-   return 1;
-}
-
-static void kb_memory_scope_end(cJSON *resp, int active, int missing)
-{
-   if (active && resp)
-      cJSON_AddBoolToObject(resp, "active_context_missing", missing ? 1 : 0);
-   if (active)
-      db2_memory_scope_context_clear();
-}
-
 static int kb_handle_session_briefing_section(int fd, cJSON *req, cJSON *(*fn)(int limit),
                                               const char *err_msg)
 {
@@ -66,19 +40,6 @@ static int kb_handle_session_briefing_section(int fd, cJSON *req, cJSON *(*fn)(i
    int srv_rc = kb_send_response(fd, resp);
    cJSON_Delete(resp);
    return srv_rc;
-}
-
-int kb_handle_memory_assemble_typed_context(int fd, cJSON *req)
-{
-   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
-   if (!cJSON_IsString(query_j) || !query_j->valuestring[0])
-      return kb_send_error(fd, "memory.assemble_typed_context requires a non-empty query");
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 1, &missing);
-   cJSON *resp = db2_kb_service_memory_assemble_typed_context_json(req);
-   /* The owner includes context metadata in its complete serialized response. */
-   kb_memory_scope_end(NULL, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to assemble typed context");
 }
 
 int kb_handle_session_briefing_commitments(int fd, cJSON *req)
@@ -493,38 +454,6 @@ int kb_handle_evidence_fidelity(int fd, cJSON *req)
                               rc < 0 ? "lookup error" : "no fidelity report for this turn");
    }
    return kb_reply_or_error(fd, resp, "failed to read fidelity report");
-}
-
-int kb_handle_memory_search_assertions(int fd, cJSON *req)
-{
-   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
-   cJSON *valid_j = cJSON_GetObjectItemCaseSensitive(req, "valid_at");
-   cJSON *believed_j = cJSON_GetObjectItemCaseSensitive(req, "believed_at");
-   cJSON *historical_j = cJSON_GetObjectItemCaseSensitive(req, "include_historical");
-   cJSON *hops_j = cJSON_GetObjectItemCaseSensitive(req, "max_hops");
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   if (!cJSON_IsString(query_j) || !query_j->valuestring[0])
-      return kb_send_error(fd, "memory.search_assertions requires a non-empty query");
-   if (valid_j && !cJSON_IsString(valid_j))
-      return kb_send_error(fd, "memory.search_assertions valid_at must be a timestamp string");
-   if (believed_j && !cJSON_IsString(believed_j))
-      return kb_send_error(fd, "memory.search_assertions believed_at must be a timestamp string");
-   if (historical_j && !cJSON_IsBool(historical_j))
-      return kb_send_error(fd, "memory.search_assertions include_historical must be boolean");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
-   int include_historical = cJSON_IsBool(historical_j) && cJSON_IsTrue(historical_j);
-   int max_hops = cJSON_IsNumber(hops_j) ? (int)hops_j->valuedouble : 0;
-   if (max_hops < 0 || max_hops > 2)
-      return kb_send_error(fd, "memory.search_assertions max_hops must be between 0 and 2");
-
-   int missing = 0;
-   int scope_active = kb_memory_scope_begin(req, 1, &missing);
-   cJSON *resp = db2_kb_service_memory_search_assertions_json(
-       query_j->valuestring, cJSON_IsString(valid_j) ? valid_j->valuestring : "",
-       cJSON_IsString(believed_j) ? believed_j->valuestring : "", include_historical, max_hops,
-       limit);
-   kb_memory_scope_end(resp, scope_active, missing);
-   return kb_reply_or_error(fd, resp, "failed to search semantic assertions");
 }
 
 /* Only transport remains: Go owns validation, authority, mutation and replies. */

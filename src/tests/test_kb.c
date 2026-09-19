@@ -17,7 +17,6 @@
 #include "../modules/db2/c/artifacts.h"
 #include "../modules/db2/c/kb_payload.h"
 #include "../modules/db2/c/code_index.h"
-#include "../modules/db2/c/memory_scope_query.h"
 #include "../modules/db2/c/lifecycle.h"
 #include "../modules/db2/c/pgvec_kb_service.h"
 #include "../modules/db2/c/sketch.h"

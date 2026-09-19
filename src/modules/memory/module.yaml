@@ -14,8 +14,7 @@
   },
   "ownership_complete": true,
   "sources": [
-    "src/modules/memory/memory_data_bus.c",
-    "src/modules/memory/memory_scope_connection.c"
+    "src/modules/memory/memory_data_bus.c"
   ],
   "go_sources": [
     "server-go/modules/memory/process.go",
@@ -253,7 +252,6 @@
     "src/modules/memory/include/aimee/memory/module_api.h"
   ],
   "private_headers": [
-    "src/modules/memory/memory_bus_context.h",
     "src/modules/memory/memory_core_internal.h",
     "src/modules/memory/memory_ontology.h"
   ],

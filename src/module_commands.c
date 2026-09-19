@@ -182,7 +182,8 @@ static void wr_u16(unsigned char *p, uint16_t v)
  * Fixed modules use their declared stage; plugins retain their stage-1 route. Returns NULL on any
  * failure; the surface that called decides what that means, exactly as module_json_call.c does. */
 static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const char *verb,
-                                   const cJSON *args, const cJSON *context, int timeout_ms)
+                                   const cJSON *args, const cJSON *context, int timeout_ms,
+                                   int raw_result)
 {
    if (!event_kind || !stage_id || !verb || !verb[0] || strlen(verb) > 127)
       return NULL;
@@ -268,15 +269,37 @@ static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const
       free(response);
       return NULL;
    }
-   cJSON *parsed = cJSON_ParseWithLength((const char *)response + INVOKE_RESPONSE_HEADER, body_len);
+   /* Validate the complete body before forwarding its exact JSON tokens. Native
+    * numeric nodes use double and cannot round-trip the owner's int64 IDs. */
+   char *body = malloc((size_t)body_len + 1);
+   if (!body)
+   {
+      free(response);
+      return NULL;
+   }
+   memcpy(body, response + INVOKE_RESPONSE_HEADER, body_len);
+   body[body_len] = '\0';
    free(response);
+   const char *end = NULL;
+   cJSON *parsed = cJSON_ParseWithLengthOpts(body, (size_t)body_len + 1, &end, 1);
+   if (parsed && end != body + body_len)
+   {
+      cJSON_Delete(parsed);
+      parsed = NULL;
+   }
+   if (parsed && raw_result)
+   {
+      cJSON_Delete(parsed);
+      parsed = cJSON_CreateRaw(body);
+   }
+   free(body);
    return parsed;
 }
 
 cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id, const char *verb,
                                          const cJSON *args, const cJSON *context)
 {
-   return command_call_timeout(event_kind, stage_id, verb, args, context, INVOKE_TIMEOUT_MS);
+   return command_call_timeout(event_kind, stage_id, verb, args, context, INVOKE_TIMEOUT_MS, 0);
 }
 
 cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const char *verb,
@@ -799,8 +822,8 @@ int aimee_module_commands_refresh(int ttl_ms)
    return registered;
 }
 
-int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
-                                           const cJSON *context, cJSON **result)
+static int commands_dispatch_context(const char *method, const cJSON *args, const cJSON *context,
+                                     cJSON **result, int raw_result)
 {
    if (!method || !result)
       return 0;
@@ -824,8 +847,21 @@ int aimee_module_commands_dispatch_context(const char *method, const cJSON *args
       return 0;
    /* A refresh may replace the registry while this call waits on the bus; only
     * the copied route crosses that wait, never a borrowed registry pointer. */
-   *result = aimee_module_command_call_context(kind, stage, verb, args, fixed ? context : NULL);
+   *result = command_call_timeout(kind, stage, verb, args, fixed ? context : NULL,
+                                  INVOKE_TIMEOUT_MS, raw_result);
    return *result ? 1 : -1;
+}
+
+int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
+                                           const cJSON *context, cJSON **result)
+{
+   return commands_dispatch_context(method, args, context, result, 0);
+}
+
+int aimee_module_commands_dispatch_raw_context(const char *method, const cJSON *args,
+                                               const cJSON *context, cJSON **result)
+{
+   return commands_dispatch_context(method, args, context, result, 1);
 }
 
 int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
@@ -868,7 +904,7 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    pthread_mutex_unlock(&g_collect_lock);
    if (matches != 1 || !kind)
       return matches ? -1 : 0;
-   *result = command_call_timeout(kind, stage, verb, args, NULL, timeout_ms);
+   *result = command_call_timeout(kind, stage, verb, args, NULL, timeout_ms, 0);
    return *result ? 1 : -1;
 }
 

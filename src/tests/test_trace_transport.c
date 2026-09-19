@@ -3,7 +3,6 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "db1_client/execution_trace.h"
-#include "modules/memory/memory_bus_context.h"
 #include "json_fluent.h"
 #include "trace_analysis.h"
 #include <assert.h>
@@ -17,12 +16,7 @@ const char *session_id(void)
 {
    return "trace-session";
 }
-void memory_bus_read_context(db2_memory_scope_context_t *context)
-{
-   memset(context, 0, sizeof(*context));
-   context->active = 1;
-   snprintf(context->project, sizeof(context->project), "trace-project");
-}
+
 int db1_execution_trace_list_after_id(int64_t after, db1_execution_trace_mining_row_t *out, int max)
 {
    assert(after == last_id && max >= 2);
@@ -52,7 +46,7 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    }
    assert(!strcmp(jo_cstr(args, "operation"), "trace-apply"));
    assert(!strcmp(jo_cstr(args, "session_id"), "trace-session"));
-   assert(!strcmp(jo_cstr(args, "project"), "trace-project"));
+   assert(!cJSON_HasObjectItem(args, "project"));
    const cJSON *batch = cJSON_GetObjectItemCaseSensitive(args, "batch");
    assert(!strcmp(jo_cstr(batch, "after_id"), "9007199254741507"));
    const cJSON *rows = cJSON_GetObjectItemCaseSensitive(batch, "rows");

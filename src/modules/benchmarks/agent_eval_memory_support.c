@@ -15,7 +15,6 @@
 #include "config.h"
 #include "config_database.h"
 #include "memory.h"
-#include "../memory/memory_bus_context.h"
 #include <math.h>
 #include "lifecycle.h"
 #include "eval_support.h"
@@ -416,8 +415,6 @@ void mem_eval_append_miss_setup_progress_row(FILE *fp, const char *dataset, cons
 int mem_eval_dispatch_diagnostic(cJSON *args, cJSON **reply)
 {
    *reply = NULL;
-   if (memory_bus_add_context(args) != 0)
-      return -1;
    return aimee_module_commands_dispatch_internal("memory.runtime", args, reply);
 }
 
@@ -469,7 +466,7 @@ int mem_eval_build_retrieval_context(const char *query, int top_k, int token_bud
        !cJSON_AddStringToObject(args, "query", query) ||
        !cJSON_AddNumberToObject(args, "top_k", top_k) ||
        !cJSON_AddNumberToObject(args, "token_budget", token_budget) ||
-       !cJSON_AddNumberToObject(args, "capacity", context_len) || memory_bus_add_context(args) != 0)
+       !cJSON_AddNumberToObject(args, "capacity", context_len))
    {
       cJSON_Delete(args);
       return -1;

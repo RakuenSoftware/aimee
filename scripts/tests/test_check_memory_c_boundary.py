@@ -107,12 +107,22 @@ class MemoryCBoundaryTest(unittest.TestCase):
         with self.assertRaises(BoundaryError):
             validate(root)
 
-    def test_rejects_external_adapter_storage_include(self) -> None:
+    def test_rejects_adapter_storage_include(self) -> None:
         root = self.fixture()
-        target = root / next(iter(EXTERNAL_CONNECTION_C))
+        target = root / next(iter(ALLOWED_C | EXTERNAL_CONNECTION_C))
         target.write_text('#include "db_postgres.h"\n', encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)
+
+    def test_rejects_retired_scope_bridge_relocation(self) -> None:
+        for symbol in ("db2_memory_scope_context_set", "memory_bus_read_context",
+                       "memory_bus_set_context_reader", "memory_bus_add_context"):
+            with self.subTest(symbol=symbol):
+                root = self.fixture()
+                (root / "src/another_owner.c").write_text(
+                    f"void {symbol}(void);\n", encoding="utf-8")
+                with self.assertRaises(BoundaryError):
+                    validate(root)
 
     def test_rejects_direct_store_call_without_include(self) -> None:
         root = self.fixture()

@@ -13,7 +13,6 @@
 #include "../modules/db2/c/lifecycle.h"
 #include "../modules/db2/c/memory_query.h"
 #include "../modules/db2/c/memory_relations.h"
-#include "../modules/db2/c/memory_scope_query.h"
 #include "../modules/memory/memory_core_internal.h"
 
 static char tmpdir[64];
@@ -70,12 +69,10 @@ static void setup(void)
    platform_setenv("HOME", tmpdir);
 
    db2_test_shim_open();
-   db2_memory_scope_context_clear();
 }
 
 static void teardown(void)
 {
-   db2_memory_scope_context_clear();
    db2_test_shim_close();
    char cmd[256];
    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
@@ -246,110 +243,9 @@ static void test_auto_tag_shared_keywords(void)
    teardown();
 }
 
-static void test_local_first_applies_before_limits_across_memory_surfaces(void)
-{
-   setup();
-   memory_t local, workspace_mem, global, other;
-   memory_insert(TIER_L2, KIND_FACT, "identity:local-crowdout",
-                 "crowdout routing needle belongs to the active project", 0.10, "local-session",
-                 &local);
-   assert(memory_tag_project(local.id, "active-project") == 0);
-   assert(db2_memory_episode_insert(local.id, "local-crowdout-episode",
-                                    "crowdout episode from active project", "local-session",
-                                    "2026-07-29") > 0);
-   insert_memory_entity(local.id, "LocalCrowdEntity");
-   db2_memory_relation_upsert_full(local.id, 0, "CrowdEntity", "owned_by", "ActiveProject",
-                                   "crowdout relation from active project", "", "", 0.10);
-
-   memory_insert(TIER_L2, KIND_FACT, "identity:workspace-crowdout",
-                 "crowdout routing needle belongs to the active workspace", 0.20,
-                 "workspace-session", &workspace_mem);
-   /* An explicit ownership change stamps both the compatibility projection
-    * and the memory row used by authorization. */
-   assert(seed_workspace_scope(workspace_mem.id, "active-workspace") == 0);
-
-   /* Both buckets exceed every one-row request below. Their much higher
-    * relevance/confidence and later insertion order reproduce the old failure:
-    * a global LIMIT first would permanently discard the active-project row. */
-   for (int i = 0; i < 12; i++)
-   {
-      char key[64];
-      char content[160];
-      snprintf(key, sizeof(key), "identity:global-crowdout-%02d", i);
-      snprintf(content, sizeof(content), "crowdout routing needle global distractor %02d", i);
-      memory_insert(TIER_L2, KIND_FACT, key, content, 0.99, "global-session", &global);
-      assert(memory_tag_global(global.id) == 0);
-      insert_memory_entity(global.id, "GlobalCrowdEntity");
-      db2_memory_relation_upsert_full(global.id, 0, "CrowdEntity", "owned_by", "Global",
-                                      "crowdout relation global distractor", "", "", 0.99);
-
-      snprintf(key, sizeof(key), "identity:other-crowdout-%02d", i);
-      snprintf(content, sizeof(content), "crowdout routing needle other project distractor %02d",
-               i);
-      memory_insert(TIER_L2, KIND_FACT, key, content, 0.99, "other-session", &other);
-      assert(memory_tag_project(other.id, "other-project") == 0);
-      insert_memory_entity(other.id, "OtherCrowdEntity");
-      db2_memory_relation_upsert_full(other.id, 0, "CrowdEntity", "owned_by", "OtherProject",
-                                      "crowdout relation other project distractor", "", "", 0.99);
-   }
-   /* A newer global episode in the same session must not become that
-    * session's representative ahead of the older active-project episode. */
-   assert(db2_memory_episode_insert(global.id, "global-same-session-episode",
-                                    "crowdout newer global episode in local session",
-                                    "local-session", "2026-07-30") > 0);
-
-   memory_t facts[64];
-   db2_memory_scope_context_set("active-workspace", "active-project", 0);
-   /* Visible and LIKE retrieval scope-order assertions now run through Go in
-    * hybrid_context_test.go, including distractors, all scope and no identity. */
-   int count;
-
-   /* Ordered SQL readers used by list, context/recall, briefing, episodes,
-    * graph, entity, and answer evidence all apply scope before LIMIT. */
-   count = db2_memory_list(TIER_L2, KIND_FACT, 1, 1, facts, 64);
-   assert(count == 1 && facts[0].id == local.id);
-
-   /* Session fact/pattern query coverage is in Go session_queries_test.go. */
-
-   memory_diagnostic_t diagnostics[2];
-   count = memory_diagnose("crowdout routing needle", 1, diagnostics, 2);
-   assert(count == 1 && diagnostics[0].memory.id == local.id);
-
-   db2_memory_cand_row_t candidates[2];
-   count = db2_memory_list_candidates(DB2_MEM_CAND_PRIMARY, candidates, 1);
-   assert(count == 1 && candidates[0].id == local.id);
-
-   db2_memory_cand_row_t recall[2];
-   count = db2_memory_list_recall_section(DB2_MEM_RECALL_IDENTITY, recall, 1);
-   assert(count == 1 && recall[0].id == local.id);
-
-   /* Briefing scope-before-LIMIT coverage is in Go briefing_test.go. */
-
-   memory_episode_t episodes[2];
-   count = db2_memory_episodes_search("crowdout", 1, episodes, 2);
-   assert(count == 1 && episodes[0].memory_id == local.id);
-
-   memory_relation_t relations[2];
-   count = db2_memory_relations_search("CrowdEntity", 1, relations, 2);
-   assert(count == 1 && relations[0].memory_id == local.id);
-   count = db2_memory_relations_for_entity("CrowdEntity", 1, relations, 2);
-   assert(count == 1 && relations[0].memory_id == local.id);
-   count = db2_memory_relations_search_as_of("CrowdEntity", "2026-07-29", 1, relations, 2);
-   assert(count == 1 && relations[0].memory_id == local.id);
-   count = db2_memory_relations_supporting("CrowdEntity", 1, relations, 2);
-   assert(count == 1 && relations[0].memory_id == local.id);
-
-   char *ctx = memory_assemble_context(NULL);
-   assert(ctx != NULL);
-   assert(strstr(ctx, "belongs to the active project") != NULL);
-   assert(strstr(ctx, "other project distractor") == NULL);
-   free(ctx);
-
-   /* Alert scope-before-LIMIT assertions run in Go alerts_test.go. */
-
-   teardown();
-}
-
+/* Scope-before-limit regressions now exercise the Go owner's explicit request
+ * scope in hybrid_context_test.go, recall_test.go, briefing_test.go,
+ * alerts_test.go, assertion_search_test.go and typed_context_test.go. */
 static void test_ws_context_prefers_project_scope_when_available(void)
 {
    setup();
@@ -598,7 +494,6 @@ int main(void)
    test_ws_cross_workspace_high_confidence();
    test_ws_null_workspace_falls_back();
    test_auto_tag_shared_keywords();
-   test_local_first_applies_before_limits_across_memory_surfaces();
    test_ws_context_prefers_project_scope_when_available();
    test_api_memory_stats_includes_scope_counts();
    test_api_memory_stats_includes_functional_tiers();

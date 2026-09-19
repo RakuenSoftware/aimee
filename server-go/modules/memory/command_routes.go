@@ -16,6 +16,8 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "search_assertions", "Search visible semantic assertions across valid and belief time.", handleEvidenceCommand, true},
+	{"memory", "assemble_typed_context", "Assemble scoped evidence with per-channel context budgets.", handleEvidenceCommand, true},
 	{"memory", "reflect", "Reflect on scoped memories and optionally propose a draft rule.", handleReflectCommand, true},
 	{"memory", "checkpoint", "Snapshot facts or restore checkpoint content into scoped memory.", handleCheckpointCommand, true},
 	{"memory", "ontology", "List the ontology or walk its scoped graph.", handleOntologyCommand, true},

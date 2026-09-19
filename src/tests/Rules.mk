@@ -647,7 +647,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-dogfood \
                $(TESTPREFIX)/unit-test-cmd-onboard \
                $(TESTPREFIX)/unit-test-session-start-util \
-               $(TESTPREFIX)/unit-test-memory-bus-context \
                $(TESTPREFIX)/unit-test-learning-memory-transport \
                $(TESTPREFIX)/unit-test-memory-reference-transport \
                $(TESTPREFIX)/unit-test-server-memory-get \
@@ -3168,9 +3167,6 @@ $(TESTPREFIX)/unit-test-bus-db2-process: \
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
 .PHONY: db2-replay
-$(TESTPREFIX)/unit-test-memory-bus-context: $(OBJDIR)/tests/test_memory_bus_context.o $(OBJDIR)/vendor/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
-
 $(TESTPREFIX)/unit-test-server-prospective: $(OBJDIR)/tests/test_server_prospective.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 

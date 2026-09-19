@@ -872,27 +872,6 @@
       "reason": "The typed memory.record_l4_approval operation fixes the approved tier and carries the bounded approver and note an operator supplies; DB2 owns the approval row that memory.reclassify_directives later reads under its gate."
     },
     {
-      "symbol": "db2_memory_scope_context_clear",
-      "signature_sha256": "5d6ec5c28d8a03daa5e5943336638a584b47a7cd8e2c566b97945cf896cc2461",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Clearing thread-local memory query context has no wire representation; each bounded memory request carries its scope and DB2 discards that request-local state before replying."
-    },
-    {
-      "symbol": "db2_memory_scope_context_get",
-      "signature_sha256": "55d1008e106a1147103b87726e4c0833c1a94acbe8962c4d65b71b3e4ba658a9",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Reading process thread-local scope is private memory-operation plumbing; explicit bounded scope fields replace implicit caller-owned state across the bus."
-    },
-    {
-      "symbol": "db2_memory_scope_context_set",
-      "signature_sha256": "3219f9f3e18ec28009676eb767569485cdcf9b6afe51a138e3c5a155840c8674",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "A setter for thread-local workspace and project scope cannot cross a process boundary; typed memory requests carry the bounded scope with the operation that consumes it."
-    },
-    {
       "symbol": "db2_memory_stats_counts",
       "signature_sha256": "efca90ae907b5403f429a06f1db17932f70a1941071d46e86b4e5630ab4a4a3b",
       "disposition": "wire-operation",

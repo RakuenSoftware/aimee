@@ -1,19 +1,13 @@
 /* Real Go context and diagnostics behind the remaining benchmark host connection. */
 #include "aimee.h"
 #include "modules/benchmarks/agent_eval_internal.h"
-#include "modules/memory/memory_bus_context.h"
 #include "json_fluent.h"
 #include "support/module_runtime_fixture.h"
 #include <assert.h>
 
 static int unavailable;
 static const char *malformed;
-void memory_bus_read_context(db2_memory_scope_context_t *context)
-{
-   memset(context, 0, sizeof(*context));
-   context->active = 1;
-   snprintf(context->project, sizeof(context->project), "bench-project");
-}
+
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
    assert(!strcmp(method, "memory.runtime"));
@@ -21,7 +15,7 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
    assert(!strcmp(operation, "benchmark-context") ||
           !strcmp(operation, "benchmark-hard-negative") || !strcmp(operation, "benchmark-miss") ||
           !strcmp(operation, "benchmark-score"));
-   assert(!strcmp(jo_cstr(args, "project"), "bench-project"));
+   assert(!cJSON_HasObjectItem(args, "project"));
    if (unavailable)
    {
       *result = NULL;

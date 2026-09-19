@@ -106,6 +106,10 @@ func typedOptions(args commandArgs) *typedContextOptions {
 	return out
 }
 func handleTypedContext(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+	return handleTypedContextResult(options, invocation, args, true)
+}
+
+func handleTypedContextResult(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs, envelope bool) ([]byte, bus.ModuleStatus) {
 	if options.placement != PlacementKB {
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}
@@ -126,6 +130,9 @@ func handleTypedContext(options handlerOptions, invocation bus.ModuleInvocation,
 	var response DataResponse
 	if json.Unmarshal(raw, &response) != nil || len(response.Payload) == 0 {
 		return nil, bus.ModuleStatusInternal
+	}
+	if !envelope {
+		return commandResult(response.Payload)
 	}
 	// Native transports carry the complete owner JSON as text, preserving numeric
 	// IDs even through cJSON. The public shape is that JSON object, not this envelope.

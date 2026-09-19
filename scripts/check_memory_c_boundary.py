@@ -11,7 +11,6 @@ from pathlib import Path
 
 ALLOWED_C = {
     "src/modules/memory/memory_data_bus.c",
-    "src/modules/memory/memory_scope_connection.c",
 }
 
 FORBIDDEN_INCLUDES = (
@@ -23,6 +22,9 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/memory/memory_scope_connection.c",
+    "src/modules/memory/memory_bus_context.h",
+    "src/modules/db2/c/memory_scope_query.h",
     "src/modules/db2/c/entity_registry.c",
     "src/modules/db2/c/entity_registry.h",
     "src/modules/db2/c/ontology_evolution.c",
@@ -85,6 +87,8 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:db2_memory_scope_context_\w+|memory_bus_(?:read_context|set_context_reader|add_context))\b(?=\s*\()|"
+    r"\b(?:db2_kb_service_memory_(?:search_assertions|assemble_typed_context)_json|kb_handle_memory_(?:search_assertions|assemble_typed_context)|kb_memory_scope_(?:begin|end))\b(?=\s*\()|"
     r"\bmem_eval_load_corpus\b(?=\s*\()|"
     r"\bmcp_memory_maintain_(?:required_cap|model_modes)\b(?=\s*\()|"
     r"\b(?:entity_name_normalize|db2_entity_(?:register(?:_named)?|alias_bind|resolve|kind|mark_merged|aliases_for|conflict_\w+))\b(?=\s*\()|"
@@ -207,13 +211,6 @@ FORBIDDEN_KB_MEMORY_POLICY = (
     "mf_subject_kind",
 )
 
-# This adapter binds the already-authorized request scope onto a prepared
-# PostgreSQL statement. It does not create statements or execute storage work;
-# binding is connection plumbing and is the explicit exception to the direct
-# store-call ban.
-STATEMENT_BINDING_C = {
-    "src/modules/memory/memory_scope_connection.c",
-}
 
 
 class BoundaryError(ValueError):
@@ -279,7 +276,7 @@ def validate(root: Path) -> None:
             if include in text:
                 violations.append(f"{relative}: {include}")
         for call in FORBIDDEN_STORE_CALLS:
-            if call in text and not (relative in STATEMENT_BINDING_C and call == "aimee_pg_"):
+            if call in text:
                 violations.append(f"{relative}: {call}")
     if violations:
         raise BoundaryError(

@@ -56,10 +56,10 @@ func TestPublicCommandDiscovery(t *testing.T) {
 			}
 			continue
 		}
-		if offset != len(response) || len(seen) != 101 {
+		if offset != len(response) || len(seen) != 103 {
 			t.Fatalf("routes=%d bytes=%d/%d", len(seen), offset, len(response))
 		}
-		for _, verb := range []string{"recall", "directive_create", "prospective_match", "list_unused_l2", "stats", "cognify", "cognify_drain", "cognify_status"} {
+		for _, verb := range []string{"search_assertions", "assemble_typed_context", "recall", "directive_create", "prospective_match", "list_unused_l2", "stats", "cognify", "cognify_drain", "cognify_status"} {
 			if !seen[verb] {
 				t.Fatal("missing public route", verb)
 			}
