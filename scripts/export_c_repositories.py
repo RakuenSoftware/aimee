@@ -631,9 +631,18 @@ def go_module_main(module_id: str, principal_ref: int,
         watchdog = "\tif handled, code := handler.ModelServicesBootstrap(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunBootstrapLookup(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunProbeWorker(os.Args); handled { os.Exit(code) }\n"
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     setup = ""
+    process_setup = ""
     if module_id in {"config", "providers"}:
         handler = "moduleHandler"
         setup = """\tmoduleHandler, err := handler.NewDefaultHandler()
+\tif err != nil {
+\t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
+\t\tos.Exit(1)
+\t}
+"""
+    if module_id == "memory":
+        handler = "moduleHandler"
+        process_setup = """\tmoduleHandler, err := handler.NewProcessHandler(ctx, os.Args[1], os.Getenv("AIMEE_MODULE_PLACEMENT"))
 \tif err != nil {
 \t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
 \t\tos.Exit(1)
@@ -682,6 +691,7 @@ func main() {{
 \t}}
 \tctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 \tdefer stop()
+{process_setup}\
 \tconfig := bus.ModuleProcessConfig{{
 \t\tSocketPath: os.Args[1], ModuleName: "{module_id}",
 \t\tPrincipalClass: {PRINCIPAL_CLASS}, PrincipalRef: {principal_ref},
@@ -704,21 +714,23 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
         path.relative_to(ROOT).as_posix()
         for path in (ROOT / "server-go/bus").glob("*.go")
         if not path.name.endswith("_test.go") and
-        (path.name != "concurrent_module_caller.go" or module_id in {"delegates", "roundtable", "providers"})
+        (path.name != "concurrent_module_caller.go" or module_id in {"delegates", "roundtable", "providers", "memory"})
     )
 
 
-# Caller-side contracts that live outside any implementation module, mapped to
+# Shared contracts and pure helpers outside an implementation module, mapped to
 # the modules that import them. Each is deliberately not owned by the module it
 # talks to: every peer that calls delegates may import server-go/delegate, and
 # every peer that calls runtime-domain operations may import server-go/aimee without importing
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
+    "server-go/internal/retrievalmetrics": {"memory", "benchmarks"},
     "server-go/modules/module-runtime/identity": {"server", "kb"},
     "server-go/modules/module-runtime/supervisor": {"server", "kb"},
-    "server-go/config": {"config", "providers"},
+    "server-go/config": {"config", "providers", "memory"},
     "server-go/modules/egress": {"providers", "memory"},
+    "server-go/modules/audit": {"memory"},
     "server-go/delegate": {"delegates", "roundtable"},
     "server-go/aimee": {"aimee", "economizer"},
     "server-go/db": {"aimee", "memory"},
@@ -726,7 +738,7 @@ GO_SHARED_CONTRACTS = {
 
 
 def go_process_shared_sources(module_id: str) -> list[str]:
-    """Return shared caller contracts needed by independently built Go modules."""
+    """Return shared contracts and helpers needed by independently built Go modules."""
     sources: list[str] = []
     for directory, importers in GO_SHARED_CONTRACTS.items():
         if module_id not in importers:
@@ -788,21 +800,34 @@ def external_module_pin(
     return pin
 
 
+def go_language_version() -> str:
+    """Keep isolated exports on the toolchain contract of the source module."""
+    for line in (ROOT / "server-go/go.mod").read_text(encoding="utf-8").splitlines():
+        if line.startswith("go "):
+            return line.split()[1]
+    raise ExportError("server-go/go.mod: missing Go language version")
+
+
 def go_module_requirements(module_id: str) -> tuple[list[str], list[str]]:
     """Return direct and indirect requirements for an isolated Go export."""
     direct = ["golang.org/x/sys"]
     indirect: list[str] = []
     if module_id == "config":
         direct.append("go.yaml.in/yaml/v3")
-    if module_id == "postgres":
+    if module_id == "memory":
+        direct.append("golang.org/x/text")
+    # The memory export includes PostgreSQL integration tests, while its
+    # production storage remains the pure-Go bus client.
+    if module_id in {"postgres", "memory"}:
         direct.append("github.com/jackc/pgx/v5")
         indirect.extend([
             "github.com/jackc/pgpassfile",
             "github.com/jackc/pgservicefile",
             "github.com/jackc/puddle/v2",
             "golang.org/x/sync",
-            "golang.org/x/text",
         ])
+        if module_id == "postgres":
+            indirect.append("golang.org/x/text")
     direct_lines = [
         f"\t{module} {go_dependency_version(module)}" for module in sorted(direct)
     ]
@@ -928,7 +953,7 @@ jobs:
                 repository / "go.mod",
                 f"""module github.com/JBailes/aimee
 
-go 1.25.0
+go {go_language_version()}
 
 require (
 {require_text}
@@ -1176,12 +1201,13 @@ serve={serve}
     contract_doc = load_json(process_contracts.CONTRACTS)
     for client in contract_doc.get("clients", []):
         request = ",".join(str(kind) for kind in client["request"])
+        publish = ",".join(str(kind) for kind in client.get("publish", []))
         client_grant = f"""version=1
 principal_class={PRINCIPAL_CLASS}
 principal_ref={client["principal_ref"]}
 uid=self
 executable={client["executable"]}
-publish=
+publish={publish}
 subscribe=
 request={request}
 serve=

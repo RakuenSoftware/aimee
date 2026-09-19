@@ -56,23 +56,6 @@ extern "C"
     * hit (out filled), 0 on miss / SQL error / unavailable DB2. */
    int db2_kb_document_fetch(int64_t id, const char *project, db2_kb_document_row_t *out);
 
-   /* Convention-candidate row from kb_documents — tier-friendly subset
-    * of fields used by kb_extract_convention_candidates. */
-   typedef struct
-   {
-      char project[64];
-      char file_path[1024];
-      char heading_path[256];
-      char content[8192];
-   } db2_kb_convention_row_t;
-
-   /* Pull up to |max| chunks from kb_documents whose file_path matches
-    * one of the convention-source patterns (CONTRIBUTING / AGENTS.md /
-    * STYLE / CODING / .aimee-rules / .aimee/rules.md / .aimee/context.md
-    * / /adr/). Ordered by project, file_path, chunk_index. Returns
-    * rows written. */
-   int db2_kb_documents_list_convention_candidates(db2_kb_convention_row_t *out, int max);
-
    /* Look up the stored file_hash for (project, file_path) in
     * kb_documents (any chunk row's column — they all share the same
     * file-level hash). Returns 0 on hit (out filled), -1 on miss /

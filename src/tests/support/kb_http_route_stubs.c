@@ -8,7 +8,6 @@
 #include "kb_http_telemetry.h"
 #include "modules/db2/c/server_registry.h"
 #include "modules/db2/c/evidence_lifecycle.h"
-#include "modules/db2/c/entity_registry.h"
 #include "modules/db2/c/management_identity_journal.h"
 #include "memory.h"
 #include "modules/db2/c/memory_query.h"
@@ -27,37 +26,12 @@ void test_kb_enrollment_authority_set(int status)
    g_enrollment_authority = status;
 }
 
-void db2_memory_scope_context_set(const char *workspace, const char *project, int allow_all)
-{
-   (void)workspace;
-   (void)project;
-   (void)allow_all;
-}
-
-void db2_memory_scope_context_clear(void)
-{
-}
-
 int db2_memory_review_list(const char *state, int limit, db2_memory_review_row_t *out, int max)
 {
    (void)state;
    (void)limit;
    (void)out;
    (void)max;
-   return 0;
-}
-
-int db2_memory_reject(int64_t id, const char *reason)
-{
-   (void)id;
-   (void)reason;
-   return 0;
-}
-
-int db2_memory_restore(int64_t id, const char *actor)
-{
-   (void)id;
-   (void)actor;
    return 0;
 }
 
@@ -364,26 +338,6 @@ int db2_write_tier_grant_lookup(const char *server_id, int64_t team_id, const ch
 /* Typed-fact console storage seams.  The focused HTTP route suite does not open
  * DB2.  Keep reads empty and mutations fail-closed; lifecycle/entity integration
  * is exercised by its dedicated DB2 tests and the real full-stack browser E2E. */
-int db2_fact_candidates(fact_candidate_t *out, int max)
-{
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int db2_entity_summaries(entity_summary_t *out, int max)
-{
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int db2_entity_merge_summaries(entity_merge_summary_t *out, int max)
-{
-   (void)out;
-   (void)max;
-   return 0;
-}
 
 static int g_fact_actor_enabled;
 
@@ -425,27 +379,6 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
    (void)assertion_id;
    (void)action;
    (void)out;
-   return -1;
-}
-
-int64_t db2_entity_merge_as(const fact_actor_t *actor, int64_t from_id, int64_t into_id,
-                            char commit_id[FACT_COMMIT_ID_MAX])
-{
-   (void)actor;
-   (void)from_id;
-   (void)into_id;
-   if (commit_id)
-      commit_id[0] = '\0';
-   return -1;
-}
-
-int db2_entity_unmerge_as(const fact_actor_t *actor, int64_t merge_id,
-                          char commit_id[FACT_COMMIT_ID_MAX])
-{
-   (void)actor;
-   (void)merge_id;
-   if (commit_id)
-      commit_id[0] = '\0';
    return -1;
 }
 

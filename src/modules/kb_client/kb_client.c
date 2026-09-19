@@ -1117,31 +1117,6 @@ char *kb_client_reconcile_json(int dry_run)
    return kb_error_json("knowledge service /v1/maintenance/reconcile did not respond");
 }
 
-/* memory.reindex scans the memory corpus and rebuilds derived tables; give
- * it a bounded but generous timeout. */
-#define KB_CLIENT_MEMORY_REINDEX_TIMEOUT_MS (5 * 60 * 1000)
-
-char *kb_client_memory_reindex_json(int limit)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "limit", limit);
-   return kb_v1_action_request_timeout("memory.reindex", req, KB_CLIENT_MEMORY_REINDEX_TIMEOUT_MS,
-                                       kb_error_json);
-}
-
-/* Memory rebuild re-upserts every memory point to pgvector; size the timeout
- * like the repair path. */
-#define KB_CLIENT_MEMORY_REBUILD_TIMEOUT_MS (10 * 60 * 1000)
-
-char *kb_client_memory_rebuild_json(const char *version)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (version && version[0])
-      cJSON_AddStringToObject(req, "version", version);
-   return kb_v1_action_request_timeout("memory.rebuild", req, KB_CLIENT_MEMORY_REBUILD_TIMEOUT_MS,
-                                       kb_error_json);
-}
-
 #define KB_CLIENT_DIRECTIVE_TIMEOUT_MS (60 * 1000)
 
 static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int timeout_ms,
@@ -1188,80 +1163,15 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
                               "knowledge service action did not respond");
 }
 
-/* Shared with kb_client_memory.c — keep external linkage. */
+char *kb_v1_action_request_with_timeout(const char *action, cJSON *req, int timeout_ms)
+{
+   return kb_v1_action_request_timeout(action, req, timeout_ms, kb_error_json);
+}
+
+/* Generic actions share the same authenticated transport and error envelopes. */
 char *kb_v1_action_request(const char *action, cJSON *req)
 {
    return kb_v1_action_request_timeout(action, req, KB_CLIENT_DIRECTIVE_TIMEOUT_MS, kb_error_json);
-}
-
-char *kb_client_memory_directive_create_json(const char *question, const char *topic,
-                                             const char *entity, const char *file,
-                                             const char *cause, int priority, const char *session,
-                                             const char *valid_until)
-{
-   if (!question || !question[0])
-      return kb_error_json("memory.directive_create requires question");
-   cJSON *req = cJSON_CreateObject();
-   /* question, topic and cause are prose the kb persists; entity and file are
-    * handles the caller resolves against later, so a redacted form would point
-    * at nothing -- those withhold outright. */
-   if (kb_client_pii_identifier_sensitive(entity) || kb_client_pii_identifier_sensitive(file) ||
-       kb_client_pii_add_string_required(req, "question", question) != 0 ||
-       kb_client_pii_add_string(req, "topic", topic) != 0 ||
-       kb_client_pii_add_string(req, "cause", cause) != 0)
-   {
-      cJSON_Delete(req);
-      return kb_client_pii_withheld_json();
-   }
-   if (entity && entity[0])
-      cJSON_AddStringToObject(req, "entity", entity);
-   if (file && file[0])
-      cJSON_AddStringToObject(req, "file", file);
-   cJSON_AddNumberToObject(req, "priority", priority);
-   if (session && session[0])
-      cJSON_AddStringToObject(req, "session", session);
-   if (valid_until && valid_until[0])
-      cJSON_AddStringToObject(req, "valid_until", valid_until);
-   return kb_v1_action_request("memory.directive_create", req);
-}
-
-char *kb_client_memory_directive_resolve_json(int64_t id, int64_t with_memory, const char *note)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "id", (double)id);
-   if (with_memory > 0)
-      cJSON_AddNumberToObject(req, "with_memory", (double)with_memory);
-   if (kb_client_pii_add_string(req, "note", note) != 0)
-   {
-      cJSON_Delete(req);
-      return kb_client_pii_withheld_json();
-   }
-   return kb_v1_action_request("memory.directive_resolve", req);
-}
-
-char *kb_client_memory_directive_suppress_json(int64_t id)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "id", (double)id);
-   return kb_v1_action_request("memory.directive_suppress", req);
-}
-
-char *kb_client_memory_directive_sweep_expired_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_action_request("memory.directive_sweep_expired", req);
-}
-
-char *kb_client_memory_directive_list_json(const char *state, const char *cause, int limit)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (state && state[0])
-      cJSON_AddStringToObject(req, "state", state);
-   if (cause && cause[0])
-      cJSON_AddStringToObject(req, "cause", cause);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   return kb_v1_action_request("memory.directive_list", req);
 }
 
 char *kb_client_curiosity_list_json(const char *state, int limit)
@@ -1485,108 +1395,6 @@ char *kb_client_artifact_set_state_json(const char *id, const char *new_state,
    if (reason && reason[0])
       cJSON_AddStringToObject(req, "reason", reason);
    return kb_v1_learning_action_request("artifacts.set_state", req);
-}
-
-/* Repair sweeps the memories table and re-upserts into pgvector; size the timeout
- * like the rebuild path (10 minutes). */
-#define KB_CLIENT_MEMORY_REPAIR_TIMEOUT_MS (10 * 60 * 1000)
-
-char *kb_client_memory_repair_json(int limit, int failed_only, int reset_stuck, int64_t memory_id,
-                                   const char *embedding_command)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   cJSON_AddBoolToObject(req, "failed_only", failed_only ? 1 : 0);
-   cJSON_AddBoolToObject(req, "reset_stuck", reset_stuck ? 1 : 0);
-   if (memory_id > 0)
-      cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   return kb_v1_action_request_timeout("memory.repair", req, KB_CLIENT_MEMORY_REPAIR_TIMEOUT_MS,
-                                       kb_error_json);
-}
-
-/* Verify runs a pgvector snapshot + DB2 scan; 30s is plenty for the normal
- * path and still under any reasonable timings budget. */
-#define KB_CLIENT_MEMORY_VERIFY_TIMEOUT_MS (30 * 1000)
-
-char *kb_client_memory_verify_json(int detail, int timings, const char *embedding_command)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddBoolToObject(req, "detail", detail ? 1 : 0);
-   cJSON_AddBoolToObject(req, "timings", timings ? 1 : 0);
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   return kb_v1_action_request_timeout("memory.verify", req, KB_CLIENT_MEMORY_VERIFY_TIMEOUT_MS,
-                                       kb_error_json);
-}
-
-/* Embed paths are batch-heavy (reembed_start walks every stale memory).
- * Share the 10-minute budget used by repair/rebuild. */
-#define KB_CLIENT_MEMORY_EMBED_TIMEOUT_MS (10 * 60 * 1000)
-
-static char *kb_v1_memory_embed_action_request(const char *method, cJSON *req)
-{
-   return kb_v1_action_request_timeout(method, req, KB_CLIENT_MEMORY_EMBED_TIMEOUT_MS,
-                                       kb_error_json);
-}
-
-char *kb_client_memory_embed_json(int all, int64_t memory_id, const char *version,
-                                  const char *embedding_command)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddBoolToObject(req, "all", all ? 1 : 0);
-   if (memory_id > 0)
-      cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
-   if (version && version[0])
-      cJSON_AddStringToObject(req, "version", version);
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   return kb_v1_memory_embed_action_request("memory.embed", req);
-}
-
-char *kb_client_memory_reembed_start_json(const char *version, const char *embedding_command)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (version && version[0])
-      cJSON_AddStringToObject(req, "version", version);
-   if (embedding_command && embedding_command[0])
-      cJSON_AddStringToObject(req, "embedding_command", embedding_command);
-   return kb_v1_memory_embed_action_request("memory.reembed_start", req);
-}
-
-char *kb_client_memory_reembed_status_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_memory_embed_action_request("memory.reembed_status", req);
-}
-
-char *kb_client_memory_reembed_cutover_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_memory_embed_action_request("memory.reembed_cutover", req);
-}
-
-char *kb_client_memory_reembed_rollback_json(const char *version)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (version && version[0])
-      cJSON_AddStringToObject(req, "version", version);
-   return kb_v1_memory_embed_action_request("memory.reembed_rollback", req);
-}
-
-char *kb_client_memory_scene_list_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_memory_embed_action_request("memory.scene_list", req);
-}
-
-char *kb_client_memory_scene_show_json(int64_t scene_id)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "scene_id", (double)scene_id);
-   return kb_v1_memory_embed_action_request("memory.scene_show", req);
 }
 
 /* Search may embed a query and hit pgvector; be generous but bounded so

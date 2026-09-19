@@ -4,8 +4,8 @@
 /* Record one kb-hosted MCP plugin tool-call OUTCOME on aimee-kb's OWN audit bus.
  *
  * Declared here WITHOUT a bus header so the kb service handler (kb_service_agent.c)
- * can fire it while staying bus-free; the .c file is the sole bus edge, mirroring
- * kb_memory_audit_bridge.c (D7 — the bus stays confined to the trusted daemons and
+ * can fire it while staying bus-free; the .c file is the sole bus edge
+ * (D7 — the bus stays confined to the trusted daemons and
  * to a small set of bridge files). Content-free by contract: only the caller
  * identity, the tool name, a name-only args fingerprint, and classified enums
  * cross — never argument or result content, and never the raw error text the

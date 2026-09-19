@@ -12,8 +12,8 @@
  * per-request disable (the `x-aimee-preinject: 0` header, surfaced by the
  * caller as request_disabled) so the A/B bench harness can toggle it live.
  *
- * The pure helpers (confidence tiering + envelope formatting) are unit-tested
- * without any kb dependency; the builder wires them to the live recall path.
+ * The shared Go memory owner renders context. This transitional host adapter
+ * retains authenticated retrieval and the final native integrity check.
  */
 #ifndef DEC_INGRESS_PREINJECT_H
 #define DEC_INGRESS_PREINJECT_H 1
@@ -21,85 +21,6 @@
 #include "cJSON.h"
 #include "index.h" /* code_search_hit_t */
 #include <stddef.h>
-
-/* P0 Envelope IR (ingress-compression §1.1). ingress_preinject_build() no longer
- * appends straight into one opaque string: it gathers its sources into a typed
- * entry list and renders the <aimee-context> block from that list. This is a
- * pure refactor — the rendered bytes are identical to before — that gives later
- * phases a typed thing to dispatch a compressor over instead of re-parsing a
- * rendered string. */
-
-/* The source a resident entry came from. Rendered in this group order. NB the
- * proposal's §1.1 enum lists code/memory/audit (+future tool_result); FACTS is
- * added here because today's envelope already emits a typed-facts group. */
-typedef enum
-{
-   ING_SRC_CODE,     /* a code-search hit          */
-   ING_SRC_MEMORY,   /* a memory preview           */
-   ING_SRC_FACTS,    /* the typed-facts block      */
-   ING_SRC_TEMPORAL, /* temporal assertions/observations/reviewed procedures */
-   ING_SRC_AUDIT,    /* the audit-context block    */
-} ingress_source_kind_t;
-
-/* Which fold produced the resident form — one value per lossiness class, reserved
- * per proposal §6.5 B2. P0 applies no folding, so every entry is ING_XF_NONE;
- * P1a/P1b populate the rest. Declared now so the IR is the contract a compressor
- * dispatches over. */
-typedef enum
-{
-   ING_XF_NONE = 0,
-   ING_XF_CODE_WHITESPACE_COLLAPSE,
-   ING_XF_CODE_COMMENT_STRIP,
-   ING_XF_CODE_SIGNATURE_SPAN,
-   ING_XF_JSON_FOLD,
-} ingress_transform_t;
-
-/* One resident entry. P0 carries only what the renderer reads (kind, header,
- * preview) plus the reserved transform tag; the richer §1.1 fields
- * (record_id/handle, sensitivity, original_ref, budget, metrics) are added by the
- * phase that first consumes them, to avoid unread fields. */
-typedef struct
-{
-   ingress_source_kind_t kind;
-   ingress_transform_t transform; /* P0: always ING_XF_NONE */
-   const char *header;            /* group header (e.g. "recommended (code):\n"). The
-                                   * renderer prepends it to every attempted candidate of
-                                   * the group but keeps it only on the first one that fits
-                                   * the budget, so it lands exactly once (the old
-                                   * `wrote_header` rule). "" when preview is self-headed. */
-   char *preview;                 /* malloc'd per-record body; the renderer reads it,
-                                   * the caller frees it */
-} ingress_entry_t;
-
-/* Render a typed entry list into the pre-envelope block string, applying the
- * existing budget gate, per-group header, single blank-line separators between
- * non-empty groups, the context-budget footer, and the truncation note — byte
- * for byte as ingress_preinject_build() did inline. Pure: no kb, no config, no
- * globals; frees nothing it is given. Returns a malloc'd block, or NULL when
- * nothing was rendered (empty list / everything omitted) — the caller treats
- * NULL or "" as "no injection". Writes the omitted-entry count to
- * *omitted_count_out when non-NULL. */
-char *ingress_render_block(const ingress_entry_t *entries, int count, size_t envelope_budget,
-                           int headline_missing_count, int *omitted_count_out);
-
-typedef int (*ingress_confidence_provider_fn)(double top_score, const char **confidence);
-/* Request a confidence tier from the supervised memory process. Returns 0 and
- * one of "high"/"medium"/"low" on success; -1 when the provider is absent,
- * fails, or returns an invalid tier. */
-int ingress_preinject_confidence(double top_score, const char **confidence);
-void ingress_preinject_register_confidence_provider(ingress_confidence_provider_fn provider);
-
-/* Format code-search hits into a `recommended (code):` block — one
- * `  - <file>` line per hit, each followed by a trimmed single-line snippet.
- * This is the primary pre-injection signal: the agent sees which files matter
- * for the turn before it explores. Returns a malloc'd string the caller frees,
- * or NULL when there are no hits. Pure (no kb). */
-char *ingress_preinject_format_code_block(const code_search_hit_t *hits, int n);
-
-/* Format the <aimee-context …> envelope from an already-packed context block
- * and a validated confidence tier. Returns a malloc'd string the caller frees,
- * or NULL when the block/tier is absent or invalid. Pure. */
-char *ingress_preinject_format_envelope(const char *context_block, const char *confidence);
 
 /* Extract the recall seed query from a parsed chat `messages` array: the text
  * of the last user-role message. Returns a malloc'd string (caller frees) or
@@ -118,19 +39,6 @@ char *ingress_preinject_last_assistant_from_messages(const cJSON *messages);
  * yields no context. Otherwise runs the recall/context-block path, derives a
  * confidence tier, and returns a malloc'd <aimee-context> envelope. */
 char *ingress_preinject_build(const char *query, int request_disabled);
-
-/* Turns whose memory recall could not reach the knowledge service, as distinct
- * from turns that recalled nothing. Both yield an envelope with no memory
- * previews, so without this counter an outage is indistinguishable from a quiet
- * turn at every per-turn surface -- and an agent handed an empty recall will
- * report that something does not exist when it merely could not look.
- * (session_degraded_notice.c makes the same point, but only at SessionStart.)
- *
- * Deliberately a counter and a log line rather than a marker inside the
- * envelope: those bytes are a cache prefix on the Anthropic arm, and perturbing
- * them during an outage would cost prompt-cache hits exactly when the service is
- * already degraded. Process-local and monotonic. */
-long long ingress_preinject_recall_unavailable_total(void);
 
 /* Merge `envelope` with `instructions` (the request system prompt), returning a
  * fresh malloc'd string the caller frees. Default: PREPENDS the envelope. When
@@ -185,15 +93,5 @@ const char *ingress_preinject_session_id(void);
  * when an active project is known; callers must not fall back to global recall. */
 int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
                                            size_t project_len);
-
-/* Validate and render a strict /v1/code/context response into a compact task
- * packet. Returns NULL on no_answer, stale/mismatched/incomplete provenance, or
- * when no complete item fits the 1200-token resident budget. */
-char *ingress_preinject_format_task_context(const char *json, const char *active_project,
-                                            int *item_count_out, double *confidence_out);
-
-/* Forget bounded first-task session state. Production does not need to call
- * this; it exists so tests and controlled reloads can start deterministically. */
-void ingress_preinject_task_state_reset(void);
 
 #endif /* DEC_INGRESS_PREINJECT_H */

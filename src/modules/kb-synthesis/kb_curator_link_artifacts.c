@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 /* kb_curator_link_artifacts.c: deep-curator link_artifacts (doc<->code bridge).
  *
  * Picks one committed code_unit not yet processed (reflected_at unset — code
@@ -141,8 +143,16 @@ static int link_concept_semantic(const char *code_id, const char *concept, const
    /* Keep the embedder's native dimension (matches resolve_entities: accept
     * whatever the model emits, then NN-search the runtime-dim entity vectors
     * with that same dim). */
-   int dim =
-       memory_embed_text(concept, embed_cmd, EMBED_INPUT_DOCUMENT, vec, CURATOR_LINK_ENTITY_DIM);
+   cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+   cJSON_AddStringToObject(embed_0_args, "base_url", embed_cmd);
+   cJSON_AddStringToObject(embed_0_args, "input_type", "document");
+   cJSON_AddStringToObject(embed_0_args, "text", concept);
+   cJSON_AddNumberToObject(embed_0_args, "max_dim", CURATOR_LINK_ENTITY_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
+   cJSON_Delete(embed_0_args);
+   int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
+                            CURATOR_LINK_ENTITY_DIM);
+   cJSON_Delete(embed_0_reply);
    if (dim <= 0)
       return 0;
 

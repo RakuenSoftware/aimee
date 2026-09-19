@@ -1,7 +1,6 @@
 /* kb_mcp_audit_bridge.c: forwards each kb-hosted MCP plugin tool-call OUTCOME onto
  * aimee-kb's OWN observability bus. The one place linking the kb's MCP execution
- * seam to the bus; kb_service_agent.c (the caller) stays bus-free. Mirrors
- * kb_memory_audit_bridge.c.
+ * seam to the bus; kb_service_agent.c (the caller) stays bus-free.
  *
  * Only NON-CONTENT fields cross. The (tool) identity is reduced to a name-only
  * fingerprint via audit_args_hash(tool, NULL, ...) — exactly as the vault / sandbox

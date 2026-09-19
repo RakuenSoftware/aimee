@@ -4,7 +4,7 @@
 
 #include "cJSON.h"
 #include "db1_client/interaction_events.h"
-#include "modules/memory/memory_platform.h"
+#include "module_commands.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -190,22 +190,34 @@ static int redact_json_strings(cJSON *node, int redaction_buf_bytes)
    if (cJSON_IsString(node) && node->valuestring)
    {
       int cap = redaction_buf_bytes > 0 ? redaction_buf_bytes : TRAJ_REDACTION_BUF_BYTES;
-      char *redacted = malloc((size_t)cap);
-      if (!redacted)
-         return -1;
-      int rc = gate_check_sensitive(node->valuestring, redacted, (size_t)cap);
-      if (rc == 2)
+      cJSON *request = cJSON_CreateObject(), *response = NULL;
+      if (!request || !cJSON_AddStringToObject(request, "content", node->valuestring) ||
+          !cJSON_AddNumberToObject(request, "capacity", cap))
       {
-         free(redacted);
+         cJSON_Delete(request);
          return -1;
       }
-      if (rc == 1 && cJSON_SetValuestring(node, redacted) == NULL)
+      int dispatched = aimee_module_commands_dispatch("memory.screen_content", request, &response);
+      cJSON_Delete(request);
+      const char *status =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+      const char *verdict =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "verdict"));
+      int rc = -1;
+      if (dispatched == 1 && status && strcmp(status, "ok") == 0 && verdict)
       {
-         free(redacted);
-         return -1;
+         if (strcmp(verdict, "allow") == 0)
+            rc = 0;
+         else if (strcmp(verdict, "redact") == 0)
+         {
+            const char *redacted =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "redacted"));
+            if (redacted && cJSON_SetValuestring(node, redacted))
+               rc = 0;
+         }
       }
-      free(redacted);
-      return 0;
+      cJSON_Delete(response);
+      return rc;
    }
    cJSON *child = node->child;
    while (child)

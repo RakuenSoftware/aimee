@@ -21,7 +21,6 @@
 #include <aimee/delegates/delegate_launch.h>
 #include <aimee/delegates/delegate_economics.h>
 #include "delegate_ensemble.h"
-#include "modules/memory/memory_platform.h"
 #include <aimee/workspace/workspace.h>
 #include "guardrails.h"
 #include <aimee/delegates/delegate_source_authority.h>
@@ -1451,7 +1450,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 
    /* Working prompt that may be augmented with prior attempt context */
    char *working_prompt = NULL;
-   int bg_embed_suppressed_prev = platform_memory_background_embed_set_suppressed(1);
 
    for (int attempt = 0; attempt < attempts; attempt++)
    {
@@ -1603,7 +1601,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       }
    }
    agent_http_cleanup();
-   platform_memory_background_embed_set_suppressed(bg_embed_suppressed_prev);
 
    if (rc == 0 &&
        liveness_reject_degenerate_response(&result.response, result.error, sizeof(result.error),

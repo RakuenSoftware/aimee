@@ -16,8 +16,8 @@
   "sources": [
     "src/modules/benchmarks/agent_eval.c",
     "src/modules/benchmarks/agent_eval_baseline.c",
-    "src/modules/benchmarks/agent_eval_benchmarks.c",
     "src/modules/benchmarks/agent_eval_memory_support.c",
+    "src/modules/benchmarks/agent_eval_memory_transport.c",
     "src/modules/benchmarks/module_adapter.c"
   ],
   "go_sources": [

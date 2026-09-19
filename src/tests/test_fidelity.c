@@ -81,7 +81,7 @@ int main(void)
    }
 
    /* DEMOTION-INERTNESS: fidelity rows exist, but NONE is a 'retrieval_attribution'
-    * (the only kind db2_demotion_score reads), so fidelity can never shift a
+    * (the only kind Go memory demotion scoring reads), so fidelity can never shift a
     * demotion percentile. */
    assert(count_kind(conn, "fidelity_report") == 2); /* t1 (upserted to 1) + t2; t3 not yet */
    assert(count_kind(conn, "fidelity_attribution") == 2);

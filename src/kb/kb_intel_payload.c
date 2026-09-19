@@ -1,19 +1,18 @@
 /* kb_intel_payload.c: shared JSON payloads for intelligence readiness/export. */
 
 #include "aimee.h"
+#include "module_commands.h"
+#include "json_fluent.h"
 #include "cJSON.h"
 #include "config.h"
 #include "modules/db2/c/bandit.h"
 #include "modules/db2/c/calibration.h"
-#include "modules/db2/c/demotion.h"
-#include "modules/db2/c/memory_query.h"
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
 #include "kb_intel_payload.h"
 #include "kb_ranker_fit.h"
 #include "memory.h"
 
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,112 +32,23 @@ cJSON *kb_intel_calibrate_readiness_response(void)
    return resp;
 }
 
-#define KB_INTEL_DEMOTE_DRY_MAX 4096
-
 cJSON *kb_intel_demote_check_response(void)
 {
-
-   db2_demotion_candidate_t *candidates =
-       calloc(KB_INTEL_DEMOTE_DRY_MAX, sizeof(db2_demotion_candidate_t));
-   if (!candidates)
-      return NULL;
-
-   int n_candidates =
-       db2_demotion_candidates(config_demotion_n_min(), candidates, KB_INTEL_DEMOTE_DRY_MAX);
-   if (n_candidates < 0)
-      n_candidates = 0;
-
-   typedef struct
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "demotion-check");
+   cJSON *config = cJSON_AddObjectToObject(args, "config");
+   cJSON_AddNumberToObject(config, "enabled", config_demotion_enabled());
+   cJSON_AddNumberToObject(config, "n_min", config_demotion_n_min());
+   cJSON_AddNumberToObject(config, "window", config_demotion_window());
+   cJSON_AddNumberToObject(config, "half_life_days", config_demotion_half_life_days());
+   int rc = aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 120000, &reply);
+   cJSON_Delete(args);
+   if (rc != 1 || strcmp(jo_cstr(reply, "status"), "ok") != 0)
    {
-      char kind[64];
-      double score;
-   } scored_t;
-
-   scored_t *rows = calloc((size_t)(n_candidates > 0 ? n_candidates : 1), sizeof(scored_t));
-   if (!rows)
-   {
-      free(candidates);
+      cJSON_Delete(reply);
       return NULL;
    }
-
-   int n_scored = 0;
-   for (int i = 0; i < n_candidates; i++)
-   {
-      double score = db2_demotion_score(candidates[i].row_id, config_demotion_window(),
-                                        config_demotion_half_life_days(), config_demotion_n_min());
-      if (isnan(score))
-         continue;
-      memory_t mem;
-      memset(&mem, 0, sizeof(mem));
-      if (db2_memory_get(candidates[i].row_id, &mem) != 0 || !mem.kind[0])
-         continue;
-      snprintf(rows[n_scored].kind, sizeof(rows[n_scored].kind), "%s", mem.kind);
-      rows[n_scored].score = score;
-      n_scored++;
-   }
-   free(candidates);
-
-   int would_demote = 0;
-   cJSON *by_kind = cJSON_CreateArray();
-   for (int i = 0; i < n_scored; i++)
-   {
-      int seen = 0;
-      for (int j = 0; j < i; j++)
-      {
-         if (strcmp(rows[j].kind, rows[i].kind) == 0)
-         {
-            seen = 1;
-            break;
-         }
-      }
-      if (seen)
-         continue;
-
-      char pbuf[2048];
-      double p10 = 0.0;
-      if (db2_demotion_profile_read(rows[i].kind, "global", "", pbuf, sizeof(pbuf)) == 0)
-      {
-         cJSON *pj = cJSON_ParseWithLength(pbuf, strlen(pbuf));
-         cJSON *percs = pj ? cJSON_GetObjectItemCaseSensitive(pj, "score_percentiles") : NULL;
-         cJSON *p10j = percs ? cJSON_GetObjectItemCaseSensitive(percs, "p10") : NULL;
-         p10 = cJSON_IsNumber(p10j) ? p10j->valuedouble : 0.0;
-         cJSON_Delete(pj);
-      }
-
-      int kind_scored = 0;
-      int below = 0;
-      for (int j = i; j < n_scored; j++)
-      {
-         if (strcmp(rows[j].kind, rows[i].kind) != 0)
-            continue;
-         kind_scored++;
-         if (rows[j].score < p10)
-            below++;
-      }
-      would_demote += below;
-
-      cJSON *entry = cJSON_CreateObject();
-      cJSON_AddStringToObject(entry, "kind", rows[i].kind);
-      cJSON_AddNumberToObject(entry, "scored", kind_scored);
-      cJSON_AddNumberToObject(entry, "would_demote", below);
-      cJSON_AddNumberToObject(entry, "p10", p10);
-      cJSON_AddItemToArray(by_kind, entry);
-   }
-   free(rows);
-
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-   {
-      cJSON_Delete(by_kind);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "candidates", n_candidates);
-   cJSON_AddNumberToObject(resp, "scored", n_scored);
-   cJSON_AddNumberToObject(resp, "would_demote", would_demote);
-   cJSON_AddNumberToObject(resp, "demotion_enabled", config_demotion_enabled());
-   cJSON_AddItemToObject(resp, "by_kind", by_kind);
-   return resp;
+   return reply;
 }
 
 #define KB_INTEL_BANDIT_EXPORT_LIMIT 500

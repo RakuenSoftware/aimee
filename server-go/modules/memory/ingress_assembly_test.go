@@ -1,0 +1,133 @@
+package memory
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+	"unicode/utf8"
+
+	"github.com/JBailes/aimee/server-go/bus"
+)
+
+func TestIngressBlockNativeGoldens(t *testing.T) {
+	for _, test := range []struct {
+		entries []ingressEntry
+		budget  int
+		want    string
+		omitted int
+	}{
+		{[]ingressEntry{{"code", "C:\n", "a\n"}, {"memory", "M:\n", "b\n"}}, 1000,
+			"C:\na\n\nM:\nb\ncontext-budget: used_bytes=11 budget_bytes=1000 omitted_count=0 headline_missing_count=0\n", 0},
+		{[]ingressEntry{{"code", "C:\n", "AAAAAAAAAA\n"}, {"code", "C:\n", "x\n"}}, 394, "C:\nx\n", 1},
+		{[]ingressEntry{{"code", "C:\n", "AAAAAAAAAA\n"}, {"memory", "M:\n", "y\n"}}, 394, "M:\ny\n", 1},
+		{nil, 1000, "", 0},
+	} {
+		got, omitted := ingressRenderBlock(test.entries, test.budget, 0)
+		if got != test.want || omitted != test.omitted {
+			t.Fatalf("got %q (%d), want %q (%d)", got, omitted, test.want, test.omitted)
+		}
+	}
+}
+
+func TestIngressEnvelopeNoInstructionsAndConfidenceBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		score float64
+		band  string
+	}{{0, "low"}, {.329999, "low"}, {.33, "medium"}, {.659999, "medium"}, {.66, "high"}, {1, "high"}} {
+		block := "recommended:\n  - src/a.c::f"
+		want := "<aimee-context confidence=\"" + test.band + "\">\n" + block + "\n</aimee-context>"
+		if got := ingressEnvelope(block, test.score); got != want {
+			t.Fatal(got)
+		}
+		if got := ingressEnvelope(block+"\n", test.score); got != want {
+			t.Fatal("extra newline", got)
+		}
+	}
+	for _, block := range []string{"", " \t\n\r "} {
+		if got := ingressEnvelope(block, 1); got != "" {
+			t.Fatal(got)
+		}
+	}
+}
+
+func TestIngressAssemblyBothPlacementsAndExactIDs(t *testing.T) {
+	request := `{"operation":"ingress-assemble","budget":2000,"code":[{"file_path":"file.go","snippet":"<x>\n\t&","line":42}],
+"memories":[{"id":"9223372036854775807","key":"a<b","headline":"summary","score":0.88},
+{"id":"102","content":"fallback","score":0.44}],"facts_requested":true,"facts_response":{"status":"ok","facts":"fact"},
+"temporal":"temporal\n","audit":"audit"}`
+	for _, placement := range []Placement{PlacementKB, PlacementServer} {
+		handler := NewHandler(nil, WithDataStore(placement, nil))
+		r := runHostRuntime(t, handler, request)
+		block := r["block"].(string)
+		for _, want := range []string{"recommended (code):\n  - file.go\n    > &lt;x&gt; &amp;\n",
+			"memory:9223372036854775807 a&lt;b [?/memory score=0.880 headline_missing=false]",
+			"memory:102 [?/memory score=0.440 headline_missing=true]", "## Known facts\nfact\n",
+			"recommended (temporal learning):\ntemporal\n", "recommended (audit context):\naudit\n"} {
+			if !strings.Contains(block, want) {
+				t.Fatal(want, block)
+			}
+		}
+		if !strings.HasPrefix(r["envelope"].(string), `<aimee-context confidence="medium">`) ||
+			r["headline_missing_count"] != float64(1) || r["facts_unavailable"] != false {
+			t.Fatal(r)
+		}
+		frame, _ := bus.EncodeCommand("runtime", []byte(request))
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal(status)
+		}
+	}
+}
+
+func TestIngressAssemblyFoldingAndBounds(t *testing.T) {
+	request := ingressAssemblyRequest{Budget: 2000, Compress: true, Code: []ingressCodeHit{
+		{FilePath: "fold.go", Snippet: strings.Repeat("é", 50), Line: 42},
+		{FilePath: "no-line.go", Snippet: strings.Repeat("é", 90)},
+		{FilePath: "short.go", Snippet: "short", Line: 1},
+	}}
+	r, err := ingressAssemble(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := r["block"].(string)
+	if !strings.Contains(block, "code — expand via code_span_get") || !strings.Contains(block, "fold.go:42\n") ||
+		!strings.Contains(block, "no-line.go\n    > ") || !strings.Contains(block, "short.go\n    > short") ||
+		r["folded_count"] != 1 || r["folded_saved"] != 100 || !utf8.ValidString(block) {
+		t.Fatal(r)
+	}
+	request.Compress = false
+	r, _ = ingressAssemble(request)
+	if strings.Contains(r["block"].(string), "fold.go:42") || r["folded_count"] != 0 {
+		t.Fatal(r)
+	}
+	request.Budget = 384
+	r, _ = ingressAssemble(request)
+	if r["block"] != "" || r["envelope"] != "" || r["omitted_count"] != 3 {
+		t.Fatal(r)
+	}
+	request.Code = make([]ingressCodeHit, 7)
+	if _, err := ingressAssemble(request); err == nil {
+		t.Fatal("unbounded code accepted")
+	}
+	request.Code = nil
+	request.Memories = make([]ingressMemoryPreview, 6)
+	if _, err := ingressAssemble(request); err == nil {
+		t.Fatal("unbounded memories accepted")
+	}
+}
+
+func TestIngressAssemblyFactsFailureAndTaskConfidence(t *testing.T) {
+	for _, facts := range []string{`null`, `{"status":"error","facts":"must not inject"}`, `{"status":"ok","facts":1}`, `{}`} {
+		r, err := ingressAssemble(ingressAssemblyRequest{TaskBlock: "task\n", TaskConfidence: .95, FactsRequested: true, FactsResponse: json.RawMessage(facts)})
+		if err != nil || r["facts_unavailable"] != true || strings.Contains(r["block"].(string), "Known facts") ||
+			!strings.HasPrefix(r["envelope"].(string), `<aimee-context confidence="high">`) {
+			t.Fatal(facts, r, err)
+		}
+	}
+	r, err := ingressAssemble(ingressAssemblyRequest{FactsRequested: true, FactsResponse: json.RawMessage(`{"status":"ok","facts":""}`)})
+	if err != nil || r["facts_unavailable"] != false || r["envelope"] != "" {
+		t.Fatal(r, err)
+	}
+	if _, err := ingressAssemble(ingressAssemblyRequest{Memories: []ingressMemoryPreview{{ID: "9223372036854775808"}}}); err == nil {
+		t.Fatal("overflow identity accepted")
+	}
+}

@@ -110,83 +110,30 @@ static int queue_main_index_scan_if_needed(const char *project, const char *root
 
 /* Build condensed session context from rules, CLAUDE.md, key facts, and
  * delegation hints. Caller owns the returned string (may be empty). */
-/* Per-section scope-rank filter + qsort + render. The caller supplies
- * the candidate memory rows (already ordered by db2 priority); we
- * compute scope visibility per id, drop rows outside [min_rank,
- * max_rank], stable-sort by rank then arrival order, and emit up to
- * |limit| rows under |header|. */
-typedef struct
+/* The session host supplies scope and remaining space; Go selects and renders. */
+static size_t session_append_memory_section(char *buf, size_t pos, size_t cap, const char *section)
 {
-   int64_t id;
-   int scope_rank;
-   int ordinal;
-   char key[128];
-   char content[384];
-   char kind[32];
-} session_scope_item_t;
-
-static int session_scope_item_cmp(const void *a, const void *b)
-{
-   const session_scope_item_t *lhs = a;
-   const session_scope_item_t *rhs = b;
-   if (lhs->scope_rank != rhs->scope_rank)
-      return rhs->scope_rank - lhs->scope_rank;
-   return lhs->ordinal - rhs->ordinal;
-}
-
-static size_t session_append_scope_section(const memory_t *rows, int n_rows, char *buf, size_t pos,
-                                           size_t cap, const char *header, const char *workspace,
-                                           const char *project, int min_rank, int max_rank,
-                                           int limit)
-{
-   session_scope_item_t items[32];
-   int item_count = 0;
-   int max_items = (int)(sizeof(items) / sizeof(items[0]));
-
-   /* Batch the per-row visibility rank lookup into a single aimee-kb RPC. */
-   int n_lookup = n_rows < max_items ? n_rows : max_items;
-   int64_t lookup_ids[32];
-   int lookup_ranks[32] = {0};
-   for (int i = 0; i < n_lookup; i++)
-      lookup_ids[i] = rows[i].id;
-   if (n_lookup > 0)
-      kb_client_memory_scope_visibility_rank(lookup_ids, n_lookup, workspace, project,
-                                             lookup_ranks);
-
-   for (int i = 0; i < n_rows && item_count < max_items; i++)
-   {
-      int rank = (i < n_lookup) ? lookup_ranks[i] : 0;
-      if (rank < min_rank || rank > max_rank)
-         continue;
-
-      items[item_count].id = rows[i].id;
-      items[item_count].scope_rank = rank;
-      items[item_count].ordinal = i;
-      snprintf(items[item_count].key, sizeof(items[item_count].key), "%s", rows[i].key);
-      snprintf(items[item_count].content, sizeof(items[item_count].content), "%s", rows[i].content);
-      snprintf(items[item_count].kind, sizeof(items[item_count].kind), "%s", rows[i].kind);
-      item_count++;
-   }
-
-   if (item_count == 0)
+   if (pos >= cap || cap - pos <= 1)
       return pos;
-
-   qsort(items, (size_t)item_count, sizeof(items[0]), session_scope_item_cmp);
-
-   ctx_appendf(buf, cap, &pos, "%s\n", header);
-   int emitted = 0;
-   for (int i = 0; i < item_count && emitted < limit && pos < cap - 512; i++)
-   {
-      const char *text = items[i].content[0] ? items[i].content : items[i].key;
-      if (items[i].kind[0])
-         ctx_appendf(buf, cap, &pos, "- [%s] %.300s\n", items[i].kind, text);
-      else
-         ctx_appendf(buf, cap, &pos, "- %.300s\n", text);
-      emitted++;
-   }
-
-   if (emitted > 0)
-      ctx_appendf(buf, cap, &pos, "\n");
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "view", "session");
+   cJSON_AddStringToObject(request, "section", section);
+   cJSON_AddNumberToObject(request, "budget_bytes", (double)(cap - pos - 1));
+   cJSON_AddNumberToObject(request, "max", !strcmp(section, "facts") ? 15 : 24);
+   char *raw = kb_v1_action_request(
+       !strcmp(section, "facts") ? "memory.top_l2_facts" : "memory.list_session_scope_priority",
+       request);
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   const cJSON *status = cJSON_GetObjectItemCaseSensitive(reply, "status");
+   const cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "text");
+   if (cJSON_IsString(status) && !strcmp(status->valuestring, "ok") && cJSON_IsString(text) &&
+       strlen(text->valuestring) < cap - pos)
+      ctx_appendf(buf, cap, &pos, "%s", text->valuestring);
+   else
+      ctx_appendf(buf, cap, &pos, "[Memory context unavailable]\n");
+   cJSON_Delete(reply);
    return pos;
 }
 
@@ -387,20 +334,7 @@ static char *build_session_context(const char *client_cwd)
    /* Key infrastructure facts (top 5 most-used) */
    if (verbose)
    {
-      memory_t facts[15];
-      int n_facts = kb_client_memory_top_l2_facts(facts, (int)(sizeof(facts) / sizeof(facts[0])));
-      int has_facts = 0;
-      for (int i = 0; i < n_facts && pos < cap - 600; i++)
-      {
-         if (!has_facts)
-         {
-            ctx_appendf(buf, cap, &pos, "# Key Facts\n");
-            has_facts = 1;
-         }
-         ctx_appendf(buf, cap, &pos, "- %s: %.300s\n", facts[i].key, facts[i].content);
-      }
-      if (has_facts)
-         ctx_appendf(buf, cap, &pos, "\n");
+      pos = session_append_memory_section(buf, pos, cap, "facts");
    }
 
    /* Open commitments + unresolved directives — phase-2-step-2 recall.
@@ -476,45 +410,9 @@ static char *build_session_context(const char *client_cwd)
          {
             int has_section = 0;
 
-            /* Canonical project/workspace-visible memories. */
-            memory_t scope_rows[24];
-            int n_scope = kb_client_memory_list_session_scope_priority(
-                scope_rows, (int)(sizeof(scope_rows) / sizeof(scope_rows[0])));
-            if (n_scope > 0)
-            {
-               size_t next = session_append_scope_section(
-                   scope_rows, n_scope, buf, pos, cap,
-                   project_name[0] ? "# Project Context" : "# Workspace Context",
-                   workspace_name[0] ? workspace_name : NULL, project_name[0] ? project_name : NULL,
-                   2, 3, 10);
-               has_section = next != pos;
-               pos = next;
-            }
-
-            /* Fallback: LIKE matching for memories not yet workspace-tagged */
-            if (!has_section && project_name[0])
-            {
-               char like_pattern[256];
-               snprintf(like_pattern, sizeof(like_pattern), "%%%s%%", project_name);
-
-               memory_t like_rows[5];
-               int n_like = kb_client_memory_list_session_scope_priority_like(
-                   like_pattern, like_rows, (int)(sizeof(like_rows) / sizeof(like_rows[0])));
-               for (int i = 0; i < n_like && pos < cap - 512; i++)
-               {
-                  if (!has_section)
-                  {
-                     ctx_appendf(buf, cap, &pos, "# Project Context (%s)\n", project_name);
-                     has_section = 1;
-                  }
-                  const char *text =
-                      like_rows[i].content[0] ? like_rows[i].content : like_rows[i].key;
-                  if (like_rows[i].kind[0])
-                     ctx_appendf(buf, cap, &pos, "- [%s] %.300s\n", like_rows[i].kind, text);
-                  else
-                     ctx_appendf(buf, cap, &pos, "- %.300s\n", text);
-               }
-            }
+            size_t next = session_append_memory_section(buf, pos, cap, "project");
+            has_section = next != pos;
+            pos = next;
 
             /* Index stats for this project */
             int file_count = 0;
@@ -541,22 +439,7 @@ static char *build_session_context(const char *client_cwd)
    /* Shared/global context resolved through canonical scope visibility. */
    if (verbose)
    {
-      memory_t scope_rows[24];
-      int n_scope = kb_client_memory_list_session_scope_priority(
-          scope_rows, (int)(sizeof(scope_rows) / sizeof(scope_rows[0])));
-      if (n_scope > 0)
-      {
-         char cwd[MAX_PATH_LEN];
-         char workspace_name[MAX_PATH_LEN] = "";
-         char project_name[MAX_PATH_LEN] = "";
-         session_context_resolve_cwd(client_cwd, cwd, sizeof(cwd));
-         if (cwd[0])
-            hook_scope_labels_for_cwd(cwd, workspace_name, sizeof(workspace_name), project_name,
-                                      sizeof(project_name));
-         pos = session_append_scope_section(scope_rows, n_scope, buf, pos, cap, "# Shared Context",
-                                            workspace_name[0] ? workspace_name : NULL,
-                                            project_name[0] ? project_name : NULL, 1, 1, 5);
-      }
+      pos = session_append_memory_section(buf, pos, cap, "shared");
    }
 
    /* Sub-agent delegation (IMPORTANT) */
@@ -700,7 +583,10 @@ void prune_stale_sessions(void)
          continue;
 
       /* Fold this session's L0 memories into L1 (runs inside aimee-kb). */
-      kb_client_memory_fold_session(stale_sid);
+      cJSON *fold_request = cJSON_CreateObject();
+      cJSON_AddStringToObject(fold_request, "session_id", stale_sid);
+      char *fold_response = kb_v1_action_request("maintenance.fold_session", fold_request);
+      free(fold_response);
       did_maintenance = 1;
 
       /* Remove worktrees for this session */
@@ -721,11 +607,11 @@ void prune_stale_sessions(void)
       /* Expire session directives */
       kb_client_directive_expire_session();
 
-      /* Legacy monolithic command path. Shipped client requests route through
-       * aimee-server; the server RPC port must split DB1 reads from DB2 writes
-       * before this maintenance can be exposed through shipped surfaces. */
-      int promoted = 0, demoted = 0, expired = 0;
-      memory_run_maintenance(&promoted, &demoted, &expired);
+      cJSON *maintenance_args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(maintenance_args, "modes", 1);
+      cJSON_AddBoolToObject(maintenance_args, "force", 1);
+      char *maintenance_reply = kb_v1_action_request("memory.maintenance_run", maintenance_args);
+      free(maintenance_reply);
 
       /* Extract anti-patterns */
       kb_client_anti_pattern_extract_from_feedback();

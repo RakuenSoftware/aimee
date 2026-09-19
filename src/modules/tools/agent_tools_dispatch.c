@@ -6,6 +6,7 @@
 #include "agent_tools_internal.h"
 #include "aimee_home.h"
 #include "log.h"
+#include "json_fluent.h"
 #include "economizer.h"
 #include "tool_args_coerce.h"
 #include "sandbox_learned.h"
@@ -1326,12 +1327,32 @@ static char *td_search_memory(cJSON *args, const char *name, const char *dispatc
    }
    else
    {
-      memory_t facts[20];
-      int count = kb_client_memory_find_facts(q->valuestring, 20, facts, 20);
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "query", q->valuestring);
+      cJSON_AddNumberToObject(request, "limit", 20);
+      cJSON_AddStringToObject(request, "format", "tool");
+      char *raw = kb_v1_action_request("memory.find_facts", request);
       kb_client_result_status_t status = kb_client_last_result_status();
+      cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+      free(raw);
+      const cJSON *count_json = cJSON_GetObjectItemCaseSensitive(reply, "count");
+      const cJSON *text_json = cJSON_GetObjectItemCaseSensitive(reply, "text");
+      int valid = !strcmp(jo_cstr(reply, "status"), "ok") && cJSON_IsNumber(count_json) &&
+                  count_json->valuedouble >= 0 && cJSON_IsString(text_json);
+      if (valid && count_json->valuedouble > 0)
+      {
+         result = safe_strdup(text_json->valuestring);
+         cJSON_Delete(reply);
+         return result;
+      }
+      if (valid)
+         status = KB_CLIENT_RESULT_EMPTY;
+      else if (status == KB_CLIENT_RESULT_OK || status == KB_CLIENT_RESULT_EMPTY)
+         status = KB_CLIENT_RESULT_UNAVAILABLE;
+      cJSON_Delete(reply);
       char buf[8192];
       int pos = 0;
-      if (count <= 0)
       {
          td_retrieval_outcome_t outcome = TD_RETRIEVAL_FAILED;
          const char *message = "memory retrieval failed";
@@ -1359,13 +1380,6 @@ static char *td_search_memory(cJSON *args, const char *name, const char *dispatc
          if (contract && pos < (int)sizeof(buf) - 2)
             pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "\n%s", contract);
          free(contract);
-      }
-      else
-      {
-         pos += snprintf(buf, sizeof(buf), "Found %d fact(s):\n\n", count);
-         for (int i = 0; i < count && pos < (int)sizeof(buf) - 512; i++)
-            pos += snprintf(buf + pos, sizeof(buf) - pos, "- **%s** [%s/%s]: %s\n", facts[i].key,
-                            facts[i].tier, facts[i].kind, facts[i].content);
       }
       result = safe_strdup(buf);
    }

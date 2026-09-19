@@ -93,12 +93,19 @@ func TestDeclareCommandsRejectsMalformed(t *testing.T) {
 	for _, bad := range [][]byte{
 		nil,
 		make([]byte, 4),
+		append(declareRequest(), 0),
 		func() []byte { b := declareRequest(); binary.LittleEndian.PutUint32(b[0:4], 0xdeadbeef); return b }(),
 		func() []byte { b := declareRequest(); binary.LittleEndian.PutUint32(b[4:8], 99); return b }(),
 	} {
 		if _, status := handleDeclareCommands(bus.ModuleInvocation{}, bad); status == bus.ModuleStatusOK {
 			t.Fatalf("malformed request accepted: %v", bad)
 		}
+	}
+}
+
+func TestDeclareCommandsHonorsExpiredInvocation(t *testing.T) {
+	if _, status := handleDeclareCommands(bus.ModuleInvocation{StageID: StageDeclareCommands, DeadlineNS: 1}, declareRequest()); status != bus.ModuleStatusCancelled {
+		t.Fatalf("expired command declaration status = %v", status)
 	}
 }
 

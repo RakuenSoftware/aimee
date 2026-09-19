@@ -29,8 +29,7 @@ SRC = ROOT / "src"
 # Every entry here is consumed by db2 code, which links only into aimee-kb, so
 # each must be registered by a kb source.
 DB2_CONSUMED_SEAMS = {
-    "memory_pii_register_turn_classifier": "memory_pii_turn_requests_sensitive",
-    "memory_pii_register_sensitivity_batch": "memory_pii_rel_sensitivity",
+    # Fact ingestion now runs entirely in Go; no native policy callback remains.
 }
 
 KB = SRC / "kb"
@@ -51,6 +50,10 @@ def main() -> int:
     db2_text = text_of(DB2)
 
     failures = []
+    retired = ("aimee_db2_register_fact_gate_provider", "db2_fact_commit_with_actor")
+    for symbol in retired:
+        if re.search(rf"\b{symbol}\s*\(", kb_text + db2_text):
+            failures.append(f"  retired native fact policy returned: {symbol}; use the Go memory owner")
     for seam, consumer in sorted(DB2_CONSUMED_SEAMS.items()):
         if not re.search(rf"\b{re.escape(consumer)}\s*\(", db2_text):
             failures.append(f"  {seam}: db2 no longer calls {consumer}(); "
@@ -70,7 +73,7 @@ def main() -> int:
               "\nin kb_module_stage_adapters.c, or delete the seam.", file=sys.stderr)
         return 1
 
-    print(f"check-provider-seams: ok ({len(DB2_CONSUMED_SEAMS)} kb-consumed seam(s) registered)")
+    print(f"check-provider-seams: ok ({len(DB2_CONSUMED_SEAMS)} kb-consumed seam(s) registered; retired fact policy absent)")
     return 0
 
 

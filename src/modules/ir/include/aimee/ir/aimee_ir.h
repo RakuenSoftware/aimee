@@ -308,6 +308,10 @@ int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const c
  * blocks). Returns the number of chars written (excluding NUL), or 0 if none. */
 size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n);
 
+/* Remove strictly descending tool indices after validating the entire patch.
+ * Returns the number removed, or -1 without mutation for an invalid patch. */
+int aimee_ir_remove_tools(aimee_request_t *request, const struct cJSON *indices);
+
 /* ---- response-side accessors (delegate/core stages read these) ----
  *
  * The request side has had aimee_ir_last_user_text since slice 0; the response

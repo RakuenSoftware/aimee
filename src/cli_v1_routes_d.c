@@ -2290,14 +2290,30 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
    const int is_pathid_route =
        cli_v1_pathid_route_for_method(disp_method, NULL, NULL, NULL) != NULL;
 
-   char *http_body = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
    /* Transport target: a configured remote /v1 endpoint ("tcp:host:port" /
     * "unix:path", authed by its bearer) reaches an aimee-server on another host;
     * otherwise the co-located server over the local aimee-http.sock. Windows is
     * always remote (resolved from --server / AIMEE_SERVER_URL inside cli_v1_send). */
    char *remote = cli_v1_client_endpoint();
    char *bearer = remote ? cli_v1_client_bearer() : NULL;
+   /* Run after either native or server-advertised argspec marshalling, so both
+    * paths carry the same inferred scope. Keep cwd intact for file requests. */
+   char *worktree_root = cli_index_worktree_root(disp_method, req);
+   if (worktree_root)
+   {
+      const char *list_verb = NULL;
+      const char *list_path = cli_v1_route_for_method("index.list", &list_verb);
+      int list_status = 0;
+      cJSON *projects =
+          list_path ? cli_v1_send(remote, bearer, list_verb, list_path, "{}", 5000, &list_status)
+                    : NULL;
+      if (list_status >= 200 && list_status < 300)
+         cli_index_apply_worktree_project(req, worktree_root, projects);
+      cJSON_Delete(projects);
+      free(worktree_root);
+   }
+   char *http_body = cJSON_PrintUnformatted(req);
+   cJSON_Delete(req);
    int http_status = 0; /* last HTTP status from the REST send (0 for the async path) */
 
    if (http_body && async_path)

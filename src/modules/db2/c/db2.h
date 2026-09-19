@@ -85,13 +85,11 @@ extern "C"
  * already include memory.h. Callers include "kind_lifecycle.h"
  * directly when they need db2_kind_lifecycle_load. */
 #include "memory_payload.h"
-#include "memory_scenes.h"
 #include "notes.h"
 #include "rules.h"
 #include "stopwords.h"
 #include "tasks.h"
 #include "tool_registry.h"
-#include "trace_mining.h"
 
 #ifdef __cplusplus
 }

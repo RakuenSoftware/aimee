@@ -84,15 +84,6 @@ int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit
 int pgvec_scroll(const char *table, int64_t offset, int64_t *ids_out, int max,
                  int64_t *next_offset_out, int *done_out);
 
-/* Search memory_embeddings by cosine distance.
- * record_type: required equality filter.
- * kinds/n_kinds: optional IN filter on the kind column (NULL/0 = no filter).
- * workspace/project: optional scope OR filter; pass "" to skip.
- * Returns number of results written (<= max), -1 on error. */
-int pgvec_memory_search(const float *vec, int dim, const char *record_type,
-                        const char *const *kinds, int n_kinds, const char *workspace,
-                        const char *project, int limit, int64_t *ids, double *scores, int max);
-
 /* Search kb_embeddings by cosine distance, filtered to a project.
  * Returns number of results written (<= max), -1 on error. */
 int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,

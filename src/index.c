@@ -6,7 +6,7 @@
 #include "modules/db2/c/css_graph.h"
 #include "modules/db2/c/entity_edges.h"
 #include "modules/db2/c/kb_runtime_state.h" /* co-change backfill idempotency marker */
-#include "modules/memory/memory_ontology.h" /* REL_CO_EDITED / NODE_FILE */
+#include "modules/db2/c/graph_kinds.h"      /* REL_CO_EDITED / NODE_FILE */
 #include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>

@@ -1,3 +1,4 @@
+#include "modules/kb_client/kb_client_pii.h"
 /* server_mcp.c: handle mcp.call -- dispatches MCP tool calls within the server */
 #include "server_mcp_internal.h"
 #include "server.h"
@@ -261,31 +262,6 @@ cJSON *tool_get_help(cJSON *args)
    return result;
 }
 
-/* Extract scope_type + scope_value from a canonical filter object.
- * Priority: workspace > project > session > user. */
-static void parse_filter_scope(cJSON *filter, const char **scope_type, const char **scope_value)
-{
-   *scope_type = NULL;
-   *scope_value = NULL;
-   if (!cJSON_IsObject(filter))
-      return;
-   cJSON *scope = cJSON_GetObjectItemCaseSensitive(filter, "scope");
-   if (!cJSON_IsObject(scope))
-      return;
-   static const char *keys[] = {"workspace", "project", "session", "user", NULL};
-   for (int i = 0; keys[i]; i++)
-   {
-      cJSON *jv = cJSON_GetObjectItemCaseSensitive(scope, keys[i]);
-      if (cJSON_IsString(jv) && jv->valuestring[0] && strcmp(jv->valuestring, "any") != 0 &&
-          strcmp(jv->valuestring, "current") != 0)
-      {
-         *scope_type = keys[i];
-         *scope_value = jv->valuestring;
-         return;
-      }
-   }
-}
-
 void mcp_memory_scope_begin(cJSON *args, int *active_context_missing)
 {
    char workspace[MAX_PATH_LEN] = "";
@@ -359,43 +335,32 @@ cJSON *tool_search_memory(cJSON *args)
       return json_result_content(reply);
    }
 
-   const char *scope_type = NULL;
-   const char *scope_value = NULL;
-   cJSON *jf = cJSON_GetObjectItemCaseSensitive(args, "filter");
-   parse_filter_scope(jf, &scope_type, &scope_value);
-
-   memory_t facts[20];
-   /* Graph-code fusion is always on for recall. */
-   int count;
-   int active_context_missing = 0;
-   if (scope_type && scope_type[0])
-      count = kb_client_memory_find_facts_scoped_ex(jq->valuestring, scope_type, scope_value, 20,
-                                                    facts, 20, "on");
-   else
-   {
-      mcp_memory_scope_begin(args, &active_context_missing);
-      count = kb_client_memory_find_facts_visible(jq->valuestring, NULL, NULL, 20, facts, 20);
-      mcp_memory_scope_end();
-   }
-   if (count < 0)
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "query", jq->valuestring);
+   cJSON_AddStringToObject(request, "format", "mcp");
+   cJSON_AddNumberToObject(request, "limit", 20);
+   const cJSON *filter = cJSON_GetObjectItemCaseSensitive(args, "filter");
+   if (filter)
+      cJSON_AddItemToObject(request, "filter", cJSON_Duplicate(filter, 1));
+   mcp_memory_scope_begin(args, NULL);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.find_facts_visible", request);
+   mcp_memory_scope_end();
+   cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   if (!reply)
       return kb_last_result_content("knowledge service memory search failed");
-
-   char buf[8192];
-   int pos = 0;
-   if (active_context_missing)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
-                        "Active project context is unavailable; showing shared/global memory "
-                        "only.\n\n");
-   if (count == 0)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No facts found for '%s'", jq->valuestring);
-   else
+   if (strcmp(jo_cstr(reply, "status"), "ok") != 0)
+      return json_result_content(reply);
+   const cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "text");
+   if (!cJSON_IsString(text))
    {
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Found %d fact(s):\n\n", count);
-      for (int i = 0; i < count && pos < (int)sizeof(buf) - 512; i++)
-         pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- **%s** [%s/%s]: %s\n", facts[i].key,
-                           facts[i].tier, facts[i].kind, facts[i].content);
+      cJSON_Delete(reply);
+      return text_content("error: memory search returned invalid output");
    }
-   return text_content(buf);
+   cJSON *content = text_content(text->valuestring);
+   cJSON_Delete(reply);
+   return content;
 }
 
 cJSON *tool_memory_mutate(cJSON *args)
@@ -424,345 +389,342 @@ cJSON *tool_memory_mutate(cJSON *args)
          return json_result_content(memory_delete_command(args, ""));
       if (strcmp(verb, "update") != 0 && strcmp(verb, "supersede") != 0)
          return text_content("error: this mutation requires store=kb");
-      int64_t id;
-      const char *content = jo_str(args, "content", "");
-      if (memory_request_positive_id(args, "id", &id) != 0 || !content[0])
-         return text_content("error: update requires a positive id and content");
-      cJSON *request = cJSON_CreateObject();
-      cJSON_AddStringToObject(request, "operation", "supersede");
-      cJSON_AddNumberToObject(request, "id", (double)id);
-      cJSON_AddStringToObject(request, "content", content);
-      cJSON_AddNumberToObject(request, "confidence", jo_num(args, "confidence", 1));
-      cJSON *reply = server_module_memory_data(request);
-      cJSON_Delete(request);
-      if (!reply)
-         return text_content("error: user memory unavailable");
-      cJSON *records = cJSON_GetObjectItemCaseSensitive(reply, "records");
-      if (!cJSON_IsArray(records) || cJSON_GetArraySize(records) == 0)
+      cJSON *reply = server_invoke_module_operation("memory.runtime", "user-mcp-supersede", args,
+                                                    "user memory unavailable");
+      const char *raw = jo_str(reply, "json", NULL);
+      if (!raw)
+         return json_result_content(reply);
+      cJSON *content = text_content(raw);
+      cJSON_Delete(reply);
+      return content;
+   }
+
+   const char *method = NULL;
+   if (!strcmp(verb, "store"))
+      method = "memory.store";
+   else if (!strcmp(verb, "update"))
+      method = "memory.update";
+   else if (!strcmp(verb, "supersede"))
+      method = "memory.supersede";
+   else if (!strcmp(verb, "forget"))
+      method = "memory.delete";
+   else if (!strcmp(verb, "affirm"))
+      method = "memory.touch";
+   else if (!strcmp(verb, "reject"))
+      method = "memory.reject";
+   if (!method)
+      return text_content("error: unknown memory mutation verb");
+   cJSON *request = cJSON_CreateObject();
+   const char *fields[] = {"id", "key", "content", "tier", "kind", "confidence", "reason", NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(args, fields[i]);
+      if (value)
       {
-         cJSON_Delete(reply);
-         return text_content("error: user memory not found");
+         const char *field = fields[i];
+         if (!strcmp(verb, "supersede"))
+         {
+            if (!strcmp(field, "id"))
+               field = "old_id";
+            if (!strcmp(field, "content"))
+               field = "new_content";
+         }
+         cJSON_AddItemToObject(request, field, cJSON_Duplicate(value, 1));
       }
-      cJSON_AddStringToObject(reply, "store", "user");
+   }
+   cJSON_AddStringToObject(request, "view", "mcp");
+   /* This host seam represents model actions. Caller-supplied authority is
+    * never copied; the Go owner applies admission and renders exact IDs. */
+   mcp_memory_scope_begin(args, NULL);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request(method, request);
+   mcp_memory_scope_end();
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   if (!reply)
+      return kb_last_result_content("memory mutation unavailable");
+   if (strcmp(jo_cstr(reply, "status"), "ok"))
       return json_result_content(reply);
-   }
-
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(args, "id");
-   cJSON *jky = cJSON_GetObjectItemCaseSensitive(args, "key");
-   cJSON *jct = cJSON_GetObjectItemCaseSensitive(args, "content");
-   cJSON *jti = cJSON_GetObjectItemCaseSensitive(args, "tier");
-   cJSON *jkn = cJSON_GetObjectItemCaseSensitive(args, "kind");
-   cJSON *jcf = cJSON_GetObjectItemCaseSensitive(args, "confidence");
-   cJSON *jre = cJSON_GetObjectItemCaseSensitive(args, "reason");
-
-   int64_t id = cJSON_IsNumber(jid) ? (int64_t)jid->valuedouble : 0;
-   const char *key = cJSON_IsString(jky) ? jky->valuestring : NULL;
-   const char *content = cJSON_IsString(jct) ? jct->valuestring : NULL;
-   const char *tier = (cJSON_IsString(jti) && jti->valuestring[0]) ? jti->valuestring : "L2";
-   const char *kind = (cJSON_IsString(jkn) && jkn->valuestring[0]) ? jkn->valuestring : "fact";
-   double confidence = cJSON_IsNumber(jcf) ? jcf->valuedouble : 1.0;
-   const char *reason = cJSON_IsString(jre) ? jre->valuestring : NULL;
-
-   char buf[256];
-   if (strcmp(verb, "store") == 0)
-   {
-      if (!key || !content)
-         return text_content("error: store requires 'key' and 'content'");
-      memory_t out;
-      memset(&out, 0, sizeof(out));
-      mcp_memory_scope_begin(args, NULL);
-      int rc = kb_client_memory_insert(tier, kind, key, content, confidence, NULL, &out);
-      mcp_memory_scope_end();
-      if (rc != 0)
-         return text_content("error: store failed");
-      snprintf(buf, sizeof(buf), "stored memory id=%lld key=%s", (long long)out.id, key);
-   }
-   else if (strcmp(verb, "update") == 0)
-   {
-      /* MODEL authority: this seam is reached only by an agent calling the MCP
-       * tool, never by the user directly, so the prior content is versioned
-       * rather than overwritten. `update` is the verb an LLM naturally reaches
-       * for when a fact changed, so it fires more often than `forget` does. */
-      if (id <= 0 || !content)
-         return text_content("error: update requires 'id' and 'content'");
-      int64_t new_id = 0;
-      mcp_memory_scope_begin(args, NULL);
-      int update_rc = kb_client_memory_update_as(id, content, MEMORY_AUTHORITY_MODEL, &new_id);
-      mcp_memory_scope_end();
-      if (update_rc != 0)
-         return text_content("error: update failed");
-      if (new_id > 0 && new_id != id)
-         snprintf(buf, sizeof(buf),
-                  "updated memory id=%lld (previous content kept as a version; "
-                  "current value is now id=%lld)",
-                  (long long)id, (long long)new_id);
-      else
-         snprintf(buf, sizeof(buf), "updated memory id=%lld", (long long)id);
-   }
-   else if (strcmp(verb, "supersede") == 0)
-   {
-      if (id <= 0 || !content)
-         return text_content("error: supersede requires 'id' and 'content'");
-      memory_t out;
-      memset(&out, 0, sizeof(out));
-      mcp_memory_scope_begin(args, NULL);
-      int supersede_rc = kb_client_memory_supersede(id, content, confidence, NULL, &out);
-      mcp_memory_scope_end();
-      if (supersede_rc != 0)
-         return text_content("error: supersede failed");
-      snprintf(buf, sizeof(buf), "superseded id=%lld new id=%lld", (long long)id,
-               (long long)out.id);
-   }
-   else if (strcmp(verb, "forget") == 0)
-   {
-      /* MODEL authority: retire, do not destroy. The memory stops answering
-       * recall under its key but stays readable through fact history, so a
-       * mistaken forget is recoverable. Only a user/operator path — which must
-       * additionally clear CAP_MEMORY_ADMIN — hard-deletes. */
-      if (id <= 0)
-         return text_content("error: forget requires 'id'");
-      mcp_memory_scope_begin(args, NULL);
-      int forget_rc = kb_client_memory_delete_as(id, MEMORY_AUTHORITY_MODEL);
-      mcp_memory_scope_end();
-      if (forget_rc != 0)
-         return text_content("error: forget failed");
-      snprintf(buf, sizeof(buf),
-               "forgot memory id=%lld (retired, not destroyed: it no longer "
-               "answers recall but remains in fact history)",
-               (long long)id);
-   }
-   else if (strcmp(verb, "affirm") == 0)
-   {
-      if (id <= 0)
-         return text_content("error: affirm requires 'id'");
-      mcp_memory_scope_begin(args, NULL);
-      int affirm_rc = kb_client_memory_touch(id);
-      mcp_memory_scope_end();
-      if (affirm_rc != 0)
-         return text_content("error: affirm failed");
-      snprintf(buf, sizeof(buf), "affirmed memory id=%lld", (long long)id);
-   }
-   else if (strcmp(verb, "reject") == 0)
-   {
-      if (id <= 0)
-         return text_content("error: reject requires 'id'");
-      mcp_memory_scope_begin(args, NULL);
-      int reject_rc = kb_client_memory_reject(id, reason);
-      mcp_memory_scope_end();
-      if (reject_rc != 0)
-         return text_content("error: reject failed");
-      snprintf(buf, sizeof(buf), "rejected memory id=%lld", (long long)id);
-   }
-   else
-   {
-      snprintf(buf, sizeof(buf), "error: unknown verb '%s'", verb);
-   }
-   return text_content(buf);
+   const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "text"));
+   cJSON *content = text_content(text ? text : "error: invalid memory mutation output");
+   cJSON_Delete(reply);
+   return content;
 }
 
 cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
 {
    cJSON *jq = cJSON_GetObjectItemCaseSensitive(args, "query");
-   cJSON *jl = cJSON_GetObjectItemCaseSensitive(args, "limit");
    if (!cJSON_IsString(jq))
       return text_content("error: missing 'query' parameter");
-
-   memory_answer_result_t result;
-   memset(&result, 0, sizeof(result));
-   int limit = cJSON_IsNumber(jl) ? jl->valueint : 5;
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);
-   int ask_rc = kb_client_memory_ask(jq->valuestring, NULL, NULL, limit, &result);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "query", jq->valuestring);
+   cJSON_AddNumberToObject(request, "limit", jo_int(args, "limit", 5));
+   char *raw = kb_v1_action_request("memory.ask", request);
    mcp_memory_scope_end();
-   if (ask_rc != 0)
-      return kb_last_result_content(result.error[0] ? result.error : "memory_ask failed");
-
-   cJSON *structured = cJSON_CreateObject();
-   if (!structured)
-      return text_content("error: out of memory");
-   cJSON_AddStringToObject(structured, "status", result.no_answer ? "abstained" : "ok");
-   cJSON_AddStringToObject(structured, "query", jq->valuestring);
-   cJSON_AddStringToObject(structured, "answer", result.answer);
-   cJSON_AddNumberToObject(structured, "confidence", result.confidence);
-   cJSON_AddStringToObject(structured, "evidence_mode", result.evidence_mode);
-   cJSON_AddBoolToObject(structured, "no_answer", result.no_answer);
-   cJSON_AddBoolToObject(structured, "low_confidence", result.low_confidence);
-   cJSON_AddBoolToObject(structured, "active_context_missing", active_context_missing);
-   cJSON *trace = cJSON_AddObjectToObject(structured, "evidence_trace");
-   if (trace)
+   cJSON *result = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   if (!result || strcmp(jo_cstr(result, "status"), "ok") != 0)
    {
-      const char *decision =
-          result.evidence.decision == MEMORY_ANSWER_DECISION_ANSWERABLE ? "answerable"
-          : result.evidence.decision == MEMORY_ANSWER_DECISION_ABSTAIN  ? "abstain"
-                                                                        : "exempt";
-      static const char *const reasons[] = {"ok",
-                                            "structural_empty",
-                                            "structural_no_extract",
-                                            "citation_required",
-                                            "grounding_low",
-                                            "chunk_floor",
-                                            "curated_exempt",
-                                            "db_unavailable"};
-      int reason_index = (int)result.evidence.reason;
-      const char *reason =
-          reason_index >= 0 && reason_index < (int)(sizeof(reasons) / sizeof(reasons[0]))
-              ? reasons[reason_index]
-              : "unknown";
-      cJSON_AddStringToObject(trace, "decision", decision);
-      cJSON_AddStringToObject(trace, "reason", reason);
-      cJSON *ids = cJSON_AddArrayToObject(trace, "candidate_ids");
-      for (int i = 0; ids && i < result.evidence.candidate_id_count; i++)
-         cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)result.evidence.candidate_ids[i]));
-      cJSON_AddNumberToObject(trace, "ranked_count", result.evidence.ranked_count);
-      cJSON_AddNumberToObject(trace, "anchor_id", (double)result.evidence.anchor_id);
-      cJSON_AddNumberToObject(trace, "anchor_rank", result.evidence.anchor_rank);
-      cJSON_AddNumberToObject(trace, "topk_grounding", result.evidence.topk_grounding);
-      cJSON_AddNumberToObject(trace, "anchor_coverage", result.evidence.anchor_coverage);
-      cJSON_AddNumberToObject(trace, "cluster_coverage", result.evidence.cluster_coverage);
-      cJSON_AddNumberToObject(trace, "threshold", result.evidence.threshold);
-      cJSON_AddNumberToObject(trace, "chunk_floor", result.evidence.chunk_floor);
-      cJSON_AddBoolToObject(trace, "structural", result.evidence.structural);
-      cJSON_AddBoolToObject(trace, "exempt", result.evidence.exempt);
-      cJSON_AddBoolToObject(trace, "trace_truncated", result.evidence.trace_truncated);
+      cJSON *error = kb_last_result_content(
+          jo_cstr(result, "message")[0] ? jo_cstr(result, "message") : "memory_ask failed");
+      cJSON_Delete(result);
+      return error;
    }
-   cJSON *citations = cJSON_AddArrayToObject(structured, "citations");
-   for (int i = 0; i < result.citation_count; i++)
+   cJSON *ids = cJSON_DetachItemFromObjectCaseSensitive(result, "citation_ids");
+   if (!cJSON_IsArray(ids) || !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "answer")) ||
+       !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(result, "no_answer")))
    {
+      cJSON_Delete(ids);
+      cJSON_Delete(result);
+      return text_content("error: memory ask returned an invalid answer");
+   }
+   int no_answer = jo_bool(result, "no_answer", 0);
+   cJSON_ReplaceItemInObjectCaseSensitive(result, "status",
+                                          cJSON_CreateString(no_answer ? "abstained" : "ok"));
+   cJSON_AddStringToObject(result, "query", jq->valuestring);
+   cJSON_DeleteItemFromObjectCaseSensitive(result, "active_context_missing");
+   cJSON_AddBoolToObject(result, "active_context_missing", active_context_missing);
+   cJSON *citations = cJSON_AddArrayToObject(result, "citations");
+   cJSON *id;
+   cJSON_ArrayForEach(id, ids)
+   {
+      if (!cJSON_IsNumber(id))
+         continue;
       cJSON *citation = cJSON_CreateObject();
-      cJSON_AddNumberToObject(citation, "memory_id", (double)result.citation_ids[i]);
+      cJSON_AddNumberToObject(citation, "memory_id", id->valuedouble);
       cJSON_AddItemToArray(citations, citation);
    }
-   *structured_out = structured;
-
+   cJSON_Delete(ids);
+   *structured_out = result;
+   if (!no_answer)
+      return text_content(jo_cstr(result, "answer"));
    char summary[2048];
-   if (result.no_answer)
-      snprintf(summary, sizeof(summary), "No confident answer for \"%s\"", jq->valuestring);
-   else
-      snprintf(summary, sizeof(summary), "%s", result.answer);
+   snprintf(summary, sizeof(summary), "No confident answer for \"%s\"", jq->valuestring);
    return text_content(summary);
 }
 
 cJSON *tool_search_graph(cJSON *args)
 {
-   cJSON *jq = cJSON_GetObjectItemCaseSensitive(args, "query");
-   cJSON *jl = cJSON_GetObjectItemCaseSensitive(args, "limit");
-   if (!cJSON_IsString(jq))
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "query"));
+   if (!value)
       return text_content("error: missing 'query' parameter");
-
-   int limit = cJSON_IsNumber(jl) ? jl->valueint : 10;
-   memory_relation_t rels[20];
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);
-   int count = kb_client_memory_search_graph(jq->valuestring, limit, rels, 20);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "query", value);
+   int limit = jo_int(args, "limit", 10);
+   cJSON_AddNumberToObject(request, "limit", limit > 20 ? 20 : limit);
+   char *raw = kb_v1_action_request("memory.search_graph", request);
    mcp_memory_scope_end();
-   if (count < 0)
-      return kb_last_result_content("knowledge service memory graph search failed");
-
-   char buf[8192];
-   int pos = 0;
+   if (!raw)
+      return kb_last_result_content("memory search_graph unavailable");
+   cJSON *response = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(response))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory search_graph response");
+   }
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      return json_result_content(response);
+   }
+   cJSON *data = cJSON_GetObjectItemCaseSensitive(response, "relations");
+   if (!cJSON_IsArray(data))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory search_graph result");
+   }
+   dstr_t body;
+   dstr_init(&body);
    if (active_context_missing)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
-                        "Active project context is unavailable; showing shared/global memory "
-                        "only.\n\n");
-   if (count == 0)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No graph relations found for '%s'",
-                        jq->valuestring);
+      dstr_append_str(
+          &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
+   int count = cJSON_GetArraySize(data);
+   if (!count)
+      dstr_appendf(&body, "No graph relations found for '%s'", value);
    else
    {
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Found %d graph relation(s):\n\n", count);
-      for (int i = 0; i < count && pos < (int)sizeof(buf) - 512; i++)
-         pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- %s [%s] %s (%s)\n", rels[i].src_entity,
-                           rels[i].relation, rels[i].dst_entity,
-                           rels[i].valid_at[0] ? rels[i].valid_at : "undated");
+      dstr_appendf(&body, "Found %d graph relation(s):\n\n", count);
+      cJSON *row;
+      cJSON_ArrayForEach(row, data)
+      {
+         const char *time = jo_cstr(row, "valid_at");
+         dstr_appendf(&body, "- %s [%s] %s (%s)\n", jo_cstr(row, "src_entity"),
+                      jo_cstr(row, "relation"), jo_cstr(row, "dst_entity"),
+                      time[0] ? time : "undated");
+      }
    }
-   return text_content(buf);
+   cJSON *content = text_content(dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_Delete(response);
+   return content;
 }
 
 cJSON *tool_get_episode(cJSON *args)
 {
-   cJSON *jk = cJSON_GetObjectItemCaseSensitive(args, "episode_key");
-   if (!cJSON_IsString(jk))
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "episode_key"));
+   if (!value)
       return text_content("error: missing 'episode_key' parameter");
-
-   memory_episode_t episode;
-   int episode_rc = kb_client_memory_get_episode(jk->valuestring, &episode);
-   if (episode_rc > 0)
-      return kb_empty_result_content("memory episode not found");
-   if (episode_rc < 0)
-      return kb_last_result_content("memory episode lookup returned no result");
-
-   char buf[4096];
-   snprintf(buf, sizeof(buf), "Episode: %s\nSession: %s\nTime: %s\nMemory ID: %lld\n\n%s",
-            episode.episode_key, episode.source_session,
-            episode.reference_time[0] ? episode.reference_time : "unknown",
-            (long long)episode.memory_id, episode.episode_text);
-   return text_content(buf);
+   int active_context_missing = 0;
+   mcp_memory_scope_begin(args, &active_context_missing);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "episode_key", value);
+   char *raw = kb_v1_action_request("memory.get_episode", request);
+   mcp_memory_scope_end();
+   if (!raw)
+      return kb_last_result_content("memory get_episode unavailable");
+   cJSON *response = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(response))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory get_episode response");
+   }
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      if (strcmp(jo_cstr(response, "kind"), "not_found") == 0)
+      {
+         cJSON_Delete(response);
+         return kb_empty_result_content("memory episode not found");
+      }
+      return json_result_content(response);
+   }
+   cJSON *data = cJSON_GetObjectItemCaseSensitive(response, "episode");
+   if (!cJSON_IsObject(data))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory get_episode result");
+   }
+   dstr_t body;
+   dstr_init(&body);
+   if (active_context_missing)
+      dstr_append_str(
+          &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
+   const char *time = jo_cstr(data, "reference_time");
+   dstr_appendf(&body, "Episode: %s\nSession: %s\nTime: %s\nMemory ID: %.0f\n\n%s",
+                jo_cstr(data, "episode_key"), jo_cstr(data, "source_session"),
+                time[0] ? time : "unknown", jo_num(data, "memory_id", 0),
+                jo_cstr(data, "episode_text"));
+   cJSON *content = text_content(dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_Delete(response);
+   return content;
 }
 
 cJSON *tool_get_entity(cJSON *args)
 {
-   cJSON *je = cJSON_GetObjectItemCaseSensitive(args, "entity");
-   if (!cJSON_IsString(je))
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "entity"));
+   if (!value)
       return text_content("error: missing 'entity' parameter");
-
-   memory_entity_profile_t profile;
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);
-   int profile_rc = kb_client_memory_get_entity_profile(je->valuestring, &profile);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "entity", value);
+   char *raw = kb_v1_action_request("memory.entity_profile", request);
    mcp_memory_scope_end();
-   if (profile_rc > 0)
-      return kb_empty_result_content("memory entity profile not found");
-   if (profile_rc < 0)
-      return kb_last_result_content("memory entity profile lookup returned no result");
-
-   char buf[4096];
-   int pos = 0;
+   if (!raw)
+      return kb_last_result_content("memory entity_profile unavailable");
+   cJSON *response = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(response))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory entity_profile response");
+   }
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      if (strcmp(jo_cstr(response, "kind"), "not_found") == 0)
+      {
+         cJSON_Delete(response);
+         return kb_empty_result_content("memory profile not found");
+      }
+      return json_result_content(response);
+   }
+   cJSON *data = cJSON_GetObjectItemCaseSensitive(response, "profile");
+   if (!cJSON_IsObject(data))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory entity_profile result");
+   }
+   dstr_t body;
+   dstr_init(&body);
    if (active_context_missing)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
-                        "Active project context is unavailable; showing shared/global memory "
-                        "only.\n\n");
-   pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Entity: %s\nMentions: %d\nRelations: %d\n",
-                     profile.entity, profile.mention_count, profile.relation_count);
-   if (profile.latest_episode[0])
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Latest episode: %s\n", profile.latest_episode);
-   if (profile.summary[0])
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Summary: %s\n", profile.summary);
-   return text_content(buf);
+      dstr_append_str(
+          &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
+   dstr_appendf(&body, "Entity: %s\nMentions: %d\nRelations: %d\n", jo_cstr(data, "entity"),
+                jo_int(data, "mention_count", 0), jo_int(data, "relation_count", 0));
+   if (jo_cstr(data, "latest_episode")[0])
+      dstr_appendf(&body, "Latest episode: %s\n", jo_cstr(data, "latest_episode"));
+   if (jo_cstr(data, "summary")[0])
+      dstr_appendf(&body, "Summary: %s\n", jo_cstr(data, "summary"));
+   cJSON *content = text_content(dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_Delete(response);
+   return content;
 }
 
 cJSON *tool_get_entity_edges(cJSON *args)
 {
-   cJSON *je = cJSON_GetObjectItemCaseSensitive(args, "entity");
-   cJSON *jl = cJSON_GetObjectItemCaseSensitive(args, "limit");
-   if (!cJSON_IsString(je))
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "entity"));
+   if (!value)
       return text_content("error: missing 'entity' parameter");
-
-   int limit = cJSON_IsNumber(jl) ? jl->valueint : 10;
-   memory_relation_t rels[20];
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);
-   int count = kb_client_memory_get_entity_edges(je->valuestring, limit, rels, 20);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "entity", value);
+   int limit = jo_int(args, "limit", 10);
+   cJSON_AddNumberToObject(request, "limit", limit > 20 ? 20 : limit);
+   char *raw = kb_v1_action_request("memory.entity_edges", request);
    mcp_memory_scope_end();
-   if (count < 0)
-      return kb_last_result_content("knowledge service entity-edge lookup failed");
-
-   char buf[8192];
-   int pos = 0;
+   if (!raw)
+      return kb_last_result_content("memory entity_edges unavailable");
+   cJSON *response = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(response))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory entity_edges response");
+   }
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0)
+   {
+      return json_result_content(response);
+   }
+   cJSON *data = cJSON_GetObjectItemCaseSensitive(response, "edges");
+   if (!cJSON_IsArray(data))
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory entity_edges result");
+   }
+   dstr_t body;
+   dstr_init(&body);
    if (active_context_missing)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
-                        "Active project context is unavailable; showing shared/global memory "
-                        "only.\n\n");
-   if (count == 0)
-      pos +=
-          snprintf(buf + pos, sizeof(buf) - pos, "No edges found for entity '%s'", je->valuestring);
+      dstr_append_str(
+          &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
+   int count = cJSON_GetArraySize(data);
+   if (!count)
+      dstr_appendf(&body, "No edges found for entity '%s'", value);
    else
    {
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Edges for %s:\n\n", je->valuestring);
-      for (int i = 0; i < count && pos < (int)sizeof(buf) - 512; i++)
-         pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- %s [%s] %s\n", rels[i].src_entity,
-                           rels[i].relation, rels[i].dst_entity);
+      dstr_appendf(&body, "Edges for %s:\n\n", value);
+      cJSON *row;
+      cJSON_ArrayForEach(row, data)
+      {
+         dstr_appendf(&body, "- %s [%s] %s\n", jo_cstr(row, "src_entity"), jo_cstr(row, "relation"),
+                      jo_cstr(row, "dst_entity"));
+      }
    }
-   return text_content(buf);
+   cJSON *content = text_content(dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_Delete(response);
+   return content;
 }
 
 cJSON *tool_get_context_block(cJSON *args)
@@ -777,26 +739,43 @@ cJSON *tool_get_context_block(cJSON *args)
    int limit = cJSON_IsNumber(jl) ? jl->valueint : 5;
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);
-   char *ctx = kb_client_memory_context_block(jq->valuestring, block_type, limit);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "query", jq->valuestring);
+   cJSON_AddStringToObject(request, "block_type", block_type);
+   cJSON_AddNumberToObject(request, "limit", limit);
+   char *raw = kb_v1_action_request("memory.context_block", request);
    mcp_memory_scope_end();
-   if (!ctx)
-      return kb_last_result_content("memory context block returned no result");
-   char *rendered = ctx;
-   if (active_context_missing)
+   if (!raw)
+      return kb_last_result_content("memory context block unavailable");
+   cJSON *response = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(response))
    {
-      size_t need = strlen(ctx) + 96;
-      rendered = malloc(need);
-      if (rendered)
-         snprintf(rendered, need,
-                  "Active project context is unavailable; showing shared/global memory only.\n\n%s",
-                  ctx);
-      else
-         rendered = ctx;
+      cJSON_Delete(response);
+      return text_content("error: invalid memory context block response");
    }
-   cJSON *result = text_content(rendered);
-   if (rendered != ctx)
-      free(rendered);
-   free(ctx);
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0)
+      return json_result_content(response);
+   const char *block = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "block"));
+   if (!block)
+   {
+      cJSON_Delete(response);
+      return text_content("error: invalid memory context block result");
+   }
+   dstr_t body;
+   dstr_init(&body);
+   if (active_context_missing)
+      dstr_append_str(
+          &body, "Active project context is unavailable; showing shared/global memory only.\n\n");
+   dstr_append_str(&body, block);
+   const char *retraction = jo_cstr(response, "retraction");
+   if (strcmp(retraction, "annotate_only") == 0 || strcmp(retraction, "operator_required") == 0 ||
+       strcmp(retraction, "immutable") == 0)
+      dstr_appendf(&body, "\nFact retraction declined: %s.\n", retraction);
+   cJSON *result = text_content(dstr_cstr(&body));
+   dstr_free(&body);
+   cJSON_Delete(response);
    return result;
 }
 
@@ -840,54 +819,80 @@ cJSON *tool_list_facts(cJSON *args)
 {
    if (server_memory_store_selection(args) != 1)
       return json_result_content(memory_list_command(args));
-   memory_t facts[64];
-   int active_context_missing = 0;
-   mcp_memory_scope_begin(args, &active_context_missing);
-   int count = kb_client_memory_list(TIER_L2, KIND_FACT, 64, facts, 64);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "tier", "L2");
+   cJSON_AddStringToObject(request, "kind", "fact");
+   cJSON_AddNumberToObject(request, "limit", 64);
+   cJSON_AddStringToObject(request, "format", "mcp");
+   mcp_memory_scope_begin(args, NULL);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.list", request);
    mcp_memory_scope_end();
-   if (count < 0)
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   if (!reply)
       return kb_last_result_content("knowledge service fact list failed");
-
-   char buf[8192];
-   int pos = 0;
-   if (active_context_missing)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
-                        "Active project context is unavailable; showing shared/global memory "
-                        "only.\n\n");
-   if (count == 0)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No L2 facts stored.");
-   else
-   {
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "%d fact(s):\n\n", count);
-      for (int i = 0; i < count && pos < (int)sizeof(buf) - 512; i++)
-         pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- **%s**: %s\n", facts[i].key,
-                           facts[i].content);
-   }
-   return text_content(buf);
+   if (strcmp(jo_cstr(reply, "status"), "ok"))
+      return json_result_content(reply);
+   const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "text"));
+   cJSON *content = text_content(text ? text : "error: invalid memory fact list output");
+   cJSON_Delete(reply);
+   return content;
 }
 
 cJSON *tool_memory_briefing(cJSON *args)
 {
-   int limit_tokens = MEMORY_BRIEFING_DEFAULT_LIMIT_TOKENS;
-   cJSON *jlimit = cJSON_GetObjectItemCaseSensitive(args, "limit_tokens");
-   if (cJSON_IsNumber(jlimit))
-      limit_tokens = (int)jlimit->valuedouble;
-
-   int active_context_missing = 0;
-   mcp_memory_scope_begin(args, &active_context_missing);
-   cJSON *bundle = kb_client_memory_briefing(limit_tokens);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "format", "mcp");
+   const cJSON *limit = cJSON_GetObjectItemCaseSensitive(args, "limit_tokens");
+   if (cJSON_IsNumber(limit))
+      cJSON_AddItemToObject(request, "limit_tokens", cJSON_Duplicate(limit, 1));
+   mcp_memory_scope_begin(args, NULL);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.briefing", request);
    mcp_memory_scope_end();
-   if (!bundle)
+   cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   if (!reply)
       return kb_last_result_content("memory briefing failed");
-   cJSON_AddBoolToObject(bundle, "active_context_missing", active_context_missing);
+   if (strcmp(jo_cstr(reply, "status"), "ok") != 0)
+      return json_result_content(reply);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+   if (!cJSON_IsString(output))
+   {
+      cJSON_Delete(reply);
+      return text_content("error: memory briefing returned invalid output");
+   }
+   cJSON *content = text_content(output->valuestring);
+   cJSON_Delete(reply);
+   return content;
+}
 
-   char *rendered = cJSON_PrintUnformatted(bundle);
-   cJSON_Delete(bundle);
-   if (!rendered)
-      return text_content("error: could not render briefing");
-
-   cJSON *content = text_content(rendered);
-   free(rendered);
+cJSON *tool_memory_alerts(cJSON *args)
+{
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "format", "mcp");
+   const cJSON *since = cJSON_GetObjectItemCaseSensitive(args, "since");
+   if (cJSON_IsString(since))
+      cJSON_AddItemToObject(request, "since", cJSON_Duplicate(since, 1));
+   mcp_memory_scope_begin(args, NULL);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.alerts", request);
+   mcp_memory_scope_end();
+   cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   if (!reply)
+      return kb_last_result_content("memory alerts failed");
+   if (strcmp(jo_cstr(reply, "status"), "ok") != 0)
+      return json_result_content(reply);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+   if (!cJSON_IsString(output))
+   {
+      cJSON_Delete(reply);
+      return text_content("error: memory alerts returned invalid output");
+   }
+   cJSON *content = text_content(output->valuestring);
+   cJSON_Delete(reply);
    return content;
 }
 
@@ -958,8 +963,31 @@ cJSON *tool_create_prospective_memory(cJSON *args)
                         ? cJSON_GetObjectItemCaseSensitive(args, "valid_until")->valuestring
                         : "";
 
-   char *envelope =
-       kb_client_memory_prospective_create_json(jt->valuestring, ja->valuestring, ae, af, re, vu);
+   cJSON *create_args = cJSON_CreateObject();
+   int withheld =
+       !create_args ||
+       kb_client_pii_add_string_required(create_args, "trigger_text", jt->valuestring) != 0 ||
+       kb_client_pii_add_string_required(create_args, "action_text", ja->valuestring) != 0 ||
+       kb_client_pii_add_string(create_args, "anchor_entity", ae) != 0 ||
+       kb_client_pii_identifier_sensitive(af);
+   char *envelope = NULL;
+   if (withheld)
+   {
+      cJSON_Delete(create_args);
+      kb_client_memory_audit_note("memory.prospective_create.withheld_pii", 0, NULL, NULL, NULL, 0,
+                                  NULL, 0);
+      envelope = kb_client_pii_withheld_json();
+   }
+   else
+   {
+      if (af)
+         cJSON_AddStringToObject(create_args, "anchor_file", af);
+      if (re)
+         cJSON_AddStringToObject(create_args, "recurrence", re);
+      if (vu)
+         cJSON_AddStringToObject(create_args, "valid_until", vu);
+      envelope = kb_v1_action_request("memory.prospective_create", create_args);
+   }
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *status = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;
@@ -1005,7 +1033,11 @@ cJSON *tool_list_prospective_memories(cJSON *args)
    if (limit > 256)
       limit = 256;
 
-   char *envelope = kb_client_memory_prospective_list_json(state, limit);
+   cJSON *list_args = cJSON_CreateObject();
+   if (state && state[0])
+      cJSON_AddStringToObject(list_args, "state", state);
+   cJSON_AddNumberToObject(list_args, "limit", limit);
+   char *envelope = kb_v1_action_request("memory.prospective_list", list_args);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *prospectives = resp ? cJSON_GetObjectItemCaseSensitive(resp, "prospectives") : NULL;
@@ -1029,7 +1061,9 @@ cJSON *tool_complete_prospective_memory(cJSON *args)
    if (!cJSON_IsNumber(ji))
       return text_content("error: missing 'id'");
    int64_t id = (int64_t)ji->valuedouble;
-   char *envelope = kb_client_memory_prospective_complete_json(id);
+   cJSON *complete_args = cJSON_CreateObject();
+   cJSON_AddNumberToObject(complete_args, "id", (double)(id));
+   char *envelope = kb_v1_action_request("memory.prospective_complete", complete_args);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *status = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;
@@ -1393,54 +1427,22 @@ cJSON *tool_list_attempts(cJSON *args)
 
 cJSON *tool_store_workflow(cJSON *args)
 {
-   cJSON *jr = cJSON_GetObjectItemCaseSensitive(args, "rule");
-   cJSON *jsig = cJSON_GetObjectItemCaseSensitive(args, "signal_type");
-   if (!cJSON_IsString(jr) || !jr->valuestring[0] || !cJSON_IsString(jsig) || !jsig->valuestring[0])
-      return text_content("error: missing 'rule' and/or 'signal_type' parameter");
-
-   /* Project: prefer explicit arg; fall back to cwd-derived workspace label. */
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(args, "project");
-   char workspace[128] = "";
-   if (cJSON_IsString(jp) && jp->valuestring[0])
-      snprintf(workspace, sizeof(workspace), "%s", jp->valuestring);
-   else
-   {
-      char cwd[MAX_PATH_LEN];
-      if (getcwd(cwd, sizeof(cwd)))
-      {
-         if (config_present())
-         {
-            for (int i = 0; i < config_workspace_count(); i++)
-            {
-               size_t wlen = strlen(config_workspaces(i));
-               if (wlen == 0)
-                  continue;
-               if (strncmp(cwd, config_workspaces(i), wlen) == 0 &&
-                   (cwd[wlen] == '/' || cwd[wlen] == '\0'))
-               {
-                  const char *slash = strrchr(config_workspaces(i), '/');
-                  const char *name = slash ? slash + 1 : config_workspaces(i);
-                  snprintf(workspace, sizeof(workspace), "%s", name);
-                  break;
-               }
-            }
-         }
-      }
-   }
-
-   if (!workspace[0])
-      return text_content("error: no workspace determined from cwd; pass 'project' explicitly");
-
-   /* User-explicit store: high confidence. */
-   int64_t id = kb_client_memory_upsert_workflow(workspace, jsig->valuestring, jr->valuestring, 1.0,
-                                                 session_id());
-   if (id <= 0)
-      return text_content("error: failed to store workflow memory");
-
-   char buf[256];
-   snprintf(buf, sizeof(buf), "Stored workflow:%s:%s (memory id %lld)", workspace,
-            jsig->valuestring, (long long)id);
-   return text_content(buf);
+   cJSON *request = args ? cJSON_Duplicate(args, 1) : cJSON_CreateObject();
+   if (!request)
+      return text_content("error: workflow owner unavailable");
+   while (cJSON_HasObjectItem(request, "mode"))
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "mode");
+   while (cJSON_HasObjectItem(request, "session_id"))
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "session_id");
+   cJSON_AddStringToObject(request, "mode", "explicit");
+   cJSON_AddStringToObject(request, "session_id", session_id());
+   cJSON *result = workflow_execute(request);
+   cJSON_Delete(request);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(result, "output");
+   cJSON *content = text_content(cJSON_IsString(output) ? output->valuestring
+                                                        : "error: workflow owner unavailable");
+   cJSON_Delete(result);
+   return content;
 }
 
 /* --- Note tool handlers --- */

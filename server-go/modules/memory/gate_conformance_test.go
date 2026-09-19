@@ -15,8 +15,8 @@ import (
 // labels. The seed-table and normalization fixtures each prove one input to the
 // gate; only this proves the ladder that combines them.
 //
-// Regenerate by linking rel_types.c and memory_fact_gate.c against a dumper and
-// re-running it, never by editing the file.
+// These frozen expectations predate the Go migration. The native gate has been
+// removed; do not regenerate this baseline from the implementation under test.
 // gateCase is one row of the matrix: the triple the C gate was asked about and
 // the verdict it gave.
 type gateCase struct {

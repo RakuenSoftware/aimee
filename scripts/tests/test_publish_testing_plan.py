@@ -91,9 +91,14 @@ def main() -> None:
         "server leaf linked into KB",
     )
     failures += expect(
-        ["src/modules/memory/memory_data_bus.c"],
+        ["src/core/event_bus/bus_runtime.c"],
         set(planner.SERVER | planner.KB),
-        "shared server and KB C source",
+        "shared server and KB C bus",
+    )
+    failures += expect(
+        ["server-go/modules/memory/public_records.go"],
+        set(planner.SERVER | planner.POSTGRES),
+        "Go memory in images shipping the module runtime",
     )
     failures += expect(
         ["src/kb/kb_mgmt_token_roots_provision_main.c"],

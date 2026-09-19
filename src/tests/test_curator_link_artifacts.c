@@ -1,3 +1,6 @@
+#include "module_commands.h"
+#include "json_fluent.h"
+#include <assert.h>
 /* test_curator_link_artifacts.c: link_artifacts bridge over the sqlite shim.
  * Empty path plus a seeded regression: a committed code_unit whose
  * domain_concepts name a committed entity gets a `mentions` edge and is marked
@@ -21,16 +24,16 @@ static int64_t g_search_pid = 0;
 static double g_search_score = 0.0;
 static char g_lookup_aid[64] = "";
 
-int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
-                      float *out, int max_dim)
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   (void)text;
-   (void)command;
-   (void)input_type;
+   assert(strcmp(method, "memory.embed_text") == 0);
+   *result = cJSON_CreateObject();
+   int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
    int dim = max_dim < 384 ? max_dim : 384;
-   for (int i = 0; i < dim; i++)
-      out[i] = 0.0f;
-   return dim;
+   cJSON *vector = cJSON_AddArrayToObject(*result, "vector");
+   for (int i = 0; i < dim; ++i)
+      cJSON_AddItemToArray(vector, cJSON_CreateNumber(0.0f));
+   return 1;
 }
 int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, const float *vec,
                                 int dim, int limit, int64_t *ids, double *scores, int max)

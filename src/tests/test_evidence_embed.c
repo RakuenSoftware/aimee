@@ -1,3 +1,6 @@
+#include "module_commands.h"
+#include "json_fluent.h"
+#include <assert.h>
 /* test_evidence_embed.c — unit tests for the evidence-vector embed worker
  * (kb/kb_evidence_embed.c).
  *
@@ -36,17 +39,18 @@ static int g_embed_dim = 384; /* dims to emit (set per test) */
 static int g_embed_calls;
 static char g_embed_last_text[4096];
 
-int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
-                      float *out, int max_dim)
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   (void)command;
-   (void)input_type;
+   assert(strcmp(method, "memory.embed_text") == 0);
+   *result = cJSON_CreateObject();
+   int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
    g_embed_calls++;
-   snprintf(g_embed_last_text, sizeof(g_embed_last_text), "%s", text ? text : "");
+   snprintf(g_embed_last_text, sizeof(g_embed_last_text), "%s", jo_cstr(args, "text"));
    int dim = g_embed_dim < max_dim ? g_embed_dim : max_dim;
-   for (int i = 0; i < dim; i++)
-      out[i] = (float)(i % 7) * 0.01f;
-   return dim;
+   cJSON *vector = cJSON_AddArrayToObject(*result, "vector");
+   for (int i = 0; i < dim; ++i)
+      cJSON_AddItemToArray(vector, cJSON_CreateNumber((float)(i % 7) * 0.01f));
+   return 1;
 }
 
 static void open_db(void)

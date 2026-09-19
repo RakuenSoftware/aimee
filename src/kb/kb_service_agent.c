@@ -10,7 +10,7 @@
 #include "modules/db2/c/feedback.h"
 #include "modules/db2/c/kb_service_backend.h"
 #include "kb_calibrate.h"
-#include "kb_demote.h"
+#include "module_commands.h"
 #include "kb_ranker_fit.h"
 #include "kb_service_agent.h"
 #include "modules/learning/learning_evidence.h"
@@ -128,13 +128,6 @@ int kb_handle_mcp_call(int fd, cJSON *req)
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddItemToObject(resp, "result", result ? result : cJSON_CreateObject());
    return kb_reply_or_error(fd, resp, "mcp call failed");
-}
-
-int kb_handle_relations_schema_list(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_relations_schema_list_json();
-   return kb_reply_or_error(fd, resp, "relations schema list failed");
 }
 
 int kb_handle_rules_insert(int fd, cJSON *req)
@@ -268,41 +261,11 @@ int kb_handle_agent_hint_consume(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to consume agent hint");
 }
 
-int kb_handle_anti_pattern_extract_from_feedback(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_anti_pattern_extract_from_feedback_json();
-   return kb_reply_or_error(fd, resp, "failed to extract anti-patterns from feedback");
-}
-
-int kb_handle_anti_pattern_extract_from_failures(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_anti_pattern_extract_from_failures_json();
-   return kb_reply_or_error(fd, resp, "failed to extract anti-patterns from failures");
-}
-
-int kb_handle_anti_pattern_escalate(int fd, cJSON *req)
-{
-   cJSON *th_j = cJSON_GetObjectItemCaseSensitive(req, "hit_threshold");
-   int hit = cJSON_IsNumber(th_j) ? (int)th_j->valuedouble : 5;
-
-   cJSON *resp = db2_kb_service_anti_pattern_escalate_json(hit);
-   return kb_reply_or_error(fd, resp, "failed to escalate anti-patterns");
-}
-
 int kb_handle_rules_decay(int fd, cJSON *req)
 {
    (void)req;
    cJSON *resp = db2_kb_service_rules_decay_json();
    return kb_reply_or_error(fd, resp, "failed to decay rules");
-}
-
-int kb_handle_memory_learn_style(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_memory_learn_style_json();
-   return kb_reply_or_error(fd, resp, "failed to learn style");
 }
 
 int kb_handle_decision_log_insert(int fd, cJSON *req)
@@ -372,16 +335,6 @@ int kb_handle_anti_pattern_delete(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to delete anti-pattern");
 }
 
-int kb_handle_memory_fold_session(int fd, cJSON *req)
-{
-   cJSON *sid_j = cJSON_GetObjectItemCaseSensitive(req, "session_id");
-   if (!cJSON_IsString(sid_j))
-      return kb_send_error(fd, "maintenance.fold_session requires session_id");
-
-   cJSON *resp = db2_kb_service_memory_fold_session_json(sid_j->valuestring);
-   return kb_reply_or_error(fd, resp, "failed to fold session");
-}
-
 int kb_handle_rules_delete(int fd, cJSON *req)
 {
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
@@ -440,13 +393,6 @@ int kb_handle_directive_expire_session(int fd, cJSON *req)
    (void)req;
    cJSON *resp = db2_kb_service_directive_expire_session_json();
    return kb_reply_or_error(fd, resp, "failed to expire session directives");
-}
-
-int kb_handle_memory_scan_conversations(int fd, cJSON *req)
-{
-   cJSON *dirs_j = cJSON_GetObjectItemCaseSensitive(req, "dirs");
-   cJSON *resp = db2_kb_service_memory_scan_conversations_json(dirs_j);
-   return kb_reply_or_error(fd, resp, "failed to scan conversations");
 }
 
 int kb_handle_anti_pattern_check(int fd, cJSON *req)
@@ -661,12 +607,27 @@ int kb_handle_ranker_record_outcome(int fd, cJSON *req)
 int kb_handle_maintenance_compute_demotions(int fd, cJSON *req)
 {
    (void)req;
-   int n = kb_demote_run();
-
-   cJSON *resp = cJSON_CreateObject();
-   cJSON_AddStringToObject(resp, "status", n >= 0 ? "ok" : "error");
-   cJSON_AddNumberToObject(resp, "profiles_written", n >= 0 ? n : 0);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "demotion-run");
+   cJSON *config = cJSON_AddObjectToObject(request, "config");
+   cJSON_AddNumberToObject(config, "enabled", config_demotion_enabled());
+   cJSON_AddNumberToObject(config, "n_min", config_demotion_n_min());
+   cJSON_AddNumberToObject(config, "window", config_demotion_window());
+   cJSON_AddNumberToObject(config, "half_life_days", config_demotion_half_life_days());
+   cJSON *response = NULL;
+   int called = aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 120000,
+                                                                &response);
+   cJSON_Delete(request);
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+   if (called != 1 || !status || strcmp(status, "ok") != 0)
+   {
+      cJSON_Delete(response);
+      response = cJSON_CreateObject();
+      cJSON_AddStringToObject(response, "status", "error");
+      cJSON_AddNumberToObject(response, "profiles_written", 0);
+      cJSON_AddStringToObject(response, "message", "Go memory demotion unavailable");
+   }
+   int rc = kb_send_response(fd, response);
+   cJSON_Delete(response);
+   return rc;
 }

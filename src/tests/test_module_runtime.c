@@ -1,4 +1,6 @@
 #define _GNU_SOURCE
+#include "cJSON.h"
+#include <sys/socket.h>
 
 #include <aimee/core/event_bus/bus_client.h>
 #include <aimee/core/event_bus/bus_endpoint.h>
@@ -16,8 +18,6 @@
 #include <aimee/governance/module_api.h>
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/module_api.h>
-#include <aimee/memory/module_api.h>
-#include "modules/memory/memory_ontology.h" /* NODE_* for the write-gate case */
 #include <aimee/response-composition/module_api.h>
 #include <aimee/roundtable/module_api.h>
 #include <aimee/routing/module_api.h>
@@ -150,25 +150,85 @@ static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t c
    assert(!"timed out waiting for module clients");
 }
 
+static pid_t spawn_module_child(const char *executable, const char *socket_path,
+                                const char *argument)
+{
+   pid_t parent = getpid();
+   pid_t child = fork();
+   assert(child >= 0);
+   if (child == 0)
+   {
+      prctl(PR_SET_PDEATHSIG, SIGKILL);
+      if (getppid() != parent)
+         _exit(0);
+      execl(executable, executable, socket_path, argument, (char *)NULL);
+      _exit(127);
+   }
+   return child;
+}
+
+static void run_memory_probe(const char *executable, const char *socket_path)
+{
+   pid_t child = spawn_module_child(executable, socket_path, "--decisions");
+   int status = 0;
+   while (waitpid(child, &status, 0) < 0)
+      assert(errno == EINTR);
+   assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* Keep the host and its callers alive while the independent memory process is
+ * killed. Its two connections and the finished probe must leave the bus before
+ * a replacement can be admitted under the same grants. */
+static void wait_for_memory_departure(bus_runtime_t *runtime, bus_host_t *host,
+                                      pthread_mutex_t *lock, bus_client_t *caller,
+                                      bus_client_t *embedding_host)
+{
+   const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
+   for (int i = 0; i < 10000; ++i)
+   {
+      struct timespec now;
+      assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+      uint64_t now_ns = (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
+      bus_client_heartbeat(caller, now_ns);
+      bus_client_heartbeat(embedding_host, now_ns);
+      pthread_mutex_lock(lock);
+      /* Production hosts call maintenance separately from dispatch pumping. */
+      (void)bus_runtime_maintain(runtime, now_ns);
+      uint32_t admitted = host->admitted;
+      pthread_mutex_unlock(lock);
+      if (admitted == 2)
+         return;
+      nanosleep(&pause, NULL);
+   }
+   assert(!"memory process connections survived termination");
+}
+
+static void memory_discovery_unavailable(aimee_module_client_t *client)
+{
+   const uint8_t request[] = {'D', 'C', 'M', 'D', 2, 0, 0, 0};
+   uint8_t response[1024];
+   memset(response, 0xa5, sizeof(response));
+   uint32_t response_len = 99;
+   struct timespec now;
+   assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+   uint64_t deadline = (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec + 2000000000ULL;
+   assert(aimee_module_client_call(client, 4096u + 7u * 256u + 255u, 255u, 9901, deadline, request,
+                                   sizeof(request), response, sizeof(response), &response_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+   assert(response_len == 0);
+}
+
 static int production_contract(const char *name, uint32_t *kind, uint32_t *principal_ref,
                                uint32_t served[PRODUCTION_STAGE_MAX], size_t *serve_count)
 {
    if (strcmp(name, "memory") == 0)
    {
-      *kind = AIMEE_MEMORY_EVENT_RERANK, *principal_ref = 7;
-      served[0] = AIMEE_MEMORY_EVENT_EXTRACT_INDEX;
-      served[1] = AIMEE_MEMORY_EVENT_WRITE;
-      served[2] = AIMEE_MEMORY_EVENT_EMBED;
-      served[3] = AIMEE_MEMORY_EVENT_RETRIEVE;
-      served[4] = AIMEE_MEMORY_EVENT_RERANK;
-      served[5] = AIMEE_MEMORY_EVENT_DECLARE_COMMANDS;
-      served[6] = AIMEE_MEMORY_EVENT_DATA;
-      /* Seven, stated rather than borrowed from the array bound. It used to say
-       * PRODUCTION_STAGE_MAX, which was 5 and therefore correct by coincidence;
-       * raising the bound to hold aimee's twenty-three made this module claim
-       * to serve twenty-three kinds, and the grant for the ones past its fifth
-       * carried uninitialised array entries. */
-      *serve_count = 7;
+      *principal_ref = 7;
+      *kind = 4096u + *principal_ref * 256u + 1u;
+      for (uint32_t stage = 1; stage <= 8; ++stage)
+         served[stage - 1] = 4096u + *principal_ref * 256u + stage;
+      served[8] = 4096u + *principal_ref * 256u + 255u;
+      *serve_count = 9;
       return 0;
    }
    if (strcmp(name, "learning") == 0)
@@ -314,109 +374,6 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
    return 0;
 }
 
-/* The memory module's four decision stages, over the real bus and the real
- * module binary.
- *
- * Everything else that tests these stages does it in process: the Go side
- * against fixtures, the C side against a registered stand-in for the module.
- * Both halves can agree with each other and still not meet in the middle, which
- * is what this crosses. Each call goes through the same encoder the production
- * adapter uses and the same decoder, so an offset either side got wrong shows up
- * as a failed decode rather than as a plausible wrong answer.
- *
- * One case per stage, chosen so the answer could not come from an empty or
- * zeroed response. */
-static void smoke_memory_decision_stages(aimee_module_client_t *client)
-{
-   uint8_t request[1024] = {0};
-   uint8_t response[1024] = {0};
-   uint32_t response_len = 0;
-
-   /* WRITE: a seeded relation whose ends satisfy it. ACCEPT is 0, so pair it
-    * with a rejection below -- a zeroed response would read as ACCEPT. */
-   aimee_memory_fact_verdict_t verdict = AIMEE_MEMORY_FACT_BADARG;
-   assert(aimee_memory_gate_request_encode(NODE_PERSON, "works_for", NODE_ORG, request,
-                                           sizeof(request)) == 0);
-   assert(aimee_module_client_call(client, AIMEE_MEMORY_EVENT_WRITE, AIMEE_MEMORY_STAGE_WRITE, 2100,
-                                   0, request, AIMEE_MEMORY_GATE_REQUEST_LEN, response,
-                                   sizeof(response), &response_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_OK);
-   assert(aimee_memory_gate_response_decode(response, response_len, &verdict) == 0);
-   assert(verdict == AIMEE_MEMORY_FACT_ACCEPT);
-
-   assert(aimee_memory_gate_request_encode(NODE_DEVICE, "works_for", NODE_ORG, request,
-                                           sizeof(request)) == 0);
-   assert(aimee_module_client_call(client, AIMEE_MEMORY_EVENT_WRITE, AIMEE_MEMORY_STAGE_WRITE, 2101,
-                                   0, request, AIMEE_MEMORY_GATE_REQUEST_LEN, response,
-                                   sizeof(response), &response_len, NULL,
-                                   NULL) == AIMEE_MODULE_CALL_OK);
-   assert(aimee_memory_gate_response_decode(response, response_len, &verdict) == 0);
-   assert(verdict == AIMEE_MEMORY_FACT_REJECT_KIND); /* a printer does not work for an org */
-
-   /* EXTRACT_INDEX: the canonical template, with the object typed by its shape. */
-   aimee_memory_triple_t triples[4];
-   uint32_t found = 0;
-   assert(aimee_memory_extract_request_encode("my home ip is 192.168.1.254", 4, request,
-                                              sizeof(request)) == 0);
-   assert(aimee_module_client_call(
-              client, AIMEE_MEMORY_EVENT_EXTRACT_INDEX, AIMEE_MEMORY_STAGE_EXTRACT_INDEX, 2102, 0,
-              request, (uint32_t)aimee_memory_extract_request_size("my home ip is 192.168.1.254"),
-              response, sizeof(response), &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
-   assert(aimee_memory_extract_response_decode(response, response_len, triples, 4, &found) == 0);
-   assert(found == 1);
-   assert(strcmp(triples[0].subject, "user") == 0);
-   assert(strcmp(triples[0].rel_type, "home_ip") == 0);
-   assert(strcmp(triples[0].object, "192.168.1.254") == 0);
-   assert(triples[0].subject_kind == NODE_PERSON && triples[0].object_kind == NODE_IP);
-
-   /* EXTRACT_INDEX, second shape: the retraction scan. Same stage, different
-    * magic, so this also proves the two are told apart on the far side. */
-   int is_retraction = -1, has_attr = -1;
-   char attr[AIMEE_MEMORY_SCAN_ATTR_MAX] = {0};
-   assert(aimee_memory_scan_request_encode("forget my email", request, sizeof(request)) == 0);
-   assert(aimee_module_client_call(
-              client, AIMEE_MEMORY_EVENT_EXTRACT_INDEX, AIMEE_MEMORY_STAGE_EXTRACT_INDEX, 2103, 0,
-              request, (uint32_t)aimee_memory_scan_request_size("forget my email"), response,
-              sizeof(response), &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
-   assert(aimee_memory_scan_response_decode(response, response_len, &is_retraction, &has_attr, attr,
-                                            sizeof(attr)) == 0);
-   assert(is_retraction == 1 && has_attr == 1 && strcmp(attr, "email") == 0);
-
-   /* RETRIEVE: the turn classifier, both answers, so a stage stuck on one of
-    * them cannot pass. */
-   int requests_sensitive = -1;
-   assert(aimee_memory_pii_request_encode("what is my email address", request, sizeof(request)) ==
-          0);
-   assert(aimee_module_client_call(
-              client, AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, 2104, 0, request,
-              (uint32_t)aimee_memory_pii_request_size("what is my email address"), response,
-              sizeof(response), &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
-   assert(aimee_memory_pii_response_decode(response, response_len, &requests_sensitive) == 0);
-   assert(requests_sensitive == 1);
-
-   assert(aimee_memory_pii_request_encode("what is the weather", request, sizeof(request)) == 0);
-   assert(aimee_module_client_call(
-              client, AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, 2105, 0, request,
-              (uint32_t)aimee_memory_pii_request_size("what is the weather"), response,
-              sizeof(response), &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
-   assert(aimee_memory_pii_response_decode(response, response_len, &requests_sensitive) == 0);
-   assert(requests_sensitive == 0);
-
-   /* RETRIEVE, second shape: a batch of relations spanning all three tiers, in
-    * an order where returning them shuffled or short would be visible. */
-   const char *rels[3] = {"works_for", "ssn", "home_password"};
-   aimee_memory_sensitivity_t tiers[3] = {0};
-   assert(aimee_memory_sens_request_encode(rels, 3, request, sizeof(request)) == 0);
-   assert(aimee_module_client_call(
-              client, AIMEE_MEMORY_EVENT_RETRIEVE, AIMEE_MEMORY_STAGE_RETRIEVE, 2106, 0, request,
-              (uint32_t)aimee_memory_sens_request_size(rels, 3), response, sizeof(response),
-              &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
-   assert(aimee_memory_sens_response_decode(response, response_len, tiers, 3) == 0);
-   assert(tiers[0] == AIMEE_MEMORY_SENS_NORMAL);
-   assert(tiers[1] == AIMEE_MEMORY_SENS_PII);
-   assert(tiers[2] == AIMEE_MEMORY_SENS_SECRET);
-}
-
 static void smoke_production_module(aimee_module_client_t *client, const char *name, uint32_t kind)
 {
    uint8_t request[AIMEE_KB_SYNTHESIS_REQUEST_LEN] = {0};
@@ -435,19 +392,7 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(strstr((char *)response, expected) != NULL);
       return;
    }
-   if (strcmp(name, "memory") == 0)
-   {
-      aimee_memory_confidence_t confidence = AIMEE_MEMORY_CONFIDENCE_LOW;
-      assert(aimee_memory_request_encode(660000, request, sizeof(request)) == 0);
-      request_len = AIMEE_MEMORY_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_MEMORY_STAGE_RERANK, 2000, 0, request,
-                                      request_len, response, sizeof(response), &response_len, NULL,
-                                      NULL) == AIMEE_MODULE_CALL_OK);
-      assert(aimee_memory_response_decode(response, response_len, &confidence) == 0);
-      assert(confidence == AIMEE_MEMORY_CONFIDENCE_HIGH);
-      smoke_memory_decision_stages(client);
-   }
-   else if (strcmp(name, "learning") == 0)
+   if (strcmp(name, "learning") == 0)
    {
       uint32_t mask = 0;
       assert(aimee_learning_request_encode("correction", request, sizeof(request)) == 0);
@@ -876,16 +821,166 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    }
 }
 
+/* Attach the trusted embedding host before opening the external admission
+ * socket, matching the daemon's principal-zero in-process connection. */
+typedef struct
+{
+   bus_host_t *host;
+   int socket;
+} trusted_attach_t;
+static void *trusted_attach(void *arg)
+{
+   trusted_attach_t *a = arg;
+   assert(bus_host_serve_attach(a->host, a->socket) == BUS_HOST_OK);
+   return NULL;
+}
+static void trusted_client(bus_host_t *host, bus_client_t *client)
+{
+   int sockets[2];
+   assert(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets) == 0);
+   trusted_attach_t args = {host, sockets[1]};
+   pthread_t thread;
+   assert(pthread_create(&thread, NULL, trusted_attach, &args) == 0);
+   assert(bus_client_attach(sockets[0], client) == BUS_CLIENT_OK);
+   assert(pthread_join(thread, NULL) == 0);
+   close(sockets[0]);
+   close(sockets[1]);
+}
+static void command_word(uint8_t *p, uint32_t value)
+{
+   p[0] = value;
+   p[1] = value >> 8;
+   p[2] = value >> 16;
+   p[3] = value >> 24;
+}
+static cJSON *host_plan(aimee_module_client_t *client, const char *args)
+{
+   uint8_t request[2048] = {0}, reply[8192] = {0};
+   size_t length = strlen(args);
+   assert(length + 23 < sizeof(request));
+   command_word(request, 0x51504d43u);
+   command_word(request + 4, 1);
+   command_word(request + 8, 7);
+   command_word(request + 12, (uint32_t)length);
+   memcpy(request + 16, "runtime", 7);
+   memcpy(request + 23, args, length);
+   struct timespec now;
+   assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+   uint64_t deadline = (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec + 2000000000ULL;
+   uint32_t reply_length = 0;
+   assert(aimee_module_client_call(client, 4096u + 7u * 256u + 8u, 8u, 8801, deadline, request,
+                                   (uint32_t)(23 + length), reply, sizeof(reply), &reply_length,
+                                   NULL, NULL) == AIMEE_MODULE_CALL_OK);
+   assert(reply_length > 12 && memcmp(reply, "CMPS", 4) == 0 && reply[4] == 1);
+   cJSON *json = cJSON_ParseWithLength((const char *)reply + 12, reply_length - 12);
+   assert(json && strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "status")),
+                         "ok") == 0);
+   return json;
+}
+static const char *json_string(const cJSON *object, const char *key)
+{
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(object, key));
+   assert(value);
+   return value;
+}
+static void smoke_host_gateway_plan(bus_client_t *host)
+{
+   aimee_module_client_t client;
+   assert(aimee_module_client_init(&client, host) == 0);
+   cJSON *plan = host_plan(
+       &client,
+       "{\"operation\":\"gateway-plan\",\"phase\":\"context\",\"roles\":[\"user\"],\"tools\":[],"
+       "\"provided_query\":\"deploy matrix\",\"last_user_text\":\"persona text\"}");
+   cJSON *steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
+   assert(cJSON_GetArraySize(steps) == 4);
+   cJSON *retrieve = cJSON_GetArrayItem(steps, 0);
+   assert(strcmp(json_string(retrieve, "binding"), "context") == 0);
+   assert(strcmp(json_string(cJSON_GetObjectItemCaseSensitive(retrieve, "args"), "query"),
+                 "deploy matrix") == 0);
+   cJSON *guidance = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 1), "context");
+   cJSON *evidence = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 3), "context");
+   assert(strcmp(json_string(guidance, "origin"), "platform") == 0 &&
+          strcmp(json_string(guidance, "authority"), "task_instruction") == 0);
+   assert(strcmp(json_string(evidence, "origin"), "retrieval") == 0 &&
+          strcmp(json_string(evidence, "authority"), "evidence") == 0);
+   cJSON_Delete(plan);
+   plan = host_plan(&client, "{\"operation\":\"gateway-plan\",\"phase\":\"tools\",\"roles\":["
+                             "\"user\"],\"tools\":[\"exec_command\",\"apply_patch\",\"shell\"]}");
+   steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
+   assert(cJSON_GetArraySize(steps) == 1);
+   cJSON *indices = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 0), "indices");
+   assert(cJSON_GetArraySize(indices) == 2 && cJSON_GetArrayItem(indices, 0)->valueint == 2 &&
+          cJSON_GetArrayItem(indices, 1)->valueint == 0);
+   cJSON_Delete(plan);
+   const char *claim = "{\"operation\":\"ingress-task-claim\",\"session\":\"live\",\"project\":"
+                       "\"p\",\"query\":\"fix resolver\"}";
+   plan = host_plan(&client, claim);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "fetch")));
+   cJSON_Delete(plan);
+   plan = host_plan(&client, claim);
+   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(plan, "fetch")));
+   cJSON_Delete(plan);
+   plan = host_plan(
+       &client, "{\"operation\":\"ingress-task-rearm\",\"session\":\"live\",\"project\":\"p\"}");
+   cJSON_Delete(plan);
+   plan = host_plan(&client, claim);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "fetch")));
+   cJSON_Delete(plan);
+   plan =
+       host_plan(&client, "{\"operation\":\"ingress-task-packet\",\"project\":\"p\",\"packet\":{"
+                          "\"status\":\"ok\",\"project\":\"p\",\"generation\":7,\"freshness\":"
+                          "\"current\",\"resolved\":true,"
+                          "\"max_results\":4,\"max_tokens\":1200,\"item_count\":1,"
+                          "\"answerability\":{\"decision\":\"answerable\"},"
+                          "\"results\":[{\"project\":\"p\",\"file_path\":\"local.go\","
+                          "\"generation\":7,\"freshness\":\"current\","
+                          "\"confidence\":0.9,\"accepted\":true,\"provenance\":[\"code\"],\"span\":"
+                          "{\"kind\":\"line\",\"line_start\":12,\"line_end\":12}}],\"why\":[]}}");
+   assert(strstr(json_string(plan, "block"), "local.go:12 [confidence=0.90; provenance=code]") !=
+          NULL);
+   assert(cJSON_GetObjectItemCaseSensitive(plan, "item_count")->valueint == 1);
+   cJSON_Delete(plan);
+   plan =
+       host_plan(&client, "{\"operation\":\"ingress-assemble\",\"budget\":1200,\"code\":[{\"file_"
+                          "path\":\"local.go\",\"snippet\":\"local resolver\",\"line\":12}],"
+                          "\"memories\":[{\"id\":\"9223372036854775807\",\"headline\":\"Use the "
+                          "local resolver.\",\"score\":0.95}]}");
+   const char *envelope = json_string(plan, "envelope");
+   assert(strstr(envelope, "<aimee-context confidence=\"low\">") == envelope);
+   assert(strstr(envelope, "memory:9223372036854775807") != NULL);
+   assert(strstr(envelope, "local.go\n    > local resolver") != NULL);
+   cJSON_Delete(plan);
+   plan = host_plan(
+       &client, "{\"operation\":\"ingress-begin\",\"session\":\"live-plan\",\"project\":\"p\","
+                "\"query\":\"fix resolver\","
+                "\"active_scope\":true,\"preview_enabled\":true,\"mode\":\"on\",\"budget\":1200}");
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "active")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "task")));
+   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(plan, "legacy_preview")));
+   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(plan, "facts")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "temporal")));
+   cJSON_Delete(plan);
+   plan = host_plan(&client, "{\"operation\":\"ingress-recall-result\",\"project\":\"p\",\"count\":"
+                             "0,\"unavailable\":true}");
+   assert(strstr(json_string(plan, "warning"), "UNAVAILABLE (not empty)") != NULL);
+   cJSON_Delete(plan);
+   plan = host_plan(&client, "{\"operation\":\"ingress-metrics\"}");
+   assert(cJSON_GetObjectItemCaseSensitive(plan, "recall_unavailable_total")->valueint == 1);
+   cJSON_Delete(plan);
+   aimee_module_client_destroy(&client);
+   puts("memory: authenticated host/Go process gateway plans and ingress policy passed");
+}
+
 int main(int argc, char **argv)
 {
-   assert(argc >= 1 && argc <= 3);
+   assert(argc >= 1 && argc <= 4);
    uint32_t test_kind = TEST_KIND, module_ref = MODULE_REF;
    uint32_t served[PRODUCTION_STAGE_MAX] = {test_kind};
    size_t serve_count = 1;
-   if (argc == 3)
+   if (argc >= 3)
       assert(production_contract(argv[2], &test_kind, &module_ref, served, &serve_count) == 0);
-   const int memory_process = argc == 3 && strcmp(argv[2], "memory") == 0;
-   const int provider_process = argc == 3 && strcmp(argv[2], "providers") == 0;
+   const int memory_process = argc >= 3 && strcmp(argv[2], "memory") == 0;
+   const int provider_process = argc >= 3 && strcmp(argv[2], "providers") == 0;
    char directory[256];
    snprintf(directory, sizeof directory, "%s/aimee-module-runtime-XXXXXX", platform_tmpdir());
    assert(mkdtemp(directory) != NULL);
@@ -894,7 +989,12 @@ int main(int argc, char **argv)
     * exercises the write path must not touch the developer's real store. */
    assert(setenv("AIMEE_HOME", directory, 1) == 0);
    if (memory_process)
-      assert(setenv("AIMEE_MODULE_PLACEMENT", "server", 1) == 0);
+   {
+      assert(argc == 4); /* policy parity is tested by the Go caller */
+      const char *placement = getenv("AIMEE_TEST_MEMORY_PLACEMENT");
+      assert(!placement || strcmp(placement, "server") == 0 || strcmp(placement, "kb") == 0);
+      assert(setenv("AIMEE_MODULE_PLACEMENT", placement ? placement : "server", 1) == 0);
+   }
    char socket_path[PATH_MAX], executable[PATH_MAX];
    assert(snprintf(socket_path, sizeof socket_path, "%s/module.sock", directory) > 0);
    assert(realpath("/proc/self/exe", executable) != NULL);
@@ -905,8 +1005,12 @@ int main(int argc, char **argv)
    else
       assert(snprintf(module_executable, sizeof module_executable, "%s", executable) > 0);
 
-   bus_instance_role_t role = argc == 3 && strcmp(argv[2], "server") == 0 ? BUS_INSTANCE_SERVER
-                              : argc == 3 && strcmp(argv[2], "kb") == 0   ? BUS_INSTANCE_KB
+   char probe_executable[PATH_MAX] = "";
+   if (argc == 4)
+      assert(realpath(argv[3], probe_executable) != NULL);
+
+   bus_instance_role_t role = argc >= 3 && strcmp(argv[2], "server") == 0 ? BUS_INSTANCE_SERVER
+                              : argc >= 3 && strcmp(argv[2], "kb") == 0   ? BUS_INSTANCE_KB
                                                                           : BUS_INSTANCE_UNSET;
    if (role != BUS_INSTANCE_UNSET)
       assert(bus_instance_ensure_identity(directory, role, module_executable) == 0);
@@ -915,6 +1019,7 @@ int main(int argc, char **argv)
    memcpy(requested, served, serve_count * sizeof(*requested));
    requested[serve_count] = EMPTY_KIND;
    const uint32_t postgres_request[] = {AIMEE_POSTGRES_EVENT_SQL};
+   const uint32_t action_publish[] = {3000u};
    const uint32_t provider_request[] = {12290u, 12295u, 4609u};
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
                                     .principal_ref = module_ref,
@@ -929,7 +1034,7 @@ int main(int argc, char **argv)
                                     .request = requested,
                                     .request_count = serve_count + 1},
                                    /* The migrated memory process owns its SQL
-                                    * through a second, request-only identity.
+                                    * and action observations through a second identity.
                                     * The smoke calls below are deliberately
                                     * store-free, but startup must still prove
                                     * that the shipped process can attach the
@@ -938,8 +1043,16 @@ int main(int argc, char **argv)
                                     .principal_ref = memory_process ? 73 : 74,
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = module_executable,
+                                    .publish = memory_process ? action_publish : NULL,
+                                    .publish_count = memory_process ? 1 : 0,
                                     .request = memory_process ? postgres_request : provider_request,
-                                    .request_count = memory_process ? 1 : 3}};
+                                    .request_count = memory_process ? 1 : 3},
+                                   {.principal_class = 1,
+                                    .principal_ref = 200,
+                                    .uid = BUS_RUNTIME_SELF_UID,
+                                    .executable = probe_executable,
+                                    .request = requested,
+                                    .request_count = serve_count}};
    bus_host_config_t host_config = {.max_slots = 8,
                                     .slot_size = 512,
                                     .inline_budget = 400,
@@ -947,6 +1060,9 @@ int main(int argc, char **argv)
                                     .arena_size = 16384};
    bus_host_t host;
    assert(bus_host_create(&host, &host_config, NULL, NULL) == BUS_HOST_OK);
+   bus_client_t embedding_host;
+   if (memory_process)
+      trusted_client(&host, &embedding_host);
    pthread_mutex_t host_lock = PTHREAD_MUTEX_INITIALIZER;
    bus_runtime_config_t runtime_config = {.instance_role = role,
                                           .socket_path = socket_path,
@@ -954,8 +1070,10 @@ int main(int argc, char **argv)
                                           .backlog = 8,
                                           .stale_after_ns = 5000000000ULL,
                                           .grants = grants,
-                                          .grant_count =
-                                              (memory_process || provider_process) ? 3 : 2};
+                                          .grant_count = argc == 4 ? 4
+                                                         : (memory_process || provider_process)
+                                                             ? 3
+                                                             : 2};
    bus_runtime_t *runtime = bus_runtime_start(&host, &host_lock, &runtime_config);
    assert(runtime != NULL);
 
@@ -971,19 +1089,7 @@ int main(int argc, char **argv)
    pid_t module_pid = -1;
    if (argc >= 2)
    {
-      pid_t parent = getpid();
-      module_pid = fork();
-      assert(module_pid >= 0);
-      if (module_pid == 0)
-      {
-         /* Outlive the test and this module runs forever: cleanup here is
-          * atexit-shaped and does not run when the test dies by a signal. */
-         prctl(PR_SET_PDEATHSIG, SIGKILL);
-         if (getppid() != parent)
-            _exit(0);
-         execl(module_executable, module_executable, socket_path, (char *)NULL);
-         _exit(127);
-      }
+      module_pid = spawn_module_child(module_executable, socket_path, NULL);
    }
    else
       assert(pthread_create(&module_thread, NULL, run_process, &process) == 0);
@@ -993,7 +1099,7 @@ int main(int argc, char **argv)
    assert(bus_endpoint_connect(socket_path, &caller_fd) == 0);
    assert(bus_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == BUS_CLIENT_OK);
    assert(bus_endpoint_close(&caller_fd) == 0);
-   wait_for_clients(&host, &host_lock, (memory_process || provider_process) ? 3 : 2, module_pid);
+   wait_for_clients(&host, &host_lock, memory_process ? 4 : provider_process ? 3 : 2, module_pid);
 
    pump_thread_t pump_state = {.host = &host, .lock = &host_lock};
    atomic_init(&pump_state.stop, 0);
@@ -1002,10 +1108,33 @@ int main(int argc, char **argv)
 
    aimee_module_client_t module_client;
    assert(aimee_module_client_init(&module_client, &caller) == 0);
+   if (memory_process)
+      smoke_host_gateway_plan(&embedding_host);
 
-   if (argc == 3)
+   if (argc >= 3)
    {
-      smoke_production_module(&module_client, argv[2], test_kind);
+      if (argc == 4)
+      {
+         run_memory_probe(probe_executable, socket_path);
+         if (memory_process)
+         {
+            assert(kill(module_pid, SIGKILL) == 0);
+            int status = 0;
+            while (waitpid(module_pid, &status, 0) < 0)
+               assert(errno == EINTR);
+            assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+            wait_for_memory_departure(runtime, &host, &host_lock, &caller, &embedding_host);
+            memory_discovery_unavailable(&module_client);
+            module_pid = spawn_module_child(module_executable, socket_path, NULL);
+            wait_for_clients(&host, &host_lock, 4, module_pid);
+            smoke_host_gateway_plan(&embedding_host);
+            run_memory_probe(probe_executable, socket_path);
+            puts("memory: terminated provider unavailable; restarted Go owner passed host/client "
+                 "parity");
+         }
+      }
+      else
+         smoke_production_module(&module_client, argv[2], test_kind);
       goto finish;
    }
 
@@ -1082,6 +1211,8 @@ finish:
    atomic_store_explicit(&pump_state.stop, 1, memory_order_release);
    assert(pthread_join(pump_thread, NULL) == 0);
    bus_client_detach(&caller);
+   if (memory_process)
+      bus_client_detach(&embedding_host);
    bus_runtime_stop(&runtime);
    bus_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);
@@ -1100,8 +1231,9 @@ finish:
       assert(unlink(learned_store) == 0);
    }
    assert(rmdir(directory) == 0);
-   if (argc == 3)
-      printf("module runtime (%s): C caller/Go handler wire parity passed\n", argv[2]);
+   if (argc >= 3)
+      printf("module runtime (%s): %s caller/Go handler wire parity passed\n", argv[2],
+             argc == 4 ? "Go" : "C");
    else
       printf(
           "module runtime (%s): dispatch, fragmented payloads, deadline, and cancellation passed\n",

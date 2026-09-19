@@ -16,7 +16,8 @@
 int pre_tool_check(const char *tool_name, const char *input_json, session_state_t *state,
                    const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len)
 {
-   return pre_tool_check_inner(tool_name, input_json, state, guardrail_mode, cwd, msg_buf, msg_len);
+   return pre_tool_check_inner(tool_name, input_json, state, guardrail_mode, cwd, msg_buf, msg_len,
+                               0);
 }
 
 int model_capability_get(const char *provider, const char *model_id, model_capability_t *out)

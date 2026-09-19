@@ -69,21 +69,6 @@ int kb_client_index_blast_radius(const char *project, const char *file_path, bla
  * stub.  Tests that don't link kb_client_tool_registry.o also don't
  * reference these symbols, so omitting them here is safe. */
 
-int kb_client_memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max)
-{
-   (void)tier;
-   (void)kind;
-   (void)limit;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-char *kb_client_memory_lint_json(void)
-{
-   return NULL;
-}
-
 /* The endogeneity gate is answered by the knowledge service. A test that does
  * not link one gets NULL, which the caller reads as "no reachable ledger" —
  * the same path a real deployment takes when the KB is down. */

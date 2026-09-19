@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 /* embedder_probe.c -- §2b kb-side embedder /health dim probe. Registered with the
  * db2 layer so db2_init can derive a fresh DB's embedding dim from the running
  * embedder without db2 learning the embed transport (db2 stays config-free). */
@@ -6,8 +8,6 @@
 #include "aimee.h" /* EMBED_MAX_DIM + memory.h prerequisites */
 #include "lifecycle.h"
 #include "log.h"
-#include "memory.h"                              /* memory_embed_text — in-process HTTP probe */
-#include "modules/memory/memory_core_internal.h" /* memory_embed_command_is_http */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,39 +30,15 @@ static long probe_mono_ms(void)
  * positive integer. */
 static int probe_once(void)
 {
-   if (!g_embed_cmd[0])
-      return -1;
-   /* An http(s):// "command" is the in-process embed transport (the combined /
-    * unified-container deployments export SYNTHESIS_ENDPOINT and set no sidecar
-    * command) — there is nothing to exec, and popen would fork
-    * `sh -c "http://... --dim"` forever. Probe by embedding a short text and
-    * taking the vector's length: transport-exact, and independent of whether
-    * the gateway's /health reports a dim. */
-   if (memory_embed_command_is_http(g_embed_cmd))
-   {
-      static float vec[EMBED_MAX_DIM];
-      int d = memory_embed_text("dim probe", g_embed_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
-      return d > 0 ? d : -1;
-   }
-   char cmd[1100];
-   snprintf(cmd, sizeof(cmd), "%s --dim", g_embed_cmd);
-   FILE *p = popen(cmd, "r");
-   if (!p)
-      return -1;
-   char buf[64] = "";
-   size_t n = fread(buf, 1, sizeof(buf) - 1, p);
-   buf[n] = '\0';
-   int status = pclose(p);
-   if (status != 0)
-      return -1; /* command signalled "not ready" / error */
-   char *endp = NULL;
-   long v = strtol(buf, &endp, 10);
-   /* accept only a clean positive integer (trailing whitespace/newline ok) */
-   while (endp && (*endp == '\n' || *endp == '\r' || *endp == ' ' || *endp == '\t'))
-      endp++;
-   if (!endp || *endp != '\0' || v <= 0)
-      return -1;
-   return (int)v;
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "dimension");
+   cJSON_AddStringToObject(args, "base_url", g_embed_cmd);
+   cJSON_AddNumberToObject(args, "max_dim", EMBED_MAX_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply);
+   cJSON_Delete(args);
+   int dim = jo_int(reply, "dim", 0);
+   cJSON_Delete(reply);
+   return dim > 0 ? dim : -1;
 }
 
 /* db2_embedder_probe_fn: poll the embedder until two CONSECUTIVE reads agree on a
@@ -125,7 +101,17 @@ static int embedder_probe_serving_id(char *out, size_t out_len, char *err, size_
    long start = probe_mono_ms();
    for (;;)
    {
-      if (memory_embed_serving_id(g_embed_cmd, out, out_len) == 0)
+      cJSON *args = cJSON_CreateObject(), *reply = NULL;
+      cJSON_AddStringToObject(args, "operation", "serving-id");
+      cJSON_AddStringToObject(args, "base_url", g_embed_cmd);
+      (void)aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply);
+      cJSON_Delete(args);
+      const cJSON *identity = cJSON_GetObjectItemCaseSensitive(reply, "serving_id");
+      int ready = cJSON_IsString(identity) && !jo_cstr(reply, "error")[0];
+      if (ready)
+         snprintf(out, out_len, "%s", identity->valuestring);
+      cJSON_Delete(reply);
+      if (ready)
       {
          if (out[0])
             LOG_INFO("db2", "embedder serving identity: %s", out);

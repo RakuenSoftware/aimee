@@ -250,12 +250,6 @@ static int session_l2_count(const char *source_session)
    return strcmp(source_session, "session-123") == 0 ? 3 : 0;
 }
 
-int db2_memory_key_exists(const char *key)
-{
-   key_exists_calls++;
-   return strcmp(key, "recovery:tool-a->tool-b") == 0 ? 1 : 0;
-}
-
 static int key_exists(const char *key)
 {
    key_exists_calls++;

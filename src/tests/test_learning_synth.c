@@ -1,3 +1,6 @@
+#include "module_commands.h"
+#include "json_fluent.h"
+#include <assert.h>
 /* test_learning_synth.c — unit tests for the candidate-generation pass
  * (kb/kb_learning_synth.c).
  *
@@ -28,17 +31,16 @@
 #define STUB_CMD  "cat " RESP_PATH
 
 /* Deterministic embedder: query vector is e0 so the bundle ranks/spans fine. */
-int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
-                      float *out, int max_dim)
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   (void)text;
-   (void)command;
-   (void)input_type;
-   int dim = 384 < max_dim ? 384 : max_dim;
-   for (int i = 0; i < dim; i++)
-      out[i] = 0.0f;
-   out[0] = 1.0f;
-   return dim;
+   assert(strcmp(method, "memory.embed_text") == 0);
+   *result = cJSON_CreateObject();
+   int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
+   int dim = max_dim < 384 ? max_dim : 384;
+   cJSON *vector = cJSON_AddArrayToObject(*result, "vector");
+   for (int i = 0; i < dim; ++i)
+      cJSON_AddItemToArray(vector, cJSON_CreateNumber(i == 0 ? 1.0f : 0.0f));
+   return 1;
 }
 
 static void open_db(void)

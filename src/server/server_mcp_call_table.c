@@ -1,3 +1,4 @@
+#include "modules/kb_client/kb_client_pii.h"
 /* server_mcp_call_table.c: split from server_mcp.c into a real translation unit
  * (was server_mcp_call_table.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
@@ -84,9 +85,6 @@ static cJSON *mcph_search_memory(struct mcp_call *c)
 {
    return tool_search_memory(c->jargs);
 }
-/* mcp_mutate_verb_method / mcp_memory_maintain_required_cap live in
- * server_mcp_memory_gate.c: they are the security-critical half of these two
- * gates, and no test links this TU. See that header. */
 static cJSON *mcph_mutate(struct mcp_call *c)
 {
    cJSON *jv = cJSON_GetObjectItemCaseSensitive(c->jargs, "verb");
@@ -269,32 +267,7 @@ static cJSON *mcph_upsert_role_template(struct mcp_call *c)
 
 static cJSON *mcph_memory_alerts(struct mcp_call *c)
 {
-   cJSON *jargs = c->jargs;
-   const char *since = NULL;
-   cJSON *js = cJSON_GetObjectItemCaseSensitive(jargs, "since");
-   if (cJSON_IsString(js) && js->valuestring[0])
-      since = js->valuestring;
-   int active_context_missing = 0;
-   mcp_memory_scope_begin(jargs, &active_context_missing);
-   char *envelope = kb_client_memory_alerts_json(since);
-   mcp_memory_scope_end();
-   cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
-   free(envelope);
-   cJSON *alerts = resp ? cJSON_GetObjectItemCaseSensitive(resp, "alerts") : NULL;
-   char *rendered = NULL;
-   if (alerts)
-   {
-      cJSON *detached = cJSON_DetachItemViaPointer(resp, alerts);
-      if (detached)
-         cJSON_AddBoolToObject(detached, "active_context_missing", active_context_missing);
-      rendered = detached ? cJSON_PrintUnformatted(detached) : NULL;
-      cJSON_Delete(detached);
-   }
-   cJSON_Delete(resp);
-   cJSON *content =
-       rendered ? text_content(rendered) : mcph_kb_last_result("memory alerts returned no result");
-   free(rendered);
-   return content;
+   return tool_memory_alerts(c->jargs);
 }
 
 static cJSON *mcph_memory_recall(struct mcp_call *c)
@@ -408,7 +381,13 @@ static cJSON *mcph_list_epistemic_directives(struct mcp_call *c)
       limit = 1;
    if (limit > 256)
       limit = 256;
-   char *envelope = kb_client_memory_directive_list_json(state, cause, limit);
+   cJSON *directive_args = cJSON_CreateObject();
+   if (state && state[0])
+      cJSON_AddStringToObject(directive_args, "state", state);
+   if (cause && cause[0])
+      cJSON_AddStringToObject(directive_args, "cause", cause);
+   cJSON_AddNumberToObject(directive_args, "limit", limit);
+   char *envelope = kb_v1_action_request("memory.directive_list", directive_args);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *directives = resp ? cJSON_GetObjectItemCaseSensitive(resp, "directives") : NULL;
@@ -455,8 +434,24 @@ static cJSON *mcph_create_epistemic_directive(struct mcp_call *c)
    if (!cause)
       cause = MEMORY_DIRECTIVE_CAUSE_USER_FOLLOW_UP;
 
-   char *envelope = kb_client_memory_directive_create_json(question, topic, entity, file, cause,
-                                                           priority, "", valid_until);
+   cJSON *directive_args = cJSON_CreateObject();
+   if (kb_client_pii_identifier_sensitive(entity) || kb_client_pii_identifier_sensitive(file) ||
+       kb_client_pii_add_string_required(directive_args, "question", question) != 0 ||
+       kb_client_pii_add_string(directive_args, "topic", topic) != 0 ||
+       kb_client_pii_add_string(directive_args, "cause", cause) != 0)
+   {
+      cJSON_Delete(directive_args);
+      return text_content("error: withheld_pii: content was not sent to aimee-kb");
+   }
+   if (entity && entity[0])
+      cJSON_AddStringToObject(directive_args, "entity", entity);
+   if (file && file[0])
+      cJSON_AddStringToObject(directive_args, "file", file);
+   cJSON_AddNumberToObject(directive_args, "priority", priority);
+
+   if (valid_until && valid_until[0])
+      cJSON_AddStringToObject(directive_args, "valid_until", valid_until);
+   char *envelope = kb_v1_action_request("memory.directive_create", directive_args);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *res = cJSON_CreateObject();
@@ -509,7 +504,11 @@ static cJSON *mcph_resolve_epistemic_directive(struct mcp_call *c)
       suppress = cJSON_IsTrue(jsp) ? 1 : 0;
    char *envelope;
    if (suppress)
-      envelope = kb_client_memory_directive_suppress_json(id);
+   {
+      cJSON *directive_args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(directive_args, "id", (double)id);
+      envelope = kb_v1_action_request("memory.directive_suppress", directive_args);
+   }
    else
    {
       int64_t resm = 0;
@@ -520,7 +519,16 @@ static cJSON *mcph_resolve_epistemic_directive(struct mcp_call *c)
       cJSON *jn = cJSON_GetObjectItemCaseSensitive(jargs, "note");
       if (cJSON_IsString(jn))
          note = jn->valuestring;
-      envelope = kb_client_memory_directive_resolve_json(id, resm, note);
+      cJSON *directive_args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(directive_args, "id", (double)id);
+      if (resm > 0)
+         cJSON_AddNumberToObject(directive_args, "with_memory", (double)resm);
+      if (kb_client_pii_add_string(directive_args, "note", note) != 0)
+      {
+         cJSON_Delete(directive_args);
+         return text_content("error: withheld_pii: content was not sent to aimee-kb");
+      }
+      envelope = kb_v1_action_request("memory.directive_resolve", directive_args);
    }
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
@@ -545,107 +553,19 @@ static cJSON *mcph_resolve_epistemic_directive(struct mcp_call *c)
 
 static cJSON *mcph_memory_maintain(struct mcp_call *c)
 {
-   cJSON *jargs = c->jargs;
-   unsigned int modes = 0;
-   cJSON *jm = cJSON_GetObjectItemCaseSensitive(jargs, "modes");
-   if (cJSON_IsString(jm) && jm->valuestring[0])
+   cJSON *reply = server_mcp_memory_maintain_command(c->conn ? c->conn->capabilities : 0, c->jargs);
+   cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "text");
+   cJSON *content;
+   if (strcmp(jo_cstr(reply, "status"), "ok") == 0 && cJSON_IsString(text))
+      content = text_content(text->valuestring);
+   else
    {
-      const char *csv = jm->valuestring;
-      while (*csv)
-      {
-         while (*csv == ' ' || *csv == ',')
-            csv++;
-         if (!*csv)
-            break;
-         const char *start = csv;
-         while (*csv && *csv != ',' && *csv != ' ')
-            csv++;
-         size_t len = (size_t)(csv - start);
-         if (len == 6 && strncmp(start, "replay", 6) == 0)
-            modes |= MEMORY_MAINTENANCE_MODE_REPLAY;
-         else if (len == 7 && strncmp(start, "compact", 7) == 0)
-            modes |= MEMORY_MAINTENANCE_MODE_COMPACT;
-         else if (len == 5 && strncmp(start, "prune", 5) == 0)
-            modes |= MEMORY_MAINTENANCE_MODE_PRUNE;
-         else if (len == 9 && strncmp(start, "summarize", 9) == 0)
-            modes |= MEMORY_MAINTENANCE_MODE_SUMMARIZE;
-      }
+      char message[256];
+      snprintf(message, sizeof(message), "error: %s",
+               jo_str(reply, "message", "memory maintenance unavailable"));
+      content = text_content(message);
    }
-   int dry_run = 0, force = 0;
-   cJSON *jd = cJSON_GetObjectItemCaseSensitive(jargs, "dry_run");
-   if (cJSON_IsBool(jd))
-      dry_run = cJSON_IsTrue(jd) ? 1 : 0;
-   cJSON *jf = cJSON_GetObjectItemCaseSensitive(jargs, "force");
-   if (cJSON_IsBool(jf))
-      force = cJSON_IsTrue(jf) ? 1 : 0;
-
-   /* The prune mode is the bulk twin of memory.delete: memory_expire() wipes
-    * every L0 row and its provenance and deletes stale L1 rows, and
-    * memory_enforce_retention() hard-deletes restricted/sensitive memories past
-    * their retention window. This tool is the model's door to it, and it was
-    * ungated -- there is not even an RPC method twin to inherit a grade from
-    * (memory.maintenance_run is a KB-service method the server never dispatches).
-    *
-    * Grading it is NOT sufficient on its own, and it is worth being explicit
-    * about why: reaching any MCP tool requires CAP_TOOL_EXECUTE, which lives
-    * only in CAPS_AUTHENTICATED and CAPS_ALL -- and both also carry
-    * CAP_MEMORY_ADMIN. Every caller that can invoke this tool therefore already
-    * clears an admin-graded gate, so a gate alone would still leave a model able
-    * to bulk-delete.
-    *
-    * So the model's door does not prune at all, for the same reason its `forget`
-    * retires rather than destroys. The operator keeps prune via
-    * `aimee memory maintain`, and the scheduler still runs the full cycle. The
-    * capability gate stays as defence in depth on the modes actually run. */
-   int dropped_prune = 0;
-   unsigned int run_modes = mcp_memory_maintain_model_modes(modes, &dropped_prune);
-
-   uint32_t required = mcp_memory_maintain_required_cap(run_modes);
-   if (!c->conn || (c->conn->capabilities & required) == 0)
-      return text_content("error: forbidden: insufficient capabilities for memory maintenance");
-
-   /* Nothing left to do once prune is removed (a bare call asking only for it):
-    * say so rather than running an empty cycle and reporting success. */
-   if (run_modes == 0)
-      return text_content("memory maintenance: nothing run. The prune mode permanently deletes "
-                          "memories (all L0 rows, stale L1 rows, and restricted/sensitive rows "
-                          "past retention) and is not available through this tool; it is an "
-                          "operator action (`aimee memory maintain`). Other modes: replay, "
-                          "compact, summarize.");
-
-   char *envelope = kb_client_memory_maintenance_run_json(run_modes, force, dry_run);
-   cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
-   free(envelope);
-   cJSON *summary = resp ? cJSON_GetObjectItemCaseSensitive(resp, "summary") : NULL;
-   char *rendered = NULL;
-   if (cJSON_IsObject(summary))
-   {
-      cJSON *detached = cJSON_DetachItemViaPointer(resp, summary);
-      rendered = detached ? cJSON_PrintUnformatted(detached) : NULL;
-      cJSON_Delete(detached);
-   }
-   cJSON_Delete(resp);
-   /* Say when the request was narrowed. Running less than asked and reporting
-    * plain success would read as "pruned" to the caller. */
-   if (dropped_prune)
-   {
-      const char *body = rendered ? rendered : "{}";
-      size_t need = strlen(body) + 256;
-      char *note = (char *)malloc(need);
-      if (note)
-      {
-         snprintf(note, need,
-                  "%s\n(prune was NOT run: it permanently deletes memories and is an operator "
-                  "action, `aimee memory maintain`. The other requested modes ran.)",
-                  body);
-         cJSON *content = text_content(note);
-         free(note);
-         free(rendered);
-         return content;
-      }
-   }
-   cJSON *content = rendered ? text_content(rendered) : text_content("{}");
-   free(rendered);
+   cJSON_Delete(reply);
    return content;
 }
 
@@ -1270,33 +1190,25 @@ static cJSON *mcph_memory_provenance(struct mcp_call *c)
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(c->jargs, "memory_id");
    if (!cJSON_IsNumber(jid))
       return text_content("error: memory_provenance requires 'memory_id'");
-   const int max = 200;
-   provenance_entry_t *ents = calloc((size_t)max, sizeof(*ents));
-   if (!ents)
-      return text_content("error: out of memory");
-   int n = kb_client_memory_get_provenance((int64_t)jid->valuedouble, ents, max);
-   if (n < 0)
+   cJSON *args = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(args);
+   cJSON_AddNumberToObject(args, "memory_id", jid->valuedouble);
+   cJSON_AddNumberToObject(args, "max", 200);
+   char *json = kb_v1_action_request("memory.get_provenance", args);
+   cJSON *response = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   cJSON *entries = cJSON_GetObjectItemCaseSensitive(response, "entries");
+   if (strcmp(jo_cstr(response, "status"), "ok") != 0 || !cJSON_IsArray(entries))
    {
-      free(ents);
+      cJSON_Delete(response);
       return mcph_kb_last_result("memory provenance returned no result");
    }
+   int count = cJSON_GetArraySize(entries);
    cJSON *result = cJSON_CreateObject();
-   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
-   cJSON *arr = cJSON_AddArrayToObject(result, "provenance");
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *e = cJSON_CreateObject();
-      cJSON_AddNumberToObject(e, "id", (double)ents[i].id);
-      cJSON_AddStringToObject(e, "action", ents[i].action);
-      if (ents[i].session_id[0])
-         cJSON_AddStringToObject(e, "session_id", ents[i].session_id);
-      if (ents[i].details[0])
-         cJSON_AddStringToObject(e, "details", ents[i].details);
-      cJSON_AddStringToObject(e, "created_at", ents[i].created_at);
-      cJSON_AddItemToArray(arr, e);
-   }
-   cJSON_AddNumberToObject(result, "count", n);
-   free(ents);
+   cJSON_AddStringToObject(result, "status", count > 0 ? "ok" : "empty");
+   cJSON_AddNumberToObject(result, "count", count);
+   cJSON_AddItemToObject(result, "provenance", cJSON_DetachItemViaPointer(response, entries));
+   cJSON_Delete(response);
    return json_result_content(result);
 }
 
@@ -1305,33 +1217,21 @@ static cJSON *mcph_memory_fact_history(struct mcp_call *c)
    cJSON *jk = cJSON_GetObjectItemCaseSensitive(c->jargs, "key");
    if (!cJSON_IsString(jk) || !jk->valuestring[0])
       return text_content("error: memory_fact_history requires 'key'");
-   const int max = 100;
-   memory_t *mems = calloc((size_t)max, sizeof(*mems));
-   if (!mems)
-      return text_content("error: out of memory");
-   int n = kb_client_memory_fact_history(jk->valuestring, mems, max);
-   if (n < 0)
-   {
-      free(mems);
-      return mcph_kb_last_result("memory fact history returned no result");
-   }
-   cJSON *result = cJSON_CreateObject();
-   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
-   cJSON *arr = cJSON_AddArrayToObject(result, "history");
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *m = cJSON_CreateObject();
-      cJSON_AddNumberToObject(m, "id", (double)mems[i].id);
-      cJSON_AddStringToObject(m, "tier", mems[i].tier);
-      cJSON_AddStringToObject(m, "kind", mems[i].kind);
-      cJSON_AddStringToObject(m, "content", mems[i].content);
-      cJSON_AddNumberToObject(m, "confidence", mems[i].confidence);
-      cJSON_AddStringToObject(m, "updated_at", mems[i].updated_at);
-      cJSON_AddItemToArray(arr, m);
-   }
-   cJSON_AddNumberToObject(result, "count", n);
-   free(mems);
-   return json_result_content(result);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "key", jk->valuestring);
+   cJSON_AddNumberToObject(request, "max", 100);
+   cJSON_AddStringToObject(request, "format", "mcp");
+   char *raw = kb_v1_action_request("memory.fact_history", request);
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+   cJSON *content;
+   if (strcmp(jo_cstr(reply, "status"), "ok") == 0 && cJSON_IsString(output))
+      content = text_content(output->valuestring);
+   else
+      content = text_content("error: memory fact history unavailable or invalid response");
+   cJSON_Delete(reply);
+   return content;
 }
 
 static cJSON *mcph_dashboard_metrics(struct mcp_call *c)

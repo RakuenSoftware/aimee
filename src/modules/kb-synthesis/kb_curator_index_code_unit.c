@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 /* kb_curator_index_code_unit.c: deep-curator code_unit vector indexer.
  *
  * Claims one proposed `code_unit` artifact, embeds its intent (summary),
@@ -117,12 +119,36 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    float intent_vec[CURATOR_CODE_UNIT_DIM];
    float sig_vec[CURATOR_CODE_UNIT_DIM];
    float body_vec[CURATOR_CODE_UNIT_DIM];
-   int d1 = memory_embed_text(intent_text, embed_cmd, EMBED_INPUT_DOCUMENT, intent_vec,
-                              CURATOR_CODE_UNIT_DIM);
-   int d2 =
-       memory_embed_text(sig_text, embed_cmd, EMBED_INPUT_DOCUMENT, sig_vec, CURATOR_CODE_UNIT_DIM);
-   int d3 = memory_embed_text(body_text, embed_cmd, EMBED_INPUT_DOCUMENT, body_vec,
-                              CURATOR_CODE_UNIT_DIM);
+   cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+   cJSON_AddStringToObject(embed_0_args, "base_url", embed_cmd);
+   cJSON_AddStringToObject(embed_0_args, "input_type", "document");
+   cJSON_AddStringToObject(embed_0_args, "text", intent_text);
+   cJSON_AddNumberToObject(embed_0_args, "max_dim", CURATOR_CODE_UNIT_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
+   cJSON_Delete(embed_0_args);
+   int d1 = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), intent_vec,
+                           CURATOR_CODE_UNIT_DIM);
+   cJSON_Delete(embed_0_reply);
+   cJSON *embed_1_args = cJSON_CreateObject(), *embed_1_reply = NULL;
+   cJSON_AddStringToObject(embed_1_args, "base_url", embed_cmd);
+   cJSON_AddStringToObject(embed_1_args, "input_type", "document");
+   cJSON_AddStringToObject(embed_1_args, "text", sig_text);
+   cJSON_AddNumberToObject(embed_1_args, "max_dim", CURATOR_CODE_UNIT_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_1_args, &embed_1_reply);
+   cJSON_Delete(embed_1_args);
+   int d2 = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_1_reply, "vector"), sig_vec,
+                           CURATOR_CODE_UNIT_DIM);
+   cJSON_Delete(embed_1_reply);
+   cJSON *embed_2_args = cJSON_CreateObject(), *embed_2_reply = NULL;
+   cJSON_AddStringToObject(embed_2_args, "base_url", embed_cmd);
+   cJSON_AddStringToObject(embed_2_args, "input_type", "document");
+   cJSON_AddStringToObject(embed_2_args, "text", body_text);
+   cJSON_AddNumberToObject(embed_2_args, "max_dim", CURATOR_CODE_UNIT_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_2_args, &embed_2_reply);
+   cJSON_Delete(embed_2_args);
+   int d3 = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_2_reply, "vector"), body_vec,
+                           CURATOR_CODE_UNIT_DIM);
+   cJSON_Delete(embed_2_reply);
 
    /* Job-row re-check + vector upsert + artifact commit in ONE transaction,
     * with the purge fence checked INSIDE it: a job claimed pre-purge can never

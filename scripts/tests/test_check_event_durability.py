@@ -39,7 +39,7 @@ class DurabilityCheckTest(unittest.TestCase):
         contract_path = root / CHECK.CONTRACTS
         contract_path.parent.mkdir(parents=True)
         contract_path.write_text(json.dumps(contract), encoding="utf-8")
-        header_path = root / "src/modules/memory/include/aimee/memory/module_api.h"
+        header_path = root / "src/headers/memory_stage_contract.h"
         header_path.parent.mkdir(parents=True)
         header_path.write_text(header, encoding="utf-8")
         rows = runtime if runtime is not None else ({kind} if durability == "ledger" else set())

@@ -11,12 +11,8 @@
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
 #include "../modules/db2/c/lifecycle.h"
-#include "../modules/db2/c/memory_briefing.h"
-#include "../modules/db2/c/memory_lifecycle.h"
 #include "../modules/db2/c/memory_query.h"
 #include "../modules/db2/c/memory_relations.h"
-#include "../modules/db2/c/memory_scope_query.h"
-#include "../modules/memory/memory_core_internal.h"
 
 static char tmpdir[64];
 
@@ -72,99 +68,33 @@ static void setup(void)
    platform_setenv("HOME", tmpdir);
 
    db2_test_shim_open();
-   db2_memory_scope_context_clear();
 }
 
 static void teardown(void)
 {
-   db2_memory_scope_context_clear();
    db2_test_shim_close();
    char cmd[256];
    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
    (void)system(cmd);
 }
 
-static void test_tag_workspace(void)
+/* Scope mutation, projection idempotence/rollback and delete cascades are
+ * exercised by Go scope_owner_test.go. KB rejects user/agent scopes; private
+ * scope storage belongs to the Server placement. This legacy, unbuilt fixture
+ * retains context assertions still awaiting migration. */
+static int seed_workspace_scope(int64_t id, const char *workspace)
 {
-   setup();
-   memory_t m;
-   memory_insert(TIER_L2, KIND_FACT, "db-host", "host at 10.0.0.5", 0.9, "s1", &m);
-
-   int rc = memory_tag_workspace(m.id, "wol");
-   assert(rc == 0);
-
-   /* Verify tag exists */
-   assert(count_for_memory(
-              "SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1 AND workspace = 'wol'",
-              m.id) == 1);
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_scopes WHERE memory_id = ?1"
-                           " AND scope_type = 'workspace' AND scope_value = 'wol'",
-                           m.id) == 1);
-
-   teardown();
-}
-
-static void test_tag_generic_scope(void)
-{
-   setup();
-   memory_t m;
-   memory_insert(TIER_L2, KIND_FACT, "persona", "Alice prefers short summaries", 0.9, "s1", &m);
-
-   assert(memory_tag_scope(m.id, "user", "alice") == 0);
-
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_scopes WHERE memory_id = ?1"
-                           " AND scope_type = 'user' AND scope_value = 'alice'",
-                           m.id) == 1);
-
-   teardown();
-}
-
-static void test_tag_multiple_workspaces(void)
-{
-   setup();
-   memory_t m;
-   memory_insert(TIER_L2, KIND_FACT, "shared-fact", "network topology", 0.9, "s1", &m);
-
-   memory_tag_workspace(m.id, "wol");
-   memory_tag_workspace(m.id, "infrastructure");
-   memory_tag_workspace(m.id, SHARED_WORKSPACE);
-
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1", m.id) ==
-          3);
-
-   teardown();
-}
-
-static void test_tag_idempotent(void)
-{
-   setup();
-   memory_t m;
-   memory_insert(TIER_L2, KIND_FACT, "key1", "content", 0.9, "s1", &m);
-
-   /* Tag same workspace twice — should not duplicate */
-   memory_tag_workspace(m.id, "wol");
-   memory_tag_workspace(m.id, "wol");
-
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1", m.id) ==
-          1);
-
-   teardown();
-}
-
-static void test_cascade_delete(void)
-{
-   setup();
-   memory_t m;
-   memory_insert(TIER_L2, KIND_FACT, "deleteme", "content", 0.9, "s1", &m);
-   memory_tag_workspace(m.id, "wol");
-
-   memory_delete(m.id);
-
-   /* Tags should be gone due to CASCADE */
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1", m.id) ==
-          0);
-
-   teardown();
+   /* Fixture setup only: scope mutation policy is exercised in Go. */
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "UPDATE memories SET scope_type='workspace',scope_value=?2 WHERE id=?1", err,
+       sizeof(err));
+   assert(st);
+   assert(aimee_pg_bind_int64(st, "?1", id) == 0);
+   assert(aimee_pg_bind_text(st, "?2", workspace) == 0);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(st);
+   return 0;
 }
 
 static void test_ws_context_scoped_memories_first(void)
@@ -174,16 +104,16 @@ static void test_ws_context_scoped_memories_first(void)
 
    /* Insert a wol-scoped fact */
    memory_insert(TIER_L2, KIND_FACT, "wol-config", "WOL uses mTLS on port 8443", 0.9, "s1", &m);
-   memory_tag_workspace(m.id, "wol");
+   seed_workspace_scope(m.id, "wol");
 
    /* Insert an aimee-scoped fact */
    memory_insert(TIER_L2, KIND_FACT, "aimee-config", "aimee uses SQLite for storage", 0.9, "s1",
                  &m);
-   memory_tag_workspace(m.id, "aimee");
+   seed_workspace_scope(m.id, "aimee");
 
    /* Insert a shared fact */
    memory_insert(TIER_L2, KIND_FACT, "infra-fact", "all services run on Proxmox VE", 0.9, "s1", &m);
-   memory_tag_workspace(m.id, SHARED_WORKSPACE);
+   seed_workspace_scope(m.id, SHARED_WORKSPACE);
 
    /* Assemble context for "wol" workspace */
    char *ctx = memory_assemble_context_ws(NULL, "wol");
@@ -233,11 +163,11 @@ static void test_ws_cross_workspace_high_confidence(void)
    assert(memory_insert_ex(TIER_L2, KIND_FACT, "other-ws-fact",
                            "critical pattern from other project", "", 0.95, "s1",
                            MEMORY_AUTHORITY_USER, &m) == 0);
-   memory_tag_workspace(m.id, "other-project");
+   seed_workspace_scope(m.id, "other-project");
 
-   /* Bump use_count to >= 5 */
-   for (int i = 0; i < 5; i++)
-      memory_touch(m.id);
+   /* Fixture state only. Touch behavior is covered by the Go owner replay. */
+   assert(count_for_memory("UPDATE memories SET use_count=5 WHERE id=?1 RETURNING use_count",
+                           m.id) == 5);
 
    char *ctx = memory_assemble_context_ws(NULL, "wol");
    assert(ctx != NULL);
@@ -262,101 +192,6 @@ static void test_ws_null_workspace_falls_back(void)
    assert(strstr(ctx, "some content") != NULL);
 
    free(ctx);
-   teardown();
-}
-
-static int count_key(const char *key)
-{
-   return count_for_key("SELECT COUNT(*) FROM memories WHERE key = ?1", key);
-}
-
-static double conf_for_key(const char *key)
-{
-   char err[128] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT confidence FROM memories WHERE key = ?1", err, sizeof(err));
-   assert(st != NULL);
-   aimee_pg_bind_text(st, "?1", key);
-   double c = -1.0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      c = aimee_pg_column_double(st, 0);
-   aimee_pg_finalize(st);
-   return c;
-}
-
-static void test_upsert_workflow_inserts_and_tags(void)
-{
-   setup();
-
-   int64_t id = memory_upsert_workflow("SmoothNAS", "pr-target", "PRs target the `testing` branch.",
-                                       0.6, "s1");
-   assert(id > 0);
-
-   /* Single row keyed by workflow:smoothnas:pr-target (key is normalized
-    * lowercase by the memory layer). */
-   assert(count_key("workflow:smoothnas:pr-target") == 1);
-
-   /* Confidence starts around the observed value (0.6). */
-   double c = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c >= 0.59 && c <= 0.61);
-
-   /* Tagged to the requested workspace. */
-   assert(count_for_memory("SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1"
-                           " AND workspace = 'SmoothNAS'",
-                           id) == 1);
-
-   /* Row kind is `workflow`. */
-   {
-      char err[128] = "";
-      aimee_pg_stmt_t *st =
-          aimee_pg_prepare(db2_conn(), "SELECT kind FROM memories WHERE id = ?1", err, sizeof(err));
-      assert(st != NULL);
-      aimee_pg_bind_int64(st, "?1", id);
-      assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-      const char *kind = aimee_pg_column_text(st, 0);
-      assert(kind && strcmp(kind, KIND_WORKFLOW) == 0);
-      aimee_pg_finalize(st);
-   }
-
-   teardown();
-}
-
-static void test_upsert_workflow_dedupes_and_bumps(void)
-{
-   setup();
-
-   int64_t first = memory_upsert_workflow("SmoothNAS", "pr-target",
-                                          "PRs target the `testing` branch.", 0.6, "s1");
-   assert(first > 0);
-
-   /* Second observation with the same signal: must update, not duplicate. */
-   int64_t second = memory_upsert_workflow("SmoothNAS", "pr-target",
-                                           "PRs target the `testing` branch.", 0.6, "s2");
-   assert(second == first);
-   assert(count_key("workflow:smoothnas:pr-target") == 1);
-
-   /* Confidence bumps toward the durable model-authored provenance ceiling. */
-   double c2 = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c2 >= 0.79 && c2 <= 0.81);
-
-   memory_upsert_workflow("SmoothNAS", "pr-target", "PRs target the `testing` branch.", 0.6, "s3");
-   double c3 = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c3 >= 0.79 && c3 <= 0.81);
-
-   /* Re-exposure cannot lift belief above the provenance ceiling. */
-   memory_upsert_workflow("SmoothNAS", "pr-target", "PRs target the `testing` branch.", 0.6, "s4");
-   double c4 = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c4 >= 0.79 && c4 <= 0.81);
-
-   teardown();
-}
-
-static void test_upsert_workflow_rejects_empty_args(void)
-{
-   setup();
-   assert(memory_upsert_workflow("", "pr-target", "rule", 0.6, "s1") == -1);
-   assert(memory_upsert_workflow("ws", "", "rule", 0.6, "s1") == -1);
-   assert(memory_upsert_workflow("ws", "pr-target", "", 0.6, "s1") == -1);
    teardown();
 }
 
@@ -407,240 +242,9 @@ static void test_auto_tag_shared_keywords(void)
    teardown();
 }
 
-static void test_scoped_retrieval_filters_results(void)
-{
-   setup();
-   memory_t user_mem, agent_mem;
-   memory_insert(TIER_L2, KIND_FACT, "summary-style", "Alice prefers terse summaries", 0.9, "s1",
-                 &user_mem);
-   memory_insert(TIER_L2, KIND_FACT, "summary-style-agent",
-                 "Reviewer agent prefers exhaustive summaries", 0.9, "s2", &agent_mem);
-
-   assert(memory_tag_scope(user_mem.id, "user", "alice") == 0);
-   assert(memory_tag_scope(agent_mem.id, "agent", "reviewer") == 0);
-
-   memory_t results[8];
-   int count = memory_find_facts_scoped("prefers summaries", "user", "alice", 5, results, 8);
-   assert(count >= 1);
-   assert(results[0].id == user_mem.id);
-
-   count = memory_find_facts_scoped("exhaustive summaries", "agent", "reviewer", 5, results, 8);
-   assert(count >= 1);
-   assert(results[0].id == agent_mem.id);
-
-   teardown();
-}
-
-static void test_visible_retrieval_prefers_narrower_scope(void)
-{
-   setup();
-   memory_t global_mem, workspace_mem, project_mem;
-   memory_insert(TIER_L2, KIND_FACT, "deploy-target-global", "Deploy target is shared infra", 0.9,
-                 "s1", &global_mem);
-   memory_insert(TIER_L2, KIND_FACT, "deploy-target-ws", "Deploy target is workspace cluster", 0.9,
-                 "s2", &workspace_mem);
-   memory_insert(TIER_L2, KIND_FACT, "deploy-target-project", "Deploy target is project sandbox",
-                 0.9, "s3", &project_mem);
-
-   assert(memory_tag_global(global_mem.id) == 0);
-   assert(memory_tag_workspace(workspace_mem.id, "wol") == 0);
-   assert(memory_tag_project(project_mem.id, "aimee") == 0);
-
-   memory_t results[8];
-   int count = memory_find_facts_visible("deploy target", "wol", "aimee", 5, results, 8);
-   assert(count == 3);
-   assert(results[0].id == project_mem.id);
-   assert(results[1].id == workspace_mem.id);
-   assert(results[2].id == global_mem.id);
-
-   teardown();
-}
-
-static void test_local_first_applies_before_limits_across_memory_surfaces(void)
-{
-   setup();
-   memory_t local, workspace_mem, global, other;
-   memory_insert(TIER_L2, KIND_FACT, "identity:local-crowdout",
-                 "crowdout routing needle belongs to the active project", 0.10, "local-session",
-                 &local);
-   assert(memory_tag_project(local.id, "active-project") == 0);
-   assert(db2_memory_episode_insert(local.id, "local-crowdout-episode",
-                                    "crowdout episode from active project", "local-session",
-                                    "2026-07-29") > 0);
-   insert_memory_entity(local.id, "LocalCrowdEntity");
-   db2_memory_relation_upsert_full(local.id, 0, "CrowdEntity", "owned_by", "ActiveProject",
-                                   "crowdout relation from active project", "", "", 0.10);
-
-   memory_insert(TIER_L2, KIND_FACT, "identity:workspace-crowdout",
-                 "crowdout routing needle belongs to the active workspace", 0.20,
-                 "workspace-session", &workspace_mem);
-   /* An explicit ownership change stamps both the compatibility projection
-    * and the memory row used by authorization. */
-   assert(memory_tag_workspace(workspace_mem.id, "active-workspace") == 0);
-
-   /* Both buckets exceed every one-row request below. Their much higher
-    * relevance/confidence and later insertion order reproduce the old failure:
-    * a global LIMIT first would permanently discard the active-project row. */
-   for (int i = 0; i < 12; i++)
-   {
-      char key[64];
-      char content[160];
-      snprintf(key, sizeof(key), "identity:global-crowdout-%02d", i);
-      snprintf(content, sizeof(content), "crowdout routing needle global distractor %02d", i);
-      memory_insert(TIER_L2, KIND_FACT, key, content, 0.99, "global-session", &global);
-      assert(memory_tag_global(global.id) == 0);
-      insert_memory_entity(global.id, "GlobalCrowdEntity");
-      db2_memory_relation_upsert_full(global.id, 0, "CrowdEntity", "owned_by", "Global",
-                                      "crowdout relation global distractor", "", "", 0.99);
-
-      snprintf(key, sizeof(key), "identity:other-crowdout-%02d", i);
-      snprintf(content, sizeof(content), "crowdout routing needle other project distractor %02d",
-               i);
-      memory_insert(TIER_L2, KIND_FACT, key, content, 0.99, "other-session", &other);
-      assert(memory_tag_project(other.id, "other-project") == 0);
-      insert_memory_entity(other.id, "OtherCrowdEntity");
-      db2_memory_relation_upsert_full(other.id, 0, "CrowdEntity", "owned_by", "OtherProject",
-                                      "crowdout relation other project distractor", "", "", 0.99);
-   }
-   /* A newer global episode in the same session must not become that
-    * session's representative ahead of the older active-project episode. */
-   assert(db2_memory_episode_insert(global.id, "global-same-session-episode",
-                                    "crowdout newer global episode in local session",
-                                    "local-session", "2026-07-30") > 0);
-
-   memory_t facts[64];
-   db2_memory_scope_context_set("active-workspace", "active-project", 0);
-   assert(db2_memory_scope_context_rank(local.id) == 3);
-   assert(db2_memory_scope_context_rank(workspace_mem.id) == 2);
-   int direct_count = db2_memory_find_facts_like("crowdout routing needle", 2, facts, 64);
-   assert(direct_count == 2);
-   assert(facts[0].id == local.id);
-   assert(facts[1].id == workspace_mem.id);
-   db2_memory_scope_context_clear();
-   int count = memory_find_facts_visible_ex("crowdout routing needle", "active-workspace",
-                                            "active-project", 0, 1, facts, 64);
-   assert(count == 1);
-   assert(facts[0].id == local.id);
-
-   /* Explicit all preserves the same bucket order but makes other projects
-    * visible at the tail. */
-   count = memory_find_facts_visible_ex("crowdout routing needle", "active-workspace",
-                                        "active-project", 1, 64, facts, 64);
-   assert(count > 1);
-   assert(facts[0].id == local.id);
-   assert(facts[1].id == workspace_mem.id);
-   int saw_other = 0;
-   for (int i = 0; i < count; i++)
-      if (facts[i].id == other.id)
-         saw_other = 1;
-   assert(saw_other);
-
-   /* With no active identity, only shared/global memory is returned. */
-   count = memory_find_facts_visible_ex("crowdout routing needle", NULL, NULL, 0, 64, facts, 64);
-   assert(count > 0);
-   for (int i = 0; i < count; i++)
-   {
-      assert(facts[i].id != local.id);
-      assert(facts[i].id != workspace_mem.id);
-      assert(memory_scope_visibility_rank(facts[i].id, NULL, NULL) == 1);
-   }
-
-   db2_memory_scope_context_set("active-workspace", "active-project", 0);
-
-   /* Ordered SQL readers used by list, context/recall, briefing, episodes,
-    * graph, entity, and answer evidence all apply scope before LIMIT. */
-   count = db2_memory_list(TIER_L2, KIND_FACT, 1, 1, facts, 64);
-   assert(count == 1 && facts[0].id == local.id);
-
-   count = db2_memory_top_l2_facts(facts, 1);
-   assert(count == 1 && facts[0].id == local.id);
-
-   count = db2_memory_list_session_scope_priority(facts, 1);
-   assert(count == 1 && facts[0].id == local.id);
-
-   count = db2_memory_list_session_scope_priority_like("%crowdout routing needle%", facts, 2);
-   assert(count == 2);
-   assert(facts[0].id == local.id);
-   assert(facts[1].id == workspace_mem.id);
-
-   memory_diagnostic_t diagnostics[2];
-   count = memory_diagnose("crowdout routing needle", 1, diagnostics, 2);
-   assert(count == 1 && diagnostics[0].memory.id == local.id);
-
-   db2_memory_cand_row_t candidates[2];
-   count = db2_memory_list_candidates(DB2_MEM_CAND_PRIMARY, candidates, 1);
-   assert(count == 1 && candidates[0].id == local.id);
-
-   db2_memory_cand_row_t recall[2];
-   count = db2_memory_list_recall_section(DB2_MEM_RECALL_IDENTITY, recall, 1);
-   assert(count == 1 && recall[0].id == local.id);
-
-   db2_memory_briefing_fact_t briefing[2];
-   count = db2_memory_briefing_list_key_facts(briefing, 1);
-   assert(count == 1 && briefing[0].memory_id == local.id);
-
-   db2_memory_briefing_activity_t activity[2];
-   count = db2_memory_briefing_list_recent_activity(activity, 1);
-   assert(count == 1 && strcmp(activity[0].session_id, "local-session") == 0);
-   assert(strstr(activity[0].summary, "active project") != NULL);
-
-   db2_memory_briefing_entity_t entities[2];
-   count = db2_memory_briefing_list_active_entities(entities, 1);
-   assert(count == 1);
-   assert(strcmp(entities[0].name, "GlobalCrowdEntity") != 0);
-   assert(strcmp(entities[0].name, "OtherCrowdEntity") != 0);
-
-   memory_episode_t episodes[2];
-   count = db2_memory_episodes_search("crowdout", 1, episodes, 2);
-   assert(count == 1 && episodes[0].memory_id == local.id);
-
-   memory_relation_t relations[2];
-   count = db2_memory_relations_search("CrowdEntity", 1, relations, 2);
-   assert(count == 1 && relations[0].memory_id == local.id);
-   count = db2_memory_relations_for_entity("CrowdEntity", 1, relations, 2);
-   assert(count == 1 && relations[0].memory_id == local.id);
-   count = db2_memory_relations_search_as_of("CrowdEntity", "2026-07-29", 1, relations, 2);
-   assert(count == 1 && relations[0].memory_id == local.id);
-   count = db2_memory_relations_supporting("CrowdEntity", 1, relations, 2);
-   assert(count == 1 && relations[0].memory_id == local.id);
-
-   char *ctx = memory_assemble_context(NULL);
-   assert(ctx != NULL);
-   assert(strstr(ctx, "belongs to the active project") != NULL);
-   assert(strstr(ctx, "other project distractor") == NULL);
-   free(ctx);
-
-   assert(db2_memory_lifecycle_update_state(local.id, "superseded", NULL) == 0);
-   assert(db2_memory_lifecycle_update_state(workspace_mem.id, "superseded", NULL) == 0);
-   assert(db2_memory_lifecycle_update_state(global.id, "superseded", NULL) == 0);
-   assert(db2_memory_lifecycle_update_state(other.id, "superseded", NULL) == 0);
-   db2_memory_lifecycle_superseded_t superseded[2];
-   count = db2_memory_lifecycle_list_newly_superseded(NULL, superseded, 1);
-   assert(count == 1 && superseded[0].memory_id == local.id);
-
-   teardown();
-}
-
-static void test_collect_scopes_defaults_legacy_rows_to_global(void)
-{
-   setup();
-   memory_t mem;
-   memory_insert(TIER_L2, KIND_FACT, "legacy-scope", "legacy content", 0.9, "s1", &mem);
-
-   memory_scope_tag_t scopes[4];
-   int count = memory_collect_scopes(mem.id, scopes, 4);
-   assert(count == 1);
-   assert(strcmp(scopes[0].type, "global") == 0);
-   assert(strcmp(scopes[0].value, "_global") == 0);
-
-   char primary_value[128];
-   memory_scope_level_t level = memory_primary_scope(mem.id, primary_value, sizeof(primary_value));
-   assert(level == MEMORY_SCOPE_GLOBAL);
-   assert(strcmp(primary_value, "_global") == 0);
-
-   teardown();
-}
-
+/* Scope-before-limit regressions now exercise the Go owner's explicit request
+ * scope in hybrid_context_test.go, recall_test.go, briefing_test.go,
+ * alerts_test.go, assertion_search_test.go and typed_context_test.go. */
 static void test_ws_context_prefers_project_scope_when_available(void)
 {
    setup();
@@ -672,7 +276,7 @@ static void test_ws_context_prefers_project_scope_when_available(void)
                  &project_mem);
 
    assert(memory_tag_global(global_mem.id) == 0);
-   assert(memory_tag_workspace(workspace_mem.id, "wol") == 0);
+   assert(seed_workspace_scope(workspace_mem.id, "wol") == 0);
    assert(memory_tag_project(project_mem.id, project_name) == 0);
 
    char *ctx = memory_assemble_context_ws(NULL, "wol");
@@ -734,7 +338,7 @@ static void test_api_memory_stats_includes_scope_counts(void)
    memory_insert(TIER_L2, KIND_FACT, "stats-project", "stats project", 0.9, "s3", &project_mem);
 
    assert(memory_tag_global(global_mem.id) == 0);
-   assert(memory_tag_workspace(workspace_mem.id, "wol") == 0);
+   assert(seed_workspace_scope(workspace_mem.id, "wol") == 0);
    assert(memory_tag_project(project_mem.id, project_name) == 0);
 
    char conf_err[128] = "";
@@ -810,73 +414,11 @@ static void test_api_memory_stats_includes_functional_tiers(void)
    teardown();
 }
 
-/* ---------------------------------------------------------------------------
- * Ranking a candidate set must cost ONE statement, not one per candidate.
- *
- * Two assertions, and the first matters more: the batch reader must agree with
- * the single-id reader on every id. This is a visibility ladder -- a batch form
- * that ranks even one row differently silently changes who can see what, and
- * that would be a far worse bug than the latency it set out to fix.
- *
- * The second asserts round-trip COUNT rather than elapsed time: deterministic,
- * no clock, no load sensitivity, and it fails identically on every machine.
- */
+/* Scope collection and the one-statement rank equivalence tests now run at
+ * the shared Go owner in scope_owner_test.go. */
+
 void aimee_pg_test_stmt_count_reset(void);
 long aimee_pg_test_stmt_count(void);
-
-static void test_scope_rank_batch_matches_single_and_costs_one_statement(void)
-{
-   setup();
-   db2_memory_scope_context_set("active-workspace", "active-project", 0);
-
-   /* One memory per rank tier, plus an unscoped row and an id that does not
-    * exist -- the two cases a naive IN(...) batch gets wrong. */
-   memory_t proj, ws, shared, plain;
-   memory_insert(TIER_L2, KIND_FACT, "rb-proj", "batch rank project row", 0.9, "s", &proj);
-   memory_insert(TIER_L2, KIND_FACT, "rb-ws", "batch rank workspace row", 0.9, "s", &ws);
-   memory_insert(TIER_L2, KIND_FACT, "rb-shared", "batch rank shared row", 0.9, "s", &shared);
-   memory_insert(TIER_L2, KIND_FACT, "rb-plain", "batch rank unscoped row", 0.9, "s", &plain);
-   assert(memory_tag_project(proj.id, "active-project") == 0);
-   assert(memory_tag_workspace(ws.id, "active-workspace") == 0);
-   assert(memory_tag_workspace(shared.id, SHARED_WORKSPACE) == 0);
-
-   int64_t ids[6];
-   ids[0] = proj.id;
-   ids[1] = ws.id;
-   ids[2] = shared.id;
-   ids[3] = plain.id;
-   ids[4] = proj.id;         /* a repeated id must rank at BOTH positions */
-   ids[5] = plain.id + 9999; /* absent from `memories` -> rank 0 */
-
-   int single[6];
-   for (int i = 0; i < 6; i++)
-      single[i] = db2_memory_scope_context_rank(ids[i]);
-
-   int batch[6];
-   aimee_pg_test_stmt_count_reset();
-   db2_memory_scope_context_rank_batch(ids, 6, batch);
-   long batch_stmts = aimee_pg_test_stmt_count();
-
-   /* Equivalence: identical verdict for every position, repeats and misses too. */
-   for (int i = 0; i < 6; i++)
-      assert(batch[i] == single[i]);
-   assert(batch[5] == 0);        /* absent id */
-   assert(batch[0] == batch[4]); /* repeated id ranked twice */
-
-   /* Cost: one statement for six ids, not six. */
-   assert(batch_stmts == 1);
-
-   /* And the single-id reader really is the per-id shape being replaced, so the
-    * saving is proportional to the candidate set rather than a constant. */
-   aimee_pg_test_stmt_count_reset();
-   for (int i = 0; i < 6; i++)
-      (void)db2_memory_scope_context_rank(ids[i]);
-   assert(aimee_pg_test_stmt_count() == 6);
-
-   db2_memory_scope_context_clear();
-   teardown();
-   printf("  PASS: test_scope_rank_batch_matches_single_and_costs_one_statement\n");
-}
 
 static void test_indexed_lexical_recall_and_substring_compatibility(void)
 {
@@ -946,27 +488,14 @@ int main(void)
 {
    test_indexed_lexical_recall_and_substring_compatibility();
    test_memory_link_batch_matches_single_query_surface();
-   test_scope_rank_batch_matches_single_and_costs_one_statement();
-   test_tag_workspace();
-   test_tag_generic_scope();
-   test_tag_multiple_workspaces();
-   test_tag_idempotent();
-   test_cascade_delete();
    test_ws_context_scoped_memories_first();
    test_ws_untagged_treated_as_shared();
    test_ws_cross_workspace_high_confidence();
    test_ws_null_workspace_falls_back();
    test_auto_tag_shared_keywords();
-   test_scoped_retrieval_filters_results();
-   test_visible_retrieval_prefers_narrower_scope();
-   test_local_first_applies_before_limits_across_memory_surfaces();
-   test_collect_scopes_defaults_legacy_rows_to_global();
    test_ws_context_prefers_project_scope_when_available();
    test_api_memory_stats_includes_scope_counts();
    test_api_memory_stats_includes_functional_tiers();
-   test_upsert_workflow_inserts_and_tags();
-   test_upsert_workflow_dedupes_and_bumps();
-   test_upsert_workflow_rejects_empty_args();
    printf("workspace_memory: all tests passed\n");
    return 0;
 }

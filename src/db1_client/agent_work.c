@@ -22,15 +22,11 @@
  * not have it -- once as the caller and once as the implementation.
 
  *
- * Background work queues: the cognify queue's claim/mark bookkeeping is
- * machine-local runtime state, which is why it is DB1's even when the memory
- * it points at lives in DB2. *
  * clang-format is off for the body below: its canonical form is whatever this
  * generator emits, and reflowing generated output would put the file and the
  * catalog permanently one reformat apart. */
 /* clang-format off */
 #include "agent_log.h"
-#include "cognify_jobs.h"
 #include "coord_jobs.h"
 #include "db1_client/db1_cron_jobs.h"
 #include "db1_client/db1_trigger.h"
@@ -235,73 +231,13 @@ static int write_result(int status)
 }
 
 
-int db1_cognify_job_enqueue(int64_t memory_id)
-{
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%lld", (long long)memory_id);
-   const char *fields[] = {arg0};
-   return write_result(call_stage(AIMEE_DB1_OP_COGNIFY_ENQUEUE, fields, 1, NULL, NULL, 0, NULL));
-}
 
-int db1_cognify_job_status(db1_cognify_job_stats_t *out)
-{
-   if (!out)
-      return -1;
-   const char *const *fields = NULL;
-   char slot0[32];
-   char slot1[32];
-   char slot2[32];
-   char slot3[32];
-   char slot4[32];
-   memset(out, 0, sizeof *out);
-   char *const values[] = {slot0, slot1, slot2, slot3, slot4};
-   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof slot4};
-   int wire_status = call_stage(AIMEE_DB1_OP_COGNIFY_STATUS, fields, 0, values, caps, 5, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return -1;
-   }
-   out->pending = (int)strtol(slot0, NULL, 10);
-   out->running = (int)strtol(slot1, NULL, 10);
-   out->done = (int)strtol(slot2, NULL, 10);
-   out->failed = (int)strtol(slot3, NULL, 10);
-   out->total = (int)strtol(slot4, NULL, 10);
-   return 0;
-}
 
-int db1_cognify_job_claim_next(db1_cognify_job_t *out)
-{
-   if (!out)
-      return -1;
-   const char *const *fields = NULL;
-   char slot0[32];
-   char slot1[32];
-   char slot2[32];
-   char slot3[32];
-   memset(out, 0, sizeof *out);
-   char *const values[] = {slot0, slot1, slot2, slot3, out->kind, out->status, out->claimed_by, out->claimed_at, out->last_error};
-   const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof slot3, sizeof out->kind, sizeof out->status, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->last_error};
-   int wire_status = call_stage(AIMEE_DB1_OP_COGNIFY_CLAIM_NEXT, fields, 0, values, caps, 9, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
-   }
-   out->id = (int64_t)strtoll(slot0, NULL, 10);
-   out->memory_id = (int64_t)strtoll(slot1, NULL, 10);
-   out->attempts = (int)strtol(slot2, NULL, 10);
-   out->max_attempts = (int)strtol(slot3, NULL, 10);
-   return 1;
-}
 
-int db1_cognify_job_mark(int64_t job_id, const char *status, const char *error)
-{
-   if (!status || !status[0])
-      return -1;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%lld", (long long)job_id);
-   const char *fields[] = {arg0, status, error ? error : ""};
-   return write_result(call_stage(AIMEE_DB1_OP_COGNIFY_MARK, fields, 3, NULL, NULL, 0, NULL));
-}
+
+
+
+
 
 long long db1_agent_log_insert(const db1_agent_log_insert_row_t *row)
 {

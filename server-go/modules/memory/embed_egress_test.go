@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,8 @@ func TestEmbedServingIdentityThroughGovernedLocalEgress(t *testing.T) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/health":
 			_, _ = w.Write([]byte(`{"status":"ok","model":"test-model","serving_id":"test-space-v1"}`))
+		case r.Method == "POST" && r.URL.Path == "/embed_batch":
+			_, _ = w.Write([]byte(`[[0.25,0.5,0.75],[1,2,3]]`))
 		case r.Method == "POST" && r.URL.Path == "/embed":
 			_, _ = w.Write([]byte(`[0.25,0.5,0.75]`))
 		default:
@@ -47,9 +50,32 @@ func TestEmbedServingIdentityThroughGovernedLocalEgress(t *testing.T) {
 	if identity.Error != "" || identity.ServingID != "test-space-v1" {
 		t.Fatalf("identity through governed egress: %+v", identity)
 	}
+	batch := EmbedBatch(t.Context(), 3, executor, EmbedRequest{BaseURL: server.URL, Texts: []string{"a", "b"}, InputType: "document", MaxDim: 3})
+	if batch.Error != "" || len(batch.Vectors) != 2 {
+		t.Fatal(batch)
+	}
 	vector := Embed(context.Background(), 2, executor, EmbedRequest{
 		BaseURL: server.URL, Text: "probe", InputType: "document", MaxDim: 3})
 	if vector.Error != "" || vector.Dim != 3 {
 		t.Fatalf("embedding through governed egress: %+v", vector)
+	}
+}
+
+func TestEmbedDimensionAndTruncation(t *testing.T) {
+	resetBreaker(t)
+	for _, command := range []string{"printf 'invalid'", "printf '0'", "printf '99999'"} {
+		if got := EmbedDimension(t.Context(), 0, nil, EmbedRequest{BaseURL: command, MaxDim: 3}); got.Error == "" {
+			t.Fatal(got)
+		}
+	}
+	if got := EmbedDimension(t.Context(), 0, nil, EmbedRequest{BaseURL: "printf '3\\n'", MaxDim: 3}); got.Error != "" || got.Dim != 3 {
+		t.Fatal(got)
+	}
+	handler := NewHandler(&batchExecutor{reply: `[1,2,3]`})
+	frame, _ := bus.EncodeCommand("embed_text", []byte(`{"base_url":"http://embedder","text":"probe","max_dim":2}`))
+	encoded, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
+	body, err := bus.DecodeCommandResult(encoded)
+	if status != bus.ModuleStatusOK || err != nil || strings.Contains(string(body), `"vector"`) || !strings.Contains(string(body), `"truncated":true`) {
+		t.Fatalf("%s %v", body, err)
 	}
 }

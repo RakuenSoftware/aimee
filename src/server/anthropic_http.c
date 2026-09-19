@@ -28,7 +28,6 @@
 #include "server_http_identity.h"
 #include <aimee/gateway/gateway_policy.h>
 #include <aimee/gateway/gateway_pipeline.h>
-#include "modules/memory/gw_stage_memory.h"
 #include "gw_stage_registry.h"
 #include "gw_stage_governance.h"
 #include "gw_stage_completion.h"
