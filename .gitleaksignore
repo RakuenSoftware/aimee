@@ -144,3 +144,7 @@ d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-4
 d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/final-T2/local-memory.json:generic-api-key:49
 d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/final-T2/shared-memory.json:generic-api-key:327
 d7956a3e2da5c7c5456140e80a20d3bdb4d1cbbe:docs/validation/release-0.4.2-testing-46e763c-2026-09-07/final-T3/local-memory.json:generic-api-key:49
+
+# Reviewed memory PII regression fixture: a PEM opening marker only, no key
+# material. Exact historical fingerprint; private-key scanning remains enabled.
+b89b7c78518a69dafe7ebca4aa7403db81b9aac2:server-go/modules/memory/reflect_test.go:private-key:63

@@ -221,6 +221,23 @@ TEST_MCP_CLIENT_OBJS = $(OBJDIR)/modules/protocols/mcp/mcp_client.o \
                        $(OBJDIR)/cJSON.o \
                        $(PLATFORM_BASIC_OBJS)
 
+# Production host dispatch for fixtures reaching the Go memory owner.
+TEST_MEMORY_TRANSPORT_OBJS = $(OBJDIR)/server/osv_check.o $(OBJDIR)/command_registry.o \
+                             $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o \
+                             $(OBJDIR)/module_commands.o $(OBJDIR)/server/server_error_kind.o
+
+$(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-cmd-onboard \
+$(TESTPREFIX)/unit-test-agent-apikey $(TESTPREFIX)/unit-test-mcp-native-dispatch \
+$(TESTPREFIX)/unit-test-tool-validation: $(TEST_MEMORY_TRANSPORT_OBJS)
+
+$(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/db1_client/runtime.o \
+                                      $(OBJDIR)/tests/support/interaction_events_stub.o
+
+$(TESTPREFIX)/unit-test-tool-validation: $(OBJDIR)/db1_client/runtime.o $(OBJDIR)/db1_client/telemetry.o
+
+
+$(OBJDIR)/tests/test_mcp_directive_transport.o: agent_help_data.h
+
 TEST_FACT_MUTATION_MIN_OBJS = $(OBJDIR)/db2/fact_mutation.o $(OBJDIR)/db2/fact_identity.o \
                               $(OBJDIR)/db2/fact_identity_unicode.o \
                               $(OBJDIR)/db2/kb_audit_worm.o \
@@ -2829,12 +2846,12 @@ $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.
 \
                                $(OBJDIR)/log.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/yaml.o $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o \
                                $(PLATFORM_BASIC_OBJS) $(OBJDIR)/interaction_event_names.o \
-                           $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
+                           $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/tests/support/module_runtime_fixture.o \
                            $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
                            \
                            $(OBJDIR)/tests/support/store_module_fixture.o \
                            $(OBS_BUS_LINK_OBJS) \
-                           $(CORE_EVENT_BUS_LIB)
+                           $(CORE_EVENT_BUS_LIB) | $(OBJDIR)/aimee-memory-fixture
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-platform-process: $(OBJDIR)/tests/test_platform_process.o \

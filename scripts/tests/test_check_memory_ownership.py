@@ -29,8 +29,8 @@ class MemoryOwnershipTest(unittest.TestCase):
         (root / checker.inventory.MANIFEST).write_text(json.dumps(manifest))
         ledger = {"source_commit": "frozen", "dispositions": {"host": {
             "owner": "C host", "contract": "Go request/reply", "reason": "transport only",
-            "evidence": ["evidence.go"]}}, "original_files": {
-            "src/modules/memory/old.c": {"disposition": "host"}}, "original_symbols": {
+            "evidence": ["evidence.go"], "cutover_dependency": "owner attached"}}, "original_files": {
+            "src/modules/memory/old.c": {"disposition": "host", "replacement_files": ["evidence.go"]}}, "original_symbols": {
             "old_memory_function": {"disposition": "host"}}, "external_files": {"host.c": {
             "disposition": "host", "symbols": ["kb_client_memory_recall"],
             "sha256": hashlib.sha256((root / "host.c").read_bytes()).hexdigest()}}}
@@ -40,6 +40,24 @@ class MemoryOwnershipTest(unittest.TestCase):
     def test_accepts_classified_external_c_host(self):
         root, _ = self.fixture()
         checker.validate(root)
+
+    def test_generated_output_is_optional_but_still_reviewed(self):
+        root, ledger = self.fixture()
+        ledger["generated_files"] = {"host.c": ledger["external_files"].pop("host.c")}
+        ledger["generated_files"]["host.c"]["inputs"] = {
+            "evidence.go": hashlib.sha256((root / "evidence.go").read_bytes()).hexdigest()}
+        (root / checker.LEDGER).write_text(json.dumps(ledger))
+        checker.validate(root)
+        original = (root / "host.c").read_text()
+        (root / "host.c").unlink()
+        checker.validate(root)
+        (root / "host.c").write_text(original + "int unexpected;\n")
+        with self.assertRaisesRegex(ValueError, "changed without ownership review"):
+            checker.validate(root)
+        (root / "host.c").write_text(original)
+        (root / "evidence.go").write_text("package changed")
+        with self.assertRaisesRegex(ValueError, "generated input needs ownership review"):
+            checker.validate(root)
 
     def test_rejects_unreviewed_new_caller(self):
         root, _ = self.fixture()
@@ -54,7 +72,7 @@ class MemoryOwnershipTest(unittest.TestCase):
             checker.validate(root)
 
     def test_rejects_missing_symbol_and_evidence(self):
-        for change in ("symbol", "evidence", "empty_evidence", "contract"):
+        for change in ("symbol", "evidence", "empty_evidence", "contract", "cutover_dependency"):
             with self.subTest(change=change):
                 root, ledger = self.fixture()
                 if change == "symbol":
@@ -64,7 +82,7 @@ class MemoryOwnershipTest(unittest.TestCase):
                 elif change == "empty_evidence":
                     ledger["dispositions"]["host"]["evidence"] = []
                 else:
-                    del ledger["dispositions"]["host"]["contract"]
+                    del ledger["dispositions"]["host"][change]
                 (root / checker.LEDGER).write_text(json.dumps(ledger))
                 with self.assertRaises(ValueError):
                     checker.validate(root)

@@ -29,13 +29,16 @@ retirement versus destruction from the admitted Go authority, and preserves
 `review_required` and `conflict` refusals. The legacy Server context-read route
 forwards the Go envelope too; a retrieval outage is no longer an empty context.
 
-The legacy console get/list adapters request Go-rendered output instead of
-decoding fixed-size native records. Go retains their twelve-field JSON schema,
-field/profile selection, empty-array representation and silent non-JSON success
-behavior. Complete content and exact int64 IDs survive the transport; missing
-records, owner refusals and malformed/unavailable responses fail the command.
-List failures cannot masquerade as healthy empty stores. Ambient scope continues
-through the existing scoped transaction and metadata reads.
+The unlinked `cmd_memory*` console family and its obsolete record wrappers are
+retired. The shipping served CLI, HTTP and MCP surfaces use the shared Go owner.
+Go renders live session context, agent search text, MCP diagnostic text and full
+record envelopes, preserving exact int64 IDs, complete content and explicit owner
+refusals. Native adapters retain host authorization and transport duties.
+
+The [G0 closeout](../proposals/pending/memory-reliability-g0-closeout.md) records
+file/API dispositions and validation. Complete DB2 retirement is a
+[future proposal TODO](../proposals/pending/db2-as-a-go-module.md#future-proposal-todo-retire-db2-completely),
+separate from the memory language boundary.
 
 ## Personal/shared recall composition
 
@@ -572,9 +575,9 @@ phases for claim, parse, and finish. See the published testing qualification in
 Required policy stages do not silently run a second implementation. Extraction
 returns an error, write gating defers, and PII injection fails closed when the
 Go module is unavailable. The cheap recall gate fails open because omitting that
-optimization must not suppress a valid recall. Supported production memory data operations cross the Go owner. Unregistered
-legacy native fixtures and old declarations remain part of the G0 caller review;
-their presence is not passing migration or release evidence.
+optimization must not suppress a valid recall. Supported production memory data operations cross the Go owner. The ownership ledger classifies every original native file/API and each external
+native-name finding; native fixtures prove transport, while the Go owner tests
+prove memory behavior.
 
 The Go package tests cover placement isolation, scope expansion, CRUD,
 maintenance, workflow identity, recall gating, extraction, ontology, embedding,

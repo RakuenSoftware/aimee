@@ -601,7 +601,7 @@ req = ('%s %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n'
        'Content-Length: %d\r\nConnection: close\r\n\r\n%s' % (verb, path, len(body), body))
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect('$HTTP_SOCK')
-s.settimeout(10)
+s.settimeout(float(os.environ.get('AIMEE_TEST_HTTP_TIMEOUT', '10')))
 s.sendall(req.encode())
 data = b''
 while True:

@@ -25,7 +25,7 @@ SPEC.loader.exec_module(exporter)
 
 class CProcessBuildTests(unittest.TestCase):
     def test_shared_database_and_domain_contracts_follow_consumers(self) -> None:
-        for module in ("aimee", "memory"):
+        for module in ("aimee", "memory", "postgres"):
             with self.subTest(module=module):
                 sources = exporter.go_process_shared_sources(module)
                 for filename in ("db.go", "store_client.go", "store_wire.go"):
@@ -37,7 +37,6 @@ class CProcessBuildTests(unittest.TestCase):
                 sources = exporter.go_process_shared_sources(module)
                 self.assertIn("server-go/aimee/client.go", sources)
                 self.assertFalse(any(path.startswith("server-go/db1/") for path in sources))
-        self.assertEqual(exporter.go_process_shared_sources("postgres"), [])
         self.assertIn("server-go/modules/egress/egress.go", exporter.go_process_shared_sources("memory"))
         self.assertIn("server-go/modules/audit/action.go", exporter.go_process_shared_sources("memory"))
 

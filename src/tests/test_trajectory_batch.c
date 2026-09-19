@@ -14,6 +14,20 @@
 #include "platform_test_util.h"
 #include "trajectory.h"
 #include "support/store_module_fixture.h"
+#include "support/module_runtime_fixture.h"
+
+/* Export screening uses the same Go owner as production. The pipe supplies
+ * transport only; no PII policy is duplicated in this fixture. */
+int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
+{
+   assert(strcmp(method, "memory.screen_content") == 0);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "fixture_command", "screen_content");
+   cJSON_AddItemToObject(request, "fixture_arguments", cJSON_Duplicate(args, 1));
+   int rc = module_runtime_fixture_call(request, result);
+   cJSON_Delete(request);
+   return rc;
+}
 
 int agent_eval_load_tasks(const char *suite_dir, eval_task_t *tasks, int max_tasks)
 {

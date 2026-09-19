@@ -47,7 +47,15 @@ func main() {
 	scanner.Buffer(make([]byte, 65536), 2<<20)
 	encoder := json.NewEncoder(os.Stdout)
 	for scanner.Scan() {
-		frame, err := bus.EncodeCommand("runtime", scanner.Bytes())
+		command, payload := "runtime", scanner.Bytes()
+		var public struct {
+			Command string          `json:"fixture_command"`
+			Args    json.RawMessage `json:"fixture_arguments"`
+		}
+		if json.Unmarshal(payload, &public) == nil && public.Command != "" {
+			command, payload = public.Command, public.Args
+		}
+		frame, err := bus.EncodeCommand(command, payload)
 		if err != nil {
 			os.Exit(1)
 		}

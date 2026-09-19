@@ -485,6 +485,9 @@ BEGIN
   -- during erasure.  They retain content-free lifecycle evidence and therefore
   -- need their normal append/update stores; granting them here avoids weakening
   -- those triggers for the privacy path.
+  -- Memory deletion also queues Go index invalidation. Keep the enqueue trigger
+  -- active under this NOLOGIN definer; no runtime role gains erasure authority.
+  GRANT INSERT,UPDATE ON kb_async_jobs TO aimee_kb_privacy_erasure;
   GRANT SELECT ON fact_evidence TO aimee_kb_privacy_erasure;
   GRANT SELECT,INSERT,UPDATE ON fact_graph_commits,fact_graph_changes,
     memory_evidence_events TO aimee_kb_privacy_erasure;

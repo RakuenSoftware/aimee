@@ -13,7 +13,8 @@
         "server-go/modules/memory/client_test.go",
         "server-go/modules/memory/runtime_role_test.go",
         "scripts/test_bus_conformance.sh"
-      ]
+      ],
+      "cutover_dependency": "Completed: Go owner registered in both placements; the production and fixture callers use its declared stages."
     },
     "host-transport": {
       "owner": "C Server/KB/CLI host",
@@ -24,7 +25,8 @@
         "src/tests/test_module_json_call.c",
         "src/tests/test_mcp_memory_answer.c",
         "scripts/test_bus_conformance.sh"
-      ]
+      ],
+      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
     "kb-client": {
       "owner": "C KB client used by external hosts",
@@ -34,7 +36,8 @@
         "src/tests/test_kb_client_memory.c",
         "src/tests/test_bus_memory_audit.c",
         "server-go/modules/memory/recall_composition_test.go"
-      ]
+      ],
+      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
     "host-context": {
       "owner": "C session/agent host consuming Go projections",
@@ -46,7 +49,8 @@
         "src/tests/test_ingress_preinject.c",
         "src/tests/test_ir_module_plan.c",
         "server-go/modules/memory/public_records_test.go"
-      ]
+      ],
+      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
     "benchmark-transport": {
       "owner": "C benchmark host",
@@ -56,7 +60,8 @@
         "src/modules/benchmarks/agent_eval_memory_transport.c",
         "server-go/modules/memory/live_benchmark_test.go",
         "server-go/modules/memory/retrieval_eval_test.go"
-      ]
+      ],
+      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
     "storage-protocol": {
       "owner": "DB2 storage and shared graph ABI",
@@ -67,7 +72,8 @@
         "src/tests/test_bus_db2_module.c",
         "src/tests/test_db2_rel_seed_support.c",
         "scripts/check_db2_link_closure.py"
-      ]
+      ],
+      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
     "protocol-catalog": {
       "owner": "Host protocol/catalog generation",
@@ -77,7 +83,8 @@
         "scripts/check_memory_c_boundary.py",
         "src/tests/test_mcp_roundtable_contract.c",
         "src/tests/test_mcp_client_registry.c"
-      ]
+      ],
+      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
     "host-fixture": {
       "owner": "External host/storage test owner",
@@ -87,7 +94,8 @@
         "scripts/check_tests_are_run.py",
         "scripts/test_bus_conformance.sh",
         "server-go/modules/memory/public_records_test.go"
-      ]
+      ],
+      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
     "legacy-fixture": {
       "owner": "Legacy test inventory; excluded from acceptance",
@@ -97,7 +105,8 @@
         "scripts/check_tests_are_run.py",
         "server-go/modules/memory/runtime_role_test.go",
         "server-go/modules/memory/recall_test.go"
-      ]
+      ],
+      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
     "legacy-command": {
       "owner": "Legacy CLI compile-check owner",
@@ -107,7 +116,8 @@
         "src/Makefile",
         "CMakeLists.txt",
         "src/tests/test_cmd_memory_data.c"
-      ]
+      ],
+      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
     "retired-api": {
       "owner": "Retired native memory implementation",
@@ -117,81 +127,159 @@
         "tests/baselines/modules/memory-native-retirement.json",
         "scripts/check_memory_c_boundary.py",
         "server-go/modules/memory/client_test.go"
-      ]
+      ],
+      "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     }
   },
   "original_files": {
     "src/modules/memory/gw_stage_memory.c": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/context_assembly.go"
+      ]
     },
     "src/modules/memory/gw_stage_memory.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/context_assembly.go"
+      ]
     },
     "src/modules/memory/include/aimee/memory/module_api.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "src/headers/memory_stage_contract.h",
+        "server-go/modules/memory/memory.go"
+      ]
     },
     "src/modules/memory/include/aimee/memory/pii_provider.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/pii.go",
+        "server-go/modules/memory/content_gate.go"
+      ]
     },
     "src/modules/memory/memory_activation.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/activation.go"
+      ]
     },
     "src/modules/memory/memory_assemble_util.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/context_assembly.go"
+      ]
     },
     "src/modules/memory/memory_bus_context.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/process.go",
+        "server-go/modules/memory/scope.go"
+      ]
     },
     "src/modules/memory/memory_content_gate_bus.c": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/content_gate.go"
+      ]
     },
     "src/modules/memory/memory_core_internal.h": {
-      "disposition": "go-owner"
+      "disposition": "retired-api",
+      "replacement_files": []
     },
     "src/modules/memory/memory_data_bus.c": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/data.go",
+        "src/modules/benchmarks/agent_eval_memory_transport.c"
+      ]
     },
     "src/modules/memory/memory_domain_bus.c": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/domain.go"
+      ]
     },
     "src/modules/memory/memory_domain_runtime_bus.c": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/runtime_command.go"
+      ]
     },
     "src/modules/memory/memory_embed_bus.c": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/embed.go"
+      ]
     },
     "src/modules/memory/memory_extract_patterns.c": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/extract.go"
+      ]
     },
     "src/modules/memory/memory_extract_patterns.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/extract.go"
+      ]
     },
     "src/modules/memory/memory_fact_gate.c": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/policy.go"
+      ]
     },
     "src/modules/memory/memory_fact_gate.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/policy.go"
+      ]
     },
     "src/modules/memory/memory_graph_fusion.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/fusion.go",
+        "server-go/modules/memory/graph_score.go"
+      ]
     },
     "src/modules/memory/memory_ontology.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/ontology.go",
+        "src/modules/db2/c/graph_kinds.h"
+      ]
     },
     "src/modules/memory/memory_pii_gate.c": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/pii.go"
+      ]
     },
     "src/modules/memory/memory_pii_gate.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/pii.go"
+      ]
     },
     "src/modules/memory/memory_platform.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/public_runtime.go"
+      ]
     },
     "src/modules/memory/memory_profile_pack.h": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/profile_pack.go"
+      ]
     },
     "src/modules/memory/memory_scope_connection.c": {
-      "disposition": "go-owner"
+      "disposition": "go-owner",
+      "replacement_files": [
+        "server-go/modules/memory/scope.go",
+        "server-go/modules/memory/process.go"
+      ]
     }
   },
   "original_symbols": {
@@ -1970,13 +2058,6 @@
       ],
       "sha256": "e453b08038729ddab07a175827cc7e2b72be978c9f58cefe2fe4445a5d698e8f"
     },
-    "src/schema_data.h": {
-      "disposition": "protocol-catalog",
-      "symbols": [
-        "db2_memory_find_facts_like"
-      ],
-      "sha256": "99cd0b91a16a185c997b90573b8fb34b3eb62782df88a0a8fb111c0f168c2467"
-    },
     "src/server/agent_runtime.c": {
       "disposition": "host-context",
       "symbols": [
@@ -2015,13 +2096,6 @@
         "server_module_memory_data"
       ],
       "sha256": "964546668ab8749469a727606a4fd81286adafa16ecca0e7cbf60f70df0515c7"
-    },
-    "src/server/openapi_server_data.h": {
-      "disposition": "protocol-catalog",
-      "symbols": [
-        "memory_stats"
-      ],
-      "sha256": "eb744127583db29d8f320c9ca05b68569e4e2779012e35d667fbda386d0f8517"
     },
     "src/server/server.c": {
       "disposition": "host-transport",
@@ -2483,6 +2557,31 @@
         "kb_client_memory_scope_context_apply"
       ],
       "sha256": "a9a98f5c46a694e89f1888fed98e7663c0fcb1ce488b391f6dfe99ed9e648d4e"
+    }
+  },
+  "generated_files": {
+    "src/schema_data.h": {
+      "disposition": "protocol-catalog",
+      "symbols": [
+        "db2_memory_find_facts_like"
+      ],
+      "sha256": "99cd0b91a16a185c997b90573b8fb34b3eb62782df88a0a8fb111c0f168c2467",
+      "inputs": {
+        "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
+        "src/modules/db2/c/schema.sql": "32dfd6a067e835bbc36f36188888553fa16b866f56923b2da128ee116ac56f4e",
+        "src/modules/db2/c/schema_sqlite.sql": "ef328b37b01c52099d6a91cb778ea3992930debe9d7a54a3e2047fb65dfdd341"
+      }
+    },
+    "src/server/openapi_server_data.h": {
+      "disposition": "protocol-catalog",
+      "symbols": [
+        "memory_stats"
+      ],
+      "sha256": "eb744127583db29d8f320c9ca05b68569e4e2779012e35d667fbda386d0f8517",
+      "inputs": {
+        "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
+        "api/openapi-server-v1.yaml": "2c0f7706ad2a88ee6ed785c32e9fa8b96a1f67801091a0da15c831fd1f1a3f1c"
+      }
     }
   }
 }

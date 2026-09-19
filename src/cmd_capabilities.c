@@ -55,7 +55,7 @@ char *build_capabilities_text(void)
        {"agent", get_agent_subcmds},
    };
 
-   for (int t = 0; t < 4 && pos < cap - 256; t++)
+   for (size_t t = 0; t < sizeof(sub_tables) / sizeof(sub_tables[0]) && pos < cap - 256; t++)
    {
       const subcmd_t *subs = sub_tables[t].getter();
       pos += (size_t)snprintf(buf + pos, cap - pos, "## aimee %s\n", sub_tables[t].parent);

@@ -116,6 +116,10 @@ RESET ROLE;
 
 DO $$
 BEGIN
+  IF (SELECT count(*) FROM kb_async_jobs WHERE kind='memory_index'
+        AND document_id IN (-92001,-92601,-92603) AND status='pending') <> 3 THEN
+    RAISE EXCEPTION 'erasure/retention did not enqueue Go index invalidation';
+  END IF;
   IF EXISTS (SELECT 1 FROM memories WHERE owner_principal='erase-a@example.test') OR
      EXISTS (SELECT 1 FROM kb_documents WHERE owner_principal='erase-a@example.test') OR
      EXISTS (SELECT 1 FROM derived_memory_registry

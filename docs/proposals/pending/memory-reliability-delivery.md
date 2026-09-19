@@ -5,11 +5,15 @@ It does not turn proposal requirements into passing release gates. The scope is
 one Go memory implementation in Server/private and KB/shared placements, with
 Go module-side producers/consumers using the existing C bus. The bus stays C.
 
+Full DB2 retirement is deferred to the [future proposal TODO](db2-as-a-go-module.md#future-proposal-todo-retire-db2-completely).
+G0 removes native memory behavior; it does not retire unrelated DB2 consumers
+or replace the C bus.
+
 ## Authorized work
 
 | Work | Current evidence | Remaining acceptance |
 |---|---|---|
-| 1. G0 ownership and documentation | Zero native files/descriptor entries; CGO-disabled module and live probe; both C-bus placements including killed-provider refusal and process restart; native labelled audit/calibration and live benchmark policy moved to Go; orphan fusion fixture replaced with production Go assertions | Server KB store/list/get/delete/supersede, search and context-read preserve complete Go envelopes and owner refusals; fact/window search and personal/shared recall composition are Go-owned; the native mutable-array merge is retired; activation snapshots/receipts, private CRUD/search/stats and personal-recall envelopes retain exact IDs, including error receipts with host HTTP classification. Legacy console get/list now forward Go-rendered records with full content, exact IDs and owner refusals instead of fixed-size C records. Complete the remaining external-caller ownership review, retire stale ABI/fixtures and record per-owner conformance evidence. Broad native-name findings are not themselves C memory implementations. |
+| 1. G0 language/ownership cutover | Pure Go shared memory owner and module-side bus transport; native implementations and dead console retired; original file/API and external-owner ledger | [Closeout evidence](memory-reliability-g0-closeout.md). Go/PostgreSQL race, actual C-bus placements/restart, native transport and 148 configured HTTP checks pass locally. Native test targets link, repaired runtime fixtures and P1 isolation pass; pushed-head CI is required before merge. Whole-DB2 retirement is deferred. |
 | 2. Retrieval compatibility | Versioned whole-record/unit/temporal semantic recall, opt-in Go PageRank, independent-arm RRF with per-arm deduplication | [Compatibility decisions](memory-reliability-retrieval-compatibility.md) are recorded; extend the frozen corpus to the full adversarial matrix and run paired quality measurements. |
 | 3. Evaluation and release evidence | Shared injected Go module; isolated corpus/dataset/QA/support/miss runners; scoped runtime-role and transport regressions; complete owner/evaluator race suite added to required packaged-DB2 CI | Initial frozen 105-case input and manifest-bound corpus baselines/per-case receipts are implemented; live CLI/Server benchmarks share the Go owner and refuse partial results; paired quality/performance and the complete CLI/MCP/HTTP/bus restart/failure matrix and required CI remain. |
 | 4. MR-01–18 | Existing foundations below | Finish each proposal's acceptance gates and integration dependencies. None is certified complete by the language migration. |

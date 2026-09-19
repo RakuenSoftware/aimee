@@ -44,21 +44,36 @@ def validate(root: Path) -> None:
     if set(ledger["original_symbols"]) != set(manifest["native_symbols"]):
         raise ValueError("missing original symbol disposition")
     actual = findings(root, manifest)
-    recorded = {path: row["symbols"] for path, row in ledger["external_files"].items()}
+    # Build products are absent in clean lint checkouts. They remain reviewed
+    # findings when present; pin both output and generator/input content.
+    generated = ledger.get("generated_files", {})
+    for path, row in generated.items():
+        if path in ledger["external_files"] or not row.get("inputs"):
+            raise ValueError(f"invalid generated disposition: {path}")
+        for source, expected in row["inputs"].items():
+            if hashlib.sha256((root / source).read_bytes()).hexdigest() != expected:
+                raise ValueError(f"generated input needs ownership review: {source}")
+    reviewed = {**ledger["external_files"], **generated}
+    present = {path: row for path, row in reviewed.items()
+               if path not in generated or (root / path).exists()}
+    recorded = {path: row["symbols"] for path, row in present.items()}
     if actual != recorded:
         changed = sorted(p for p in set(actual) | set(recorded) if actual.get(p) != recorded.get(p))
         raise ValueError(f"external memory ownership needs review: {changed}")
-    for path, row in ledger["external_files"].items():
+    for path, row in present.items():
         digest = hashlib.sha256((root / path).read_bytes()).hexdigest()
         if row.get("sha256") != digest:
             raise ValueError(f"external memory adapter changed without ownership review: {path}")
-    for path in ledger["original_files"]:
+    for path, row in ledger["original_files"].items():
+        for replacement in row["replacement_files"]:
+            if not (root / replacement).is_file():
+                raise ValueError(f"missing replacement owner: {path}: {replacement}")
         if (root / path).exists():
             raise ValueError(f"retired native file restored: {path}")
-    for section in ("original_files", "original_symbols", "external_files"):
-        for name, row in ledger[section].items():
+    for section in ("original_files", "original_symbols", "external_files", "generated_files"):
+        for name, row in ledger.get(section, {}).items():
             group = ledger["dispositions"].get(row["disposition"])
-            if not group or not group.get("owner") or not group.get("contract") or not group.get("reason"):
+            if not group or not group.get("owner") or not group.get("contract") or not group.get("reason") or not group.get("cutover_dependency"):
                 raise ValueError(f"incomplete disposition: {name}")
             if not group.get("evidence"):
                 raise ValueError(f"missing conformance evidence: {name}")

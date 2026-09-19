@@ -733,7 +733,7 @@ GO_SHARED_CONTRACTS = {
     "server-go/modules/audit": {"memory"},
     "server-go/delegate": {"delegates", "roundtable"},
     "server-go/aimee": {"aimee", "economizer"},
-    "server-go/db": {"aimee", "memory"},
+    "server-go/db": {"aimee", "memory", "postgres"},
 }
 
 
