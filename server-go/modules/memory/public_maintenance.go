@@ -11,6 +11,7 @@ import (
 
 func handleMaintenanceCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
 	request := DataRequest{IncludeAll: true}
+	var modelDroppedPrune bool
 	switch verb {
 	case "lint":
 		request.Operation, request.Limit = "lint", 256
@@ -26,6 +27,14 @@ func handleMaintenanceCommand(options handlerOptions, invocation bus.ModuleInvoc
 		}
 		_ = json.Unmarshal(args["force"], &request.Force)
 		_ = json.Unmarshal(args["dry_run"], &request.DryRun)
+		var modelPolicy bool
+		_ = json.Unmarshal(args["model_policy"], &modelPolicy)
+		if modelPolicy {
+			request.Modes, modelDroppedPrune = modelMaintenanceModes(request.Modes)
+			if request.Modes == 0 {
+				return commandResult(map[string]any{"status": "ok", "nothing_run": true, "text": modelMaintenanceNoop})
+			}
+		}
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -59,7 +68,7 @@ func handleMaintenanceCommand(options handlerOptions, invocation bus.ModuleInvoc
 			var droppedPrune bool
 			_ = json.Unmarshal(args["prune_removed"], &droppedPrune)
 			// The transport's notice must agree with the owner's actual modes.
-			if droppedPrune && response.Maintenance.ModesRun != 0 && response.Maintenance.ModesRun&MaintenancePrune == 0 {
+			if (droppedPrune || modelDroppedPrune) && response.Maintenance.ModesRun != 0 && response.Maintenance.ModesRun&MaintenancePrune == 0 {
 				outcome := "The other requested modes ran."
 				if response.Maintenance.Skipped {
 					outcome = "The remaining modes were skipped by the idle guard."
@@ -126,4 +135,33 @@ func addMaintenanceConsole(result map[string]any, summary MaintenanceSummary, re
 		text += "Vector maintenance skipped here; ownership belongs to the knowledge service.\n"
 	}
 	result["text"] = text
+}
+
+const modelMaintenanceNoop = "memory maintenance: nothing run. The prune mode permanently deletes memories (all L0 rows, stale L1 rows, and restricted/sensitive rows past retention) and is not available through this tool; it is an operator action (`aimee memory maintain`). Other modes: replay, compact, summarize."
+
+// Capability alone cannot authorize pruning through a model tool: authenticated
+// MCP callers already hold admin capability. Keep the operator/scheduler path
+// separate and never pass the zero/default sentinel after removing prune.
+func modelMaintenanceModes(modes uint32) (uint32, bool) {
+	if modes == 0 {
+		modes = MaintenanceDefault
+	}
+	return modes &^ MaintenancePrune, modes&MaintenancePrune != 0
+}
+
+func planModelMaintenance(args commandArgs) ([]byte, bus.ModuleStatus) {
+	// The existing MCP vocabulary excludes drift; numeric and unknown modes
+	// behave like an omitted mode. CLI mode parsing remains broader.
+	modes := parseMaintenanceModes(args.stringOr("modes", "")) &^ MaintenanceDrift
+	modes, dropped := modelMaintenanceModes(modes)
+	if modes == 0 {
+		// Retain the existing admin gate on an explicit prune-only no-op.
+		return commandResult(map[string]any{"status": "ok", "required_capability": "admin", "execute": false, "text": modelMaintenanceNoop})
+	}
+	var force, dry bool
+	_ = json.Unmarshal(args["force"], &force)
+	_ = json.Unmarshal(args["dry_run"], &dry)
+	return commandResult(map[string]any{"status": "ok", "required_capability": "write", "execute": true,
+		"request": map[string]any{"modes": modes, "force": force, "dry_run": dry,
+			"view": "model", "model_policy": true, "prune_removed": dropped}})
 }

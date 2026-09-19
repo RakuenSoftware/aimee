@@ -1,17 +1,9 @@
-/* test_mcp_memory_gate.c: the authorization decisions behind the two MCP memory
- * tools that can destroy stored data.
- *
- * These exist because tool_memory_mutate's `forget` and `update` verbs reached a
- * hard DELETE and a no-history UPDATE with no capability check at all, and
- * `memory_maintain`'s prune mode bulk-deletes with no gate anywhere. Both gates
- * are one `if` away from being decorative, and no test links
- * server_mcp_call_table.c (it pulls in every tool aimee has), so the decisions
- * were extracted into a pure TU precisely so they could be pinned here. */
+/* Host capability enforcement and transport conformance for Go-owned MCP policy. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include "aimee.h"
-#include "memory.h" /* MEMORY_MAINTENANCE_MODE_* — not standalone; needs aimee.h first */
+#include "cJSON.h"
 #include "server.h" /* CAP_* bits, server_capability_for_method */
 #include "server_mcp_memory_gate.h"
 
@@ -56,44 +48,6 @@ static void test_verb_grades_are_what_the_fix_intended(void)
    printf("  PASS: forget grades as memory:admin, store/update as memory:write\n");
 }
 
-/* memory_maintain's prune mode hard-deletes: every L0 row and its provenance,
- * stale L1 rows, and restricted/sensitive memories past retention. */
-static void test_maintain_prune_requires_admin(void)
-{
-   assert(mcp_memory_maintain_required_cap(MEMORY_MAINTENANCE_MODE_PRUNE) == CAP_MEMORY_ADMIN);
-
-   /* Prune combined with harmless modes is still destructive. */
-   assert(mcp_memory_maintain_required_cap(MEMORY_MAINTENANCE_MODE_REPLAY |
-                                           MEMORY_MAINTENANCE_MODE_PRUNE) == CAP_MEMORY_ADMIN);
-   printf("  PASS: prune requires memory:admin\n");
-}
-
-/* The subtle half: modes of 0 means MEMORY_MAINTENANCE_MODES_DEFAULT, which
- * includes prune. A bare `memory_maintain {}` therefore DELETES, and must grade
- * as destructive. This is the case a reader most easily misses, and the one that
- * would silently drop to memory:write if prune ever left the default set. */
-static void test_maintain_default_modes_require_admin(void)
-{
-   assert((MEMORY_MAINTENANCE_MODES_DEFAULT & MEMORY_MAINTENANCE_MODE_PRUNE) != 0);
-   assert(mcp_memory_maintain_required_cap(0) == CAP_MEMORY_ADMIN);
-   assert(mcp_memory_maintain_required_cap(0) ==
-          mcp_memory_maintain_required_cap(MEMORY_MAINTENANCE_MODE_PRUNE));
-   printf("  PASS: a bare memory_maintain {} grades as destructive\n");
-}
-
-/* Non-destructive maintenance is a write, not an admin action -- the gate should
- * not be so blunt that ordinary upkeep needs the destroy grant. */
-static void test_maintain_non_destructive_modes_require_write(void)
-{
-   assert(mcp_memory_maintain_required_cap(MEMORY_MAINTENANCE_MODE_REPLAY) == CAP_MEMORY_WRITE);
-   assert(mcp_memory_maintain_required_cap(MEMORY_MAINTENANCE_MODE_COMPACT) == CAP_MEMORY_WRITE);
-   assert(mcp_memory_maintain_required_cap(MEMORY_MAINTENANCE_MODE_SUMMARIZE) == CAP_MEMORY_WRITE);
-   assert(mcp_memory_maintain_required_cap(MEMORY_MAINTENANCE_MODE_DRIFT) == CAP_MEMORY_WRITE);
-   assert(mcp_memory_maintain_required_cap(MEMORY_MAINTENANCE_MODE_REPLAY |
-                                           MEMORY_MAINTENANCE_MODE_COMPACT) == CAP_MEMORY_WRITE);
-   printf("  PASS: non-destructive modes require only memory:write\n");
-}
-
 /* The gate alone cannot stop a model from bulk-deleting, and this is the reason:
  * reaching ANY MCP tool needs CAP_TOOL_EXECUTE, which exists only in
  * CAPS_AUTHENTICATED and CAPS_ALL -- and both of those also carry
@@ -118,52 +72,11 @@ static void test_every_mcp_caller_already_clears_the_admin_gate(void)
    printf("  PASS: every MCP-capable caller already holds memory:admin\n");
 }
 
-/* Which is why the model's door does not prune at all. */
-static void test_model_modes_never_prune(void)
-{
-   int dropped = -1;
-
-   /* Explicit prune is removed, and reported. */
-   unsigned int m = mcp_memory_maintain_model_modes(MEMORY_MAINTENANCE_MODE_PRUNE, &dropped);
-   assert((m & MEMORY_MAINTENANCE_MODE_PRUNE) == 0);
-   assert(m == 0); /* nothing else was asked for */
-   assert(dropped == 1);
-
-   /* A bare call -- modes 0 -> MODES_DEFAULT, which includes prune -- loses only
-    * prune and still runs the rest. This is the case that silently destroyed. */
-   dropped = -1;
-   m = mcp_memory_maintain_model_modes(0, &dropped);
-   assert((m & MEMORY_MAINTENANCE_MODE_PRUNE) == 0);
-   assert(dropped == 1);
-   assert((m & MEMORY_MAINTENANCE_MODE_REPLAY) == MEMORY_MAINTENANCE_MODE_REPLAY);
-   assert((m & MEMORY_MAINTENANCE_MODE_COMPACT) == MEMORY_MAINTENANCE_MODE_COMPACT);
-
-   /* Prune mixed with real work keeps the work. */
-   dropped = -1;
-   m = mcp_memory_maintain_model_modes(
-       MEMORY_MAINTENANCE_MODE_PRUNE | MEMORY_MAINTENANCE_MODE_SUMMARIZE, &dropped);
-   assert(m == MEMORY_MAINTENANCE_MODE_SUMMARIZE);
-   assert(dropped == 1);
-
-   /* A request with no prune in it is passed through untouched and not reported
-    * as narrowed. */
-   dropped = -1;
-   m = mcp_memory_maintain_model_modes(MEMORY_MAINTENANCE_MODE_REPLAY, &dropped);
-   assert(m == MEMORY_MAINTENANCE_MODE_REPLAY);
-   assert(dropped == 0);
-
-   /* Whatever survives is never admin-graded, since prune is what made it so. */
-   assert(mcp_memory_maintain_required_cap(mcp_memory_maintain_model_modes(0, NULL)) ==
-          CAP_MEMORY_WRITE);
-   printf("  PASS: the model's maintenance door never prunes\n");
-}
-
 /* Neither gate may be satisfiable by a read-only caller. */
 static void test_no_gate_is_read_only(void)
 {
    assert((CAPS_READ_ONLY & CAP_MEMORY_ADMIN) == 0);
    assert((CAPS_READ_ONLY & CAP_MEMORY_WRITE) == 0);
-   assert((CAPS_READ_ONLY & mcp_memory_maintain_required_cap(0)) == 0);
    assert((CAPS_READ_ONLY & server_capability_for_method(mcp_mutate_verb_method("forget"))) == 0);
    printf("  PASS: no memory gate is satisfied by a read-only caller\n");
 }
@@ -207,6 +120,111 @@ static void test_authenticated_identity_is_not_capability(void)
    printf("  PASS: authenticated account is asked separately from capability\n");
 }
 
+static const char *owner_plan, *kb_reply;
+static int plan_calls, kb_calls;
+
+cJSON *server_invoke_module_operation(const char *method, const char *operation, const cJSON *args,
+                                      const char *unavailable)
+{
+   assert(strcmp(method, "memory.runtime") == 0);
+   assert(strcmp(operation, "maintenance-model-plan") == 0);
+   assert(cJSON_IsObject(args) && unavailable);
+   plan_calls++;
+   return owner_plan ? cJSON_Parse(owner_plan) : NULL;
+}
+
+cJSON *server_error_kind_json(const char *kind, const char *message, const char *request_id)
+{
+   (void)request_id;
+   cJSON *reply = cJSON_CreateObject();
+   cJSON_AddStringToObject(reply, "status", "error");
+   cJSON_AddStringToObject(reply, "kind", kind);
+   cJSON_AddStringToObject(reply, "message", message);
+   return reply;
+}
+
+char *kb_v1_action_request(const char *method, cJSON *request)
+{
+   assert(strcmp(method, "memory.maintenance_run") == 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "model_policy")));
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(request, "modes")) == 3);
+   assert(!cJSON_HasObjectItem(request, "actor") && !cJSON_HasObjectItem(request, "authority"));
+   assert(!cJSON_HasObjectItem(request, "capabilities") &&
+          !cJSON_HasObjectItem(request, "operation"));
+   kb_calls++;
+   cJSON_Delete(request);
+   return kb_reply ? strdup(kb_reply) : NULL;
+}
+
+static void assert_reply_kind(cJSON *reply, const char *kind)
+{
+   assert(reply && strcmp(cJSON_GetObjectItemCaseSensitive(reply, "kind")->valuestring, kind) == 0);
+   cJSON_Delete(reply);
+}
+
+static void test_maintenance_owner_transport(void)
+{
+   cJSON *args = cJSON_Parse("{\"modes\":\"prune\",\"actor\":\"operator\",\"authority\":40,"
+                             "\"capabilities\":4294967295,\"operation\":\"delete\"}");
+   const char *run = "{\"status\":\"ok\",\"execute\":true,\"required_capability\":\"write\","
+                     "\"request\":{\"modes\":3,\"model_policy\":true,\"view\":\"model\"}}";
+   owner_plan = run;
+   kb_reply = "{\"status\":\"ok\",\"text\":\"owner receipt: 9007199254740993\"}";
+   assert_reply_kind(server_mcp_memory_maintain_command(0, args), SERVER_ERR_PERMISSION_DENIED);
+   assert_reply_kind(server_mcp_memory_maintain_command(CAPS_READ_ONLY, args),
+                     SERVER_ERR_PERMISSION_DENIED);
+   assert(kb_calls == 0);
+   cJSON *reply = server_mcp_memory_maintain_command(CAP_MEMORY_WRITE, args);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(reply, "text")->valuestring,
+                 "owner receipt: 9007199254740993") == 0);
+   assert(kb_calls == 1);
+   cJSON_Delete(reply);
+   owner_plan = "{\"status\":\"ok\",\"execute\":false,\"required_capability\":\"admin\",\"text\":"
+                "\"nothing run\"}";
+   assert_reply_kind(server_mcp_memory_maintain_command(CAP_MEMORY_WRITE, args),
+                     SERVER_ERR_PERMISSION_DENIED);
+   reply = server_mcp_memory_maintain_command(CAP_MEMORY_ADMIN, args);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(reply, "text")->valuestring, "nothing run") == 0);
+   cJSON_Delete(reply);
+   assert(kb_calls == 1);
+   const char *bad_plans[] = {
+       NULL,
+       "{}",
+       "[]",
+       "{\"status\":\"error\"}",
+       "{\"status\":\"ok\",\"execute\":1,\"required_capability\":\"write\"}",
+       "{\"status\":\"ok\",\"execute\":true,\"required_capability\":\"read\"}",
+       "{\"status\":\"ok\",\"execute\":true,\"required_capability\":\"write\",\"request\":{\"model_"
+       "policy\":false}}",
+       "{\"status\":\"ok\",\"execute\":true,\"required_capability\":\"write\"}",
+       "{\"status\":\"ok\",\"execute\":false,\"required_capability\":\"admin\"}",
+       "{\"status\":\"ok\",\"execute\":false,\"required_capability\":\"admin\",\"text\":"
+       "\"ambiguous\",\"request\":{}}"};
+   for (size_t i = 0; i < sizeof(bad_plans) / sizeof(bad_plans[0]); ++i)
+   {
+      owner_plan = bad_plans[i];
+      assert_reply_kind(server_mcp_memory_maintain_command(CAPS_ALL, args), SERVER_ERR_UNAVAILABLE);
+   }
+   assert(kb_calls == 1);
+   owner_plan = run;
+   const char *bad_replies[] = {NULL,
+                                "{}",
+                                "[]",
+                                "{\"status\":\"error\",\"text\":\"false success\"}",
+                                "{\"status\":\"ok\"}",
+                                "{\"status\":\"ok\",\"text\":\"x\"} trailing"};
+   for (size_t i = 0; i < sizeof(bad_replies) / sizeof(bad_replies[0]); ++i)
+   {
+      kb_reply = bad_replies[i];
+      assert_reply_kind(server_mcp_memory_maintain_command(CAP_MEMORY_WRITE, args),
+                        SERVER_ERR_UNAVAILABLE);
+   }
+   assert(plan_calls > kb_calls);
+   cJSON_Delete(args);
+   printf("  PASS: Go plans require host capabilities; malformed plans and failures never execute "
+          "or look successful\n");
+}
+
 int main(void)
 {
    const char *index_methods[] = {
@@ -219,12 +237,9 @@ int main(void)
    test_authenticated_identity_is_not_capability();
    test_verb_methods();
    test_verb_grades_are_what_the_fix_intended();
-   test_maintain_prune_requires_admin();
-   test_maintain_default_modes_require_admin();
-   test_maintain_non_destructive_modes_require_write();
    test_every_mcp_caller_already_clears_the_admin_gate();
-   test_model_modes_never_prune();
    test_no_gate_is_read_only();
+   test_maintenance_owner_transport();
    printf("mcp_memory_gate: all tests passed\n");
    return 0;
 }

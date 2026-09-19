@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -104,6 +105,19 @@ func TestMaintenancePublicPostgres(t *testing.T) {
 	if metrics["runs_total"].(float64)-beforeMetrics["runs_total"].(float64) != 3 || metrics["skips_total"].(float64)-beforeMetrics["skips_total"].(float64) != 1 || metrics["ms_max"].(float64) < 0 {
 		t.Fatal(metrics)
 	}
+	// A model's prune-only request must stop before the default-mode sentinel
+	// can reach SQL. The actual L0 row survives even with force/admin-like args.
+	noop := runPublicCommand(t, client, "maintenance_run", `{"model_policy":true,"view":"model","modes":4,"force":true,"authority":40}`)
+	if noop["nothing_run"] != true || noop["summary"] != nil {
+		t.Fatal(noop)
+	}
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM memories WHERE id=1 AND tier='L0'`).Scan(&count); err != nil || count != 1 {
+		t.Fatal("model prune changed L0 memory", count, err)
+	}
+	modelDefault := runPublicCommand(t, client, "maintenance_run", `{"model_policy":true,"view":"model","force":true,"dry_run":true}`)
+	if modelDefault["summary"].(map[string]any)["modes_run"] != float64(MaintenanceReplay|MaintenanceCompact) || !strings.Contains(modelDefault["text"].(string), "prune was NOT run") {
+		t.Fatal(modelDefault)
+	}
 	_, err = tx.Exec(ctx, `TRUNCATE memories`)
 	if err != nil {
 		t.Fatal(err)
@@ -116,6 +130,7 @@ func TestMaintenancePublicPostgres(t *testing.T) {
 
 // Observe the inputs that reach the owner, including the default-mode sentinel.
 type consoleMaintenanceStore struct {
+	calls int
 	recordingDataStore
 	maintenanceDataStore
 	modes      uint32
@@ -125,6 +140,7 @@ type consoleMaintenanceStore struct {
 }
 
 func (s *consoleMaintenanceStore) RunMaintenance(_ context.Context, modes uint32, force, dry bool) (MaintenanceSummary, error) {
+	s.calls++
 	s.modes, s.force, s.dry = modes, force, dry
 	return MaintenanceSummary{ModesRun: modes, DryRun: dry, Skipped: s.skipped, Promoted: 2, Demoted: 3, Expired: 4, LifecycleArchived: 5, Merged: 6, Rescored: 7, ElapsedMS: 1.25}, s.err
 }
@@ -185,5 +201,66 @@ func TestMaintenanceConsoleOwner(t *testing.T) {
 		if err == nil || len(body) != 0 {
 			t.Fatalf("failed maintenance looked successful: %s, %v", body, err)
 		}
+	}
+}
+
+func TestModelMaintenancePlan(t *testing.T) {
+	for _, placement := range []Placement{PlacementServer, PlacementKB} {
+		handler := NewHandler(nil, WithDataStore(placement, nil))
+		for _, tc := range []struct {
+			modes   string
+			run     uint32
+			dropped bool
+		}{
+			{`null`, 3, true}, {`4`, 3, true}, {`""`, 3, true},
+			{`"prune"`, 0, true}, {`"prune,summarize"`, 8, true},
+			{`"replay"`, 1, false}, {`"compact summarize"`, 10, false},
+			{`"drift"`, 3, true}, {`"drift,prune"`, 0, true},
+			{`"REPLAY,replay\tcompact"`, 3, true},
+			{`" replay, compact, prune, summarize, replay,unknown "`, 11, true},
+		} {
+			args := `{"operation":"maintenance-model-plan","modes":` + tc.modes + `,"force":true,"dry_run":true,"actor":"operator","authority":40,"capabilities":4294967295,"model_policy":false,"prune_removed":false}`
+			r := runHostRuntime(t, handler, args)
+			if r["status"] != "ok" || r["execute"] != (tc.run != 0) {
+				t.Fatal(placement, tc, r)
+			}
+			if tc.run == 0 {
+				if r["required_capability"] != "admin" || r["text"] != modelMaintenanceNoop || r["request"] != nil {
+					t.Fatal(r)
+				}
+				continue
+			}
+			q := r["request"].(map[string]any)
+			if r["required_capability"] != "write" || q["modes"] != float64(tc.run) || tc.run&MaintenancePrune != 0 ||
+				q["force"] != true || q["dry_run"] != true || q["view"] != "model" || q["model_policy"] != true || q["prune_removed"] != tc.dropped || len(q) != 6 {
+				t.Fatal(r)
+			}
+		}
+		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"maintenance-model-plan"}`))
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 200}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal("peer reached host policy planner", placement, status)
+		}
+	}
+}
+
+func TestModelMaintenanceExecutionNeverPrunes(t *testing.T) {
+	s := &consoleMaintenanceStore{}
+	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, s)))
+	for _, tc := range []struct{ modes, want uint32 }{{0, 3}, {4, 0}, {5, 1}, {7, 3}, {8, 8}, {31, 27}} {
+		before := s.calls
+		args, _ := json.Marshal(map[string]any{"modes": tc.modes, "model_policy": true, "view": "model", "force": true, "dry_run": false})
+		r := runPublicCommand(t, client, "maintenance_run", string(args))
+		if tc.want == 0 {
+			if s.calls != before || r["nothing_run"] != true || r["text"] != modelMaintenanceNoop {
+				t.Fatal("prune-only request reached maintenance store", r)
+			}
+		} else if s.calls != before+1 || s.modes != tc.want || s.modes&MaintenancePrune != 0 {
+			t.Fatal(tc, s.modes, r)
+		}
+	}
+	// The operator and scheduler still own the unrestricted path.
+	runPublicCommand(t, client, "maintenance_run", `{"modes":4,"force":true}`)
+	if s.modes != MaintenancePrune {
+		t.Fatal(s.modes)
 	}
 }

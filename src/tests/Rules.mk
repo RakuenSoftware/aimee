@@ -4427,13 +4427,10 @@ $(TESTPREFIX)/unit-test-entity-registry: $(OBJDIR)/tests/test_entity_registry.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # typed-fact P3: confidence classes (§5) + correction/retraction (§4), shim.
-# The capability grading behind the MCP `mutate` and `memory_maintain` gates.
-# server_mcp_memory_gate.o is pure (macros + strcmp), so this links with only
-# server_auth.o for server_capability_for_method -- deliberately, so the
-# security-critical decisions are testable without linking the MCP call table.
+# Real MCP maintenance transport with a stubbed Go owner and KB, plus mutation grades.
 $(TESTPREFIX)/unit-test-mcp-memory-gate: $(OBJDIR)/tests/test_mcp_memory_gate.o \
                                $(OBJDIR)/server/server_mcp_memory_gate.o \
-                               $(OBJDIR)/server/server_auth.o
+                               $(OBJDIR)/server/server_auth.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-fact-lifecycle: $(OBJDIR)/tests/test_fact_lifecycle.o \

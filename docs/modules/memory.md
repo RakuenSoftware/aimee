@@ -97,8 +97,16 @@ Go retains the comma/space mode vocabulary, numeric API modes, default-mode
 sentinel, force and dry-run behavior. Skipped cycles use the owner's boolean
 receipt, and failed maintenance cannot be rendered as a successful empty cycle.
 MCP also uses the Go-rendered summary and prune-removal notice, which distinguishes
-completed, skipped and dry-run outcomes. Its existing model-mode restriction and
-capability gate remain at the Server transport boundary pending their migration.
+completed, skipped and dry-run outcomes. The private `maintenance-model-plan`
+runtime operation now owns MCP mode parsing, default expansion, prune removal,
+capability selection and no-op text. It ignores caller-supplied actor/capability
+fields and emits a new bounded request. Server enforces the selected capability
+against the authenticated connection and forwards only that request. The KB Go
+owner reapplies `model_policy` before execution: a prune-only request returns a
+no-op before reaching SQL, and zero/default modes become replay plus compact.
+Operator and scheduler maintenance retain their existing unrestricted path.
+The retired native mode-policy functions are forbidden by the boundary guard;
+MCP mutation-verb routing and other native clients still await migration.
 
 The supervised `aimee-module-memory` process is pure Go. It owns extraction,
 write gating, embedding, retrieval safety, reranking, command declaration, and

@@ -85,9 +85,6 @@ static cJSON *mcph_search_memory(struct mcp_call *c)
 {
    return tool_search_memory(c->jargs);
 }
-/* mcp_mutate_verb_method / mcp_memory_maintain_required_cap live in
- * server_mcp_memory_gate.c: they are the security-critical half of these two
- * gates, and no test links this TU. See that header. */
 static cJSON *mcph_mutate(struct mcp_call *c)
 {
    cJSON *jv = cJSON_GetObjectItemCaseSensitive(c->jargs, "verb");
@@ -556,90 +553,19 @@ static cJSON *mcph_resolve_epistemic_directive(struct mcp_call *c)
 
 static cJSON *mcph_memory_maintain(struct mcp_call *c)
 {
-   cJSON *jargs = c->jargs;
-   unsigned int modes = 0;
-   cJSON *jm = cJSON_GetObjectItemCaseSensitive(jargs, "modes");
-   if (cJSON_IsString(jm) && jm->valuestring[0])
-   {
-      const char *csv = jm->valuestring;
-      while (*csv)
-      {
-         while (*csv == ' ' || *csv == ',')
-            csv++;
-         if (!*csv)
-            break;
-         const char *start = csv;
-         while (*csv && *csv != ',' && *csv != ' ')
-            csv++;
-         size_t len = (size_t)(csv - start);
-         if (len == 6 && strncmp(start, "replay", 6) == 0)
-            modes |= MEMORY_MAINTENANCE_MODE_REPLAY;
-         else if (len == 7 && strncmp(start, "compact", 7) == 0)
-            modes |= MEMORY_MAINTENANCE_MODE_COMPACT;
-         else if (len == 5 && strncmp(start, "prune", 5) == 0)
-            modes |= MEMORY_MAINTENANCE_MODE_PRUNE;
-         else if (len == 9 && strncmp(start, "summarize", 9) == 0)
-            modes |= MEMORY_MAINTENANCE_MODE_SUMMARIZE;
-      }
-   }
-   int dry_run = 0, force = 0;
-   cJSON *jd = cJSON_GetObjectItemCaseSensitive(jargs, "dry_run");
-   if (cJSON_IsBool(jd))
-      dry_run = cJSON_IsTrue(jd) ? 1 : 0;
-   cJSON *jf = cJSON_GetObjectItemCaseSensitive(jargs, "force");
-   if (cJSON_IsBool(jf))
-      force = cJSON_IsTrue(jf) ? 1 : 0;
-
-   /* The prune mode is the bulk twin of memory.delete: memory_expire() wipes
-    * every L0 row and its provenance and deletes stale L1 rows, and
-    * memory_enforce_retention() hard-deletes restricted/sensitive memories past
-    * their retention window. This tool is the model's door to it, and it was
-    * ungated -- there is not even an RPC method twin to inherit a grade from
-    * (memory.maintenance_run is a KB-service method the server never dispatches).
-    *
-    * Grading it is NOT sufficient on its own, and it is worth being explicit
-    * about why: reaching any MCP tool requires CAP_TOOL_EXECUTE, which lives
-    * only in CAPS_AUTHENTICATED and CAPS_ALL -- and both also carry
-    * CAP_MEMORY_ADMIN. Every caller that can invoke this tool therefore already
-    * clears an admin-graded gate, so a gate alone would still leave a model able
-    * to bulk-delete.
-    *
-    * So the model's door does not prune at all, for the same reason its `forget`
-    * retires rather than destroys. The operator keeps prune via
-    * `aimee memory maintain`, and the scheduler still runs the full cycle. The
-    * capability gate stays as defence in depth on the modes actually run. */
-   int dropped_prune = 0;
-   unsigned int run_modes = mcp_memory_maintain_model_modes(modes, &dropped_prune);
-
-   uint32_t required = mcp_memory_maintain_required_cap(run_modes);
-   if (!c->conn || (c->conn->capabilities & required) == 0)
-      return text_content("error: forbidden: insufficient capabilities for memory maintenance");
-
-   /* Nothing left to do once prune is removed (a bare call asking only for it):
-    * say so rather than running an empty cycle and reporting success. */
-   if (run_modes == 0)
-      return text_content("memory maintenance: nothing run. The prune mode permanently deletes "
-                          "memories (all L0 rows, stale L1 rows, and restricted/sensitive rows "
-                          "past retention) and is not available through this tool; it is an "
-                          "operator action (`aimee memory maintain`). Other modes: replay, "
-                          "compact, summarize.");
-
-   cJSON *request = cJSON_CreateObject();
-   cJSON_AddNumberToObject(request, "modes", (double)run_modes);
-   cJSON_AddBoolToObject(request, "force", force);
-   cJSON_AddBoolToObject(request, "dry_run", dry_run);
-   cJSON_AddStringToObject(request, "view", "model");
-   cJSON_AddBoolToObject(request, "prune_removed", dropped_prune);
-   char *envelope = kb_v1_action_request("memory.maintenance_run", request);
-   cJSON *resp = envelope ? cJSON_ParseWithOpts(envelope, NULL, 1) : NULL;
-   free(envelope);
-   cJSON *text = cJSON_GetObjectItemCaseSensitive(resp, "text");
+   cJSON *reply = server_mcp_memory_maintain_command(c->conn ? c->conn->capabilities : 0, c->jargs);
+   cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "text");
    cJSON *content;
-   if (strcmp(jo_cstr(resp, "status"), "ok") == 0 && cJSON_IsString(text))
+   if (strcmp(jo_cstr(reply, "status"), "ok") == 0 && cJSON_IsString(text))
       content = text_content(text->valuestring);
    else
-      content = text_content("error: memory maintenance failed or returned an invalid response");
-   cJSON_Delete(resp);
+   {
+      char message[256];
+      snprintf(message, sizeof(message), "error: %s",
+               jo_str(reply, "message", "memory maintenance unavailable"));
+      content = text_content(message);
+   }
+   cJSON_Delete(reply);
    return content;
 }
 

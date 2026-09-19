@@ -1,10 +1,10 @@
-/* server_mcp_memory_gate.c: the authorization decisions for the MCP memory tools
- * that can destroy stored data. See server_mcp_memory_gate.h for why they live
- * here rather than inline in server_mcp_call_table.c. */
+/* MCP memory transport: enforce host capabilities against the Go owner's plan. */
 #include "server_mcp_memory_gate.h"
 #include "server.h" /* CAP_MEMORY_ADMIN / CAP_MEMORY_WRITE */
 #include "aimee.h"
-#include "memory.h" /* MEMORY_MAINTENANCE_MODE_PRUNE / _MODES_DEFAULT */
+#include "kb_client.h"
+#include "json_fluent.h"
+#include <aimee/core/event_bus/module_protocol.h>
 #include <string.h>
 
 const char *mcp_mutate_verb_method(const char *verb)
@@ -28,18 +28,55 @@ const char *mcp_mutate_verb_method(const char *verb)
    return NULL;
 }
 
-uint32_t mcp_memory_maintain_required_cap(unsigned int modes)
+cJSON *server_mcp_memory_maintain_command(uint32_t capabilities, const cJSON *args)
 {
-   unsigned int effective = modes ? modes : (unsigned int)MEMORY_MAINTENANCE_MODES_DEFAULT;
-   return (effective & MEMORY_MAINTENANCE_MODE_PRUNE) ? (uint32_t)CAP_MEMORY_ADMIN
-                                                      : (uint32_t)CAP_MEMORY_WRITE;
-}
-
-unsigned int mcp_memory_maintain_model_modes(unsigned int modes, int *dropped_prune_out)
-{
-   unsigned int effective = modes ? modes : (unsigned int)MEMORY_MAINTENANCE_MODES_DEFAULT;
-   int had_prune = (effective & MEMORY_MAINTENANCE_MODE_PRUNE) ? 1 : 0;
-   if (dropped_prune_out)
-      *dropped_prune_out = had_prune;
-   return effective & ~(unsigned int)MEMORY_MAINTENANCE_MODE_PRUNE;
+   cJSON *plan = server_invoke_module_operation("memory.runtime", "maintenance-model-plan", args,
+                                                "memory maintenance policy unavailable");
+   cJSON *execute = cJSON_GetObjectItemCaseSensitive(plan, "execute");
+   const char *required = jo_cstr(plan, "required_capability");
+   uint32_t capability = strcmp(required, "write") == 0   ? CAP_MEMORY_WRITE
+                         : strcmp(required, "admin") == 0 ? CAP_MEMORY_ADMIN
+                                                          : 0;
+   if (strcmp(jo_cstr(plan, "status"), "ok") != 0 || !cJSON_IsBool(execute) || !capability)
+   {
+      cJSON_Delete(plan);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "memory maintenance policy unavailable",
+                                    NULL);
+   }
+   if (!(capabilities & capability))
+   {
+      cJSON_Delete(plan);
+      return server_error_kind_json(SERVER_ERR_PERMISSION_DENIED,
+                                    "forbidden: insufficient capabilities for memory maintenance",
+                                    NULL);
+   }
+   if (cJSON_IsFalse(execute))
+   {
+      if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(plan, "text")) &&
+          !cJSON_HasObjectItem(plan, "request"))
+         return plan;
+      cJSON_Delete(plan);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "invalid memory maintenance plan",
+                                    NULL);
+   }
+   cJSON *request = cJSON_DetachItemFromObjectCaseSensitive(plan, "request");
+   cJSON_Delete(plan);
+   if (!cJSON_IsObject(request) ||
+       !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "model_policy")))
+   {
+      cJSON_Delete(request);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "invalid memory maintenance plan",
+                                    NULL);
+   }
+   char *raw = kb_v1_action_request("memory.maintenance_run", request);
+   cJSON *reply = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+                      ? cJSON_ParseWithOpts(raw, NULL, 1)
+                      : NULL;
+   free(raw);
+   if (cJSON_IsObject(reply) && strcmp(jo_cstr(reply, "status"), "ok") == 0 &&
+       cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "text")))
+      return reply;
+   cJSON_Delete(reply);
+   return server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                 "memory maintenance failed or returned an invalid response", NULL);
 }
