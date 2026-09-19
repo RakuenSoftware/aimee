@@ -965,6 +965,9 @@ jobs:
       - name: Replay packaged DB2 operations through the event bus
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 db2-replay
       - name: Replay Go memory ownership and isolated evaluator contracts
+        # Report memory independently when an earlier DB2 assertion fails.
+        # Failed setup still fails this required job; no checks are waived.
+        if: ${{ !cancelled() }}
         run: make -C src GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 memory-owner-replay-check
       - name: Verify durable schema effect
         run: |

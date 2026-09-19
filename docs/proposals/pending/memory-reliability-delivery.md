@@ -41,7 +41,9 @@ Historical notes are preserved in the [program migration history](memory-reliabi
 and [module migration history](../../modules/memory-migration-history.md). Their
 counts and pending statements are dated checkpoints, not current certification.
 
-The memory process restart legs pass in both placements. The broader bus
-conformance run currently fails at egress caller admission; the harness from
-before the memory restart change reproduces that failure. This limits the
-broader-suite claim, not the observed memory restart result.
+The full cross-language bus conformance suite passes locally, including memory
+termination/restart in both placements. Its egress fixture advertised one
+uninitialized extra stage; the fixture now matches the seven shipping stages.
+The previous remote packaged-DB2 replay failed at its dimension-reset assertion
+before reaching the memory suite. Memory replay now runs after an earlier step
+failure to report its own result; the required job still retains every failure.

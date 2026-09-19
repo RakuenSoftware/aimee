@@ -337,7 +337,7 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       served[4] = AIMEE_EGRESS_EVENT_SSE_RECV;
       served[5] = AIMEE_EGRESS_EVENT_SSE_CLOSE;
       served[6] = AIMEE_EGRESS_EVENT_CREDENTIAL_KEY;
-      *serve_count = 8;
+      *serve_count = 7;
       return 0;
    }
    else if (strcmp(name, "providers") == 0)
