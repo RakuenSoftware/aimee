@@ -1469,6 +1469,15 @@ $(TESTPREFIX)/unit-test-server-mcp-roundtable: \
 # test needs the HTTP transport (cli_http_request) linked in even though it
 # never reaches a server: the lookup calls through it. The route sources
 # themselves are #included by the test, so their objects stay out.
+TEST_TARGETS += $(TESTPREFIX)/unit-test-cli-index-worktree
+$(TESTPREFIX)/unit-test-cli-index-worktree: $(OBJDIR)/tests/test_cli_index_worktree.o \
+                                  $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o \
+                                  $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
+                                  $(OBJDIR)/cli_client.o $(OBJDIR)/posix/cli_client.o \
+                                  $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
+                                  $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-cli-v1-delegate: $(OBJDIR)/tests/test_cli_v1_delegate.o \
                                   $(OBJDIR)/modules/workspace/workspace_client_diff.o \
                                   $(OBJDIR)/cJSON.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/posix/util.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o \

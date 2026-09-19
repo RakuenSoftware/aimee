@@ -14,6 +14,29 @@ Go module-side producers/consumers using the existing C bus. The bus stays C.
 | 3. Evaluation and release evidence | Shared injected Go module; isolated corpus/dataset/QA/support/miss runners; scoped runtime-role and transport regressions; complete owner/evaluator race suite added to required packaged-DB2 CI | Initial frozen 105-case input and manifest-bound corpus baselines/per-case receipts are implemented; live CLI/Server benchmarks share the Go owner and refuse partial results; paired quality/performance and the complete CLI/MCP/HTTP/bus restart/failure matrix and required CI remain. |
 | 4. MR-01–18 | Existing foundations below | Finish each proposal's acceptance gates and integration dependencies. None is certified complete by the language migration. |
 
+## Supporting indexed-lookup repair
+
+The repeated `scope_required: no active project` during this migration came from
+using a linked checkout under `/tmp` against a remote service that had registered
+the main checkout under `/home/virant/dev/aimee`. Sending only the client's `cwd`
+gave that service neither a matching root nor access to the worktree's Git metadata.
+
+The POSIX thin client now resolves standard linked-worktree metadata locally and
+matches the main checkout against registered index roots for indexed reads and
+`kb search`. It retains the real `cwd`, explicit/launcher project choices and
+`--scope all`. Actual worktree registrations take precedence; unknown or ambiguous
+roots do not invent a project. Missing Git or unavailable registry responses leave
+the existing server fallback intact. Both native and served-argspec requests use
+the same forwarding step. This changes CLI project discovery, not memory identity
+or the C event bus. Windows' subprocess stub and nonstandard Git layouts retain
+the previous explicit-project/server-fallback behavior.
+
+Regression evidence includes real Git repositories and linked worktrees, nested
+directories, shell characters in paths, root boundaries and ambiguity; HTTP tests
+exercise both marshallers, registry failure and explicit/environment/all-scope
+precedence. Live `index hybrid` and `index investigate` succeed from the migration
+worktree without `--project` against the existing remote service.
+
 ## Proposal acceptance ledger
 
 | Proposal | Implemented foundation | Work still required for full acceptance |
