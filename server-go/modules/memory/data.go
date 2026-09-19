@@ -883,7 +883,7 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		maxLimit = 1024
 	case "rebuild-derived":
 		maxLimit = 100000
-	case "prospective-list", "directive-list", "lint", "conflict-list", "low-effectiveness", "unused-l2", "superseded-keys", "entity-edges":
+	case "prospective-list", "directive-list", "prospective-current", "directive-current", "lint", "conflict-list", "low-effectiveness", "unused-l2", "superseded-keys", "entity-edges":
 		maxLimit = 256
 	}
 	if request.Limit < 1 || request.Limit > maxLimit || len(request.Kind) > 64 ||
@@ -1935,6 +1935,16 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 		response.Armed, response.Triggered, response.Completed, response.ProspectiveExpired, err =
 			prospective.ProspectiveCounts(ctx)
+	case "prospective-current", "directive-current":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Operation == "prospective-current" {
+			response.Prospectives, err = backend.prospectiveCurrent(ctx, request.Limit)
+		} else {
+			response.Directives, err = backend.recallOpenDirectives(ctx, request.Limit)
+		}
 	case "prospective-create", "prospective-list", "prospective-get", "prospective-complete",
 		"prospective-sweep", "prospective-match", "prospective-mark-triggered":
 		if options.placement != PlacementKB {

@@ -27,7 +27,7 @@ func handleProspectiveCommand(options handlerOptions, invocation bus.ModuleInvoc
 	case "prospective_dashboard":
 		request.Operation, request.Limit = "prospective-list", 20
 	case "prospective_briefing":
-		request.Operation, request.State, request.Limit = "prospective-list", "armed", limit("limit", 8, 32)
+		request.Operation, request.State, request.Limit = "prospective-current", "armed", limit("limit", 8, 32)
 	case "prospective_list":
 		request.State, request.Limit = strings.ToLower(strings.TrimSpace(args.stringOr("state", ""))), limit("limit", 50, 256)
 		switch request.State {

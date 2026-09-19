@@ -123,8 +123,7 @@ func (s *postgresDataStore) ProspectiveSweep(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE prospective_memories SET state='expired', updated_at=pg_now_text()
-WHERE state='armed' AND valid_until<>''
-  AND rtrim(replace(valid_until,'T',' '),'Z') < rtrim(replace(pg_now_text(),'T',' '),'Z')`)
+WHERE state='armed' AND `+memoryTimeSQL("valid_until")+`<=CURRENT_TIMESTAMP`)
 	if err != nil {
 		return 0, err
 	}
@@ -142,8 +141,7 @@ func (s *postgresDataStore) ProspectiveMatch(ctx context.Context, turn, entity, 
 	}
 	turn = strings.TrimSpace(turn)
 	rows, err := s.db.Query(ctx, `SELECT `+prospectiveColumns+` FROM prospective_memories
-WHERE state='armed' AND (valid_until='' OR
-  rtrim(replace(valid_until,'T',' '),'Z') >= rtrim(replace(pg_now_text(),'T',' '),'Z'))
+WHERE state='armed' AND `+memoryUnexpiredSQL("")+`
 AND (($2<>'' AND lower(anchor_entity)=lower($2)) OR
      ($3<>'' AND lower(anchor_file)=lower($3)) OR
      ($1<>'' AND (tsvector_to_array(to_tsvector('english', $1)) &&
@@ -170,4 +168,19 @@ WHERE id=$1 AND state='armed'`, id)
 		runtimeMetricState.prospectiveTrigger.Add(1)
 	}
 	return changed, err
+}
+
+// Current serving views do not depend on maintenance sweeping expired rows.
+// The ordinary list remains an operator view of stored lifecycle state.
+func (s *postgresDataStore) prospectiveCurrent(ctx context.Context, limit int) ([]Prospective, error) {
+	if err := s.requireKBProspective(); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(ctx, `SELECT `+prospectiveColumns+` FROM prospective_memories
+ WHERE state='armed' AND `+memoryUnexpiredSQL("")+`
+ ORDER BY created_at DESC,id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	return scanProspectiveRows(rows)
 }

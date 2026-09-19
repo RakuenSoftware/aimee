@@ -54,6 +54,7 @@ func TestProspectivePublicPostgresLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}))
+	exerciseDeadlineReplay(t, ctx, tx, handler, "prospective")
 	client := clientForHandler(t, handler)
 	list := runPublicCommand(t, client, "prospective_list", `{}`)
 	if rows, ok := list["prospectives"].([]any); !ok || len(rows) != 0 {

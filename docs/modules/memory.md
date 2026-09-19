@@ -52,7 +52,7 @@ above 2^53-1.
 
 ## Current-state retrieval validity
 
-The Go `current-validity-v2` predicate applies active lifecycle, suppression and
+The Go `current-validity-v3` predicate applies active lifecycle, suppression and
 half-open valid time before shared lexical, whole-record/unit semantic, graph/
 PageRank, compatibility-window, recall-bundle, activation and briefing limits.
 Pending commitments retain their lifecycle while sharing the time predicate;
@@ -64,6 +64,11 @@ visible source cannot admit an edge with hidden or inapplicable dependencies. UT
 time and explicit offsets compare as instants against one transaction clock;
 malformed nonempty values refuse retrieval. Scope/RLS and current embedding
 fingerprints remain additional admission requirements.
+
+Directive/reminder matching, recall fallback and briefing views share the same
+normalized expiry gate. Sweeps expire a row at the exact upper boundary; serving
+does not wait for a sweep. Operator lists/dashboard counts retain stored lifecycle
+state so unswept records remain inspectable.
 
 The baseline policy fingerprint includes this version. This current-state slice
 does not certify all MR-01 surfaces, privileged historical/belief-time access,

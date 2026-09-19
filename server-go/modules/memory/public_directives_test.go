@@ -42,6 +42,7 @@ func TestDirectivePublicPostgresLifecycle(t *testing.T) {
 	}
 	s := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
 	handler := NewHandler(nil, WithDataStore(PlacementKB, s))
+	exerciseDeadlineReplay(t, ctx, tx, handler, "directive")
 	client := clientForHandler(t, handler)
 	for _, verb := range []string{"directive_list", "directive_briefing", "directive_dashboard"} {
 		if result := runPublicCommand(t, client, verb, `{}`); result["status"] != "ok" {

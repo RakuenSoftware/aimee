@@ -274,7 +274,7 @@ func (s *postgresDataStore) recallHardRules(ctx context.Context, limit int) ([]r
 
 func (s *postgresDataStore) recallOpenDirectives(ctx context.Context, limit int) ([]Directive, error) {
 	rows, err := s.db.Query(ctx, `SELECT `+directiveColumns+` FROM epistemic_directives WHERE state='open'
- AND (valid_until='' OR rtrim(replace(valid_until,'T',' '),'Z') >= rtrim(replace(pg_now_text(),'T',' '),'Z'))
+ AND `+memoryUnexpiredSQL("")+`
  ORDER BY priority DESC,created_at DESC,id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err

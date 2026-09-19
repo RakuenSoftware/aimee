@@ -180,8 +180,7 @@ func (s *postgresDataStore) DirectiveSweep(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE epistemic_directives SET state='expired', updated_at=pg_now_text()
-WHERE state='open' AND valid_until<>''
-  AND rtrim(replace(valid_until,'T',' '),'Z') < rtrim(replace(pg_now_text(),'T',' '),'Z')`)
+WHERE state='open' AND `+memoryTimeSQL("valid_until")+`<=CURRENT_TIMESTAMP`)
 	if err != nil {
 		return 0, err
 	}
@@ -197,8 +196,7 @@ func (s *postgresDataStore) DirectiveMatch(ctx context.Context, turn, entity, fi
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+directiveColumns+` FROM epistemic_directives
-WHERE state='open' AND (valid_until='' OR
- rtrim(replace(valid_until,'T',' '),'Z') >= rtrim(replace(pg_now_text(),'T',' '),'Z'))
+WHERE state='open' AND `+memoryUnexpiredSQL("")+`
 AND (($2<>'' AND lower(anchor_entity)=lower($2)) OR
      ($3<>'' AND lower(anchor_file)=lower($3)) OR
      ($1<>'' AND (lower(question) LIKE '%'||lower($1)||'%' OR

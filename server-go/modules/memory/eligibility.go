@@ -3,7 +3,7 @@ package memory
 // Versioned current-state KB eligibility, evaluated before lane limits. The
 // storage transaction supplies one stable request clock through CURRENT_TIMESTAMP.
 // Scope/RLS and evidence-specific admission remain additional mandatory gates.
-const currentEligibilityPolicy = "current-validity-v2"
+const currentEligibilityPolicy = "current-validity-v3"
 
 // KB timestamps historically mix UTC wall time and RFC3339 offsets. Normalize
 // both at the adapter; invalid nonempty timestamps raise a query error rather
@@ -20,9 +20,16 @@ func memoryTimeSQL(column string) string {
 
 // Prefixes are fixed SQL aliases supplied by this package, never request text.
 func memoryValiditySQL(prefix string) string {
-	from, until := memoryTimeSQL(prefix+"valid_from"), memoryTimeSQL(prefix+"valid_until")
-	return `(` + from + ` IS NULL OR ` + from + `<=CURRENT_TIMESTAMP) AND (` + until + ` IS NULL OR CURRENT_TIMESTAMP<` + until + `)`
+	from := memoryTimeSQL(prefix + "valid_from")
+	return `(` + from + ` IS NULL OR ` + from + `<=CURRENT_TIMESTAMP) AND ` + memoryUnexpiredSQL(prefix)
 }
 func currentMemorySQL(prefix string) string {
 	return prefix + `lifecycle_state='active' AND ` + prefix + `activation_suppressed=0 AND ` + memoryValiditySQL(prefix)
+}
+
+// Directives and reminders have an upper validity endpoint only. Matching,
+// briefing and sweeps use the same half-open boundary as memory records.
+func memoryUnexpiredSQL(prefix string) string {
+	until := memoryTimeSQL(prefix + "valid_until")
+	return `(` + until + ` IS NULL OR CURRENT_TIMESTAMP<` + until + `)`
 }
