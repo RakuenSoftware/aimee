@@ -166,7 +166,7 @@ def main():
             check('Server application metadata contains no database or enrollment credential', application_metadata_is_private(server))
             gate_script = ROOT / 'tests/e2e/memory-placement-e2e.py'
             common = ['--server', server.application, '--store-db', server.postgres]
-            command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'))
+            command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'), timeout=900)
             check('KB-free personal memory regression gate', True)
             if kb:
                 # The two projects retain separate stores, model identities and

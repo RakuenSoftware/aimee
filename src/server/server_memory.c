@@ -67,6 +67,35 @@ int server_memory_scope_begin(cJSON *req)
    return (!include_all && !workspace[0] && !project[0]) ? 1 : 0;
 }
 
+/* Classify transport errors without decoding/re-encoding owner integer tokens. */
+static cJSON *memory_owner_error_reply(const char *raw, const cJSON *parsed)
+{
+   cJSON *reply = NULL;
+   /* HTTP classification belongs to the host's runtime-web provider. Add
+    * only that transport field; preserve all owner tokens, including IDs
+    * inside error receipts. Owner envelopes cannot supply this host field. */
+   cJSON *classification = cJSON_CreateObject();
+   server_error_kind_apply(classification, jo_cstr(parsed, "kind"));
+   const cJSON *http = cJSON_GetObjectItemCaseSensitive(classification, "http_status");
+   if (cJSON_IsNumber(http) && http->valuedouble >= 400 && http->valuedouble <= 599 &&
+       floor(http->valuedouble) == http->valuedouble)
+   {
+      size_t capacity = strlen(raw) + 64;
+      char *classified = malloc(capacity);
+      if (classified)
+      {
+         snprintf(classified, capacity, "{\"http_status\":%d,%s", http->valueint,
+                  strchr(raw, '{') + 1);
+         reply = cJSON_CreateRaw(classified);
+         free(classified);
+      }
+   }
+   else
+      reply = cJSON_CreateRaw(raw);
+   cJSON_Delete(classification);
+   return reply;
+}
+
 /* THE command, in the shape the core command table can route.
  *
  * Every surface needs the same thing from a command -- a result -- but the RPC
@@ -119,7 +148,8 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
       reply = cJSON_CreateRaw(raw);
    else if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "error") &&
             cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "kind")))
-      reply = cJSON_CreateRaw(raw);
+      reply = cJSON_HasObjectItem(parsed, "http_status") ? cJSON_CreateRaw(raw)
+                                                       : memory_owner_error_reply(raw, parsed);
    cJSON_Delete(parsed);
    free(raw);
    return reply ? reply
@@ -148,28 +178,7 @@ static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
             cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "kind")) &&
             !cJSON_HasObjectItem(parsed, "http_status"))
    {
-      /* HTTP classification belongs to the host's runtime-web provider. Add
-       * only that transport field; preserve all owner tokens, including IDs
-       * inside error receipts. Owner envelopes cannot supply this host field. */
-      cJSON *classification = cJSON_CreateObject();
-      server_error_kind_apply(classification, jo_cstr(parsed, "kind"));
-      const cJSON *http = cJSON_GetObjectItemCaseSensitive(classification, "http_status");
-      if (cJSON_IsNumber(http) && http->valuedouble >= 400 && http->valuedouble <= 599 &&
-          floor(http->valuedouble) == http->valuedouble)
-      {
-         size_t capacity = strlen(raw) + 64;
-         char *classified = malloc(capacity);
-         if (classified)
-         {
-            snprintf(classified, capacity, "{\"http_status\":%d,%s", http->valueint,
-                     strchr(raw, '{') + 1);
-            reply = cJSON_CreateRaw(classified);
-            free(classified);
-         }
-      }
-      else
-         reply = cJSON_CreateRaw(raw);
-      cJSON_Delete(classification);
+      reply = memory_owner_error_reply(raw, parsed);
    }
    cJSON_Delete(parsed);
    cJSON_Delete(transport);

@@ -243,7 +243,7 @@ void server_error_kind_apply(cJSON *response, const char *kind)
 {
    cJSON_DeleteItemFromObjectCaseSensitive(response, "kind");
    cJSON_AddStringToObject(response, "kind", kind);
-   cJSON_AddNumberToObject(response, "http_status", !strcmp(kind, "not_found") ? 404 : 503);
+   cJSON_AddNumberToObject(response, "http_status", !strcmp(kind, "not_found") ? 404 : !strcmp(kind, "invalid_argument") ? 400 : 503);
 }
 static void test_stats_transport(void)
 {
@@ -411,6 +411,7 @@ static void test_store_confidence(void)
          cJSON *kind = cJSON_GetObjectItem(reply, "kind");
          assert(cJSON_IsString(kind) &&
                 strcmp(kind->valuestring, SERVER_ERR_INVALID_ARGUMENT) == 0);
+         assert(cJSON_GetObjectItem(reply, "http_status")->valueint == 400);
          assert(store_calls == before + 1);
          cJSON_Delete(reply);
          cJSON_Delete(request);
@@ -455,7 +456,14 @@ static void test_store_owner_envelope(void)
          cJSON *reply = memory_store_command(
              request, expected_store_authority ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL);
          char *rendered = cJSON_PrintUnformatted(reply);
-         assert(rendered && !strcmp(rendered, store_reply));
+         assert(rendered);
+         if (i == 0)
+            assert(!strcmp(rendered, store_reply));
+         else
+         {
+            assert(!strncmp(rendered, "{\"http_status\":503,", 19));
+            assert(!strcmp(rendered + 19, store_reply + 1));
+         }
          free(rendered);
          cJSON_Delete(reply);
       }
@@ -500,7 +508,8 @@ static void test_search_owner_transport(void)
    review_reply =
        "{\"status\":\"error\",\"kind\":\"unavailable\",\"message\":\"window lane failed\"}";
    handle_memory_search(NULL, NULL, request);
-   assert(!strcmp(search_wire_reply, review_reply));
+   assert(!strncmp(search_wire_reply, "{\"http_status\":503,", 19));
+   assert(!strcmp(search_wire_reply + 19, review_reply + 1));
    review_reply = "{\"status\":\"ok\",\"facts\":[]}";
    handle_memory_search(NULL, NULL, request);
    assert(strstr(search_wire_reply, "unavailable"));
@@ -519,7 +528,8 @@ static void test_read_owner_refusal(void)
    review_reply =
        "{\"status\":\"error\",\"kind\":\"unavailable\",\"message\":\"retrieval failed\"}";
    handle_memory_read(NULL, NULL, request);
-   assert(!strcmp(search_wire_reply, review_reply));
+   assert(!strncmp(search_wire_reply, "{\"http_status\":503,", 19));
+   assert(!strcmp(search_wire_reply + 19, review_reply + 1));
    review_reply = "{\"status\":\"ok\",\"context\":\"\",\"active_context_missing\":true}";
    handle_memory_read(NULL, NULL, request);
    assert(!strcmp(search_wire_reply, review_reply));
@@ -549,7 +559,13 @@ static void test_get_delete_owner_envelopes(void)
          store_reply = replies[i];
          reply = memory_delete_command(request, expected_store_authority ? "user" : "model");
          raw = cJSON_PrintUnformatted(reply);
-         assert(!strcmp(raw, store_reply));
+         if (i == 0)
+            assert(!strcmp(raw, store_reply));
+         else
+         {
+            assert(!strncmp(raw, "{\"http_status\":503,", 19));
+            assert(!strcmp(raw + 19, store_reply + 1));
+         }
          free(raw);
          cJSON_Delete(reply);
       }
