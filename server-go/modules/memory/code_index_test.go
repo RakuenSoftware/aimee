@@ -161,7 +161,7 @@ func TestKBGraphFusionUsesInstancePolicyAndVisibility(t *testing.T) {
 	ctx, _, db := codeFixture(t)
 	_, err := db.Exec(ctx, `CREATE FUNCTION pg_now_text() RETURNS text LANGUAGE sql AS 'SELECT to_char(now(), ''YYYY-MM-DD HH24:MI:SS'')';
 CREATE TABLE memories(id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,content text,
- confidence double precision,lifecycle_state text,activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',updated_at timestamptz DEFAULT now());
+ confidence double precision,lifecycle_state text,activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',updated_at timestamptz DEFAULT now(),valid_from text DEFAULT '',valid_until text DEFAULT '');
 CREATE TABLE memory_entities(memory_id bigint,entity text,weight double precision DEFAULT 1);
 CREATE TABLE fact_evidence(assertion_id bigint,source_kind text,source_id text);
 CREATE TABLE projects(name text,lifecycle_state text);

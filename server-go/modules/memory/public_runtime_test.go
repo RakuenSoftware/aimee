@@ -49,7 +49,7 @@ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,key text,content text DEFAULT '
  scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',source_session text DEFAULT '',ttl_at text DEFAULT '',
  sensitivity text DEFAULT 'normal',evidence_strength double precision DEFAULT 0.5,observation_count int DEFAULT 1,last_used_at text,
- created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
+ created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text(),valid_from text DEFAULT '',valid_until text DEFAULT '');
 CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,memory_id bigint,source_session text,episode_text text,reference_time text,created_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_entities(memory_id bigint,entity text);
 CREATE TEMP TABLE memory_conflicts(id bigint,memory_a bigint,memory_b bigint,detected_at text,resolved int,resolution text);

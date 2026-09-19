@@ -49,7 +49,7 @@ func (s *postgresDataStore) LegacySearch(ctx context.Context, clusters []string,
 	}
 	rows, err := s.db.Query(ctx, `SELECT COALESCE(source_session,''),0,COALESCE(artifact_ref,''),0,0,
  content,confidence FROM memories
-WHERE lifecycle_state='active' AND ($1='' OR
+WHERE `+currentMemorySQL("")+` AND ($1='' OR
  to_tsvector('simple',key||' '||content) @@ plainto_tsquery('simple',$1))
 ORDER BY CASE WHEN $1='' THEN 0 ELSE ts_rank_cd(to_tsvector('simple',key||' '||content),
  plainto_tsquery('simple',$1)) END DESC, confidence DESC, id DESC LIMIT $2`, query, limit)

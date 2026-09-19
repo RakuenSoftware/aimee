@@ -46,7 +46,7 @@ func TestPersonalMemoryPrivacyRegression(t *testing.T) {
 	_, err = tx.Exec(ctx, strings.Replace(text[a:b], "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE", 1)+`
 CREATE TEMP TABLE memories (
  id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,
- content text,confidence double precision,lifecycle_state text,activation_suppressed int DEFAULT 0);
+ content text,confidence double precision,lifecycle_state text,activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
 INSERT INTO memories VALUES(42,'global','_global','L0','fact','kb-fixture','shared knowledge',1,'active',0);
 INSERT INTO user_memories(id,key,content) VALUES(42,'private-fixture','PII fixture: local only');`)
 	if err != nil {

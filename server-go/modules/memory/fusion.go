@@ -36,8 +36,8 @@ type graphVisit struct {
 
 // Repeat the parent visibility predicate at both seed and result collection.
 // The store's RLS context remains an additional bound, including all-scope calls.
-const graphVisible = `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM memories
- WHERE lifecycle_state='active' AND activation_suppressed=0
+var graphVisible = `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM memories
+ WHERE ` + currentMemorySQL("") + `
  AND CASE WHEN $1 THEN scope_type=$2 AND scope_value=$3
  ELSE $4 OR scope_type='global' OR (scope_type='workspace' AND scope_value='_shared') OR (scope_type='project' AND scope_value=$5)
  OR (scope_type='workspace' AND scope_value=$6) END
@@ -83,10 +83,10 @@ func (s *postgresDataStore) expandGraph(ctx context.Context, seeds []string, cod
  FROM entity_edges e WHERE (e.source=f.node OR e.target=f.node)
  AND (e.edge_class<>'semantic' OR (e.suppressed=0 AND e.superseded_at='' AND e.invalidated_at=''
  AND e.lifecycle_state IN ('persistent','promoted')
- AND (e.valid_until='' OR e.valid_until>pg_now_text()) AND (e.valid_from='' OR e.valid_from<=pg_now_text())))
+ AND (`+memoryValiditySQL("e.")+`)))
  AND (NOT EXISTS(SELECT 1 FROM fact_evidence fe WHERE fe.assertion_id=e.id AND fe.source_kind='memory')
  OR EXISTS(SELECT 1 FROM fact_evidence fe JOIN memories m ON fe.source_id='memory:'||m.id::text
- WHERE fe.assertion_id=e.id AND fe.source_kind='memory' AND m.lifecycle_state='active' AND m.activation_suppressed=0
+ WHERE fe.assertion_id=e.id AND fe.source_kind='memory' AND `+currentMemorySQL("m.")+`
  AND CASE WHEN $2 THEN m.scope_type=$3 AND m.scope_value=$4 ELSE $5 OR m.scope_type='global' OR (m.scope_type='workspace' AND m.scope_value='_shared')
  OR (m.scope_type='project' AND m.scope_value=$6) OR (m.scope_type='workspace' AND m.scope_value=$7) END))
  AND (e.edge_origin<>'code_projection' OR EXISTS(SELECT 1 FROM code_projection_generations g

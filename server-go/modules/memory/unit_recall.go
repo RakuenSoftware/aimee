@@ -54,7 +54,7 @@ func (s *postgresDataStore) unitSemanticCandidates(ctx context.Context, req Data
  COALESCE(($12::jsonb->'floors'->>i.unit_type)::double precision,0.52)*$13 AS floor
  FROM inputs i JOIN memory_embedding_versions v ON v.version=$9 AND v.point_id=i.point_id AND v.input_hash=i.input_hash
  JOIN memories m ON m.id=i.memory_id
- WHERE i.record_type='unit' AND m.lifecycle_state='active' AND m.activation_suppressed=0
+ WHERE i.record_type='unit' AND `+currentMemorySQL("m.")+`
  AND CASE WHEN $1 THEN m.scope_type=$2 AND m.scope_value=$3
  ELSE $4 OR m.scope_type='global' OR (m.scope_type='workspace' AND m.scope_value='_shared')
  OR (m.scope_type='project' AND m.scope_value=$5) OR (m.scope_type='workspace' AND m.scope_value=$6) END

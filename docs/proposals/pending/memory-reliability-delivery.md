@@ -18,7 +18,7 @@ Go module-side producers/consumers using the existing C bus. The bus stays C.
 
 | Proposal | Implemented foundation | Work still required for full acceptance |
 |---|---|---|
-| MR-01 eligibility | Scoped transactions, placement separation, lifecycle/current-hash filters before semantic limits | Unified temporal/utility policy on every surface, release recheck and race tests |
+| MR-01 eligibility | Scoped transactions, placement separation, current-hash filters and Go current-validity predicates before lexical/semantic/unit/graph/window limits | Unified temporal/utility policy on every surface, release recheck and race tests |
 | MR-02 mutations | Shared KB admission across same-key/edit/legacy verbs, user/model versions, original-author preservation, identity locking, tombstones and atomic extraction actor/job writes | Linked review proposals, personal versioning, expected-version/idempotency contracts, durable guards, invalidation outbox and replay |
 | MR-03 budgets | Go typed-context assembly and existing packing limits | Final serialized provider byte/token caps and protected-projection accounting |
 | MR-04 lineage | Fact lineage/review and invalidation paths | Independent-family accounting, full derivative closure and restore-resistant erasure |

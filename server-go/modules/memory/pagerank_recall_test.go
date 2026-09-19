@@ -90,7 +90,7 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	defer exec(`ROLLBACK TO SAVEPOINT pagerank_recall_replay; RELEASE SAVEPOINT pagerank_recall_replay`)
 	exec(`RESET ROLE; SELECT set_config('aimee.memory_scope_all','1',true)`)
 	ids := map[string]int64{}
-	for i, key := range []string{"hub", "left", "right", "tail", "neighbor", "private", "suppressed", "archived", "wrong-kind", "wrong-tier", "global", "ignored"} {
+	for i, key := range []string{"hub", "left", "right", "tail", "neighbor", "private", "suppressed", "archived", "wrong-kind", "wrong-tier", "global", "ignored", "future", "expired"} {
 		scope, value, life, kind, tier, suppressed, content := "project", "pagerank-recall-local", "active", "fact", "L2", 0, "rankneedle"
 		switch key {
 		case "neighbor", "ignored":
@@ -112,7 +112,9 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 		exec(`INSERT INTO memories(id,tier,kind,key,content,scope_type,scope_value,lifecycle_state,activation_suppressed,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'2026-01-01')`, id, tier, kind, "pagerank-"+key, content, scope, value, life, suppressed)
 		ids[key] = id
 	}
-	for _, key := range []string{"left", "right", "tail", "neighbor", "private", "suppressed", "archived", "wrong-kind", "wrong-tier", "global"} {
+	exec(`UPDATE memories SET valid_from=(now()+interval '1 second')::text WHERE id=$1`, ids["future"])
+	exec(`UPDATE memories SET valid_until=now()::text WHERE id=$1`, ids["expired"])
+	for _, key := range []string{"left", "right", "tail", "neighbor", "private", "suppressed", "archived", "wrong-kind", "wrong-tier", "global", "future", "expired"} {
 		exec(`INSERT INTO memory_links(source_id,target_id,relation) VALUES($1,$2,'depends_on')`, ids["hub"], ids[key])
 	}
 	exec(`INSERT INTO memory_links(source_id,target_id,relation) VALUES($1,$2,'ignored')`, ids["hub"], ids["ignored"])

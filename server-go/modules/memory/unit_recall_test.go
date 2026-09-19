@@ -66,7 +66,7 @@ func exerciseUnitRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, back
 	offJSON, _ := json.Marshal(off)
 	ids := map[string]int64{}
 	units := map[string]int64{}
-	for _, key := range []string{"temporal", "event", "summary", "entity", "procedural", "both", "private", "suppressed", "archived", "stale-parent", "stale-unit", "wrong-kind", "wrong-tier", "wrong-dim", "zero", "nan"} {
+	for _, key := range []string{"temporal", "event", "summary", "entity", "procedural", "both", "private", "suppressed", "archived", "stale-parent", "stale-unit", "wrong-kind", "wrong-tier", "wrong-dim", "zero", "nan", "future", "expired"} {
 		scope, kind, tier, typ, unitKind := "unit-recall-local", "fact", "L2", "temporal", "episodic"
 		switch key {
 		case "private":
@@ -100,6 +100,8 @@ func exerciseUnitRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, back
  FROM inputs WHERE scope_value LIKE 'unit-recall-%'`, string(weakJSON), string(offJSON))
 	exec(`UPDATE memory_embedding_versions SET embedding=$2::vector WHERE version='shared-recall-test' AND point_id=$1`, ids["both"], string(strongJSON))
 	exec(`UPDATE memories SET activation_suppressed=1 WHERE id=$1`, ids["suppressed"])
+	exec(`UPDATE memories SET valid_from=(now()+interval '1 second')::text WHERE id=$1`, ids["future"])
+	exec(`UPDATE memories SET valid_until=now()::text WHERE id=$1`, ids["expired"])
 	exec(`UPDATE memories SET lifecycle_state='archived' WHERE id=$1`, ids["archived"])
 	exec(`UPDATE memories SET content='changed source' WHERE id=$1`, ids["stale-parent"])
 	exec(`UPDATE memory_units SET unit_text='changed derived text' WHERE id=$1`, units["stale-unit"])

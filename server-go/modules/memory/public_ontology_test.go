@@ -64,7 +64,7 @@ func TestPublicOntologyWalkPostgres(t *testing.T) {
 	sql(`CREATE SCHEMA ontology_walk_test;
 CREATE FUNCTION ontology_walk_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
 SET LOCAL search_path TO pg_temp,ontology_walk_test,public;
-CREATE TEMP TABLE memories(id bigint PRIMARY KEY,scope_type text,scope_value text,tier text DEFAULT 'L2',kind text DEFAULT 'fact',key text DEFAULT '',content text DEFAULT '',confidence float8 DEFAULT 1,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0);
+CREATE TEMP TABLE memories(id bigint PRIMARY KEY,scope_type text,scope_value text,tier text DEFAULT 'L2',kind text DEFAULT 'fact',key text DEFAULT '',content text DEFAULT '',confidence float8 DEFAULT 1,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
 CREATE TEMP TABLE entity_edges(id bigint PRIMARY KEY,source text,relation text,target text,relation_id int DEFAULT 5,subject_kind int DEFAULT 1,object_kind int DEFAULT 1,weight int DEFAULT 10,edge_class text DEFAULT 'associative',suppressed int DEFAULT 0,superseded_at text DEFAULT '',invalidated_at text DEFAULT '',lifecycle_state text DEFAULT 'persistent',valid_from text DEFAULT '',valid_until text DEFAULT '',edge_origin text DEFAULT '',projection_generation_id bigint);
 CREATE TEMP TABLE fact_evidence(assertion_id bigint,source_id text,source_kind text DEFAULT 'memory',invalidated_at text DEFAULT '',stance text DEFAULT 'supports');
 CREATE TEMP TABLE projects(name text,lifecycle_state text DEFAULT 'current');

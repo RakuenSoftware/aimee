@@ -60,7 +60,7 @@ func TestRetrievalCorpus(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memories (
 id bigint PRIMARY KEY, scope_type text, scope_value text, tier text, kind text,
 key text, content text, confidence double precision, lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,
-use_cases text DEFAULT '', updated_at timestamptz DEFAULT now()) ON COMMIT DROP`)
+use_cases text DEFAULT '', updated_at timestamptz DEFAULT now(),valid_from text DEFAULT '',valid_until text DEFAULT '') ON COMMIT DROP`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,9 +110,8 @@ VALUES($1,'global','_global',$2,$3,$4,$5,0.8)`, id, fixture.Tier, fixture.Kind, 
 			t.Fatal(err)
 		}
 	}
-	_, err = tx.Exec(ctx, `CREATE TEMP TABLE user_memories (LIKE memories INCLUDING ALL,
-valid_until timestamptz) ON COMMIT DROP;
-INSERT INTO user_memories SELECT *, NULL::timestamptz FROM memories`)
+	_, err = tx.Exec(ctx, `CREATE TEMP TABLE user_memories (id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,content text,confidence double precision,lifecycle_state text,updated_at timestamptz DEFAULT now(),valid_until timestamptz) ON COMMIT DROP;
+INSERT INTO user_memories(id,scope_type,scope_value,tier,kind,key,content,confidence,lifecycle_state) SELECT id,scope_type,scope_value,tier,kind,key,content,confidence,lifecycle_state FROM memories`)
 	if err != nil {
 		t.Fatal(err)
 	}

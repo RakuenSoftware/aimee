@@ -80,7 +80,7 @@ func (m *EvaluationModule) evaluationManifest(ctx context.Context, corpus Evalua
 		}
 	}
 	raw, err = json.Marshal(map[string]any{
-		"retrieval": "raw-query-versioned-rrf60-v1", "pagerank_policy": pageRankRecallPolicy,
+		"retrieval": "raw-query-versioned-rrf60-v1", "eligibility": currentEligibilityPolicy, "pagerank_policy": pageRankRecallPolicy,
 		"pagerank_enabled": request.pageRankConfig.enabled, "pagerank": request.pageRankConfig.request,
 		"graph_fusion": m.backend.graphFusionEnabled(), "settings": settings,
 		"candidate_limit": 20, "placement": "kb", "fixture_policy": "full-text-raw-query-v1",

@@ -312,6 +312,7 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 	exerciseLearningMutationReplay(t, ctx, tx, handler)
 	exerciseRuntimeRecordReplay(t, ctx, tx, handler)
 	exerciseRetrievalPolicyReplay(t, ctx, tx, backend.(*postgresDataStore))
+	exerciseCurrentEligibilityReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseDerivedTextReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseDerivedUnitsReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseDerivedRelationsReplay(t, ctx, tx, backend.(*postgresDataStore))

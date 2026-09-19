@@ -29,6 +29,20 @@ retirement versus destruction from the admitted Go authority, and preserves
 `review_required` and `conflict` refusals. The legacy Server context-read route
 forwards the Go envelope too; a retrieval outage is no longer an empty context.
 
+## Current-state retrieval validity
+
+The Go `current-validity-v1` predicate applies active lifecycle, suppression and
+half-open valid time before shared lexical, whole-record/unit semantic, graph/
+PageRank and compatibility-window limits. Memory-backed graph evidence and
+semantic edge intervals share the same timestamp normalization. UTC legacy wall
+time and explicit offsets compare as instants against one transaction clock;
+malformed nonempty values refuse retrieval. Scope/RLS and current embedding
+fingerprints remain additional admission requirements.
+
+The baseline policy fingerprint includes this version. This current-state slice
+does not certify all MR-01 surfaces, privileged historical/belief-time access,
+utility horizons or a final release/revocation generation check.
+
 ## Canonical KB mutation admission
 
 KB same-key store, edit, supersede and legacy store/content-edit adapters now use

@@ -74,6 +74,7 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	ids := map[string]int64{}
 	for _, seed := range []struct{ key, scope, kind string }{
 		{"private", "shared-recall-private", "fact"},
+		{"future", "shared-recall-local", "fact"}, {"expired", "shared-recall-local", "fact"},
 		{"stale", "shared-recall-local", "fact"}, {"moved", "shared-recall-local", "fact"},
 		{"suppressed", "shared-recall-local", "fact"}, {"retired", "shared-recall-local", "fact"},
 		{"wrong-kind", "shared-recall-local", "procedure"}, {"wrong-dim", "shared-recall-local", "fact"},
@@ -95,6 +96,8 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	exec(`UPDATE memories SET content='edited content' WHERE id=$1`, ids["stale"])
 	exec(`UPDATE memories SET scope_value='shared-recall-moved' WHERE id=$1`, ids["moved"])
 	exec(`UPDATE memories SET activation_suppressed=1 WHERE id=$1`, ids["suppressed"])
+	exec(`UPDATE memories SET valid_from=(now()+interval '1 second')::text WHERE id=$1`, ids["future"])
+	exec(`UPDATE memories SET valid_until=now()::text WHERE id=$1`, ids["expired"])
 	exec(`UPDATE memories SET lifecycle_state='archived' WHERE id=$1`, ids["retired"])
 	exec(`UPDATE memory_embedding_versions SET embedding='[1,0]'::vector WHERE point_id=$1 AND version='shared-recall-test'`, ids["wrong-dim"])
 	zero, _ := json.Marshal(make([]float32, dimension))

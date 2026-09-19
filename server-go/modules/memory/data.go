@@ -669,7 +669,7 @@ ORDER BY (lower(key)=lower($5)) DESC,
 	} else {
 		rows, err = s.db.Query(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
 FROM memories
-WHERE lifecycle_state = 'active' AND activation_suppressed=0 AND scope_type = $1 AND scope_value = $2
+WHERE `+currentMemorySQL("")+` AND scope_type = $1 AND scope_value = $2
   AND ($7 = '' OR key ILIKE $3 OR content ILIKE $3 OR use_cases ILIKE $3
        OR to_tsvector('english', key || ' ' || content || ' ' || COALESCE(use_cases,''))
           @@ plainto_tsquery('english', $7))

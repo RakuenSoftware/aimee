@@ -32,7 +32,7 @@ CREATE FUNCTION archive_command_test.pg_now_text() RETURNS text LANGUAGE sql AS 
 SET LOCAL search_path TO pg_temp,archive_command_test,public;
 CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text,tier text DEFAULT 'L2',kind text DEFAULT 'fact',epistemic_kind text DEFAULT 'world_fact',
  scope_type text DEFAULT 'global',scope_value text DEFAULT '_global',confidence double precision DEFAULT 0.8,use_count int DEFAULT 0,
- source_session text DEFAULT 'session',provenance_category text DEFAULT '',artifact_ref text DEFAULT '',lifecycle_state text DEFAULT 'active',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text(),UNIQUE(kind,key,scope_type,scope_value));
+ source_session text DEFAULT 'session',provenance_category text DEFAULT '',artifact_ref text DEFAULT '',lifecycle_state text DEFAULT 'active',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text(),UNIQUE(kind,key,scope_type,scope_value),valid_from text DEFAULT '',valid_until text DEFAULT '',activation_suppressed int DEFAULT 0);
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text);
 CREATE TEMP TABLE memory_units(id bigserial PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,weight double precision,memory_kind text,is_episode_card int DEFAULT 0);
 CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text,confidence double precision);
