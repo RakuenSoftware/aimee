@@ -653,10 +653,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-memory-view-transport \
                $(TESTPREFIX)/unit-test-memory-demotion-transport \
                $(TESTPREFIX)/unit-test-cmd-memory-data \
-               $(TESTPREFIX)/unit-test-cmd-memory-cognify \
                $(TESTPREFIX)/unit-test-memory-checkpoint-transport \
-               $(TESTPREFIX)/unit-test-memory-reflect-transport \
-               $(TESTPREFIX)/unit-test-memory-record-console-transport \
                $(TESTPREFIX)/unit-test-workflow-transport \
                $(TESTPREFIX)/unit-test-trace-transport \
                $(TESTPREFIX)/unit-test-assertion-transport \
@@ -7878,9 +7875,6 @@ $(TESTPREFIX)/unit-test-server-memory-domain: $(OBJDIR)/tests/test_server_memory
 $(TESTPREFIX)/unit-test-cmd-memory-data: $(OBJDIR)/tests/test_cmd_memory_data.o $(OBJDIR)/cmd_data.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-cmd-memory-cognify: $(OBJDIR)/cmd_util.o $(OBJDIR)/tests/test_cmd_memory_cognify.o $(OBJDIR)/cmd_memory_core.o $(OBJDIR)/cmd_memory_vector.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
-
 $(TESTPREFIX)/unit-test-kb-memory-facts-connection: $(OBJDIR)/tests/test_kb_memory_facts_connection.o $(OBJDIR)/kb/kb_memory_facts.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
@@ -7900,13 +7894,7 @@ $(OBJDIR)/aimee-memory-fixture: $(AIMEE_MODULE_GO_SRCS)
 $(TESTPREFIX)/unit-test-memory-demotion-transport: $(OBJDIR)/tests/test_memory_demotion_transport.o $(OBJDIR)/kb/kb_service_agent.o $(OBJDIR)/kb/kb_intel_payload.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-memory-checkpoint-transport: $(OBJDIR)/tests/test_memory_checkpoint_transport.o $(OBJDIR)/tasks.o $(OBJDIR)/cmd_memory_core.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
-
-$(TESTPREFIX)/unit-test-memory-reflect-transport: $(OBJDIR)/tests/test_memory_reflect_transport.o $(OBJDIR)/cmd_memory_embed.o $(OBJDIR)/cmd_memory_core.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
-
-$(TESTPREFIX)/unit-test-memory-record-console-transport: $(OBJDIR)/tests/test_memory_record_console_transport.o $(OBJDIR)/cmd_memory_core.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
+$(TESTPREFIX)/unit-test-memory-checkpoint-transport: $(OBJDIR)/tests/test_memory_checkpoint_transport.o $(OBJDIR)/tasks.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-workflow-transport: $(OBJDIR)/tests/test_workflow_transport.o $(OBJDIR)/workflow_learn.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture

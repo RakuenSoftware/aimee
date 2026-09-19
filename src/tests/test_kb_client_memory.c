@@ -342,17 +342,10 @@ static void test_recall_carries_and_records_production_activation(void)
 
 static void test_readers_distinguish_unreachable_from_empty(void)
 {
-   memory_t mems[8];
-   search_result_t windows[8];
-   conflict_t conflicts[8];
-   char *clusters[] = {"hello"};
 
    /* --- kb unreachable: every count-returning reader reports < 0 --- */
    kb_client_dependency_reset_for_tests();
    mock_agent_http_set_post_handler(unreachable_post_handler);
-   assert(kb_client_memory_list(NULL, NULL, 8, mems, 8) < 0);
-   assert(kb_client_memory_find_facts("q", 8, mems, 8) < 0);
-   assert(kb_client_memory_find_facts_scoped("q", NULL, NULL, 8, mems, 8) < 0);
    char *failed = kb_v1_action_request("memory.find_facts_visible",
                                        cJSON_Parse("{\"query\":\"q\",\"limit\":8}"));
    cJSON *failure = failed ? cJSON_Parse(failed) : NULL;
@@ -362,8 +355,6 @@ static void test_readers_distinguish_unreachable_from_empty(void)
    assert(!cJSON_GetObjectItemCaseSensitive(failure, "facts"));
    cJSON_Delete(failure);
    free(failed);
-   assert(kb_client_memory_search(clusters, 1, 8, windows, 8) < 0);
-   assert(kb_client_memory_list_conflicts(conflicts, 8) < 0);
 
    /* --- healthy but empty: same readers report exactly 0 (not < 0) --- */
    /* Model dependency recovery between the two independent fixtures. Without
@@ -372,9 +363,6 @@ static void test_readers_distinguish_unreachable_from_empty(void)
     * classification. Breaker recovery itself is covered by kb-client-search. */
    kb_client_dependency_reset_for_tests();
    mock_agent_http_set_post_handler(empty_ok_post_handler);
-   assert(kb_client_memory_list(NULL, NULL, 8, mems, 8) == 0);
-   assert(kb_client_memory_find_facts("q", 8, mems, 8) == 0);
-   assert(kb_client_memory_find_facts_scoped("q", NULL, NULL, 8, mems, 8) == 0);
    char *raw = kb_v1_action_request("memory.find_facts_visible",
                                     cJSON_Parse("{\"query\":\"q\",\"limit\":8}"));
    cJSON *visible = raw ? cJSON_Parse(raw) : NULL;
@@ -385,8 +373,6 @@ static void test_readers_distinguish_unreachable_from_empty(void)
    assert(cJSON_IsArray(facts) && cJSON_GetArraySize(facts) == 0);
    cJSON_Delete(visible);
    free(raw);
-   assert(kb_client_memory_search(clusters, 1, 8, windows, 8) == 0);
-   assert(kb_client_memory_list_conflicts(conflicts, 8) == 0);
 
    mock_agent_http_reset();
    printf("  PASS: test_readers_distinguish_unreachable_from_empty\n");
@@ -394,19 +380,12 @@ static void test_readers_distinguish_unreachable_from_empty(void)
 
 static void test_ordered_readers_propagate_active_project_context(void)
 {
-   memory_t mems[8];
    memory_diagnostic_t diagnostics[2];
 
    scoped_request_count = 0;
    mock_agent_http_set_post_handler(scoped_ok_post_handler);
    kb_client_memory_scope_context_set("active-workspace", "active-project", 0);
 
-   (void)kb_client_memory_find_facts("q", 8, mems, 8);
-   (void)kb_client_memory_find_facts_ex("q", 8, mems, 8, "on");
-   (void)kb_client_memory_list(NULL, NULL, 8, mems, 8);
-   char *clusters[] = {"q"};
-   search_result_t windows[2];
-   (void)kb_client_memory_search(clusters, 1, 2, windows, 2);
    cJSON *visible = cJSON_Parse("{\"query\":\"q\",\"limit\":8}");
    kb_client_memory_scope_context_apply(visible);
    free(kb_v1_action_request("memory.find_facts_visible", visible));
@@ -451,20 +430,14 @@ static void test_ordered_readers_propagate_active_project_context(void)
    }
    (void)kb_client_memory_diagnose("q", 2, diagnostics, 2);
 
-   (void)kb_client_memory_top_l2_facts(mems, 8);
-   (void)kb_client_memory_list_session_scope_priority(mems, 8);
-   (void)kb_client_memory_list_session_scope_priority_like("%q%", mems, 8);
    (void)kb_client_memory_insert("L2", "fact", "scoped-key", "scoped-content", 0.8, NULL, NULL);
    (void)kb_client_memory_find_id_by_key_kind("scoped-key", "fact");
-   (void)kb_client_memory_supersede(42, "replacement", 0.9, NULL, NULL);
-   (void)kb_client_memory_update_as(42, "replacement", MEMORY_AUTHORITY_MODEL, NULL);
-   (void)kb_client_memory_delete_as(42, MEMORY_AUTHORITY_MODEL);
-   (void)kb_client_memory_touch(42);
    (void)kb_client_memory_reject(42, "wrong");
-   (void)kb_client_memory_get(42, &mems[0]);
+   memory_t memory;
+   (void)kb_client_memory_get(42, &memory);
 
    kb_client_memory_scope_context_clear();
-   assert(scoped_request_count == 29);
+   assert(scoped_request_count == 18);
    mock_agent_http_reset();
    printf("  PASS: test_ordered_readers_propagate_active_project_context\n");
 }
@@ -681,27 +654,6 @@ static void test_pii_never_reaches_kb(void)
    rc = kb_client_memory_insert(TIER_L1, KIND_FACT, secret, "benign body", 1.0, "s", NULL);
    assert(rc == KB_CLIENT_MEMORY_WITHHELD_PII);
    assert(g_pii_posts == 0);
-
-   /* 4. The same screen guards update and supersede, not just insert. */
-   mock_agent_http_reset();
-   mock_agent_http_set_post_handler(recording_post_handler);
-   g_pii_posts = 0;
-   g_pii_last_body[0] = '\0';
-   rc = kb_client_memory_update(42, secret);
-   if (rc == KB_CLIENT_MEMORY_WITHHELD_PII)
-      assert(g_pii_posts == 0);
-   else
-      assert(strstr(g_pii_last_body, "hunter2trustno1") == NULL);
-
-   mock_agent_http_reset();
-   mock_agent_http_set_post_handler(recording_post_handler);
-   g_pii_posts = 0;
-   g_pii_last_body[0] = '\0';
-   rc = kb_client_memory_supersede(42, secret, 1.0, "s", NULL);
-   if (rc == KB_CLIENT_MEMORY_WITHHELD_PII)
-      assert(g_pii_posts == 0);
-   else
-      assert(strstr(g_pii_last_body, "hunter2trustno1") == NULL);
 
    mock_agent_http_reset();
    printf("  PASS: test_pii_never_reaches_kb\n");

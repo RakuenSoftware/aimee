@@ -357,6 +357,43 @@ VALUES($1,$2,'exact integer fixture','L2','fact','world_fact','project','exact-i
 			}
 		}
 	}
+	// MCP writes retain model admission and render exact IDs inside owner text.
+	if _, err := tx.Exec(ctx, `SELECT setval('memories_id_seq',9007199254741993)`); err != nil {
+		t.Fatal(err)
+	}
+	mcp := runPublicCommand(t, client, "store", `{"key":"mcp-view","content":"original","view":"mcp"}`)
+	if mcp["text"] != "stored memory id=9007199254741994 key=mcp-view" {
+		t.Fatal(mcp)
+	}
+	var mcpTier string
+	if err := tx.QueryRow(ctx, `SELECT tier FROM memories WHERE id=9007199254741994`).Scan(&mcpTier); err != nil || mcpTier != "L2" {
+		t.Fatal(mcpTier, err)
+	}
+	mcp = runPublicCommand(t, client, "update", `{"id":"9007199254741994","content":"replacement","view":"mcp","authority":"user"}`)
+	if mcp["text"] != "updated memory id=9007199254741994 (previous content kept as a version; current value is now id=9007199254741995)" {
+		t.Fatal(mcp)
+	}
+	mcp = runPublicCommand(t, client, "supersede", `{"old_id":"9007199254741995","new_content":"corrected","view":"mcp"}`)
+	if mcp["text"] != "superseded id=9007199254741995 new id=9007199254741996" {
+		t.Fatal(mcp)
+	}
+	mcp = runPublicCommand(t, client, "touch", `{"id":"9007199254741996","view":"mcp"}`)
+	if mcp["text"] != "affirmed memory id=9007199254741996" {
+		t.Fatal(mcp)
+	}
+	mcp = runPublicCommand(t, client, "delete", `{"id":"9007199254741996","view":"mcp"}`)
+	if mcp["text"] != "forgot memory id=9007199254741996 (retired, not destroyed: it no longer answers recall but remains in fact history)" {
+		t.Fatal(mcp)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE id BETWEEN 9007199254741994 AND 9007199254741996`).Scan(&count); err != nil || count != 3 {
+		t.Fatal("MCP destroyed history", count, err)
+	}
+	if r := runPublicCommand(t, client, "restore", `{"id":"9007199254741996","view":"mcp"}`); r["kind"] != "invalid_argument" {
+		t.Fatal(r)
+	}
+	if _, err := tx.Exec(ctx, `SELECT setval('memories_id_seq',1000)`); err != nil {
+		t.Fatal(err)
+	}
 	// Replacement under a non-owner role cannot reach a different project's source.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_store_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA store_command_test TO memory_store_test;

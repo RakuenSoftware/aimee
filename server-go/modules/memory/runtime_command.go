@@ -16,6 +16,10 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "user-mcp-supersede":
+		args["old_id"], args["new_content"] = args["id"], args["content"]
+		args["view"] = json.RawMessage(`"mcp"`)
+		return runtimeJSONText(handleUserCommand(options, invocation, "supersede", args))
 	case "personal-recall":
 		if options.placement != PlacementServer {
 			return nil, bus.ModuleStatusCapabilityAbsent

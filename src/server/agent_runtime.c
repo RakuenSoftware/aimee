@@ -1700,38 +1700,27 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
     * Otherwise fall back to the generic context assembly. */
    if (!skip_kb_client && custom_prompt && custom_prompt[0])
    {
-      /* Extract keywords from the prompt for targeted search */
-      memory_t mems[8];
-      int mcount = 0;
-
-      /* Search L2/L3/L5 facts and patterns matching keywords from the prompt.
-       * L3 holds slow-changing project/environment facts; L5 holds synthesised
-       * patterns across sessions.  Both should flow into the injected context
-       * alongside L2 facts. */
-      char keyword[64] = {0};
-      const char *p = custom_prompt;
-      while (*p && (*p == ' ' || !strncmp(p, "Check ", 6) || !strncmp(p, "Deploy ", 7) ||
-                    !strncmp(p, "Verify ", 7) || !strncmp(p, "List ", 5)))
-      {
-         while (*p && *p != ' ')
-            p++;
-         while (*p == ' ')
-            p++;
-      }
-      snprintf(keyword, sizeof(keyword), "%.*s", 60, p);
-      const char *search = keyword[0] ? keyword : custom_prompt;
-      mcount = kb_client_memory_search_facts_patterns_by_keyword(search, mems, 5);
-
-      if (mcount > 0)
-      {
-         size_t arch_start = pos;
-         ctx_appendf(buf, cap, &pos, "# Relevant Context\n");
-         for (int i = 0; i < mcount && pos < cap - 256 && (pos - arch_start) < budget_arch; i++)
-         {
-            ctx_appendf(buf, cap, &pos, "- %s: %s\n", mems[i].key, mems[i].content);
-         }
-         ctx_appendf(buf, cap, &pos, "\n");
-      }
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "keyword", custom_prompt);
+      cJSON_AddStringToObject(request, "view", "session");
+      cJSON_AddStringToObject(request, "section", "relevant");
+      cJSON_AddNumberToObject(request, "max", 5);
+      size_t available = pos < cap ? cap - pos - 1 : 0;
+      if (available > budget_arch)
+         available = budget_arch;
+      cJSON_AddNumberToObject(request, "budget_bytes", (double)available);
+      char *raw = kb_v1_action_request("memory.search_facts_patterns_by_keyword", request);
+      cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+      free(raw);
+      const cJSON *status = cJSON_GetObjectItemCaseSensitive(reply, "status");
+      const cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "text");
+      if (cJSON_IsString(status) && !strcmp(status->valuestring, "ok") && cJSON_IsString(text) &&
+          strlen(text->valuestring) <= available)
+         ctx_appendf(buf, cap, &pos, "%s", text->valuestring);
+      else
+         ctx_appendf(buf, cap, &pos, "[Memory context unavailable]\n");
+      cJSON_Delete(reply);
    }
    else if (!skip_kb_client)
    {

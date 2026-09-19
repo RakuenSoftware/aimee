@@ -2,6 +2,8 @@ package memory
 
 import (
 	"encoding/json"
+	"fmt"
+
 	"github.com/JBailes/aimee/server-go/bus"
 )
 
@@ -24,6 +26,9 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	request := DataRequest{IncludeAll: true}
 	invalid := func(message string) ([]byte, bus.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
+	}
+	if args.stringOr("view", "") == "mcp" && verb != "delete" && verb != "update" && verb != "touch" && verb != "reject" {
+		return invalid("unsupported MCP mutation view")
 	}
 	// Asking for user authority never grants it. Only the host's independently
 	// authenticated context may raise the fail-closed model authority.
@@ -134,5 +139,36 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	if scoped {
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}
+	if args.stringOr("view", "") == "mcp" {
+		newID := request.ID
+		if verb == "update" {
+			newID = response.IDs[0]
+		}
+		return mutationMCPResult(verb, request.ID, newID, "")
+	}
 	return commandResult(result)
+}
+
+func mutationMCPResult(verb string, id, newID int64, key string) ([]byte, bus.ModuleStatus) {
+	var text string
+	switch verb {
+	case "store":
+		text = fmt.Sprintf("stored memory id=%d key=%s", id, key)
+	case "update":
+		text = fmt.Sprintf("updated memory id=%d", id)
+		if newID != id {
+			text += fmt.Sprintf(" (previous content kept as a version; current value is now id=%d)", newID)
+		}
+	case "supersede":
+		text = fmt.Sprintf("superseded id=%d new id=%d", id, newID)
+	case "delete":
+		text = fmt.Sprintf("forgot memory id=%d (retired, not destroyed: it no longer answers recall but remains in fact history)", id)
+	case "touch":
+		text = fmt.Sprintf("affirmed memory id=%d", id)
+	case "reject":
+		text = fmt.Sprintf("rejected memory id=%d", id)
+	default:
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	return commandResult(map[string]any{"status": "ok", "text": text})
 }

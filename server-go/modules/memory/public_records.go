@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -63,7 +64,7 @@ FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 	for _, record := range records {
 		r, ok := metadata[record.ID]
 		if !ok {
-			continue
+			return nil, fmt.Errorf("memory: metadata missing for record %d", record.ID)
 		}
 		r.Tier, r.Kind, r.Key, r.Content, r.Confidence = record.Tier, record.Kind, record.Key, record.Content, record.Confidence
 		result = append(result, r)
@@ -179,6 +180,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 				return invalid("memory.search_facts_patterns_by_keyword requires keyword")
 			}
 			request.Mode, request.Limit = "facts-patterns", args.limit("max", 5, 64)
+			if args.stringOr("view", "") == "session" {
+				request.Pattern = sessionSearchKeyword(request.Pattern)
+			}
 		}
 		if verb != "load_eval_corpus" {
 			scoped = commandScope(args, &request)
@@ -200,6 +204,29 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
+	}
+	if args.stringOr("view", "") == "session" {
+		return sessionMemoryView(options, invocation, args, request, response.PublicRecords)
+	}
+	if verb == "list" && args.stringOr("format", "") == "mcp" {
+		missing := scoped && !request.IncludeAll && request.Workspace == "" && request.Project == ""
+		var text strings.Builder
+		if missing {
+			text.WriteString("Active project context is unavailable; showing shared/global memory only.\n\n")
+		}
+		if len(response.PublicRecords) == 0 {
+			text.WriteString("No L2 facts stored.")
+		} else {
+			fmt.Fprintf(&text, "%d fact(s):\n\n", len(response.PublicRecords))
+			for _, record := range response.PublicRecords {
+				fmt.Fprintf(&text, "- **%s**: %s\n", record.Key, record.Content)
+			}
+		}
+		return commandResult(map[string]any{"status": "ok", "text": text.String(), "active_context_missing": missing})
+	}
+	if verb == "find_facts" && args.stringOr("format", "") == "tool" {
+		return commandResult(map[string]any{"status": "ok", "count": len(response.PublicRecords),
+			"text": memorySearchText(request.Query, response.PublicRecords, false)})
 	}
 	if args.stringOr("view", "") == "console" && (verb == "get" || verb == "list") {
 		if verb == "get" {

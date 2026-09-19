@@ -40,6 +40,9 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	request := DataRequest{Operation: "insert-epistemic", PublicView: true, Key: args.stringOr("key", ""), Content: args.stringOr("content", ""),
 		Tier: args.stringOr("tier", "L0"), Kind: args.stringOr("kind", "fact"), EpistemicKind: args.stringOr("epistemic_kind", "world_fact"),
 		SessionID: args.stringOr("session_id", ""), UseCases: args.stringOr("use_cases", "")}
+	if args.stringOr("view", "") == "mcp" {
+		request.Tier = args.stringOr("tier", "L2")
+	}
 	if strings.TrimSpace(request.Key) == "" || strings.TrimSpace(request.Content) == "" {
 		return invalid("memory.store requires non-empty key and content")
 	}
@@ -82,6 +85,9 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		return nil, bus.ModuleStatusInternal
 	}
 	r := response.PublicRecords[0]
+	if args.stringOr("view", "") == "mcp" {
+		return mutationMCPResult("store", r.ID, r.ID, r.Key)
+	}
 	result := map[string]any{"status": "ok", "id": r.ID, "memory": r}
 	if args.stringOr("view", "") == "server" {
 		result["store"] = "kb"
@@ -149,6 +155,9 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 		}{"ok", "kb", response.PublicRecords[0]})
 	}
 	result := map[string]any{"status": "ok", "memory": response.PublicRecords[0]}
+	if args.stringOr("view", "") == "mcp" {
+		return mutationMCPResult("supersede", id, response.PublicRecords[0].ID, "")
+	}
 	if scoped {
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}

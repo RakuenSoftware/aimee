@@ -50,7 +50,6 @@ char *build_capabilities_text(void)
       const char *parent;
       const subcmd_t *(*getter)(void);
    } sub_tables[] = {
-       {"memory", get_memory_subcmds},
        {"index", get_index_subcmds},
        {"wm", get_wm_subcmds},
        {"agent", get_agent_subcmds},

@@ -389,140 +389,66 @@ cJSON *tool_memory_mutate(cJSON *args)
          return json_result_content(memory_delete_command(args, ""));
       if (strcmp(verb, "update") != 0 && strcmp(verb, "supersede") != 0)
          return text_content("error: this mutation requires store=kb");
-      int64_t id;
-      const char *content = jo_str(args, "content", "");
-      if (memory_request_positive_id(args, "id", &id) != 0 || !content[0])
-         return text_content("error: update requires a positive id and content");
-      cJSON *request = cJSON_CreateObject();
-      cJSON_AddStringToObject(request, "operation", "supersede");
-      cJSON_AddNumberToObject(request, "id", (double)id);
-      cJSON_AddStringToObject(request, "content", content);
-      cJSON_AddNumberToObject(request, "confidence", jo_num(args, "confidence", 1));
-      cJSON *reply = server_module_memory_data(request);
-      cJSON_Delete(request);
-      if (!reply)
-         return text_content("error: user memory unavailable");
-      cJSON *records = cJSON_GetObjectItemCaseSensitive(reply, "records");
-      if (!cJSON_IsArray(records) || cJSON_GetArraySize(records) == 0)
+      cJSON *reply = server_invoke_module_operation("memory.runtime", "user-mcp-supersede", args,
+                                                    "user memory unavailable");
+      const char *raw = jo_str(reply, "json", NULL);
+      if (!raw)
+         return json_result_content(reply);
+      cJSON *content = text_content(raw);
+      cJSON_Delete(reply);
+      return content;
+   }
+
+   const char *method = NULL;
+   if (!strcmp(verb, "store"))
+      method = "memory.store";
+   else if (!strcmp(verb, "update"))
+      method = "memory.update";
+   else if (!strcmp(verb, "supersede"))
+      method = "memory.supersede";
+   else if (!strcmp(verb, "forget"))
+      method = "memory.delete";
+   else if (!strcmp(verb, "affirm"))
+      method = "memory.touch";
+   else if (!strcmp(verb, "reject"))
+      method = "memory.reject";
+   if (!method)
+      return text_content("error: unknown memory mutation verb");
+   cJSON *request = cJSON_CreateObject();
+   const char *fields[] = {"id", "key", "content", "tier", "kind", "confidence", "reason", NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(args, fields[i]);
+      if (value)
       {
-         cJSON_Delete(reply);
-         return text_content("error: user memory not found");
+         const char *field = fields[i];
+         if (!strcmp(verb, "supersede"))
+         {
+            if (!strcmp(field, "id"))
+               field = "old_id";
+            if (!strcmp(field, "content"))
+               field = "new_content";
+         }
+         cJSON_AddItemToObject(request, field, cJSON_Duplicate(value, 1));
       }
-      cJSON_AddStringToObject(reply, "store", "user");
+   }
+   cJSON_AddStringToObject(request, "view", "mcp");
+   /* This host seam represents model actions. Caller-supplied authority is
+    * never copied; the Go owner applies admission and renders exact IDs. */
+   mcp_memory_scope_begin(args, NULL);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request(method, request);
+   mcp_memory_scope_end();
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   if (!reply)
+      return kb_last_result_content("memory mutation unavailable");
+   if (strcmp(jo_cstr(reply, "status"), "ok"))
       return json_result_content(reply);
-   }
-
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(args, "id");
-   cJSON *jky = cJSON_GetObjectItemCaseSensitive(args, "key");
-   cJSON *jct = cJSON_GetObjectItemCaseSensitive(args, "content");
-   cJSON *jti = cJSON_GetObjectItemCaseSensitive(args, "tier");
-   cJSON *jkn = cJSON_GetObjectItemCaseSensitive(args, "kind");
-   cJSON *jcf = cJSON_GetObjectItemCaseSensitive(args, "confidence");
-   cJSON *jre = cJSON_GetObjectItemCaseSensitive(args, "reason");
-
-   int64_t id = cJSON_IsNumber(jid) ? (int64_t)jid->valuedouble : 0;
-   const char *key = cJSON_IsString(jky) ? jky->valuestring : NULL;
-   const char *content = cJSON_IsString(jct) ? jct->valuestring : NULL;
-   const char *tier = (cJSON_IsString(jti) && jti->valuestring[0]) ? jti->valuestring : "L2";
-   const char *kind = (cJSON_IsString(jkn) && jkn->valuestring[0]) ? jkn->valuestring : "fact";
-   double confidence = cJSON_IsNumber(jcf) ? jcf->valuedouble : 1.0;
-   const char *reason = cJSON_IsString(jre) ? jre->valuestring : NULL;
-
-   char buf[256];
-   if (strcmp(verb, "store") == 0)
-   {
-      if (!key || !content)
-         return text_content("error: store requires 'key' and 'content'");
-      memory_t out;
-      memset(&out, 0, sizeof(out));
-      mcp_memory_scope_begin(args, NULL);
-      int rc = kb_client_memory_insert(tier, kind, key, content, confidence, NULL, &out);
-      mcp_memory_scope_end();
-      if (rc != 0)
-         return text_content("error: store failed");
-      snprintf(buf, sizeof(buf), "stored memory id=%lld key=%s", (long long)out.id, key);
-   }
-   else if (strcmp(verb, "update") == 0)
-   {
-      /* MODEL authority: this seam is reached only by an agent calling the MCP
-       * tool, never by the user directly, so the prior content is versioned
-       * rather than overwritten. `update` is the verb an LLM naturally reaches
-       * for when a fact changed, so it fires more often than `forget` does. */
-      if (id <= 0 || !content)
-         return text_content("error: update requires 'id' and 'content'");
-      int64_t new_id = 0;
-      mcp_memory_scope_begin(args, NULL);
-      int update_rc = kb_client_memory_update_as(id, content, MEMORY_AUTHORITY_MODEL, &new_id);
-      mcp_memory_scope_end();
-      if (update_rc != 0)
-         return text_content("error: update failed");
-      if (new_id > 0 && new_id != id)
-         snprintf(buf, sizeof(buf),
-                  "updated memory id=%lld (previous content kept as a version; "
-                  "current value is now id=%lld)",
-                  (long long)id, (long long)new_id);
-      else
-         snprintf(buf, sizeof(buf), "updated memory id=%lld", (long long)id);
-   }
-   else if (strcmp(verb, "supersede") == 0)
-   {
-      if (id <= 0 || !content)
-         return text_content("error: supersede requires 'id' and 'content'");
-      memory_t out;
-      memset(&out, 0, sizeof(out));
-      mcp_memory_scope_begin(args, NULL);
-      int supersede_rc = kb_client_memory_supersede(id, content, confidence, NULL, &out);
-      mcp_memory_scope_end();
-      if (supersede_rc != 0)
-         return text_content("error: supersede failed");
-      snprintf(buf, sizeof(buf), "superseded id=%lld new id=%lld", (long long)id,
-               (long long)out.id);
-   }
-   else if (strcmp(verb, "forget") == 0)
-   {
-      /* MODEL authority: retire, do not destroy. The memory stops answering
-       * recall under its key but stays readable through fact history, so a
-       * mistaken forget is recoverable. Only a user/operator path — which must
-       * additionally clear CAP_MEMORY_ADMIN — hard-deletes. */
-      if (id <= 0)
-         return text_content("error: forget requires 'id'");
-      mcp_memory_scope_begin(args, NULL);
-      int forget_rc = kb_client_memory_delete_as(id, MEMORY_AUTHORITY_MODEL);
-      mcp_memory_scope_end();
-      if (forget_rc != 0)
-         return text_content("error: forget failed");
-      snprintf(buf, sizeof(buf),
-               "forgot memory id=%lld (retired, not destroyed: it no longer "
-               "answers recall but remains in fact history)",
-               (long long)id);
-   }
-   else if (strcmp(verb, "affirm") == 0)
-   {
-      if (id <= 0)
-         return text_content("error: affirm requires 'id'");
-      mcp_memory_scope_begin(args, NULL);
-      int affirm_rc = kb_client_memory_touch(id);
-      mcp_memory_scope_end();
-      if (affirm_rc != 0)
-         return text_content("error: affirm failed");
-      snprintf(buf, sizeof(buf), "affirmed memory id=%lld", (long long)id);
-   }
-   else if (strcmp(verb, "reject") == 0)
-   {
-      if (id <= 0)
-         return text_content("error: reject requires 'id'");
-      mcp_memory_scope_begin(args, NULL);
-      int reject_rc = kb_client_memory_reject(id, reason);
-      mcp_memory_scope_end();
-      if (reject_rc != 0)
-         return text_content("error: reject failed");
-      snprintf(buf, sizeof(buf), "rejected memory id=%lld", (long long)id);
-   }
-   else
-   {
-      snprintf(buf, sizeof(buf), "error: unknown verb '%s'", verb);
-   }
-   return text_content(buf);
+   const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "text"));
+   cJSON *content = text_content(text ? text : "error: invalid memory mutation output");
+   cJSON_Delete(reply);
+   return content;
 }
 
 cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
@@ -893,30 +819,25 @@ cJSON *tool_list_facts(cJSON *args)
 {
    if (server_memory_store_selection(args) != 1)
       return json_result_content(memory_list_command(args));
-   memory_t facts[64];
-   int active_context_missing = 0;
-   mcp_memory_scope_begin(args, &active_context_missing);
-   int count = kb_client_memory_list(TIER_L2, KIND_FACT, 64, facts, 64);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "tier", "L2");
+   cJSON_AddStringToObject(request, "kind", "fact");
+   cJSON_AddNumberToObject(request, "limit", 64);
+   cJSON_AddStringToObject(request, "format", "mcp");
+   mcp_memory_scope_begin(args, NULL);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.list", request);
    mcp_memory_scope_end();
-   if (count < 0)
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   if (!reply)
       return kb_last_result_content("knowledge service fact list failed");
-
-   char buf[8192];
-   int pos = 0;
-   if (active_context_missing)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf),
-                        "Active project context is unavailable; showing shared/global memory "
-                        "only.\n\n");
-   if (count == 0)
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "No L2 facts stored.");
-   else
-   {
-      pos = mcp_appendf(buf, pos, (int)sizeof(buf), "%d fact(s):\n\n", count);
-      for (int i = 0; i < count && pos < (int)sizeof(buf) - 512; i++)
-         pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- **%s**: %s\n", facts[i].key,
-                           facts[i].content);
-   }
-   return text_content(buf);
+   if (strcmp(jo_cstr(reply, "status"), "ok"))
+      return json_result_content(reply);
+   const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "text"));
+   cJSON *content = text_content(text ? text : "error: invalid memory fact list output");
+   cJSON_Delete(reply);
+   return content;
 }
 
 cJSON *tool_memory_briefing(cJSON *args)

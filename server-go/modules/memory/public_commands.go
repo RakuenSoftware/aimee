@@ -260,6 +260,9 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		case "get":
 			result["memory"] = record
 		case "supersede":
+			if args.stringOr("view", "") == "mcp" {
+				return commandResult(map[string]any{"status": "ok", "store": "user", "records": response.Records})
+			}
 			// Supersede's established envelope contains the record at the root.
 			return commandResult(struct {
 				Record

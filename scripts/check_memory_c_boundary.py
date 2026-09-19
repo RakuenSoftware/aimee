@@ -26,6 +26,16 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/cmd_memory.c",
+    "src/cmd_memory_core.c",
+    "src/cmd_memory_curiosity.c",
+    "src/cmd_memory_embed.c",
+    "src/cmd_memory_internal.h",
+    "src/cmd_memory_lint.c",
+    "src/cmd_memory_op.c",
+    "src/cmd_memory_pack.c",
+    "src/cmd_memory_vector.c",
+
     "src/user_memory_merge.c",
     "src/tests/test_memory_candidate_fusion.c",
     "src/tests/test_memory_filter.c",
@@ -95,6 +105,7 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
+    r"\b(?:kb_client_memory_delete|kb_client_memory_delete_as|kb_client_memory_find_facts|kb_client_memory_find_facts_ex|kb_client_memory_find_facts_scoped|kb_client_memory_find_facts_scoped_ex|kb_client_memory_list|kb_client_memory_list_conflicts|kb_client_memory_list_session_scope_priority|kb_client_memory_list_session_scope_priority_like|kb_client_memory_load_eval_corpus|kb_client_memory_query_edges|kb_client_memory_search|kb_client_memory_search_facts_patterns_by_keyword|kb_client_memory_set_artifact|kb_client_memory_supersede|kb_client_memory_top_l2_facts|kb_client_memory_touch|kb_client_memory_update|kb_client_memory_update_as|session_scope_item_cmp|session_append_scope_section|get_memory_subcmds|cmd_memory)\b(?=\s*\()|"
     r"\bdb1_user_memory_merge_into_array\b(?=\s*\()|"
     r"\b(?:mem_eval_run(?:_with_latency)?|mem_eval_load_production_corpus|mem_eval_fusion_arm_resolve)\b(?=\s*\()|"
     r"\b(?:memory_rescore_parts|memory_sort_diagnostics|memory_query_has_temporal_intent|memory_bucket_failure|memory_collect_candidates|memory_eval_labeled_cases|memory_write_profile_file|memory_candidates_merge_interleaved|memory_effective_importance)\b(?=\s*\()|"

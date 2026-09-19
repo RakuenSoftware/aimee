@@ -76,7 +76,7 @@ CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value tex
 INSERT INTO memories(key,content) VALUES ('release',repeat('memory detail ',700));
 INSERT INTO memories(key,lifecycle_state,valid_until) VALUES ('release#v1','superseded','2026-06-01');
 INSERT INTO memories(key,scope_value) VALUES ('private-key','private');
-INSERT INTO memories(key,scope_type,scope_value) VALUES ('global-key','global','_global'),('workspace-key','workspace','team');
+INSERT INTO memories(key,content,scope_type,scope_value) VALUES ('global-key','global marker','global','_global'),('workspace-key','workspace marker','workspace','team');
 INSERT INTO memory_summaries(memory_id,scope,summary) VALUES (1,'summary','fallback'),(1,'headline','Release headline'),(3,'headline','Private headline');
 INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	if err != nil {
@@ -238,6 +238,35 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	out = run("fact_history", `{"key":"no-such-key","format":"mcp"}`)["output"].(string)
 	if err := json.Unmarshal([]byte(out), &mcp); err != nil || mcp.Status != "empty" || mcp.Count != 0 || len(mcp.History) != 0 {
 		t.Fatal(out, err)
+	}
+	// Text views keep full records; only session excerpts have an explicit budget.
+	mcpText := run("list", `{"kind":"pattern","tier":"L3","format":"mcp","limit":1}`)["text"].(string)
+	if !strings.Contains(mcpText, fullContent) || !strings.Contains(mcpText, longKey) {
+		t.Fatal("MCP list truncated")
+	}
+	toolText := run("find_facts", `{"query":"release","project":"app","scope_context":true,"format":"tool"}`)
+	if toolText["count"] != float64(1) || !strings.Contains(toolText["text"].(string), record["content"].(string)) {
+		t.Fatal("agent search truncated", toolText)
+	}
+	for _, section := range []string{"project", "shared"} {
+		args := `{"view":"session","section":"` + section + `","scope_context":true,"workspace":"team","project":"app","max":64,"budget_bytes":1200}`
+		if section == "shared" {
+			args = `{"view":"session","section":"shared","scope_context":true,"max":64,"budget_bytes":1200}`
+		}
+		view := run("list_session_scope_priority", args)["text"].(string)
+		if len(view) > 1200 || strings.Contains(view, "private-key") {
+			t.Fatal("session scope/budget", view)
+		}
+		if section == "shared" && (!strings.Contains(view, "global marker") || strings.Contains(view, "workspace marker")) {
+			t.Fatal("shared ranks", view)
+		}
+	}
+	if view := run("top_l2_facts", `{"view":"session","section":"facts","scope_context":true,"project":"app","budget_bytes":1}`)["text"]; view != "" {
+		t.Fatal("session exceeded budget", view)
+	}
+	// Metadata loss must not silently produce partial success.
+	if _, err := (&postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}).publicRecords(ctx, []Record{{ID: 9223372036854775807}}); err == nil {
+		t.Fatal("missing metadata accepted")
 	}
 	// Verify visibility with a real non-owner connection, including metadata.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_record_test NOINHERIT NOBYPASSRLS;

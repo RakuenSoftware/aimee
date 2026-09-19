@@ -114,6 +114,9 @@ class MemoryCBoundaryTest(unittest.TestCase):
     def test_rejects_relocated_native_client_or_declaration(self) -> None:
         for suffix, declaration in (
             ("c", "int memory_extract_patterns(void) { return 0; }"),
+            ("c", "int session_append_scope_section(void) { return 0; }"),
+            ("h", "int kb_client_memory_find_facts(void);"),
+            ("c", "int cmd_memory(void) { return 0; }"),
             ("c", "int mem_eval_run_locomo_qa(void) { return 0; }"),
             ("h", "int mem_eval_report_longmemeval_misses(void);"),
             ("h", "int mem_eval_open_temp_db(void);"),

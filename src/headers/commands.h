@@ -103,9 +103,6 @@ void cmd_notify(app_ctx_t *ctx, int argc, char **argv);
 void cmd_usage(app_ctx_t *ctx, int argc, char **argv);
 void cmd_clarify(app_ctx_t *ctx, int argc, char **argv);
 
-/* cmd_memory.c */
-void cmd_memory(app_ctx_t *ctx, int argc, char **argv);
-
 /* cmd_index.c */
 void cmd_index(app_ctx_t *ctx, int argc, char **argv);
 
@@ -267,7 +264,6 @@ int command_is_hidden_default(const char *name);
 void print_commands_for_tier(cmd_tier_t tier);
 
 /* Subtable accessors for the help system */
-const subcmd_t *get_memory_subcmds(void);
 const subcmd_t *get_agent_subcmds(void);
 const subcmd_t *get_index_subcmds(void);
 

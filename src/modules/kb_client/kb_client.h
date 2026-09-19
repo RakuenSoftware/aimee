@@ -491,31 +491,6 @@ char *kb_client_dashboard_reminders_json(void);
 char *kb_client_dashboard_recall_json(void);
 char *kb_client_dashboard_directives_json(void);
 
-/* Search stored memory facts via aimee-kb (the DB2 owner).  Returns
- * the number of rows written into |out| (0..|max|), or -1 if kb is
- * unreachable or the vector index is unavailable. This legacy native RPC
- * adapter remains until its server-side consumers migrate to Go. */
-int kb_client_memory_find_facts(const char *query, int limit, memory_t *out, int max);
-
-/* ABI-compatible legacy form. graph_code_fusion_state is ignored; every
- * request uses the receiving instance's configured fusion policy. */
-int kb_client_memory_find_facts_ex(const char *query, int limit, memory_t *out, int max,
-                                   const char *graph_code_fusion_state);
-
-/* List stored memories filtered by tier/kind via aimee-kb.  Returns
- * the number of rows written into |out| (0 if kb is unreachable).
- * Mirrors memory_list(). */
-int kb_client_memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max);
-
-/* Load the eval-corpus memories via aimee-kb (DB2 owner).  Returns the
- * number of rows written into |out| (0 on failure / empty corpus).
- * Mirrors db2_memory_load_eval_corpus(). */
-int kb_client_memory_load_eval_corpus(memory_t *out, int max, char *label_out, size_t label_len);
-
-/* Top L2 facts via aimee-kb.  Returns row count.  Mirrors
- * the Go memory.top_l2_facts command. */
-int kb_client_memory_top_l2_facts(memory_t *out, int max);
-
 /* Render the "Open Commitments" / "Unresolved Questions" briefing
  * sections via aimee-kb.  Returns a heap-allocated markdown fragment
  * (caller frees) or NULL when the section is empty / kb is unreachable.
@@ -561,42 +536,11 @@ void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, c
                                  const char *key, double confidence, const char *session_id,
                                  int ok);
 
-/* Delete a memory by id via aimee-kb.  Returns 0 on success, -1 on
- * failure / kb unreachable.  Mirrors memory_delete(). */
-int kb_client_memory_delete(int64_t id);
-
-/* Same, but says who is asking. MEMORY_AUTHORITY_MODEL retires the memory
- * (recoverable via memory_fact_history); MEMORY_AUTHORITY_USER destroys it.
- * kb_client_memory_delete() above is the USER-authority spelling. */
-int kb_client_memory_delete_as(int64_t id, memory_authority_t authority);
-
-/* Increment use_count and stamp last_used_at (positive reinforcement).
- * Returns 0 on success, -1 on failure / kb unreachable. */
-int kb_client_memory_touch(int64_t id);
-
-/* Replace a memory's content in place (update verb).
- * Returns 0 on success, -1 on failure / kb unreachable. */
-int kb_client_memory_update(int64_t id, const char *content);
-
-/* Same, but says who is asking. MEMORY_AUTHORITY_MODEL versions the old content
- * via supersede and reports the new current id through `new_id_out` (optional);
- * MEMORY_AUTHORITY_USER overwrites in place and reports `id`. */
-int kb_client_memory_update_as(int64_t id, const char *content, memory_authority_t authority,
-                               int64_t *new_id_out);
-
 /* Reject a memory: preserve it as reviewable history, remove it from recall,
  * and install an exact-value tombstone that blocks automatic re-extraction.
  * Optional reason is retained with the row and mutation evidence.
  * Returns 0 on success, -1 on failure / kb unreachable. */
 int kb_client_memory_reject(int64_t id, const char *reason);
-/* List unresolved conflicts via aimee-kb.  Returns row count.
- * Mirrors memory_list_conflicts(). */
-int kb_client_memory_list_conflicts(conflict_t *out, int max);
-
-/* List entity-graph edges incident to |entity| via aimee-kb.  Returns
- * row count.  Mirrors memory_query_edges(). */
-int kb_client_memory_query_edges(const char *entity, edge_t *out, int max);
-
 /* Compact conversation windows (raw->summary, summary->fact) via aimee-kb.
  * Returns 0 / -1.  Mirrors memory_compact_windows(). */
 int kb_client_memory_compact_windows(int *summary_count, int *fact_count);
@@ -610,20 +554,6 @@ char *kb_client_memory_assemble_context(const char *task_hint);
  * active observations, and reviewed procedures) via aimee-kb. Returns the
  * trust-labelled rendered context, or NULL when unavailable or empty. */
 char *kb_client_memory_assemble_typed_context(const char *query);
-
-/* Search conversation windows via aimee-kb.  Returns row count.
- * Mirrors memory_search(). */
-int kb_client_memory_search(char **clusters, int cluster_count, int limit, search_result_t *out,
-                            int max);
-
-/* Explicitly scoped fact search via the Go memory owner. Returns row count. */
-int kb_client_memory_find_facts_scoped(const char *query, const char *scope_type,
-                                       const char *scope_value, int limit, memory_t *out, int max);
-/* ABI-compatible legacy form; the fusion argument is ignored. The receiving
- * instance applies its own configuration. */
-int kb_client_memory_find_facts_scoped_ex(const char *query, const char *scope_type,
-                                          const char *scope_value, int limit, memory_t *out,
-                                          int max, const char *graph_code_fusion_state);
 
 /* Export rules to JSONL via aimee-kb.  Returns row count or -1. */
 int kb_client_rules_export_jsonl(const char *path);
@@ -749,22 +679,16 @@ int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind);
  * link pipeline.  Returns 0 on success (out filled if non-NULL) or
  * -1 if kb is unreachable / supersede failed.  Mirrors
  * the shared Go replacement command. */
-int kb_client_memory_supersede(int64_t old_id, const char *new_content, double confidence,
-                               const char *session_id, memory_t *out);
 
 /* Set the artifact_type / artifact_ref / artifact_hash columns on a
  * memory row via aimee-kb.  Returns 0 on success, -1 on failure /
  * missing row.  Mirrors db2_memory_set_artifact(). */
-int kb_client_memory_set_artifact(int64_t memory_id, const char *artifact_type,
-                                  const char *artifact_ref, const char *artifact_hash);
 
 /* Session-scope priority memory listings via aimee-kb.  Used by the
  * session-start prompt builder to populate # Project / # Workspace /
  * # Global Context sections.  Each returns the number of rows
  * written into |out| (0 if kb is unreachable).  Mirrors
  * the Go memory.list_session_scope_priority commands. */
-int kb_client_memory_list_session_scope_priority(memory_t *out, int max);
-int kb_client_memory_list_session_scope_priority_like(const char *pattern, memory_t *out, int max);
 
 /* Run the active-task drift check via aimee-kb.  Returns 0 on
  * success (|out| filled) or -1 if kb is unreachable / task missing.
@@ -776,7 +700,6 @@ int kb_client_memory_check_drift(int64_t task_id, const char *file_path, const c
 /* Search facts/patterns by free-text keyword via aimee-kb.  Returns
  * the number of rows written into |out| (0 if kb is unreachable).
  * Mirrors db2_memory_search_facts_patterns_by_keyword(). */
-int kb_client_memory_search_facts_patterns_by_keyword(const char *keyword, memory_t *out, int max);
 
 /* Task CRUD via aimee-kb (the DB2 owner).  Each mirrors the local
  * db2_task_* signature.  See db2/tasks.h for aimee_task_t /

@@ -762,11 +762,6 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_capabilities.c
     ${AIMEE_SRC_DIR}/cmd_session_lifecycle.c
     ${AIMEE_SRC_DIR}/cmd_ensemble.c
-    ${AIMEE_SRC_DIR}/cmd_memory.c
-    ${AIMEE_SRC_DIR}/cmd_memory_core.c
-    ${AIMEE_SRC_DIR}/cmd_memory_curiosity.c
-    ${AIMEE_SRC_DIR}/cmd_memory_embed.c
-    ${AIMEE_SRC_DIR}/cmd_memory_vector.c
     ${AIMEE_SRC_DIR}/cmd_index.c
     ${AIMEE_SRC_DIR}/cmd_rules.c
     ${AIMEE_SRC_DIR}/cmd_learning.c

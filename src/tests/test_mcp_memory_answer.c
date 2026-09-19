@@ -9,6 +9,34 @@
 #include <string.h>
 
 extern cJSON *tool_search_memory(cJSON *args);
+extern cJSON *tool_memory_mutate(cJSON *args);
+extern cJSON *tool_list_facts(cJSON *args);
+cJSON *memory_list_command(cJSON *args)
+{
+   (void)args;
+   abort();
+}
+cJSON *memory_store_command(cJSON *args, memory_authority_t authority)
+{
+   (void)args;
+   (void)authority;
+   abort();
+}
+cJSON *memory_delete_command(cJSON *args, const char *account)
+{
+   (void)args;
+   (void)account;
+   abort();
+}
+cJSON *server_invoke_module_operation(const char *method, const char *operation, const cJSON *args,
+                                      const char *error)
+{
+   (void)method;
+   (void)operation;
+   (void)args;
+   (void)error;
+   abort();
+}
 extern cJSON *tool_memory_briefing(cJSON *args);
 extern cJSON *tool_memory_alerts(cJSON *args);
 extern cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out);
@@ -70,7 +98,7 @@ char *kb_v1_action_request(const char *action, cJSON *request)
 {
    calls++;
    assert(active && strcmp(action, expected_action) == 0);
-   if (strcmp(action, "memory.briefing") != 0 && strcmp(action, "memory.alerts") != 0)
+   if (!strcmp(action, "memory.ask") || !strcmp(action, "memory.find_facts_visible"))
       assert(strcmp(jo_cstr(request, "query"), "query") == 0);
    assert(strcmp(jo_cstr(request, "project"), expected_project) == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
@@ -95,6 +123,17 @@ char *kb_v1_action_request(const char *action, cJSON *request)
       assert(strcmp(jo_cstr(request, "format"), "mcp") == 0);
       assert(strcmp(jo_cstr(request, "since"), "2026-09-01") == 0);
       assert(jo_bool(request, "include_all", -1) == expected_all);
+   }
+   if (!strcmp(action, "memory.list"))
+   {
+      assert(!strcmp(jo_cstr(request, "tier"), "L2") && !strcmp(jo_cstr(request, "kind"), "fact"));
+      assert(jo_int(request, "limit", 0) == 64 && !strcmp(jo_cstr(request, "format"), "mcp"));
+   }
+   if (!strcmp(action, "memory.update"))
+   {
+      assert(!strcmp(jo_cstr(request, "id"), "9007199254740993"));
+      assert(!cJSON_HasObjectItem(request, "authority"));
+      assert(!strcmp(jo_cstr(request, "view"), "mcp"));
    }
    cJSON_Delete(request);
    return reply ? cJSON_PrintUnformatted(reply) : NULL;
@@ -229,6 +268,38 @@ int main(void)
       cJSON_Delete(reply);
       reply = NULL;
       content = bundle_tools[i](args);
+      assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "unavailable"));
+      cJSON_Delete(content);
+      cJSON_Delete(args);
+   }
+   cJSON *(*record_tools[])(cJSON *) = {tool_memory_mutate, tool_list_facts};
+   char long_text[24000];
+   memset(long_text, 'x', sizeof(long_text) - 1);
+   long_text[sizeof(long_text) - 1] = 0;
+   for (int i = 0; i < 2; i++)
+   {
+      expected_action = i == 0 ? "memory.update" : "memory.list";
+      expected_project = "project-a";
+      args = cJSON_Parse("{\"verb\":\"update\",\"id\":\"9007199254740993\",\"content\":"
+                         "\"replacement\",\"authority\":\"user\",\"project\":\"project-a\"}");
+      reply = cJSON_CreateObject();
+      cJSON_AddStringToObject(reply, "status", "ok");
+      cJSON_AddStringToObject(reply, "text", long_text);
+      content = record_tools[i](args);
+      assert(!active && !strcmp(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), long_text));
+      cJSON_Delete(content);
+      cJSON_ReplaceItemInObjectCaseSensitive(reply, "text", cJSON_CreateNumber(7));
+      content = record_tools[i](args);
+      assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "invalid memory"));
+      cJSON_Delete(content);
+      cJSON_ReplaceItemInObjectCaseSensitive(reply, "status", cJSON_CreateString("error"));
+      cJSON_AddStringToObject(reply, "kind", "review_required");
+      content = record_tools[i](args);
+      assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "review_required"));
+      cJSON_Delete(content);
+      cJSON_Delete(reply);
+      reply = NULL;
+      content = record_tools[i](args);
       assert(!active && strstr(jo_cstr(cJSON_GetArrayItem(content, 0), "text"), "unavailable"));
       cJSON_Delete(content);
       cJSON_Delete(args);
