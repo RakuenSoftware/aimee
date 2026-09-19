@@ -49,6 +49,9 @@ func handleCheckpointCommand(options handlerOptions, invocation bus.ModuleInvoca
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
+	if refusal := commandMutationRefusal(response.Code); refusal != nil {
+		return commandResult(refusal)
+	}
 	if action == "restore" {
 		if len(response.Records) != 1 || response.Records[0].ID <= 0 {
 			return nil, bus.ModuleStatusInternal

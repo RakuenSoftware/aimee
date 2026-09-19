@@ -86,7 +86,7 @@ func exerciseLearningMutationReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 	}
 	client := clientForHandler(t, handler)
 	// Host observation plan -> canonical KB workflow write under the packaged
-	// runtime role. Repeat observations keep one scoped row and provenance cap.
+	// runtime role. Changed observations version the row; exact repeats retain identity.
 	plan := runHostRuntime(t, handler, `{"operation":"workflow-plan","mode":"observe","command":"make test","cwd":"/dev/ObservedTeam/src","workspaces":["/dev/ObservedTeam"]}`)
 	planned, err := json.Marshal(plan["request"])
 	if err != nil {
@@ -109,9 +109,10 @@ func exerciseLearningMutationReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 	workflowID := int64(first["id"].(float64))
 	for i := 0; i < 3; i++ {
 		again := runPublicCommand(t, client, "upsert_workflow", `{"workspace":"LearningTeam","signal_type":"PR","rule":"run all tests","observed_confidence":0.6}`)
-		if again["id"] != first["id"] {
+		if again["status"] != "ok" || (i == 0 && again["id"] == first["id"]) || (i > 0 && again["id"] != float64(workflowID)) {
 			t.Fatal(again, first)
 		}
+		workflowID = int64(again["id"].(float64))
 	}
 	var confidence, ceiling float64
 	var key, session, provenance string
@@ -122,9 +123,10 @@ func exerciseLearningMutationReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 		t.Fatal(key, confidence, ceiling, session, provenance, tagged, err)
 	}
 	r := run("workflow", map[string]any{"project": "LearningTeam", "signal_type": "PR", "rule": "review then test"}, nil)
-	if r["id"] != first["id"] {
+	if r["id"] == float64(workflowID) {
 		t.Fatal(r, first)
 	}
+	workflowID = int64(r["id"].(float64))
 	if err := tx.QueryRow(ctx, `SELECT source_session FROM memories WHERE id=$1`, workflowID).Scan(&session); err != nil || session != "learning-session" {
 		t.Fatal(session, err)
 	}

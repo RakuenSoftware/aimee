@@ -2,7 +2,9 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
 
 	store "github.com/JBailes/aimee/server-go/db"
 )
@@ -14,6 +16,7 @@ const (
 	MutationOK                  = 0
 	MutationImmutableExperience = -2
 	MutationRequiresReplacement = -3
+	MutationReviewRequired      = -4
 )
 
 var validEpistemicKinds = map[string]bool{
@@ -25,14 +28,16 @@ var validEpistemicKinds = map[string]bool{
 // authenticated caller and becomes durable provenance; it is never inferred
 // from the memory text. Active rejection tombstones fail the write closed.
 func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataRequest) (record Record, err error) {
-	merged := false
+	replaced := false
 	defer func() {
-		tool := ""
-		if merged {
-			tool = "memory.merge"
+		if replaced {
+			return
 		}
-		s.recordMutation(DataRequest{Operation: "insert-epistemic", SessionID: request.SessionID}, DataResponse{Records: []Record{record}}, err, tool)
+		s.recordMutation(DataRequest{Operation: "insert-epistemic", SessionID: request.SessionID, Authority: request.Authority}, DataResponse{Records: []Record{record}}, err, "")
 	}()
+	if _, ok := s.db.(store.Tx); !ok {
+		return Record{}, errors.New("memory: canonical writes require a transaction")
+	}
 	if err := s.requireKBDomain(); err != nil {
 		return Record{}, err
 	}
@@ -64,84 +69,79 @@ func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataReq
 	if request.Confidence != nil {
 		confidence = *request.Confidence
 	}
+	if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
+		return Record{}, errors.New("memory: invalid confidence")
+	}
 	if confidence > ceiling {
 		confidence = ceiling
 	}
 	scope := request.Scope
 	record.Scope = scope
-	err = s.db.QueryRow(ctx, `WITH allowed AS (
- SELECT 1 WHERE NOT EXISTS (
+	// Serialize the conflict identity even when there is no row to lock yet.
+	identity, _ := json.Marshal([4]string{string(scope.Type), scope.Value, request.Kind, request.Key})
+	if _, err = s.db.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,5747))`, string(identity)); err != nil {
+		return Record{}, err
+	}
+	var count int
+	var existing int64
+	if err = s.db.QueryRow(ctx, `SELECT count(*),COALESCE(min(id),0) FROM memories
+ WHERE kind=$1 AND key=$2 AND scope_type=$3 AND scope_value=$4 AND lifecycle_state='active'`,
+		request.Kind, request.Key, scope.Type, scope.Value).Scan(&count, &existing); err != nil {
+		return Record{}, err
+	}
+	if count > 1 {
+		return Record{}, errors.New("memory: ambiguous active key requires review")
+	}
+	if existing != 0 {
+		replaced = true
+		request.Confidence = &confidence
+		// All replacements use the same admission rules as edit and supersede.
+		return s.replaceKBAs(ctx, existing, request.Content, confidence, request.SessionID, request.Authority, &request)
+	}
+	err = s.db.QueryRow(ctx, `INSERT INTO memories(tier,kind,epistemic_kind,key,content,use_cases,confidence,confidence_ceiling,
+ source_session,provenance_category,scope_type,scope_value,lifecycle_state)
+ SELECT $1,$12,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active'
+ WHERE NOT EXISTS (
   SELECT 1 FROM memory_rejection_tombstones WHERE object_kind='memory' AND active=1
    AND memory_key=$3 AND memory_content=$4 AND scope_type=$10 AND scope_value=$11
- )
-), updated AS (
- UPDATE memories SET tier=$1,content=$4,use_cases=$5,confidence=$6,confidence_ceiling=$7,
- source_session=$8,provenance_category=$9,epistemic_kind=$2,lifecycle_state='active',
- activation_suppressed=0,valid_until='',updated_at=pg_now_text()
- WHERE kind=$12 AND key=$3 AND scope_type=$10 AND scope_value=$11
-   AND lifecycle_state='active' AND EXISTS(SELECT 1 FROM allowed)
- RETURNING id
-), inserted AS (
- INSERT INTO memories(tier,kind,epistemic_kind,key,content,use_cases,confidence,confidence_ceiling,
- source_session,provenance_category,scope_type,scope_value,lifecycle_state)
- SELECT $1,$12,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active' FROM allowed
- WHERE NOT EXISTS(SELECT 1 FROM updated) RETURNING id
-) SELECT id,true FROM updated UNION ALL SELECT id,false FROM inserted LIMIT 1`, request.Tier, epistemic,
-		request.Key, request.Content, request.UseCases, confidence, ceiling, request.SessionID,
-		provenance, scope.Type, scope.Value, request.Kind).Scan(&record.ID, &merged)
+ ) RETURNING id`, request.Tier, epistemic, request.Key, request.Content, request.UseCases, confidence,
+		ceiling, request.SessionID, provenance, scope.Type, scope.Value, request.Kind).Scan(&record.ID)
 	if store.IsNoRows(err) {
 		return Record{}, errors.New("memory: write blocked by rejection tombstone")
 	}
+
 	record.Tier, record.Kind, record.Key, record.Content, record.Confidence =
 		request.Tier, request.Kind, request.Key, request.Content, confidence
 	return record, err
 }
 
-// UpdateAs preserves model-authored history while allowing an authenticated
-// operator to make the explicitly destructive in-place edit.
-func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content string, authority int) (code int, newID int64, err error) {
-	defer func() {
-		if authority == AuthorityUser {
-			s.recordMutation(DataRequest{Operation: "update-as", ID: id}, DataResponse{Code: &code, IDs: []int64{newID}}, err, "")
-		}
-	}()
-	var screenErr error
-	content, screenErr = screenMemoryText(content)
-	if screenErr != nil {
-		return -1, 0, screenErr
-	}
-	if err := s.requireKBDomain(); err != nil {
-		return -1, 0, err
-	}
-	var epistemic string
+// UpdateAs is always a versioned correction. User authority determines the new
+// author; it is not implicit permission to erase the previous version.
+func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content string, authority int) (int, int64, error) {
 	var confidence float64
-	if err := s.db.QueryRow(ctx, `SELECT epistemic_kind,confidence FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&epistemic, &confidence); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT confidence FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&confidence); err != nil {
 		if store.IsNoRows(err) {
 			return -1, 0, ErrMemoryNotFound
 		}
 		return -1, 0, err
 	}
-	switch epistemic {
-	case "episode", "experience":
-		return MutationImmutableExperience, id, nil
-	case "instruction", "policy":
-		return MutationRequiresReplacement, id, nil
+	record, err := s.replaceKBAs(ctx, id, content, confidence, "", authority, nil)
+	if code := mutationRefusal(err); code != 0 {
+		return code, id, nil
 	}
-	if authority == AuthorityUser {
-		tag, err := s.db.Exec(ctx, `UPDATE memories SET content=$2,provenance_category='user_stated',
-confidence_ceiling=CASE WHEN tier='L5' THEN 0.5 ELSE 1.0 END,
-confidence=LEAST(confidence,CASE WHEN tier='L5' THEN 0.5 ELSE 1.0 END),updated_at=pg_now_text()
-WHERE id=$1 AND lifecycle_state='active'`, id, content)
-		if err == nil && tag.RowsAffected() == 0 {
-			return -1, 0, ErrMemoryNotFound
-		}
-		return MutationOK, id, err
-	}
-	if authority != AuthorityModel {
-		return -1, 0, errors.New("memory: invalid authority")
-	}
-	record, err := s.supersedeKB(ctx, id, content, confidence, "")
 	return MutationOK, record.ID, err
+}
+
+func mutationRefusal(err error) int {
+	switch {
+	case errors.Is(err, errImmutableExperience):
+		return MutationImmutableExperience
+	case errors.Is(err, errRequiresRevocation):
+		return MutationRequiresReplacement
+	case errors.Is(err, errMutationReviewRequired):
+		return MutationReviewRequired
+	}
+	return 0
 }
 
 // DeleteAs hard-deletes only under explicit user authority. Model authority
@@ -158,6 +158,16 @@ func (s *postgresDataStore) DeleteAs(ctx context.Context, id int64, authority in
 	case AuthorityUser:
 		query = `DELETE FROM memories WHERE id=$1`
 	case AuthorityModel:
+		var epistemic, origin string
+		if err := s.db.QueryRow(ctx, `SELECT epistemic_kind,provenance_category FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&epistemic, &origin); err != nil {
+			if store.IsNoRows(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		if err := admitMemoryReplacement(epistemic, origin, authority); err != nil {
+			return false, err
+		}
 		query = `UPDATE memories SET key=key||'#v'||id::text,lifecycle_state='superseded',
 valid_until=pg_now_text(),archive_reason='retired by model',activation_suppressed=1,
 updated_at=pg_now_text() WHERE id=$1 AND lifecycle_state='active'`
@@ -169,34 +179,81 @@ updated_at=pg_now_text() WHERE id=$1 AND lifecycle_state='active'`
 }
 
 var (
-	errImmutableExperience = errors.New("memory: episode and experience memories require annotation")
-	errRequiresRevocation  = errors.New("memory: instruction and policy memories require revocation")
+	errMutationReviewRequired = errors.New("memory: replacing authoritative or unknown-origin content requires user review")
+	errImmutableExperience    = errors.New("memory: episode and experience memories require annotation")
+	errRequiresRevocation     = errors.New("memory: instruction and policy memories require revocation")
 )
 
-// supersedeKB closes the old interval and opens the replacement at the same
-// instant. The locked source retains its content and scope; model replacement
-// cannot inherit a user's provenance or exceed the source's confidence ceiling.
-func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content string, confidence float64, session string) (r Record, err error) {
+func admitMemoryReplacement(epistemic, origin string, authority int) error {
+	switch epistemic {
+	case "episode", "experience":
+		return errImmutableExperience
+	case "instruction", "policy":
+		return errRequiresRevocation
+	}
+	if authority == AuthorityModel && origin != "agent_message" {
+		return errMutationReviewRequired
+	}
+	return nil
+}
+
+// All replacement entry points preserve the old row and apply the same
+// authority/epistemic admission before writing anything.
+func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content string, confidence float64, session string) (Record, error) {
+	return s.replaceKBAs(ctx, id, content, confidence, session, AuthorityModel, nil)
+}
+func (s *postgresDataStore) replaceKBAs(ctx context.Context, id int64, content string, confidence float64, session string, authority int, metadata *DataRequest) (r Record, err error) {
 	defer func() {
-		s.recordMutation(DataRequest{Operation: "supersede", ID: id, SessionID: session}, DataResponse{Records: []Record{r}}, err, "")
+		s.recordMutation(DataRequest{Operation: "supersede", ID: id, SessionID: session, Authority: authority}, DataResponse{Records: []Record{r}}, err, "")
 	}()
+	if err := s.requireKBDomain(); err != nil {
+		return Record{}, err
+	}
+	if _, ok := s.db.(store.Tx); !ok {
+		return Record{}, errors.New("memory: replacement requires a transaction")
+	}
+	if authority != AuthorityModel && authority != AuthorityUser {
+		return Record{}, errors.New("memory: invalid authority")
+	}
+	if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
+		return Record{}, errors.New("memory: invalid confidence")
+	}
 	var screenErr error
 	content, screenErr = screenMemoryText(content)
 	if screenErr != nil {
 		return Record{}, screenErr
 	}
-	var epistemic string
-	if err := s.db.QueryRow(ctx, `SELECT epistemic_kind FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&epistemic); err != nil {
+	var epistemic, origin, oldUseCases string
+	var previous Record
+	if err := s.db.QueryRow(ctx, `SELECT epistemic_kind,provenance_category,tier,kind,key,content,use_cases,confidence,scope_type,scope_value FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&epistemic, &origin, &previous.Tier, &previous.Kind, &previous.Key, &previous.Content, &oldUseCases, &previous.Confidence, &previous.Scope.Type, &previous.Scope.Value); err != nil {
 		if store.IsNoRows(err) {
 			return Record{}, ErrMemoryNotFound
 		}
 		return Record{}, err
 	}
-	switch epistemic {
-	case "episode", "experience":
-		return Record{}, errImmutableExperience
-	case "instruction", "policy":
-		return Record{}, errRequiresRevocation
+	// Identical same-author upserts retain identity. They cannot capture another
+	// author's provenance and never relax an immutable record's content.
+	expectedOrigin := "agent_message"
+	if authority == AuthorityUser {
+		expectedOrigin = "user_stated"
+	}
+	if metadata != nil && origin == expectedOrigin && previous.Content == content && previous.Tier == metadata.Tier && previous.Kind == metadata.Kind && oldUseCases == metadata.UseCases && previous.Confidence == confidence && (metadata.EpistemicKind == "" || metadata.EpistemicKind == epistemic) {
+		previous.ID = id
+		return previous, nil
+	}
+	if err := admitMemoryReplacement(epistemic, origin, authority); err != nil {
+		return Record{}, err
+	}
+	if metadata != nil && metadata.EpistemicKind != "" && metadata.EpistemicKind != epistemic {
+		return Record{}, errMutationReviewRequired
+	}
+	provenance, ceiling := "agent_message", 0.8
+	if authority == AuthorityUser {
+		provenance, ceiling = "user_stated", 1
+	}
+	tier, useCases := "", ""
+	if metadata != nil {
+		tier, useCases = metadata.Tier, metadata.UseCases
 	}
 	err = s.db.QueryRow(ctx, `WITH candidate AS MATERIALIZED (
  SELECT *,pg_now_text() AS boundary FROM memories WHERE id=$1 AND lifecycle_state='active'
@@ -204,14 +261,15 @@ func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content s
   AND t.memory_key=memories.key AND t.memory_content=$2 AND t.scope_type=memories.scope_type AND t.scope_value=memories.scope_value)
 ), closed AS (
  UPDATE memories m SET key=c.key||'#v'||m.id::text,lifecycle_state='superseded',valid_until=c.boundary,
- activation_suppressed=1,archive_reason='superseded by model replacement',updated_at=c.boundary
+ activation_suppressed=1,archive_reason='superseded by versioned replacement',updated_at=c.boundary
  FROM candidate c WHERE m.id=c.id RETURNING c.*
 ), fresh AS (
  INSERT INTO memories(tier,kind,epistemic_kind,key,content,use_cases,confidence,confidence_ceiling,
- source_session,provenance_category,scope_type,scope_value,lifecycle_state,valid_from)
- SELECT tier,kind,epistemic_kind,key,$2,use_cases,LEAST($3,confidence_ceiling,0.8,CASE WHEN tier='L5' THEN 0.5 ELSE 1.0 END),
- LEAST(confidence_ceiling,0.8,CASE WHEN tier='L5' THEN 0.5 ELSE 1.0 END),
- CASE WHEN $4='' THEN source_session ELSE $4 END,'agent_message',scope_type,scope_value,'active',boundary
+ source_session,provenance_category,scope_type,scope_value,lifecycle_state,valid_from,owner_principal,sensitivity)
+ SELECT CASE WHEN $9 THEN $7 ELSE tier END,kind,epistemic_kind,key,$2,CASE WHEN $9 THEN $8 ELSE use_cases END,
+ LEAST($3,$6,CASE WHEN (CASE WHEN $9 THEN $7 ELSE tier END)='L5' THEN 0.5 ELSE 1.0 END),
+ LEAST($6,CASE WHEN (CASE WHEN $9 THEN $7 ELSE tier END)='L5' THEN 0.5 ELSE 1.0 END),
+ CASE WHEN $4='' THEN source_session ELSE $4 END,$5,scope_type,scope_value,'active',boundary,owner_principal,sensitivity
  FROM closed RETURNING id,scope_type,scope_value,tier,kind,key,content,confidence
 ), scopes AS (
  INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
@@ -220,7 +278,7 @@ func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content s
 ), links AS (
  INSERT INTO memory_links(source_id,target_id,relation) SELECT id,$1,'supersedes' FROM fresh
 )
-SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM fresh`, id, content, confidence, session).
+SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM fresh`, id, content, confidence, session, provenance, ceiling, tier, useCases, metadata != nil).
 		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound

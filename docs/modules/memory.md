@@ -21,6 +21,30 @@ The memory executable and live Go probe must also build with `CGO_ENABLED=0`.
 This language boundary does not certify all historical behavioral parity or the
 numbered reliability proposals.
 
+## Canonical KB mutation admission
+
+KB same-key store, edit, supersede and legacy store/content-edit adapters now use
+one Go replacement admission path. Changed content gets a new row, a closed old
+validity interval and a supersession link. User corrections preserve history too.
+Primary/secondary scopes, owner principal and sensitivity survive replacement;
+new authorship and confidence ceilings are derived from the admitted writer.
+
+Model replacement or retirement of user-authored or unknown-origin content returns
+`review_required`. This refusal preserves the active source; linked review proposals
+remain to be implemented. Episode/experience content stays immutable, and policy or
+instruction content requires the reviewed replacement path. These checks also
+apply to same-key conflicts. Identical same-author upserts retain their ID and
+original captured author. Same-key creators serialize on the scoped identity,
+including before any row exists. Ambiguous legacy duplicate keys fail explicitly.
+
+The old data-stage `update-content` operation returns the new identity in `ids`;
+callers must use that identity after a successful correction. Scoped legacy delete
+uses the same model retirement policy as the public command. Explicit authorized
+hard deletion remains distinct. Transactional extraction capture/job failures roll
+back the entire replacement. This is the initial MR-02 KB slice, not completion of
+expected-version/idempotency keys, durable invalidation replay, personal-memory
+versioning, reviewed proposals or the full mutation/retention policy.
+
 ## Labelled audit and calibration
 
 `memory.audit` and `memory.calibrate` are Go command-owner operations. They accept

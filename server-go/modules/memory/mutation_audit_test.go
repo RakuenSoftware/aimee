@@ -126,7 +126,15 @@ func exerciseMutationAuditReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 	id := int64(stored["id"].(float64))
 	for _, verb := range []string{"update", "reject", "restore", "delete"} {
 		r := call(verb, fmt.Sprintf(`{"id":%d,"content":"changed note","authority":"user","scope_context":true,"project":"audit-project"}`, id))
-		if r["status"] != "ok" || actions[len(actions)-1].Tool != "memory."+verb || actions[len(actions)-1].Verdict != "ok" {
+		tool := "memory." + verb
+		if verb == "update" {
+			tool = "memory.supersede"
+			if r["id"] == float64(id) {
+				t.Fatal(r)
+			}
+			id = int64(r["id"].(float64))
+		}
+		if r["status"] != "ok" || actions[len(actions)-1].Tool != tool || actions[len(actions)-1].Verdict != "ok" {
 			t.Fatal(verb, r, actions)
 		}
 	}

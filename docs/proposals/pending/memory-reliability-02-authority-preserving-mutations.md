@@ -1,6 +1,6 @@
 # MR-02: Authority-preserving memory mutations
 
-- **State:** Proposed
+- **State:** In progress; initial KB admission/versioning slice implemented
 - **Priority:** P0: durable correctness
 - **Owner:** Go memory mutation admission, with PostgreSQL durable guards
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) for shared authorization vocabulary; admission fixes can begin immediately
@@ -8,7 +8,19 @@
 
 ## Problem and intended result
 
-Insert/upsert and edit currently have different history semantics. A same-key insert can overwrite active content in place, while a model replacement can inherit provenance and confidence limits from the prior row. The durable result must describe who authored the new content and what evidence supports it, regardless of which API verb was used.
+The original same-key insert could overwrite active content in place, while edits
+used a different history path. KB store/upsert, edit, supersede and legacy content
+adapters now share Go admission and create versions for changed content. User
+corrections preserve history; model writes cannot displace user or unknown-origin
+content. Immutable kinds are protected on conflict, exact same-author retries
+preserve identity and captured authorship, and concurrent same-key creators are
+serialized. PostgreSQL tests cover rollback, protected writer/verb combinations,
+private metadata preservation and an actual blocked concurrent writer.
+
+This is a foundation slice. Review-required writes currently refuse without
+creating a linked proposal. Personal versioning, explicit expected versions,
+idempotency keys, durable guards/outbox/consumer replay and full retention policy
+remain acceptance work.
 
 Implement one mutation admission operation for create, propose, correct, supersede, reject, retire and explicitly authorized destructive deletion. Route compatibility entry points through it.
 

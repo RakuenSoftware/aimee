@@ -264,9 +264,9 @@ WHERE c.object_kind='memory' AND c.object_key=$1 AND g.actor_principal=$2 AND g.
 			}
 		}
 	}
-	stored := command("store", `{"key":"runtime-public#v123","content":"original","authority":"user","tier":"L2","scope_context":true,"project":"runtime-project-a"}`, true)
+	stored := command("store", `{"key":"runtime-public#v123","content":"original","tier":"L2","scope_context":true,"project":"runtime-project-a"}`, true)
 	oldID := int64(stored["id"].(float64))
-	checkAudit(oldID, caller.Principal, "user")
+	checkAudit(oldID, caller.Principal, "model")
 	if _, err := tx.Exec(ctx, `INSERT INTO memory_scopes(memory_id,scope_type,scope_value) VALUES ($1,'workspace','runtime-team')`, oldID); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,11 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 	if err != nil || key != "runtime-public#v123" || provenance != "agent_message" || ceiling != 0.8 || actor != "system:model-inference" || role != "model" || !interval || !inherited || !link {
 		t.Fatalf("replacement: %s %s %g %s %s interval=%v scope=%v link=%v err=%v", key, provenance, ceiling, actor, role, interval, inherited, link, err)
 	}
-	command("update", fmt.Sprintf(`{"id":%d,"content":"operator correction","authority":"user","scope_context":true,"project":"runtime-project-a"}`, newID), true)
+	corrected := command("update", fmt.Sprintf(`{"id":%d,"content":"operator correction","authority":"user","scope_context":true,"project":"runtime-project-a"}`, newID), true)
+	if corrected["superseded"] != true || corrected["id"] == float64(newID) {
+		t.Fatal(corrected)
+	}
+	newID = int64(corrected["id"].(float64))
 	checkAudit(newID, caller.Principal, "user")
 	if err := tx.QueryRow(ctx, `SELECT m.provenance_category,m.confidence_ceiling,a.actor_principal,a.actor_role FROM memories m JOIN memory_fact_actors a ON a.memory_id=m.id WHERE m.id=$1`, newID).Scan(&provenance, &ceiling, &actor, &role); err != nil || provenance != "user_stated" || ceiling != 1 || actor != caller.Principal || role != "user" {
 		t.Fatal(provenance, ceiling, actor, role, err)

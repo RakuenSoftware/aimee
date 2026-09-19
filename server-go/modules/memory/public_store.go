@@ -23,10 +23,7 @@ func (s *postgresDataStore) captureStoredFactActor(ctx context.Context, id int64
 		}
 	}
 	_, err := s.db.Exec(ctx, `INSERT INTO memory_fact_actors(memory_id,actor_principal,actor_role,authority_rank,authenticated,transport_identity)
-VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(memory_id) DO UPDATE SET
-actor_principal=EXCLUDED.actor_principal,actor_role=EXCLUDED.actor_role,
-authority_rank=EXCLUDED.authority_rank,authenticated=EXCLUDED.authenticated,
-transport_identity=EXCLUDED.transport_identity,captured_at=pg_now_text()`, id, actor.Principal, actor.Role, actor.Rank, actor.Authenticated, actor.TransportIdentity)
+VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(memory_id) DO NOTHING`, id, actor.Principal, actor.Role, actor.Rank, actor.Authenticated, actor.TransportIdentity)
 	if err != nil {
 		return err
 	}
@@ -75,7 +72,13 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		return nil, status
 	}
 	var response DataResponse
-	if json.Unmarshal(data, &response) != nil || len(response.PublicRecords) != 1 {
+	if json.Unmarshal(data, &response) != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	if refusal := commandMutationRefusal(response.Code); refusal != nil {
+		return commandResult(refusal)
+	}
+	if len(response.PublicRecords) != 1 {
 		return nil, bus.ModuleStatusInternal
 	}
 	r := response.PublicRecords[0]
@@ -116,6 +119,9 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
+	}
+	if refusal := commandMutationRefusal(response.Code); refusal != nil {
+		return commandResult(refusal)
 	}
 	if response.Code != nil {
 		if *response.Code == MutationImmutableExperience {

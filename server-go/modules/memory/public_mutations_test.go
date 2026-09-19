@@ -75,7 +75,7 @@ SET LOCAL search_path TO pg_temp,mutation_command_test,public;
 CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text DEFAULT 'old',tier text DEFAULT 'L2',kind text DEFAULT 'fact',epistemic_kind text DEFAULT 'world_fact',
  scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 0.8,confidence_ceiling double precision DEFAULT 0.8,use_count int DEFAULT 0,
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,archive_reason text DEFAULT '',use_cases text DEFAULT '',last_used_at text DEFAULT '',source_session text DEFAULT '',provenance_category text DEFAULT 'agent_message',
- valid_from text DEFAULT '',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
+ owner_principal text DEFAULT '',sensitivity text DEFAULT 'normal',valid_from text DEFAULT '',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_rejection_tombstones(id bigserial PRIMARY KEY,object_kind text,memory_key text,memory_content text,scope_type text,scope_value text,reason text,active int DEFAULT 1,rejected_at text DEFAULT pg_now_text(),rejected_by text DEFAULT '',restored_at text DEFAULT '',restored_by text DEFAULT '');
 CREATE UNIQUE INDEX tomb_unique ON memory_rejection_tombstones(memory_key,memory_content,scope_type,scope_value) WHERE object_kind='memory' AND active=1;
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text,UNIQUE(memory_id,scope_type,scope_value));
@@ -117,11 +117,11 @@ UPDATE memories SET epistemic_kind='policy' WHERE id=8;`)
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE id=2`).Scan(&count); err != nil || count != 0 {
 		t.Fatal(count, err)
 	}
-	// Authentication alone does not request destructive editing.
+	// Every correction preserves history, including explicit user authority.
 	if r := run("update", `{"id":3,"content":"versioned"}`, true); r["status"] != "ok" || r["superseded"] != true || r["id"] == float64(3) {
 		t.Fatal(r)
 	}
-	if r := run("update", `{"id":4,"content":"in place","authority":"user"}`, true); r["status"] != "ok" || r["superseded"] != false || r["id"] != float64(4) {
+	if r := run("update", `{"id":4,"content":"in place","authority":"user"}`, true); r["status"] != "ok" || r["superseded"] != true || r["id"] == float64(4) {
 		t.Fatal(r)
 	}
 	for _, id := range []string{"7", "8"} {

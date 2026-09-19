@@ -317,7 +317,7 @@ type directiveDataStore interface {
 
 type domainDataStore interface {
 	Touch(context.Context, []int64) (int, error)
-	UpdateContent(context.Context, int64, string) (bool, error)
+	UpdateContent(context.Context, int64, string) (int64, error)
 	Reject(context.Context, int64, string) (bool, error)
 	LinkCreate(context.Context, int64, int64, string) (MemoryLink, error)
 	LinkQuery(context.Context, int64, int) ([]MemoryLink, error)
@@ -736,13 +736,10 @@ func searchPattern(query string) string {
 }
 
 func (s *postgresDataStore) Put(ctx context.Context, scope Scope, r Record) (out Record, err error) {
-	merged := false
 	defer func() {
-		tool := ""
-		if merged {
-			tool = "memory.merge"
+		if s.placement == PlacementServer {
+			s.recordMutation(DataRequest{Operation: "store"}, DataResponse{Records: []Record{out}}, err, "")
 		}
-		s.recordMutation(DataRequest{Operation: "store"}, DataResponse{Records: []Record{out}}, err, tool)
 	}()
 	var screenErr error
 	r.Content, screenErr = screenMemoryWrite(r.Key, r.Content)
@@ -764,25 +761,24 @@ ON CONFLICT (kind, key) DO UPDATE SET
 RETURNING id`, r.Kind, r.Tier, r.Key, r.Content, r.Confidence).Scan(&r.ID)
 		return r, err
 	}
-	err = s.db.QueryRow(ctx, `WITH updated AS (
-  UPDATE memories SET tier = $2, content = $4, confidence = $5,
-    updated_at = pg_now_text()
-  WHERE kind = $1 AND key = $3 AND scope_type = $6 AND scope_value = $7
-    AND lifecycle_state = 'active'
-  RETURNING id
-), inserted AS (
-  INSERT INTO memories
-    (kind, tier, key, content, confidence, scope_type, scope_value, lifecycle_state)
-  SELECT $1, $2, $3, $4, $5, $6, $7, 'active'
-  WHERE NOT EXISTS (SELECT 1 FROM updated)
-  RETURNING id
-)
-SELECT id,true FROM updated UNION ALL SELECT id,false FROM inserted LIMIT 1`,
-		r.Kind, r.Tier, r.Key, r.Content, r.Confidence, scope.Type, scope.Value).Scan(&r.ID, &merged)
-	return r, err
+	return s.InsertEpistemic(ctx, DataRequest{Scope: scope, Tier: r.Tier, Kind: r.Kind, Key: r.Key, Content: r.Content, Confidence: &r.Confidence, Authority: AuthorityModel})
 }
 
 func (s *postgresDataStore) Delete(ctx context.Context, scope Scope, id int64) (changed bool, err error) {
+	if s.placement == PlacementKB {
+		current, err := s.get(ctx, scope, id, false)
+		if errors.Is(err, ErrMemoryNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if current.Scope != scope {
+			return false, nil
+		}
+		return s.DeleteAs(ctx, id, AuthorityModel)
+	}
+
 	defer func() {
 		s.recordMutation(DataRequest{Operation: "delete", ID: id}, DataResponse{Deleted: changed}, err, "memory.retire")
 	}()
@@ -792,10 +788,6 @@ func (s *postgresDataStore) Delete(ctx context.Context, scope Scope, id int64) (
 	if s.placement == PlacementServer {
 		tag, err = s.db.Exec(ctx, `UPDATE user_memories SET lifecycle_state = 'retired', updated_at = now()
 WHERE id = $1 AND lifecycle_state = 'active'`, id)
-	} else {
-		tag, err = s.db.Exec(ctx, `UPDATE memories SET lifecycle_state = 'retired', updated_at = pg_now_text()
-WHERE id = $1 AND scope_type = $2 AND scope_value = $3 AND lifecycle_state = 'active'`,
-			id, scope.Type, scope.Value)
 	}
 	if err != nil {
 		return false, err
@@ -2081,7 +2073,12 @@ set_config('aimee.correlation_id',$9,true)`,
 			if request.ID <= 0 {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			response.Updated, err = domain.UpdateContent(ctx, request.ID, request.Content)
+			var id int64
+			id, err = domain.UpdateContent(ctx, request.ID, request.Content)
+			response.Updated = err == nil && id > 0
+			if response.Updated {
+				response.IDs = []int64{id}
+			}
 		case "reject":
 			if request.ID <= 0 {
 				return nil, bus.ModuleStatusInvalidRequest
@@ -2436,6 +2433,11 @@ set_config('aimee.correlation_id',$9,true)`,
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if code := mutationRefusal(err); code != 0 {
+		response = DataResponse{Code: &code}
+		err = nil
+	}
+
 	if err != nil {
 		if invocation.Cancelled() || ctx.Err() != nil {
 			return nil, bus.ModuleStatusCancelled

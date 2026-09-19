@@ -3,9 +3,11 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
@@ -45,7 +47,7 @@ SET LOCAL search_path TO pg_temp,store_command_test,public;
 CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text,tier text,kind text,epistemic_kind text,
  scope_type text,scope_value text,confidence double precision,confidence_ceiling double precision,use_count int DEFAULT 0,
  lifecycle_state text,activation_suppressed int DEFAULT 0,archive_reason text DEFAULT '',use_cases text DEFAULT '',last_used_at text DEFAULT '',source_session text DEFAULT '',provenance_category text DEFAULT '',
- valid_from text DEFAULT '',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
+ owner_principal text DEFAULT '',sensitivity text DEFAULT 'normal',valid_from text DEFAULT '',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
 CREATE UNIQUE INDEX memory_key_scope ON memories(kind,key,scope_type,scope_value);
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text,UNIQUE(memory_id,scope_type,scope_value));
 CREATE TEMP TABLE memory_links(id bigserial PRIMARY KEY,source_id bigint,target_id bigint,relation text);
@@ -93,13 +95,13 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 		t.Fatal(user)
 	}
 	checkActor(user["id"], "user:alice", 30, 1)
-	// A failed model edit must roll back the closed interval, replacement,
+	// A failed authorized correction must roll back the closed interval, replacement,
 	// lineage, and extraction actor together.
 	if _, err := tx.Exec(ctx, `ALTER TABLE kb_async_jobs ADD CONSTRAINT update_enqueue_failure CHECK (document_id<0) NOT VALID`); err != nil {
 		t.Fatal(err)
 	}
-	edit := fmt.Sprintf(`{"id":%.0f,"content":"failed replacement"}`, user["id"])
-	if r := runPublicCommand(t, client, "update", edit); r["kind"] != "unavailable" {
+	edit := fmt.Sprintf(`{"id":%.0f,"content":"failed replacement","authority":"user"}`, user["id"])
+	if r, status := invokeContextCommand(t, handler, 0, caller, "update", edit); status != bus.ModuleStatusOK || r["kind"] != "unavailable" {
 		t.Fatal(r)
 	}
 	var active bool
@@ -114,15 +116,62 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	if _, err := tx.Exec(ctx, `ALTER TABLE kb_async_jobs DROP CONSTRAINT update_enqueue_failure`); err != nil {
 		t.Fatal(err)
 	}
-	// Reusing a key for model text must replace stale, higher extraction authority.
-	replaced := put(`{"key":"user-note","content":"model replacement","scope_context":true,"project":"app"}`, true)
-	if replaced["status"] != "ok" || replaced["id"] != user["id"] {
+	// A same-key write, edit, supersede or retirement cannot silently displace
+	// user-authored content, even through an authenticated model host.
+	for _, attempt := range []struct{ verb, args string }{
+		{"store", `{"key":"user-note","content":"model replacement","scope_context":true,"project":"app"}`},
+		{"update", fmt.Sprintf(`{"id":%.0f,"content":"model replacement"}`, user["id"])},
+		{"supersede", fmt.Sprintf(`{"old_id":%.0f,"new_content":"model replacement"}`, user["id"])},
+		{"delete", fmt.Sprintf(`{"id":%.0f}`, user["id"])},
+	} {
+		got, status := invokeContextCommand(t, handler, 0, caller, attempt.verb, attempt.args)
+		if status != bus.ModuleStatusOK || got["kind"] != "review_required" {
+			t.Fatal(attempt, got, status)
+		}
+	}
+	checkActor(user["id"], "user:alice", 30, 1)
+	replaced := put(`{"key":"user-note","content":"reviewed correction","authority":"user","scope_context":true,"project":"app"}`, true)
+	if replaced["status"] != "ok" || replaced["id"] == user["id"] {
 		t.Fatal(replaced, user)
 	}
-	checkActor(replaced["id"], "system:model-inference", 10, 0)
+	checkActor(replaced["id"], "user:alice", 30, 1)
+	// Older data-stage verbs are compatibility adapters to the same admission.
+	for _, operation := range []string{"store", "update-content", "delete"} {
+		request := DataRequest{Operation: operation, ID: int64(replaced["id"].(float64)), Scope: Scope{Type: ScopeProject, Value: "app"}, Tier: "L2", Kind: "fact", Key: "user-note", Content: "legacy overwrite"}
+		body, _ := json.Marshal(request)
+		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, body)
+		var result DataResponse
+		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &result) != nil || result.Code == nil || *result.Code != MutationReviewRequired {
+			t.Fatal(operation, string(raw), status)
+		}
+	}
+
+	var oldContent, oldState string
+	if err := tx.QueryRow(ctx, `SELECT content,lifecycle_state FROM memories WHERE id=$1`, int64(user["id"].(float64))).Scan(&oldContent, &oldState); err != nil || oldContent != "verified note" || oldState != "superseded" {
+		t.Fatal(oldContent, oldState, err)
+	}
 	var jobs int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM kb_async_jobs WHERE kind='memory_facts' AND status='pending'`).Scan(&jobs); err != nil || jobs != 2 {
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM kb_async_jobs WHERE kind='memory_facts' AND status='pending'`).Scan(&jobs); err != nil || jobs != 3 {
 		t.Fatal(jobs, err)
+	}
+	// Retrying identical bytes does not rewrite the original extraction author.
+	other := caller
+	other.Principal = "user:bob"
+	same, status := invokeContextCommand(t, handler, 0, other, "store", `{"key":"user-note","content":"reviewed correction","authority":"user","scope_context":true,"project":"app"}`)
+	if status != bus.ModuleStatusOK || same["id"] != replaced["id"] {
+		t.Fatal(same, status)
+	}
+	checkActor(replaced["id"], "user:alice", 30, 1)
+	// Immutable epistemic kinds retain the same protection on upsert as on edit.
+	for _, kind := range []string{"episode", "experience", "instruction", "policy"} {
+		made := put(fmt.Sprintf(`{"key":"guard-%s","content":"original","epistemic_kind":"%s","authority":"user"}`, kind, kind), true)
+		if made["status"] != "ok" {
+			t.Fatal(made)
+		}
+		conflict := put(fmt.Sprintf(`{"key":"guard-%s","content":"overwrite","authority":"user"}`, kind), true)
+		if conflict["kind"] != "conflict" {
+			t.Fatal(kind, conflict)
+		}
 	}
 	if low := put(`{"key":"hypothesis","content":"tentative","tier":"L5","authority":"user"}`, true); low["status"] != "ok" || low["memory"].(map[string]any)["confidence"] != 0.5 {
 		t.Fatal(low)
@@ -158,10 +207,13 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 		t.Fatal(scope, err)
 	}
 
-	// Replacement preserves history and scope while lowering inherited authority.
-	original := put(`{"key":"version#v123","content":"original","authority":"user","tier":"L2","use_cases":"context","session_id":"before","scope_context":true,"project":"app"}`, true)
+	// Model replacement preserves its own history, scope and model provenance.
+	original := put(`{"key":"version#v123","content":"original","tier":"L2","use_cases":"context","session_id":"before","scope_context":true,"project":"app"}`, true)
 	oldID := int64(original["id"].(float64))
 	if _, err := tx.Exec(ctx, `INSERT INTO memory_scopes VALUES ($1,'workspace','team')`, oldID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE memories SET owner_principal='user:private',sensitivity='sensitive' WHERE id=$1`, oldID); err != nil {
 		t.Fatal(err)
 	}
 	replacementArgs := fmt.Sprintf(`{"old_id":%d,"new_content":"replacement","confidence":1,"session_id":"after","scope_context":true,"project":"app"}`, oldID)
@@ -175,6 +227,10 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 		t.Fatal(replacement)
 	}
 	checkActor(fresh["id"], "system:model-inference", 10, 0)
+	var owner, sensitivity string
+	if err := tx.QueryRow(ctx, `SELECT owner_principal,sensitivity FROM memories WHERE id=$1`, newID).Scan(&owner, &sensitivity); err != nil || owner != "user:private" || sensitivity != "sensitive" {
+		t.Fatal(owner, sensitivity, err)
+	}
 	var boundary, state, oldKey string
 	var equal bool
 	err = tx.QueryRow(ctx, `SELECT o.key,o.lifecycle_state,o.valid_until,o.valid_until=n.valid_from FROM memories o,memories n WHERE o.id=$1 AND n.id=$2`, oldID, newID).Scan(&oldKey, &state, &boundary, &equal)
@@ -265,4 +321,92 @@ SET LOCAL ROLE memory_store_test;`)
 		t.Fatal(r)
 	}
 
+}
+
+// An insert conflict must wait for the actual uncommitted identity lock, then
+// admit against the committed author's authority rather than overwrite it.
+func TestSameKeyMutationConcurrency(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	aConn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer aConn.Close(context.Background())
+	bConn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bConn.Close(context.Background())
+	a, err := aConn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Rollback(context.Background())
+	b, err := bConn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Rollback(context.Background())
+	request := DataRequest{Scope: Scope{Type: ScopeProject, Value: "mutation-concurrency"}, Tier: "L2", Kind: "fact", Key: fmt.Sprintf("mutation-%d", time.Now().UnixNano()), Content: "verified original", Authority: AuthorityUser}
+	first, err := (&postgresDataStore{db: evalQueryer{a}, placement: PlacementKB}).InsertEpistemic(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		// Release any failed attempt before cleaning only this test's record.
+		cancel()
+		b.Rollback(context.Background())
+		a.Rollback(context.Background())
+		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		_, err := aConn.Exec(cleanup, `DELETE FROM memories WHERE id=$1 AND key=$2`, first.ID, request.Key)
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+	done := make(chan error, 1)
+	model := request
+	model.Content, model.Authority = "model overwrite", AuthorityModel
+	go func() {
+		_, err := (&postgresDataStore{db: evalQueryer{b}, placement: PlacementKB}).InsertEpistemic(ctx, model)
+		done <- err
+	}()
+	waiting := false
+	for !waiting {
+		if err := a.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND NOT granted)`, int64(bConn.PgConn().PID())).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if !waiting {
+			select {
+			case err := <-done:
+				t.Fatal("conflicting writer bypassed identity lock", err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
+	if err := a.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, errMutationReviewRequired) {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if err := b.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var content, state string
+	if err := aConn.QueryRow(ctx, `SELECT content,lifecycle_state FROM memories WHERE id=$1`, first.ID).Scan(&content, &state); err != nil || content != "verified original" || state != "active" {
+		t.Fatal(content, state, err)
+	}
 }

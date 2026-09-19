@@ -133,16 +133,22 @@ last_used_at=pg_now_text(), updated_at=pg_now_text() WHERE id=ANY($1::text::bigi
 	return int(tag.RowsAffected()), nil
 }
 
-func (s *postgresDataStore) UpdateContent(ctx context.Context, id int64, content string) (out bool, err error) {
-	defer func() {
-		s.recordMutation(DataRequest{Operation: "update-content", ID: id}, DataResponse{Updated: out}, err, "")
-	}()
-	if err := s.requireKBDomain(); err != nil {
-		return false, err
+// Legacy content edits use the canonical model transition and return its new
+// identity. They cannot mutate old content or bypass epistemic/author checks.
+func (s *postgresDataStore) UpdateContent(ctx context.Context, id int64, content string) (int64, error) {
+	code, next, err := s.UpdateAs(ctx, id, content, AuthorityModel)
+	if err != nil {
+		return 0, err
 	}
-	tag, err := s.db.Exec(ctx, `UPDATE memories SET content=$2, updated_at=pg_now_text()
-WHERE id=$1 AND lifecycle_state='active'`, id, content)
-	return err == nil && tag.RowsAffected() > 0, err
+	switch code {
+	case MutationImmutableExperience:
+		return 0, errImmutableExperience
+	case MutationRequiresReplacement:
+		return 0, errRequiresRevocation
+	case MutationReviewRequired:
+		return 0, errMutationReviewRequired
+	}
+	return next, nil
 }
 
 func (s *postgresDataStore) Reject(ctx context.Context, id int64, reason string) (out bool, err error) {

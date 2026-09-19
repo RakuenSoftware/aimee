@@ -5,6 +5,21 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 )
 
+func commandMutationRefusal(code *int) map[string]any {
+	if code == nil {
+		return nil
+	}
+	switch *code {
+	case MutationImmutableExperience:
+		return commandError("conflict", errImmutableExperience.Error())
+	case MutationRequiresReplacement:
+		return commandError("conflict", errRequiresRevocation.Error())
+	case MutationReviewRequired:
+		return commandError("review_required", errMutationReviewRequired.Error())
+	}
+	return nil
+}
+
 func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
 	request := DataRequest{IncludeAll: true}
 	invalid := func(message string) ([]byte, bus.ModuleStatus) {
@@ -71,6 +86,9 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
+	}
+	if refusal := commandMutationRefusal(response.Code); refusal != nil {
+		return commandResult(refusal)
 	}
 	result := map[string]any{"status": "ok"}
 	missing := false

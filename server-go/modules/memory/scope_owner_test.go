@@ -210,7 +210,7 @@ func exerciseScopeReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler b
 		t.Fatal("packaged delete failed")
 	}
 	var lifecycle string
-	if err := tx.QueryRow(ctx, `SELECT lifecycle_state FROM memories WHERE id=$1`, id).Scan(&lifecycle); err != nil || lifecycle != "retired" {
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state FROM memories WHERE id=$1`, id).Scan(&lifecycle); err != nil || lifecycle != "superseded" {
 		t.Fatal(lifecycle, err)
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_workspaces WHERE memory_id=$1`, id).Scan(&n); err != nil || n != 1 {
