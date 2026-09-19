@@ -481,15 +481,6 @@ void memory_filter_from_scope(const char *scope_type, const char *scope_value,
 /* Serialize a filter to a fresh cJSON object.  Caller owns it. */
 struct cJSON *memory_filter_to_json(const memory_filter_t *f);
 
-/* --- Effective importance (memory-public-contract) --- */
-
-/* Compute the effective importance of a memory for ranking / explain.
- * Formula: base × kind_decay(age) × bounded_reinforcement(use_count)
- * with a freshness floor for rows < 24h old.
- * now_sec: current epoch-seconds (0 = use time(NULL)).
- * Returns a value in (0, 1]. */
-double memory_effective_importance(const memory_t *m, time_t now_sec);
-
 /* --- Workflow Learning --- */
 
 /* Upsert a project workflow memory (kind=workflow) scoped to a workspace.

@@ -328,8 +328,6 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
          }
          cJSON *entry = cJSON_CreateObject();
          cJSON_AddItemToObject(entry, "memory", memory_to_json(&facts[i]));
-         cJSON_AddNumberToObject(entry, "effective_importance",
-                                 memory_effective_importance(&facts[i], 0));
          for (int j = 0; j < explain_count; j++)
          {
             if (explain_rows[j].memory.id != facts[i].id)
@@ -378,8 +376,7 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
       fputs(jo_cstr(explain_stats, "pagerank_text"), stdout);
       for (int i = 0; i < fact_count; i++)
       {
-         printf("[%d] #%lld %s  eff_imp=%.3f\n", i + 1, (long long)facts[i].id, facts[i].key,
-                memory_effective_importance(&facts[i], 0));
+         printf("[%d] #%lld %s\n", i + 1, (long long)facts[i].id, facts[i].key);
          for (int j = 0; j < explain_count; j++)
          {
             if (explain_rows[j].memory.id != facts[i].id)

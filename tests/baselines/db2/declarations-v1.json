@@ -954,10 +954,6 @@
     },
     {
       "classification": "private-implementation-test",
-      "path": "src/tests/test_memory_filter.c"
-    },
-    {
-      "classification": "private-implementation-test",
       "path": "src/tests/test_memory_retrieval_eval.c"
     },
     {
@@ -16565,7 +16561,6 @@
         "src/tests/test_learning_synth.c",
         "src/tests/test_learning_version.c",
         "src/tests/test_memory_advanced.c",
-        "src/tests/test_memory_filter.c",
         "src/tests/test_notes.c",
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_pgvec.c",
@@ -19978,7 +19973,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "1156c427d21b4ed0dc738423ef71cec61db522eaa304d3c4d2d42a30da83a971",
+  "fingerprint": "896b89a52b14d2c94671814373f0096a513be54b4e7de3219f5dd51d35ac1c53",
   "module": "db2",
   "schema_version": 1,
   "summary": {

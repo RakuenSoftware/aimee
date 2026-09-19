@@ -6,6 +6,7 @@
  * in cmd_memory_core.c too). */
 #include "aimee.h"
 #include "cmd_memory_internal.h"
+#include "config_database.h"
 #include "db1_client/db1.h"
 #include "dogfood.h"
 #include "modules/db2/c/memory_query.h"
@@ -393,14 +394,6 @@ void mem_answer(app_ctx_t *ctx, int argc, char **argv)
       {
          cJSON *citation = cJSON_CreateObject();
          cJSON_AddNumberToObject(citation, "memory_id", (double)surfaced_ids[i]);
-         if (explain)
-         {
-            memory_t mem;
-            memset(&mem, 0, sizeof(mem));
-            if (kb_client_memory_get(surfaced_ids[i], &mem) == 0)
-               cJSON_AddNumberToObject(citation, "effective_importance",
-                                       memory_effective_importance(&mem, 0));
-         }
          cJSON_AddItemToArray(citations, citation);
       }
       if (explain)
@@ -488,463 +481,69 @@ void mem_reflect(app_ctx_t *ctx, int argc, char **argv)
    cJSON_Delete(result);
 }
 
-typedef struct
+/* Label parsing, scoring and calibration belong to the Go owner. */
+static void mem_label_analysis(app_ctx_t *ctx, int argc, char **argv, const char *method)
 {
-   char query[1024];
-   int64_t expected_id;
-} memory_label_case_t;
-
-typedef struct
-{
-   double lexical;
-   double coverage;
-   double entity;
-   double temporal;
-   double evidence;
-   double semantic;
-   double state;
-   double intent;
-   double confidence;
-} memory_multiplier_profile_t;
-
-static memory_multiplier_profile_t memory_multiplier_profile_default(void)
-{
-   memory_multiplier_profile_t p = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
-   return p;
-}
-
-static int memory_load_label_cases(const char *path, memory_label_case_t *cases, int max_cases)
-{
-   FILE *fp = fopen(path, "r");
+   opt_parsed_t opts;
+   opt_parse(argc, argv, NULL, &opts);
+   const char *labels = opt_get(&opts, "labels");
+   if (!labels)
+      fatal("memory analysis requires --labels <query<TAB>memory_id file>");
+   FILE *fp = fopen(labels, "rb");
    if (!fp)
-      fatal("failed to open labels file: %s", path);
-
-   int count = 0;
-   char line[4096];
-   while (fgets(line, sizeof(line), fp) && count < max_cases)
-   {
-      char *p = line;
-      while (*p && isspace((unsigned char)*p))
-         p++;
-      if (!*p || *p == '#')
-         continue;
-      char *tab = strchr(p, '\t');
-      if (!tab)
-         continue;
-      *tab = '\0';
-      char *id_str = tab + 1;
-      char *nl = strchr(id_str, '\n');
-      if (nl)
-         *nl = '\0';
-      while (*id_str && isspace((unsigned char)*id_str))
-         id_str++;
-      if (!p[0] || !id_str[0])
-         continue;
-      snprintf(cases[count].query, sizeof(cases[count].query), "%s", p);
-      cases[count].expected_id = atoll(id_str);
-      if (cases[count].expected_id > 0)
-         count++;
-   }
+      fatal("cannot open labels file");
+   char *input = malloc(1048578);
+   if (!input)
+      fatal("cannot allocate labels input");
+   size_t count = fread(input, 1, 1048577, fp);
+   int failed = ferror(fp);
    fclose(fp);
-   return count;
-}
-
-static double memory_rescore_parts(const memory_score_parts_t *parts,
-                                   const memory_multiplier_profile_t *profile)
-{
-   return parts->lexical * profile->lexical + parts->coverage * profile->coverage +
-          parts->entity * profile->entity + parts->temporal * profile->temporal +
-          parts->evidence * profile->evidence + parts->semantic * profile->semantic +
-          parts->state * profile->state + parts->intent * profile->intent + parts->salience +
-          parts->surprise + parts->pagerank + parts->confidence * profile->confidence;
-}
-
-static void memory_sort_diagnostics(memory_diagnostic_t *rows, int count,
-                                    const memory_multiplier_profile_t *profile)
-{
-   for (int i = 0; i < count; i++)
-      rows[i].parts.total = memory_rescore_parts(&rows[i].parts, profile);
-   for (int i = 0; i < count; i++)
+   if (failed || count > 1048576 || memchr(input, '\0', count))
+      fatal("labels must be text of at most 1 MiB");
+   input[count] = '\0';
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "labels_tsv", input);
+   free(input);
+   cJSON_AddStringToObject(request, "labels", labels);
+   cJSON_AddNumberToObject(request, "limit", opt_get_int(&opts, "limit", 10));
+   cJSON_AddNumberToObject(request, "candidate_limit", opt_get_int(&opts, "candidate-limit", 24));
+   cJSON_AddNumberToObject(request, "rounds", opt_get_int(&opts, "rounds", 2));
+   cJSON_AddBoolToObject(request, "apply_config", opt_get_flag(&opts, "apply-config"));
+   cJSON_AddStringToObject(request, "format", ctx->json_output ? "json" : "text");
+   if (ctx->json_fields)
+      cJSON_AddStringToObject(request, "fields", ctx->json_fields);
+   if (ctx->response_profile)
+      cJSON_AddStringToObject(request, "profile", ctx->response_profile);
+   cJSON *result = mem_rpc_unwrap(kb_v1_action_request(method, request), "memory analysis failed");
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(result, "output");
+   const cJSON *artifact = cJSON_GetObjectItemCaseSensitive(result, "artifact");
+   if (!cJSON_IsString(output) || !cJSON_IsString(artifact))
+      fatal("memory analysis returned malformed output");
+   const char *write_path = opt_get(&opts, "write");
+   if (write_path && write_path[0])
    {
-      for (int j = i + 1; j < count; j++)
-      {
-         if (rows[j].parts.total > rows[i].parts.total)
-         {
-            memory_diagnostic_t tmp = rows[i];
-            rows[i] = rows[j];
-            rows[j] = tmp;
-         }
-      }
+      fp = fopen(write_path, "wb");
+      if (!fp)
+         fatal("cannot open analysis artifact");
+      size_t length = strlen(artifact->valuestring);
+      failed = fwrite(artifact->valuestring, 1, length, fp) != length;
+      failed |= fclose(fp) != 0;
+      if (failed)
+         fatal("cannot write analysis artifact");
    }
-}
-
-static int memory_query_has_temporal_intent(const char *query)
-{
-   if (!query || !query[0])
-      return 0;
-   return strstr(query, "when") != NULL || strstr(query, "date") != NULL ||
-          strstr(query, "before") != NULL || strstr(query, "after") != NULL ||
-          strstr(query, "year") != NULL || strstr(query, "month") != NULL ||
-          strstr(query, "today") != NULL || strstr(query, "yesterday") != NULL;
-}
-
-static const char *memory_bucket_failure(const char *query, const memory_diagnostic_t *expected)
-{
-   if (memory_query_has_temporal_intent(query) && expected->parts.temporal <= 0.0 &&
-       (strstr(expected->memory.content, "20") || strstr(expected->memory.content, "Jan") ||
-        strstr(expected->memory.content, "Feb") || strstr(expected->memory.content, "Mar") ||
-        strstr(expected->memory.content, "Apr") || strstr(expected->memory.content, "May") ||
-        strstr(expected->memory.content, "Jun") || strstr(expected->memory.content, "Jul") ||
-        strstr(expected->memory.content, "Aug") || strstr(expected->memory.content, "Sep") ||
-        strstr(expected->memory.content, "Oct") || strstr(expected->memory.content, "Nov") ||
-        strstr(expected->memory.content, "Dec")))
-      return "temporal_miss";
-   if (expected->parts.entity <= 0.0)
-      return "entity_miss";
-   if (expected->parts.lexical <= 0.0 && expected->parts.semantic > 0.0)
-      return "lexical_gap";
-   if (expected->parts.semantic <= 0.0 && expected->parts.lexical < 1.5)
-      return "semantic_gap";
-   if (expected->parts.state < -0.1)
-      return "state_penalty";
-   if (expected->parts.coverage < 0.5)
-      return "granularity_gap";
-   return "ranking_gap";
-}
-
-static int memory_collect_candidates(const char *query, int candidate_limit, int64_t expected_id,
-                                     memory_diagnostic_t *rows, int max_rows)
-{
-   int count = kb_client_memory_diagnose(query, candidate_limit, rows, max_rows);
-   int have_expected = 0;
-   for (int i = 0; i < count; i++)
-   {
-      if (rows[i].memory.id == expected_id)
-      {
-         have_expected = 1;
-         break;
-      }
-   }
-   if (!have_expected && expected_id > 0 && count < max_rows &&
-       kb_client_memory_explain_match(query, expected_id, &rows[count]) == 0)
-      count++;
-   return count;
-}
-
-static int memory_find_expected_rank(memory_diagnostic_t *rows, int count,
-                                     const memory_multiplier_profile_t *profile,
-                                     int64_t expected_id)
-{
-   memory_sort_diagnostics(rows, count, profile);
-   for (int i = 0; i < count; i++)
-   {
-      if (rows[i].memory.id == expected_id)
-         return i + 1;
-   }
-   return 0;
-}
-
-static double memory_eval_labeled_cases(const memory_label_case_t *cases, int case_count, int limit,
-                                        int candidate_limit,
-                                        const memory_multiplier_profile_t *profile, int *hits_at_k)
-{
-   double mrr = 0.0;
-   if (hits_at_k)
-      *hits_at_k = 0;
-   for (int i = 0; i < case_count; i++)
-   {
-      memory_diagnostic_t rows[40];
-      int count = memory_collect_candidates(cases[i].query, candidate_limit, cases[i].expected_id,
-                                            rows, 40);
-      int rank = memory_find_expected_rank(rows, count, profile, cases[i].expected_id);
-      if (rank > 0)
-      {
-         mrr += 1.0 / (double)rank;
-         if (hits_at_k && rank <= limit)
-            (*hits_at_k)++;
-      }
-   }
-   return case_count > 0 ? mrr / (double)case_count : 0.0;
-}
-
-static void memory_write_profile_file(const char *path, const memory_multiplier_profile_t *profile)
-{
-   const char *profile_path = getenv("AIMEE_MEMORY_WEIGHT_PROFILE");
-   double lexical_key = 2.0, lexical_content = 1.0, long_token = 0.5, coverage = 3.0;
-   double entity = 1.0, temporal = 1.0, evidence = 1.0, semantic = 1.2, state = 1.0;
-   double workflow_intent = 1.2, entity_intent = 0.5, temporal_intent = 0.6, confidence = 0.05;
-
-   if (profile_path && profile_path[0])
-   {
-      FILE *in = fopen(profile_path, "r");
-      if (in)
-      {
-         char line[256];
-         while (fgets(line, sizeof(line), in))
-         {
-            char name[128];
-            double value = 0.0;
-            if (sscanf(line, " %127[^=]=%lf", name, &value) != 2)
-               continue;
-            if (strcmp(name, "lexical_key") == 0)
-               lexical_key = value;
-            else if (strcmp(name, "lexical_content") == 0)
-               lexical_content = value;
-            else if (strcmp(name, "long_token") == 0)
-               long_token = value;
-            else if (strcmp(name, "coverage") == 0)
-               coverage = value;
-            else if (strcmp(name, "entity") == 0)
-               entity = value;
-            else if (strcmp(name, "temporal") == 0)
-               temporal = value;
-            else if (strcmp(name, "evidence") == 0)
-               evidence = value;
-            else if (strcmp(name, "semantic") == 0)
-               semantic = value;
-            else if (strcmp(name, "state") == 0)
-               state = value;
-            else if (strcmp(name, "workflow_intent") == 0)
-               workflow_intent = value;
-            else if (strcmp(name, "entity_intent") == 0)
-               entity_intent = value;
-            else if (strcmp(name, "temporal_intent") == 0)
-               temporal_intent = value;
-            else if (strcmp(name, "confidence") == 0)
-               confidence = value;
-         }
-         fclose(in);
-      }
-   }
-
-   lexical_key = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_LEXICAL_KEY", lexical_key);
-   lexical_content = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_LEXICAL_CONTENT", lexical_content);
-   long_token = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_LONG_TOKEN", long_token);
-   coverage = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_COVERAGE", coverage);
-   entity = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_ENTITY", entity);
-   temporal = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_TEMPORAL", temporal);
-   evidence = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_EVIDENCE", evidence);
-   semantic = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_SEMANTIC", semantic);
-   state = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_STATE", state);
-   workflow_intent = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_WORKFLOW_INTENT", workflow_intent);
-   entity_intent = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_ENTITY_INTENT", entity_intent);
-   temporal_intent = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_TEMPORAL_INTENT", temporal_intent);
-   confidence = cmd_memory_env_weight("AIMEE_MEMORY_WEIGHT_CONFIDENCE", confidence);
-
-   FILE *out = fopen(path, "w");
-   if (!out)
-      fatal("failed to write profile: %s", path);
-   fprintf(out, "lexical_key=%.6f\n", lexical_key * profile->lexical);
-   fprintf(out, "lexical_content=%.6f\n", lexical_content * profile->lexical);
-   fprintf(out, "long_token=%.6f\n", long_token * profile->lexical);
-   fprintf(out, "coverage=%.6f\n", coverage * profile->coverage);
-   fprintf(out, "entity=%.6f\n", entity * profile->entity);
-   fprintf(out, "temporal=%.6f\n", temporal * profile->temporal);
-   fprintf(out, "evidence=%.6f\n", evidence * profile->evidence);
-   fprintf(out, "semantic=%.6f\n", semantic * profile->semantic);
-   fprintf(out, "state=%.6f\n", state * profile->state);
-   fprintf(out, "workflow_intent=%.6f\n", workflow_intent * profile->intent);
-   fprintf(out, "entity_intent=%.6f\n", entity_intent * profile->intent);
-   fprintf(out, "temporal_intent=%.6f\n", temporal_intent * profile->intent);
-   fprintf(out, "confidence=%.6f\n", confidence * profile->confidence);
-   fclose(out);
+   fputs(output->valuestring, stdout);
+   cJSON_Delete(result);
 }
 
 void mem_audit(app_ctx_t *ctx, int argc, char **argv)
 {
-   (void)ctx;
-   opt_parsed_t opts;
-   opt_parse(argc, argv, NULL, &opts);
-   const char *labels = opt_get(&opts, "labels");
-   int limit = opt_get_int(&opts, "limit", 10);
-   int candidate_limit = opt_get_int(&opts, "candidate-limit", 24);
-   if (!labels)
-      fatal("memory audit requires --labels <query<TAB>memory_id file>");
-
-   memory_label_case_t cases[4096];
-   int case_count = memory_load_label_cases(labels, cases, 4096);
-   if (case_count <= 0)
-      fatal("no valid label cases in %s", labels);
-
-   memory_multiplier_profile_t profile = memory_multiplier_profile_default();
-   double mrr = 0.0;
-   int hits = 0;
-   int temporal_miss = 0, entity_miss = 0, lexical_gap = 0, semantic_gap = 0;
-   int state_penalty = 0, granularity_gap = 0, ranking_gap = 0, missing = 0;
-
-   for (int i = 0; i < case_count; i++)
-   {
-      memory_diagnostic_t rows[40];
-      int count = memory_collect_candidates(cases[i].query, candidate_limit, cases[i].expected_id,
-                                            rows, 40);
-      int rank = memory_find_expected_rank(rows, count, &profile, cases[i].expected_id);
-      if (rank > 0)
-      {
-         mrr += 1.0 / (double)rank;
-         if (rank <= limit)
-            hits++;
-      }
-      else
-      {
-         missing++;
-      }
-
-      memory_diagnostic_t expected;
-      if (kb_client_memory_explain_match(cases[i].query, cases[i].expected_id, &expected) == 0)
-      {
-         const char *bucket = memory_bucket_failure(cases[i].query, &expected);
-         if (strcmp(bucket, "temporal_miss") == 0)
-            temporal_miss++;
-         else if (strcmp(bucket, "entity_miss") == 0)
-            entity_miss++;
-         else if (strcmp(bucket, "lexical_gap") == 0)
-            lexical_gap++;
-         else if (strcmp(bucket, "semantic_gap") == 0)
-            semantic_gap++;
-         else if (strcmp(bucket, "state_penalty") == 0)
-            state_penalty++;
-         else if (strcmp(bucket, "granularity_gap") == 0)
-            granularity_gap++;
-         else
-            ranking_gap++;
-      }
-   }
-
-   mrr /= (double)case_count;
-   if (ctx->json_output)
-   {
-      cJSON *j = cJSON_CreateObject();
-      jo_add_str(j, "labels", labels);
-      jo_add_num(j, "mrr", mrr);
-      jo_add_num(j, "recall_at_k", (double)hits / (double)case_count);
-      jo_add_i64(j, "case_count", case_count);
-      cJSON *b = cJSON_CreateObject();
-      jo_add_i64(b, "temporal_miss", temporal_miss);
-      jo_add_i64(b, "entity_miss", entity_miss);
-      jo_add_i64(b, "lexical_gap", lexical_gap);
-      jo_add_i64(b, "semantic_gap", semantic_gap);
-      jo_add_i64(b, "state_penalty", state_penalty);
-      jo_add_i64(b, "granularity_gap", granularity_gap);
-      jo_add_i64(b, "ranking_gap", ranking_gap);
-      jo_add_i64(b, "missing", missing);
-      cJSON_AddItemToObject(j, "buckets", b);
-      emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
-      return;
-   }
-
-   printf("Audit labels: %s\n", labels);
-   printf("Cases: %d\n", case_count);
-   printf("MRR: %.4f\n", mrr);
-   printf("Recall@%d: %.4f\n", limit, (double)hits / (double)case_count);
-   printf("Miss buckets: temporal=%d entity=%d lexical=%d semantic=%d state=%d granularity=%d "
-          "ranking=%d missing=%d\n",
-          temporal_miss, entity_miss, lexical_gap, semantic_gap, state_penalty, granularity_gap,
-          ranking_gap, missing);
+   mem_label_analysis(ctx, argc, argv, "memory.audit");
 }
 
 void mem_calibrate(app_ctx_t *ctx, int argc, char **argv)
 {
-   (void)ctx;
-   opt_parsed_t opts;
-   opt_parse(argc, argv, NULL, &opts);
-   const char *labels = opt_get(&opts, "labels");
-   const char *write_path = opt_get(&opts, "write");
-   int apply_config = opt_get_flag(&opts, "apply-config");
-   int limit = opt_get_int(&opts, "limit", 10);
-   int candidate_limit = opt_get_int(&opts, "candidate-limit", 24);
-   int rounds = opt_get_int(&opts, "rounds", 2);
-   if (!labels)
-      fatal("memory calibrate requires --labels <query<TAB>memory_id file>");
-
-   memory_label_case_t cases[4096];
-   int case_count = memory_load_label_cases(labels, cases, 4096);
-   if (case_count <= 0)
-      fatal("no valid label cases in %s", labels);
-
-   memory_multiplier_profile_t best = memory_multiplier_profile_default();
-   double best_mrr =
-       memory_eval_labeled_cases(cases, case_count, limit, candidate_limit, &best, NULL);
-   double candidates[] = {0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.00};
-
-   for (int round = 0; round < rounds; round++)
-   {
-      double *fields[] = {&best.lexical,  &best.coverage, &best.entity,
-                          &best.temporal, &best.evidence, &best.semantic,
-                          &best.state,    &best.intent,   &best.confidence};
-      int field_count = (int)(sizeof(fields) / sizeof(fields[0]));
-      for (int f = 0; f < field_count; f++)
-      {
-         double original = *fields[f];
-         double local_best_value = original;
-         double local_best_mrr = best_mrr;
-         for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++)
-         {
-            *fields[f] = candidates[i];
-            double trial =
-                memory_eval_labeled_cases(cases, case_count, limit, candidate_limit, &best, NULL);
-            if (trial > local_best_mrr + 1e-9)
-            {
-               local_best_mrr = trial;
-               local_best_value = candidates[i];
-            }
-         }
-         *fields[f] = local_best_value;
-         best_mrr = local_best_mrr;
-      }
-   }
-
-   int hits = 0;
-   double final_mrr =
-       memory_eval_labeled_cases(cases, case_count, limit, candidate_limit, &best, &hits);
-   if (write_path && write_path[0])
-   {
-      memory_write_profile_file(write_path, &best);
-      if (apply_config)
-      {
-         if (config_set_memory_weight_profile(write_path) != 0)
-            fatal("failed to save config for apply-config");
-      }
-   }
-   else if (apply_config)
-   {
-      fatal("--apply-config requires --write <profile>");
-   }
-
-   if (ctx->json_output)
-   {
-      cJSON *j = cJSON_CreateObject();
-      jo_add_str(j, "labels", labels);
-      jo_add_num(j, "mrr", final_mrr);
-      jo_add_num(j, "recall_at_k", (double)hits / (double)case_count);
-      if (write_path && write_path[0])
-         jo_add_str(j, "profile_path", write_path);
-      jo_add_bool(j, "applied_config", apply_config && write_path && write_path[0]);
-      cJSON *p = cJSON_CreateObject();
-      jo_add_num(p, "lexical", best.lexical);
-      jo_add_num(p, "coverage", best.coverage);
-      jo_add_num(p, "entity", best.entity);
-      jo_add_num(p, "temporal", best.temporal);
-      jo_add_num(p, "evidence", best.evidence);
-      jo_add_num(p, "semantic", best.semantic);
-      jo_add_num(p, "state", best.state);
-      jo_add_num(p, "intent", best.intent);
-      jo_add_num(p, "confidence", best.confidence);
-      cJSON_AddItemToObject(j, "multipliers", p);
-      emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
-      return;
-   }
-
-   printf("Calibrated on %d cases from %s\n", case_count, labels);
-   printf("MRR: %.4f\n", final_mrr);
-   printf("Recall@%d: %.4f\n", limit, (double)hits / (double)case_count);
-   printf("Multipliers: lexical=%.2f coverage=%.2f entity=%.2f temporal=%.2f evidence=%.2f "
-          "semantic=%.2f state=%.2f intent=%.2f confidence=%.2f\n",
-          best.lexical, best.coverage, best.entity, best.temporal, best.evidence, best.semantic,
-          best.state, best.intent, best.confidence);
-   if (write_path && write_path[0])
-      printf("Wrote profile: %s\n", write_path);
-   if (apply_config && write_path && write_path[0])
-      printf("Applied profile in aimee config\n");
+   mem_label_analysis(ctx, argc, argv, "memory.calibrate");
 }
 
 static void mem_print_eval_report(const char *title, const mem_eval_scores_t *scores,

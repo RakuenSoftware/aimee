@@ -24,18 +24,6 @@
 /* File-scope config, loaded once by cmd_memory before dispatch */
 /* memory_score_parts_to_json prototype in cmd_memory_internal.h */
 
-double cmd_memory_env_weight(const char *name, double fallback)
-{
-   const char *v = getenv(name);
-   if (!v || !v[0])
-      return fallback;
-   char *end = NULL;
-   double d = strtod(v, &end);
-   if (!end || end == v)
-      return fallback;
-   return d;
-}
-
 void cmd_memory_apply_rerank_mode(const opt_parsed_t *opts)
 {
    if (opt_get_flag(opts, "slow-rerank"))

@@ -13,7 +13,6 @@
 /* File-scope config, loaded once by cmd_memory before dispatch. */
 
 /* Env-knob readers and option-shape helpers used by the subcommand handlers. */
-double cmd_memory_env_weight(const char *name, double fallback);
 void cmd_memory_apply_rerank_mode(const opt_parsed_t *opts);
 const char *cmd_memory_scope_type(const opt_parsed_t *opts);
 const char *cmd_memory_scope_value(const opt_parsed_t *opts);
