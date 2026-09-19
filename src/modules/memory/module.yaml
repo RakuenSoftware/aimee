@@ -141,6 +141,7 @@
     "server-go/modules/memory/cmd/aimee-memory-eval/main.go",
     "server-go/modules/memory/shared_recall.go",
     "server-go/modules/memory/evaluation.go",
+    "server-go/modules/memory/evaluation_manifest.go",
     "server-go/modules/memory/cmd/aimee-memory-eval/corpus.go",
     "server-go/modules/memory/lane_metrics.go",
     "server-go/modules/memory/pagerank.go",

@@ -103,7 +103,10 @@ func run(ctx context.Context, schemaPath string, dimension int, input io.Reader,
 	})
 }
 
-func evaluationSession(ctx context.Context, schemaPath string, dimension int, action func(*postgres.EvaluationStore) error) (err error) {
+func evaluationSession(ctx context.Context, schemaPath string, dimension int, action func(*postgres.EvaluationStore) error) error {
+	return evaluationSessionSnapshot(ctx, schemaPath, dimension, func(db *postgres.EvaluationStore, _ []byte) error { return action(db) })
+}
+func evaluationSessionSnapshot(ctx context.Context, schemaPath string, dimension int, action func(*postgres.EvaluationStore, []byte) error) (err error) {
 	if schemaPath == "" || dimension < 1 || dimension > 2000 {
 		return errors.New("evaluation requires -schema (packaged KB schema) and -embedding-dim in 1..2000")
 	}
@@ -124,7 +127,7 @@ func evaluationSession(ctx context.Context, schemaPath string, dimension int, ac
 		return err
 	}
 	defer func() { err = errors.Join(err, db.Close()) }()
-	return action(db)
+	return action(db, schema)
 }
 
 func defaultSchema() string {

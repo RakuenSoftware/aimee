@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,11 +35,50 @@ func readEvaluationJSON(path string, target any) error {
 }
 
 type evaluationBaseline struct {
+	Manifest    memory.EvaluationManifest     `json:"manifest"`
+	CaseResults []memory.EvaluationCaseResult `json:"case_results"`
 	memory.EvaluationScores
 	Threshold float64 `json:"threshold_pct"`
 }
 
-func checkBaseline(scores memory.EvaluationScores, baseline evaluationBaseline) error {
+func checkBaseline(result memory.EvaluationResult, baseline evaluationBaseline) error {
+	scores := result.Scores
+	if result.Manifest == nil {
+		return errors.New("evaluation result has no manifest")
+	}
+	if err := result.Manifest.Validate(); err != nil {
+		return err
+	}
+	if err := baseline.Manifest.Validate(); err != nil {
+		return err
+	}
+	got, _ := json.Marshal(result.Manifest)
+	want, _ := json.Marshal(baseline.Manifest)
+	if !bytes.Equal(got, want) {
+		return errors.New("evaluation baseline input/embedding/policy manifest mismatch")
+	}
+	if len(result.Manifest.CaseIDs) != scores.Cases || len(baseline.CaseResults) != scores.Cases || len(result.Cases) != scores.Cases {
+		return errors.New("evaluation baseline lacks complete per-case receipts")
+	}
+	for i, id := range result.Manifest.CaseIDs {
+		if result.Cases[i].ID != id || baseline.CaseResults[i].ID != id {
+			return errors.New("evaluation baseline case receipt mismatch")
+		}
+	}
+
+	if err := validateCaseReceipts(result.Cases, result.Scores); err != nil {
+		return err
+	}
+	if err := validateCaseReceipts(baseline.CaseResults, baseline.EvaluationScores); err != nil {
+		return err
+	}
+	for i, row := range result.Cases {
+		got, _ := json.Marshal(row.Expected)
+		want, _ := json.Marshal(baseline.CaseResults[i].Expected)
+		if !bytes.Equal(got, want) {
+			return errors.New("evaluation relevance labels differ from baseline")
+		}
+	}
 	if baseline.Cases != scores.Cases || baseline.Cases < 1 || baseline.Threshold < 0 || baseline.Threshold > 100 || math.IsNaN(baseline.Threshold) {
 		return errors.New("evaluation baseline has a different case denominator or invalid threshold")
 	}
@@ -49,7 +89,7 @@ func checkBaseline(scores memory.EvaluationScores, baseline evaluationBaseline) 
 		{"mrr", scores.MRR, baseline.MRR}, {"ndcg_5", scores.NDCG5, baseline.NDCG5},
 		{"ndcg_10", scores.NDCG10, baseline.NDCG10}, {"recall_5", scores.Recall5, baseline.Recall5}, {"recall_10", scores.Recall10, baseline.Recall10},
 	} {
-		if math.IsNaN(metric.want) || math.IsInf(metric.want, 0) || metric.want < 0 || metric.want > 1 {
+		if math.IsNaN(metric.got) || math.IsInf(metric.got, 0) || metric.got < 0 || metric.got > 1 || math.IsNaN(metric.want) || math.IsInf(metric.want, 0) || metric.want < 0 || metric.want > 1 {
 			return fmt.Errorf("invalid baseline %s", metric.name)
 		}
 		if metric.got < metric.want*(1-baseline.Threshold/100) {
@@ -58,15 +98,61 @@ func checkBaseline(scores memory.EvaluationScores, baseline evaluationBaseline) 
 	}
 	return nil
 }
-func writeBaseline(path string, scores memory.EvaluationScores) (err error) {
+func validateCaseReceipts(rows []memory.EvaluationCaseResult, total memory.EvaluationScores) error {
+	if len(rows) != total.Cases || len(rows) == 0 {
+		return errors.New("evaluation receipt denominator mismatch")
+	}
+	sums := [5]float64{}
+	for _, row := range rows {
+		if row.Scores.Cases != 1 || len(row.Expected) == 0 || len(row.Retrieved) > 20 || math.IsNaN(row.LatencyMS) || math.IsInf(row.LatencyMS, 0) || row.LatencyMS < 0 {
+			return errors.New("invalid evaluation case receipt")
+		}
+		for _, ids := range [][]string{row.Expected, row.Retrieved} {
+			seen := map[string]bool{}
+			for _, id := range ids {
+				if id == "" || seen[id] {
+					return errors.New("invalid evaluation receipt fixture IDs")
+				}
+				seen[id] = true
+			}
+		}
+		for i, value := range []float64{row.Scores.MRR, row.Scores.NDCG5, row.Scores.NDCG10, row.Scores.Recall5, row.Scores.Recall10} {
+			if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1 {
+				return errors.New("invalid evaluation receipt score")
+			}
+			sums[i] += value
+		}
+	}
+	for i, value := range []float64{total.MRR, total.NDCG5, total.NDCG10, total.Recall5, total.Recall10} {
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.Abs(value-sums[i]/float64(len(rows))) > 1e-9 {
+			return errors.New("evaluation aggregate disagrees with case receipts")
+		}
+	}
+	return nil
+}
+
+func writeBaseline(path string, result memory.EvaluationResult) (err error) {
+	if result.Manifest == nil {
+		return errors.New("evaluation result has no manifest")
+	}
+	baseline := evaluationBaseline{Manifest: *result.Manifest, CaseResults: result.Cases, EvaluationScores: result.Scores, Threshold: 5}
+	if err := checkBaseline(result, baseline); err != nil {
+		return err
+	}
+	payload, err := json.MarshalIndent(baseline, "", "  ")
+	if err != nil {
+		return err
+	}
+	if len(payload)+1 > 4<<20 {
+		return errors.New("evaluation baseline exceeds 4 MiB")
+	}
+
 	f, err := os.CreateTemp(filepath.Dir(path), ".memory-baseline-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(f.Name())
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "  ")
-	err = encoder.Encode(evaluationBaseline{scores, 5})
+	_, err = f.Write(append(payload, '\n'))
 	if err == nil {
 		err = f.Sync()
 	}
@@ -107,27 +193,30 @@ func runCorpus(ctx context.Context, schema string, dimension int, path, command,
 	}
 	var result memory.EvaluationResult
 	// Close the isolated database before publishing scores or replacing a baseline.
-	err = evaluationSession(ctx, schema, dimension, func(db *postgres.EvaluationStore) error {
+	err = evaluationSessionSnapshot(ctx, schema, dimension, func(db *postgres.EvaluationStore, schemaSnapshot []byte) error {
 		var err error
 		result, err = memory.EvaluateCorpus(ctx, db, executor, corpus, command)
+		if err == nil {
+			result.Manifest.SchemaSHA256 = memory.EvaluationDigest(schemaSnapshot)
+		}
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	rendered, err := memory.FormatEvaluation(result, path, format, fields, profile)
+	if err != nil {
+		return err
+	}
 	if baselinePath != "" {
 		if update {
-			err = writeBaseline(baselinePath, result.Scores)
+			err = writeBaseline(baselinePath, result)
 		} else {
-			err = checkBaseline(result.Scores, baseline)
+			err = checkBaseline(result, baseline)
 		}
 		if err != nil {
 			return err
 		}
-	}
-	rendered, err := memory.FormatEvaluation(result, path, format, fields, profile)
-	if err != nil {
-		return err
 	}
 	_, err = output.Write(rendered)
 	return err

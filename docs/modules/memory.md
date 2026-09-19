@@ -111,6 +111,20 @@ separate disposable database for each conversation or question. QA, session-supp
 and miss-report suites now use the same injected Go module setup. The native
 dataset runners and memory scratch-store hooks are deleted.
 
+Corpus evaluations now emit a versioned manifest and one result per case, with
+stable fixture IDs rather than ephemeral database IDs. The manifest binds the
+semantic corpus digest, exact schema bytes used to create the database, embedding
+serving identity/dimension, ordered case IDs and effective ranking policy. Baseline
+comparison rejects missing manifests and changed identities even when the case
+count matches. Baselines retain the case receipts; failed runs cannot overwrite
+them or publish partial scores. The checked-in 105-case input is frozen by
+`tests/eval/memory_retrieval_manifest_v1.json` and a required unit assertion.
+
+The [retrieval compatibility decisions](../proposals/pending/memory-reliability-retrieval-compatibility.md)
+state what is retained and retired. This first manifest does not certify real-model
+quality, historical C ranking parity, temporal reproducibility or the full release
+matrix. Existing aggregate-only baselines require explicit regeneration.
+
 ## Purpose and non-goals
 
 Shared KB searches admit semantic-only whole-record and derived-unit matches
@@ -136,9 +150,9 @@ identify their actual contributions.
 
 Model outages, identity changes and invalid query embeddings leave lexical recall
 available; a required SQL failure remains an operation failure. This path requires
-a pinned active version and a governed executor. Unversioned-vector admission and
-legacy semantic query expansion remain outside this path; this does not certify the full legacy retrieval pipeline or the native
-benchmark runners.
+a pinned active version and a governed executor. Unversioned-vector admission and legacy semantic query expansion are deliberately
+retired from this path under the compatibility decisions above; this does not
+certify historical retrieval quality.
 
 Memory is one Go module deployed in two placements. `AIMEE_MODULE_PLACEMENT` is
 required for a running process:

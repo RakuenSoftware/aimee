@@ -50,6 +50,8 @@ func TestCorpusValidation(t *testing.T) {
 		func(c *memory.EvaluationCorpus) { c.Version = 2 },
 		func(c *memory.EvaluationCorpus) { c.Fixtures = nil },
 		func(c *memory.EvaluationCorpus) { c.Cases = nil },
+		func(c *memory.EvaluationCorpus) { c.Cases[0].ID = "" },
+		func(c *memory.EvaluationCorpus) { c.Cases = append(c.Cases, c.Cases[0]) },
 		func(c *memory.EvaluationCorpus) { c.Fixtures = append(c.Fixtures, c.Fixtures[0]) },
 		func(c *memory.EvaluationCorpus) { c.Cases[0].Expected = []string{"missing"} },
 		func(c *memory.EvaluationCorpus) { c.Cases[0].Expected = []string{"opaque", "opaque"} },
@@ -99,6 +101,9 @@ func TestCorpusIsolatedSemanticReplay(t *testing.T) {
 			if result.Status != "ok" || result.Scores.Cases != 1 || result.Scores.MRR != 1 || result.Scores.Recall10 != 1 || len(result.LatenciesMS) != 1 {
 				t.Fatal(result)
 			}
+			if result.Manifest == nil || result.Manifest.EmbeddingIdentity != "corpus-test" || result.Manifest.EmbeddingDimension != 3 || len(result.Cases) != 1 || result.Cases[0].ID != "semantic" || len(result.Cases[0].Retrieved) != 1 || result.Cases[0].Retrieved[0] != "opaque" || result.Cases[0].Scores.MRR != 1 {
+				t.Fatal("missing stable manifest/case receipt", result)
+			}
 			return nil
 		})
 		if err != nil {
@@ -112,24 +117,52 @@ func TestCorpusIsolatedSemanticReplay(t *testing.T) {
 func TestBaselineAtomicAndDenominator(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "baseline.json")
 	scores := memory.EvaluationScores{MRR: 1, NDCG5: 1, NDCG10: 1, Recall5: 1, Recall10: 1, Cases: 1}
-	if err := writeBaseline(path, scores); err != nil {
+	result := memory.EvaluationResult{Scores: scores, Manifest: &memory.EvaluationManifest{Version: 1, CorpusSHA256: strings.Repeat("a", 64), SchemaSHA256: strings.Repeat("b", 64), PolicySHA256: strings.Repeat("c", 64), EmbeddingIdentity: "test", EmbeddingDimension: 3, CaseIDs: []string{"one"}}, Cases: []memory.EvaluationCaseResult{{ID: "one", Expected: []string{"fixture"}, Retrieved: []string{"fixture"}, Scores: scores}}}
+	if err := writeBaseline(path, result); err != nil {
 		t.Fatal(err)
 	}
 	var baseline evaluationBaseline
 	if err := readEvaluationJSON(path, &baseline); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkBaseline(scores, baseline); err != nil {
+	if err := checkBaseline(result, baseline); err != nil {
 		t.Fatal(err)
 	}
-	scores.Cases = 2
-	if checkBaseline(scores, baseline) == nil {
+	result.Scores.Cases = 2
+	if checkBaseline(result, baseline) == nil {
 		t.Fatal("changed denominator passed")
 	}
-	scores.Cases = 1
-	scores.MRR = .5
-	if checkBaseline(scores, baseline) == nil {
+	result.Scores.Cases = 1
+	result.Scores.MRR = .5
+	if checkBaseline(result, baseline) == nil {
 		t.Fatal("regression passed")
+	}
+	result.Scores.MRR = 1
+	for _, change := range []func(*memory.EvaluationManifest){
+		func(m *memory.EvaluationManifest) { m.CorpusSHA256 = strings.Repeat("d", 64) },
+		func(m *memory.EvaluationManifest) { m.SchemaSHA256 = strings.Repeat("d", 64) },
+		func(m *memory.EvaluationManifest) { m.PolicySHA256 = strings.Repeat("d", 64) },
+		func(m *memory.EvaluationManifest) { m.EmbeddingIdentity = "another" },
+		func(m *memory.EvaluationManifest) { m.EmbeddingDimension = 4 },
+		func(m *memory.EvaluationManifest) { m.CaseIDs = []string{"other"} },
+	} {
+		changed := *result.Manifest
+		change(&changed)
+		copy := result
+		copy.Manifest = &changed
+		if checkBaseline(copy, baseline) == nil {
+			t.Fatal("changed manifest passed", changed)
+		}
+	}
+	broken := baseline
+	broken.CaseResults = append([]memory.EvaluationCaseResult(nil), baseline.CaseResults...)
+	broken.CaseResults[0].Scores.MRR = .2
+	if checkBaseline(result, broken) == nil {
+		t.Fatal("aggregate/case disagreement passed")
+	}
+	baseline.Manifest = memory.EvaluationManifest{}
+	if checkBaseline(result, baseline) == nil {
+		t.Fatal("unbound legacy baseline passed")
 	}
 }
 
@@ -175,6 +208,20 @@ func TestCorpusCommandReplayAndBaselineFailure(t *testing.T) {
 	output.Reset()
 	if err := runCorpus(context.Background(), schema, 3, path, "printf '[1,0]'", "", baseline, true, "json", "", "", &output); err == nil {
 		t.Fatal("failed embedder passed")
+	}
+	// Same input identity compares successfully across independent databases.
+	if err := runCorpus(context.Background(), schema, 3, path, script, "", baseline, false, "json", "", "", &output); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	// Changing a query while keeping the denominator fixed cannot reuse scores.
+	corpus.Cases[0].Query = "different query with the same case count"
+	changed, _ := json.Marshal(corpus)
+	if err := os.WriteFile(path, changed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runCorpus(context.Background(), schema, 3, path, script, "", baseline, false, "json", "", "", &output); err == nil || !strings.Contains(err.Error(), "manifest mismatch") {
+		t.Fatal("changed corpus passed baseline", err)
 	}
 	after, _ := os.ReadFile(baseline)
 	if !bytes.Equal(original, after) || output.Len() != 0 {
@@ -229,5 +276,43 @@ func TestCorpusCancellationStopsQueryEmbedding(t *testing.T) {
 	<-done
 	if err == nil || executor.queries != 1 || time.Since(started) > 3*time.Second {
 		t.Fatal("cancellation was not propagated", err, executor.queries, time.Since(started))
+	}
+}
+
+func TestFrozenRepositoryCorpus(t *testing.T) {
+	directory := "../../../../../tests/eval"
+	var manifest struct {
+		Version int      `json:"version"`
+		Corpus  string   `json:"corpus"`
+		SHA256  string   `json:"sha256"`
+		CaseIDs []string `json:"case_ids"`
+	}
+	if err := readEvaluationJSON(filepath.Join(directory, "memory_retrieval_manifest_v1.json"), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Version != 1 || manifest.Corpus != "memory_retrieval_corpus.json" {
+		t.Fatal(manifest)
+	}
+	raw, err := os.ReadFile(filepath.Join(directory, manifest.Corpus))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if memory.EvaluationDigest(raw) != manifest.SHA256 {
+		t.Fatal("frozen corpus changed: version and review its manifest explicitly")
+	}
+	var corpus memory.EvaluationCorpus
+	if err := json.Unmarshal(raw, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	if err := corpus.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(corpus.Cases) != len(manifest.CaseIDs) {
+		t.Fatal("frozen denominator changed")
+	}
+	for i, row := range corpus.Cases {
+		if row.ID != manifest.CaseIDs[i] {
+			t.Fatal("frozen case order changed")
+		}
 	}
 }

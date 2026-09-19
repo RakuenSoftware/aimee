@@ -43,11 +43,13 @@ type EvaluationScores struct {
 	Cases    int     `json:"n_cases"`
 }
 type EvaluationResult struct {
-	Suite         string           `json:"suite,omitempty"`
-	Samples       int              `json:"samples,omitempty"`
-	ExcludedCases map[string]int   `json:"excluded_cases,omitempty"`
-	Status        string           `json:"status"`
-	Scores        EvaluationScores `json:"metrics"`
+	Manifest      *EvaluationManifest    `json:"manifest,omitempty"`
+	Cases         []EvaluationCaseResult `json:"case_results,omitempty"`
+	Suite         string                 `json:"suite,omitempty"`
+	Samples       int                    `json:"samples,omitempty"`
+	ExcludedCases map[string]int         `json:"excluded_cases,omitempty"`
+	Status        string                 `json:"status"`
+	Scores        EvaluationScores       `json:"metrics"`
 	// Owner latency includes retrieval and governed embedding, but excludes
 	// transport to the standalone evaluator. It is not a live KB hop measurement.
 	LatenciesMS []float64 `json:"owner_latency_ms"`
@@ -65,7 +67,12 @@ func (c EvaluationCorpus) Validate() error {
 	for _, f := range c.Fixtures {
 		fixtures[f.FID] = true
 	}
+	caseIDs := map[string]bool{}
 	for _, row := range c.Cases {
+		if row.ID == "" || caseIDs[row.ID] {
+			return errors.New("evaluation requires unique nonempty case IDs")
+		}
+		caseIDs[row.ID] = true
 		if strings.TrimSpace(row.Query) == "" || len(row.Expected) < 1 || len(row.Expected) > 128 {
 			return errors.New("evaluation case requires a query and 1..128 relevance labels")
 		}
@@ -113,6 +120,15 @@ func EvaluateCorpus(ctx context.Context, db store.DB, executor egress.Executor, 
 	if err != nil {
 		return result, err
 	}
+	manifest, err := module.evaluationManifest(ctx, corpus)
+	if err != nil {
+		return EvaluationResult{}, err
+	}
+	result.Manifest = &manifest
+	fixtureIDs := map[string]string{}
+	for fid, id := range ids {
+		fixtureIDs[id] = fid
+	}
 	result.LatenciesMS = make([]float64, 0, len(corpus.Cases))
 	for _, row := range corpus.Cases {
 		expected := make([]string, len(row.Expected))
@@ -125,12 +141,34 @@ func EvaluateCorpus(ctx context.Context, db store.DB, executor egress.Executor, 
 		if err != nil {
 			return EvaluationResult{}, err
 		}
-		result.LatenciesMS = append(result.LatenciesMS, float64(time.Since(start))/float64(time.Millisecond))
+		latency := float64(time.Since(start)) / float64(time.Millisecond)
+		result.LatenciesMS = append(result.LatenciesMS, latency)
+		receipt := EvaluationCaseResult{ID: row.ID, Expected: append([]string(nil), row.Expected...), Retrieved: []string{}, LatencyMS: latency,
+			Scores: EvaluationScores{MRR: score.MRR, NDCG5: score.NDCG5, NDCG10: score.NDCG10, Recall5: score.Recall5, Recall10: score.Recall10, Cases: 1}}
+		seen := map[string]bool{}
+		for _, id := range score.IDs {
+			fid, ok := fixtureIDs[id]
+			if !ok || seen[id] {
+				return EvaluationResult{}, errors.New("evaluation owner returned an unknown or duplicate fixture")
+			}
+			seen[id] = true
+			receipt.Retrieved = append(receipt.Retrieved, fid)
+		}
+		result.Cases = append(result.Cases, receipt)
 		result.Scores.MRR += score.MRR
 		result.Scores.NDCG5 += score.NDCG5
 		result.Scores.NDCG10 += score.NDCG10
 		result.Scores.Recall5 += score.Recall5
 		result.Scores.Recall10 += score.Recall10
+	}
+	after, err := module.evaluationManifest(ctx, corpus)
+	if err != nil {
+		return EvaluationResult{}, err
+	}
+	beforeJSON, _ := json.Marshal(manifest)
+	afterJSON, _ := json.Marshal(after)
+	if string(beforeJSON) != string(afterJSON) {
+		return EvaluationResult{}, errors.New("evaluation identity or policy changed during run")
 	}
 	n := float64(len(corpus.Cases))
 	result.Scores.MRR /= n
@@ -176,6 +214,10 @@ func FormatEvaluation(result EvaluationResult, path, format, fields, profile str
 	view := map[string]any{"status": "ok", "suite": suite, "dataset": path,
 		"metrics": map[string]any{"mrr": s.MRR, "ndcg_5": s.NDCG5, "ndcg_10": s.NDCG10, "recall_5": s.Recall5, "recall_10": s.Recall10, "cases": s.Cases},
 		"latency": timing, "latency_scope": "owner", "route_buckets": map[string]any{}, "shape_buckets": map[string]any{}}
+	if result.Manifest != nil {
+		view["manifest"] = result.Manifest
+		view["case_results"] = result.Cases
+	}
 	if result.Suite != "" {
 		view["samples"] = result.Samples
 		view["excluded_cases"] = result.ExcludedCases

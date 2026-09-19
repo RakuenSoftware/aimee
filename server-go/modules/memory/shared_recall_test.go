@@ -77,7 +77,7 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 		{"stale", "shared-recall-local", "fact"}, {"moved", "shared-recall-local", "fact"},
 		{"suppressed", "shared-recall-local", "fact"}, {"retired", "shared-recall-local", "fact"},
 		{"wrong-kind", "shared-recall-local", "procedure"}, {"wrong-dim", "shared-recall-local", "fact"},
-		{"zero", "shared-recall-local", "fact"}, {"visible", "shared-recall-local", "fact"},
+		{"zero", "shared-recall-local", "fact"}, {"unversioned", "shared-recall-local", "fact"}, {"visible", "shared-recall-local", "fact"},
 	} {
 		var id int64
 		if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,confidence,scope_type,scope_value)
@@ -88,6 +88,10 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	}
 	exec(embeddingInputs+`INSERT INTO memory_embedding_versions(version,point_id,memory_id,input_hash,embedding)
  SELECT 'shared-recall-test',point_id,memory_id,input_hash,$1::vector FROM inputs WHERE input_key LIKE 'shared-recall-%'`, string(encoded))
+	// A perfectly matching legacy vector without the active generation is not
+	// semantically admissible. Re-embedding is required, not dimension guessing.
+	exec(`DELETE FROM memory_embedding_versions WHERE memory_id=$1`, ids["unversioned"])
+	exec(`INSERT INTO memory_embeddings(point_id,embedding,record_type,primary_scope,project,kind,payload_json) VALUES($1,$2::vector,'memory','project','shared-recall-local','fact','{}')`, ids["unversioned"], string(encoded))
 	exec(`UPDATE memories SET content='edited content' WHERE id=$1`, ids["stale"])
 	exec(`UPDATE memories SET scope_value='shared-recall-moved' WHERE id=$1`, ids["moved"])
 	exec(`UPDATE memories SET activation_suppressed=1 WHERE id=$1`, ids["suppressed"])

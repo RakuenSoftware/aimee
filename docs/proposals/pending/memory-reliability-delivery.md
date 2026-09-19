@@ -10,8 +10,8 @@ Go module-side producers/consumers using the existing C bus. The bus stays C.
 | Work | Current evidence | Remaining acceptance |
 |---|---|---|
 | 1. G0 ownership and documentation | Zero native files/descriptor entries; CGO-disabled module and live probe; both C-bus placements; native labelled audit/calibration policy moved to Go; orphan fusion fixture replaced with production Go assertions | Complete the external-caller ownership review, retire remaining stale ABI/fixtures and record per-owner conformance evidence. Broad native-name findings are not themselves C memory implementations. |
-| 2. Retrieval compatibility | Versioned whole-record/unit/temporal semantic recall, opt-in Go PageRank, independent-arm RRF with per-arm deduplication | Freeze explicit legacy expansion/vector/ranking decisions and adversarial comparison fixtures; do not claim historical quality parity from unit tests. |
-| 3. Evaluation and release evidence | Shared injected Go module; isolated corpus/dataset/QA/support/miss runners; scoped runtime-role and transport regressions | Frozen manifests, per-case receipts and paired quality/performance results; complete CLI/MCP/HTTP/bus restart/failure matrix and required CI. |
+| 2. Retrieval compatibility | Versioned whole-record/unit/temporal semantic recall, opt-in Go PageRank, independent-arm RRF with per-arm deduplication | [Compatibility decisions](memory-reliability-retrieval-compatibility.md) are recorded; extend the frozen corpus to the full adversarial matrix and run paired quality measurements. |
+| 3. Evaluation and release evidence | Shared injected Go module; isolated corpus/dataset/QA/support/miss runners; scoped runtime-role and transport regressions | Initial frozen 105-case input and manifest-bound corpus baselines/per-case receipts are implemented; paired quality/performance and the complete CLI/MCP/HTTP/bus restart/failure matrix and required CI remain. |
 | 4. MR-01–18 | Existing foundations below | Finish each proposal's acceptance gates and integration dependencies. None is certified complete by the language migration. |
 
 ## Proposal acceptance ledger
@@ -35,7 +35,7 @@ Go module-side producers/consumers using the existing C bus. The bus stays C.
 | MR-15 outcomes | Existing feedback/workflow and learning paths | Verified application versus exposure, delayed outcomes and complete task cost |
 | MR-16 actions | Existing host authorization boundaries | Exact action evidence reauthorization, idempotent effects and composition budgets |
 | MR-17 retries | No release claim | Clean reasoning context with retained real-action journal and replay prevention |
-| MR-18 release gates | Go owner tests, live C bus and isolated evaluators | Frozen adversarial manifests, paired quality/performance and required surface/restart/failure gates |
+| MR-18 release gates | Go owner tests, live C bus, isolated evaluators, frozen corpus and manifest-bound per-case baselines | Complete adversarial manifests, temporal reproducibility, paired quality/performance and required surface/restart/failure gates |
 
 Historical notes are preserved in the [program migration history](memory-reliability-migration-history.md)
 and [module migration history](../../modules/memory-migration-history.md). Their
