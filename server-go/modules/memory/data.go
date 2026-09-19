@@ -50,6 +50,7 @@ type DataRequest struct {
 	ResetStuck     bool                    `json:"reset_stuck,omitempty"`
 	TagScope       *Scope                  `json:"tag_scope,omitempty"`
 	PublicView     bool                    `json:"public_view,omitempty"`
+	SharedRecall   json.RawMessage         `json:"shared_recall,omitempty"`
 	Activation     json.RawMessage         `json:"activation,omitempty"`
 	FactWrite      *FactWriteRequest       `json:"fact_write,omitempty"`
 	CodeIndex      *CodeIndexRequest       `json:"code_index,omitempty"`
@@ -2335,6 +2336,12 @@ set_config('aimee.correlation_id',$9,true)`,
 		case "tier-kind-counts":
 			response.TierKindCounts, err = queries.TierKindCounts(ctx, request.Limit)
 		}
+	case "compose-recall":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementServer || invocation.PrincipalRef != 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		response.Payload, err = backend.ComposeRecall(ctx, request.SharedRecall, request.LimitTokens, request.SessionStart)
 	case "recall-bundle", "briefing-bundle", "alerts-bundle", "assemble-context", "context-block", "context-ingress",
 		"diagnose", "explain", "ask":
 		if options.placement != PlacementKB && request.Operation != "recall-bundle" {

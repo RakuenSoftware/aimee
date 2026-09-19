@@ -1,0 +1,155 @@
+package memory
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/jackc/pgx/v5"
+)
+
+func TestRecallCompositionPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_MEMORY_EVAL_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_MEMORY_EVAL_URL for composition replay")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	schema, err := os.ReadFile("../aimee/families/schema_conversation.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(schema)
+	a, b := strings.Index(text, "CREATE TABLE IF NOT EXISTS user_memories ("), strings.Index(text, "CREATE INDEX IF NOT EXISTS user_memories_recall")
+	if a < 0 || b <= a {
+		t.Fatal("shipping personal schema missing")
+	}
+	exec(strings.Replace(text[a:b], "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE", 1))
+	full := strings.Repeat("個人設定", 600)
+	exec(`INSERT INTO user_memories(id,tier,kind,key,content) VALUES
+ (9007199254740993,'L3','fact','identity:name',$1),
+ (42,'L2','preference','editor','private editor'),
+ (43,'L2','preference','expired','expired secret'),
+ (44,'L2','fact','identity:archived','archived secret')`, full)
+	exec(`UPDATE user_memories SET valid_until=now() WHERE id=43;
+ UPDATE user_memories SET lifecycle_state='archived' WHERE id=44`)
+	shared := recallBundle{Identity: recallItems([]Record{{ID: 51, Key: "identity:name", Content: "shared name"}, {ID: 52, Key: "identity:name", Content: "duplicate shared name"}, {ID: 42, Key: "identity:team", Content: "shared team"}}), Preferences: recallItems([]Record{{ID: 61, Key: "editor", Content: "shared editor"}}), ActiveContext: []RecallRecord{}, OpenCommitments: []RecallRecord{}, AlwaysOnRules: []recallRule{{ID: 91, Title: "hard policy"}}, Reminders: []recallReminder{}, Directives: []recallDirective{}, Explain: []any{}, LimitTokens: 8192}
+	for i := range shared.Identity {
+		shared.Identity[i].ActivationManaged = true
+	}
+	sharedJSON, _ := json.Marshal(map[string]any{"status": "ok", "recall": shared, "receipt": json.RawMessage(`{"id":9007199254740995}`)})
+	backend, _ := NewPostgresDataStore(evalQueryer{tx}, PlacementServer)
+	handler := NewHandler(nil, WithDataStore(PlacementServer, backend))
+	call := func(input string, limit int) ([]byte, bus.ModuleStatus) {
+		t.Helper()
+		args, _ := json.Marshal(map[string]any{"operation": "compose-recall", "shared_json": input, "limit_tokens": limit})
+		frame, _ := bus.EncodeCommand("runtime", args)
+		raw, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame)
+		if status != bus.ModuleStatusOK {
+			return nil, status
+		}
+		body, err := bus.DecodeCommandResult(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope struct{ JSON string }
+		if json.Unmarshal(body, &envelope) != nil || envelope.JSON == "" {
+			t.Fatalf("missing composition %s", body)
+		}
+		return []byte(envelope.JSON), status
+	}
+	raw, status := call(string(sharedJSON), 8192)
+	if status != bus.ModuleStatusOK {
+		t.Fatal(status)
+	}
+	var envelope struct {
+		Status string
+		Store  string
+		Recall json.RawMessage
+	}
+	if json.Unmarshal(raw, &envelope) != nil || envelope.Status != "ok" || envelope.Store != "composed" {
+		t.Fatal(string(raw))
+	}
+	var got recallBundle
+	if err := json.Unmarshal(envelope.Recall, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Identity) != 2 || got.Identity[0].ID != 9007199254740993 || got.Identity[0].Content != full || got.Identity[0].Handle != "user:memory:9007199254740993" || got.Identity[0].ActivationManaged || got.Identity[1].ID != 42 || !got.Identity[1].ActivationManaged {
+		t.Fatal("identity precedence/precision", got.Identity)
+	}
+	if len(got.Preferences) != 1 || got.Preferences[0].Content != "private editor" || got.Preferences[0].ID != 42 {
+		t.Fatal(got.Preferences)
+	}
+	if !strings.Contains(string(raw), `"id":9007199254740995`) || strings.Contains(string(raw), "secret") || strings.Contains(string(raw), "shared name") {
+		t.Fatal(string(raw))
+	}
+	if got.ApproxTokens != (len(envelope.Recall)+3)/4 || got.UsedTokens != got.ApproxTokens || got.BudgetExceeded {
+		t.Fatal("incorrect composed budget", got.ApproxTokens)
+	}
+	for _, limit := range []int{64, 128, 512} {
+		raw, status = call(string(sharedJSON), limit)
+		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &envelope) != nil || json.Unmarshal(envelope.Recall, &got) != nil {
+			t.Fatal(status, string(raw))
+		}
+		if got.ApproxTokens != (len(envelope.Recall)+3)/4 || got.BudgetExceeded != (got.ApproxTokens > limit) {
+			t.Fatal("final composition budget", limit, string(raw))
+		}
+	}
+	// A failed shared read never turns into success using personal content.
+	for _, input := range []string{`{"status":"error","kind":"unavailable"}`, `{"status":"quarantined","recall":{}}`} {
+		raw, status = call(input, 8192)
+		if status != bus.ModuleStatusOK || string(raw) != input {
+			t.Fatal("shared refusal lost", string(raw), status)
+		}
+	}
+	for _, input := range []string{`{`, `{"status":"ok","recall":{}}`, `{"status":"unknown"}`} {
+		raw, status = call(input, 8192)
+		if status == bus.ModuleStatusOK && !strings.Contains(string(raw), `"status":"error"`) {
+			t.Fatal("bad shared input admitted", string(raw))
+		}
+	}
+	// Missing private storage must refuse the whole composition, never return a
+	// plausible shared-only result or partial personal section.
+	exec(`SAVEPOINT composition_failure; ALTER TABLE user_memories RENAME TO unavailable_personal`)
+	raw, status = call(string(sharedJSON), 8192)
+	if status != bus.ModuleStatusOK || !strings.Contains(string(raw), `"kind":"unavailable"`) || strings.Contains(string(raw), `"recall"`) {
+		t.Fatal("private failure hidden", string(raw), status)
+	}
+	exec(`ROLLBACK TO SAVEPOINT composition_failure; RELEASE SAVEPOINT composition_failure`)
+	raw, status = call(string(sharedJSON), 8192)
+	if status != bus.ModuleStatusOK || !strings.Contains(string(raw), `"store":"composed"`) {
+		t.Fatal("composition did not recover", string(raw), status)
+	}
+	// The host route cannot be invoked by plugins or by the KB placement.
+	args, _ := json.Marshal(map[string]any{"operation": "compose-recall", "shared_json": string(sharedJSON)})
+	frame, _ := bus.EncodeCommand("runtime", args)
+	if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+		t.Fatal("plugin composition", status)
+	}
+	kb := NewHandler(nil, WithDataStore(PlacementKB, nil))
+	if _, status := kb(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+		t.Fatal("KB composition", status)
+	}
+	data := dataRequest(t, DataRequest{Operation: "compose-recall", SharedRecall: sharedJSON})
+	if _, status := handler(bus.ModuleInvocation{StageID: StageData, PrincipalRef: 73}, data); status != bus.ModuleStatusInvalidRequest {
+		t.Fatal("plugin data composition", status)
+	}
+}

@@ -16,6 +16,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "compose-recall":
+		return handleRecallComposition(options, invocation, args)
 	case "maintenance-model-plan":
 		return planModelMaintenance(args)
 	case "entity-conflicts":

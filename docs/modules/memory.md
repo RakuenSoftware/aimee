@@ -29,6 +29,24 @@ retirement versus destruction from the admitted Go authority, and preserves
 `review_required` and `conflict` refusals. The legacy Server context-read route
 forwards the Go envelope too; a retrieval outage is no longer an empty context.
 
+## Personal/shared recall composition
+
+The Server placement owns the composition of a scoped KB recall envelope with
+personal identity and preferences. Personal rows override matching shared keys
+within those sections; equal numeric IDs from different placements do not
+collide. The Go owner reads current personal rows, retains full content and exact
+int64 IDs, preserves scoped handles, and rebudgets the final serialized bundle.
+Personal rows are never sent to the KB. Shared-only requests skip composition.
+
+The internal `memory.runtime` operation `compose-recall` accepts the shared
+response as JSON text and returns the complete composed response as text, so C
+transport cannot round IDs while decoding it. Plugins and the KB placement
+cannot invoke this personal-store operation. A failed private read refuses the
+whole composition; shared errors/quarantine remain refusals. The retired
+`src/user_memory_merge.c` policy and mutable-array ABI are guarded against return.
+This does not make cross-store reads one atomic snapshot or provide durable
+release receipts; activation receipt transport still needs its own exact-ID work.
+
 ## Current-state retrieval validity
 
 The Go `current-validity-v2` predicate applies active lifecycle, suppression and

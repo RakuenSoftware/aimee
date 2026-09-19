@@ -18,7 +18,7 @@
 #include "kb_client_memory_internal.h"
 #include "kb_client_pii.h"
 #include "db1_client/caches.h"
-#include "db1_client/user_memory.h"
+#include "headers/module_commands.h"
 #include "db1_optional.h"
 #include "cJSON.h"
 #include "config.h"
@@ -853,12 +853,8 @@ int kb_client_memory_delete(int64_t id)
    return kb_client_memory_delete_as(id, MEMORY_AUTHORITY_USER);
 }
 
-/* Proposal 2 Phase 1: recall assembly runs IN aimee-kb (the shared, db2-only,
- * many-user store) which has no access to this user's db1, so the db1<->db2
- * merge happens here in aimee-server (1:1 per user) — the single proxy seam
- * every recall consumer (the /v1 endpoint AND the primary-agent pre-turn
- * injection) shares. The per-section merge logic lives in db1/user_memory.c
- * (db1_user_memory_merge_into_array) so it is unit-testable without kb. */
+/* The native host transports the scoped shared bundle to its local Go memory
+ * owner. Selection, collision precedence and final budgeting belong to Go. */
 static char *memory_recall_json(const char *task_hint, int limit_tokens, int session_start,
                                 const char *graph_code_fusion_state, int include_user)
 {
@@ -887,42 +883,36 @@ static char *memory_recall_json(const char *task_hint, int limit_tokens, int ses
                     "\"integrity_verdict\":\"quarantine\"}");
    }
 
-   /* Fast path: when this user has no db1 memory (the case until capture is
-    * wired), skip the parse/merge/reserialize entirely and pass the kb bundle
-    * through verbatim — recall is on the primary agent's hot per-turn loop. */
-   if (!include_user || !db1_user_memory_any())
+   if (include_user)
    {
-      cJSON *response = cJSON_Parse(j);
-      if (response)
-      {
-         kbc_memory_activation_record_recall(response, &activation);
-         cJSON_Delete(response);
-      }
-      return j;
-   }
-
-   /* Merge this user's db1 identity/preferences on top of the org bundle. */
-   cJSON *bundle = cJSON_Parse(j);
-   if (bundle)
-   {
-      cJSON *recall = cJSON_GetObjectItemCaseSensitive(bundle, "recall");
-      if (recall)
-      {
-         db1_user_memory_merge_into_array(cJSON_GetObjectItemCaseSensitive(recall, "identity"),
-                                          DB1_USER_RECALL_IDENTITY, "user identity");
-         db1_user_memory_merge_into_array(cJSON_GetObjectItemCaseSensitive(recall, "preferences"),
-                                          DB1_USER_RECALL_PREFERENCES, "user preference");
-      }
-      kbc_memory_activation_record_recall(bundle, &activation);
-      char *merged = cJSON_PrintUnformatted(bundle);
-      cJSON_Delete(bundle);
-      if (merged)
+      cJSON *request = cJSON_CreateObject();
+      if (!request)
       {
          free(j);
-         return merged;
+         return NULL;
       }
+      cJSON_AddStringToObject(request, "operation", "compose-recall");
+      cJSON_AddStringToObject(request, "shared_json", j);
+      cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
+      cJSON_AddBoolToObject(request, "session_start", session_start != 0);
+      cJSON *reply = NULL;
+      int rc = aimee_module_commands_dispatch_internal("memory.runtime", request, &reply);
+      cJSON_Delete(request);
+      free(j);
+      const char *body =
+          rc == 1 ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "json")) : NULL;
+      j = body ? strdup(body) : NULL;
+      cJSON_Delete(reply);
+      if (!j)
+         return NULL;
    }
-   return j; /* parse/merge failed: return the kb bundle verbatim */
+   cJSON *response = cJSON_Parse(j);
+   if (response)
+   {
+      kbc_memory_activation_record_recall(response, &activation);
+      cJSON_Delete(response);
+   }
+   return j;
 }
 
 /* Explicit shared-store reads must never merge personal rows into the result. */

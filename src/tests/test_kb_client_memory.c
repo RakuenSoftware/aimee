@@ -14,7 +14,6 @@
 #include "kb_client.h"
 #include "kb_client_pii.h"
 #include "runtime_secret.h"
-#include "db1_client/user_memory.h"
 #include "db1_client/caches.h"
 #include "support/mock_agent_http.h"
 #include "cJSON.h"
@@ -91,17 +90,24 @@ int db1_context_snapshot_insert_turn(const char *session_id_arg, int64_t memory_
    return 0;
 }
 
-int db1_user_memory_any(void)
+static int composition_calls;
+static int composition_transport = 1;
+static const char *composition_reply;
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   return 0;
-}
-
-void db1_user_memory_merge_into_array(cJSON *arr, db1_user_recall_section_t section,
-                                      const char *why)
-{
-   (void)arr;
-   (void)section;
-   (void)why;
+   assert(strcmp(method, "memory.runtime") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
+                 "compose-recall") == 0);
+   const char *shared = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "shared_json"));
+   assert(shared != NULL);
+   composition_calls++;
+   *result = NULL;
+   if (composition_transport != 1)
+      return composition_transport;
+   *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(*result, "status", "ok");
+   cJSON_AddStringToObject(*result, "json", composition_reply ? composition_reply : shared);
+   return 1;
 }
 
 /* Transport failure: no response body, sub-100 status. kb_v1_action_request
@@ -287,6 +293,25 @@ static void test_recall_carries_and_records_production_activation(void)
    assert(activation_writes == 1);
    assert(activation_write_id == 73);
    assert(activation_write_turn == 7);
+   int calls = composition_calls;
+   json = kb_client_memory_recall_shared_json("shared only", 128, 0);
+   assert(json != NULL && composition_calls == calls);
+   free(json);
+   composition_reply = "{\"status\":\"ok\",\"recall\":{\"identity\":[{\"memory_id\":"
+                       "9007199254740993,\"text\":\"個人\"}]}}";
+   json = kb_client_memory_recall_json("composed", 128, 0);
+   assert(json != NULL && strcmp(json, composition_reply) == 0);
+   free(json);
+   composition_reply = "{\"status\":\"error\",\"kind\":\"unavailable\"}";
+   int writes = activation_writes;
+   json = kb_client_memory_recall_json("failed composition", 128, 0);
+   assert(json != NULL && strcmp(json, composition_reply) == 0 && activation_writes == writes);
+   free(json);
+   composition_reply = NULL;
+   composition_transport = -1;
+   assert(kb_client_memory_recall_json("missing local owner", 128, 0) == NULL);
+   assert(activation_writes == writes);
+   composition_transport = 1;
    mock_agent_http_reset();
    printf("  PASS: test_recall_carries_and_records_production_activation\n");
 }
