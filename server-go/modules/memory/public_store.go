@@ -55,7 +55,7 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		var ok bool
 		confidence, ok = args.number("confidence")
 		if !ok || confidence < 0 || confidence > 1 {
-			return invalid("memory.store confidence must be between zero and one")
+			return invalid("memory.store confidence must be between 0 and 1")
 		}
 	}
 	request.Confidence = &confidence
@@ -112,7 +112,7 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 	if _, exists := args["confidence"]; exists {
 		confidence, ok = args.number("confidence")
 		if !ok || confidence < 0 || confidence > 1 {
-			return commandResult(commandError("invalid_argument", "confidence must be between zero and one"))
+			return commandResult(commandError("invalid_argument", "confidence must be between 0 and 1"))
 		}
 	}
 	request := DataRequest{Operation: "supersede", ID: id, Content: content, Confidence: &confidence, SessionID: args.stringOr("session_id", ""), PublicView: true, IncludeAll: true}

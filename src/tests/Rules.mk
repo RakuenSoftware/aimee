@@ -228,13 +228,21 @@ TEST_MEMORY_TRANSPORT_OBJS = $(OBJDIR)/server/osv_check.o $(OBJDIR)/command_regi
 
 $(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-cmd-onboard \
 $(TESTPREFIX)/unit-test-agent-apikey $(TESTPREFIX)/unit-test-mcp-native-dispatch \
-$(TESTPREFIX)/unit-test-tool-validation: $(TEST_MEMORY_TRANSPORT_OBJS)
+$(TESTPREFIX)/unit-test-tool-validation $(TESTPREFIX)/unit-test-mcp-native-surface \
+$(TESTPREFIX)/unit-test-notes $(TESTPREFIX)/unit-test-tool-prompts \
+$(TESTPREFIX)/unit-test-delegate-driver $(TESTPREFIX)/unit-test-agent-http: $(TEST_MEMORY_TRANSPORT_OBJS)
 
 $(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/db1_client/runtime.o \
                                       $(OBJDIR)/tests/support/interaction_events_stub.o
 
-$(TESTPREFIX)/unit-test-tool-validation: $(OBJDIR)/db1_client/runtime.o $(OBJDIR)/db1_client/telemetry.o
+$(TESTPREFIX)/unit-test-tool-validation $(TESTPREFIX)/unit-test-mcp-native-surface \
+$(TESTPREFIX)/unit-test-notes $(TESTPREFIX)/unit-test-tool-prompts \
+$(TESTPREFIX)/unit-test-delegate-driver $(TESTPREFIX)/unit-test-agent-http: \
+    $(OBJDIR)/db1_client/runtime.o $(OBJDIR)/db1_client/telemetry.o
 
+
+$(TESTPREFIX)/unit-test-kb-client-search: $(OBJDIR)/modules/kb_client/kb_client_pii.o \
+    $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
 
 $(OBJDIR)/tests/test_mcp_directive_transport.o: agent_help_data.h
 

@@ -17,8 +17,12 @@ import (
 func TestStorePublicValidation(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
 	for _, args := range []string{`{}`, `{"key":"x","content":" "}`, `{"key":"x","content":"y","confidence":null}`, `{"key":"x","content":"y","confidence":2}`, `{"key":"x","content":"y","epistemic_kind":"anything"}`} {
-		if r := runPublicCommand(t, client, "store", args); r["kind"] != "invalid_argument" {
+		r := runPublicCommand(t, client, "store", args)
+		if r["kind"] != "invalid_argument" {
 			t.Fatal(r)
+		}
+		if strings.Contains(args, "confidence") && !strings.Contains(fmt.Sprint(r["message"]), "confidence must be between 0 and 1") {
+			t.Fatal("confidence refusal changed the public contract", r)
 		}
 	}
 	if r := runPublicCommand(t, client, "store", `{"key":"x","content":"y"}`); r["kind"] != "unavailable" {
