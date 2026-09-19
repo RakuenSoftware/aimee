@@ -563,8 +563,12 @@ and empty scratch connections. `AIMEE_DB2_URL`, `AIMEE_MEMORY_EVAL_URL` and
 `AIMEE_DB_TEST_URL` are required; the evaluator provisions isolated databases.
 The target runs the full memory, isolated evaluator and module race suites with
 required PostgreSQL variables, including the restricted-role replay. Missing
-DSNs fail instead of skipping. This gate proves fixture contracts; it does not
-certify real-provider quality or the complete restart/failure matrix.
+DSNs fail instead of skipping. The existing cross-language conformance gate
+now also kills and restarts the
+Go memory process in both placements while retaining its C host/callers. It
+checks unavailable discovery after reaping and reruns host and Go-client parity
+after restart. This store-free process test does not prove durable database
+recovery, real-provider quality or the complete surface/restart/failure matrix.
 
 Descriptor validation enforces the source inventory, and both `aimee-server`
 and `aimee-kb` must link without any retired C memory implementation.

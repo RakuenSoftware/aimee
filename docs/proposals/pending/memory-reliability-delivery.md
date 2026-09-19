@@ -9,7 +9,7 @@ Go module-side producers/consumers using the existing C bus. The bus stays C.
 
 | Work | Current evidence | Remaining acceptance |
 |---|---|---|
-| 1. G0 ownership and documentation | Zero native files/descriptor entries; CGO-disabled module and live probe; both C-bus placements; native labelled audit/calibration and live benchmark policy moved to Go; orphan fusion fixture replaced with production Go assertions | Server KB store/list/get/delete/supersede, search and context-read preserve complete Go envelopes and owner refusals; fact/window search and personal/shared recall composition are Go-owned; the native mutable-array merge is retired; activation snapshots/receipts and personal-recall envelopes retain exact IDs. Complete the remaining external-caller ownership review, retire stale ABI/fixtures and record per-owner conformance evidence. Broad native-name findings are not themselves C memory implementations. |
+| 1. G0 ownership and documentation | Zero native files/descriptor entries; CGO-disabled module and live probe; both C-bus placements including killed-provider refusal and process restart; native labelled audit/calibration and live benchmark policy moved to Go; orphan fusion fixture replaced with production Go assertions | Server KB store/list/get/delete/supersede, search and context-read preserve complete Go envelopes and owner refusals; fact/window search and personal/shared recall composition are Go-owned; the native mutable-array merge is retired; activation snapshots/receipts and personal-recall envelopes retain exact IDs. Complete the remaining external-caller ownership review, retire stale ABI/fixtures and record per-owner conformance evidence. Broad native-name findings are not themselves C memory implementations. |
 | 2. Retrieval compatibility | Versioned whole-record/unit/temporal semantic recall, opt-in Go PageRank, independent-arm RRF with per-arm deduplication | [Compatibility decisions](memory-reliability-retrieval-compatibility.md) are recorded; extend the frozen corpus to the full adversarial matrix and run paired quality measurements. |
 | 3. Evaluation and release evidence | Shared injected Go module; isolated corpus/dataset/QA/support/miss runners; scoped runtime-role and transport regressions; complete owner/evaluator race suite added to required packaged-DB2 CI | Initial frozen 105-case input and manifest-bound corpus baselines/per-case receipts are implemented; live CLI/Server benchmarks share the Go owner and refuse partial results; paired quality/performance and the complete CLI/MCP/HTTP/bus restart/failure matrix and required CI remain. |
 | 4. MR-01–18 | Existing foundations below | Finish each proposal's acceptance gates and integration dependencies. None is certified complete by the language migration. |
@@ -35,8 +35,13 @@ Go module-side producers/consumers using the existing C bus. The bus stays C.
 | MR-15 outcomes | Existing feedback/workflow and learning paths | Verified application versus exposure, delayed outcomes and complete task cost |
 | MR-16 actions | Existing host authorization boundaries | Exact action evidence reauthorization, idempotent effects and composition budgets |
 | MR-17 retries | No release claim | Clean reasoning context with retained real-action journal and replay prevention |
-| MR-18 release gates | Go owner tests, live C bus, isolated evaluators, frozen corpus and manifest-bound per-case baselines | Complete adversarial manifests, temporal reproducibility, paired quality/performance and full surface/restart/failure gates; owner/evaluator PostgreSQL replay is now wired into required CI |
+| MR-18 release gates | Go owner tests, live C bus with process restart, isolated evaluators, frozen corpus and manifest-bound per-case baselines | Complete adversarial manifests, temporal reproducibility, paired quality/performance and full surface/restart/failure gates; owner/evaluator PostgreSQL replay is now wired into required CI |
 
 Historical notes are preserved in the [program migration history](memory-reliability-migration-history.md)
 and [module migration history](../../modules/memory-migration-history.md). Their
 counts and pending statements are dated checkpoints, not current certification.
+
+The memory process restart legs pass in both placements. The broader bus
+conformance run currently fails at egress caller admission; the harness from
+before the memory restart change reproduces that failure. This limits the
+broader-suite claim, not the observed memory restart result.

@@ -150,6 +150,74 @@ static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t c
    assert(!"timed out waiting for module clients");
 }
 
+static pid_t spawn_module_child(const char *executable, const char *socket_path,
+                                const char *argument)
+{
+   pid_t parent = getpid();
+   pid_t child = fork();
+   assert(child >= 0);
+   if (child == 0)
+   {
+      prctl(PR_SET_PDEATHSIG, SIGKILL);
+      if (getppid() != parent)
+         _exit(0);
+      execl(executable, executable, socket_path, argument, (char *)NULL);
+      _exit(127);
+   }
+   return child;
+}
+
+static void run_memory_probe(const char *executable, const char *socket_path)
+{
+   pid_t child = spawn_module_child(executable, socket_path, "--decisions");
+   int status = 0;
+   while (waitpid(child, &status, 0) < 0)
+      assert(errno == EINTR);
+   assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+/* Keep the host and its callers alive while the independent memory process is
+ * killed. Its two connections and the finished probe must leave the bus before
+ * a replacement can be admitted under the same grants. */
+static void wait_for_memory_departure(bus_runtime_t *runtime, bus_host_t *host,
+                                      pthread_mutex_t *lock, bus_client_t *caller,
+                                      bus_client_t *embedding_host)
+{
+   const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
+   for (int i = 0; i < 10000; ++i)
+   {
+      struct timespec now;
+      assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+      uint64_t now_ns = (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
+      bus_client_heartbeat(caller, now_ns);
+      bus_client_heartbeat(embedding_host, now_ns);
+      pthread_mutex_lock(lock);
+      /* Production hosts call maintenance separately from dispatch pumping. */
+      (void)bus_runtime_maintain(runtime, now_ns);
+      uint32_t admitted = host->admitted;
+      pthread_mutex_unlock(lock);
+      if (admitted == 2)
+         return;
+      nanosleep(&pause, NULL);
+   }
+   assert(!"memory process connections survived termination");
+}
+
+static void memory_discovery_unavailable(aimee_module_client_t *client)
+{
+   const uint8_t request[] = {'D', 'C', 'M', 'D', 2, 0, 0, 0};
+   uint8_t response[1024];
+   memset(response, 0xa5, sizeof(response));
+   uint32_t response_len = 99;
+   struct timespec now;
+   assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+   uint64_t deadline = (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec + 2000000000ULL;
+   assert(aimee_module_client_call(client, 4096u + 7u * 256u + 255u, 255u, 9901, deadline, request,
+                                   sizeof(request), response, sizeof(response), &response_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
+   assert(response_len == 0);
+}
+
 static int production_contract(const char *name, uint32_t *kind, uint32_t *principal_ref,
                                uint32_t served[PRODUCTION_STAGE_MAX], size_t *serve_count)
 {
@@ -1021,19 +1089,7 @@ int main(int argc, char **argv)
    pid_t module_pid = -1;
    if (argc >= 2)
    {
-      pid_t parent = getpid();
-      module_pid = fork();
-      assert(module_pid >= 0);
-      if (module_pid == 0)
-      {
-         /* Outlive the test and this module runs forever: cleanup here is
-          * atexit-shaped and does not run when the test dies by a signal. */
-         prctl(PR_SET_PDEATHSIG, SIGKILL);
-         if (getppid() != parent)
-            _exit(0);
-         execl(module_executable, module_executable, socket_path, (char *)NULL);
-         _exit(127);
-      }
+      module_pid = spawn_module_child(module_executable, socket_path, NULL);
    }
    else
       assert(pthread_create(&module_thread, NULL, run_process, &process) == 0);
@@ -1059,17 +1115,23 @@ int main(int argc, char **argv)
    {
       if (argc == 4)
       {
-         pid_t probe_pid = fork();
-         assert(probe_pid >= 0);
-         if (probe_pid == 0)
+         run_memory_probe(probe_executable, socket_path);
+         if (memory_process)
          {
-            execl(probe_executable, probe_executable, socket_path, "--decisions", (char *)NULL);
-            _exit(127);
+            assert(kill(module_pid, SIGKILL) == 0);
+            int status = 0;
+            while (waitpid(module_pid, &status, 0) < 0)
+               assert(errno == EINTR);
+            assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+            wait_for_memory_departure(runtime, &host, &host_lock, &caller, &embedding_host);
+            memory_discovery_unavailable(&module_client);
+            module_pid = spawn_module_child(module_executable, socket_path, NULL);
+            wait_for_clients(&host, &host_lock, 4, module_pid);
+            smoke_host_gateway_plan(&embedding_host);
+            run_memory_probe(probe_executable, socket_path);
+            puts("memory: terminated provider unavailable; restarted Go owner passed host/client "
+                 "parity");
          }
-         int status = 0;
-         while (waitpid(probe_pid, &status, 0) < 0)
-            assert(errno == EINTR);
-         assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
       }
       else
          smoke_production_module(&module_client, argv[2], test_kind);
