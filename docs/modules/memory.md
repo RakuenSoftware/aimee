@@ -21,6 +21,14 @@ The memory executable and live Go probe must also build with `CGO_ENABLED=0`.
 This language boundary does not certify all historical behavioral parity or the
 numbered reliability proposals.
 
+
+Shared KB get and ID-based mutations also accept canonical positive decimal-string
+IDs, preserving int64 identities through native JSON transports. Unsafe numeric
+IDs, noncanonical strings and overflow remain invalid. Server delete reports
+retirement versus destruction from the admitted Go authority, and preserves
+`review_required` and `conflict` refusals. The legacy Server context-read route
+forwards the Go envelope too; a retrieval outage is no longer an empty context.
+
 ## Canonical KB mutation admission
 
 KB same-key store, edit, supersede and legacy store/content-edit adapters now use

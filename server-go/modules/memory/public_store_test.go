@@ -311,6 +311,52 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	if correctedView["status"] != "ok" || correctedView["store"] != "kb" || correctedView["id"] == createdView["id"] || correctedView["content"] != longContent+" corrected" || correctedView["memory"] != nil {
 		t.Fatal("server supersede shape", correctedView)
 	}
+	// Decimal-string IDs cross native JSON transports without double rounding.
+	// Replies retain numeric int64 tokens from the owner, including temporal data.
+	for i, provenance := range []string{"agent_message", "agent_message", "user_stated"} {
+		_, err := tx.Exec(ctx, `INSERT INTO memories(id,key,content,tier,kind,epistemic_kind,scope_type,scope_value,confidence,confidence_ceiling,lifecycle_state,provenance_category)
+VALUES($1,$2,'exact integer fixture','L2','fact','world_fact','project','exact-id',.8,.8,'active',$3)`, int64(9007199254740993)+int64(i)*2, fmt.Sprintf("exact-%d", i), provenance)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	exactArgs := `{"id":"9007199254740993","view":"server","scope_context":true,"project":"exact-id","as_of":"2020-01-01T00:00:00Z"}`
+	exactBody, err := client.Command(ctx, 73, "get", json.RawMessage(exactArgs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exactRecord struct {
+		Status string `json:"status"`
+		Store  string `json:"store"`
+		Memory struct {
+			ID int64 `json:"id"`
+		} `json:"memory"`
+		AsOf string `json:"as_of"`
+	}
+	if json.Unmarshal(exactBody, &exactRecord) != nil || exactRecord.Status != "ok" || exactRecord.Store != "kb" || exactRecord.Memory.ID != 9007199254740993 || exactRecord.AsOf == "" {
+		t.Fatal(string(exactBody))
+	}
+	deleted := runPublicCommand(t, client, "delete", exactArgs)
+	if deleted["status"] != "ok" || deleted["store"] != "kb" || deleted["deleted"] != true || deleted["destroyed"] != false {
+		t.Fatal(deleted)
+	}
+	if r := runPublicCommand(t, client, "supersede", `{"old_id":"9007199254740995","new_content":"exact replacement","view":"server","scope_context":true,"project":"exact-id"}`); r["status"] != "ok" || r["content"] != "exact replacement" {
+		t.Fatal(r)
+	}
+	if r := runPublicCommand(t, client, "delete", `{"id":"9007199254740997","view":"server","scope_context":true,"project":"exact-id"}`); r["kind"] != "review_required" || r["deleted"] != nil {
+		t.Fatal(r)
+	}
+	destroyed, status := invokeContextCommand(t, handler, 0, caller, "delete", `{"id":"9007199254740997","authority":"user","view":"server","scope_context":true,"project":"exact-id"}`)
+	if status != bus.ModuleStatusOK || destroyed["status"] != "ok" || destroyed["destroyed"] != true || destroyed["deleted"] != true {
+		t.Fatal(status, destroyed)
+	}
+	for _, id := range []string{`9007199254740993`, `"9223372036854775808"`, `"01"`, `"-1"`} {
+		for _, verb := range []string{"get", "delete"} {
+			if r := runPublicCommand(t, client, verb, `{"id":`+id+`}`); r["kind"] != "invalid_argument" {
+				t.Fatal(verb, id, r)
+			}
+		}
+	}
 	// Replacement under a non-owner role cannot reach a different project's source.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_store_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA store_command_test TO memory_store_test;

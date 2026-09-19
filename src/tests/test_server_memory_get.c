@@ -50,17 +50,6 @@ void kb_client_memory_scope_context_clear(void)
    clears++;
 }
 
-int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
-                                    kb_valid_at_t *verdict)
-{
-   calls++;
-   assert(id == 42);
-   assert(strcmp(as_of ? as_of : "", expected_time) == 0);
-   *verdict = answer;
-   *out = result == 0 ? cJSON_Parse("{\"id\":42,\"content\":\"KB-owned memory\"}") : NULL;
-   return result;
-}
-
 cJSON *server_error_kind_json(const char *kind, const char *message, const char *request_id)
 {
    (void)request_id;
@@ -73,7 +62,12 @@ cJSON *server_error_kind_json(const char *kind, const char *message, const char 
 
 static int user_calls, user_result, store_calls;
 static double expected_confidence;
-static const char *store_reply;
+static const char *store_reply, *get_reply;
+extern cJSON *memory_delete_command(cJSON *, const char *);
+memory_authority_t server_account_memory_authority(const char *account)
+{
+   return account && !strcmp(account, "user") ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
+}
 static int expected_store_authority;
 
 /* Go validates and shapes these commands. This native test only verifies the
@@ -132,7 +126,40 @@ void kb_client_memory_scope_context_apply(cJSON *request)
 }
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
-   if (!strcmp(method, "memory.store"))
+   if (!strcmp(method, "memory.get"))
+   {
+      calls++;
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
+      assert(!cJSON_HasObjectItem(request, "actor") && !cJSON_HasObjectItem(request, "authority"));
+      if (get_reply)
+      {
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "id")),
+                        "9007199254740993"));
+         cJSON_Delete(request);
+         return strdup(get_reply);
+      }
+      assert(cJSON_GetObjectItemCaseSensitive(request, "id")->valuedouble == 42);
+      const char *as_of = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "as_of"));
+      assert(!strcmp(as_of ? as_of : "", expected_time));
+      cJSON_Delete(request);
+      if (result)
+         return strdup(result < 0 ? "{\"status\":\"error\",\"kind\":\"unavailable\"}"
+                                  : "{\"status\":\"error\",\"kind\":\"not_found\"}");
+      cJSON *reply = cJSON_Parse("{\"status\":\"ok\",\"store\":\"kb\",\"memory\":{\"id\":42,"
+                                 "\"content\":\"KB-owned memory\"}}");
+      if (expected_time[0])
+      {
+         cJSON_AddStringToObject(reply, "as_of", expected_time);
+         if (answer == KB_VALID_AT_UNKNOWN)
+            cJSON_AddStringToObject(reply, "valid_at", "unknown");
+         else
+            cJSON_AddBoolToObject(reply, "valid_at", answer == KB_VALID_AT_YES);
+      }
+      char *raw = cJSON_PrintUnformatted(reply);
+      cJSON_Delete(reply);
+      return raw;
+   }
+   if (!strcmp(method, "memory.store") || !strcmp(method, "memory.delete"))
    {
       store_calls++;
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
@@ -440,6 +467,50 @@ static void test_search_owner_transport(void)
    cJSON_Delete(request);
 }
 
+static void test_read_owner_refusal(void)
+{
+   cJSON *request = cJSON_CreateObject();
+   review_method = "memory.assemble_context";
+   review_reply =
+       "{\"status\":\"error\",\"kind\":\"unavailable\",\"message\":\"retrieval failed\"}";
+   handle_memory_read(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, review_reply));
+   review_reply = "{\"status\":\"ok\",\"context\":\"\",\"active_context_missing\":true}";
+   handle_memory_read(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, review_reply));
+   free(search_wire_reply);
+   search_wire_reply = NULL;
+   cJSON_Delete(request);
+}
+
+static void test_get_delete_owner_envelopes(void)
+{
+   cJSON *request = cJSON_Parse("{\"store\":\"kb\",\"id\":\"9007199254740993\",\"actor\":"
+                                "\"forged\",\"authority\":\"user\"}");
+   get_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9007199254740993},\"receipt\":\"owner\"}";
+   cJSON *reply = memory_get_command(request);
+   char *raw = cJSON_PrintUnformatted(reply);
+   assert(!strcmp(raw, get_reply));
+   free(raw);
+   cJSON_Delete(reply);
+   get_reply = NULL;
+   const char *replies[] = {
+       "{\"status\":\"ok\",\"id\":9007199254740993,\"deleted\":true,\"destroyed\":false}",
+       "{\"status\":\"error\",\"kind\":\"review_required\"}",
+       "{\"status\":\"error\",\"kind\":\"conflict\"}"};
+   for (expected_store_authority = 0; expected_store_authority < 2; expected_store_authority++)
+      for (size_t i = 0; i < sizeof(replies) / sizeof(replies[0]); i++)
+      {
+         store_reply = replies[i];
+         reply = memory_delete_command(request, expected_store_authority ? "user" : "model");
+         raw = cJSON_PrintUnformatted(reply);
+         assert(!strcmp(raw, store_reply));
+         free(raw);
+         cJSON_Delete(reply);
+      }
+   cJSON_Delete(request);
+}
+
 int main(void)
 {
    test_user_namespace();
@@ -449,7 +520,7 @@ int main(void)
    for (unsigned i = 0; i < sizeof(verdicts) / sizeof(verdicts[0]); i++)
    {
       answer = verdicts[i];
-      cJSON *response = memory_get_command(request);
+      cJSON *response = materialize_reply(memory_get_command(request));
       assert(cJSON_IsObject(cJSON_GetObjectItem(response, "memory")));
       assert(strcmp(cJSON_GetObjectItem(response, "as_of")->valuestring, expected_time) == 0);
       cJSON *valid = cJSON_GetObjectItem(response, "valid_at");
@@ -461,13 +532,13 @@ int main(void)
    }
    cJSON_DeleteItemFromObjectCaseSensitive(request, "as_of");
    expected_time = "";
-   cJSON *response = memory_get_command(request);
+   cJSON *response = materialize_reply(memory_get_command(request));
    assert(!cJSON_HasObjectItem(response, "valid_at"));
    assert(!cJSON_HasObjectItem(response, "as_of"));
    cJSON_Delete(response);
    for (result = -1; result <= 1; result += 2)
    {
-      response = memory_get_command(request);
+      response = materialize_reply(memory_get_command(request));
       const char *kind = cJSON_GetObjectItem(response, "kind")->valuestring;
       assert(strcmp(kind, result < 0 ? SERVER_ERR_UNAVAILABLE : SERVER_ERR_NOT_FOUND) == 0);
       cJSON_Delete(response);
@@ -481,5 +552,7 @@ int main(void)
         "passed");
    test_stats_transport();
    test_search_owner_transport();
+   test_get_delete_owner_envelopes();
+   test_read_owner_refusal();
    return 0;
 }

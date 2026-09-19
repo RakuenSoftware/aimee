@@ -36,13 +36,6 @@ static cJSON *memory_bad_store(void)
                                  NULL);
 }
 
-static cJSON *memory_with_store(cJSON *reply, const char *store)
-{
-   if (reply)
-      cJSON_AddStringToObject(reply, "store", store);
-   return reply;
-}
-
 static cJSON *memory_data_request(const char *operation)
 {
    cJSON *request = cJSON_CreateObject();
@@ -105,7 +98,7 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
    static const char *fields[] = {"key",        "content",    "tier",        "kind",
                                   "confidence", "session_id", "use_cases",   "epistemic_kind",
                                   "limit",      "old_id",     "new_content", "keywords",
-                                  NULL};
+                                  "id",         "as_of",      NULL};
    for (int i = 0; fields[i]; i++)
    {
       const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);
@@ -284,11 +277,6 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                            server_invoke_module_operation("memory.runtime", "user-supersede", req,
                                                           "user memory module unavailable"));
 
-   int64_t old_id;
-   if (memory_request_positive_id(req, "old_id", &old_id) != 0)
-      return server_send_error_kind(
-          conn, SERVER_ERR_INVALID_ARGUMENT,
-          "memory.supersede requires an exactly representable positive ID", NULL);
    return send_and_free(conn, kb_memory_owner_command("memory.supersede", req,
                                                       MEMORY_AUTHORITY_MODEL, "id", cJSON_Number));
 }
@@ -297,27 +285,8 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * part of the server placement's data contract. */
 static cJSON *kb_memory_delete_command(cJSON *req, const char *account)
 {
-   int64_t id = 0;
-   if (memory_request_positive_id(req, "id", &id) != 0)
-      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
-                                    "memory.delete requires a positive integer id", NULL);
-
-   memory_authority_t authority = server_account_memory_authority(account);
-   server_memory_scope_begin(req);
-   int delete_rc = kb_client_memory_delete_as(id, authority);
-   kb_client_memory_scope_context_clear();
-   if (delete_rc != 0)
-      return server_error_kind_json(SERVER_ERR_NOT_FOUND,
-                                    "no such memory, or the knowledge service refused", NULL);
-
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "id", (double)id);
-   cJSON_AddBoolToObject(resp, "deleted", 1);
-   /* Say which happened. "deleted" alone would report a retire as a destroy, and
-    * a caller correcting a mistake needs to know whether the value is really gone
-    * or still readable through memory_fact_history. */
-   cJSON_AddBoolToObject(resp, "destroyed", authority == MEMORY_AUTHORITY_USER);
-   return resp;
+   return kb_memory_owner_command("memory.delete", req, server_account_memory_authority(account),
+                                  "deleted", cJSON_True);
 }
 
 cJSON *memory_delete_command(cJSON *req, const char *account)
@@ -326,7 +295,7 @@ cJSON *memory_delete_command(cJSON *req, const char *account)
    if (selection < 0)
       return memory_bad_store();
    if (selection)
-      return memory_with_store(kb_memory_delete_command(req, account), "kb");
+      return kb_memory_delete_command(req, account);
    return server_invoke_module_operation("memory.runtime", "user-delete", req,
                                          "user memory module unavailable");
 }
@@ -339,34 +308,8 @@ int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 static cJSON *kb_memory_get_command(cJSON *req)
 {
-   int64_t id = 0;
-   if (memory_request_positive_id(req, "id", &id) != 0)
-      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
-                                    "memory.get requires a positive integer id", NULL);
-
-   /* Explicit KB selection preserves KB handles and historical reads. */
-   const char *as_of = jo_str(req, "as_of", "");
-   int missing = server_memory_scope_begin(req);
-   cJSON *record = NULL;
-   kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
-   int rc = kb_client_memory_get_json_as_of(id, as_of, &record, &verdict);
-   kb_client_memory_scope_context_clear();
-   if (rc > 0)
-      return server_error_kind_json(SERVER_ERR_NOT_FOUND, "memory not found", NULL);
-   if (rc < 0 || !record)
-      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "KB memory unavailable", NULL);
-   cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "memory", record);
-   cJSON_AddBoolToObject(resp, "active_context_missing", missing);
-   if (as_of[0])
-   {
-      cJSON_AddStringToObject(resp, "as_of", as_of);
-      if (verdict == KB_VALID_AT_UNKNOWN || verdict == KB_VALID_AT_UNASKED)
-         cJSON_AddStringToObject(resp, "valid_at", "unknown");
-      else
-         cJSON_AddBoolToObject(resp, "valid_at", verdict == KB_VALID_AT_YES);
-   }
-   return resp;
+   return kb_memory_owner_command("memory.get", req, MEMORY_AUTHORITY_MODEL, "memory",
+                                  cJSON_Object);
 }
 
 cJSON *memory_get_command(cJSON *req)
@@ -375,7 +318,7 @@ cJSON *memory_get_command(cJSON *req)
    if (selection < 0)
       return memory_bad_store();
    if (selection)
-      return memory_with_store(kb_memory_get_command(req), "kb");
+      return kb_memory_get_command(req);
    return server_invoke_module_operation("memory.runtime", "user-get", req,
                                          "user memory module unavailable");
 }
@@ -389,14 +332,9 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   int active_context_missing = server_memory_scope_begin(req);
-   char *context = kb_client_memory_assemble_context(NULL);
-   kb_client_memory_scope_context_clear();
-   cJSON *resp = jo_ok();
-   jo_add_str(resp, "context", context ? context : "");
-   jo_add_bool(resp, "active_context_missing", active_context_missing);
-   free(context);
-   return send_and_free(conn, resp);
+   return send_and_free(conn,
+                        kb_memory_owner_command("memory.assemble_context", req,
+                                                MEMORY_AUTHORITY_MODEL, "context", cJSON_String));
 }
 
 /* Personal recall uses the same memory module as shared recall, with the

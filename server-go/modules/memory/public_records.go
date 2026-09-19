@@ -134,7 +134,7 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 		}
 	case "get":
 		var ok bool
-		request.ID, ok = args.positiveID("id")
+		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("memory.get requires a positive integer id")
 		}

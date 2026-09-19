@@ -34,7 +34,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	switch verb {
 	case "delete", "update", "touch", "reject", "restore":
 		var ok bool
-		request.ID, ok = args.positiveID("id")
+		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("memory." + verb + " requires a positive integer id")
 		}
@@ -95,6 +95,9 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	switch verb {
 	case "delete":
 		missing = !response.Deleted
+		if args.stringOr("view", "") == "server" {
+			result["id"], result["store"], result["deleted"], result["destroyed"] = request.ID, "kb", true, request.Authority == AuthorityUser
+		}
 	case "touch":
 		missing = response.Count == nil || *response.Count == 0
 	case "reject", "restore":

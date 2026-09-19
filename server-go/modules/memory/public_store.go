@@ -93,7 +93,7 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 }
 
 func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
-	id, ok := args.positiveID("old_id")
+	id, ok := args.decimalID("old_id")
 	content := args.stringOr("new_content", "")
 	if !ok || strings.TrimSpace(content) == "" {
 		return commandResult(commandError("invalid_argument", "memory.supersede requires old_id and new_content"))
