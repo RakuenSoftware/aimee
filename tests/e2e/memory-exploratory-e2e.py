@@ -21,8 +21,11 @@ def main():
     for name in ('server', 'store-db', 'output'):
         parser.add_argument('--' + name, required=True)
     args = parser.parse_args()
-    if not args.server.startswith('aimee-e2e-server-'):
+    suffix = '-aimee-server-1'
+    if not args.server.startswith('aimee-e2e-server-') or not args.server.endswith(suffix):
         parser.error('requires a disposable deployment-matrix Server')
+    if args.store_db != args.server.removesuffix(suffix) + '-aimee-store-db-1':
+        parser.error('store-db must belong to the same disposable Server project')
     gate = placement.Gate(args)
     fixtures = []
     timings = {}
