@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -67,7 +68,7 @@ func TestDomainPublicPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA domain_command_test;
  CREATE FUNCTION domain_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
  SET LOCAL search_path TO pg_temp,domain_command_test,public;
- CREATE TEMP TABLE memories(id bigint PRIMARY KEY,tier text,kind text,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,created_at text DEFAULT pg_now_text(),last_used_at text,use_count int DEFAULT 0,confidence double precision DEFAULT 1);
+ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,tier text,kind text,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,created_at text DEFAULT pg_now_text(),last_used_at text,use_count int DEFAULT 0,confidence double precision DEFAULT 1,effectiveness double precision DEFAULT 0.2);
  INSERT INTO memories(id,tier,kind,scope_type,scope_value) VALUES (1,'L2','fact','global','_global'),(2,'L1','episode','workspace','repo'),(3,'L2','preference','project','app');
  CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text);
  INSERT INTO memory_scopes VALUES (1,'workspace','repo'),(1,'project','app');
@@ -156,6 +157,30 @@ func TestDomainPublicPostgres(t *testing.T) {
 	health := run("query_health", `{}`)["health"].(map[string]any)
 	if health["cycles"] != float64(1) || health["total_promotions"] != float64(2) || health["write_to_readable_lag"].(map[string]any)["state"] != "unmeasured" {
 		t.Fatal(health)
+	}
+	console := run("stats", `{"view":"console","effectiveness":true,"operation":"delete","id":1}`)
+	display := console["display"].(map[string]any)
+	if display["total"] != float64(3) || display["tiers"].(map[string]any)["L2"] != float64(2) ||
+		display["effectiveness"].(map[string]any)["low_effectiveness"] != float64(3) ||
+		display["effectiveness"].(map[string]any)["never_surfaced_l2"] != float64(2) {
+		t.Fatal(console)
+	}
+	if !strings.Contains(console["text"].(string), "L0=0 L1=1 L2=2 L3=0 L4=0 L5=0\n") ||
+		console["pagerank_timing"].(map[string]any)["elapsed_ms"] != float64(0) ||
+		console["pagerank_text"] != "PageRank: elapsed=0.000ms avg=0.000ms max=0.000ms samples=0 candidates=0 edges=0\n" {
+		t.Fatal(console)
+	}
+	if _, exists := run("stats", `{"view":"console"}`)["display"].(map[string]any)["effectiveness"]; exists {
+		t.Fatal("human view unexpectedly requested effectiveness")
+	}
+	if _, exists := run("stats", `{}`)["display"]; exists {
+		t.Fatal("console fields leaked into ordinary stats")
+	}
+	consoleHealth := run("query_health", `{"view":"console"}`)
+	if !strings.Contains(consoleHealth["text"].(string), "Memory Health (last 7 days, 1 cycles):\n") ||
+		!strings.Contains(consoleHealth["text"].(string), "  Write-to-readable:  unmeasured\n  Expirations:        4\n") ||
+		consoleHealth["health"].(map[string]any)["total_promotions"] != float64(2) {
+		t.Fatal(consoleHealth)
 	}
 	// Exercise the historical 256-row public cap (the data transport used to reject it).
 	_, err = tx.Exec(ctx, `INSERT INTO memory_conflicts(memory_a,memory_b) SELECT 1,2 FROM generate_series(1,299)`)
@@ -321,5 +346,15 @@ SET LOCAL ROLE memory_domain_test;`)
 	var retained string
 	if err := conn.QueryRow(ctx, `SELECT COALESCE(current_setting('aimee.memory_scope_value',true),'')`).Scan(&retained); err != nil || retained != "" {
 		t.Fatalf("scope retained after transaction: %q %v", retained, err)
+	}
+}
+
+func TestStatisticsConsoleUnavailable(t *testing.T) {
+	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
+	for _, verb := range []string{"stats", "query_health"} {
+		body, err := client.Command(context.Background(), 73, verb, json.RawMessage(`{"view":"console","effectiveness":true}`))
+		if err == nil || len(body) != 0 {
+			t.Fatalf("unavailable %s looked healthy: %s, %v", verb, body, err)
+		}
 	}
 }

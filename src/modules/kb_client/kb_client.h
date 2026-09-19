@@ -596,26 +596,9 @@ int kb_client_memory_update_as(int64_t id, const char *content, memory_authority
  * Optional reason is retained with the row and mutation evidence.
  * Returns 0 on success, -1 on failure / kb unreachable. */
 int kb_client_memory_reject(int64_t id, const char *reason);
-/* Read aggregate memory stats via aimee-kb.  Returns 0 on success,
- * -1 on failure / kb unreachable.  Mirrors memory_stats(). */
-int kb_client_memory_stats(memory_stats_t *out);
-
-/* Raw-JSON variant: returns the kb "stats" object as a malloc'd JSON string
- * (caller frees), or NULL when the kb is unreachable / returns a non-"ok"
- * envelope.  Used by handle_memory_stats to forward the payload verbatim. */
-char *kb_client_memory_stats_json(void);
-
 /* List unresolved conflicts via aimee-kb.  Returns row count.
  * Mirrors memory_list_conflicts(). */
 int kb_client_memory_list_conflicts(conflict_t *out, int max);
-
-/* Read 7-day rolling health stats via aimee-kb.  Returns 0 / -1.
- * Mirrors memory_query_health(). */
-int kb_client_memory_query_health(memory_health_t *out);
-
-/* Read effectiveness stats via aimee-kb.  Returns 0 / -1.
- * Mirrors memory_effectiveness_stats(). */
-int kb_client_memory_effectiveness_stats(effectiveness_stats_t *out);
 
 /* List entity-graph edges incident to |entity| via aimee-kb.  Returns
  * row count.  Mirrors memory_query_edges(). */

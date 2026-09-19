@@ -81,6 +81,16 @@ authoritative mutation audit. Owner refusals retain their error kinds, while
 missing or malformed responses are unavailable rather than successful empty
 reviews or a fabricated not-found result.
 
+Memory statistics and health console views are rendered by the Go owner through
+`view=console` on the existing public commands. Statistics optionally include
+effectiveness for JSON output; failures of the primary query remain failures.
+The CLI forwards Go's display/text fields and search timing view. Server KB stats
+forward the complete validated owner envelope, preserving integer tokens and
+error kinds. Missing or malformed replies never become healthy zero statistics.
+The four native stats, raw-stats, effectiveness and health client APIs are retired.
+PageRank timing compatibility fields remain zero, and write-to-readable latency
+remains explicitly unmeasured; this migration does not introduce measurements.
+
 The supervised `aimee-module-memory` process is pure Go. It owns extraction,
 write gating, embedding, retrieval safety, reranking, command declaration, and
 the scoped memory data API.

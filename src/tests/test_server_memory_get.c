@@ -8,6 +8,7 @@
 #include <string.h>
 
 extern cJSON *memory_get_command(cJSON *request);
+extern cJSON *memory_stats_command(const cJSON *request);
 extern cJSON *memory_review_list_command(cJSON *request);
 extern cJSON *memory_restore_command(cJSON *request);
 extern cJSON *memory_store_command(const cJSON *request, memory_authority_t authority);
@@ -78,6 +79,8 @@ cJSON *server_invoke_module_operation(const char *method, const char *operation,
       return reply;
    }
    assert(strcmp(unavailable_message, "user memory module unavailable") == 0);
+   if (strcmp(operation, "user-stats") == 0)
+      return cJSON_Parse("{\"status\":\"ok\",\"store\":\"user\",\"stats\":{\"total\":3}}");
    if (strcmp(operation, "user-store") == 0)
    {
       store_calls++;
@@ -115,7 +118,10 @@ void kb_client_memory_scope_context_apply(cJSON *request)
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
    assert(strcmp(method, review_method) == 0);
-   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
+   if (strcmp(method, "memory.stats") == 0)
+      assert(cJSON_GetArraySize(request) == 0);
+   else
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
    assert(!cJSON_HasObjectItem(request, "actor"));
    assert(!cJSON_HasObjectItem(request, "authority"));
    assert(!cJSON_HasObjectItem(request, "operation"));
@@ -128,6 +134,53 @@ void server_error_kind_apply(cJSON *response, const char *kind)
    cJSON_DeleteItemFromObjectCaseSensitive(response, "kind");
    cJSON_AddStringToObject(response, "kind", kind);
 }
+static void test_stats_transport(void)
+{
+   cJSON *request =
+       cJSON_Parse("{\"operation\":\"delete\",\"authority\":\"user\",\"view\":\"console\"}");
+   int previous_calls = review_calls;
+   cJSON *reply = memory_stats_command(request);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(reply, "store")->valuestring, "user") == 0);
+   assert(review_calls == previous_calls);
+   cJSON_Delete(reply);
+   cJSON_AddStringToObject(request, "store", "kb");
+   review_method = "memory.stats";
+   review_reply =
+       "{\"status\":\"ok\",\"stats\":{\"total\":9007199254740993},\"receipt\":\"owner\"}";
+   reply = memory_stats_command(request);
+   char *rendered = cJSON_PrintUnformatted(reply);
+   assert(strcmp(rendered, review_reply) == 0);
+   free(rendered);
+   cJSON_Delete(reply);
+   const char *bad[] = {NULL,
+                        "{}",
+                        "[]",
+                        "{\"status\":\"ok\"}",
+                        "{\"status\":\"ok\",\"stats\":null}",
+                        "{\"status\":\"ok\",\"stats\":{}} trailing"};
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i)
+   {
+      review_reply = bad[i];
+      reply = memory_stats_command(request);
+      assert(strcmp(cJSON_GetObjectItemCaseSensitive(reply, "kind")->valuestring,
+                    SERVER_ERR_UNAVAILABLE) == 0);
+      cJSON_Delete(reply);
+   }
+   review_reply = "{\"status\":\"error\",\"kind\":\"unauthorized\",\"message\":\"owner refusal\"}";
+   reply = memory_stats_command(request);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(reply, "kind")->valuestring, "unauthorized") ==
+          0);
+   cJSON_Delete(reply);
+   cJSON_ReplaceItemInObjectCaseSensitive(request, "store", cJSON_CreateString("invalid"));
+   previous_calls = review_calls;
+   reply = memory_stats_command(request);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(reply, "kind")->valuestring,
+                 SERVER_ERR_INVALID_ARGUMENT) == 0 &&
+          review_calls == previous_calls);
+   cJSON_Delete(reply);
+   cJSON_Delete(request);
+}
+
 static void test_review_transport(void)
 {
    cJSON *request = cJSON_Parse("{\"project\":\"test-project\"}");
@@ -313,5 +366,6 @@ int main(void)
    test_review_transport();
    puts("server memory get: local privacy, explicit KB routing, temporal verdicts, and failures "
         "passed");
+   test_stats_transport();
    return 0;
 }

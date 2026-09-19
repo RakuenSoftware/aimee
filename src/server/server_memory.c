@@ -10,6 +10,7 @@
 #include "integrity.h"
 #include <aimee/workspace/workspace.h>
 #include <math.h>
+#include <aimee/core/event_bus/module_protocol.h>
 
 /* --- Memory handlers --- */
 
@@ -307,27 +308,44 @@ int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, memory_list_command(req));
 }
 
+cJSON *memory_stats_command(const cJSON *req)
+{
+   int selection = server_memory_store_selection(req);
+   if (selection < 0)
+      return memory_bad_store();
+   if (!selection)
+      return server_invoke_module_operation("memory.runtime", "user-stats", req,
+                                            "user memory module unavailable");
+   char *raw = kb_v1_action_request("memory.stats", cJSON_CreateObject());
+   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+                       ? cJSON_ParseWithOpts(raw, NULL, 1)
+                       : NULL;
+   cJSON *reply = NULL;
+   if (cJSON_IsObject(parsed) && strcmp(jo_cstr(parsed, "status"), "ok") == 0 &&
+       cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(parsed, "stats")))
+      reply = cJSON_CreateRaw(raw);
+   else if (cJSON_IsObject(parsed) && strcmp(jo_cstr(parsed, "status"), "error") == 0)
+   {
+      char *kind = strdup(jo_str(parsed, "kind", SERVER_ERR_UNAVAILABLE));
+      if (kind)
+      {
+         server_error_kind_apply(parsed, kind[0] ? kind : SERVER_ERR_UNAVAILABLE);
+         free(kind);
+         reply = parsed;
+         parsed = NULL;
+      }
+   }
+   free(raw);
+   cJSON_Delete(parsed);
+   return reply ? reply
+                : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                         "memory statistics unavailable or invalid response", NULL);
+}
+
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   (void)req;
-   int selection = server_memory_store_selection(req);
-   if (selection < 0)
-      return send_and_free(conn, memory_bad_store());
-   if (!selection)
-      return send_and_free(conn, server_invoke_module_operation("memory.runtime", "user-stats", req,
-                                                                "user memory module unavailable"));
-   char *json = kb_client_memory_stats_json();
-   if (!json)
-      return server_send_error(conn,
-                               "knowledge service unavailable; the memory store is unreachable "
-                               "(server-side maintenance is required)",
-                               NULL);
-   cJSON *stats = cJSON_Parse(json);
-   free(json);
-   cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "stats", stats ? stats : cJSON_CreateObject());
-   return send_and_free(conn, resp);
+   return send_and_free(conn, memory_stats_command(req));
 }
 
 /* cJSON stores numbers as doubles. Reject fractional and unrepresentable IDs

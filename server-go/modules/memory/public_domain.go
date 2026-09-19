@@ -200,6 +200,17 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		}
 		fields["write_to_readable_lag"] = map[string]any{"samples": 0, "state": "unmeasured"}
 		result["health"] = fields
+		if args.stringOr("view", "") == "console" {
+			h := response.Health
+			result["text"] = fmt.Sprintf("Memory Health (last 7 days, %d cycles):\n"+
+				"  Contradiction rate: %.1f%% (%d detected)\n"+
+				"  Promotion rate:     %.1f%% (%d promoted)\n"+
+				"  Demotion rate:      %.1f%% (%d demoted)\n"+
+				"  Staleness:          %.1f%% of L2 facts unused in 30+ days\n"+
+				"  Write-to-readable:  unmeasured\n"+
+				"  Expirations:        %d\n", h.Cycles, h.ContradictionRate*100, h.Contradictions,
+				h.PromotionRate*100, h.Promotions, h.DemotionRate*100, h.Demotions, h.Staleness*100, h.Expirations)
+		}
 	case "stats_dashboard":
 		if len(response.Payload) == 0 {
 			return nil, bus.ModuleStatusInternal
@@ -221,9 +232,45 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		}
 		result["stats"] = map[string]any{"total": s.Total, "conflicts": s.Conflicts, "tier_counts": tiers, "kind_counts": kinds,
 			"pagerank_last_ms": 0, "pagerank_avg_ms": 0, "pagerank_max_ms": 0, "pagerank_samples": 0, "pagerank_last_candidates": 0, "pagerank_last_edges": 0}
+		if args.stringOr("view", "") == "console" {
+			addStatsConsole(result, *s)
+			// The historical CLI includes effectiveness only in JSON output and
+			// treats this secondary query as optional. Never hide a primary stats failure.
+			var effectiveness bool
+			_ = json.Unmarshal(args["effectiveness"], &effectiveness)
+			if effectiveness {
+				data, status := handleData(options, invocation, []byte(`{"operation":"effectiveness-stats","include_all":true}`))
+				var extra DataResponse
+				if status == bus.ModuleStatusOK && json.Unmarshal(data, &extra) == nil && extra.Effectiveness != nil {
+					e := extra.Effectiveness
+					result["display"].(map[string]any)["effectiveness"] = map[string]any{
+						"avg_effectiveness": e.Average, "low_effectiveness": e.LowCount,
+						"high_impact": e.HighImpactCount, "never_surfaced_l2": e.NeverSurfacedL2}
+				}
+			}
+		}
 	}
 	if scoped {
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}
 	return commandResult(result)
+}
+
+// Keep the CLI's presentation contract in the same owner as the public stats.
+// PageRank timing remains unmeasured by this owner; these compatibility fields
+// retain their existing zero values until real measurements are available.
+func addStatsConsole(result map[string]any, stats MemoryStats) {
+	tiers := make(map[string]int, 6)
+	for i := 0; i < 6; i++ {
+		name := fmt.Sprintf("L%d", i)
+		tiers[name] = stats.TierCounts[name]
+	}
+	result["display"] = map[string]any{"total": stats.Total, "conflicts": stats.Conflicts, "tiers": tiers,
+		"pagerank": map[string]any{"last_ms": 0, "avg_ms": 0, "max_ms": 0, "samples": 0, "last_candidates": 0, "last_edges": 0}}
+	result["pagerank_timing"] = map[string]any{"elapsed_ms": 0, "avg_ms": 0, "max_ms": 0, "samples": 0, "candidates": 0, "edges": 0}
+	result["pagerank_text"] = "PageRank: elapsed=0.000ms avg=0.000ms max=0.000ms samples=0 candidates=0 edges=0\n"
+	result["text"] = fmt.Sprintf("Memory Stats:\n  Total:              %d\n  Conflicts:          %d\n"+
+		"  Tiers:              L0=%d L1=%d L2=%d L3=%d L4=%d L5=%d\n"+
+		"  PageRank latency:   last=0.000ms avg=0.000ms max=0.000ms samples=0 candidates=0 edges=0\n",
+		stats.Total, stats.Conflicts, tiers["L0"], tiers["L1"], tiers["L2"], tiers["L3"], tiers["L4"], tiers["L5"])
 }

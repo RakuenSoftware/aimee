@@ -17,6 +17,25 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* The Go owner supplies JSON and text views; transport failures must not look
+ * like a healthy empty store. The action transport takes ownership of request. */
+static cJSON *memory_console_reply(const char *method, int effectiveness)
+{
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "view", "console");
+   if (effectiveness)
+      cJSON_AddBoolToObject(request, "effectiveness", 1);
+   char *raw = kb_v1_action_request(method, request);
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   if (!cJSON_IsObject(reply) || strcmp(jo_cstr(reply, "status"), "ok") != 0)
+      fatal("%s: %s", method,
+            jo_str(reply, "message", "memory service unavailable or invalid response"));
+   if (!cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "text")))
+      fatal("%s: invalid memory console response", method);
+   return reply;
+}
+
 void mem_store(app_ctx_t *ctx, int argc, char **argv)
 {
    opt_parsed_t opts;
@@ -249,13 +268,15 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
 
    memory_diagnostic_t explain_rows[64];
    int explain_count = 0;
-   memory_stats_t explain_stats;
-   memset(&explain_stats, 0, sizeof(explain_stats));
+   cJSON *explain_stats = NULL;
    if (explain)
    {
       explain_count = cmd_memory_diagnose_query(&opts, query_buf, limit, explain_rows, 64);
       cmd_memory_require_runtime(explain_count, "memory search --explain");
-      kb_client_memory_stats(&explain_stats);
+      explain_stats = memory_console_reply("memory.stats", 0);
+      if (!cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(explain_stats, "pagerank_timing")) ||
+          !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(explain_stats, "pagerank_text")))
+         fatal("memory search --explain: invalid statistics response");
    }
 
    /* Search conversation windows */
@@ -323,14 +344,10 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
 
       if (explain)
       {
-         cJSON *timing = cJSON_CreateObject();
-         jo_add_num(timing, "elapsed_ms", explain_stats.pagerank_last_ms);
-         jo_add_num(timing, "avg_ms", explain_stats.pagerank_avg_ms);
-         jo_add_num(timing, "max_ms", explain_stats.pagerank_max_ms);
-         jo_add_num(timing, "samples", explain_stats.pagerank_samples);
-         jo_add_num(timing, "candidates", explain_stats.pagerank_last_candidates);
-         jo_add_num(timing, "edges", explain_stats.pagerank_last_edges);
-         cJSON_AddItemToObject(obj, "pagerank_timing", timing);
+         cJSON_AddItemToObject(
+             obj, "pagerank_timing",
+             cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(explain_stats, "pagerank_timing"),
+                             1));
 
          /* Stable filter contract (memory-public-contract). */
          cJSON_AddItemToObject(obj, "filter_contract", memory_filter_to_json(&filter));
@@ -348,10 +365,7 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
          free(fc_str);
          cJSON_Delete(fc);
       }
-      printf("PageRank: elapsed=%.3fms avg=%.3fms max=%.3fms samples=%d candidates=%d edges=%d\n",
-             explain_stats.pagerank_last_ms, explain_stats.pagerank_avg_ms,
-             explain_stats.pagerank_max_ms, explain_stats.pagerank_samples,
-             explain_stats.pagerank_last_candidates, explain_stats.pagerank_last_edges);
+      fputs(jo_cstr(explain_stats, "pagerank_text"), stdout);
       for (int i = 0; i < fact_count; i++)
       {
          printf("[%d] #%lld %s  eff_imp=%.3f\n", i + 1, (long long)facts[i].id, facts[i].key,
@@ -397,6 +411,7 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
                 valid[0] ? valid : "(any)");
       }
    }
+   cJSON_Delete(explain_stats);
    cJSON_Delete(as_of_response);
    free(results);
 }
@@ -463,54 +478,18 @@ void mem_stats(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)argc;
    (void)argv;
-   memory_stats_t stats;
-   kb_client_memory_stats(&stats);
+   cJSON *reply = memory_console_reply("memory.stats", ctx->json_output);
+   cJSON *display = cJSON_DetachItemFromObjectCaseSensitive(reply, "display");
+   if (!cJSON_IsObject(display))
+      fatal("memory.stats: invalid statistics response");
    if (ctx->json_output)
-   {
-      cJSON *j = cJSON_CreateObject();
-      cJSON_AddNumberToObject(j, "total", stats.total);
-      cJSON_AddNumberToObject(j, "conflicts", stats.conflicts);
-      cJSON *tiers = cJSON_AddObjectToObject(j, "tiers");
-      cJSON_AddNumberToObject(tiers, "L0", stats.tier_counts[0]);
-      cJSON_AddNumberToObject(tiers, "L1", stats.tier_counts[1]);
-      cJSON_AddNumberToObject(tiers, "L2", stats.tier_counts[2]);
-      cJSON_AddNumberToObject(tiers, "L3", stats.tier_counts[3]);
-      cJSON_AddNumberToObject(tiers, "L4", stats.tier_counts[4]);
-      cJSON_AddNumberToObject(tiers, "L5", stats.tier_counts[5]);
-
-      cJSON *pagerank = cJSON_AddObjectToObject(j, "pagerank");
-      cJSON_AddNumberToObject(pagerank, "last_ms", stats.pagerank_last_ms);
-      cJSON_AddNumberToObject(pagerank, "avg_ms", stats.pagerank_avg_ms);
-      cJSON_AddNumberToObject(pagerank, "max_ms", stats.pagerank_max_ms);
-      cJSON_AddNumberToObject(pagerank, "samples", stats.pagerank_samples);
-      cJSON_AddNumberToObject(pagerank, "last_candidates", stats.pagerank_last_candidates);
-      cJSON_AddNumberToObject(pagerank, "last_edges", stats.pagerank_last_edges);
-
-      effectiveness_stats_t estats;
-      if (kb_client_memory_effectiveness_stats(&estats) == 0)
-      {
-         cJSON *eff = cJSON_AddObjectToObject(j, "effectiveness");
-         cJSON_AddNumberToObject(eff, "avg_effectiveness", estats.avg_effectiveness);
-         cJSON_AddNumberToObject(eff, "low_effectiveness", estats.low_effectiveness_count);
-         cJSON_AddNumberToObject(eff, "high_impact", estats.high_impact_count);
-         cJSON_AddNumberToObject(eff, "never_surfaced_l2", estats.never_surfaced_l2);
-      }
-
-      emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
-   }
+      emit_json_ctx(display, ctx->json_fields, ctx->response_profile);
    else
    {
-      printf("Memory Stats:\n");
-      printf("  Total:              %d\n", stats.total);
-      printf("  Conflicts:          %d\n", stats.conflicts);
-      printf("  Tiers:              L0=%d L1=%d L2=%d L3=%d L4=%d L5=%d\n", stats.tier_counts[0],
-             stats.tier_counts[1], stats.tier_counts[2], stats.tier_counts[3], stats.tier_counts[4],
-             stats.tier_counts[5]);
-      printf("  PageRank latency:   last=%.3fms avg=%.3fms max=%.3fms samples=%d candidates=%d "
-             "edges=%d\n",
-             stats.pagerank_last_ms, stats.pagerank_avg_ms, stats.pagerank_max_ms,
-             stats.pagerank_samples, stats.pagerank_last_candidates, stats.pagerank_last_edges);
+      fputs(jo_cstr(reply, "text"), stdout);
+      cJSON_Delete(display);
    }
+   cJSON_Delete(reply);
 }
 
 void mem_scan(app_ctx_t *ctx, int argc, char **argv)
@@ -718,51 +697,18 @@ void mem_health(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)argc;
    (void)argv;
-   memory_health_t health;
-   kb_client_memory_query_health(&health);
+   cJSON *reply = memory_console_reply("memory.query_health", 0);
+   cJSON *health = cJSON_DetachItemFromObjectCaseSensitive(reply, "health");
+   if (!cJSON_IsObject(health))
+      fatal("memory.query_health: invalid health response");
    if (ctx->json_output)
-   {
-      cJSON *j = cJSON_CreateObject();
-      cJSON_AddNumberToObject(j, "cycles", health.cycles);
-      cJSON_AddNumberToObject(j, "contradiction_rate", health.contradiction_rate);
-      cJSON_AddNumberToObject(j, "promotion_rate", health.promotion_rate);
-      cJSON_AddNumberToObject(j, "demotion_rate", health.demotion_rate);
-      cJSON_AddNumberToObject(j, "staleness", health.staleness);
-      cJSON_AddNumberToObject(j, "total_contradictions", health.total_contradictions);
-      cJSON_AddNumberToObject(j, "total_promotions", health.total_promotions);
-      cJSON_AddNumberToObject(j, "total_demotions", health.total_demotions);
-      cJSON_AddNumberToObject(j, "total_expirations", health.total_expirations);
-      cJSON *lag = cJSON_AddObjectToObject(j, "write_to_readable_lag");
-      cJSON_AddNumberToObject(lag, "samples", (double)health.write_to_readable_samples);
-      if (health.write_to_readable_samples > 0)
-      {
-         cJSON_AddNumberToObject(lag, "p50_secs", health.write_to_readable_p50_secs);
-         cJSON_AddNumberToObject(lag, "p95_secs", health.write_to_readable_p95_secs);
-         cJSON_AddNumberToObject(lag, "p99_secs", health.write_to_readable_p99_secs);
-      }
-      else
-         cJSON_AddStringToObject(lag, "state", "unmeasured");
-      emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
-   }
+      emit_json_ctx(health, ctx->json_fields, ctx->response_profile);
    else
    {
-      printf("Memory Health (last 7 days, %d cycles):\n", health.cycles);
-      printf("  Contradiction rate: %.1f%% (%d detected)\n", health.contradiction_rate * 100,
-             health.total_contradictions);
-      printf("  Promotion rate:     %.1f%% (%d promoted)\n", health.promotion_rate * 100,
-             health.total_promotions);
-      printf("  Demotion rate:      %.1f%% (%d demoted)\n", health.demotion_rate * 100,
-             health.total_demotions);
-      printf("  Staleness:          %.1f%% of L2 facts unused in 30+ days\n",
-             health.staleness * 100);
-      if (health.write_to_readable_samples > 0)
-         printf("  Write-to-readable:  p50=%.3fs p95=%.3fs p99=%.3fs (%lld samples)\n",
-                health.write_to_readable_p50_secs, health.write_to_readable_p95_secs,
-                health.write_to_readable_p99_secs, (long long)health.write_to_readable_samples);
-      else
-         printf("  Write-to-readable:  unmeasured\n");
-      printf("  Expirations:        %d\n", health.total_expirations);
+      fputs(jo_cstr(reply, "text"), stdout);
+      cJSON_Delete(health);
    }
+   cJSON_Delete(reply);
 }
 
 void mem_provenance(app_ctx_t *ctx, int argc, char **argv)
