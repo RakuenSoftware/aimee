@@ -1,5 +1,6 @@
 /* The actual retrieval-reference writer preserves the Go record version. */
 #include <assert.h>
+#include "json_fluent.h"
 #include "../modules/db2/c/demotion.c"
 
 static int available = 1;

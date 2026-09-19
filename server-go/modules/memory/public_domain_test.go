@@ -136,6 +136,13 @@ func TestDomainPublicPostgres(t *testing.T) {
 	if len(provenance) != 1 || provenance[0].(map[string]any)["details"] != "source detail" {
 		t.Fatal(provenance)
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO memory_provenance(id,memory_id,session_id,action,details) VALUES (9007199254740993,1,'session','created','exact')`); err != nil {
+		t.Fatal(err)
+	}
+	mcpProvenance := run("get_provenance", `{"memory_id":"1","format":"mcp"}`)["output"].(string)
+	if !strings.Contains(mcpProvenance, "9007199254740993") {
+		t.Fatal(mcpProvenance)
+	}
 	run("link_create", `{"source_id":1,"target_id":2,"relation":"supports","authority":99}`)
 	links := run("link_query", `{"memory_id":2}`)["links"].([]any)
 	if len(links) != 1 || len(links[0].(map[string]any)) != 5 {

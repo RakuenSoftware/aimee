@@ -1,0 +1,2488 @@
+{
+  "version": 1,
+  "source_commit": "a705a6d29468860f5d895a94794de954c25301b6",
+  "scope": "Only memory is Go. The C bus and external host/storage owners stay C. This ledger classifies, and does not weaken, the immutable broad native inventory.",
+  "dispositions": {
+    "go-owner": {
+      "owner": "Go memory, Server/private and KB/shared",
+      "contract": "memory data, command and runtime stages; existing C bus framing",
+      "reason": "Native implementation retired. Go owns domain policy and all module-side communication. Intentional retrieval differences are recorded separately from language conformance.",
+      "evidence": [
+        "server-go/modules/memory/data.go",
+        "server-go/modules/memory/memory.go",
+        "server-go/modules/memory/client_test.go",
+        "server-go/modules/memory/runtime_role_test.go",
+        "scripts/test_bus_conformance.sh"
+      ]
+    },
+    "host-transport": {
+      "owner": "C Server/KB/CLI host",
+      "contract": "Authenticated host requests, complete owner envelopes, explicit owner refusal",
+      "reason": "Host owns authentication, store selection, module lifecycle and transport. It calls the Go owner and never substitutes a native engine.",
+      "evidence": [
+        "src/tests/test_server_memory_get.c",
+        "src/tests/test_module_json_call.c",
+        "src/tests/test_mcp_memory_answer.c",
+        "scripts/test_bus_conformance.sh"
+      ]
+    },
+    "kb-client": {
+      "owner": "C KB client used by external hosts",
+      "contract": "memory.* request/reply protocol, local Go screening, host activation receipts",
+      "reason": "Only marshals remote requests, parses protocol fields and records host-owned receipts. Admission, scope eligibility, search, composition and rendering are Go operations. Older fixed-record clients remain only for external ABI consumers; live text paths use complete owner output.",
+      "evidence": [
+        "src/tests/test_kb_client_memory.c",
+        "src/tests/test_bus_memory_audit.c",
+        "server-go/modules/memory/recall_composition_test.go"
+      ]
+    },
+    "host-context": {
+      "owner": "C session/agent host consuming Go projections",
+      "contract": "Go session views and ingress assembly, caller-supplied space budget",
+      "reason": "C retains non-memory session/agent behavior. Go chooses, ranks and renders memory sections and diagnostic previews. C appends returned text and records externally owned retrieval events.",
+      "evidence": [
+        "src/tests/test_session_memory_transport.c",
+        "src/tests/test_agent_memory_transport.c",
+        "src/tests/test_ingress_preinject.c",
+        "src/tests/test_ir_module_plan.c",
+        "server-go/modules/memory/public_records_test.go"
+      ]
+    },
+    "benchmark-transport": {
+      "owner": "C benchmark host",
+      "contract": "Versioned memory-stage calls; injected production Go evaluator",
+      "reason": "Three retained memory_insert entry points are benchmark-host transport only. No scratch memory engine or local ranking implementation remains.",
+      "evidence": [
+        "src/modules/benchmarks/agent_eval_memory_transport.c",
+        "server-go/modules/memory/live_benchmark_test.go",
+        "server-go/modules/memory/retrieval_eval_test.go"
+      ]
+    },
+    "storage-protocol": {
+      "owner": "DB2 storage and shared graph ABI",
+      "contract": "DB2 generated wire catalog and persisted enum/row definitions",
+      "reason": "Declarations, enum codecs and persisted relation codes belong to external storage. Retired memory_* implementations are absent; legacy wire IDs remain reserved rather than renumbered. Go memory owns the domain operations.",
+      "evidence": [
+        "src/tests/test_db2_module_contract.c",
+        "src/tests/test_bus_db2_module.c",
+        "src/tests/test_db2_rel_seed_support.c",
+        "scripts/check_db2_link_closure.py"
+      ]
+    },
+    "protocol-catalog": {
+      "owner": "Host protocol/catalog generation",
+      "contract": "MCP tools, served CLI/HTTP routes and generated schemas",
+      "reason": "Memory names are command/schema identifiers, not a native implementation. Runtime routing uses the declared Go stages.",
+      "evidence": [
+        "scripts/check_memory_c_boundary.py",
+        "src/tests/test_mcp_roundtable_contract.c",
+        "src/tests/test_mcp_client_registry.c"
+      ]
+    },
+    "host-fixture": {
+      "owner": "External host/storage test owner",
+      "contract": "C harnesses for the existing bus, transport and storage interfaces",
+      "reason": "C tests exercise external C owners. Native memory domain parity is tested in Go. Test-only stubs supply protocol replies, not a shipping fallback.",
+      "evidence": [
+        "scripts/check_tests_are_run.py",
+        "scripts/test_bus_conformance.sh",
+        "server-go/modules/memory/public_records_test.go"
+      ]
+    },
+    "legacy-fixture": {
+      "owner": "Legacy test inventory; excluded from acceptance",
+      "contract": "Unbuilt historical monolith tests tracked by check_tests_are_run",
+      "reason": "These are unbuilt mixed-owner historical fixtures, not production consumers or passing evidence. Their memory behaviors are covered by the Go owner suites; they cannot satisfy a G0 gate.",
+      "evidence": [
+        "scripts/check_tests_are_run.py",
+        "server-go/modules/memory/runtime_role_test.go",
+        "server-go/modules/memory/recall_test.go"
+      ]
+    },
+    "legacy-command": {
+      "owner": "Legacy CLI compile-check owner",
+      "contract": "CMD_SRCS compile-only registration; shipping CLI uses served commands",
+      "reason": "Not linked into a shipping CLI or Server command table. Retained mixed-purpose commands call transport APIs; the complete cmd_memory family and its fixtures are deleted.",
+      "evidence": [
+        "src/Makefile",
+        "CMakeLists.txt",
+        "src/tests/test_cmd_memory_data.c"
+      ]
+    },
+    "retired-api": {
+      "owner": "Retired native memory implementation",
+      "contract": "Immutable native-retirement source snapshot",
+      "reason": "No native production definition remains. The implementation is Go or the dead entry point is deleted; any surviving type/declaration is separately classified under its external protocol owner.",
+      "evidence": [
+        "tests/baselines/modules/memory-native-retirement.json",
+        "scripts/check_memory_c_boundary.py",
+        "server-go/modules/memory/client_test.go"
+      ]
+    }
+  },
+  "original_files": {
+    "src/modules/memory/gw_stage_memory.c": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/gw_stage_memory.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/include/aimee/memory/module_api.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/include/aimee/memory/pii_provider.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_activation.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_assemble_util.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_bus_context.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_content_gate_bus.c": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_core_internal.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_data_bus.c": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_domain_bus.c": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_domain_runtime_bus.c": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_embed_bus.c": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_extract_patterns.c": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_extract_patterns.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_fact_gate.c": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_fact_gate.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_graph_fusion.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_ontology.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_pii_gate.c": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_pii_gate.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_platform.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_profile_pack.h": {
+      "disposition": "go-owner"
+    },
+    "src/modules/memory/memory_scope_connection.c": {
+      "disposition": "go-owner"
+    }
+  },
+  "original_symbols": {
+    "AIMEE_MEMORY_BUS_CONTEXT_H": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_EVENT_DATA": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h",
+        "src/kb/kb_module_stage_adapters.c",
+        "src/modules/benchmarks/agent_eval_memory_transport.c",
+        "src/server/module_stage_adapters.c"
+      ]
+    },
+    "AIMEE_MEMORY_EVENT_DECLARE_COMMANDS": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h"
+      ]
+    },
+    "AIMEE_MEMORY_EVENT_EMBED": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h",
+        "src/kb/kb_module_stage_adapters.c"
+      ]
+    },
+    "AIMEE_MEMORY_EVENT_EXTRACT_INDEX": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h"
+      ]
+    },
+    "AIMEE_MEMORY_EVENT_RERANK": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h",
+        "src/server/server_ready.c"
+      ]
+    },
+    "AIMEE_MEMORY_EVENT_RETRIEVE": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h"
+      ]
+    },
+    "AIMEE_MEMORY_EVENT_WRITE": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h"
+      ]
+    },
+    "AIMEE_MEMORY_EXTRACT_REQUEST_HEADER_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_EXTRACT_REQUEST_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_EXTRACT_RESPONSE_HEADER_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_EXTRACT_RESPONSE_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_EXTRACT_RESPONSE_MAX": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_GATE_REQUEST_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_GATE_REQUEST_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_GATE_RESPONSE_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_GATE_RESPONSE_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_MODULE_API_H": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_PII_PROVIDER_H": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_PII_REQUEST_HEADER_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_PII_REQUEST_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_PII_RESPONSE_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_PII_RESPONSE_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_REL_TYPE_MAX": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_REQUEST_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_REQUEST_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_RESPONSE_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_RESPONSE_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SCAN_ATTR_MAX": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SCAN_REQUEST_HEADER_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SCAN_REQUEST_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SCAN_RESPONSE_HEADER_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SCAN_RESPONSE_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SCAN_RESPONSE_MAX": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SENS_REQUEST_HEADER_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SENS_REQUEST_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SENS_RESPONSE_HEADER_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SENS_RESPONSE_MAGIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_SENS_RESPONSE_MAX": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_STAGE_DATA": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h",
+        "src/kb/kb_module_stage_adapters.c",
+        "src/modules/benchmarks/agent_eval_memory_transport.c",
+        "src/server/module_stage_adapters.c"
+      ]
+    },
+    "AIMEE_MEMORY_STAGE_DECLARE_COMMANDS": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h"
+      ]
+    },
+    "AIMEE_MEMORY_STAGE_EMBED": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h",
+        "src/kb/kb_module_stage_adapters.c"
+      ]
+    },
+    "AIMEE_MEMORY_STAGE_EXTRACT_INDEX": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h"
+      ]
+    },
+    "AIMEE_MEMORY_STAGE_RERANK": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h"
+      ]
+    },
+    "AIMEE_MEMORY_STAGE_RETRIEVE": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h"
+      ]
+    },
+    "AIMEE_MEMORY_STAGE_WRITE": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/headers/memory_stage_contract.h"
+      ]
+    },
+    "AIMEE_MEMORY_TRIPLE_OBJECT_MAX": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_TRIPLE_REL_TYPE_MAX": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_TRIPLE_SUBJECT_MAX": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_TRIPLE_WIRE_MAX": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "AIMEE_MEMORY_WIRE_VERSION": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_ACTIVATION_MAX_ROWS": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_ACTIVATION_STICKY_BONUS": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_AUTOFREE": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_CORE_INTERNAL_H": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_GRAPH_GRAVITY_DEFAULT": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_GRAPH_GRAVITY_SEMANTIC": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_PROFILE_PACK_DESC_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_PROFILE_PACK_MAX_KINDS": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_PROFILE_PACK_MAX_LIST": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_PROFILE_PACK_MAX_TIERS": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "MEMORY_PROFILE_PACK_NAME_LEN": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "add_provenance": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "aimee_memory_confidence_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "aimee_memory_fact_verdict_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "aimee_memory_sensitivity_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "aimee_memory_triple_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "anti_pattern_escalate": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/modules/kb_client/kb_client_agent.c"
+      ]
+    },
+    "anti_pattern_extract_from_failures": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/modules/kb_client/kb_client_agent.c"
+      ]
+    },
+    "anti_pattern_extract_from_feedback": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/modules/kb_client/kb_client_agent.c"
+      ]
+    },
+    "assemble_texts_near_duplicate": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "assemble_token_bits": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "context_apply_recency": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "context_recency_from_age_days": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "context_xml_tag_for_header": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_alloc_all_ids": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_conflict_list": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_count_by_tier_kind": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_decisions_export_jsonl": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_epistemic_kind": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_export_alloc_all": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_export_row_free": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_find_facts_like": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/schema_data.h"
+      ]
+    },
+    "db2_memory_find_id_by_key_kind": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/modules/db2/c/memory_query.h",
+        "src/tests/test_bus_db2_module.c",
+        "src/tests/test_db2_module_contract.c"
+      ]
+    },
+    "db2_memory_get": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_key_exists": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/modules/db2/c/memory_payload.h"
+      ]
+    },
+    "db2_memory_list_low_effectiveness": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_list_session_scope_priority": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_list_session_scope_priority_like": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_list_superseded_keys": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_list_unused_l2": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_load_eval_corpus": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_pii_sensitivity_batch_fn": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_pii_turn_classifier_fn": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_promotion_demote_id": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_provenance_by_id": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_reject": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_restore": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_review_list": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/modules/db2/c/memory_query.h",
+        "src/tests/support/kb_http_route_stubs.c"
+      ]
+    },
+    "db2_memory_scene_members": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scenes_list_recent": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scope_bind_current": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scope_context_allows": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scope_context_clear": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scope_context_get": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scope_context_rank": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scope_context_rank_batch": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scope_context_restore": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scope_context_set": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scope_context_set_exact": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_scope_tag_insert": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_search_facts_patterns_by_keyword": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_set_artifact": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_summaries_list": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_top_l2_facts": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "db2_memory_workspace_tag_insert": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "fact_gate_verdict_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "gate_check_ephemeral": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "gate_check_sensitive": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "gate_has_evidence_markers": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "gw_memory_recall_gate_metrics_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "gw_memory_system_prompt": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "gw_stage_memory_enabled": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "gw_stage_memory_recall_gate_metrics": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "gw_stage_memory_recall_gate_record_outcome": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "gw_stage_memory_recall_gate_should_skip": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "ir_stage_memory": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_activation_row_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_activation_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_alerts": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/modules/protocols/mcp/mcp_tools.c",
+        "src/modules/protocols/mcp/mcp_tools_extended.c",
+        "src/server/server_mcp_call_table.c"
+      ]
+    },
+    "memory_answer_evidence_decision_str": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_answer_evidence_reason_str": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_apply_feedback": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_ask_query": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_ask_query_scoped": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_assemble_context": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_context_assembly.c"
+      ]
+    },
+    "memory_assemble_context_ws": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_workspace_memory.c"
+      ]
+    },
+    "memory_audit_emit": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_briefing": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/modules/protocols/mcp/mcp_tools.c",
+        "src/modules/protocols/mcp/mcp_tools_extended.c",
+        "src/server/server_mcp_call_table.c",
+        "src/tests/test_dogfood.c"
+      ]
+    },
+    "memory_bus_read_context": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_bus_set_context_reader": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_candidate_source_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_check_drift": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_collect_scopes": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_compact_windows": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_content_as_of_dup": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_content_dup": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_delete": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_context_assembly.c"
+      ]
+    },
+    "memory_delete_as": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_diagnose": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h"
+      ]
+    },
+    "memory_diagnose_scoped": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_directive_counts": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_directive_create": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c",
+        "src/tests/test_session_briefing.c"
+      ]
+    },
+    "memory_directive_from_json": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_directive_get": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_directive_list": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_curiosity.c",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_directive_mark_surfaced": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_directive_match": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_directive_metrics": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_directive_resolve": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c",
+        "src/tests/test_session_briefing.c"
+      ]
+    },
+    "memory_directive_suppress": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_directive_sweep_expired": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_directive_to_json": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_effectiveness_stats": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_embed": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_embed_command_is_http": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_embed_serving_id": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_embed_text": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_embed_texts": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_embedder_last_result_unauthorized": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_episode_card_generate": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_explain_match": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/modules/protocols/mcp/mcp_tools_extended.c",
+        "src/server/server_mcp_call_table.c"
+      ]
+    },
+    "memory_extract_patterns": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_extract_register_extractor": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_extract_register_turn_scanner": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_fact_gate_check": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_fact_gate_checker_fn": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_fact_gate_register_checker": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_fact_history": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/modules/protocols/mcp/mcp_tools_extended.c",
+        "src/server/server_mcp_call_table.c"
+      ]
+    },
+    "memory_find_facts": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_find_facts_scoped": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_find_facts_visible": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_find_facts_visible_ex": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_fold_session": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_functional_tier_name": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_fusion_state_clear": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_fusion_state_is_on": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_fusion_state_set": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_get": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/modules/protocols/mcp/mcp_tools.c",
+        "src/modules/protocols/mcp/mcp_tools_extended.c",
+        "src/server/server_mcp_call_table.c",
+        "src/tests/test_mcp_roundtable_contract.c"
+      ]
+    },
+    "memory_get_as_of_result": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_get_context_block": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_get_entity_edges": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_get_entity_profile": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_get_episode": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_get_provenance": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_get_result": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_graph_expansion_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_graph_path_edge_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_insert": {
+      "disposition": "benchmark-transport",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/modules/benchmarks/agent_eval_memory_transport.c",
+        "src/tests/bench_perf.c",
+        "src/tests/test_context_assembly.c",
+        "src/tests/test_curiosity.c",
+        "src/tests/test_memory_advanced.c",
+        "src/tests/test_workspace_memory.c"
+      ]
+    },
+    "memory_insert_epistemic_ex": {
+      "disposition": "benchmark-transport",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/modules/benchmarks/agent_eval_memory_transport.c"
+      ]
+    },
+    "memory_insert_ex": {
+      "disposition": "benchmark-transport",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/modules/benchmarks/agent_eval_memory_transport.c",
+        "src/tests/test_workspace_memory.c"
+      ]
+    },
+    "memory_learn_style": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/modules/kb_client/kb_client_agent.c"
+      ]
+    },
+    "memory_lifecycle_counts": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_lifecycle_sweep_expired": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_link_create": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_workspace_memory.c"
+      ]
+    },
+    "memory_link_delete": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_link_query": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_lint_run": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_list": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_list_conflicts": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_list_episodes": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_maintenance_run": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_maintenance_summary_to_json": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_mark_pending": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_node_kind_t": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/rel_types.h",
+        "src/modules/db2/c/graph_kinds.h",
+        "src/rel_types.c",
+        "src/tests/test_db2_rel_seed_support.c",
+        "src/tests/test_db2_rel_type_support.c"
+      ]
+    },
+    "memory_ontology_node_kind_from_text": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_ontology_node_kind_to_text": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_ontology_relation_from_text": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_ontology_relation_to_text": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_ontology_rule_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_ontology_rules": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_ontology_validate": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pagerank_config_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pagerank_runtime_stats_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pagerank_score_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_parsed_date_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pattern_extractor_fn": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pattern_scan_turn": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pattern_turn_scanner_fn": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pattern_turn_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pii_inject_classifier_fn": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pii_register_inject_classifier": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pii_register_sensitivity_batch": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pii_register_turn_classifier": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pii_rel_sensitivity": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pii_rel_sensitivity_batch": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pii_sensitivity_batch_fn": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pii_should_inject": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pii_turn_classifier_fn": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_pii_turn_requests_sensitive": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_primary_scope": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_profile_pack_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_prospective_complete": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c",
+        "src/tests/test_session_briefing.c"
+      ]
+    },
+    "memory_prospective_count_by_state": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_prospective_create": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c",
+        "src/tests/test_session_briefing.c"
+      ]
+    },
+    "memory_prospective_get": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_prospective_list": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c",
+        "src/tests/test_session_briefing.c"
+      ]
+    },
+    "memory_prospective_mark_triggered": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_prospective_match": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_prospective_metrics": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_prospective_sweep_expired": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_query_edges": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_query_health": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_query_intent_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_rank_weights_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_rebuild_derived_indexes": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_rebuild_vector_index_for_version": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_recall": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/modules/protocols/mcp/mcp_tool_profile.c",
+        "src/modules/protocols/mcp/mcp_tools.c",
+        "src/modules/protocols/mcp/mcp_tools_extended.c",
+        "src/server/server_mcp_call_table.c",
+        "src/tests/test_mcp_client_registry.c"
+      ]
+    },
+    "memory_recall_activated": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_recall_metrics": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_recall_trace_capture_begin": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_recall_trace_capture_end": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_recall_trace_capture_reset": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_recall_trace_rejections": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_record_conflict": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_reject": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_relation_kind_t": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/modules/db2/c/graph_kinds.h"
+      ]
+    },
+    "memory_repair_vector_index": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_repair_vector_index_failed_only": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_resolve_conflict": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_run_maintenance": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_scan_content": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_scan_conversations": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_scope_level_name": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_scope_visibility_rank": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_search": {
+      "disposition": "host-transport",
+      "external_occurrences": [
+        "src/tests/bench_perf.c",
+        "src/tests/test_dogfood.c"
+      ]
+    },
+    "memory_search_graph": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_search_graph_as_of": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_set_audit_hook": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_stats": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/kb/kb_service.c",
+        "src/modules/kb_client/kb_client_dashboard.c",
+        "src/server/openapi_server_data.h",
+        "src/server/server_dispatch_defs_data.h",
+        "src/server/server_http_routes.c",
+        "src/server/server_state.c",
+        "src/tests/bench_perf.c",
+        "src/tests/test_server_dispatch.c"
+      ]
+    },
+    "memory_supersede": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_tag_global": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_workspace_memory.c"
+      ]
+    },
+    "memory_tag_project": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_workspace_memory.c"
+      ]
+    },
+    "memory_tag_scope": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_tag_workspace": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_temporal_constraint_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_touch": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_touch_many": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_transition_lifecycle": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h",
+        "src/tests/test_context_assembly.c",
+        "src/tests/test_memory_advanced.c"
+      ]
+    },
+    "memory_update_content": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/headers/memory.h"
+      ]
+    },
+    "memory_update_content_as": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_upsert_workflow": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "memory_valid_at": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "mode": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "pattern_triple_t": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "pgvec_memory_vector_collection_exists": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    },
+    "pgvec_memory_vector_collection_recreate": {
+      "disposition": "storage-protocol",
+      "external_occurrences": [
+        "src/modules/db2/c/memory_vectors.h",
+        "src/tests/test_pgvec_neardup.c"
+      ]
+    },
+    "pgvec_memory_vector_search_record_type": {
+      "disposition": "retired-api",
+      "external_occurrences": []
+    }
+  },
+  "external_files": {
+    "src/cmd_data.c": {
+      "disposition": "legacy-command",
+      "symbols": [
+        "kb_client_memory_insert",
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "e81388aca7314f889fdb26c139b77c7109301a2f52844fa50394ad8b8ad6ed8b"
+    },
+    "src/cmd_dogfood.c": {
+      "disposition": "legacy-command",
+      "symbols": [
+        "kb_client_memory_audit_note"
+      ],
+      "sha256": "f95cb9ed44de1b470b19d0218746b6a42801e481a85ebe4a420efb2b9c799db7"
+    },
+    "src/cmd_kb_export.c": {
+      "disposition": "legacy-command",
+      "symbols": [
+        "kb_client_memory_internal"
+      ],
+      "sha256": "2d9f938cbf185de2265cb2d9618e80f6777dd15b3e467d80852499ad148a00a9"
+    },
+    "src/cmd_onboard.c": {
+      "disposition": "legacy-command",
+      "symbols": [
+        "kb_client_memory_get",
+        "kb_client_memory_insert",
+        "kb_client_memory_insert_as"
+      ],
+      "sha256": "ce61bdfd4d71cb51c8317a1a0fc100ebb7c5516482b0df8348ea3b3a23931bfd"
+    },
+    "src/cmd_session_lifecycle.c": {
+      "disposition": "host-context",
+      "symbols": [
+        "kb_client_memory_compact_windows",
+        "kb_client_memory_learn_style",
+        "kb_client_memory_scan_conversations",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "0abee9a8f40dedea019ca17b8d5c243d30f003ada3f13e197b3dff8c62a6d111"
+    },
+    "src/headers/memory.h": {
+      "disposition": "storage-protocol",
+      "symbols": [
+        "add_provenance",
+        "memory_assemble_context",
+        "memory_assemble_context_ws",
+        "memory_delete",
+        "memory_diagnose",
+        "memory_directive_counts",
+        "memory_directive_create",
+        "memory_directive_get",
+        "memory_directive_list",
+        "memory_directive_mark_surfaced",
+        "memory_directive_match",
+        "memory_directive_metrics",
+        "memory_directive_resolve",
+        "memory_directive_suppress",
+        "memory_directive_sweep_expired",
+        "memory_insert",
+        "memory_insert_epistemic_ex",
+        "memory_insert_ex",
+        "memory_lifecycle_counts",
+        "memory_lifecycle_sweep_expired",
+        "memory_link_create",
+        "memory_list_conflicts",
+        "memory_maintenance_run",
+        "memory_mark_pending",
+        "memory_prospective_complete",
+        "memory_prospective_create",
+        "memory_prospective_get",
+        "memory_prospective_list",
+        "memory_prospective_mark_triggered",
+        "memory_prospective_match",
+        "memory_prospective_sweep_expired",
+        "memory_query_health",
+        "memory_record_conflict",
+        "memory_resolve_conflict",
+        "memory_stats",
+        "memory_tag_global",
+        "memory_tag_project",
+        "memory_transition_lifecycle",
+        "memory_update_content"
+      ],
+      "sha256": "be5774483082bf9c0f7376b478c9a79363ea7db1f675928d06b7edc839b5e602"
+    },
+    "src/headers/memory_stage_contract.h": {
+      "disposition": "host-transport",
+      "symbols": [
+        "AIMEE_MEMORY_EVENT_COMMAND",
+        "AIMEE_MEMORY_EVENT_DATA",
+        "AIMEE_MEMORY_EVENT_DECLARE_COMMANDS",
+        "AIMEE_MEMORY_EVENT_EMBED",
+        "AIMEE_MEMORY_EVENT_EXTRACT_INDEX",
+        "AIMEE_MEMORY_EVENT_RERANK",
+        "AIMEE_MEMORY_EVENT_RETRIEVE",
+        "AIMEE_MEMORY_EVENT_WRITE",
+        "AIMEE_MEMORY_STAGE_COMMAND",
+        "AIMEE_MEMORY_STAGE_DATA",
+        "AIMEE_MEMORY_STAGE_DECLARE_COMMANDS",
+        "AIMEE_MEMORY_STAGE_EMBED",
+        "AIMEE_MEMORY_STAGE_EXTRACT_INDEX",
+        "AIMEE_MEMORY_STAGE_RERANK",
+        "AIMEE_MEMORY_STAGE_RETRIEVE",
+        "AIMEE_MEMORY_STAGE_WRITE"
+      ],
+      "sha256": "db535cd5e2bb1a2c8dad391c9c81b7b19b74e83c1ec56d793591760ca27f6b9f"
+    },
+    "src/headers/module_stage_adapters.h": {
+      "disposition": "host-transport",
+      "symbols": [
+        "server_module_memory_data"
+      ],
+      "sha256": "1a3f43565e46720266282f783122f9b257f2967af8921ebc107466615f1cf6b7"
+    },
+    "src/headers/rel_types.h": {
+      "disposition": "storage-protocol",
+      "symbols": [
+        "memory_node_kind_t"
+      ],
+      "sha256": "30ab6901aeb1d5b7f2253df87144759132e42bbb73748bcd32d776b28e232610"
+    },
+    "src/kb/kb.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
+      ],
+      "sha256": "bbd44c8f4883ce61a96a49b5ccde61e305c923642f41bdd4ec98026edf84b04a"
+    },
+    "src/kb/kb_memory_facts.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_module_memory_data"
+      ],
+      "sha256": "63540ad0635fa366d5c3e56721e8d624bac6b45fd49b11dd475e6fd659eef8bd"
+    },
+    "src/kb/kb_module_stage_adapters.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "AIMEE_MEMORY_EVENT_DATA",
+        "AIMEE_MEMORY_EVENT_EMBED",
+        "AIMEE_MEMORY_STAGE_DATA",
+        "AIMEE_MEMORY_STAGE_EMBED",
+        "kb_module_memory_data"
+      ],
+      "sha256": "680b2d301db8658893634a555d6a8db6aed0d27f2bdc4997d43752e23b3baf89"
+    },
+    "src/kb/kb_module_stage_adapters.h": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_module_memory_data"
+      ],
+      "sha256": "a321e4f7702d696057f7f7796134096e95e339117337e2a10f5143ce1e0585d3"
+    },
+    "src/kb/kb_service.c": {
+      "disposition": "protocol-catalog",
+      "symbols": [
+        "memory_stats"
+      ],
+      "sha256": "e0406a9b12f758870d423edbd76001cccf3573052e47a3a06621c1e3486cd074"
+    },
+    "src/modules/benchmarks/agent_eval_memory_transport.c": {
+      "disposition": "benchmark-transport",
+      "symbols": [
+        "AIMEE_MEMORY_EVENT_DATA",
+        "AIMEE_MEMORY_STAGE_DATA",
+        "memory_insert",
+        "memory_insert_epistemic_ex",
+        "memory_insert_ex"
+      ],
+      "sha256": "092c35cde685ac1430e4dcacc178d9ee4e345de61f2f50cdcb6e2220f7ec053b"
+    },
+    "src/modules/db2/c/graph_kinds.h": {
+      "disposition": "storage-protocol",
+      "symbols": [
+        "memory_node_kind_t",
+        "memory_relation_kind_t"
+      ],
+      "sha256": "2c4a4c818c0d9e5bc838782f9a1f26d31127d2a951667bd5c3cfc8a8f273d782"
+    },
+    "src/modules/db2/c/memory_payload.h": {
+      "disposition": "storage-protocol",
+      "symbols": [
+        "db2_memory_key_exists"
+      ],
+      "sha256": "c1703b7daabf60e0e946f5c885c7a1d9d8f16b862bc71d96e2e58b91b1c31df8"
+    },
+    "src/modules/db2/c/memory_query.h": {
+      "disposition": "storage-protocol",
+      "symbols": [
+        "db2_memory_find_id_by_key_kind",
+        "db2_memory_review_list"
+      ],
+      "sha256": "3a471572aa3798ae4a28c74cc907aaa1a25a5aeffb96e0f613a61c9da5f98eb6"
+    },
+    "src/modules/db2/c/memory_vectors.h": {
+      "disposition": "storage-protocol",
+      "symbols": [
+        "pgvec_memory_vector_collection_recreate"
+      ],
+      "sha256": "8d16cd04963a75d14749cf73f278516760bf92f524bf4f60e40d3df0494db28a"
+    },
+    "src/modules/guardrails/guardrails_orchestrator.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_check_drift"
+      ],
+      "sha256": "97df185ec3a926fb00926bd805f87db677d07f690eb3ed3efbe8bfd1b791a963"
+    },
+    "src/modules/kb_client/kb_client.h": {
+      "disposition": "kb-client",
+      "symbols": [
+        "kb_client_memory_assemble_context",
+        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_audit_hook_fn",
+        "kb_client_memory_audit_note",
+        "kb_client_memory_benchmark_json",
+        "kb_client_memory_check_drift",
+        "kb_client_memory_compact_windows",
+        "kb_client_memory_find_id_by_key_kind",
+        "kb_client_memory_get",
+        "kb_client_memory_get_as_of",
+        "kb_client_memory_get_json_as_of",
+        "kb_client_memory_insert",
+        "kb_client_memory_insert_as",
+        "kb_client_memory_insert_ex",
+        "kb_client_memory_learn_style",
+        "kb_client_memory_recall_json",
+        "kb_client_memory_recall_json_ex",
+        "kb_client_memory_recall_shared_json",
+        "kb_client_memory_scan_conversations",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "e082bca050fc187928d2c02d15d2e431719f84af763c18b59bf4270992ab33e2"
+    },
+    "src/modules/kb_client/kb_client_agent.c": {
+      "disposition": "kb-client",
+      "symbols": [
+        "anti_pattern_escalate",
+        "anti_pattern_extract_from_failures",
+        "anti_pattern_extract_from_feedback",
+        "kb_client_memory_learn_style",
+        "kb_client_memory_scan_conversations",
+        "memory_learn_style"
+      ],
+      "sha256": "4e9da1a87e1adbd3738da95257ed49ee28eea534fe8ac2a52e8d8688ad85727a"
+    },
+    "src/modules/kb_client/kb_client_dashboard.c": {
+      "disposition": "kb-client",
+      "symbols": [
+        "memory_stats"
+      ],
+      "sha256": "c681e3beba4876f6b6565d2bc696bfc3310b54667ae6d3aa3eea5db26fc3ca93"
+    },
+    "src/modules/kb_client/kb_client_memory.c": {
+      "disposition": "kb-client",
+      "symbols": [
+        "kb_client_memory_assemble_context",
+        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_benchmark_json",
+        "kb_client_memory_compact_windows",
+        "kb_client_memory_get",
+        "kb_client_memory_get_as_of",
+        "kb_client_memory_get_json_as_of",
+        "kb_client_memory_internal",
+        "kb_client_memory_recall_json",
+        "kb_client_memory_recall_json_ex",
+        "kb_client_memory_recall_shared_json",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "5f18e47d490c35f94fc6d4134eb1af3f75a4df76c08ad6d3196fec4c09ddfc09"
+    },
+    "src/modules/kb_client/kb_client_memory_audit.c": {
+      "disposition": "kb-client",
+      "symbols": [
+        "kb_client_memory_audit_hook_fn",
+        "kb_client_memory_audit_note"
+      ],
+      "sha256": "734d31686141197a9c712f623aa96177718dc547e4cba9f2110b1fdf36174810"
+    },
+    "src/modules/kb_client/kb_client_memory_mutations.c": {
+      "disposition": "kb-client",
+      "symbols": [
+        "kb_client_memory_audit_note",
+        "kb_client_memory_check_drift",
+        "kb_client_memory_find_id_by_key_kind",
+        "kb_client_memory_insert",
+        "kb_client_memory_insert_as",
+        "kb_client_memory_insert_ex",
+        "kb_client_memory_internal",
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "9185c06c8eba2b61ed58d853227bc885b00770dd88d6373234fd9074b5b3f597"
+    },
+    "src/modules/kb_client/kb_client_roadmap.c": {
+      "disposition": "kb-client",
+      "symbols": [
+        "kb_client_memory_internal"
+      ],
+      "sha256": "7052e15e46cade0a4190e18309a2e00742f10240b49e3f432325d85bb473f761"
+    },
+    "src/modules/protocols/mcp/mcp_tool_profile.c": {
+      "disposition": "protocol-catalog",
+      "symbols": [
+        "memory_recall"
+      ],
+      "sha256": "daa9cd1bd7379781bd4f05c3b1fa67d2b781a62a49e9fa0812e95a47d3d828fa"
+    },
+    "src/modules/protocols/mcp/mcp_tools.c": {
+      "disposition": "protocol-catalog",
+      "symbols": [
+        "memory_alerts",
+        "memory_briefing",
+        "memory_get",
+        "memory_recall"
+      ],
+      "sha256": "5485d242e02582c15ca2e6355837ba8e91cdf04e79236a78b8041ec741d9c6b1"
+    },
+    "src/modules/protocols/mcp/mcp_tools_extended.c": {
+      "disposition": "protocol-catalog",
+      "symbols": [
+        "memory_alerts",
+        "memory_briefing",
+        "memory_explain_match",
+        "memory_fact_history",
+        "memory_get",
+        "memory_recall"
+      ],
+      "sha256": "a6766b285f0d9912505d9a3d7625b3cc2bb02177e08ddd42bcace8595b168bb0"
+    },
+    "src/modules/tools/agent_tools_dispatch.c": {
+      "disposition": "host-context",
+      "symbols": [
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "e65b54fe8ce372e7bfb87e22bcd38125aaf21cac894fc13d718e92a6fc2b5791"
+    },
+    "src/rel_types.c": {
+      "disposition": "storage-protocol",
+      "symbols": [
+        "memory_node_kind_t"
+      ],
+      "sha256": "e453b08038729ddab07a175827cc7e2b72be978c9f58cefe2fe4445a5d698e8f"
+    },
+    "src/schema_data.h": {
+      "disposition": "protocol-catalog",
+      "symbols": [
+        "db2_memory_find_facts_like"
+      ],
+      "sha256": "99cd0b91a16a185c997b90573b8fb34b3eb62782df88a0a8fb111c0f168c2467"
+    },
+    "src/server/agent_runtime.c": {
+      "disposition": "host-context",
+      "symbols": [
+        "kb_client_memory_assemble_context",
+        "kb_client_memory_find_id_by_key_kind",
+        "kb_client_memory_insert",
+        "kb_client_memory_recall_json_ex",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "7dfe5addbcf20b6ca74381ff2927279a77195ade663b8885a5235d897691ec0b"
+    },
+    "src/server/ingress_preinject.c": {
+      "disposition": "host-context",
+      "symbols": [
+        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "f7271431082fb9377a1908875c57595897d47131d96f2f7b7d3c2abcc8f002fb"
+    },
+    "src/server/memory_audit_bridge.h": {
+      "disposition": "host-transport",
+      "symbols": [
+        "AIMEE_MEMORY_AUDIT_BRIDGE_H"
+      ],
+      "sha256": "a748844434493b685a5dd284e7e3aff0452d9cd22d08e7c927c00e4342374730"
+    },
+    "src/server/module_stage_adapters.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "AIMEE_MEMORY_EVENT_DATA",
+        "AIMEE_MEMORY_STAGE_DATA",
+        "server_module_memory_data"
+      ],
+      "sha256": "964546668ab8749469a727606a4fd81286adafa16ecca0e7cbf60f70df0515c7"
+    },
+    "src/server/openapi_server_data.h": {
+      "disposition": "protocol-catalog",
+      "symbols": [
+        "memory_stats"
+      ],
+      "sha256": "eb744127583db29d8f320c9ca05b68569e4e2779012e35d667fbda386d0f8517"
+    },
+    "src/server/server.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_scope_context_clear",
+        "server_module_memory_data"
+      ],
+      "sha256": "ac281a3358a4e9dad4beb225cf249a39bb8e07d0ec11d0d5f5d9c9fbcba3ef2d"
+    },
+    "src/server/server_api.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_recall_shared_json",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "6f79342044fa0174e64d59e3aeffc8cc18be67297f7c0c4d4e9a9b0f74a5df6e"
+    },
+    "src/server/server_code_index.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "server_module_memory_data"
+      ],
+      "sha256": "ac39d26034da3e6a67c004ae7a387764133469b905a35d647d2c683473ee147d"
+    },
+    "src/server/server_dispatch_defs_data.h": {
+      "disposition": "protocol-catalog",
+      "symbols": [
+        "memory_stats"
+      ],
+      "sha256": "35b7399e72a62d9616b06520af5363156809b3780857ab2abf9b505c676d2460"
+    },
+    "src/server/server_facts.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_audit_note"
+      ],
+      "sha256": "19f983ec1c61929355ca65c151fb17860f67c0180b3d325aa63691245d15b5c7"
+    },
+    "src/server/server_hooks.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "server_module_memory_data"
+      ],
+      "sha256": "1d5099366b3f9928c4ca9e880819b0c21f590d736fb94393482f93204d1825d5"
+    },
+    "src/server/server_http_routes.c": {
+      "disposition": "protocol-catalog",
+      "symbols": [
+        "memory_stats"
+      ],
+      "sha256": "fb7dcf36e45c32454e6ff77eeedf7d734fde85e42eb38716d2f1e14d9b387dd7"
+    },
+    "src/server/server_mcp.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_audit_note",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set",
+        "server_module_memory_data"
+      ],
+      "sha256": "664b7f7054f15b8964b0d6dc9137865faa64a0f6fe0f8e2a3b84ad46ee9da411"
+    },
+    "src/server/server_mcp_call_table.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_recall_shared_json",
+        "kb_client_memory_scope_context_apply",
+        "memory_alerts",
+        "memory_briefing",
+        "memory_explain_match",
+        "memory_fact_history",
+        "memory_get",
+        "memory_recall"
+      ],
+      "sha256": "2bcbe9f4c674a2862679f89aeff8d5d4fdb68fc40f62a69b77d71f97ff2aca9b"
+    },
+    "src/server/server_memory.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "29f28c6bec671d134db5bd768a4374a3bb40ed62d1776dd3af3503c3f9cd800f"
+    },
+    "src/server/server_memory_benchmark.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_benchmark_json",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear"
+      ],
+      "sha256": "0eafc391b60698590d469375334aa8b0a840c646c89b0234116a3cb15d309651"
+    },
+    "src/server/server_memory_review.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_audit_note",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear"
+      ],
+      "sha256": "113b970f0b82c681784fdaac87267adb994a9fc35b69a6fb5d909d79e0e56c28"
+    },
+    "src/server/server_ready.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "AIMEE_MEMORY_EVENT_RERANK"
+      ],
+      "sha256": "ed297947458e09654df03efb8731a820609f2b18506baac633a38c6c62f17193"
+    },
+    "src/server/server_session.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "2a4617a05ccfade8d61a5b79aa73330356d3c78bd299e0fd8940d5067c10c17f"
+    },
+    "src/server/server_state.c": {
+      "disposition": "host-transport",
+      "symbols": [
+        "kb_client_memory_audit_note",
+        "memory_stats",
+        "server_module_memory_data"
+      ],
+      "sha256": "e1e2b75663d6add8ed381021b5309f8cfca2b0ab35af684e2b53828634d3a599"
+    },
+    "src/tasks.c": {
+      "disposition": "host-context",
+      "symbols": [
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "22a414a7a09d4a15d790cc27f66c90a4ceb2010ff499d623eb3123227321bacd"
+    },
+    "src/tests/bench_perf.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "memory_insert",
+        "memory_search",
+        "memory_stats"
+      ],
+      "sha256": "e59bfd74749fc8e2b7b2e4f51410de4c438823f0b172a14ceb985f8e40e75cc1"
+    },
+    "src/tests/support/kb_client_test_stub.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_check_drift"
+      ],
+      "sha256": "143fa9fec8d6bbe971a3a5df693c0392d2576faffb61f9733ec1b1b8bb657c7a"
+    },
+    "src/tests/support/kb_http_route_stubs.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "db2_memory_review_list"
+      ],
+      "sha256": "6da102d88d8ab39fa963e655873899d4ae161145eccf7324c89c8b9effd18b86"
+    },
+    "src/tests/test_agent_memory_transport.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "8b35ddf28eeb6fbb44e3be94cc1ab3e9e3eaa898b157cf68de1642439a4abaa4"
+    },
+    "src/tests/test_bus_db2_module.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "db2_memory_find_id_by_key_kind"
+      ],
+      "sha256": "1605edf71e2a947b6af3c34ef1d1d992141b2ad34eeb5392d044a5562193623d"
+    },
+    "src/tests/test_bus_memory_audit.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_audit_note"
+      ],
+      "sha256": "74184437dd278bc1b68f1210be82f327b6e80e7332cfcf016997c6277ff72544"
+    },
+    "src/tests/test_cmd_memory_data.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_insert",
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "3c9afa759a7fbf3ec050d9aff922c2698e984481cbd688a67d59293ea4a8446a"
+    },
+    "src/tests/test_context_assembly.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "memory_assemble_context",
+        "memory_delete",
+        "memory_insert",
+        "memory_transition_lifecycle"
+      ],
+      "sha256": "79dce2701ce04437d94e6c137d25812f45c57d08f59c82459291f000f30777b5"
+    },
+    "src/tests/test_curiosity.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "memory_directive_list",
+        "memory_insert"
+      ],
+      "sha256": "d90f1195ac0c3f61d48f15c34fd32dbaff2b74e6fd272f82ecfbe739c1578e17"
+    },
+    "src/tests/test_db2_module_contract.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "db2_memory_find_id_by_key_kind"
+      ],
+      "sha256": "db04057def93328592de112abd2e65ddec1daa4c2719219c77759a4f5f6f7035"
+    },
+    "src/tests/test_db2_rel_seed_support.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "memory_node_kind_t"
+      ],
+      "sha256": "98db2cce74e7c4185cf3b4140178755ca11e5acec105004082ffa4924e369dd0"
+    },
+    "src/tests/test_db2_rel_type_support.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "memory_node_kind_t"
+      ],
+      "sha256": "2ac3e9e3a0ba0f6598cad376b6e3db7aa446e72ff83c2a50de4af13c43368165"
+    },
+    "src/tests/test_dogfood.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "memory_briefing",
+        "memory_search"
+      ],
+      "sha256": "95daf33fe2b7c252909d37dec4ad1d001242134f8d9df6f24998b27e2d7c5ce0"
+    },
+    "src/tests/test_ingress_preinject.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "490ff36b0a88d766d83140b89e4bb5760e977b56d4dca86ec0587ca4e5ca72ce"
+    },
+    "src/tests/test_ir_module_plan.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "262a6da40ab32b8d9895c1bf50ea380f42ef6676e0ee00235079fac5dfb47a7d"
+    },
+    "src/tests/test_kb.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED"
+      ],
+      "sha256": "2e887804db85b888a43e1ad0f7fee23ea6d8865309ccedebeabe59704fd7a700"
+    },
+    "src/tests/test_kb_client_memory.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_assemble_context",
+        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_benchmark_json",
+        "kb_client_memory_find_id_by_key_kind",
+        "kb_client_memory_get",
+        "kb_client_memory_get_as_of",
+        "kb_client_memory_get_json_as_of",
+        "kb_client_memory_insert",
+        "kb_client_memory_recall_json",
+        "kb_client_memory_recall_shared_json",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "e3fdf020e66057362ec3994f4d6c60d51f5dc03d936b7be095fbc83172eddb06"
+    },
+    "src/tests/test_kb_memory_facts_connection.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_module_memory_data"
+      ],
+      "sha256": "14f410396729f35203196e45024e38a25cdba2d6198daeae5e986aca8538f0a4"
+    },
+    "src/tests/test_mcp_client_registry.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "memory_recall"
+      ],
+      "sha256": "e35d836a7c290bdd6ff3f2e0c2a07d0c849a884d6d51a23620e4e4db036ceca5"
+    },
+    "src/tests/test_mcp_memory_answer.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_audit_note",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set",
+        "server_module_memory_data"
+      ],
+      "sha256": "30fda6badd59af2b403255d89a4f16de59be388efceef3a632940025dbc6bb4f"
+    },
+    "src/tests/test_mcp_roundtable_contract.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "memory_get"
+      ],
+      "sha256": "38da9e34b27ede7e18de9bf3e50a37b0b3c619f92164400cc1e7c3e64b0d7926"
+    },
+    "src/tests/test_memory_advanced.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "add_provenance",
+        "memory_directive_counts",
+        "memory_directive_create",
+        "memory_directive_get",
+        "memory_directive_list",
+        "memory_directive_mark_surfaced",
+        "memory_directive_match",
+        "memory_directive_metrics",
+        "memory_directive_resolve",
+        "memory_directive_suppress",
+        "memory_directive_sweep_expired",
+        "memory_insert",
+        "memory_lifecycle_counts",
+        "memory_lifecycle_sweep_expired",
+        "memory_list_conflicts",
+        "memory_maintenance_run",
+        "memory_mark_pending",
+        "memory_prospective_complete",
+        "memory_prospective_create",
+        "memory_prospective_get",
+        "memory_prospective_list",
+        "memory_prospective_mark_triggered",
+        "memory_prospective_match",
+        "memory_prospective_sweep_expired",
+        "memory_query_health",
+        "memory_record_conflict",
+        "memory_resolve_conflict",
+        "memory_transition_lifecycle"
+      ],
+      "sha256": "59ce537a82ee4450e56e09bdac09d0b5a3b49a5a8b0ddc00c7a71e5c071ec83d"
+    },
+    "src/tests/test_memory_checkpoint_transport.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "a449f5f3d329f901aa2ac0c979f6dd4c97214cbef0ff3eb36e1d811f62ab77f9"
+    },
+    "src/tests/test_module_json_call.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "server_module_memory_data"
+      ],
+      "sha256": "2633f7881a3eef1257ef977c4c34b073f4a182750665d4c3ec8d501ee28df972"
+    },
+    "src/tests/test_pgvec_neardup.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "pgvec_memory_vector_collection_recreate"
+      ],
+      "sha256": "f6ec281efe496b865b62eff9dd0c3156d003e4651e08e7a2c97594956ce31bfc"
+    },
+    "src/tests/test_server_dispatch.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_scope_context_clear",
+        "memory_stats",
+        "server_module_memory_data"
+      ],
+      "sha256": "a95e671fb426956b20144f9b3e2aa2c6f58b29676c28d2a39bc7891b010035ee"
+    },
+    "src/tests/test_server_facts_transport.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_audit_note"
+      ],
+      "sha256": "60644de6a523fcfee0697b32d0a6262b4355429dd12eb29d3e08e4ff71b9bd14"
+    },
+    "src/tests/test_server_memory_benchmark.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_benchmark_json",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear"
+      ],
+      "sha256": "4f5cf2e15f017e998d8b63326578690415456fd8ebc6802edcd1fc6a2085c3cb"
+    },
+    "src/tests/test_server_memory_domain.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "8ed09dd1e7db70410cf20f52d979568fa0f8971583a5464eac2a3a3d8d69bf78"
+    },
+    "src/tests/test_server_memory_get.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_audit_note",
+        "kb_client_memory_scope_context_apply",
+        "kb_client_memory_scope_context_clear",
+        "kb_client_memory_scope_context_set"
+      ],
+      "sha256": "6875b4564c9dfd7be6e82a05f0d1da2356c0e6e557cff62734e5cb8ba116c062"
+    },
+    "src/tests/test_server_prospective.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_audit_note"
+      ],
+      "sha256": "5ca2def52ef329e8a08dc089c4d56e0df51506182d74238515fad8dd660e45ac"
+    },
+    "src/tests/test_session_briefing.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "memory_directive_create",
+        "memory_directive_resolve",
+        "memory_prospective_complete",
+        "memory_prospective_create",
+        "memory_prospective_list"
+      ],
+      "sha256": "ed25d88d5696fad401602ba1ce36e6627f360eab075a0bda1e934c09d8bb6745"
+    },
+    "src/tests/test_session_memory_transport.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "bdd928a66bebeee343ed1da935aac55547cc8d78e3e78b79794659de7609041c"
+    },
+    "src/tests/test_wiki_render.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "ce1ca897443c2155a6e0edfa74c8f6fb558795d90dc3aa85047be5d0d97e329a"
+    },
+    "src/tests/test_workspace_memory.c": {
+      "disposition": "legacy-fixture",
+      "symbols": [
+        "memory_assemble_context_ws",
+        "memory_insert",
+        "memory_insert_ex",
+        "memory_link_create",
+        "memory_tag_global",
+        "memory_tag_project"
+      ],
+      "sha256": "fce0e7896093e0b676854c2cb2b9d9a5c11e6f3384f743f228d732ad95c2926c"
+    },
+    "src/wiki_render.c": {
+      "disposition": "host-context",
+      "symbols": [
+        "kb_client_memory_scope_context_apply"
+      ],
+      "sha256": "a9a98f5c46a694e89f1888fed98e7663c0fcb1ce488b391f6dfe99ed9e648d4e"
+    }
+  }
+}

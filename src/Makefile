@@ -2214,6 +2214,7 @@ module-bus-boundary-check:
 
 memory-c-boundary-check:
 	@python3 -I -S ../scripts/check_memory_c_boundary.py
+	@python3 -I -S ../scripts/check_memory_ownership.py
 
 module-egress-check:
 	@python3 -I -S ../scripts/check-module-egress.py

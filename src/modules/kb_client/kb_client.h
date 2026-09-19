@@ -540,7 +540,6 @@ void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, c
  * and install an exact-value tombstone that blocks automatic re-extraction.
  * Optional reason is retained with the row and mutation evidence.
  * Returns 0 on success, -1 on failure / kb unreachable. */
-int kb_client_memory_reject(int64_t id, const char *reason);
 /* Compact conversation windows (raw->summary, summary->fact) via aimee-kb.
  * Returns 0 / -1.  Mirrors memory_compact_windows(). */
 int kb_client_memory_compact_windows(int *summary_count, int *fact_count);
@@ -587,18 +586,6 @@ int kb_client_mcp_call(const char *qualified_name, const cJSON *args, int timeou
 
 /* List the memory_relation_schema rows owned by aimee-kb.  Writes up
  * to |max| rows into |out| and returns the number written. */
-
-/* Diagnose a query (returns memory_t + memory_score_parts_t per row)
- * via aimee-kb.  Returns row count.  Mirrors memory_diagnose() and
- * memory_diagnose_scoped(). */
-int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max);
-int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
-                                     const char *scope_value, int limit, memory_diagnostic_t *out,
-                                     int max);
-
-/* Explain how a specific memory matches a query via aimee-kb.
- * Returns 0 / -1.  Mirrors memory_explain_match(). */
-int kb_client_memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic_t *out);
 
 /* Fetch a single memory row by id via aimee-kb. Returns 0 on success,
  * 1 for a valid missing row, or -1 when the service/result is unavailable. */

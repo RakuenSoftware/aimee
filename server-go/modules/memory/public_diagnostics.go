@@ -30,7 +30,7 @@ func handleDiagnosticCommand(options handlerOptions, invocation bus.ModuleInvoca
 	scoped := false
 	if verb == "explain_match" {
 		request.Operation = "explain"
-		request.ID, ok = args.positiveID("memory_id")
+		request.ID, ok = args.decimalID("memory_id")
 		if !ok {
 			return commandResult(commandError("invalid_argument", "missing positive memory_id"))
 		}
@@ -68,6 +68,30 @@ func handleDiagnosticCommand(options handlerOptions, invocation bus.ModuleInvoca
 		if record, ok := metadata[d.Memory.ID]; ok {
 			rows = append(rows, publicDiagnostic{Memory: record, Parts: d.Parts})
 		}
+	}
+	if args.stringOr("format", "") == "ingress" {
+		previews := make([]map[string]any, 0, len(rows))
+		for _, r := range rows {
+			m := r.Memory
+			preview := m.Headline
+			if preview == "" {
+				preview = m.Content
+			}
+			previews = append(previews, map[string]any{"id": strconv.FormatInt(m.ID, 10), "key": m.Key, "tier": m.Tier, "kind": m.Kind, "headline": m.Headline, "content": m.Content, "score": r.Parts.Total, "preview": preview})
+		}
+		return commandResult(map[string]any{"status": "ok", "memories": previews})
+	}
+	if verb == "explain_match" && args.stringOr("format", "") == "mcp" {
+		if len(rows) != 1 {
+			return commandResult(commandError("not_found", "memory not found"))
+		}
+		m, p := rows[0].Memory, rows[0].Parts
+		result := map[string]any{"status": "ok", "memory": map[string]any{"id": m.ID, "tier": m.Tier, "kind": m.Kind, "headline": m.Headline, "content": m.Content}, "scores": map[string]any{"lexical": p.Lexical, "semantic": p.Semantic, "entity": p.Entity, "temporal": p.Temporal, "evidence": p.Evidence, "confidence": p.Confidence, "salience": p.Salience, "graph_score": p.GraphScore, "hybrid_total": p.HybridTotal, "blended_total": p.BlendedTotal, "total": p.Total}}
+		output, err := json.Marshal(result)
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		return commandResult(map[string]any{"status": "ok", "output": string(output)})
 	}
 	result := map[string]any{"status": "ok"}
 	if verb == "explain_match" {

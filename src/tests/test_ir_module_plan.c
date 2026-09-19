@@ -165,8 +165,15 @@ void kb_client_memory_scope_context_apply(cJSON *request)
    cJSON_AddBoolToObject(request, "scope_context", 1);
    cJSON_AddStringToObject(request, "project", "active-project");
 }
+static char *diagnostic_reply(const cJSON *request);
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
+   if (!strcmp(method, "memory.diagnose_scoped"))
+   {
+      char *raw = diagnostic_reply(request);
+      cJSON_Delete(request);
+      return raw;
+   }
    assert(strcmp(method, "memory.facts") == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "project")),
@@ -218,21 +225,14 @@ kb_client_result_status_t kb_client_last_result_status(void)
  * exists to catch -- and with (void)query it passed with the fix reverted.
  * Anything that does not mention the subject recalls nothing, exactly as the
  * real kb did when handed 5773 characters of persona. */
-int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
+static char *diagnostic_reply(const cJSON *request)
 {
-   if (query && (!strstr(query, "deploy") || strstr(query, "aimee-persona")))
-      return 0;
-   (void)limit;
-   if (g_no_recall || !out || max <= 0)
-      return 0;
-   memset(out, 0, sizeof(out[0]) * (size_t)max);
-   out[0].memory.id = 101;
-   snprintf(out[0].memory.tier, sizeof(out[0].memory.tier), "L2");
-   snprintf(out[0].memory.kind, sizeof(out[0].memory.kind), "fact");
-   snprintf(out[0].memory.key, sizeof(out[0].memory.key), "deploy path");
-   snprintf(out[0].memory.headline, sizeof(out[0].memory.headline), "Use the deploy matrix.");
-   out[0].parts.total = 0.88;
-   return 1;
+   const char *query = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "query"));
+   if (g_no_recall || !query || !strstr(query, "deploy") || strstr(query, "aimee-persona"))
+      return strdup("{\"status\":\"ok\",\"memories\":[]}");
+   return strdup("{\"status\":\"ok\",\"memories\":[{\"id\":\"101\",\"tier\":\"L2\",\"kind\":"
+                 "\"fact\",\"key\":\"deploy path\",\"headline\":\"Use the deploy "
+                 "matrix.\",\"preview\":\"Use the deploy matrix.\",\"score\":0.88}]}");
 }
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                 int max)

@@ -104,10 +104,7 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		scoped = commandScope(args, &request)
 	case "get_provenance", "link_query":
 		var ok bool
-		request.ID, ok = args.positiveID("memory_id")
-		if verb == "link_query" {
-			request.ID, ok = args.decimalID("memory_id")
-		}
+		request.ID, ok = args.decimalID("memory_id")
 		if !ok {
 			return invalid("missing memory_id")
 		}
@@ -202,6 +199,17 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 			rows = []Provenance{}
 		}
 		result["entries"] = rows
+		if args.stringOr("format", "") == "mcp" {
+			status := "ok"
+			if len(rows) == 0 {
+				status = "empty"
+			}
+			output, err := json.Marshal(map[string]any{"status": status, "count": len(rows), "provenance": rows})
+			if err != nil {
+				return nil, bus.ModuleStatusInternal
+			}
+			return commandResult(map[string]any{"status": "ok", "output": string(output)})
+		}
 	case "link_query":
 		rows := make([]map[string]any, 0, len(response.Links))
 		for _, r := range response.Links {

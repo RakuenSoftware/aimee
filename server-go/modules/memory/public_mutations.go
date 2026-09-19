@@ -136,6 +136,9 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	if verb == "restore" {
 		result["id"], result["restored"] = request.ID, true
 	}
+	if verb == "reject" && args.stringOr("view", "") == "server" {
+		result["id"], result["tombstoned"] = request.ID, true
+	}
 	if scoped {
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}
@@ -170,5 +173,5 @@ func mutationMCPResult(verb string, id, newID int64, key string) ([]byte, bus.Mo
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	return commandResult(map[string]any{"status": "ok", "text": text})
+	return commandResult(map[string]any{"status": "ok", "text": text, "audit_id": fmt.Sprint(newID)})
 }

@@ -6,13 +6,17 @@
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "aimee.h"
-#include "module_commands.h"
-#include "json_fluent.h"
 
 #include <cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Optional external host transport. The standalone storage module has no
+ * command registry; unresolved memory versions retain the documented unknown
+ * value. Memory policy is never supplied by DB2. */
+extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, cJSON **)
+    __attribute__((weak));
 
 /* auditable-correctness P1.5 (D3): the retrieval_event carries a UNIFIED typed
  * `surfaced_refs` list — [{type,...,v}] — as the source of truth. Memory rows are
@@ -39,11 +43,14 @@ static cJSON *make_memory_ref(int64_t id)
    cJSON *args = cJSON_CreateObject(), *reply = NULL;
    cJSON_AddStringToObject(args, "operation", "record");
    cJSON_AddNumberToObject(args, "id", (double)id);
-   if (aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) == 1)
+   if (aimee_module_commands_dispatch_internal &&
+       aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) == 1)
    {
       const cJSON *record = cJSON_GetObjectItemCaseSensitive(reply, "memory");
-      const char *version = jo_cstr(record, "updated_at");
-      if (strcmp(jo_cstr(reply, "status"), "ok") == 0 && version[0])
+      const char *version =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "updated_at"));
+      const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
+      if (status && strcmp(status, "ok") == 0 && version && version[0])
          cJSON_AddStringToObject(r, "v", version);
    }
    cJSON_Delete(reply);
@@ -298,6 +305,12 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
    if (!turn_id || !turn_id[0])
       return -1;
 
+   /* Optional external host transport. The standalone storage module has no
+    * command registry; unresolved memory versions retain the documented unknown
+    * value. Memory policy is never supplied by DB2. */
+   extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, cJSON **)
+       __attribute__((weak));
+
    /* auditable-correctness P1.5 (D14): the two-writer idempotent merge. A turn's
     * retrieval_event may be contributed to by more than one surface (the memory
     * recall AND the code-search surface). The first writer creates the event; any
@@ -464,6 +477,12 @@ int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id, const char
       id_out[0] = '\0';
    if (!turn_id || !turn_id[0])
       return -1;
+
+   /* Optional external host transport. The standalone storage module has no
+    * command registry; unresolved memory versions retain the documented unknown
+    * value. Memory policy is never supplied by DB2. */
+   extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, cJSON **)
+       __attribute__((weak));
 
    /* auditable-correctness P1.5 (D3/D14): merge TYPED refs ({type, ref, v}, e.g.
     * code:<project>:<file_path> with v=content_hash) into the turn's unified

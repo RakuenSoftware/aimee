@@ -380,7 +380,6 @@ static void test_readers_distinguish_unreachable_from_empty(void)
 
 static void test_ordered_readers_propagate_active_project_context(void)
 {
-   memory_diagnostic_t diagnostics[2];
 
    scoped_request_count = 0;
    mock_agent_http_set_post_handler(scoped_ok_post_handler);
@@ -428,11 +427,15 @@ static void test_ordered_readers_propagate_active_project_context(void)
       json = kb_v1_action_request(context_commands[i], request);
       free(json);
    }
-   (void)kb_client_memory_diagnose("q", 2, diagnostics, 2);
+   cJSON *diagnostics = cJSON_Parse("{\"query\":\"q\",\"limit\":2}");
+   kb_client_memory_scope_context_apply(diagnostics);
+   free(kb_v1_action_request("memory.diagnose_scoped", diagnostics));
 
    (void)kb_client_memory_insert("L2", "fact", "scoped-key", "scoped-content", 0.8, NULL, NULL);
    (void)kb_client_memory_find_id_by_key_kind("scoped-key", "fact");
-   (void)kb_client_memory_reject(42, "wrong");
+   cJSON *reject = cJSON_Parse("{\"id\":42,\"reason\":\"wrong\"}");
+   kb_client_memory_scope_context_apply(reject);
+   free(kb_v1_action_request("memory.reject", reject));
    memory_t memory;
    (void)kb_client_memory_get(42, &memory);
 
@@ -646,6 +649,22 @@ static void test_pii_never_reaches_kb(void)
       assert(g_pii_posts == 0);
    }
 
+   /* The direct action path used by HTTP/MCP has the same no-transmit gate. */
+   const char *methods[] = {"memory.store", "memory.update", "memory.supersede", "memory.reject"};
+   for (int i = 0; i < 4; i++)
+   {
+      g_pii_posts = 0;
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request,
+                              i == 2   ? "new_content"
+                              : i == 3 ? "reason"
+                                       : "content",
+                              secret);
+      char *raw = kb_v1_action_request(methods[i], request);
+      assert(raw && g_pii_posts == 0 && !strstr(raw, "hunter2trustno1"));
+      free(raw);
+   }
+
    /* 3. A sensitive KEY withholds the whole write: the key is the lookup handle
     *    and cannot be redacted in place. Nothing is transmitted. */
    mock_agent_http_reset();
@@ -721,7 +740,6 @@ static void test_every_content_wrapper_screens(void)
             (void)kb_client_decision_log_insert(1, "opts", "chosen", secret, "assume", &dec));
    PII_CASE("collab_rules.propose", (void)kb_client_collab_rules_propose(secret, "why", "me"));
    PII_CASE("task.create", (void)kb_client_task_create(secret, "s", 0, &task));
-   PII_CASE("memory.reject", (void)kb_client_memory_reject(42, secret));
 
    /* And the screen must not have turned these into blanket refusals: clean
     * content still reaches the kb. */
@@ -815,6 +833,39 @@ static void test_benchmark_file_transport(void)
    mock_agent_http_reset();
 }
 
+static const char *exact_reply;
+static int exact_id_post(const char *url, const char *auth, const char *body, char **reply,
+                         int timeout, const char *headers)
+{
+   (void)url;
+   (void)auth;
+   (void)timeout;
+   (void)headers;
+   cJSON *request = cJSON_Parse(body);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "view")), "native"));
+   cJSON_Delete(request);
+   *reply = strdup(exact_reply);
+   return 200;
+}
+static void test_exact_mutation_identity(void)
+{
+   kb_client_dependency_reset_for_tests();
+   mock_agent_http_set_post_handler(exact_id_post);
+   exact_reply = "{\"status\":\"ok\",\"id_text\":\"9007199254740993\",\"id\":9007199254740993,"
+                 "\"memory\":{\"id\":9007199254740993}}";
+   memory_t out;
+   assert(kb_client_memory_insert("L2", "fact", "key", "content", .8, NULL, &out) == 0 &&
+          out.id == INT64_C(9007199254740993));
+   assert(kb_client_memory_find_id_by_key_kind("key", "fact") == INT64_C(9007199254740993));
+   exact_reply = "{\"status\":\"ok\",\"id_text\":\"9223372036854775808\",\"id\":42}";
+   assert(kb_client_memory_find_id_by_key_kind("key", "fact") == 0);
+   exact_reply = "{\"status\":\"ok\",\"id\":9007199254740993}";
+   assert(kb_client_memory_insert("L2", "fact", "key", "content", .8, NULL, &out) < 0);
+   assert(kb_client_memory_find_id_by_key_kind("key", "fact") == 0);
+   mock_agent_http_reset();
+}
+
 int main(void)
 {
    test_screen_failures();
@@ -823,6 +874,7 @@ int main(void)
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
    assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
+   test_exact_mutation_identity();
    test_benchmark_file_transport();
    test_generic_action_preserves_budget_auth_and_refusal();
    test_readers_distinguish_unreachable_from_empty();

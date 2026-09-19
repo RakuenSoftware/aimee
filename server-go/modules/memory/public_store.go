@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -89,6 +90,9 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		return mutationMCPResult("store", r.ID, r.ID, r.Key)
 	}
 	result := map[string]any{"status": "ok", "id": r.ID, "memory": r}
+	if args.stringOr("view", "") == "native" {
+		result["id_text"] = fmt.Sprint(r.ID)
+	}
 	if args.stringOr("view", "") == "server" {
 		result["store"] = "kb"
 	}

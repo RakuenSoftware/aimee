@@ -1339,7 +1339,8 @@ static char *td_search_memory(cJSON *args, const char *name, const char *dispatc
       const cJSON *count_json = cJSON_GetObjectItemCaseSensitive(reply, "count");
       const cJSON *text_json = cJSON_GetObjectItemCaseSensitive(reply, "text");
       int valid = !strcmp(jo_cstr(reply, "status"), "ok") && cJSON_IsNumber(count_json) &&
-                  count_json->valuedouble >= 0 && cJSON_IsString(text_json);
+                  count_json->valuedouble >= 0 && count_json->valuedouble <= 20 &&
+                  count_json->valuedouble == count_json->valueint && cJSON_IsString(text_json);
       if (valid && count_json->valuedouble > 0)
       {
          result = safe_strdup(text_json->valuestring);

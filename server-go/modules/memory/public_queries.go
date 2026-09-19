@@ -106,6 +106,9 @@ func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation,
 			return nil, bus.ModuleStatusInternal
 		}
 		result["id"] = response.IDs[0]
+		if args.stringOr("view", "") == "native" {
+			result["id_text"] = fmt.Sprint(response.IDs[0])
+		}
 	case "list_low_effectiveness":
 		rows := response.LowEffectiveness
 		if rows == nil {

@@ -8,6 +8,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, const char *kind,
+                                 const char *key, double confidence, const char *session, int ok)
+{
+   (void)op;
+   (void)id;
+   (void)tier;
+   (void)kind;
+   (void)key;
+   (void)confidence;
+   (void)session;
+   assert(ok);
+}
 extern cJSON *tool_search_memory(cJSON *args);
 extern cJSON *tool_memory_mutate(cJSON *args);
 extern cJSON *tool_list_facts(cJSON *args);

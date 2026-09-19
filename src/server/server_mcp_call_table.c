@@ -1117,35 +1117,29 @@ static cJSON *mcph_index_structure(struct mcp_call *c)
 
 static cJSON *mcph_memory_explain_match(struct mcp_call *c)
 {
-   cJSON *jq = cJSON_GetObjectItemCaseSensitive(c->jargs, "query");
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(c->jargs, "memory_id");
-   if (!cJSON_IsString(jq) || !jq->valuestring[0] || !cJSON_IsNumber(jid))
-      return text_content("error: memory_explain_match requires 'query' and 'memory_id'");
-   memory_diagnostic_t diag;
-   memset(&diag, 0, sizeof(diag));
-   if (kb_client_memory_explain_match(jq->valuestring, (int64_t)jid->valuedouble, &diag) != 0)
-      return mcph_kb_last_result("memory match explanation returned no result");
-   cJSON *result = cJSON_CreateObject();
-   cJSON_AddStringToObject(result, "status", "ok");
-   cJSON *m = cJSON_AddObjectToObject(result, "memory");
-   cJSON_AddNumberToObject(m, "id", (double)diag.memory.id);
-   cJSON_AddStringToObject(m, "tier", diag.memory.tier);
-   cJSON_AddStringToObject(m, "kind", diag.memory.kind);
-   cJSON_AddStringToObject(m, "headline", diag.memory.headline);
-   cJSON_AddStringToObject(m, "content", diag.memory.content);
-   cJSON *p = cJSON_AddObjectToObject(result, "scores");
-   cJSON_AddNumberToObject(p, "lexical", diag.parts.lexical);
-   cJSON_AddNumberToObject(p, "semantic", diag.parts.semantic);
-   cJSON_AddNumberToObject(p, "entity", diag.parts.entity);
-   cJSON_AddNumberToObject(p, "temporal", diag.parts.temporal);
-   cJSON_AddNumberToObject(p, "evidence", diag.parts.evidence);
-   cJSON_AddNumberToObject(p, "confidence", diag.parts.confidence);
-   cJSON_AddNumberToObject(p, "salience", diag.parts.salience);
-   cJSON_AddNumberToObject(p, "graph_score", diag.parts.graph_score);
-   cJSON_AddNumberToObject(p, "hybrid_total", diag.parts.hybrid_total);
-   cJSON_AddNumberToObject(p, "blended_total", diag.parts.blended_total);
-   cJSON_AddNumberToObject(p, "total", diag.parts.total);
-   return json_result_content(result);
+   cJSON *request = cJSON_CreateObject();
+   const char *fields[] = {"query", "memory_id", NULL};
+   for (int i = 0; fields[i]; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(c->jargs, fields[i]);
+      if (value)
+         cJSON_AddItemToObject(request, fields[i], cJSON_Duplicate(value, 1));
+   }
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "format", "mcp");
+   char *raw = kb_v1_action_request("memory.explain_match", request);
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+   if (!strcmp(jo_cstr(reply, "status"), "ok") && cJSON_IsString(output))
+   {
+      cJSON *content = text_content(output->valuestring);
+      cJSON_Delete(reply);
+      return content;
+   }
+   if (reply)
+      return json_result_content(reply);
+   return mcph_kb_last_result("memory match explanation unavailable");
 }
 
 /* ── P3b extended read-only tools: blast radius, memory provenance/history,
@@ -1187,29 +1181,26 @@ static cJSON *mcph_index_blast_radius(struct mcp_call *c)
 
 static cJSON *mcph_memory_provenance(struct mcp_call *c)
 {
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(c->jargs, "memory_id");
-   if (!cJSON_IsNumber(jid))
-      return text_content("error: memory_provenance requires 'memory_id'");
-   cJSON *args = cJSON_CreateObject();
-   kb_client_memory_scope_context_apply(args);
-   cJSON_AddNumberToObject(args, "memory_id", jid->valuedouble);
-   cJSON_AddNumberToObject(args, "max", 200);
-   char *json = kb_v1_action_request("memory.get_provenance", args);
-   cJSON *response = json ? cJSON_Parse(json) : NULL;
-   free(json);
-   cJSON *entries = cJSON_GetObjectItemCaseSensitive(response, "entries");
-   if (strcmp(jo_cstr(response, "status"), "ok") != 0 || !cJSON_IsArray(entries))
+   cJSON *request = cJSON_CreateObject();
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(c->jargs, "memory_id");
+   if (id)
+      cJSON_AddItemToObject(request, "memory_id", cJSON_Duplicate(id, 1));
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddNumberToObject(request, "max", 200);
+   cJSON_AddStringToObject(request, "format", "mcp");
+   char *raw = kb_v1_action_request("memory.get_provenance", request);
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+   if (!strcmp(jo_cstr(reply, "status"), "ok") && cJSON_IsString(output))
    {
-      cJSON_Delete(response);
-      return mcph_kb_last_result("memory provenance returned no result");
+      cJSON *content = text_content(output->valuestring);
+      cJSON_Delete(reply);
+      return content;
    }
-   int count = cJSON_GetArraySize(entries);
-   cJSON *result = cJSON_CreateObject();
-   cJSON_AddStringToObject(result, "status", count > 0 ? "ok" : "empty");
-   cJSON_AddNumberToObject(result, "count", count);
-   cJSON_AddItemToObject(result, "provenance", cJSON_DetachItemViaPointer(response, entries));
-   cJSON_Delete(response);
-   return json_result_content(result);
+   if (reply)
+      return json_result_content(reply);
+   return mcph_kb_last_result("memory provenance unavailable");
 }
 
 static cJSON *mcph_memory_fact_history(struct mcp_call *c)

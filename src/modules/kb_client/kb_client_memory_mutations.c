@@ -63,6 +63,7 @@ int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind)
    kb_client_memory_scope_context_apply(req);
    cJSON_AddStringToObject(req, "key", key);
    cJSON_AddStringToObject(req, "kind", kind);
+   cJSON_AddStringToObject(req, "view", "native");
    char *json = kb_v1_action_request("memory.find_id_by_key_kind", req);
    if (!json)
       return 0;
@@ -73,10 +74,9 @@ int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind)
       return 0;
 
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(resp, "id");
    int64_t id = 0;
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsNumber(id_j))
-      id = (int64_t)id_j->valuedouble;
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0)
+      id = kbc_memory_response_id(resp);
    cJSON_Delete(resp);
    return id;
 }
@@ -132,6 +132,7 @@ int kb_client_memory_insert_as(const char *tier, const char *kind, const char *k
     * caller that never thought about it records the agent provenance. */
    if (authority == MEMORY_AUTHORITY_USER)
       cJSON_AddStringToObject(req, "authority", "user");
+   cJSON_AddStringToObject(req, "view", "native");
    char *json = kb_v1_action_request("memory.store", req);
    if (!json)
       return -1;
@@ -145,30 +146,21 @@ int kb_client_memory_insert_as(const char *tier, const char *kind, const char *k
    int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
 
    int64_t rec_id = 0;
-   if (ok && out)
+   if (ok)
    {
-      memset(out, 0, sizeof(*out));
-      cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(resp, "memory");
-      if (cJSON_IsObject(mem_j))
+      const cJSON *memory = cJSON_GetObjectItemCaseSensitive(resp, "memory");
+      rec_id = cJSON_HasObjectItem(resp, "id_text")
+                   ? kbc_memory_response_id(resp)
+                   : kbc_memory_response_id(cJSON_IsObject(memory) ? memory : resp);
+      if (out)
       {
-         kbc_memory_row_from_json(mem_j, out);
+         memset(out, 0, sizeof(*out));
+         if (cJSON_IsObject(memory))
+            kbc_memory_row_from_json((cJSON *)memory, out);
+         out->id = rec_id;
+         if (rec_id <= 0)
+            ok = 0;
       }
-      else
-      {
-         cJSON *id_j = cJSON_GetObjectItemCaseSensitive(resp, "id");
-         if (cJSON_IsNumber(id_j))
-            out->id = (int64_t)id_j->valuedouble;
-      }
-      rec_id = out->id;
-   }
-   else if (ok)
-   {
-      /* Extract the id for the audit note even when the caller wants no row back. */
-      cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(resp, "memory");
-      cJSON *id_j = cJSON_IsObject(mem_j) ? cJSON_GetObjectItemCaseSensitive(mem_j, "id")
-                                          : cJSON_GetObjectItemCaseSensitive(resp, "id");
-      if (cJSON_IsNumber(id_j))
-         rec_id = (int64_t)id_j->valuedouble;
    }
    cJSON_Delete(resp);
    /* NON-CONTENT audit: identity + confidence + session only, never the content.
@@ -177,33 +169,4 @@ int kb_client_memory_insert_as(const char *tier, const char *kind, const char *k
    kb_client_memory_audit_note("memory.insert", rec_id, tier, kind, key, confidence, session_id,
                                ok);
    return ok ? 0 : -1;
-}
-
-int kb_client_memory_reject(int64_t id, const char *reason)
-{
-   if (id <= 0)
-      return -1;
-   cJSON *req = cJSON_CreateObject();
-   kb_client_memory_scope_context_apply(req);
-   cJSON_AddNumberToObject(req, "id", (double)id);
-   /* The rejection reason is free prose that aimee-kb keeps alongside the
-    * record, so it is screened like any other persisted text. */
-   if (kb_client_pii_add_string(req, "reason", reason) != 0)
-   {
-      cJSON_Delete(req);
-      kb_client_memory_audit_note("memory.reject.withheld_pii", id, NULL, NULL, NULL, 0.0, NULL, 0);
-      return KB_CLIENT_WITHHELD_PII;
-   }
-   char *json = kb_v1_action_request("memory.reject", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
-   cJSON_Delete(resp);
-   kb_client_memory_audit_note("memory.reject", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
-   return rc;
 }

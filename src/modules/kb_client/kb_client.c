@@ -1132,6 +1132,32 @@ static char *kb_v1_action_request_timeout(const char *action, cJSON *req, int ti
    if (!req)
       return error_json("failed to allocate knowledge service request");
 
+   /* All native memory writers share the local Go screening boundary before
+    * crossing to the KB. Direct action forwarding must not bypass it. */
+   if (!strcmp(action, "memory.store") || !strcmp(action, "memory.update") ||
+       !strcmp(action, "memory.supersede") || !strcmp(action, "memory.reject"))
+   {
+      const cJSON *key = cJSON_GetObjectItemCaseSensitive(req, "key");
+      int withheld = cJSON_IsString(key) && kb_client_pii_identifier_sensitive(key->valuestring);
+      const char *fields[] = {"content", "new_content", "use_cases", "reason", NULL};
+      for (int i = 0; !withheld && fields[i]; i++)
+      {
+         const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);
+         if (!cJSON_IsString(value))
+            continue;
+         char *redacted = NULL;
+         withheld = kb_client_pii_screen(value->valuestring, &redacted) != 0;
+         if (!withheld && redacted)
+            cJSON_ReplaceItemInObjectCaseSensitive(req, fields[i], cJSON_CreateString(redacted));
+         free(redacted);
+      }
+      if (withheld)
+      {
+         cJSON_Delete(req);
+         return kb_client_pii_withheld_json();
+      }
+   }
+
    char *escaped = kb_client_query_escape(action);
    if (!escaped)
    {

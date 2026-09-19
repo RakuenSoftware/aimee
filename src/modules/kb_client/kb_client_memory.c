@@ -232,6 +232,25 @@ static int kbc_memory_single_miss(const cJSON *resp)
           (cJSON_IsString(message) && strstr(message->valuestring, "not found") != NULL);
 }
 
+/* Owner-provided decimal IDs preserve full int64 tokens across cJSON. Older
+ * peers are accepted only when their numeric token is exactly representable. */
+int64_t kbc_memory_response_id(const cJSON *object)
+{
+   const cJSON *text = cJSON_GetObjectItemCaseSensitive(object, "id_text");
+   if (text)
+   {
+      const char *raw = cJSON_GetStringValue(text);
+      char *end = NULL;
+      int64_t id = 0;
+      return kbc_memory_activation_integer(raw, &end, &id) && end && !*end ? id : 0;
+   }
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(object, "id");
+   return cJSON_IsNumber(id) && isfinite(id->valuedouble) && id->valuedouble > 0 &&
+                  id->valuedouble <= 9007199254740991.0 && floor(id->valuedouble) == id->valuedouble
+              ? (int64_t)id->valuedouble
+              : 0;
+}
+
 void kbc_memory_row_from_json(cJSON *f, memory_t *m)
 {
    memset(m, 0, sizeof(*m));
@@ -296,117 +315,6 @@ static char *kb_client_v1_session_briefing_section(const char *method, int limit
       out = strdup(body->valuestring);
    cJSON_Delete(resp);
    return out;
-}
-
-static void kbc_memory_diagnostic_from_json(cJSON *j, memory_diagnostic_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   cJSON *mem = cJSON_GetObjectItemCaseSensitive(j, "memory");
-   if (cJSON_IsObject(mem))
-      kbc_memory_row_from_json(mem, &out->memory);
-   cJSON *parts = cJSON_GetObjectItemCaseSensitive(j, "parts");
-   if (cJSON_IsObject(parts))
-   {
-#define PICK(field)                                                                                \
-   do                                                                                              \
-   {                                                                                               \
-      cJSON *v = cJSON_GetObjectItemCaseSensitive(parts, #field);                                  \
-      if (cJSON_IsNumber(v))                                                                       \
-         out->parts.field = v->valuedouble;                                                        \
-   } while (0)
-      PICK(lexical);
-      PICK(coverage);
-      PICK(entity);
-      PICK(temporal);
-      PICK(evidence);
-      PICK(semantic);
-      PICK(state);
-      PICK(intent);
-      PICK(confidence);
-      PICK(salience);
-      PICK(surprise);
-      PICK(pagerank);
-      PICK(hybrid_total);
-      PICK(blended_total);
-      PICK(total);
-#undef PICK
-   }
-}
-
-int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
-                                     const char *scope_value, int limit, memory_diagnostic_t *out,
-                                     int max)
-{
-   if (!query || !out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   if (scope_type && scope_type[0])
-      cJSON_AddStringToObject(req, "scope_type", scope_type);
-   if (scope_value && scope_value[0])
-      cJSON_AddStringToObject(req, "scope_value", scope_value);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.diagnose_scoped", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "rows");
-   int n = 0;
-   if (cJSON_IsArray(rows))
-   {
-      cJSON *r;
-      cJSON_ArrayForEach(r, rows)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_diagnostic_from_json(r, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
-{
-   return kb_client_memory_diagnose_scoped(query, NULL, NULL, limit, out, max);
-}
-
-int kb_client_memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic_t *out)
-{
-   if (!query || !out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "query", query);
-   cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
-   char *json = kb_v1_action_request("memory.explain_match", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *row = cJSON_GetObjectItemCaseSensitive(resp, "row");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsObject(row))
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   kbc_memory_diagnostic_from_json(row, out);
-   cJSON_Delete(resp);
-   return 0;
 }
 
 char *kb_client_memory_assemble_context(const char *task_hint)

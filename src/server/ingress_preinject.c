@@ -1,3 +1,4 @@
+#include <errno.h>
 /* server/ingress_preinject.c: see ingress_preinject.h.
  *
  * The envelope is a compact, model-readable block. Its `explore-with` line
@@ -352,16 +353,36 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    /* Secondary signal: durable memory previews. Inject enough to decide what to
     * fetch next, not the whole memory body. The full row remains reachable via
     * the advertised memory:<id> handle and the memory_get MCP tool. */
-   memory_diagnostic_t mems[5];
-   int mem_n = legacy_preview_on ? kb_client_memory_diagnose(query, 5, mems, 5) : 0;
+   cJSON *memories = NULL;
+   if (legacy_preview_on)
+   {
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "query", query);
+      cJSON_AddStringToObject(request, "format", "ingress");
+      cJSON_AddNumberToObject(request, "limit", 5);
+      char *raw = kb_v1_action_request("memory.diagnose_scoped", request);
+      cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+      free(raw);
+      const cJSON *status = cJSON_GetObjectItemCaseSensitive(reply, "status");
+      const cJSON *rows = cJSON_GetObjectItemCaseSensitive(reply, "memories");
+      if (cJSON_IsString(status) && !strcmp(status->valuestring, "ok") && cJSON_IsArray(rows) &&
+          cJSON_GetArraySize(rows) <= 5)
+         memories = cJSON_DetachItemFromObjectCaseSensitive(reply, "memories");
+      cJSON_Delete(reply);
+   }
+   int mem_n = memories ? cJSON_GetArraySize(memories) : 0;
+   int memory_unavailable = legacy_preview_on && !memories;
+   if (!memories)
+      memories = cJSON_CreateArray();
+   cJSON_AddItemToObject(assembly, "memories", memories);
    if (legacy_preview_on)
    {
       cJSON *outcome = cJSON_CreateObject();
       cJSON_AddStringToObject(outcome, "operation", "ingress-recall-result");
       cJSON_AddStringToObject(outcome, "project", active_project);
       cJSON_AddNumberToObject(outcome, "count", mem_n);
-      cJSON_AddBoolToObject(outcome, "unavailable",
-                            kb_client_last_result_status() == KB_CLIENT_RESULT_UNAVAILABLE);
+      cJSON_AddBoolToObject(outcome, "unavailable", memory_unavailable);
       cJSON *result = ingress_command(outcome);
       const char *message =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "warning"));
@@ -369,22 +390,6 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          LOG_WARN("ingress-memory", "%s", message);
       cJSON_Delete(result);
    }
-   cJSON *memories = cJSON_AddArrayToObject(assembly, "memories");
-   for (int i = 0; i < mem_n; i++)
-   {
-      cJSON *row = cJSON_CreateObject();
-      char id[32];
-      snprintf(id, sizeof(id), "%" PRId64, (int64_t)mems[i].memory.id);
-      cJSON_AddStringToObject(row, "id", id);
-      cJSON_AddStringToObject(row, "key", mems[i].memory.key);
-      cJSON_AddStringToObject(row, "tier", mems[i].memory.tier);
-      cJSON_AddStringToObject(row, "kind", mems[i].memory.kind);
-      cJSON_AddStringToObject(row, "headline", mems[i].memory.headline);
-      cJSON_AddStringToObject(row, "content", mems[i].memory.content);
-      cJSON_AddNumberToObject(row, "score", mems[i].parts.total);
-      cJSON_AddItemToArray(memories, row);
-   }
-
    /* Typed-fact layer (§7): current facts about entities named in this turn,
     * recalled and injected automatically so the agent grounds on them without
     * having to call the get_context_block tool. Gated kb-side on
@@ -430,22 +435,28 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       char fp[32];
       ingress_query_fingerprint(query, fp, sizeof(fp));
 
-      /* Memory surface (single-writer, P1): mems[] holds the full set of memory
+      /* Memory surface (single-writer, P1): the owner returns the full set of memory
        * previews surfaced into this turn (mem_n <= the diagnose cap of 5), so
        * recording all of them is the complete memory evidence, not a truncation. */
       int64_t ids[5];
       const char *snips[5];
       int n_ids = 0;
       for (int i = 0; i < mem_n && n_ids < (int)(sizeof(ids) / sizeof(ids[0])); i++)
-         if (mems[i].memory.id > 0)
+      {
+         const cJSON *row = cJSON_GetArrayItem(memories, i);
+         const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "id"));
+         const char *preview =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "preview"));
+         char *end = NULL;
+         errno = 0;
+         int64_t value = id ? strtoll(id, &end, 10) : 0;
+         if (id && id[0] >= '1' && id[0] <= '9' && end && !*end && !errno && value > 0 && preview)
          {
-            /* Snippet for per-doc overlap attribution: the same preview text the
-             * turn saw (headline, else content). */
-            snips[n_ids] =
-                mems[i].memory.headline[0] ? mems[i].memory.headline : mems[i].memory.content;
-            ids[n_ids] = mems[i].memory.id;
+            ids[n_ids] = value;
+            snips[n_ids] = preview;
             n_ids++;
          }
+      }
       if (n_ids > 0)
       {
          char ev_id[64] = "";

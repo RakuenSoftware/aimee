@@ -378,6 +378,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-kb-client-docs \
                $(TESTPREFIX)/unit-test-kb-client-search \
                $(TESTPREFIX)/unit-test-mcp-memory-answer \
+               $(TESTPREFIX)/unit-test-agent-memory-transport \
+               $(TESTPREFIX)/unit-test-session-memory-transport \
                $(TESTPREFIX)/unit-test-mcp-directive-transport \
                $(TESTPREFIX)/unit-test-kb-client-memory \
                $(TESTPREFIX)/unit-test-kb-graph \
@@ -871,7 +873,6 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
                 $(TESTPREFIX)/unit-test-db2-model-validation-support \
                 $(TESTPREFIX)/unit-test-db2-random-support \
-                $(TESTPREFIX)/unit-test-db2-rel-enum-text-support \
                 $(TESTPREFIX)/unit-test-db2-rel-seed-support \
                 $(TESTPREFIX)/unit-test-db2-rel-type-support \
                 $(TESTPREFIX)/unit-test-db2-runtime-config-support \
@@ -954,7 +955,6 @@ UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-random-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-type-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-runtime-config-support-sanitize \
@@ -2757,7 +2757,7 @@ $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integra
 # convention seven other suites here already use: bring the real module up, or
 # skip saying why.
 $(TESTPREFIX)/unit-test-agent: | $(OBJDIR)/aimee-module
-$(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test_agent_caps.o \
+$(TESTPREFIX)/unit-test-agent: $(OBJDIR)/server/osv_check.o $(OBJDIR)/command_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o $(OBJDIR)/module_commands.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test_agent_caps.o \
                       $(OBJDIR)/core/turn_integrity/turn_integrity.o \
                       $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/tests/support/store_module_fixture.o $(DB1_CLIENT_OBJS) \
                      $(OBJDIR)/db1_store_ready.o \
@@ -7141,40 +7141,6 @@ unit-test-db2-time-support: $(TESTPREFIX)/unit-test-db2-time-support
 unit-test-db2-time-support-sanitize: $(TESTPREFIX)/unit-test-db2-time-support-sanitize
 	$<
 
-DB2_REL_ENUM_TEXT_SUPPORT_RENAMES = \
-   -Dcorrection_behavior_to_text=db2_support_correction_behavior_to_text \
-   -Drel_sensitivity_to_text=db2_support_rel_sensitivity_to_text
-
-$(OBJDIR)/tests/db2_rel_enum_text_support_impl.o: modules/db2/support/rel_enum_text_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_REL_ENUM_TEXT_SUPPORT_RENAMES) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-db2-rel-enum-text-support: \
-                     $(OBJDIR)/tests/test_db2_rel_enum_text_support.o \
-                     $(OBJDIR)/tests/db2_rel_enum_text_support_impl.o \
-                     $(OBJDIR)/tests/db2_rel_type_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-DB2_REL_ENUM_TEXT_SANITIZE_DIR = $(OBJDIR)/tests/db2-rel-enum-text-support-sanitize
-
-$(DB2_REL_ENUM_TEXT_SANITIZE_DIR)/test.o: tests/test_db2_rel_enum_text_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(DB2_REL_ENUM_TEXT_SANITIZE_DIR)/support.o: modules/db2/support/rel_enum_text_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_REL_ENUM_TEXT_SUPPORT_RENAMES) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize: \
-                     $(DB2_REL_ENUM_TEXT_SANITIZE_DIR)/test.o \
-                     $(DB2_REL_ENUM_TEXT_SANITIZE_DIR)/support.o \
-                     $(OBJDIR)/tests/db2-rel-type-support-sanitize/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-db2-rel-enum-text-support unit-test-db2-rel-enum-text-support-sanitize
-unit-test-db2-rel-enum-text-support: $(TESTPREFIX)/unit-test-db2-rel-enum-text-support
-	$<
 
 unit-test-db2-rel-enum-text-support-sanitize: \
       $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize
@@ -7911,3 +7877,9 @@ $(TESTPREFIX)/unit-test-assertion-transport: $(OBJDIR)/tests/test_assertion_tran
 
 $(TESTPREFIX)/unit-test-agent-generate-transport: $(OBJDIR)/tests/test_agent_generate_transport.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
+
+$(TESTPREFIX)/unit-test-agent-memory-transport: $(OBJDIR)/tests/test_agent_memory_transport.o $(OBJDIR)/posix/td_search_render.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-session-memory-transport: $(OBJDIR)/tests/test_session_memory_transport.o $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

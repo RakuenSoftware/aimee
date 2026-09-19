@@ -10,6 +10,7 @@
 #include "integrity.h"
 #include <aimee/workspace/workspace.h>
 #include <math.h>
+#include <errno.h>
 #include <aimee/core/event_bus/module_protocol.h>
 
 /* --- Memory handlers --- */
@@ -282,6 +283,22 @@ int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
 {
    cJSON *item = cJSON_GetObjectItemCaseSensitive(req, field);
+   if (cJSON_IsString(item))
+   {
+      const char *text = item->valuestring;
+      if (!text || text[0] < '1' || text[0] > '9')
+         return -1;
+      for (const char *p = text; *p; p++)
+         if (*p < '0' || *p > '9')
+            return -1;
+      errno = 0;
+      char *end = NULL;
+      long long value = strtoll(text, &end, 10);
+      if (errno || !end || *end || value <= 0 || value > INT64_MAX)
+         return -1;
+      *out = (int64_t)value;
+      return 0;
+   }
    if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) || item->valuedouble <= 0.0 ||
        item->valuedouble >= 9223372036854775808.0 || floor(item->valuedouble) != item->valuedouble)
       return -1;
@@ -289,22 +306,7 @@ int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
    return *out <= INT64_C(9007199254740991) ? 0 : -1;
 }
 
-/* Replace a memory with a corrected one, linking the two.
- *
- * This is the operation that should be reached for far more often than
- * memory.delete, and it was equally unreachable over /v1: `aimee memory
- * supersede` exists and works on the server host (cmd_memory.c), but the thin
- * client routes through /v1 and there was no route, so a remote user could not
- * say "this belief was replaced" — only store another one, or delete.
- *
- * That asymmetry matters because the store DEPENDS on the supersession chain.
- * memory.list_superseded_keys and memory.fact_history walk it, so deleting a
- * wrong memory instead of superseding it loses the answer to "why did it assert
- * this in March" and destroys the negative examples effectiveness and
- * evidence_strength are computed from. A corrected memory is signal; a deleted
- * one is a hole.
- *
- * Same CAP_MEMORY_WRITE gate as store and delete. */
+/* Replacement and its version chain are owned by Go in the selected placement. */
 int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

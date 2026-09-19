@@ -67,7 +67,7 @@ func TestRecordPublicPostgres(t *testing.T) {
 CREATE FUNCTION record_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
 SET LOCAL search_path TO pg_temp,record_command_test,public;
 CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
- scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
+ epistemic_kind text DEFAULT 'world_fact',scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT 'answer questions',last_used_at text DEFAULT '',source_session text DEFAULT 'session-1',provenance_category text DEFAULT 'human',
  valid_from text DEFAULT '2026-01-01',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_summaries(id bigserial PRIMARY KEY,memory_id bigint,scope text,summary text);
@@ -268,6 +268,29 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	if _, err := (&postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}).publicRecords(ctx, []Record{{ID: 9223372036854775807}}); err == nil {
 		t.Fatal("missing metadata accepted")
 	}
+	previewArgs, _ := json.Marshal(map[string]any{"query": longKey, "scope_context": true, "project": "app", "format": "ingress", "limit": 5})
+	previews := run("diagnose_scoped", string(previewArgs))["memories"].([]any)
+	if len(previews) == 0 {
+		t.Fatal("missing ingress previews")
+	}
+	for _, item := range previews {
+		row := item.(map[string]any)
+		if !strings.HasPrefix(row["id"].(string), "900719925474") || row["content"] != fullContent || row["preview"] != fullContent {
+			t.Fatal("truncated ingress preview", row["id"])
+		}
+	}
+	explainArgs, _ := json.Marshal(map[string]any{"query": longKey, "memory_id": "9007199254740993", "scope_context": true, "project": "app", "format": "mcp"})
+	explained := run("explain_match", string(explainArgs))["output"].(string)
+	var explanation struct {
+		Memory struct {
+			ID      int64
+			Content string
+		}
+		Scores map[string]float64
+	}
+	if json.Unmarshal([]byte(explained), &explanation) != nil || explanation.Memory.ID != 9007199254740993 || explanation.Memory.Content != fullContent || len(explanation.Scores) != 11 {
+		t.Fatal("invalid MCP explanation")
+	}
 	// Verify visibility with a real non-owner connection, including metadata.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_record_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA record_command_test TO memory_record_test;
@@ -304,5 +327,17 @@ SET LOCAL ROLE memory_record_test;`)
 	}
 	if r := run("list", `{"scope_context":true,"limit":64}`); len(r["memories"].([]any)) != 1 || r["active_context_missing"] != true {
 		t.Fatal(r)
+	}
+}
+
+func TestSessionTextBudget(t *testing.T) {
+	text := strings.Repeat("記憶", 100)
+	if got := sessionExcerpt(text, 301); len(got) != 300 || !strings.HasSuffix(got, "憶") {
+		t.Fatal(got)
+	}
+	for input, want := range map[string]string{"Check Deploy example": "example", "  Verify List deployment": "deployment", "plain question": "plain question", "Check ": "Check "} {
+		if got := sessionSearchKeyword(input); got != want {
+			t.Fatal(input, got)
+		}
 	}
 }

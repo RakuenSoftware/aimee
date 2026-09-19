@@ -55,6 +55,7 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <errno.h>
 #include "agent_help_data.h"
 int agent_load_config(agent_config_t *cfg);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -445,6 +446,16 @@ cJSON *tool_memory_mutate(cJSON *args)
       return kb_last_result_content("memory mutation unavailable");
    if (strcmp(jo_cstr(reply, "status"), "ok"))
       return json_result_content(reply);
+   const char *audit_text = jo_str(reply, "audit_id", NULL);
+   if (audit_text)
+   {
+      errno = 0;
+      char *end = NULL;
+      long long audit_id = strtoll(audit_text, &end, 10);
+      if (!errno && end && !*end && audit_id > 0 && audit_id <= INT64_MAX)
+         kb_client_memory_audit_note(!strcmp(verb, "store") ? "memory.insert" : method, audit_id,
+                                     NULL, NULL, NULL, 0.0, NULL, 1);
+   }
    const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "text"));
    cJSON *content = text_content(text ? text : "error: invalid memory mutation output");
    cJSON_Delete(reply);

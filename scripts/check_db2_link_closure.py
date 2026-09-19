@@ -777,44 +777,23 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "bounded system I/O and formatting surface. It has no DB, "
                 "event-bus, provider, pgvector, DB3, config, logging, or heap dependency.",
 }, {
-    "path": "src/modules/db2/support/rel_enum_text_primitives.c",
-    "source_sha256": "231f5255d1350c752317529e2d0b2bab3528dbc6e0186e4fec780c3319bb8884",
-    "header": "src/modules/db2/support/db2_rel_enum_text.h",
-    "header_sha256": "169b08838b6425976afd817ad315b12db51a86df655b1d8a3dfb1c3ee7f23773",
-    "defines": ["correction_behavior_to_text", "rel_sensitivity_to_text"],
-    "resolves": ["correction_behavior_to_text", "rel_sensitivity_to_text"],
-    "allowed_includes": ["db2_rel_enum_text.h"],
-    "allowed_header_includes": [],
-    "allowed_undefined": [],
-    "base_references": {
-        "correction_behavior_to_text": ["src/modules/db2/c/rel_types_store.c"],
-        "rel_sensitivity_to_text": ["src/modules/db2/c/rel_types_store.c"],
-    },
-    "provenance": "Definitions promoted from the DB-free enum text core in src/rel_types.c; both "
-                  "DB2 calls audited in src/modules/db2/c/rel_types_store.c.",
-    "evidence": "Two deterministic three-value switches with descriptor-owned numeric ABI and no "
-                "imports, shared ontology header, allocation, I/O, DB, event-bus, provider, "
-                "platform, pgvector, DB3, or logging dependency; enum ABI and parity tested.",
-}, {
     "path": "src/modules/db2/support/rel_seed_primitives.c",
     "source_sha256": "4044739d1f0b90760f35f9935bbf7b04efbd7fb6b4008ff31698290420f27828",
     "header": "src/modules/db2/support/db2_rel_seed.h",
     "header_sha256": "a9fdcb84c1dca6d8fa295fe0586be5e2ac43eb1ba17e53bb2197d47175307423",
     "defines": ["rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup"],
-    "resolves": ["rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup"],
+    "resolves": ["rel_types_seed_lookup"],
     "allowed_includes": ["db2_rel_seed.h", "db2_rel_type_helpers.h", "string.h"],
     "allowed_header_includes": [],
     "allowed_undefined": ["rel_type_normalize", "strcmp"],
     "base_references": {
-        "rel_types_seed_at": ["src/modules/db2/c/rel_types_store.c"],
-        "rel_types_seed_count": ["src/modules/db2/c/rel_types_store.c"],
         "rel_types_seed_lookup": [
             "src/modules/db2/c/entity_edges.c",
-            "src/modules/db2/c/fact_lifecycle.c",
+            "src/modules/db2/c/fact_mutation.c",
         ],
     },
     "provenance": "Temporary relationship ABI data generated from the Go memory seed "
-                  "in server-go/modules/memory/ontology_seed.go; original DB2 references are pinned.",
+                  "in server-go/modules/memory/ontology_seed.go; remaining DB2 entity and fact storage callers are pinned.",
     "evidence": "The descriptor owns the generated database-free table and a private ABI mirror; "
                 "size, offsets, enum widths, every field, iteration bounds, pointer identity, "
                 "normalization, misses, and sanitizer behavior are compared with the monolith. "
@@ -832,12 +811,8 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "allowed_header_includes": ["stddef.h"],
     "allowed_undefined": ["__ctype_b_loc", "__ctype_tolower_loc", "strcmp"],
     "base_references": {
-        "rel_type_is_functional": ["src/modules/db2/c/entity_edges.c"],
-        "rel_type_normalize": [
-            "src/modules/db2/c/fact_lifecycle.c",
-            "src/modules/db2/c/ontology_evolution.c",
-            "src/modules/db2/c/rel_types_store.c",
-        ],
+        "rel_type_is_functional": ["src/modules/db2/c/entity_edges.c", "src/modules/db2/c/fact_mutation.c"],
+        "rel_type_normalize": ["src/modules/db2/c/fact_identity.c"],
     },
     "provenance": "Definitions promoted from the DB-free core in src/rel_types.c; all DB2 calls "
                   "audited in entity_edges.c, fact_lifecycle.c, "

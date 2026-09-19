@@ -394,6 +394,12 @@ VALUES($1,$2,'exact integer fixture','L2','fact','world_fact','project','exact-i
 	if _, err := tx.Exec(ctx, `SELECT setval('memories_id_seq',1000)`); err != nil {
 		t.Fatal(err)
 	}
+	if r := put(`{"key":"native-identity","content":"identity text","view":"native"}`, false); r["id_text"] != fmt.Sprintf("%.0f", r["id"]) {
+		t.Fatal("missing native identity", r)
+	}
+	if r := runPublicCommand(t, client, "find_id_by_key_kind", `{"key":"native-identity","kind":"fact","view":"native"}`); r["id_text"] != fmt.Sprintf("%.0f", r["id"]) {
+		t.Fatal("missing lookup identity", r)
+	}
 	// Replacement under a non-owner role cannot reach a different project's source.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_store_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA store_command_test TO memory_store_test;

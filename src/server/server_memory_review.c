@@ -89,21 +89,41 @@ int handle_memory_reject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (server_memory_store_selection(req) != 1)
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
                                     "this operation requires store=kb", NULL);
-   int64_t id = 0;
-   if (memory_request_positive_id(req, "id", &id) != 0)
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
-                                    "memory.reject requires a positive integer id", NULL);
-   const char *reason = jo_str(req, "reason", "explicit user rejection");
+   cJSON *request = cJSON_CreateObject();
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "id");
+   if (id)
+      cJSON_AddItemToObject(request, "id", cJSON_Duplicate(id, 1));
+   cJSON_AddStringToObject(request, "reason", jo_str(req, "reason", "explicit user rejection"));
+   cJSON_AddStringToObject(request, "view", "server");
    server_memory_scope_begin(req);
-   int rc = kb_client_memory_reject(id, reason);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.reject", request);
    kb_client_memory_scope_context_clear();
-   if (rc != 0)
-      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
-                                    "no such visible memory, or rejection was refused", NULL);
-   cJSON *resp = jo_ok();
-   jo_add_i64(resp, "id", id);
-   jo_add_bool(resp, "tombstoned", 1);
-   return send_and_free(conn, resp);
+   cJSON *parsed = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   cJSON *reply = NULL;
+   if (!strcmp(jo_cstr(parsed, "status"), "ok") &&
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(parsed, "tombstoned")))
+      reply = cJSON_CreateRaw(raw);
+   else if (!strcmp(jo_cstr(parsed, "status"), "error"))
+   {
+      reply = parsed;
+      parsed = NULL;
+      char *kind = strdup(jo_str(reply, "kind", SERVER_ERR_UNAVAILABLE));
+      if (kind)
+      {
+         server_error_kind_apply(reply, kind);
+         free(kind);
+      }
+   }
+   int64_t audit_id = 0;
+   (void)memory_request_positive_id(req, "id", &audit_id);
+   kb_client_memory_audit_note("memory.reject", audit_id, NULL, NULL, NULL, 0.0, NULL,
+                               reply && cJSON_IsRaw(reply));
+   cJSON_Delete(parsed);
+   free(raw);
+   return send_and_free(conn, reply ? reply
+                                    : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                                             "memory rejection unavailable", NULL));
 }
 
 cJSON *memory_restore_command(cJSON *req)

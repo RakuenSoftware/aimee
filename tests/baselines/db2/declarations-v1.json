@@ -14,22 +14,6 @@
     },
     {
       "classification": "host-generated-client",
-      "path": "src/cmd_memory_core.c"
-    },
-    {
-      "classification": "host-generated-client",
-      "path": "src/cmd_memory_curiosity.c"
-    },
-    {
-      "classification": "host-generated-client",
-      "path": "src/cmd_memory_embed.c"
-    },
-    {
-      "classification": "host-generated-client",
-      "path": "src/cmd_memory_vector.c"
-    },
-    {
-      "classification": "host-generated-client",
       "path": "src/cmd_session_lifecycle.c"
     },
     {
@@ -6097,7 +6081,6 @@
     },
     {
       "consumers": [
-        "src/cmd_memory_curiosity.c",
         "src/tests/test_curiosity.c"
       ],
       "locations": [
@@ -6108,7 +6091,7 @@
       ],
       "signature": "int db2_curiosity_gap_type_is_canonical ( const char * gap_type )",
       "signature_sha256": "81e91ce3a68e2621371d12bd70381996eeab45c0994774c75f29d9c87c40708f",
-      "status": "audit-pending",
+      "status": "private-test-only",
       "symbol": "db2_curiosity_gap_type_is_canonical"
     },
     {
@@ -6204,7 +6187,6 @@
     },
     {
       "consumers": [
-        "src/cmd_memory_curiosity.c",
         "src/tests/test_curiosity.c"
       ],
       "locations": [
@@ -6215,7 +6197,7 @@
       ],
       "signature": "int db2_curiosity_state_is_valid ( const char * state )",
       "signature_sha256": "baec77836d688a0d3d80c736dae249d15943be120e1895e776e60f3cc350f9e4",
-      "status": "audit-pending",
+      "status": "private-test-only",
       "symbol": "db2_curiosity_state_is_valid"
     },
     {
@@ -19973,15 +19955,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "896b89a52b14d2c94671814373f0096a513be54b4e7de3219f5dd51d35ac1c53",
+  "fingerprint": "ecda87a1f3d68bdf6aa229df416bf216773dee39ed0ec8edc5aa6fb5c6d087bf",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 429,
+    "audit_pending": 427,
     "declarations": 1097,
     "headers": 126,
     "internal_unconsumed": 204,
-    "private_test_only": 275,
+    "private_test_only": 277,
     "reviewed": 189
   }
 }

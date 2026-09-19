@@ -1,4 +1,3 @@
-#include "module_commands.h"
 /* db2/kb_service_backend.c: kb-service backend SQL primitives — Postgres via libpq. */
 
 #include "kb_service_backend.h"
@@ -19,6 +18,11 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+/* The standalone DB2 process has no host command registry. Without a Go
+ * memory owner, leave the curiosity item pending for a later attempt. */
+extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, cJSON **)
+    __attribute__((weak));
 
 #define KBS_ERRBUF 256
 
@@ -979,7 +983,10 @@ cJSON *db2_kb_service_curiosity_route_top_json(int limit, const char *source_ses
       cJSON_AddNumberToObject(args, "priority", priority);
       cJSON_AddStringToObject(args, "evidence", it->evidence);
       cJSON_AddStringToObject(args, "session", source_session ? source_session : "");
-      int dispatched = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+      int dispatched =
+          aimee_module_commands_dispatch_internal
+              ? aimee_module_commands_dispatch_internal("memory.runtime", args, &response)
+              : 0;
       cJSON_Delete(args);
       const char *status =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
