@@ -455,7 +455,7 @@ static void test_memory_get_as_of_is_wired(void)
    cJSON *req = marshal_memory_get(2, argv);
    assert(req);
    cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "id");
-   assert(cJSON_IsNumber(id) && (int)id->valuedouble == 42);
+   assert(cJSON_IsString(id) && !strcmp(id->valuestring, "42"));
    cJSON *as_of = cJSON_GetObjectItemCaseSensitive(req, "as_of");
    assert(cJSON_IsString(as_of));
    assert(strcmp(as_of->valuestring, "2026-06-12 00:00:00") == 0);

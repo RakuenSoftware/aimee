@@ -473,7 +473,7 @@ cJSON *marshal_memory_get(int argc, char **argv)
 
    cJSON *req = marshal_no_args("memory.get");
    if (opts.pos_count > 0)
-      cJSON_AddNumberToObject(req, "id", atoll(opts.positional[0]));
+      cJSON_AddStringToObject(req, "id", opts.positional[0]);
    const char *as_of = cli_args_get(&opts, "as-of");
    if (!as_of)
       as_of = cli_args_get(&opts, "as_of");
@@ -489,7 +489,7 @@ cJSON *marshal_memory_delete(int argc, char **argv)
    cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("memory.delete");
    if (opts.pos_count > 0)
-      cJSON_AddNumberToObject(req, "id", atoll(opts.positional[0]));
+      cJSON_AddStringToObject(req, "id", opts.positional[0]);
    marshal_add_memory_scope(req, &opts);
    return req;
 }
@@ -503,7 +503,7 @@ cJSON *marshal_memory_supersede(int argc, char **argv)
    cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("memory.supersede");
    if (opts.pos_count > 0)
-      cJSON_AddNumberToObject(req, "old_id", atoll(opts.positional[0]));
+      cJSON_AddStringToObject(req, "old_id", opts.positional[0]);
    char *content = positionals_joined(&opts, 1);
    if (content)
       cJSON_AddStringToObject(req, "new_content", content);
@@ -582,8 +582,11 @@ static void print_memory_row(cJSON *m)
    const char *kind = json_str(m, "kind");
    const char *key = json_str(m, "key");
    const char *content = json_str(m, "content");
-   printf("%lld  %-3s %-12s %s", cJSON_IsNumber(id) ? (long long)id->valuedouble : 0, tier, kind,
-          key[0] ? key : "(no key)");
+   if (cJSON_IsRaw(id))
+      printf("%s", id->valuestring);
+   else
+      printf("%lld", cJSON_IsNumber(id) ? (long long)id->valuedouble : 0);
+   printf("  %-3s %-12s %s", tier, kind, key[0] ? key : "(no key)");
    if (content[0])
       printf(": %s", content);
    putchar('\n');
@@ -681,7 +684,9 @@ void pt_print_memory_search(const char *method, cJSON *resp)
 void pt_print_memory_store(const char *method, cJSON *resp)
 {
    cJSON *id = cJSON_GetObjectItemCaseSensitive(resp, "id");
-   if (cJSON_IsNumber(id))
+   if (cJSON_IsRaw(id))
+      printf("stored memory %s\n", id->valuestring);
+   else if (cJSON_IsNumber(id))
       printf("stored memory %lld\n", (long long)id->valuedouble);
    else
       printf("stored memory\n");

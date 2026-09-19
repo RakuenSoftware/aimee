@@ -243,7 +243,10 @@ void server_error_kind_apply(cJSON *response, const char *kind)
 {
    cJSON_DeleteItemFromObjectCaseSensitive(response, "kind");
    cJSON_AddStringToObject(response, "kind", kind);
-   cJSON_AddNumberToObject(response, "http_status", !strcmp(kind, "not_found") ? 404 : !strcmp(kind, "invalid_argument") ? 400 : 503);
+   cJSON_AddNumberToObject(response, "http_status",
+                           !strcmp(kind, "not_found")          ? 404
+                           : !strcmp(kind, "invalid_argument") ? 400
+                                                               : 503);
 }
 static void test_stats_transport(void)
 {

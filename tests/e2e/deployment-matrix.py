@@ -91,7 +91,7 @@ class Stack:
 
     def kb_request(self, path, body=None, authenticated=True):
         code = '''import http.client,json,sys
-a=json.load(sys.stdin); c=http.client.HTTPConnection('127.0.0.1',8741,timeout=40)
+a=json.load(sys.stdin); c=http.client.HTTPConnection('127.0.0.1',8741,timeout=70)
 h={'Content-Type':'application/json'}
 if a['token']: h['Authorization']='Bearer '+a['token']
 c.request('GET' if a['body'] is None else 'POST',a['path'],None if a['body'] is None else json.dumps(a['body']),h)

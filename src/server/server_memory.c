@@ -149,7 +149,7 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
    else if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "error") &&
             cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "kind")))
       reply = cJSON_HasObjectItem(parsed, "http_status") ? cJSON_CreateRaw(raw)
-                                                       : memory_owner_error_reply(raw, parsed);
+                                                         : memory_owner_error_reply(raw, parsed);
    cJSON_Delete(parsed);
    free(raw);
    return reply ? reply

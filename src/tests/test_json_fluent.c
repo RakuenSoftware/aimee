@@ -1,5 +1,6 @@
 /* test_json_fluent.c: unit tests for the json_fluent helpers */
 #include "json_fluent.h"
+#include "json_wire.h"
 #include "cJSON.h"
 #include <stdio.h>
 #include <string.h>
@@ -117,9 +118,30 @@ static int test_numeric_arrays(void)
    return 0;
 }
 
+static int test_exact_integer_wire(void)
+{
+   const char *wire = "{\"text\":\"123 \\\" -9007199254740995\",\"9007199254740997\":"
+                      "[42,9007199254740993,-9223372036854775808,1.25,1e20],"
+                      "\"nested\":{\"id\":9223372036854775807}}";
+   cJSON *doc = json_wire_parse_exact_integers(wire);
+   CHECK(doc);
+   char *rendered = cJSON_PrintUnformatted(doc);
+   CHECK(rendered && strstr(rendered, "[42,9007199254740993,-9223372036854775808,1.25,"));
+   CHECK(strstr(rendered, "\"id\":9223372036854775807"));
+   cJSON_free(rendered);
+   cJSON_Delete(doc);
+   doc = json_wire_parse_exact_integers("9007199254740993");
+   CHECK(cJSON_IsRaw(doc) && !strcmp(doc->valuestring, "9007199254740993"));
+   cJSON_Delete(doc);
+   CHECK(!json_wire_parse_exact_integers("{\"id\":1} trailing"));
+   CHECK(!json_wire_parse_exact_integers("{\"id\":9223372036854775807"));
+   return 0;
+}
+
 int main(void)
 {
-   int failed = test_numeric_arrays();
+   int failed = test_exact_integer_wire();
+   failed += test_numeric_arrays();
    failed += test_optional_getters();
    failed += test_required_getters();
    failed += test_null_safe_adds();

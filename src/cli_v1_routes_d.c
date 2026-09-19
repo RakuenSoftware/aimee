@@ -4,6 +4,7 @@
  * =================================================================== */
 
 #include "cli_v1_routes_internal.h"
+#include "json_wire.h"
 #include <stdint.h> /* uint64_t: the manifest cache key must be 64-bit on LLP64 too */
 #include "platform_path.h"
 #include "platform_random.h"
@@ -963,7 +964,7 @@ static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *ve
        * running?)" -- so on Windows an authorization refusal was indistinguishable
        * from an outage, and sent users to debug a server that had just answered.
        * A non-JSON body still parses to NULL and falls through as before. */
-      resp = cJSON_Parse(r);
+      resp = !strncmp(path, "/v1/memory/", 11) ? json_wire_parse_exact_integers(r) : cJSON_Parse(r);
       free(r);
    }
 #endif

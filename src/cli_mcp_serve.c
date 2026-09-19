@@ -926,7 +926,7 @@ static void handle_resources_read(cJSON *id, cJSON *req)
 
       cJSON *sreq = cJSON_CreateObject();
       cJSON_AddStringToObject(sreq, "method", "memory.get");
-      cJSON_AddNumberToObject(sreq, "id", (double)memory_id);
+      cJSON_AddStringToObject(sreq, "id", id_text);
 
       cJSON *resp = server_request(sreq, DEFAULT_TIMEOUT_MS);
       cJSON_Delete(sreq);
