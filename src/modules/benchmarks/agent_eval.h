@@ -176,19 +176,6 @@ int mem_eval_run_with_latency(mem_eval_case_t *cases, int n_cases, mem_eval_scor
 #define MEM_CORPUS_MAX_FIXTURES 256
 #define MEM_CORPUS_MAX_CASES    512
 
-/* Load golden corpus from JSON file, open a fresh in-memory scratch DB,
- * insert fixtures, and populate cases[] with correctly mapped expected IDs.
- * Returns the number of cases loaded (>= 0), or -1 on error.
- * On success the caller must call mem_eval_close_temp_db() once done.
- *
- * `embed_cmd` is the embedder the fixtures are embedded with, and is required —
- * empty or NULL is an error, because a retrieval benchmark whose corpus was never
- * embedded measures nothing. It used to resolve this from config internally, which
- * hid the dependency and silently fell back to the builtin lexical embedder that no
- * longer exists. */
-int mem_eval_load_corpus(const char *corpus_path, const char *embed_cmd, mem_eval_case_t *cases,
-                         int max_cases);
-
 /* Load the code-vector-graph production corpus (queries with already-resolved
  * live DB2 memory ids in `expected_ids`). Opens NO scratch DB — cases run
  * against the live store (for the graph-code fusion ablation). Returns the

@@ -447,21 +447,23 @@ func (s *postgresDataStore) pendingEmbeddingMetadata(ctx context.Context) (int64
 	return n, err
 }
 
-func (s *postgresDataStore) embedForVersion(ctx context.Context, trace uint64, executor egress.Executor, version string, request EmbedRequest) EmbedResponse {
-	identity := func() (string, error) {
-		if !EmbedIsHTTP(request.BaseURL) {
-			// Legacy command embedders need not implement a health endpoint. Their
-			// version binds the exact configured command, as well as its dimension.
-			sum := sha256.Sum256([]byte(request.BaseURL))
-			return fmt.Sprintf("command:%x", sum), nil
-		}
-		probe := EmbedServingID(ctx, trace, executor, request.BaseURL)
-		id := strings.TrimSpace(probe.ServingID)
-		if probe.Error != "" || id == "" || len(id) > 4096 || strings.ContainsAny(id, "\r\n{}[]") {
-			return "", errors.New("memory: embedder serving identity unavailable")
-		}
-		return id, nil
+func versionServingIdentity(ctx context.Context, trace uint64, executor egress.Executor, command string) (string, error) {
+	if !EmbedIsHTTP(command) {
+		// Legacy command embedders need not implement a health endpoint. Their
+		// version binds the exact configured command, as well as its dimension.
+		sum := sha256.Sum256([]byte(command))
+		return fmt.Sprintf("command:%x", sum), nil
 	}
+	probe := EmbedServingID(ctx, trace, executor, command)
+	id := strings.TrimSpace(probe.ServingID)
+	if probe.Error != "" || id == "" || len(id) > 4096 || strings.ContainsAny(id, "\r\n{}[]") {
+		return "", errors.New("memory: embedder serving identity unavailable")
+	}
+	return id, nil
+}
+
+func (s *postgresDataStore) embedForVersion(ctx context.Context, trace uint64, executor egress.Executor, version string, request EmbedRequest) EmbedResponse {
+	identity := func() (string, error) { return versionServingIdentity(ctx, trace, executor, request.BaseURL) }
 	before, err := identity()
 	if err != nil {
 		return EmbedResponse{Error: err.Error()}

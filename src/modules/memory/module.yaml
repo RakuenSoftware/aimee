@@ -144,7 +144,9 @@
     "server-go/modules/memory/entity_mutation.go",
     "server-go/modules/memory/entity_conflicts.go",
     "server-go/modules/memory/cmd/aimee-memory-eval/main.go",
-    "server-go/modules/memory/shared_recall.go"
+    "server-go/modules/memory/shared_recall.go",
+    "server-go/modules/memory/evaluation.go",
+    "server-go/modules/memory/cmd/aimee-memory-eval/corpus.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -244,7 +246,8 @@
     "server-go/modules/memory/entity_mutation_test.go",
     "server-go/modules/memory/entity_registry_test.go",
     "server-go/modules/memory/cmd/aimee-memory-eval/main_test.go",
-    "server-go/modules/memory/shared_recall_test.go"
+    "server-go/modules/memory/shared_recall_test.go",
+    "server-go/modules/memory/cmd/aimee-memory-eval/corpus_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"

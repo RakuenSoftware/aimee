@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -92,7 +93,17 @@ func serve(ctx context.Context, input io.Reader, output io.Writer, handler bus.M
 	return errors.Join(scanner.Err(), ctx.Err())
 }
 
-func run(ctx context.Context, schemaPath string, dimension int, input io.Reader, output io.Writer) (err error) {
+func run(ctx context.Context, schemaPath string, dimension int, input io.Reader, output io.Writer) error {
+	return evaluationSession(ctx, schemaPath, dimension, func(db *postgres.EvaluationStore) error {
+		data, err := memory.NewPostgresDataStore(db, memory.PlacementKB)
+		if err != nil {
+			return err
+		}
+		return serve(ctx, input, output, memory.NewHandler(nil, memory.WithDataStore(memory.PlacementKB, data)))
+	})
+}
+
+func evaluationSession(ctx context.Context, schemaPath string, dimension int, action func(*postgres.EvaluationStore) error) (err error) {
 	if schemaPath == "" || dimension < 1 || dimension > 2000 {
 		return errors.New("evaluation requires -schema (packaged KB schema) and -embedding-dim in 1..2000")
 	}
@@ -113,18 +124,33 @@ func run(ctx context.Context, schemaPath string, dimension int, input io.Reader,
 		return err
 	}
 	defer func() { err = errors.Join(err, db.Close()) }()
-	data, err := memory.NewPostgresDataStore(db, memory.PlacementKB)
-	if err != nil {
-		return err
+	return action(db)
+}
+
+func defaultSchema() string {
+	if path := os.Getenv("AIMEE_EVAL_SCHEMA"); path != "" {
+		return path
 	}
-	// No network or model executor is installed by this local transport. Owner
-	// operations requiring one must report its absence rather than fake vectors.
-	return serve(ctx, input, output, memory.NewHandler(nil, memory.WithDataStore(memory.PlacementKB, data)))
+	if executable, err := os.Executable(); err == nil {
+		path := filepath.Join(filepath.Dir(executable), "..", "share", "aimee", "memory-eval-schema.sql")
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return "src/modules/db2/c/schema.sql"
 }
 
 func main() {
-	schema := flag.String("schema", "", "path to the packaged KB schema.sql")
+	schema := flag.String("schema", defaultSchema(), "path to the packaged KB schema.sql")
 	dimension := flag.Int("embedding-dim", 0, "configured vector width (1..2000)")
+	corpus := flag.String("corpus", "", "labelled corpus file; otherwise serve JSON lines")
+	command := flag.String("embedding-command", "", "corpus embedder URL or configured command")
+	socket := flag.String("module-bus-socket", os.Getenv("AIMEE_MODULE_BUS_SOCKET"), "governed egress bus socket for HTTP embedding")
+	baseline := flag.String("baseline", "", "optional baseline file to compare or update")
+	update := flag.Bool("update-baseline", false, "atomically replace the baseline after a successful evaluation")
+	format := flag.String("format", "json", "corpus output: json or text")
+	fields := flag.String("fields", "", "comma-separated output fields")
+	profile := flag.String("profile", "", "response profile")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "evaluation accepts JSON lines on stdin, not positional arguments")
@@ -134,7 +160,17 @@ func main() {
 	defer cancel()
 	stop := context.AfterFunc(ctx, func() { _ = os.Stdin.Close() })
 	defer stop()
-	if err := run(ctx, *schema, *dimension, os.Stdin, os.Stdout); err != nil {
+	var err error
+	if *corpus == "" {
+		if *command != "" || *baseline != "" || *update || *format != "json" {
+			err = errors.New("corpus options require -corpus")
+		} else {
+			err = run(ctx, *schema, *dimension, os.Stdin, os.Stdout)
+		}
+	} else {
+		err = runCorpus(ctx, *schema, *dimension, *corpus, *command, *socket, *baseline, *update, *format, *fields, *profile, os.Stdout)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

@@ -118,5 +118,5 @@ func NewProcessHandler(ctx context.Context, socket, placementName string) (bus.M
 	StartPersonalIndex(ctx, data, executor, os.Getenv("EMBEDDER_URL"))
 	StartSharedIndex(ctx, data, executor)
 	log.Printf("memory module: placement=%s storage=postgres", placement)
-	return NewHandler(executor, WithDataStore(placement, data)), nil
+	return NewHandler(executor, WithDataStore(placement, data), func(options *handlerOptions) { options.dataContext = ctx }), nil
 }

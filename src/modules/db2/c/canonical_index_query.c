@@ -18,7 +18,6 @@
 #include "entity_edges.h"     /* co_edited backfill: edge upsert / co_targets read */
 #include "index.h"            /* cochange_pairs_for_commit / cochange_is_hex_sha */
 #include "kb_runtime_state.h" /* db2_kb_purge_fence_active: commit-point fence check */
-#include "modules/memory/memory_ontology.h" /* REL_CO_EDITED / NODE_FILE */
 #include "aimee.h"
 #include "db_postgres.h"
 #include "../support/db2_log.h"

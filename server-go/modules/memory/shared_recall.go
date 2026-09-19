@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 	"time"
@@ -13,13 +14,22 @@ import (
 // identity. A stale vector cannot become a candidate merely because its parent
 // ID still exists. Scope and lifecycle filters precede the candidate cap.
 func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequest, exact bool, base []Record) ([]Record, error) {
-	if s.placement != PlacementKB || s.recallExecutor == nil || req.Query == "" || req.Limit <= 0 {
+	if s.placement != PlacementKB || req.Query == "" || req.Limit <= 0 {
+		return base, nil
+	}
+	if s.recallExecutor == nil && !s.requireSemantic {
+		return base, nil
+	}
+	unavailable := func() ([]Record, error) {
+		if s.requireSemantic {
+			return nil, errors.New("memory: evaluation semantic recall unavailable")
+		}
 		return base, nil
 	}
 	// The data owner pins each request to a transaction. Keep version selection,
 	// query embedding and the candidate read under the same rebuild lock.
 	if _, ok := s.db.(store.Tx); !ok {
-		return base, nil
+		return unavailable()
 	}
 	if _, err := s.db.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, vectorRebuildLock); err != nil {
 		return nil, err
@@ -28,21 +38,21 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 	if err != nil {
 		return nil, err
 	}
-	if version == "" || command == "" {
-		return base, nil
+	if version == "" || command == "" || (EmbedIsHTTP(command) && s.recallExecutor == nil) {
+		return unavailable()
 	}
 	var identity string
 	if err := s.db.QueryRow(ctx, `SELECT serving_id FROM memory_embedder_versions WHERE version=$1`, version).Scan(&identity); err != nil {
 		return nil, err
 	}
 	if identity == "" {
-		return base, nil
+		return unavailable()
 	}
 	scale := sharedSemanticFloorScale(dimension, 0)
 	if s.settings != nil {
 		settings, err := s.settings()
 		if err != nil {
-			return base, nil
+			return unavailable()
 		}
 		scale = sharedSemanticFloorScale(dimension, configNumber(settings, "memory_semantic_floor_scale"))
 	}
@@ -55,21 +65,21 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 	}
 	embedCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	before := EmbedServingID(embedCtx, 0, s.recallExecutor, command)
-	if before.Error != "" || before.ServingID != identity {
-		return base, nil
+	before, err := versionServingIdentity(embedCtx, 0, s.recallExecutor, command)
+	if err != nil || before != identity {
+		return unavailable()
 	}
 	query := Embed(embedCtx, 0, s.recallExecutor, EmbedRequest{BaseURL: command, Text: req.Query, InputType: "query", MaxDim: dimension})
 	if query.Error != "" || query.Unavailable || query.Unauthorized || query.Truncated || len(query.Vector) != dimension {
-		return base, nil
+		return unavailable()
 	}
 	vector, err := vectorLiteral(query.Vector)
 	if err != nil {
-		return base, nil
+		return unavailable()
 	}
-	after := EmbedServingID(embedCtx, 0, s.recallExecutor, command)
-	if after.Error != "" || after.ServingID != identity {
-		return base, nil
+	after, err := versionServingIdentity(embedCtx, 0, s.recallExecutor, command)
+	if err != nil || after != identity {
+		return unavailable()
 	}
 	// Fingerprints cover text, scope and kind, so moved/edited records need fresh
 	// embeddings. Unit recall has additional intent/temporal weights; this channel

@@ -426,16 +426,17 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
-	recallExecutor egress.Executor
-	auditAction    func(context.Context, audit.Action) error
-	auditBatch     *mutationAuditBatch
-	episodeCommand func(context.Context, string, []byte) ([]byte, error)
-	settings       func() (map[string]any, error)
-	fusionEnabled  bool
-	code           codeIndexState
-	personal       *personalVectors
-	db             store.Queryer
-	placement      Placement
+	recallExecutor  egress.Executor
+	requireSemantic bool // standalone evaluation must not silently fall back to lexical recall
+	auditAction     func(context.Context, audit.Action) error
+	auditBatch      *mutationAuditBatch
+	episodeCommand  func(context.Context, string, []byte) ([]byte, error)
+	settings        func() (map[string]any, error)
+	fusionEnabled   bool
+	code            codeIndexState
+	personal        *personalVectors
+	db              store.Queryer
+	placement       Placement
 }
 
 func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, error) {
@@ -785,6 +786,7 @@ WHERE id = $1 AND scope_type = $2 AND scope_value = $3 AND lifecycle_state = 'ac
 }
 
 type handlerOptions struct {
+	dataContext    context.Context
 	gateway        *gatewayState
 	executor       egress.Executor
 	placement      Placement
@@ -1087,7 +1089,11 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if timeout <= 0 {
 		return nil, bus.ModuleStatusCancelled
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	parent := options.dataContext
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	if request.Operation == "code-index" {
 		code, ok := options.data.(*postgresDataStore)

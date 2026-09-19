@@ -1261,64 +1261,65 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
 
    if (strcmp(suite, "corpus") == 0 || strcmp(suite, "memory-retrieval") == 0)
    {
-      const char *corpus_path = opt_get(&opts, "corpus");
-      const char *baseline_path = opt_get(&opts, "baseline");
-      int update_baseline = opt_get_flag(&opts, "update-baseline");
-      if (!corpus_path)
-         corpus_path = "tests/eval/memory_retrieval_corpus.json";
-      if (!baseline_path)
-         baseline_path = "tests/eval/memory_retrieval_baseline.json";
-
-      mem_eval_case_t corpus_cases[MEM_CORPUS_MAX_CASES];
-      const char *bench_embed = config_embedder_command_current(NULL);
-      /* Name the actual cause. A retrieval benchmark embeds its corpus, so with no
-       * embedder configured the load fails for a reason that has nothing to do with the
-       * corpus path — and "corpus failed for <path>" sends the operator to the file. */
-      if (!bench_embed || !bench_embed[0])
-         fatal("no embedder configured; a retrieval benchmark cannot embed its corpus. "
-               "Set one with `aimee config set embedder_model <model>` or EMBEDDER_URL");
-      int n_corpus =
-          mem_eval_load_corpus(corpus_path, bench_embed, corpus_cases, MEM_CORPUS_MAX_CASES);
-      if (n_corpus <= 0)
-         fatal("memory benchmark corpus failed for %s", corpus_path);
-
-      mem_eval_scores_t scores;
-      mem_eval_latency_t latency;
-      mem_eval_run_with_latency(corpus_cases, n_corpus, &scores, &latency);
-
-      mem_eval_close_temp_db();
-
-      if (update_baseline)
+      char helper[4096], dimension[32];
+      if (platform_get_exe_path(helper, sizeof(helper)) != 0)
+         fatal("cannot locate the Go memory evaluator");
+      char *slash = strrchr(helper, '/');
+#ifdef _WIN32
+      char *backslash = strrchr(helper, '\\');
+      if (!slash || (backslash && backslash > slash))
+         slash = backslash;
+      const char *suffix = "/aimee-memory-eval.exe";
+#else
+      const char *suffix = "/aimee-memory-eval";
+#endif
+      if (!slash || (size_t)(slash - helper) + strlen(suffix) + 1 > sizeof(helper))
+         fatal("cannot locate the Go memory evaluator");
+      strcpy(slash, suffix);
+      snprintf(dimension, sizeof(dimension), "%d", config_resolve_embedder_dims_current());
+      const char *corpus = opt_get(&opts, "corpus");
+      const char *baseline = opt_get(&opts, "baseline");
+      const char *embedder = config_embedder_command_current(NULL);
+      const char *args[24] = {helper,
+                              "-corpus",
+                              corpus ? corpus : "tests/eval/memory_retrieval_corpus.json",
+                              "-baseline",
+                              baseline ? baseline : "tests/eval/memory_retrieval_baseline.json",
+                              "-embedding-command",
+                              embedder ? embedder : "",
+                              "-embedding-dim",
+                              dimension,
+                              "-format",
+                              ctx->json_output ? "json" : "text"};
+      int next = 11;
+      if (ctx->json_fields && ctx->json_fields[0])
       {
-         if (mem_eval_save_baseline(baseline_path, &scores, 5.0) != 0)
-            fatal("failed to update benchmark baseline: %s", baseline_path);
+         args[next++] = "-fields";
+         args[next++] = ctx->json_fields;
       }
-
-      if (ctx->json_output)
+      if (ctx->response_profile && ctx->response_profile[0])
       {
-         mem_emit_eval_json(ctx, "corpus", corpus_path, &scores, &latency,
-                            benchmark_weight_profile);
-         BENCHMARK_RETURN;
+         args[next++] = "-profile";
+         args[next++] = ctx->response_profile;
       }
-
-      char title[1024];
-      snprintf(title, sizeof(title), "Memory Benchmark — corpus: %s", corpus_path);
-      mem_print_eval_report(title, &scores, &latency);
-      mem_benchmark_print_weight_profile(benchmark_weight_profile);
-      if (update_baseline)
-         printf("Baseline updated: %s\n", baseline_path);
-      else
+      if (opt_get_flag(&opts, "update-baseline"))
+         args[next++] = "-update-baseline";
+      const char *schema = opt_get(&opts, "schema");
+      if (schema)
       {
-         mem_eval_scores_t baseline;
-         double threshold_pct = 5.0;
-         if (mem_eval_load_baseline(baseline_path, &baseline, &threshold_pct) == 0)
-         {
-            if (mem_eval_check_regression(&scores, &baseline, threshold_pct) != 0)
-               fatal("memory benchmark regression detected vs %s", baseline_path);
-            printf("OK: no regression vs baseline (%s, threshold %.1f%%)\n", baseline_path,
-                   threshold_pct);
-         }
+         args[next++] = "-schema";
+         args[next++] = schema;
       }
+      args[next] = NULL;
+      char *output = NULL;
+      int rc = safe_exec_capture(args, &output, 1024 * 1024);
+      if (rc != 0 || !output)
+      {
+         free(output);
+         fatal("Go memory corpus evaluation failed (exit %d)", rc);
+      }
+      fputs(output, stdout);
+      free(output);
       BENCHMARK_RETURN;
    }
 

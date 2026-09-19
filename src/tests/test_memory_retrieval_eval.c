@@ -1,3 +1,6 @@
+/* Corpus seeding, embedding, malformed inputs and baseline regression now run
+ * in Go: modules/memory/cmd/aimee-memory-eval/corpus_test.go. Graph traversal
+ * regressions run in modules/memory/graph_score_test.go. */
 #include "json_fluent.h"
 #include "module_commands.h"
 /* test_memory_retrieval_eval.c: unit tests for corpus-based memory retrieval evaluation */
@@ -122,33 +125,6 @@ static char *write_temp_baseline(const char *json)
    return path;
 }
 
-static void test_corpus_load_minimal(void)
-{
-   static const char *corpus_json =
-       "{"
-       "  \"version\": 1,"
-       "  \"fixtures\": ["
-       "    {\"fid\": \"f1\", \"tier\": \"L2\", \"kind\": \"fact\","
-       "     \"key\": \"nginx deployment\", \"content\": \"nginx runs on port 443\"}"
-       "  ],"
-       "  \"cases\": ["
-       "    {\"id\": \"c1\", \"query\": \"nginx deployment\", \"expected\": [\"f1\"]}"
-       "  ]"
-       "}";
-
-   char *path = write_temp_corpus(corpus_json);
-   mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
-
-   assert(n == 1);
-   assert(cases[0].n_expected == 1);
-   assert(cases[0].expected_ids[0] > 0);
-   assert(strncmp(cases[0].query, "nginx deployment", 16) == 0);
-   mem_eval_close_temp_db();
-   platform_test_remove_sqlite(path);
-   free(path);
-}
-
 /* The production-corpus loader reads pre-resolved live DB2 ids from
  * `expected_ids` and opens no scratch DB; every well-formed query is loaded,
  * including ones still awaiting labelling (empty expected_ids). */
@@ -182,136 +158,8 @@ static void test_production_corpus_load(void)
 }
 
 /* Graph-fusion admission and scope coverage now lives in Go graph_score_test.go. */
-static void test_corpus_load_multi_expected(void)
-{
-   static const char *corpus_json =
-       "{"
-       "  \"version\": 1,"
-       "  \"fixtures\": ["
-       "    {\"fid\": \"a\", \"tier\": \"L2\", \"kind\": \"fact\","
-       "     \"key\": \"server deploy\", \"content\": \"deploy to staging\"},"
-       "    {\"fid\": \"b\", \"tier\": \"L2\", \"kind\": \"procedure\","
-       "     \"key\": \"deploy procedure\", \"content\": \"deploy steps for server\"}"
-       "  ],"
-       "  \"cases\": ["
-       "    {\"id\": \"c1\", \"query\": \"deploy\", \"expected\": [\"a\", \"b\"]}"
-       "  ]"
-       "}";
-
-   char *path = write_temp_corpus(corpus_json);
-   mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
-
-   assert(n == 1);
-   assert(cases[0].n_expected == 2);
-   assert(cases[0].expected_ids[0] > 0);
-   assert(cases[0].expected_ids[1] > 0);
-   assert(cases[0].expected_ids[0] != cases[0].expected_ids[1]);
-   mem_eval_close_temp_db();
-   platform_test_remove_sqlite(path);
-   free(path);
-}
-
-static void test_corpus_load_populates_local_embeddings(void)
-{
-   static const char *corpus_json =
-       "{"
-       "  \"version\": 1,"
-       "  \"fixtures\": ["
-       "    {\"fid\": \"f1\", \"tier\": \"L2\", \"kind\": \"fact\","
-       "     \"key\": \"database connection pool\","
-       "     \"content\": \"connection pool size defaults to 10\"}"
-       "  ],"
-       "  \"cases\": ["
-       "    {\"id\": \"c1\", \"query\": \"default pool size\", \"expected\": [\"f1\"]}"
-       "  ]"
-       "}";
-
-   char *path = write_temp_corpus(corpus_json);
-   mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
-   assert(n == 1);
-
-   mem_eval_close_temp_db();
-   platform_test_remove_sqlite(path);
-   free(path);
-}
-
-static void test_corpus_load_invalid_json(void)
-{
-   char *path = write_temp_corpus("{not valid json");
-   mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
-   assert(n == -1);
-   platform_test_remove_sqlite(path);
-   free(path);
-}
-
-static void test_corpus_load_missing_file(void)
-{
-   mem_eval_case_t cases[16];
-   int n =
-       mem_eval_load_corpus("/tmp/does_not_exist_xyzzy.json", MEMORY_EMBED_TEST_FIXTURE, cases, 16);
-   assert(n == -1);
-}
-
-static void test_corpus_load_unknown_fid(void)
-{
-   /* expected references a fid that is not in fixtures — case should be skipped */
-   static const char *corpus_json =
-       "{"
-       "  \"version\": 1,"
-       "  \"fixtures\": ["
-       "    {\"fid\": \"f1\", \"tier\": \"L2\", \"kind\": \"fact\","
-       "     \"key\": \"some key\", \"content\": \"some content\"}"
-       "  ],"
-       "  \"cases\": ["
-       "    {\"id\": \"c1\", \"query\": \"some key\", \"expected\": [\"UNKNOWN_FID\"]}"
-       "  ]"
-       "}";
-
-   char *path = write_temp_corpus(corpus_json);
-   mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
-   /* Case has no resolvable expected IDs, so it should be dropped → 0 cases loaded */
-   assert(n <= 0);
-   mem_eval_close_temp_db();
-   platform_test_remove_sqlite(path);
-   free(path);
-}
 
 /* --- mem_eval_run against corpus --- */
-
-static void test_mem_eval_run_finds_exact_match(void)
-{
-   static const char *corpus_json =
-       "{"
-       "  \"version\": 1,"
-       "  \"fixtures\": ["
-       "    {\"fid\": \"f1\", \"tier\": \"L2\", \"kind\": \"fact\","
-       "     \"key\": \"database connection pool\","
-       "     \"content\": \"connection pool size defaults to 10\"}"
-       "  ],"
-       "  \"cases\": ["
-       "    {\"id\": \"c1\", \"query\": \"database connection pool\", \"expected\": [\"f1\"]}"
-       "  ]"
-       "}";
-
-   char *path = write_temp_corpus(corpus_json);
-   mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
-   assert(n == 1);
-
-   mem_eval_scores_t scores;
-   int rc = mem_eval_run(cases, n, &scores);
-   assert(rc == 0);
-
-   /* Exact key match should give MRR = 1.0 */
-   assert(scores.mrr > 0.0);
-   mem_eval_close_temp_db();
-   platform_test_remove_sqlite(path);
-   free(path);
-}
 
 /* --- Baseline load/save/check tests --- */
 
@@ -407,146 +255,6 @@ static void test_regression_check_zero_baseline(void)
  * is soft (>= 0) because graph coverage depends on edge density; the
  * primary goal is to exercise the multi-hop traversal code path and
  * report the metric. */
-static void insert_edge(const char *src, const char *rel, const char *tgt, int weight)
-{
-   static const char *sql = "INSERT INTO entity_edges (source, relation, target, weight)"
-                            " VALUES (?1, ?2, ?3, ?4)";
-   char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), sql, err, sizeof(err));
-   assert(st);
-   aimee_pg_bind_text(st, "?1", src);
-   aimee_pg_bind_text(st, "?2", rel);
-   aimee_pg_bind_text(st, "?3", tgt);
-   aimee_pg_bind_int(st, "?4", weight);
-   (void)aimee_pg_step(st, err, sizeof(err));
-   aimee_pg_finalize(st);
-}
-
-static void test_multi_hop_recall(void)
-{
-   /* Three fixtures that describe a chain: deploy-server → deploy-procedure
-    * → branch-policy. A multi-hop query about deployment failures should be
-    * able to bridge all three via co_edited / co_discussed edges. */
-   static const char *corpus_json =
-       "{"
-       "  \"version\": 1,"
-       "  \"fixtures\": ["
-       "    {\"fid\": \"f1\", \"tier\": \"L2\", \"kind\": \"fact\","
-       "     \"key\": \"deploy server\", \"content\": \"server deployed at 192.168.1.50\"},"
-       "    {\"fid\": \"f2\", \"tier\": \"L2\", \"kind\": \"procedure\","
-       "     \"key\": \"deploy procedure\", \"content\": \"git pull then make then restart\"},"
-       "    {\"fid\": \"f3\", \"tier\": \"L2\", \"kind\": \"fact\","
-       "     \"key\": \"branch policy\", \"content\": \"feature branches target testing\"}"
-       "  ],"
-       "  \"cases\": ["
-       "    {\"id\": \"c1\", \"query\": \"deploy server\", \"expected\": [\"f1\"]}"
-       "  ]"
-       "}";
-
-   char *path = write_temp_corpus(corpus_json);
-   mem_eval_case_t cases[16];
-   int n = mem_eval_load_corpus(path, MEMORY_EMBED_TEST_FIXTURE, cases, 16);
-   assert(n == 1);
-
-   /* Seed graph edges to link the three fixtures. In production these would
-    * be laid down by window extraction during normal operation. */
-   insert_edge("deploy", "co_discussed", "procedure", 3);
-   insert_edge("deploy", "co_edited", "branch", 2);
-   insert_edge("procedure", "depends_on", "branch", 1);
-   insert_edge("server", "co_discussed", "deploy", 4);
-
-   /* Walk the graph starting from seed "deploy" and verify that at least
-    * one bridge memory is surfaced. memory_graph_related tokenizes the
-    * seed, walks co_discussed one hop, then co_edited/depends_on another. */
-   char *seeds[2] = {(char *)"deploy server", (char *)"server"};
-   graph_related_t related[8];
-   int rcount = memory_graph_related(seeds, 2, related, 8);
-
-   printf("\n  multi-hop: %d bridge memories surfaced ", rcount);
-   assert(rcount >= 0); /* soft — just exercise the path without crashing */
-   mem_eval_close_temp_db();
-   platform_test_remove_sqlite(path);
-   free(path);
-}
-
-static int run_corpus_regression(const char *corpus_path, const char *baseline_path)
-{
-   if (!corpus_path || !baseline_path)
-   {
-      fprintf(stderr, "usage: unit-test-memory-retrieval-eval --corpus PATH --baseline PATH\n");
-      return 2;
-   }
-
-   static mem_eval_case_t cases[MEM_CORPUS_MAX_CASES];
-   int n_cases =
-       mem_eval_load_corpus(corpus_path, MEMORY_EMBED_TEST_FIXTURE, cases, MEM_CORPUS_MAX_CASES);
-   if (n_cases <= 0)
-   {
-      fprintf(stderr, "FAIL: memory retrieval corpus failed for %s\n", corpus_path);
-      return 1;
-   }
-
-   mem_eval_scores_t scores;
-   mem_eval_latency_t latency;
-   int rc = mem_eval_run_with_latency(cases, n_cases, &scores, &latency);
-   mem_eval_close_temp_db();
-   if (rc != 0)
-   {
-      fprintf(stderr, "FAIL: memory retrieval eval failed for %s\n", corpus_path);
-      return 1;
-   }
-
-   printf("Memory retrieval corpus eval: cases=%d mrr=%.6f ndcg@5=%.6f recall@5=%.6f p95=%.2fms\n",
-          scores.n_cases, scores.mrr, scores.ndcg_5, scores.recall_5, latency.p95_ms);
-
-   mem_eval_scores_t baseline;
-   double threshold_pct = 5.0;
-   if (mem_eval_load_baseline(baseline_path, &baseline, &threshold_pct) != 0)
-   {
-      fprintf(stderr, "FAIL: could not load memory retrieval baseline %s\n", baseline_path);
-      return 1;
-   }
-   if (mem_eval_check_regression(&scores, &baseline, threshold_pct) != 0)
-   {
-      fprintf(stderr, "FAIL: memory retrieval regression detected vs %s\n", baseline_path);
-      return 1;
-   }
-
-   printf("OK: no regression vs baseline (%s, threshold %.1f%%)\n", baseline_path, threshold_pct);
-   return 0;
-}
-
-static int maybe_run_cli_mode(int argc, char **argv, int *handled)
-{
-   const char *corpus_path = NULL;
-   const char *baseline_path = NULL;
-   *handled = 0;
-
-   for (int i = 1; i < argc; i++)
-   {
-      if (strcmp(argv[i], "--corpus") == 0 && i + 1 < argc)
-      {
-         corpus_path = argv[++i];
-         *handled = 1;
-      }
-      else if (strcmp(argv[i], "--baseline") == 0 && i + 1 < argc)
-      {
-         baseline_path = argv[++i];
-         *handled = 1;
-      }
-      else
-      {
-         fprintf(stderr,
-                 "usage: unit-test-memory-retrieval-eval [--corpus PATH --baseline PATH]\n");
-         *handled = 1;
-         return 2;
-      }
-   }
-
-   if (!*handled)
-      return 0;
-   return run_corpus_regression(corpus_path, baseline_path);
-}
 
 static void test_baseline_load_from_file(void)
 {
@@ -695,13 +403,8 @@ static void test_golden_smoke_fixture(void)
    }
 }
 
-int main(int argc, char **argv)
+int main(void)
 {
-   int handled = 0;
-   int cli_rc = maybe_run_cli_mode(argc, argv, &handled);
-   if (handled)
-      return cli_rc;
-
    /* The eval scratch store needs a disposable database when the test shim is
     * backed by Postgres; a no-op under the sqlite shim, which makes its own
     * in-memory handle. */
@@ -743,36 +446,8 @@ int main(int argc, char **argv)
    test_recall_zero();
    printf("ok\n");
 
-   printf("test_corpus_load_minimal... ");
-   test_corpus_load_minimal();
-   printf("ok\n");
-
    printf("test_production_corpus_load... ");
    test_production_corpus_load();
-   printf("ok\n");
-
-   printf("test_corpus_load_multi_expected... ");
-   test_corpus_load_multi_expected();
-   printf("ok\n");
-
-   printf("test_corpus_load_populates_local_embeddings... ");
-   test_corpus_load_populates_local_embeddings();
-   printf("ok\n");
-
-   printf("test_corpus_load_invalid_json... ");
-   test_corpus_load_invalid_json();
-   printf("ok\n");
-
-   printf("test_corpus_load_missing_file... ");
-   test_corpus_load_missing_file();
-   printf("ok\n");
-
-   printf("test_corpus_load_unknown_fid... ");
-   test_corpus_load_unknown_fid();
-   printf("ok\n");
-
-   printf("test_mem_eval_run_finds_exact_match... ");
-   test_mem_eval_run_finds_exact_match();
    printf("ok\n");
 
    printf("test_baseline_load_save_roundtrip... ");
@@ -809,10 +484,6 @@ int main(int argc, char **argv)
 
    printf("test_agent_eval_manifest_comparability... ");
    test_agent_eval_manifest_comparability();
-   printf("ok\n");
-
-   printf("test_multi_hop_recall... ");
-   test_multi_hop_recall();
    printf("ok\n");
 
    printf("test_golden_smoke_fixture... ");

@@ -1019,3 +1019,26 @@ previously listed migration work remain incomplete.
 CLI/Server/KB builds, the retained native lifecycle and ontology fixtures, Go
 memory/module race suites, the final restricted-role maintenance replay,
 CGO-disabled builds, both live process placements and all 77 lint checks pass.
+
+
+The local labelled-corpus evaluator now runs entirely in Go. `aimee memory
+benchmark corpus` launches `aimee-memory-eval`, which owns a fresh disposable
+PostgreSQL database for seeding, metadata derivation, versioned embedding,
+activation, retrieval and scoring. It requires `AIMEE_DB2_EVAL_URL`; HTTP
+embedders additionally require `AIMEE_MODULE_BUS_SOCKET` for governed egress.
+The Make install includes the helper and its packaged schema. The standalone
+helper accepts `-schema`, `-corpus`, `-embedding-command`, `-embedding-dim`,
+`-baseline`, `-update-baseline`, `-format`, `-fields` and `-profile`.
+
+Malformed fixtures, unknown relevance labels, changed baseline denominators,
+incomplete embedding and unavailable query embedding fail the evaluation.
+Baseline replacement is atomic and happens only after the isolated database
+has closed successfully. Scores and latency come from the shared Go owner;
+latency does not include a Server-to-KB hop. Legacy route/shape buckets are
+unmeasured and remain empty. This evaluates the Go owner's current retrieval
+behavior; it does not certify the still-pending native unit/temporal ranking
+parity. Other native dataset/judge runners and their scratch-store consumers
+remain G0 work. The C corpus loader and its dependent corpus fixtures are
+retired; production-corpus/agent-manifest C fixtures remain until those runners
+migrate. Go tests cover isolated semantic recall, command and governed HTTP
+embedders, full fixture identities, input failures and baseline protection.

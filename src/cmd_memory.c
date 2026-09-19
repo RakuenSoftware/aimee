@@ -15,7 +15,6 @@
 #include "dogfood.h"
 #include "json_fluent.h"
 #include "kb_client.h"
-#include "modules/memory/memory_ontology.h"
 #include "platform_process.h"
 #include "kb.h"
 #include <ctype.h>

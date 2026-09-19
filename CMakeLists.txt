@@ -1553,6 +1553,23 @@ add_custom_target(agent_help_header DEPENDS "${AGENT_HELP_HEADER}")
 # builds only the `aimee` target) races the generated header.
 add_dependencies(aimee agent_help_header)
 
+# Optional local corpus evaluation helper. It owns the isolated PostgreSQL
+# session and shared Go memory implementation; it is not a second memory daemon.
+find_program(AIMEE_EVAL_GO_EXECUTABLE go)
+if(AIMEE_EVAL_GO_EXECUTABLE)
+    file(GLOB_RECURSE AIMEE_EVAL_GO_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/server-go/*.go")
+    set(AIMEE_EVAL_BINARY "${CMAKE_CURRENT_BINARY_DIR}/aimee-memory-eval${CMAKE_EXECUTABLE_SUFFIX}")
+    add_custom_command(OUTPUT "${AIMEE_EVAL_BINARY}"
+        COMMAND "${CMAKE_COMMAND}" -E env CGO_ENABLED=0 "${AIMEE_EVAL_GO_EXECUTABLE}" build
+            -o "${AIMEE_EVAL_BINARY}" ./modules/memory/cmd/aimee-memory-eval
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/server-go"
+        DEPENDS ${AIMEE_EVAL_GO_SOURCES}
+            "${CMAKE_CURRENT_SOURCE_DIR}/server-go/go.mod"
+            "${CMAKE_CURRENT_SOURCE_DIR}/server-go/go.sum")
+    add_custom_target(memory_eval_helper ALL DEPENDS "${AIMEE_EVAL_BINARY}")
+endif()
+
 # --- Non-thin-client targets ------------------------------------------------
 # CMake builds ONLY the `aimee` thin client (+ the unit-test suite below).
 # aimee-server, aimee-kb, aimee-gateway and aimee-runtime-web are Linux/Docker

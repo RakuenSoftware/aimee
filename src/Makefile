@@ -13,6 +13,7 @@ RM      = rm -rf
 endif
 BINARY  = ../aimee$(EXEEXT)
 SERVER  = ../aimee-server$(EXEEXT)
+MEMORY_EVAL = ../aimee-memory-eval$(EXEEXT)
 CONFIG_MODULE = $(OBJDIR)/aimee-module-config$(EXEEXT)
 # Statically-linked TCP<->UDS bridge that runs INSIDE a delegate sandbox container.
 FORWARDER = ../aimee-forwarder$(EXEEXT)
@@ -973,7 +974,7 @@ DEPS = $(ALL_OBJS:.o=.d) $(shell find $(OBJDIR) -name '*.d' 2>/dev/null)
 
 .PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check memory-c-boundary-check module-egress-check cleanup-ledger-check repository-lock-check db2-contract-check db2-declaration-ledger-check db2-activation-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check memory-store-degradation-check config-schema-drift-check config-uninitialized-check cmd-srcs-compile-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests configure-hooks-matrix-test go-unit-tests go-vulncheck verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke init-migrate-service-test postgres-store-upgrade-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check learning-loop-evidence self-learning-efficacy virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check module-placement-check
 
-all: retire-obsolete-binaries $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
+all: retire-obsolete-binaries $(MEMORY_EVAL) $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
 
 # The forwarder is a standalone static binary (libc only, no aimee objects); it is
 # shipped in the aimee-server image and docker-cp'd into a delegate sandbox.
@@ -1472,6 +1473,11 @@ $(BINARY): $(CLI_OBJS) $(CLIENT_SUPPORT_OBJS) $(CORE_CONNECTION_LIB)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_CLIENT)
 
+# The corpus evaluator owns its disposable PostgreSQL session and Go memory owner.
+MEMORY_EVAL_GO_SRCS := $(shell find ../server-go -name '*.go' -type f 2>$(NULLDEV)) ../server-go/go.mod ../server-go/go.sum
+$(MEMORY_EVAL): $(MEMORY_EVAL_GO_SRCS)
+	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../aimee-memory-eval ./modules/memory/cmd/aimee-memory-eval
+
 # Go webchat server: serves the browser UI, handles PAM auth, proxies chat to aimee-server.
 RUNTIME_WEB_GO_SRCS := $(wildcard ../runtime-web/*.go) ../runtime-web/go.mod ../runtime-web/go.sum \
 	$(wildcard ../server-go/modules/runtime-web/policy/*.go)
@@ -1812,8 +1818,9 @@ CFLAGS_DATADIR = -DAIMEE_DATADIR='"$(DATADIR)"'
 install:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	@mkdir -p build && date +%s > $(BUILD_ID_FILE)
-	$(MAKE) $(BINARY) $(RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY)
+	$(MAKE) $(MEMORY_EVAL) $(BINARY) $(RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY)
 	rm -f $(PREFIX)/bin/aimee-client $(PREFIX)/bin/aimee-worker
+	install -m 755 $(MEMORY_EVAL) $(PREFIX)/bin/aimee-memory-eval
 	install -m 755 $(BINARY) $(PREFIX)/bin/aimee
 	install -m 755 $(RUNTIME_WEB) $(PREFIX)/bin/aimee-runtime-web
 	install -m 755 $(DELEGATE_EGRESS) $(PREFIX)/bin/aimee-delegate-egress
@@ -1824,6 +1831,7 @@ install:
 	install -m 755 $(KB_RESOLVER) $(PREFIX)/bin/aimee-kb-resolver
 	install -m 755 $(GATEWAY) $(PREFIX)/bin/aimee-gateway
 	@mkdir -p $(DATADIR)
+	install -m 644 modules/db2/c/schema.sql $(DATADIR)/memory-eval-schema.sql
 	install -m 644 ../data/models_dev_snapshot.json $(DATADIR)/models_dev_snapshot.json
 
 # --- Embedded docs (compiled into binary) ---
