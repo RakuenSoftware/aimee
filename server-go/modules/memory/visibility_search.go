@@ -14,7 +14,7 @@ func (s *postgresDataStore) SearchVisible(ctx context.Context, req DataRequest) 
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
 FROM memories
-WHERE lifecycle_state='active'
+WHERE lifecycle_state='active' AND activation_suppressed=0
  AND ($1 OR scope_type='global' OR (scope_type='workspace' AND scope_value='_shared')
       OR (scope_type='project' AND scope_value=$2)
       OR (scope_type='workspace' AND scope_value=$3))

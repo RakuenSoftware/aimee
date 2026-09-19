@@ -59,7 +59,7 @@ func TestRetrievalCorpus(t *testing.T) {
 	defer tx.Rollback(ctx)
 	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memories (
 id bigint PRIMARY KEY, scope_type text, scope_value text, tier text, kind text,
-key text, content text, confidence double precision, lifecycle_state text DEFAULT 'active',
+key text, content text, confidence double precision, lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,
 use_cases text DEFAULT '', updated_at timestamptz DEFAULT now()) ON COMMIT DROP`)
 	if err != nil {
 		t.Fatal(err)

@@ -61,7 +61,7 @@ CREATE FUNCTION record_command_test.pg_now_text(shift text DEFAULT '0 seconds') 
 SET LOCAL search_path TO pg_temp,record_command_test,public;
 CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
  scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
- lifecycle_state text DEFAULT 'active',use_cases text DEFAULT 'answer questions',last_used_at text DEFAULT '',source_session text DEFAULT 'session-1',provenance_category text DEFAULT 'human',
+ lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT 'answer questions',last_used_at text DEFAULT '',source_session text DEFAULT 'session-1',provenance_category text DEFAULT 'human',
  valid_from text DEFAULT '2026-01-01',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_summaries(id bigserial PRIMARY KEY,memory_id bigint,scope text,summary text);
 CREATE TEMP TABLE memory_workspaces(memory_id bigint,workspace text,PRIMARY KEY(memory_id,workspace));

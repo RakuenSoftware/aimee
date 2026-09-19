@@ -146,6 +146,22 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
 		t.Fatal("dependency outage lost lexical recall", got, status)
 	}
+	// Suppression applies to lexical candidates before LIMIT, including when
+	// the semantic provider is down. A high-priority suppressed match must not
+	// consume the visible row's slot in either explicit or contextual scope.
+	exec(`RESET ROLE`)
+	exec(`UPDATE memories SET key='suppression-needle',content='suppression-needle',updated_at='9999-12-31' WHERE id=$1`, ids["suppressed"])
+	exec(`UPDATE memories SET content='suppression-needle' WHERE id=$1`, ids["visible"])
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	request.Query = "suppression-needle"
+	for _, scope := range []Scope{{}, {Type: ScopeProject, Value: "shared-recall-local"}} {
+		request.Scope = scope
+		got, status = call()
+		if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
+			t.Fatal("suppressed lexical match displaced visible memory", scope, got, status)
+		}
+	}
+	request.Scope = Scope{}
 	model.fail = false
 	request.Query = "utterly unrelated request"
 	exec(`RESET ROLE; REVOKE SELECT ON memory_embedding_versions FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
