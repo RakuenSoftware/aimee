@@ -201,6 +201,19 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
+	if args.stringOr("view", "") == "console" && (verb == "get" || verb == "list") {
+		if verb == "get" {
+			if len(response.PublicRecords) == 0 {
+				return commandResult(commandError("not_found", "memory not found"))
+			}
+			return inspectionOutput(consoleMemoryRecord(response.PublicRecords[0]), "", args)
+		}
+		rows := make([]map[string]any, 0, len(response.PublicRecords))
+		for _, r := range response.PublicRecords {
+			rows = append(rows, consoleMemoryRecord(r))
+		}
+		return inspectionOutput(rows, "", args)
+	}
 	if verb == "fact_history" && (args.stringOr("view", "") == "console" || args.stringOr("format", "") == "mcp") {
 		return historyInspection(response.PublicRecords, args)
 	}
@@ -255,14 +268,24 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	return commandResult(result)
 }
 
+// Preserve the native console's record schema while keeping its contents and
+// integer IDs in the owner. The host transports the rendered output as a string.
+func consoleMemoryRecord(r publicMemoryRecord) map[string]any {
+	return map[string]any{
+		"id": r.ID, "tier": r.Tier, "kind": r.Kind, "key": r.Key, "content": r.Content,
+		"confidence": r.Confidence, "use_count": r.UseCount, "last_used_at": r.LastUsedAt,
+		"created_at": r.CreatedAt, "updated_at": r.UpdatedAt, "source_session": r.SourceSession,
+		"provenance_category": r.ProvenanceCategory,
+	}
+}
+
 func historyInspection(records []publicMemoryRecord, args commandArgs) ([]byte, bus.ModuleStatus) {
 	rows := make([]map[string]any, 0, len(records))
 	mcp := args.stringOr("format", "") == "mcp"
 	for _, r := range records {
 		row := map[string]any{"id": r.ID, "tier": r.Tier, "kind": r.Kind, "content": r.Content, "confidence": r.Confidence, "updated_at": r.UpdatedAt}
 		if !mcp {
-			row["key"], row["use_count"], row["last_used_at"] = r.Key, r.UseCount, r.LastUsedAt
-			row["created_at"], row["source_session"], row["provenance_category"] = r.CreatedAt, r.SourceSession, r.ProvenanceCategory
+			row = consoleMemoryRecord(r)
 		}
 		rows = append(rows, row)
 	}

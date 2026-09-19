@@ -29,6 +29,14 @@ retirement versus destruction from the admitted Go authority, and preserves
 `review_required` and `conflict` refusals. The legacy Server context-read route
 forwards the Go envelope too; a retrieval outage is no longer an empty context.
 
+The legacy console get/list adapters request Go-rendered output instead of
+decoding fixed-size native records. Go retains their twelve-field JSON schema,
+field/profile selection, empty-array representation and silent non-JSON success
+behavior. Complete content and exact int64 IDs survive the transport; missing
+records, owner refusals and malformed/unavailable responses fail the command.
+List failures cannot masquerade as healthy empty stores. Ambient scope continues
+through the existing scoped transaction and metadata reads.
+
 ## Personal/shared recall composition
 
 The Server placement owns the composition of a scoped KB recall envelope with

@@ -14,6 +14,8 @@ func TestRecordPublicValidation(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
 	for _, tt := range []struct{ verb, args string }{
 		{"get", `{"id":0}`}, {"get", `{"id":1.5}`}, {"fact_history", `{}`},
+		{"get", `{"id":"9007199254740993x","view":"console"}`},
+		{"get", `{"id":9007199254740993,"view":"console"}`},
 		{"list_session_scope_priority_like", `{"pattern":null}`}, {"search_facts_patterns_by_keyword", `{}`},
 		{"scope_visibility_rank", `{"ids":null}`}, {"tag_scope", `{"memory_id":1,"scope_type":"user","scope_value":"alice"}`},
 		{"tag_workspace", `{"memory_id":1,"workspace":""}`},
@@ -36,6 +38,11 @@ func TestRecordPublicValidation(t *testing.T) {
 	for _, verb := range []string{"list", "get", "fact_history", "find_facts_visible", "find_facts_scoped"} {
 		if r := runPublicCommand(t, client, verb, `{"id":1,"key":"missing","query":"anything"}`); r["kind"] != "unavailable" {
 			t.Fatalf("%s: %v", verb, r)
+		}
+	}
+	for _, verb := range []string{"get", "list"} {
+		if r := runPublicCommand(t, client, verb, `{"id":"9007199254740993","view":"console"}`); r["kind"] != "unavailable" || r["output"] != nil {
+			t.Fatalf("%s console failure became output: %v", verb, r)
 		}
 	}
 }
@@ -162,9 +169,44 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	}
 	longKey := strings.Repeat("履歴", 180)
 	fullContent := strings.Repeat("長い記憶", 1800)
-	_, err = tx.Exec(ctx, `INSERT INTO memories(id,key,content) SELECT 9007199254740993+g,$1||'#v'||g::text,$2 FROM generate_series(0,69) g`, longKey, fullContent)
+	_, err = tx.Exec(ctx, `INSERT INTO memories(id,key,content,tier,kind) SELECT 9007199254740993+g,$1||'#v'||g::text,$2,'L3','pattern' FROM generate_series(0,69) g`, longKey, fullContent)
 	if err != nil {
 		t.Fatal(err)
+	}
+	console := run("get", `{"id":"9007199254740993","view":"console","format":"json"}`)["output"].(string)
+	var consoleRecord map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(console), &consoleRecord); err != nil || len(consoleRecord) != 12 || string(consoleRecord["id"]) != "9007199254740993" {
+		t.Fatal("console record schema/ID", err, console)
+	}
+	var content string
+	if err := json.Unmarshal(consoleRecord["content"], &content); err != nil || content != fullContent {
+		t.Fatal("console record content truncated", err)
+	}
+	console = run("get", `{"id":"9007199254740993","view":"console","format":"json","fields":"id,content,created_at","profile":"compact"}`)["output"].(string)
+	consoleRecord = nil
+	if err := json.Unmarshal([]byte(console), &consoleRecord); err != nil || len(consoleRecord) != 2 || string(consoleRecord["id"]) != "9007199254740993" {
+		t.Fatal("console record selection", err, console)
+	}
+	console = run("list", `{"tier":"L3","kind":"pattern","limit":1000,"view":"console","format":"json"}`)["output"].(string)
+	var consoleRows []struct {
+		ID           int64
+		Key, Content string
+	}
+	if err := json.Unmarshal([]byte(console), &consoleRows); err != nil || len(consoleRows) != 64 {
+		t.Fatal("console list limit", err, len(consoleRows))
+	}
+	for _, row := range consoleRows {
+		if row.ID < 9007199254740993 || row.ID > 9007199254741062 || row.Content != fullContent || !strings.HasPrefix(row.Key, longKey) {
+			t.Fatal("console list truncated/rounded", row.ID)
+		}
+	}
+	if out := run("list", `{"kind":"missing","view":"console"}`)["output"]; out != "[]\n" {
+		t.Fatal("console empty list", out)
+	}
+	for _, verb := range []string{"get", "list"} {
+		if out := run(verb, `{"id":"9007199254740993","view":"console","format":"text"}`)["output"]; out != "" {
+			t.Fatal("legacy console text contract changed", out)
+		}
 	}
 	args, _ := json.Marshal(map[string]any{"key": longKey, "max": 100, "view": "console", "format": "json"})
 	out := run("fact_history", string(args))["output"].(string)
@@ -214,6 +256,13 @@ SET LOCAL ROLE memory_record_test;`)
 	}
 	if r := runPublicCommand(t, client, "get", `{"id":3,"scope_context":true,"project":"app"}`); r["kind"] != "not_found" {
 		t.Fatal(r)
+	}
+	if r := runPublicCommand(t, client, "get", `{"id":"3","scope_context":true,"project":"app","view":"console"}`); r["kind"] != "not_found" || r["output"] != nil {
+		t.Fatal("console disclosed hidden record", r)
+	}
+	console = run("list", `{"scope_context":true,"limit":64,"view":"console"}`)["output"].(string)
+	if err := json.Unmarshal([]byte(console), &consoleRows); err != nil || len(consoleRows) != 1 || consoleRows[0].Key != "global-key" {
+		t.Fatal("console list crossed scope", err, console)
 	}
 	ranks := run("scope_visibility_rank", `{"ids":[1,3,4,5,1,9999,null],"workspace":"team","project":"app"}`)["ranks"].([]any)
 	for i, want := range []float64{3, 0, 1, 2, 3, 0, 0} {

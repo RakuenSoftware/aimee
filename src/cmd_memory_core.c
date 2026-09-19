@@ -120,12 +120,11 @@ void mem_get(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
       fatal("memory get requires an id");
-   int64_t id = atoll(argv[0]);
-   memory_t mem;
-   if (kb_client_memory_get(id, &mem) != 0)
-      fatal("memory not found: %lld", (long long)id);
-   if (ctx->json_output)
-      emit_json_ctx(memory_to_json(&mem), ctx->json_fields, ctx->response_profile);
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "view", "console");
+   cJSON_AddStringToObject(request, "id", argv[0]);
+   memory_inspection_output(ctx, "memory.get", request);
 }
 
 void mem_delete(app_ctx_t *ctx, int argc, char **argv)
@@ -228,15 +227,16 @@ void mem_list(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   memory_t mems[256];
-   int count = kb_client_memory_list(tier, kind, limit, mems, 256);
-   if (ctx->json_output)
-   {
-      cJSON *arr = cJSON_CreateArray();
-      for (int i = 0; i < count; i++)
-         cJSON_AddItemToArray(arr, memory_to_json(&mems[i]));
-      emit_json_ctx(arr, ctx->json_fields, ctx->response_profile);
-   }
+   cJSON *request = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddStringToObject(request, "view", "console");
+   if (tier && tier[0])
+      cJSON_AddStringToObject(request, "tier", tier);
+   if (kind && kind[0])
+      cJSON_AddStringToObject(request, "kind", kind);
+   if (limit > 0)
+      cJSON_AddNumberToObject(request, "limit", limit);
+   memory_inspection_output(ctx, "memory.list", request);
 }
 
 void mem_search(app_ctx_t *ctx, int argc, char **argv)
