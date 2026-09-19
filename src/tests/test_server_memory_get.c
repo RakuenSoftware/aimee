@@ -2,6 +2,7 @@
 #include "cJSON.h"
 #include "kb_client.h"
 #include "server.h"
+#include "integrity.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -61,6 +62,16 @@ cJSON *server_error_kind_json(const char *kind, const char *message, const char 
 }
 
 static int user_calls, user_result, store_calls;
+static const char *personal_recall_reply;
+static int personal_quarantine;
+int integrity_ingress_decide(const char *text, integrity_source_t source, const char *boundary,
+                             int autonomous, integrity_result_t *result_out)
+{
+   (void)result_out;
+   assert(text && source == INTEGRITY_SOURCE_AGENT_MESSAGE && !strcmp(boundary, "recall") &&
+          autonomous);
+   return personal_quarantine;
+}
 static double expected_confidence;
 static const char *store_reply, *get_reply;
 extern cJSON *memory_delete_command(cJSON *, const char *);
@@ -87,6 +98,20 @@ cJSON *server_invoke_module_operation(const char *method, const char *operation,
       return reply;
    }
    assert(strcmp(unavailable_message, "user memory module unavailable") == 0);
+   if (strcmp(operation, "personal-recall") == 0)
+   {
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "task_hint")),
+                    "private query") == 0);
+      assert(cJSON_GetObjectItemCaseSensitive(request, "limit_tokens")->valuedouble == 8192);
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "session_start")));
+      if (!personal_recall_reply)
+         return server_error_kind_json(SERVER_ERR_UNAVAILABLE, unavailable_message, NULL);
+      cJSON *reply = cJSON_CreateObject();
+      cJSON_AddStringToObject(reply, "status", "ok");
+      cJSON_AddStringToObject(reply, "json", personal_recall_reply);
+      return reply;
+   }
+
    if (strcmp(operation, "user-stats") == 0)
       return cJSON_Parse("{\"status\":\"ok\",\"store\":\"user\",\"stats\":{\"total\":3}}");
    if (strcmp(operation, "user-store") == 0)
@@ -511,6 +536,27 @@ static void test_get_delete_owner_envelopes(void)
    cJSON_Delete(request);
 }
 
+static void test_personal_recall_owner_envelope(void)
+{
+   personal_recall_reply = "{\"status\":\"ok\",\"store\":\"user\",\"recall\":{\"identity\":[{"
+                           "\"id\":9007199254740993,\"text\":\"個人設定\"}],\"approx_tokens\":81}}";
+   char *body = server_user_memory_recall_json("private query", 8192, 1);
+   assert(body && strcmp(body, personal_recall_reply) == 0);
+   free(body);
+   personal_recall_reply =
+       "{\"status\":\"error\",\"kind\":\"unavailable\",\"receipt\":9007199254740995}";
+   body = server_user_memory_recall_json("private query", 8192, 1);
+   assert(body && strcmp(body, personal_recall_reply) == 0);
+   free(body);
+   personal_quarantine = 1;
+   body = server_user_memory_recall_json("private query", 8192, 1);
+   assert(body && strstr(body, "quarantined"));
+   free(body);
+   personal_quarantine = 0;
+   personal_recall_reply = NULL;
+   assert(server_user_memory_recall_json("private query", 8192, 1) == NULL);
+}
+
 int main(void)
 {
    test_user_namespace();
@@ -554,5 +600,6 @@ int main(void)
    test_search_owner_transport();
    test_get_delete_owner_envelopes();
    test_read_owner_refusal();
+   test_personal_recall_owner_envelope();
    return 0;
 }

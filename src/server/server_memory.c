@@ -36,14 +36,6 @@ static cJSON *memory_bad_store(void)
                                  NULL);
 }
 
-static cJSON *memory_data_request(const char *operation)
-{
-   cJSON *request = cJSON_CreateObject();
-   if (request)
-      cJSON_AddStringToObject(request, "operation", operation);
-   return request;
-}
-
 int server_memory_scope_begin(cJSON *req)
 {
    const char *cwd = jo_str(req, "cwd", NULL);
@@ -341,31 +333,18 @@ int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * process's own data grant. No KB request is needed to create its envelope. */
 char *server_user_memory_recall_json(const char *hint, int limit_tokens, int session_start)
 {
-   cJSON *request = memory_data_request("recall-bundle");
+   cJSON *request = cJSON_CreateObject();
    if (!request)
       return NULL;
-   cJSON_AddStringToObject(request, "query", hint ? hint : "");
+   cJSON_AddStringToObject(request, "task_hint", hint ? hint : "");
    cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
    cJSON_AddBoolToObject(request, "session_start", session_start != 0);
-   cJSON *response = server_module_memory_data(request);
+   cJSON *response = server_invoke_module_operation("memory.runtime", "personal-recall", request,
+                                                    "user memory module unavailable");
    cJSON_Delete(request);
-   cJSON *payload = response ? cJSON_DetachItemFromObjectCaseSensitive(response, "payload") : NULL;
+   const char *body = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "json"));
+   char *json = body ? strdup(body) : NULL;
    cJSON_Delete(response);
-   if (!cJSON_IsObject(payload))
-   {
-      cJSON_Delete(payload);
-      return NULL;
-   }
-   cJSON *envelope = jo_ok();
-   if (!envelope)
-   {
-      cJSON_Delete(payload);
-      return NULL;
-   }
-   cJSON_AddStringToObject(envelope, "store", "user");
-   cJSON_AddItemToObject(envelope, "recall", payload);
-   char *json = cJSON_PrintUnformatted(envelope);
-   cJSON_Delete(envelope);
    integrity_result_t gate;
    if (json && integrity_ingress_decide(json, INTEGRITY_SOURCE_AGENT_MESSAGE, "recall", 1, &gate))
    {

@@ -16,6 +16,11 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	operation := args.stringOr("operation", "")
 	switch operation {
+	case "personal-recall":
+		if options.placement != PlacementServer {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		return runtimeJSONText(handleRecallCommand(options, invocation, args))
 	case "compose-recall":
 		return handleRecallComposition(options, invocation, args)
 	case "maintenance-model-plan":
@@ -65,12 +70,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		if status != bus.ModuleStatusOK {
 			return nil, status
 		}
-		body, err := bus.DecodeCommandResult(encoded)
-		if err != nil {
-			return nil, bus.ModuleStatusInternal
-		}
-		// The native transport must not round review IDs through cJSON doubles.
-		return commandResult(map[string]any{"status": "ok", "json": string(body)})
+		return runtimeJSONText(encoded, status)
 	case "user-store", "user-get", "user-list", "user-search", "user-delete", "user-supersede", "user-stats":
 		return handleUserCommand(options, invocation, operation[len("user-"):], args)
 	case "prospective-dashboard", "prospective-briefing", "directive-dashboard", "directive-briefing", "stats-dashboard":
@@ -330,4 +330,17 @@ func (s *postgresDataStore) maintenanceDashboard(ctx context.Context) (json.RawM
 		"metrics": map[string]any{"runs_total": runs, "skips_total": runtimeMetricState.maintenanceSkips.Load(), "changes_total": runtimeMetricState.maintenanceChanges.Load(), "ms_avg": avg, "ms_max": max},
 		"config":  map[string]any{"enabled": number("memory_maintenance_enabled") != 0, "interval_seconds": interval, "summarize_enabled": number("memory_maintenance_summarize_enabled") != 0},
 	})
+}
+
+// Native serialization-only callers receive JSON text, preserving exact owner
+// integer tokens rather than parsing and rebuilding their nested payload.
+func runtimeJSONText(encoded []byte, status bus.ModuleStatus) ([]byte, bus.ModuleStatus) {
+	if status != bus.ModuleStatusOK {
+		return nil, status
+	}
+	body, err := bus.DecodeCommandResult(encoded)
+	if err != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	return commandResult(map[string]any{"status": "ok", "json": string(body)})
 }

@@ -335,6 +335,9 @@ func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation
 		return nil, bus.ModuleStatusInternal
 	}
 	result := map[string]any{"status": "ok", "recall": response.Payload}
+	if options.placement == PlacementServer {
+		result["store"] = "user"
+	}
 	if scoped {
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}

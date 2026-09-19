@@ -38,6 +38,10 @@ collide. The Go owner reads current personal rows, retains full content and exac
 int64 IDs, preserves scoped handles, and rebudgets the final serialized bundle.
 Personal rows are never sent to the KB. Shared-only requests skip composition.
 
+The Server personal-recall adapter also forwards the complete Go envelope as
+text, including exact IDs and owner errors; the native integrity check remains
+at materialization.
+
 The internal `memory.runtime` operation `compose-recall` accepts the shared
 response as JSON text and returns the complete composed response as text, so C
 transport cannot round IDs while decoding it. Plugins and the KB placement

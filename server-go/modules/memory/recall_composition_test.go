@@ -76,6 +76,11 @@ func TestRecallCompositionPostgres(t *testing.T) {
 		}
 		return []byte(envelope.JSON), status
 	}
+	personal := runHostRuntime(t, handler, `{"operation":"personal-recall","limit_tokens":8192,"task_hint":"identity:name"}`)
+	personalJSON, ok := personal["json"].(string)
+	if !ok || !strings.Contains(personalJSON, `"id":9007199254740993`) || !strings.Contains(personalJSON, `"store":"user"`) || !strings.Contains(personalJSON, full) || strings.Contains(personalJSON, "shared name") {
+		t.Fatal("personal recall envelope lost", personal)
+	}
 	raw, status := call(string(sharedJSON), 8192)
 	if status != bus.ModuleStatusOK {
 		t.Fatal(status)
@@ -133,10 +138,25 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	if status != bus.ModuleStatusOK || !strings.Contains(string(raw), `"kind":"unavailable"`) || strings.Contains(string(raw), `"recall"`) {
 		t.Fatal("private failure hidden", string(raw), status)
 	}
+	personal = runHostRuntime(t, handler, `{"operation":"personal-recall","limit_tokens":8192}`)
+	personalJSON, _ = personal["json"].(string)
+	if !strings.Contains(personalJSON, `"kind":"unavailable"`) || strings.Contains(personalJSON, `"recall"`) {
+		t.Fatal("personal failure hidden", personal)
+	}
 	exec(`ROLLBACK TO SAVEPOINT composition_failure; RELEASE SAVEPOINT composition_failure`)
 	raw, status = call(string(sharedJSON), 8192)
 	if status != bus.ModuleStatusOK || !strings.Contains(string(raw), `"store":"composed"`) {
 		t.Fatal("composition did not recover", string(raw), status)
+	}
+	{
+		frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"personal-recall"}`))
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand, PrincipalRef: 73}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal("plugin personal recall", status)
+		}
+		kb := NewHandler(nil, WithDataStore(PlacementKB, nil))
+		if _, status := kb(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusCapabilityAbsent {
+			t.Fatal("KB personal recall", status)
+		}
 	}
 	// The host route cannot be invoked by plugins or by the KB placement.
 	args, _ := json.Marshal(map[string]any{"operation": "compose-recall", "shared_json": string(sharedJSON)})
