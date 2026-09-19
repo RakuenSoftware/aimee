@@ -166,6 +166,18 @@ server placement to address KB memory. The KB placement rejects user scope.
 
 ## Public contracts
 
+Server KB store, list and supersede forward complete Go-rendered responses through
+the authenticated KB transport. The Go owner owns validation and server response
+shape; native callers no longer reconstruct these records through `memory_t`.
+The transport preserves numeric tokens and extra receipt fields, forwards owner
+`review_required`/`conflict` errors, and rejects missing/malformed owner envelopes.
+It copies command data fields, reconstructs host scope, and supplies authority
+from the verified host context; caller-supplied actor/authority/operation and scope
+control fields do not pass through. Supersede keeps its flat server envelope,
+while the ordinary KB command retains its nested memory response. Missing private
+memory still cannot trigger a KB fallback.
+
+
 Personal review-list rendering now belongs to the Go owner through the private
 `user-review-list` runtime operation. It retains the Server envelope, both
 `lifecycle_state` and `lifecycle` fields, complete content and integer IDs. The

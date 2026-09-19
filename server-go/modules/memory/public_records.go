@@ -215,6 +215,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 		return commandResult(map[string]any{"status": "ok", "text": memorySearchText(request.Query, response.PublicRecords, missing), "active_context_missing": missing})
 	}
 	result := map[string]any{"status": "ok"}
+	if args.stringOr("view", "") == "server" {
+		result["store"] = "kb"
+	}
 	if verb == "get" {
 		if len(response.PublicRecords) == 0 {
 			return commandResult(commandError("not_found", "memory not found"))

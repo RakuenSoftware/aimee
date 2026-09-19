@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -279,6 +280,36 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	}
 	if _, err := tx.Exec(ctx, `ALTER TABLE kb_async_jobs DROP CONSTRAINT fail_replacement`); err != nil {
 		t.Fatal(err)
+	}
+	// Server views retain complete owner records and the existing flat
+	// supersede envelope without routing through fixed native structs.
+	longContent := strings.Repeat("完整 memory ", 1024)
+	viewArgs, _ := json.Marshal(map[string]any{"key": "server-view", "content": longContent, "view": "server", "scope_context": true, "project": "server-view-project"})
+	createdView := put(string(viewArgs), false)
+	if createdView["status"] != "ok" || createdView["store"] != "kb" {
+		t.Fatal(createdView)
+	}
+	viewList := runPublicCommand(t, client, "list", `{"view":"server","scope_context":true,"project":"server-view-project"}`)
+	if viewList["store"] != "kb" {
+		t.Fatal("server list missing store")
+	}
+	foundView := false
+	for _, item := range viewList["memories"].([]any) {
+		record := item.(map[string]any)
+		if record["id"] == createdView["id"] {
+			foundView = true
+			if record["content"] != longContent {
+				t.Fatal("server list lost content")
+			}
+		}
+	}
+	if !foundView {
+		t.Fatal("server list omitted scoped record")
+	}
+	viewArgs, _ = json.Marshal(map[string]any{"old_id": createdView["id"], "new_content": longContent + " corrected", "view": "server", "scope_context": true, "project": "server-view-project"})
+	correctedView := runPublicCommand(t, client, "supersede", string(viewArgs))
+	if correctedView["status"] != "ok" || correctedView["store"] != "kb" || correctedView["id"] == createdView["id"] || correctedView["content"] != longContent+" corrected" || correctedView["memory"] != nil {
+		t.Fatal("server supersede shape", correctedView)
 	}
 	// Replacement under a non-owner role cannot reach a different project's source.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_store_test NOINHERIT NOBYPASSRLS;

@@ -83,6 +83,9 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	}
 	r := response.PublicRecords[0]
 	result := map[string]any{"status": "ok", "id": r.ID, "memory": r}
+	if args.stringOr("view", "") == "server" {
+		result["store"] = "kb"
+	}
 	if scoped {
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}
@@ -137,6 +140,13 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 	}
 	if len(response.PublicRecords) != 1 {
 		return nil, bus.ModuleStatusInternal
+	}
+	if args.stringOr("view", "") == "server" {
+		return commandResult(struct {
+			Status string `json:"status"`
+			Store  string `json:"store"`
+			publicMemoryRecord
+		}{"ok", "kb", response.PublicRecords[0]})
 	}
 	result := map[string]any{"status": "ok", "memory": response.PublicRecords[0]}
 	if scoped {

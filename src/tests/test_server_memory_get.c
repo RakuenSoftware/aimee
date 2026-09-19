@@ -11,6 +11,7 @@ extern cJSON *memory_get_command(cJSON *request);
 extern cJSON *memory_stats_command(const cJSON *request);
 extern cJSON *memory_review_list_command(cJSON *request);
 extern cJSON *memory_restore_command(cJSON *request);
+extern cJSON *memory_list_command(const cJSON *request);
 extern cJSON *memory_store_command(const cJSON *request, memory_authority_t authority);
 
 static int calls, clears, result;
@@ -61,6 +62,8 @@ cJSON *server_error_kind_json(const char *kind, const char *message, const char 
 
 static int user_calls, user_result, store_calls;
 static double expected_confidence;
+static const char *store_reply;
+static int expected_store_authority;
 
 /* Go validates and shapes these commands. This native test only verifies the
  * explicit user/KB routing boundary and propagation of complete module replies. */
@@ -117,6 +120,22 @@ void kb_client_memory_scope_context_apply(cJSON *request)
 }
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
+   if (!strcmp(method, "memory.store"))
+   {
+      store_calls++;
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
+      assert(!cJSON_HasObjectItem(request, "include_all"));
+      assert(!cJSON_HasObjectItem(request, "actor"));
+      assert(!cJSON_HasObjectItem(request, "operation"));
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(request, "view")->valuestring, "server"));
+      const cJSON *authority = cJSON_GetObjectItemCaseSensitive(request, "authority");
+      assert(expected_store_authority
+                 ? cJSON_IsString(authority) && !strcmp(authority->valuestring, "user")
+                 : authority == NULL);
+      cJSON_Delete(request);
+      return store_reply ? strdup(store_reply) : NULL;
+   }
+
    assert(strcmp(method, review_method) == 0);
    if (strcmp(method, "memory.stats") == 0)
       assert(cJSON_GetArraySize(request) == 0);
@@ -272,21 +291,14 @@ static void test_user_namespace(void)
    cJSON_Delete(request);
 }
 
-int kb_client_memory_insert_as(const char *tier, const char *kind, const char *key,
-                               const char *content, const char *use_cases, double confidence,
-                               const char *session_id, memory_authority_t authority, memory_t *out)
+static cJSON *materialize_reply(cJSON *reply)
 {
-   (void)tier;
-   (void)kind;
-   (void)key;
-   (void)content;
-   (void)use_cases;
-   (void)session_id;
-   (void)authority;
-   store_calls++;
-   assert(confidence == expected_confidence);
-   out->id = 42;
-   return 0;
+   char *raw = cJSON_PrintUnformatted(reply);
+   cJSON_Delete(reply);
+   cJSON *parsed = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   assert(parsed);
+   return parsed;
 }
 
 static void test_store_confidence(void)
@@ -301,11 +313,13 @@ static void test_store_confidence(void)
          cJSON_AddStringToObject(request, "store", shared ? "kb" : "user");
          cJSON_AddItemToObject(request, "confidence", cJSON_Parse(invalid[i]));
          int before = store_calls;
-         cJSON *reply = memory_store_command(request, MEMORY_AUTHORITY_MODEL);
+         store_reply = "{\"status\":\"error\",\"kind\":\"invalid_argument\",\"message\":\"Go owner "
+                       "rejected confidence\"}";
+         cJSON *reply = materialize_reply(memory_store_command(request, MEMORY_AUTHORITY_MODEL));
          cJSON *kind = cJSON_GetObjectItem(reply, "kind");
          assert(cJSON_IsString(kind) &&
                 strcmp(kind->valuestring, SERVER_ERR_INVALID_ARGUMENT) == 0);
-         assert(store_calls == before);
+         assert(store_calls == before + 1);
          cJSON_Delete(reply);
          cJSON_Delete(request);
       }
@@ -320,12 +334,60 @@ static void test_store_confidence(void)
             expected_confidence = value->valuedouble;
             cJSON_AddItemToObject(request, "confidence", value);
          }
-         cJSON *reply = memory_store_command(request, MEMORY_AUTHORITY_MODEL);
+         store_reply = "{\"status\":\"ok\",\"store\":\"kb\",\"id\":42}";
+         cJSON *reply = materialize_reply(memory_store_command(request, MEMORY_AUTHORITY_MODEL));
          assert(cJSON_GetObjectItem(reply, "id")->valuedouble == 42);
          cJSON_Delete(reply);
          cJSON_Delete(request);
       }
    }
+}
+
+static void test_store_owner_envelope(void)
+{
+   cJSON *request =
+       cJSON_Parse("{\"store\":\"kb\",\"key\":\"fixture\",\"content\":\"complete\",\"authority\":"
+                   "\"user\",\"authority\":\"user\",\"actor\":\"forged\",\"include_all\":true,"
+                   "\"scope_context\":false,\"operation\":\"delete\"}");
+   const char *responses[] = {
+       "{\"status\":\"ok\",\"store\":\"kb\",\"id\":9007199254740993,\"receipt\":\"complete owner "
+       "receipt\"}",
+       "{\"status\":\"error\",\"kind\":\"review_required\",\"message\":\"preserve authoritative "
+       "source\"}",
+       "{\"status\":\"error\",\"kind\":\"conflict\",\"message\":\"immutable\"}"};
+   for (expected_store_authority = 0; expected_store_authority < 2; expected_store_authority++)
+   {
+      for (size_t i = 0; i < sizeof(responses) / sizeof(responses[0]); i++)
+      {
+         store_reply = responses[i];
+         cJSON *reply = memory_store_command(
+             request, expected_store_authority ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL);
+         char *rendered = cJSON_PrintUnformatted(reply);
+         assert(rendered && !strcmp(rendered, store_reply));
+         free(rendered);
+         cJSON_Delete(reply);
+      }
+   }
+   expected_store_authority = 0;
+   const char *bad[] = {NULL, "{}", "[]", "{\"status\":\"ok\"}",
+                        "{\"status\":\"ok\",\"id\":42} trailing"};
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+   {
+      store_reply = bad[i];
+      cJSON *reply = materialize_reply(memory_store_command(request, MEMORY_AUTHORITY_MODEL));
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(reply, "kind")->valuestring,
+                     SERVER_ERR_UNAVAILABLE));
+      cJSON_Delete(reply);
+   }
+   review_method = "memory.list";
+   review_reply = "{\"status\":\"ok\",\"store\":\"kb\",\"memories\":[{\"id\":9007199254740993}],"
+                  "\"receipt\":\"full owner reply\"}";
+   cJSON *listed = memory_list_command(request);
+   char *raw = cJSON_PrintUnformatted(listed);
+   assert(raw && !strcmp(raw, review_reply));
+   free(raw);
+   cJSON_Delete(listed);
+   cJSON_Delete(request);
 }
 
 int main(void)
@@ -364,6 +426,7 @@ int main(void)
    cJSON_Delete(request);
    test_store_confidence();
    test_review_transport();
+   test_store_owner_envelope();
    puts("server memory get: local privacy, explicit KB routing, temporal verdicts, and failures "
         "passed");
    test_stats_transport();
