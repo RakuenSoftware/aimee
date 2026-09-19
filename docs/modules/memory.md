@@ -63,20 +63,32 @@ isolated Go path until their seeding, embeddings and reads are migrated together
 
 ## Purpose and non-goals
 
-Shared KB searches also admit semantic-only whole-record matches from the active
-versioned embedding catalog. The Go owner holds the rebuild lock while it checks
-the model identity, embeds the query and reads candidates. Current input hashes,
+Shared KB searches admit semantic-only whole-record and derived-unit matches
+from the active versioned embedding catalog. The Go owner holds the rebuild lock
+while it checks the model identity, embeds the query and reads candidates. Current input hashes,
 parent visibility, exact scope, lifecycle, suppression, kind and tier are checked
 before limiting candidates. Wrong-width and zero vectors cannot enter the result.
 The channel retains the former whole-record cosine floor and dimension-dependent
 scale, including the `memory_semantic_floor_scale` configuration override, then
-fuses lexical and semantic ranks while preserving scope priority.
+fuses lexical and semantic ranks while preserving scope priority. Unit similarity
+adds the retired native type/kind intent boosts and weight contribution, with
+separate temporal/event/summary floors scaled to the deployed dimension. Intent
+matching uses whole terms, so `candidate` and `Chicago` do not imply a date query.
+
+Each semantic channel filters current input hashes, parent visibility, lifecycle,
+suppression, kind, tier and vector validity before its parent budget. Unit inputs
+include the source content, so editing a parent or unit invalidates stale unit
+vectors. Non-finite unit weights are excluded. Units group by parent using their
+best qualifying similarity; copies cannot add votes. Whole-record and unit hits
+then deduplicate by parent using the stronger score. Both channels use one query
+embedding and the same pinned serving identity. Unit and temporal lane counters
+identify their actual contributions.
 
 Model outages, identity changes and invalid query embeddings leave lexical recall
 available; a required SQL failure remains an operation failure. This path requires
 a pinned active version and a governed executor. Unversioned-vector admission and
-the native unit/temporal semantic weighting still need migration; this does not
-certify the full legacy retrieval pipeline or the native benchmark runners.
+legacy semantic query expansion remain outside this path; this does not certify the full legacy retrieval pipeline or the native
+benchmark runners.
 
 Memory is one Go module deployed in two placements. `AIMEE_MODULE_PLACEMENT` is
 required for a running process:
@@ -430,9 +442,9 @@ mass, and maximum-normalized bonuses. Successful owner calls record graph-query
 plus kernel time only after the request transaction commits. Measurements are
 process-local, not an end-to-end retrieval latency or a replacement for the old
 native baseline. `BenchmarkPageRankKernel50` measures CPU work alone. This private
-operation makes scoring available to the isolated evaluator; recall ordering is
-unchanged at this checkpoint. PageRank retrieval integration and unit/temporal
-semantic weighting still need separate behavioral parity work.
+operation makes scoring available to the isolated evaluator. PageRank does not
+yet rerank recall. Its retrieval integration and legacy query/candidate expansion
+still need separate behavioral parity work.
 
 There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report
@@ -1084,9 +1096,9 @@ Baseline replacement is atomic and happens only after the isolated database
 has closed successfully. Scores and latency come from the shared Go owner;
 latency does not include a Server-to-KB hop. Legacy route/shape buckets are
 unmeasured and remain empty. This evaluates the Go owner's current retrieval
-behavior; it does not certify the still-pending native unit/temporal ranking
-parity. Other native dataset/judge runners and their scratch-store consumers
-remain G0 work. The C corpus loader and its dependent corpus fixtures are
+behavior; unit/temporal candidate weights now run in Go, but this does not
+certify the entire historical ranking pipeline. Other native dataset/judge runners
+and their scratch-store consumers remain G0 work. The C corpus loader and its dependent corpus fixtures are
 retired; production-corpus/agent-manifest C fixtures remain until those runners
 migrate. Go tests cover isolated semantic recall, command and governed HTTP
 embedders, full fixture identities, input failures and baseline protection.

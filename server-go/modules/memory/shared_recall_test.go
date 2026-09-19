@@ -132,6 +132,7 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	}
 	request.Scope = Scope{}
 	request.IncludeAll = false
+	exerciseUnitRecallReplay(t, ctx, tx, backend, model, dimension)
 	model.vector = []byte(`[1,0]`)
 	got, status = call()
 	if status != bus.ModuleStatusOK || len(got.Records) != 0 {

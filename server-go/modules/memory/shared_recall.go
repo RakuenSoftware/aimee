@@ -82,8 +82,7 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 		return unavailable()
 	}
 	// Fingerprints cover text, scope and kind, so moved/edited records need fresh
-	// embeddings. Unit recall has additional intent/temporal weights; this channel
-	// restores the whole-record candidates and leaves those weights separate.
+	// embeddings. Whole-record and unit channels each get an eligible-parent budget.
 	rows, err := s.db.Query(ctx, embeddingInputs+`, candidates AS (
  SELECT i.memory_id, CASE WHEN vector_dims(v.embedding)=vector_dims($10::vector) AND vector_norm(v.embedding)>0
  THEN 1-(v.embedding <=> $10::vector) END AS similarity
@@ -96,7 +95,7 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
  OR (m.scope_type='project' AND m.scope_value=$5) OR (m.scope_type='workspace' AND m.scope_value=$6) END
  AND ($7='' OR m.kind=$7) AND ($8='' OR m.tier=$8)
  AND vector_dims(v.embedding)=vector_dims($10::vector)
- ) SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence
+ ) SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,c.similarity
  FROM candidates c JOIN memories m ON m.id=c.memory_id
  WHERE c.similarity >= $12 ORDER BY CASE
  WHEN $1 THEN 0 WHEN m.scope_type='project' AND m.scope_value=$5 THEN 0
@@ -107,11 +106,26 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 	if err != nil {
 		return nil, err
 	}
-	semantic, err := scanRecordRows(rows)
+	whole := []semanticCandidate{}
+	for rows.Next() {
+		c := semanticCandidate{lanes: laneSemantic}
+		r := &c.record
+		if err := rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &c.score); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		whole = append(whole, c)
+	}
+	err = rows.Err()
+	rows.Close()
 	if err != nil {
 		return nil, err
 	}
-	req.lanes.add(semantic, laneSemantic)
+	units, err := s.unitSemanticCandidates(ctx, req, exact, version, vector, scale)
+	if err != nil {
+		return nil, err
+	}
+	semantic := mergeSemanticCandidates(req, exact, whole, units)
 	combined := fusePersonal(base, semantic, len(base)+len(semantic))
 	if !exact {
 		scopeRank := func(r Record) int {
