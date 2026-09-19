@@ -30,15 +30,15 @@
     },
     {
       "classification": "host-generated-client",
+      "path": "src/headers/rel_types.h"
+    },
+    {
+      "classification": "host-generated-client",
       "path": "src/index.c"
     },
     {
       "classification": "kb-generated-client",
       "path": "src/kb/db2_adapters/kb_service_backend_agent.c"
-    },
-    {
-      "classification": "kb-generated-client",
-      "path": "src/kb/db2_adapters/kb_service_backend_context.c"
     },
     {
       "classification": "kb-generated-client",
@@ -526,6 +526,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_assertion_transport.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_bandit.c"
     },
     {
@@ -938,6 +942,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_memory_reference_transport.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_memory_retrieval_eval.c"
     },
     {
@@ -1042,10 +1050,6 @@
     },
     {
       "classification": "private-implementation-test",
-      "path": "src/tests/test_wiki_render.c"
-    },
-    {
-      "classification": "private-implementation-test",
       "path": "src/tests/test_witness_canary_pg.c"
     },
     {
@@ -1079,10 +1083,6 @@
     {
       "classification": "host-generated-client",
       "path": "src/tools/witness_cadence_harness.c"
-    },
-    {
-      "classification": "host-generated-client",
-      "path": "src/trace_analysis.c"
     }
   ],
   "declarations": [
@@ -10155,8 +10155,8 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_context.c",
-        "src/kb/kb_service_css.c"
+        "src/kb/kb_service_css.c",
+        "src/tests/test_assertion_transport.c"
       ],
       "locations": [
         {
@@ -19929,7 +19929,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "63eed00980f0e2f669cb466c405349e0ec506cc3e877d662a3c9a7ffb40ff14e",
+  "fingerprint": "fb3b4739cff3511366e826157d593fcfabf99a1b4083b7c62fc1e66cdaf99aa0",
   "module": "db2",
   "schema_version": 1,
   "summary": {
