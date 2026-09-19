@@ -18,7 +18,7 @@ Implement the shared eligibility decision in `server-go/modules/memory` and use 
 
 ## Implemented foundation
 
-The Go `current-validity-v3` predicate now applies active lifecycle, explicit
+The Go `current-validity-v4` predicate now applies active lifecycle, explicit
 suppression and half-open valid time before lexical, active-version whole-record
 semantic, unit/temporal semantic, graph/PageRank parent, compatibility-window,
 recall-bundle, activation and briefing limits. Pending commitments use the same
@@ -39,7 +39,10 @@ briefing fixtures prove backfill with high-ranked invalid rows exceeding section
 limits. Directive/reminder match and briefing views now share normalized expiry;
 sweeps use the same exact upper boundary. PostgreSQL replay covers offsets,
 pre-limit exclusion, malformed timestamps and recovery. Operator lists preserve
-unswept lifecycle state. This does not complete the host privilege vocabulary,
+unswept lifecycle state. Assertion world-valid and belief-time SQL now preserves
+stored offsets and fractions and uses the same inclusive-start/exclusive-end
+semantics, with non-UTC replay coverage. The public anchor format remains
+second-precision UTC. This does not complete the host privilege vocabulary,
 fact/cache surfaces, historical/belief-time
 modes, final-release generation checks or the validity command below.
 

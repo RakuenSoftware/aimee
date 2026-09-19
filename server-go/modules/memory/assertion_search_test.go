@@ -126,6 +126,43 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	if len(hits(got)) != 1 || hits(got)[0].(map[string]any)["stable_id"] != fmt.Sprint(current) {
 		t.Fatal(got)
 	}
+	// Stored offsets and subsecond endpoints must compare as instants, even
+	// though this public request contract retains second-precision UTC anchors.
+	exec(`SAVEPOINT assertion_instant; SET LOCAL TIME ZONE 'Asia/Tokyo'`)
+	exec(`UPDATE entity_edges SET valid_from='2026-04-01T09:00:00+09:00',
+ valid_until='2026-04-01T00:00:00.500Z',asserted_at='2026-04-02T09:00:00+09:00',
+ superseded_at='2026-04-02T00:00:00.500Z' WHERE id=$1`, current)
+	got = call()
+	if len(hits(got)) != 1 || hits(got)[0].(map[string]any)["stable_id"] != fmt.Sprint(current) {
+		t.Fatal("offset/fraction interval lost", got)
+	}
+	// The same instant rendered as a positive offset is an exclusive endpoint.
+	for _, column := range []string{"valid_until", "superseded_at", "invalidated_at"} {
+		exec(`SAVEPOINT assertion_upper_boundary`)
+		end := "2026-04-02T09:00:00+09:00"
+		if column == "valid_until" {
+			end = "2026-04-01T09:00:00+09:00"
+		}
+		exec(`UPDATE entity_edges SET `+column+`=$1 WHERE id=$2`, end, current)
+		if got := call(); len(hits(got)) != 0 {
+			t.Fatal("exclusive endpoint admitted", column, got)
+		}
+		exec(`ROLLBACK TO SAVEPOINT assertion_upper_boundary; RELEASE SAVEPOINT assertion_upper_boundary`)
+	}
+	exec(`UPDATE entity_edges SET valid_from='2026-04-01T00:00:00.001Z' WHERE id=$1`, current)
+	if got := call(); len(hits(got)) != 0 {
+		t.Fatal("future fraction admitted", got)
+	}
+	for _, bad := range []string{"now", "infinity", "2026-02-30T00:00:00Z"} {
+		exec(`SAVEPOINT assertion_malformed_time`)
+		exec(`UPDATE entity_edges SET valid_from=$1 WHERE id=$2`, bad, current)
+		got = call()
+		if got["status"] != "degraded" || len(hits(got)) != 0 {
+			t.Fatal("malformed assertion time admitted", bad, got)
+		}
+		exec(`ROLLBACK TO SAVEPOINT assertion_malformed_time; RELEASE SAVEPOINT assertion_malformed_time`)
+	}
+	exec(`ROLLBACK TO SAVEPOINT assertion_instant; RELEASE SAVEPOINT assertion_instant`)
 	args["believed_at"] = "2026-02-02T00:00:00Z"
 	if len(hits(call())) != 0 {
 		t.Fatal("time axes collapsed")

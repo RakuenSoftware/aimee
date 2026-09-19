@@ -52,7 +52,7 @@ above 2^53-1.
 
 ## Current-state retrieval validity
 
-The Go `current-validity-v3` predicate applies active lifecycle, suppression and
+The Go `current-validity-v4` predicate applies active lifecycle, suppression and
 half-open valid time before shared lexical, whole-record/unit semantic, graph/
 PageRank, compatibility-window, recall-bundle, activation and briefing limits.
 Pending commitments retain their lifecycle while sharing the time predicate;
@@ -69,6 +69,11 @@ Directive/reminder matching, recall fallback and briefing views share the same
 normalized expiry gate. Sweeps expire a row at the exact upper boundary; serving
 does not wait for a sweep. Operator lists/dashboard counts retain stored lifecycle
 state so unswept records remain inspectable.
+
+Assertion search normalizes stored offsets and fractions for both world-valid
+and belief-time intervals, including its current/historical projection. The
+request contract still accepts second-precision UTC anchors; historical access
+authorization and parent-version closure remain separate acceptance work.
 
 The baseline policy fingerprint includes this version. This current-state slice
 does not certify all MR-01 surfaces, privileged historical/belief-time access,
@@ -535,13 +540,14 @@ phases for claim, parse, and finish. See the published testing qualification in
 Required policy stages do not silently run a second implementation. Extraction
 returns an error, write gating defers, and PII injection fails closed when the
 Go module is unavailable. The cheap recall gate fails open because omitting that
-optimization must not suppress a valid recall. Every linker-live legacy ABI
-operation now crosses the Go data stage; there is no unavailable shim.
+optimization must not suppress a valid recall. Supported production memory data operations cross the Go owner. Unregistered
+legacy native fixtures and old declarations remain part of the G0 caller review;
+their presence is not passing migration or release evidence.
 
 The Go package tests cover placement isolation, scope expansion, CRUD,
 maintenance, workflow identity, recall gating, extraction, ontology, embedding,
-typed-fact planning/grounding, and PII behavior. C tests cover only message
-framing and host/connection integration.
+typed-fact planning/grounding, and PII behavior. Active C transport tests cover message framing and host/connection integration;
+retired-engine fixtures are not substitutes for Go owner regressions.
 Descriptor validation enforces the source inventory, and both `aimee-server`
 and `aimee-kb` must link without any retired C memory implementation.
 

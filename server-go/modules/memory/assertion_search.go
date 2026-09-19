@@ -155,31 +155,30 @@ const assertionVisible = `NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN mem
  ON f.source_id='memory:'||m.id::text AND m.lifecycle_state='active' AND m.activation_suppressed=0
  WHERE f.assertion_id=e.id AND f.source_kind='memory' AND f.invalidated_at=''
  AND (m.id IS NULL OR ($5<>'' AND (m.scope_type<>$5 OR m.scope_value<>$6))))`
-const assertionCurrent = `((e.asserted_at='' OR replace(substr(e.asserted_at,1,19),'T',' ')<=pg_now_text())
- AND (e.superseded_at='' OR pg_now_text()<replace(substr(e.superseded_at,1,19),'T',' '))
- AND (e.invalidated_at='' OR pg_now_text()<replace(substr(e.invalidated_at,1,19),'T',' '))
- AND (e.assertion_kind<>'world_fact' OR ((e.valid_from='' OR replace(substr(e.valid_from,1,19),'T',' ')<=pg_now_text())
- AND (e.valid_until='' OR pg_now_text()<replace(substr(e.valid_until,1,19),'T',' ')))))`
-const assertionFilter = `e.edge_class='semantic' AND e.suppressed=0 AND e.lifecycle_state IN ('persistent','promoted')
- AND ($1<>'' OR $3 OR ((e.asserted_at='' OR replace(substr(e.asserted_at,1,19),'T',' ')<=pg_now_text())
- AND (e.superseded_at='' OR pg_now_text()<replace(substr(e.superseded_at,1,19),'T',' '))
- AND (e.invalidated_at='' OR pg_now_text()<replace(substr(e.invalidated_at,1,19),'T',' '))))
- AND ($1='' OR ((e.asserted_at='' OR replace(substr(e.asserted_at,1,19),'T',' ')<=$1)
- AND (e.superseded_at='' OR $1<replace(substr(e.superseded_at,1,19),'T',' '))
- AND (e.invalidated_at='' OR $1<replace(substr(e.invalidated_at,1,19),'T',' '))))
- AND ($2<>'' OR $3 OR e.assertion_kind<>'world_fact' OR ((e.valid_from='' OR replace(substr(e.valid_from,1,19),'T',' ')<=pg_now_text())
- AND (e.valid_until='' OR pg_now_text()<replace(substr(e.valid_until,1,19),'T',' '))))
- AND ($2='' OR ((e.valid_from='' OR replace(substr(e.valid_from,1,19),'T',' ')<=$2)
- AND (e.valid_until='' OR $2<replace(substr(e.valid_until,1,19),'T',' ')))) AND ` + assertionVisible
-const assertionColumns = `e.id,e.version,e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
+
+// Belief time and world-valid time are independent half-open intervals. Do not
+// truncate stored fractions or discard offsets when comparing either axis.
+func assertionBeliefSQL(clock string) string {
+	return memoryStartedAtSQL("e.asserted_at", clock) + ` AND ` +
+		memoryUnexpiredAtSQL("e.superseded_at", clock) + ` AND ` +
+		memoryUnexpiredAtSQL("e.invalidated_at", clock)
+}
+
+var assertionCurrent = `(` + assertionBeliefSQL("CURRENT_TIMESTAMP") + `
+ AND (e.assertion_kind<>'world_fact' OR (` + memoryValiditySQL("e.") + `)))`
+var assertionFilter = `e.edge_class='semantic' AND e.suppressed=0 AND e.lifecycle_state IN ('persistent','promoted')
+ AND ($1<>'' OR $3 OR (` + assertionBeliefSQL("CURRENT_TIMESTAMP") + `))
+ AND ($1='' OR (` + assertionBeliefSQL(memoryTimeSQL("$1::text")) + `))
+ AND ($2<>'' OR $3 OR e.assertion_kind<>'world_fact' OR (` + memoryValiditySQL("e.") + `))
+ AND ($2='' OR (` + memoryValidityAtSQL("e.", memoryTimeSQL("$2::text")) + `)) AND ` + assertionVisible
+var assertionColumns = `e.id,e.version,e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
  e.authority_rank,e.confidence_class,e.confidence,e.valid_from,e.valid_until,e.asserted_at,e.superseded_at,
  NOT ` + assertionCurrent + `,
  (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' AND f.stance='supports'),
  (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' AND f.stance='contradicts')`
 
 func assertionParams(request DataRequest, exact Scope, query string) []any {
-	normalize := func(s string) string { return strings.ReplaceAll(strings.TrimSuffix(s, "Z"), "T", " ") }
-	return []any{normalize(request.Assertions.BelievedAt), normalize(request.Assertions.ValidAt), request.Assertions.Historical, strings.ToLower(query), exact.Type, exact.Value}
+	return []any{request.Assertions.BelievedAt, request.Assertions.ValidAt, request.Assertions.Historical, strings.ToLower(query), exact.Type, exact.Value}
 }
 func (s *postgresDataStore) assertionCandidates(ctx context.Context, request DataRequest, exact Scope, query string, limit int, vector string) ([]assertionHit, error) {
 	params := assertionParams(request, exact, query)
