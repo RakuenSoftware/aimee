@@ -99,6 +99,22 @@ func exerciseRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 		private := seed("L3", "fact", fmt.Sprintf("identity:private-%d", i), "project", "private-project", "active")
 		exec(`UPDATE memories SET confidence=1 WHERE id=ANY($1::bigint[])`, []int64{global, private})
 	}
+	// High-ranked inapplicable rows exceed every section cap. Selection must
+	// backfill from current rows, including pending commitments and activation.
+	for _, state := range []string{"active", "pending"} {
+		for _, kind := range []string{"fact", "preference"} {
+			for i := 0; i < 12; i++ {
+				for _, endpoint := range []string{"future", "expired"} {
+					id := seed("L3", kind, fmt.Sprintf("identity:inapplicable-%s-%s-%s-%d backend migration", state, kind, endpoint, i), "project", "recall-project", state)
+					if endpoint == "future" {
+						exec(`UPDATE memories SET confidence=1,valid_from=(CURRENT_TIMESTAMP+interval '1 day')::text WHERE id=$1`, id)
+					} else {
+						exec(`UPDATE memories SET confidence=1,valid_until=CURRENT_TIMESTAMP::text WHERE id=$1`, id)
+					}
+				}
+			}
+		}
+	}
 	exec(`INSERT INTO rules(polarity,title,description,weight,directive_type,created_at,updated_at)
  VALUES('negative','Recall hard rule','Do not expose secrets',10,'hard',pg_now_text(),pg_now_text()),
  ('positive','Recall soft rule','Optional advice',99,'soft',pg_now_text(),pg_now_text())`)
@@ -131,6 +147,9 @@ func exerciseRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 		}
 		if b.ApproxTokens != (len(envelope.Recall)+3)/4 {
 			t.Fatal("wrong estimate", b.ApproxTokens, len(envelope.Recall))
+		}
+		if strings.Contains(string(raw), "inapplicable-") {
+			t.Fatal("inapplicable memory escaped bundle gate", string(raw))
 		}
 		if strings.Contains(string(raw), "private-project") {
 			t.Fatal("private recall row")

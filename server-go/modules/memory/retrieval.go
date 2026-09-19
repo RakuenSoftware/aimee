@@ -85,7 +85,7 @@ func (s *postgresDataStore) recallSource() string {
  0 AS activation_suppressed FROM user_memories
  WHERE valid_until IS NULL OR valid_until > now()) AS recall_memories`
 	}
-	return "memories"
+	return `(SELECT * FROM memories WHERE ` + memoryValiditySQL("") + `) AS recall_memories`
 }
 
 func (s *postgresDataStore) recallRecords(ctx context.Context, where string, limit int, args ...any) ([]Record, error) {

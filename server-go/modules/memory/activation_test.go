@@ -54,6 +54,7 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
  id bigint PRIMARY KEY,scope_type text DEFAULT 'global',scope_value text DEFAULT '_global',
  tier text DEFAULT 'L2',kind text DEFAULT 'preference',key text DEFAULT 'editor',content text DEFAULT 'fixture',
  confidence double precision DEFAULT 0.5,lifecycle_state text DEFAULT 'active',
+ valid_from text DEFAULT '',valid_until text DEFAULT '',
  use_count bigint DEFAULT 0,updated_at timestamptz DEFAULT now(),
  activation_sticky_turns bigint DEFAULT 2,activation_cooldown_turns bigint DEFAULT 1,
  activation_delay_turns bigint DEFAULT 0,activation_suppressed bigint DEFAULT 0);
@@ -62,6 +63,10 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
  INSERT INTO memories(id,kind,key,confidence) VALUES(6,'fact','unrelated',0.7);
  INSERT INTO memories(id,lifecycle_state,activation_delay_turns) VALUES(7,'pending',3),(8,'pending',0);
  INSERT INTO memories(id,lifecycle_state,activation_suppressed) VALUES(9,'pending',1);
+ INSERT INTO memories(id,confidence,valid_from) SELECT n,1,(now()+interval '1 day')::text FROM generate_series(10,19) n;
+ INSERT INTO memories(id,confidence,valid_until) SELECT n,1,now()::text FROM generate_series(20,29) n;
+ INSERT INTO memories(id,confidence,lifecycle_state,valid_from) VALUES(30,1,'pending',(now()+interval '1 day')::text);
+ INSERT INTO memories(id,confidence,lifecycle_state,valid_until) VALUES(31,1,'pending',now()::text);
  CREATE TEMP TABLE prospective_memories(id bigint,trigger_text text,action_text text,anchor_entity text,
  anchor_file text,recurrence text,state text,valid_until text,source_session text,trigger_count bigint,
  last_triggered_at text,created_at text,updated_at text);
@@ -77,7 +82,7 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
-	snapshot := &ActivationSnapshot{CurrentTurn: 3, Rows: []ActivationRow{{1, 2}, {4, 1}, {6, 1}}}
+	snapshot := &ActivationSnapshot{CurrentTurn: 3, Rows: []ActivationRow{{1, 2}, {4, 1}, {6, 1}, {10, 1}, {20, 1}}}
 	ids := func(records []Record) []int64 {
 		out := make([]int64, 0, len(records))
 		for _, record := range records {
@@ -97,7 +102,7 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(ids(records), []int64{4, 6}) {
 		t.Fatalf("sticky relevance=%v %v", ids(records), err)
 	}
-	records, _, held, err = s.activationAfterFusion(ctx, snapshot, []Record{{ID: 1}}, []Record{{ID: 4}, {ID: 5}}, 2)
+	records, _, held, err = s.activationAfterFusion(ctx, snapshot, []Record{{ID: 1}, {ID: 10}, {ID: 20}}, []Record{{ID: 4}, {ID: 5}}, 2)
 	if err != nil || !reflect.DeepEqual(ids(records), []int64{4, 5}) || held != 1 {
 		t.Fatalf("graph bypass/backfill=%v %d %v", ids(records), held, err)
 	}

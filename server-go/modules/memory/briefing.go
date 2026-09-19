@@ -100,7 +100,7 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
 	b := briefingBundle{Facts: []briefingFact{}, Activity: []briefingActivity{}, Entities: []briefingEntity{}, Style: style, BriefingStyle: style, LimitTokens: min(max(tokens, 64), 8192)}
 	rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence,
  evidence_strength,observation_count,COALESCE(NULLIF(last_used_at,''),updated_at)
- FROM memories WHERE lifecycle_state='active' AND activation_suppressed=0
+ FROM memories WHERE `+currentMemorySQL("")+`
  AND tier IN ('L2','L3','L4','L5') AND kind<>'scratch' AND COALESCE(sensitivity,'normal')<>'secret'
  ORDER BY `+queryScopeOrder+`,(confidence+evidence_strength) DESC,observation_count DESC,use_count DESC,id DESC LIMIT $1`, factLimit)
 	if err != nil {
@@ -126,7 +126,7 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
  SELECT e.source_session,e.episode_text,e.reference_time,e.created_at,`+queryScopeOrder+` AS scope_rank,
  row_number() OVER(PARTITION BY e.source_session ORDER BY `+queryScopeOrder+`,e.created_at DESC,e.id DESC) AS rn
  FROM memory_episodes e JOIN memories m ON m.id=e.memory_id
- WHERE e.source_session<>'' AND m.lifecycle_state='active' AND m.activation_suppressed=0
+ WHERE e.source_session<>'' AND `+currentMemorySQL("m.")+`
  AND COALESCE(m.sensitivity,'normal')<>'secret')
  SELECT source_session,COALESCE(episode_text,''),COALESCE(reference_time,''),COALESCE(created_at,'') FROM ranked WHERE rn=1
  ORDER BY scope_rank,created_at DESC,source_session DESC LIMIT $1`, activityLimit)
@@ -148,7 +148,7 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
 	}
 	rows, err = s.db.Query(ctx, `SELECT entity,COUNT(*),MAX(COALESCE(NULLIF(m.last_used_at,''),m.updated_at))
  FROM memory_entities me JOIN memories m ON m.id=me.memory_id
- WHERE entity<>'' AND m.lifecycle_state='active' AND m.activation_suppressed=0
+ WHERE entity<>'' AND `+currentMemorySQL("m.")+`
  AND COALESCE(m.sensitivity,'normal')<>'secret'
  AND (NULLIF(m.last_used_at,'') IS NULL OR aimee_utc_text_timestamptz(m.last_used_at)>=now()-interval '30 days')
  GROUP BY entity ORDER BY MIN(`+queryScopeOrder+`),COUNT(*) DESC,

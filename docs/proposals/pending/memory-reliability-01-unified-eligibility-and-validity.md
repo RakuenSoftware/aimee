@@ -20,8 +20,10 @@ Implement the shared eligibility decision in `server-go/modules/memory` and use 
 
 The Go `current-validity-v1` predicate now applies active lifecycle, explicit
 suppression and half-open valid time before lexical, active-version whole-record
-semantic, unit/temporal semantic, graph/PageRank parent and compatibility-window
-limits. Memory-backed graph evidence uses the same predicate; semantic edge time
+semantic, unit/temporal semantic, graph/PageRank parent, compatibility-window,
+recall-bundle, activation and briefing limits. Pending commitments use the same
+valid-time gate with their pending lifecycle. Sticky activation does not override
+validity, and briefing activity/entity aggregates require current parents. Memory-backed graph evidence uses the same predicate; semantic edge time
 bounds use the same timestamp adapter. UTC wall timestamps and offset-bearing
 forms normalize to instants, using the storage transaction's captured clock.
 Malformed or relative/infinite governed times refuse retrieval rather than becoming open
@@ -30,8 +32,10 @@ endpoints. Corpus baseline policy fingerprints include this eligibility version.
 Restricted-role replay covers current/future/expired/suppressed and excluded
 lifecycle states, scope isolation, exact boundary instants, non-UTC sessions,
 malformed timestamps, and recovery. Dense/unit and PageRank fixtures include
-otherwise perfectly matching future/expired sources. This does not complete the
-host privilege vocabulary, all bundle/fact/cache surfaces, historical/belief-time
+otherwise perfectly matching future/expired sources. Bundle, activation and
+briefing fixtures prove backfill with high-ranked invalid rows exceeding section
+limits. This does not complete the host privilege vocabulary, directive/reminder
+expiry, fact/cache surfaces, historical/belief-time
 modes, final-release generation checks or the validity command below.
 
 ## Contract

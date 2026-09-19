@@ -79,6 +79,18 @@ func exerciseBriefingReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
 		episode(id, fmt.Sprint(id), "excluded-"+fmt.Sprint(id), "2026-09-17T10:00:00Z")
 		exec(`INSERT INTO memory_entities(memory_id,entity) VALUES($1,$2)`, id, "excluded-"+fmt.Sprint(id))
 	}
+	// Invalid parents cannot supply facts, episode summaries or entity counts,
+	// even when enough high-ranked rows exist to fill the section limits.
+	for i := 0; i < 65; i++ {
+		id := seed("L3", "fact", fmt.Sprintf("brief:inapplicable-%d", i), "project", "brief-project", "active", "normal")
+		if i%2 == 0 {
+			exec(`UPDATE memories SET confidence=1,valid_from=(CURRENT_TIMESTAMP+interval '1 day')::text WHERE id=$1`, id)
+		} else {
+			exec(`UPDATE memories SET confidence=1,valid_until=CURRENT_TIMESTAMP::text WHERE id=$1`, id)
+		}
+		episode(id, fmt.Sprint(id), "inapplicable-"+fmt.Sprint(id), "2099-09-17T10:00:00Z")
+		exec(`INSERT INTO memory_entities(memory_id,entity) VALUES($1,'caroline'),($1,$2)`, id, "inapplicable-"+fmt.Sprint(id))
+	}
 	exec(`INSERT INTO memory_entities(memory_id,entity) VALUES($1,'caroline'),($2,'caroline'),($2,'atlas')`, local, mid)
 	promote := func(style string) {
 		t.Helper()

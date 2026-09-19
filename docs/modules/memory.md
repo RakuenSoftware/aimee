@@ -33,7 +33,10 @@ forwards the Go envelope too; a retrieval outage is no longer an empty context.
 
 The Go `current-validity-v1` predicate applies active lifecycle, suppression and
 half-open valid time before shared lexical, whole-record/unit semantic, graph/
-PageRank and compatibility-window limits. Memory-backed graph evidence and
+PageRank, compatibility-window, recall-bundle, activation and briefing limits.
+Pending commitments retain their lifecycle while sharing the time predicate;
+sticky activation cannot extend expired validity. Briefing episode summaries and
+entity counts require current parents. Memory-backed graph evidence and
 semantic edge intervals share the same timestamp normalization. UTC legacy wall
 time and explicit offsets compare as instants against one transaction clock;
 malformed nonempty values refuse retrieval. Scope/RLS and current embedding
