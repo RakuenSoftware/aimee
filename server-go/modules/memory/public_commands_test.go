@@ -168,10 +168,10 @@ func TestPublicCommandMissingAndOutage(t *testing.T) {
 	if got["kind"] != "not_found" {
 		t.Fatal(got)
 	}
-	// Bounded query compatibility: all keyword validation precedes truncation.
-	args, _ := json.Marshal(map[string]any{"keywords": []string{strings.Repeat("a", 3000), "b"}})
+	// The owner preserves complete Unicode queries in both placements.
+	args, _ := json.Marshal(map[string]any{"keywords": []string{strings.Repeat("界", 3000), "b"}})
 	runPublicCommand(t, client, "search", string(args))
-	if len(s.query) != 2047 {
+	if s.query != strings.Repeat("界", 3000)+" b" {
 		t.Fatalf("query len=%d", len(s.query))
 	}
 }

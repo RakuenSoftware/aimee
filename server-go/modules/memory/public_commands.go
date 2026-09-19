@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"strings"
 
@@ -214,31 +215,11 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			request.Limit = int(math.Max(math.Min(value, math.MaxInt32), math.MinInt32))
 		}
 	case "search":
-		request.Limit = 10
-		if _, exists := args["limit"]; exists {
-			value, ok := args.number("limit")
-			if !ok || value < 1 || value > 32 || math.Trunc(value) != value {
-				return invalid("memory.search limit must be an integer between 1 and 32")
-			}
-			request.Limit = int(value)
+		terms, limit, err := serverSearchArguments(args)
+		if err != nil {
+			return invalid(err.Error())
 		}
-		var keywords []json.RawMessage
-		if json.Unmarshal(args["keywords"], &keywords) != nil || len(keywords) == 0 {
-			return invalid("missing or empty keywords array")
-		}
-		if len(keywords) > 16 {
-			return invalid("memory.search accepts at most 16 keywords")
-		}
-		terms := make([]string, len(keywords))
-		for i, raw := range keywords {
-			if json.Unmarshal(raw, &terms[i]) != nil || terms[i] == "" {
-				return invalid("memory.search keywords must be non-empty strings")
-			}
-		}
-		request.Query = strings.Join(terms, " ")
-		if len(request.Query) > 2047 {
-			request.Query = request.Query[:2047]
-		}
+		request.Query, request.Limit = strings.Join(terms, " "), limit
 	case "review-list":
 		request.State, request.Limit = args.stringOr("state", ""), 64
 		if value, ok := args.number("limit"); ok {
@@ -358,4 +339,34 @@ func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}
 	return commandResult(result)
+}
+
+// Both placements validate the same Server contract and data-stage query bound.
+// Silently truncating input could change query meaning or UTF-8.
+func serverSearchArguments(args commandArgs) ([]string, int, error) {
+	limit := 10
+	if _, exists := args["limit"]; exists {
+		value, ok := args.number("limit")
+		if !ok || value < 1 || value > 32 || math.Trunc(value) != value {
+			return nil, 0, errors.New("memory.search limit must be an integer between 1 and 32")
+		}
+		limit = int(value)
+	}
+	var keywords []json.RawMessage
+	if json.Unmarshal(args["keywords"], &keywords) != nil || len(keywords) == 0 {
+		return nil, 0, errors.New("missing or empty keywords array")
+	}
+	if len(keywords) > 16 {
+		return nil, 0, errors.New("memory.search accepts at most 16 keywords")
+	}
+	terms := make([]string, len(keywords))
+	for i, raw := range keywords {
+		if json.Unmarshal(raw, &terms[i]) != nil || strings.TrimSpace(terms[i]) == "" {
+			return nil, 0, errors.New("memory.search keywords must be non-empty strings")
+		}
+	}
+	if len(strings.Join(terms, " ")) > 16384 {
+		return nil, 0, errors.New("memory.search query exceeds 16384 bytes")
+	}
+	return terms, limit, nil
 }

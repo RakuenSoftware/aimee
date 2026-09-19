@@ -156,3 +156,21 @@ SET LOCAL ROLE memory_runtime_test;`)
 		}
 	}
 }
+
+func TestServerSearchValidation(t *testing.T) {
+	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
+	for _, args := range []string{
+		`{"view":"server"}`, `{"view":"server","keywords":[]}`,
+		`{"view":"server","keywords":[null]}`, `{"view":"server","keywords":[" "]}`,
+		`{"view":"server","keywords":["x"],"limit":1.5}`,
+		`{"view":"server","keywords":["x"],"limit":33}`,
+		`{"view":"server","keywords":["x"],"limit":null}`,
+	} {
+		if r := runPublicCommand(t, client, "search", args); r["kind"] != "invalid_argument" {
+			t.Fatal(args, r)
+		}
+	}
+	if r := runPublicCommand(t, client, "search", `{"view":"server","keywords":["x"]}`); r["kind"] != "unavailable" {
+		t.Fatal(r)
+	}
+}

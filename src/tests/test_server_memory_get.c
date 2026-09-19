@@ -14,6 +14,17 @@ extern cJSON *memory_restore_command(cJSON *request);
 extern cJSON *memory_list_command(const cJSON *request);
 extern cJSON *memory_store_command(const cJSON *request, memory_authority_t authority);
 
+extern int handle_memory_search(server_ctx_t *, server_conn_t *, cJSON *);
+static char *search_wire_reply;
+int send_and_free(server_conn_t *conn, cJSON *response)
+{
+   (void)conn;
+   free(search_wire_reply);
+   search_wire_reply = cJSON_PrintUnformatted(response);
+   cJSON_Delete(response);
+   return 0;
+}
+
 static int calls, clears, result;
 static kb_valid_at_t answer;
 static const char *expected_time;
@@ -104,6 +115,7 @@ cJSON *server_invoke_module_operation(const char *method, const char *operation,
 
 static const char *review_reply, *review_method;
 static int review_calls;
+static const char *expected_search_keyword;
 static int restore_audits, restore_successes;
 void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, const char *kind,
                                  const char *key, double confidence, const char *session_id, int ok)
@@ -137,6 +149,14 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    }
 
    assert(strcmp(method, review_method) == 0);
+   if (!strcmp(method, "memory.search"))
+   {
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(request, "view")->valuestring, "server"));
+      assert(!strcmp(
+          cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(request, "keywords"), 0)->valuestring,
+          expected_search_keyword));
+   }
+
    if (strcmp(method, "memory.stats") == 0)
       assert(cJSON_GetArraySize(request) == 0);
    else
@@ -390,6 +410,36 @@ static void test_store_owner_envelope(void)
    cJSON_Delete(request);
 }
 
+static void test_search_owner_transport(void)
+{
+   char keyword[9001];
+   memset(keyword, 'q', sizeof(keyword) - 1);
+   keyword[sizeof(keyword) - 1] = 0;
+   expected_search_keyword = keyword;
+   cJSON *request = cJSON_Parse(
+       "{\"store\":\"kb\",\"actor\":\"forged\",\"authority\":\"user\",\"operation\":\"delete\"}");
+   cJSON *keywords = cJSON_AddArrayToObject(request, "keywords");
+   cJSON_AddItemToArray(keywords, cJSON_CreateString(keyword));
+   review_method = "memory.search";
+   review_reply = "{\"status\":\"ok\",\"facts\":[{\"id\":9007199254740993}],\"windows\":[],"
+                  "\"receipt\":\"owner\"}";
+   handle_memory_search(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, review_reply));
+   review_reply =
+       "{\"status\":\"error\",\"kind\":\"unavailable\",\"message\":\"window lane failed\"}";
+   handle_memory_search(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, review_reply));
+   review_reply = "{\"status\":\"ok\",\"facts\":[]}";
+   handle_memory_search(NULL, NULL, request);
+   assert(strstr(search_wire_reply, "unavailable"));
+   review_reply = "{\"status\":\"ok\",\"facts\":null}";
+   handle_memory_search(NULL, NULL, request);
+   assert(strstr(search_wire_reply, "unavailable"));
+   free(search_wire_reply);
+   search_wire_reply = NULL;
+   cJSON_Delete(request);
+}
+
 int main(void)
 {
    test_user_namespace();
@@ -430,5 +480,6 @@ int main(void)
    puts("server memory get: local privacy, explicit KB routing, temporal verdicts, and failures "
         "passed");
    test_stats_transport();
+   test_search_owner_transport();
    return 0;
 }

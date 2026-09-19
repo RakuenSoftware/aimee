@@ -68,6 +68,40 @@ func exerciseRetrievalPolicyReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	run(nil, 10) // Operator promotion is honored while live decisions are disabled.
 	run(map[string]any{"limit": 3}, 3)
 	run(map[string]any{"limit": 0}, 20)
+	// Server facts and compatibility windows are one scoped Go operation. Both
+	// preserve complete records, and a second-lane failure cannot look empty.
+	serverSearch := func(terms []string, want int) {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"view": "server", "keywords": terms, "limit": 3,
+			"scope_context": true, "project": "policy-app"})
+		r := runPublicCommand(t, client, "search", string(raw))
+		if r["status"] != "ok" || r["store"] != "kb" || r["active_context_missing"] != false {
+			t.Fatal(r)
+		}
+		facts, windows := r["facts"].([]any), r["windows"].([]any)
+		if len(facts) != want || len(windows) != want {
+			t.Fatalf("server search facts=%d windows=%d want=%d", len(facts), len(windows), want)
+		}
+		for _, fact := range facts {
+			row := fact.(map[string]any)
+			if row["key"] == "hidden-policy" || len(row["content"].(string)) <= 4096 {
+				t.Fatal("server search lost scope or full content")
+			}
+		}
+		for _, window := range windows {
+			if len(window.(map[string]any)["summary"].(string)) <= 4096 {
+				t.Fatal("server search truncated window")
+			}
+		}
+	}
+	serverSearch([]string{"policyneedle"}, 3)
+	serverSearch([]string{strings.Repeat("policyneedle ", 250), "absentfinalterm"}, 0)
+	execSQL(`RESET ROLE; ALTER TABLE memories RENAME COLUMN artifact_ref TO fixture_hidden_artifact; SET LOCAL ROLE aimee_store_runtime`)
+	if r := runPublicCommand(t, client, "search", `{"view":"server","keywords":["policyneedle"],"limit":3,"scope_context":true,"project":"policy-app"}`); r["kind"] != "unavailable" || r["facts"] != nil || r["windows"] != nil {
+		t.Fatal("window failure published partial search", r)
+	}
+	execSQL(`RESET ROLE; ALTER TABLE memories RENAME COLUMN fixture_hidden_artifact TO artifact_ref; SET LOCAL ROLE aimee_store_runtime`)
+	serverSearch([]string{"policyneedle"}, 3)
 	dir := t.TempDir()
 	capture, script := filepath.Join(dir, "input.json"), filepath.Join(dir, "optimize")
 	command := func(response string) {

@@ -1797,12 +1797,15 @@ set_config('aimee.correlation_id',$9,true)`,
 		} else {
 			response.Records, err = options.data.Search(ctx, scope, query, request.Kind, request.Tier, request.Limit)
 		}
-	case "adaptive-search":
+	case "adaptive-search", "server-search":
 		backend, ok := options.data.(*postgresDataStore)
 		if !ok || options.placement != PlacementKB {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
 		response.Records, err = backend.adaptiveSearch(ctx, request)
+		if err == nil && request.Operation == "server-search" {
+			response.LegacyResults, err = backend.LegacySearch(ctx, request.Clusters, request.Limit)
+		}
 	case "visible-search":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusInvalidRequest

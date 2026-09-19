@@ -81,121 +81,6 @@ int server_memory_scope_begin(cJSON *req)
    return (!include_all && !workspace[0] && !project[0]) ? 1 : 0;
 }
 
-static int handle_kb_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-
-   cJSON *jkw = cJSON_GetObjectItemCaseSensitive(req, "keywords");
-   cJSON *jlimit = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   if (jlimit &&
-       (!cJSON_IsNumber(jlimit) || !isfinite(jlimit->valuedouble) || jlimit->valuedouble < 1 ||
-        jlimit->valuedouble > 32 || jlimit->valuedouble != (double)(int)jlimit->valuedouble))
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
-                                    "memory.search limit must be an integer between 1 and 32",
-                                    NULL);
-   int limit = jlimit ? (int)jlimit->valuedouble : 10;
-   if (!cJSON_IsArray(jkw) || cJSON_GetArraySize(jkw) == 0)
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
-                                    "missing or empty keywords array", NULL);
-   int count = cJSON_GetArraySize(jkw);
-   if (count > 16)
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
-                                    "memory.search accepts at most 16 keywords", NULL);
-   char *clusters[16];
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *item = cJSON_GetArrayItem(jkw, i);
-      if (!cJSON_IsString(item) || !item->valuestring[0])
-         return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
-                                       "memory.search keywords must be non-empty strings", NULL);
-      clusters[i] = item->valuestring;
-   }
-   /* Build query string for fact search */
-   char query_buf[2048];
-   int qpos = 0;
-   for (int i = 0; i < count; i++)
-   {
-      /* snprintf returns the would-be length, so a long keyword can run qpos
-       * past the buffer; the next sizeof(query_buf) - qpos would then wrap to a
-       * huge size_t and write out of bounds. Stop appending once full. */
-      if (qpos >= (int)sizeof(query_buf) - 1)
-         break;
-      if (i > 0)
-         qpos += snprintf(query_buf + qpos, sizeof(query_buf) - qpos, " ");
-      qpos += snprintf(query_buf + qpos, sizeof(query_buf) - qpos, "%s", clusters[i]);
-   }
-
-   int active_context_missing = server_memory_scope_begin(req);
-   /* The KB applies its own instance-wide fusion setting. */
-   memory_t facts[32];
-   int fact_count = kb_client_memory_find_facts_ex(query_buf, limit, facts, 32, "on");
-   if (fact_count < 0)
-   {
-      kb_client_memory_scope_context_clear();
-      /* Report the failure that ACTUALLY happened. This used to answer every
-       * cause with "search index unavailable; server-side maintenance is
-       * required", which names the wrong owner: the common case is a caller
-       * whose scope did not resolve (a remote client with no active project),
-       * and the kb is healthy. That message sent three separate investigations
-       * at the kb — restarting it, matching its image, re-checking its mTLS
-       * trust — while nothing was wrong with it. The typed result carries the
-       * real dependency and retryability, and the sibling index route already
-       * reports it this way. */
-      kb_client_result_status_t status = kb_client_last_result_status();
-      const char *detail = active_context_missing
-                               ? "memory search found no active project to scope to; pass a "
-                                 "project or cwd, or ask for scope=all"
-                               : "memory search could not reach the knowledge service";
-      aimee_log(LOG_WARN, "memory.search", "find_facts failed: status=%s scope_missing=%d",
-                kb_client_result_status_name(status), active_context_missing);
-      char *json = kb_client_last_result_json(detail);
-      cJSON *err = json ? cJSON_Parse(json) : NULL;
-      free(json);
-      if (!err)
-         return server_send_error(conn, detail, NULL);
-      server_error_kind_apply(err, active_context_missing ? SERVER_ERR_INVALID_ARGUMENT
-                                                          : SERVER_ERR_UNAVAILABLE);
-      cJSON_AddBoolToObject(err, "active_context_missing", active_context_missing);
-      return send_and_free(conn, err);
-   }
-
-   /* Search conversation windows */
-   search_result_t results[32];
-   int found = kb_client_memory_search(clusters, count, limit, results, 32);
-   kb_client_memory_scope_context_clear();
-   cJSON *farr = cJSON_CreateArray();
-   for (int i = 0; i < fact_count; i++)
-      cJSON_AddItemToArray(farr, memory_to_json(&facts[i]));
-
-   cJSON *warr = cJSON_CreateArray();
-   for (int i = 0; i < found; i++)
-   {
-      cJSON *r = cJSON_CreateObject();
-      jo_add_str(r, "session_id", results[i].session_id);
-      jo_add_i64(r, "seq", results[i].seq);
-      jo_add_str(r, "summary", results[i].summary);
-      jo_add_num(r, "score", results[i].score);
-      cJSON_AddItemToArray(warr, r);
-   }
-
-   cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "facts", farr);
-   cJSON_AddItemToObject(resp, "windows", warr);
-   jo_add_bool(resp, "active_context_missing", active_context_missing);
-   return send_and_free(conn, resp);
-}
-
-int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   int selection = server_memory_store_selection(req);
-   if (selection < 0)
-      return send_and_free(conn, memory_bad_store());
-   if (selection)
-      return handle_kb_memory_search(ctx, conn, req);
-   return send_and_free(conn, server_invoke_module_operation("memory.runtime", "user-search", req,
-                                                             "user memory module unavailable"));
-}
-
 /* THE command, in the shape the core command table can route.
  *
  * Every surface needs the same thing from a command -- a result -- but the RPC
@@ -219,7 +104,8 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
       return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "KB memory request unavailable", NULL);
    static const char *fields[] = {"key",        "content",    "tier",        "kind",
                                   "confidence", "session_id", "use_cases",   "epistemic_kind",
-                                  "limit",      "old_id",     "new_content", NULL};
+                                  "limit",      "old_id",     "new_content", "keywords",
+                                  NULL};
    for (int i = 0; fields[i]; i++)
    {
       const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);
@@ -240,6 +126,8 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
    const cJSON *field = cJSON_GetObjectItemCaseSensitive(parsed, required);
    if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "ok") && field &&
        (field->type & 0xff) == expected_type &&
+       (strcmp(method, "memory.search") ||
+        cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parsed, "windows"))) &&
        (expected_type != cJSON_Number || (isfinite(field->valuedouble) && field->valuedouble > 0 &&
                                           floor(field->valuedouble) == field->valuedouble)))
       reply = cJSON_CreateRaw(raw);
@@ -251,6 +139,20 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
    return reply ? reply
                 : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
                                          "KB memory owner unavailable or invalid response", NULL);
+}
+
+int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   int selection = server_memory_store_selection(req);
+   if (selection < 0)
+      return send_and_free(conn, memory_bad_store());
+   if (selection)
+      return send_and_free(conn,
+                           kb_memory_owner_command("memory.search", req, MEMORY_AUTHORITY_MODEL,
+                                                   "facts", cJSON_Array));
+   return send_and_free(conn, server_invoke_module_operation("memory.runtime", "user-search", req,
+                                                             "user memory module unavailable"));
 }
 
 static cJSON *kb_memory_store_command(const cJSON *req, memory_authority_t authority)

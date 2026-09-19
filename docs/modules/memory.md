@@ -45,6 +45,20 @@ back the entire replacement. This is the initial MR-02 KB slice, not completion 
 expected-version/idempotency keys, durable invalidation replay, personal-memory
 versioning, reviewed proposals or the full mutation/retention policy.
 
+## Server search orchestration
+
+Server KB search forwards keywords to `memory.search` with the Server view. The
+Go owner validates and joins them, executes fact and compatibility-window reads
+in one scoped transaction, and returns complete owner envelopes. A failed lane
+fails the operation; it cannot masquerade as an empty window list. The C host
+only resolves placement/scope and transports the result. Integer tokens and
+content survive without fixed native result structs.
+
+Both placements retain complete Unicode queries up to the Go data-stage limit
+of 16,384 bytes and reject longer queries explicitly. The old 2,047-byte silent
+truncation is retired. This changes long-query behavior intentionally; the frozen
+retrieval manifest must be used for comparisons.
+
 ## Labelled audit and calibration
 
 `memory.audit` and `memory.calibrate` are Go command-owner operations. They accept

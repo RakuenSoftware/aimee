@@ -64,6 +64,16 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		}
 		scoped = commandScope(args, &request)
 	case "search":
+		if args.stringOr("view", "") == "server" {
+			terms, limit, err := serverSearchArguments(args)
+			if err != nil {
+				return invalid(err.Error())
+			}
+			request.Operation, request.Query, request.Clusters = "server-search", strings.Join(terms, " "), terms
+			request.Limit, request.PublicView = limit, true
+			scoped = commandScope(args, &request)
+			break
+		}
 		request.Operation, request.Limit = "legacy-search", args.limit("limit", 10, 64)
 		if raw, exists := args["clusters"]; exists {
 			var clusters []json.RawMessage
@@ -217,7 +227,14 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 				rows[i].Files = []string{}
 			}
 		}
-		result["results"] = rows
+		if request.Operation == "server-search" {
+			if response.PublicRecords == nil {
+				response.PublicRecords = []publicMemoryRecord{}
+			}
+			result["store"], result["facts"], result["windows"] = "kb", response.PublicRecords, rows
+		} else {
+			result["results"] = rows
+		}
 	case "briefing", "alerts":
 		if len(response.Payload) == 0 {
 			return nil, bus.ModuleStatusInternal
@@ -273,7 +290,7 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 		result["drifted"], result["task_id"], result["task_title"], result["message"] = r.Drifted, r.TaskID, r.TaskTitle, r.Message
 	}
 	if scoped {
-		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
+		result["active_context_missing"] = !request.IncludeAll && request.Workspace == "" && request.Project == ""
 	}
 	return commandResult(result)
 }
