@@ -287,8 +287,9 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
          return 502;
       }
       snprintf(resp, (size_t)cap, "%s", local);
+      int status = server_http_declared_status(local);
       free(local);
-      return 200;
+      return status ? status : 502;
    }
 
    /* Graph-code fusion is always on for recall. */
@@ -344,8 +345,9 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
       return 502;
    }
    snprintf(resp, (size_t)cap, "%s", j);
+   int status = server_http_declared_status(j);
    free(j);
-   return 200;
+   return status ? status : 502;
 }
 
 /* POST /v1/notes/search: parse {query, limit?} and search notes via aimee-kb.

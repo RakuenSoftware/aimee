@@ -2112,7 +2112,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "6f79342044fa0174e64d59e3aeffc8cc18be67297f7c0c4d4e9a9b0f74a5df6e"
+      "sha256": "8a0dabd801df65e26b48c4d9d2678e5a2fc0b1b86cf8ff2ada134589cf3f806f"
     },
     "src/server/server_code_index.c": {
       "disposition": "host-transport",
