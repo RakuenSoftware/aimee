@@ -538,13 +538,6 @@ char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_token
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
                                       const char *graph_code_fusion_state);
 
-/* Memory-to-memory link CRUD via aimee-kb.  Mirror memory_link_create
- * / _query / _delete.  Return 0/-1 on success/failure for create+delete,
- * row count for query (0 on failure / kb unreachable). */
-int kb_client_memory_link_create(int64_t source_id, int64_t target_id, const char *relation);
-int kb_client_memory_link_query(int64_t memory_id, memory_link_t *out, int max);
-int kb_client_memory_link_delete(int64_t link_id);
-
 /* Audit hook: notified after each SERVER-INITIATED memory mutation via aimee-kb
  * (insert / update / delete / reject) with NON-CONTENT fields only — the
  * operation, the memory id, and (for insert) the tier / kind / key identity,

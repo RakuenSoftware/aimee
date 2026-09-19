@@ -198,6 +198,76 @@ func TestDomainPublicPostgres(t *testing.T) {
 	if scopes[0].(map[string]any)["count"] != float64(0) || scopes[1].(map[string]any)["count"] != float64(1) || scopes[2].(map[string]any)["count"] != float64(2) || scopes[2].(map[string]any)["conflicted_memories"] != float64(300) {
 		t.Fatal(scopes)
 	}
+	t.Run("link console", func(t *testing.T) {
+		_, err := tx.Exec(ctx, `INSERT INTO memories(id,tier,kind,scope_type,scope_value) VALUES
+   (9007199254740993,'L2','fact','global','_global'),
+   (9223372036854775807,'L2','fact','global','_global');
+   ALTER SEQUENCE memory_links_id_seq RESTART WITH 9007199254740993`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		create := `{"view":"console","source_id":"9007199254740993","target_id":"9223372036854775807","relation":"related_to","format":"text"}`
+		if got := run("link_create", create)["output"]; got != "Linked memory 9007199254740993 -[related_to]-> 9223372036854775807\n" {
+			t.Fatal(got)
+		}
+		for _, test := range []struct{ id, direction, other string }{
+			{"9007199254740993", "->", "9223372036854775807"},
+			{"9223372036854775807", "<-", "9007199254740993"},
+		} {
+			got := run("link_query", `{"view":"console","memory_id":"`+test.id+`","format":"text"}`)["output"].(string)
+			if !strings.Contains(got, "[9007199254740993] "+test.direction+" [related_to] "+test.other+"  (") {
+				t.Fatal(got)
+			}
+		}
+		output := run("link_query", `{"view":"console","memory_id":"9007199254740993"}`)["output"].(string)
+		var links []map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(output), &links); err != nil || len(links) != 1 || len(links[0]) != 5 ||
+			string(links[0]["id"]) != "9007199254740993" || string(links[0]["source_id"]) != "9007199254740993" || string(links[0]["target_id"]) != "9223372036854775807" {
+			t.Fatal(output, err)
+		}
+		for _, test := range []struct{ verb, args string }{
+			{"link_create", strings.Replace(create, `"text"`, `"invalid"`, 1)},
+			{"link_create", strings.Replace(create, "related_to", "fixes", 1)},
+			{"link_delete", `{"view":"console","link_id":"9007199254740993","format":"invalid"}`},
+		} {
+			result := runPublicCommand(t, client, test.verb, test.args)
+			if result["kind"] != "invalid_argument" || result["output"] != nil {
+				t.Fatal(result)
+			}
+		}
+		for _, id := range []string{`"0"`, `"-1"`, `"01"`, `"+1"`, `" 1"`, `"1x"`, `"9223372036854775808"`, `9007199254740993`, `1.5`, `null`} {
+			for _, verb := range []string{"link_create", "link_query", "link_delete"} {
+				args := `{"view":"console","source_id":` + id + `,"target_id":"9223372036854775807","relation":"related_to","memory_id":` + id + `,"link_id":` + id + `}`
+				result := runPublicCommand(t, client, verb, args)
+				if result["kind"] != "invalid_argument" {
+					t.Fatalf("%s %s: %v", verb, id, result)
+				}
+			}
+		}
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_links WHERE source_id=9007199254740993`).Scan(&count); err != nil || count != 1 {
+			t.Fatal(count, err)
+		}
+		run("link_create", `{"source_id":"9223372036854775807","target_id":"9007199254740993","relation":"fixes"}`)
+		for _, relation := range []string{"supersedes", "depends_on", "contradicts"} {
+			run("link_create", strings.Replace(create, "related_to", relation, 1))
+		}
+		for i := 0; i < 2; i++ {
+			if got := run("link_delete", `{"view":"console","link_id":"9007199254740993","format":"text"}`)["output"]; got != "Deleted link 9007199254740993\n" {
+				t.Fatal(got)
+			}
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM memory_links WHERE source_id>=9007199254740993 OR target_id>=9007199254740993; DELETE FROM memories WHERE id>=9007199254740993`); err != nil {
+			t.Fatal(err)
+		}
+		if got := run("link_query", `{"view":"console","memory_id":"9007199254740993"}`)["output"]; got != "[]\n" {
+			t.Fatal(got)
+		}
+		if got := run("link_query", `{"view":"console","memory_id":"9007199254740993","format":"text"}`)["output"]; got != "No links for memory 9007199254740993\n" {
+			t.Fatal(got)
+		}
+	})
+
 	// Derived rows have no RLS of their own. Query through the parent memory
 	// policy, with a real non-owner connection and transaction-local scope.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_domain_test NOINHERIT NOBYPASSRLS;
@@ -351,8 +421,8 @@ SET LOCAL ROLE memory_domain_test;`)
 
 func TestStatisticsConsoleUnavailable(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
-	for _, verb := range []string{"stats", "query_health"} {
-		body, err := client.Command(context.Background(), 73, verb, json.RawMessage(`{"view":"console","effectiveness":true}`))
+	for _, verb := range []string{"stats", "query_health", "link_query", "link_create", "link_delete"} {
+		body, err := client.Command(context.Background(), 73, verb, json.RawMessage(`{"view":"console","effectiveness":true,"memory_id":"1","source_id":"1","target_id":"2","link_id":"1","relation":"related_to"}`))
 		if err == nil || len(body) != 0 {
 			t.Fatalf("unavailable %s looked healthy: %s, %v", verb, body, err)
 		}

@@ -870,7 +870,16 @@ void agent_store_feedback(const agent_result_t *result, const char *role,
 
          int64_t task_id = kb_client_memory_find_id_by_key_kind(norm_task_key, "task");
          if (task_id > 0)
-            kb_client_memory_link_create(mem.id, task_id, "fixes");
+         {
+            char source_id[32], target_id[32];
+            snprintf(source_id, sizeof(source_id), "%lld", (long long)mem.id);
+            snprintf(target_id, sizeof(target_id), "%lld", (long long)task_id);
+            cJSON *request = cJSON_CreateObject();
+            cJSON_AddStringToObject(request, "source_id", source_id);
+            cJSON_AddStringToObject(request, "target_id", target_id);
+            cJSON_AddStringToObject(request, "relation", "fixes");
+            free(kb_v1_action_request("memory.link_create", request));
+         }
       }
    }
 }

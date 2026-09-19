@@ -1818,80 +1818,33 @@ void mem_mlink(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 3)
       fatal("usage: aimee memory mlink <source_id> <target_id> <relation>");
-   int64_t src = atoll(argv[0]);
-   int64_t tgt = atoll(argv[1]);
-   const char *rel = argv[2];
-
-   if (strcmp(rel, "supersedes") != 0 && strcmp(rel, "depends_on") != 0 &&
-       strcmp(rel, "contradicts") != 0 && strcmp(rel, "related_to") != 0)
-      fatal("relation must be: supersedes, depends_on, contradicts, or related_to");
-
-   if (kb_client_memory_link_create(src, tgt, rel) != 0)
-      fatal("failed to create link");
-
-   if (ctx->json_output)
-      emit_ok_ctx(ctx->json_fields, ctx->response_profile);
-   else
-      printf("Linked memory %lld -[%s]-> %lld\n", (long long)src, rel, (long long)tgt);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "view", "console");
+   cJSON_AddStringToObject(request, "source_id", argv[0]);
+   cJSON_AddStringToObject(request, "target_id", argv[1]);
+   cJSON_AddStringToObject(request, "relation", argv[2]);
+   memory_inspection_output(ctx, "memory.link_create", request);
 }
 
 void mem_mlinks(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
       fatal("usage: aimee memory mlinks <id>");
-   int64_t id = atoll(argv[0]);
-
-   memory_link_t links[32];
-   int count = kb_client_memory_link_query(id, links, 32);
-
-   if (ctx->json_output)
-   {
-      cJSON *arr = cJSON_CreateArray();
-      for (int i = 0; i < count; i++)
-      {
-         cJSON *obj = cJSON_CreateObject();
-         cJSON_AddNumberToObject(obj, "id", (double)links[i].id);
-         cJSON_AddNumberToObject(obj, "source_id", (double)links[i].source_id);
-         cJSON_AddNumberToObject(obj, "target_id", (double)links[i].target_id);
-         cJSON_AddStringToObject(obj, "relation", links[i].relation);
-         cJSON_AddStringToObject(obj, "created_at", links[i].created_at);
-         cJSON_AddItemToArray(arr, obj);
-      }
-      char *json = cJSON_Print(arr);
-      printf("%s\n", json);
-      free(json);
-      cJSON_Delete(arr);
-   }
-   else
-   {
-      if (count == 0)
-      {
-         printf("No links for memory %lld\n", (long long)id);
-         return;
-      }
-      for (int i = 0; i < count; i++)
-      {
-         const char *dir = (links[i].source_id == id) ? "->" : "<-";
-         int64_t other = (links[i].source_id == id) ? links[i].target_id : links[i].source_id;
-         printf("  [%lld] %s [%s] %lld  (%s)\n", (long long)links[i].id, dir, links[i].relation,
-                (long long)other, links[i].created_at);
-      }
-   }
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "view", "console");
+   cJSON_AddStringToObject(request, "memory_id", argv[0]);
+   cJSON_AddNumberToObject(request, "max", 32);
+   memory_inspection_output(ctx, "memory.link_query", request);
 }
 
 void mem_munlink(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
       fatal("usage: aimee memory munlink <link_id>");
-   int64_t link_id = atoll(argv[0]);
-
-   if (kb_client_memory_link_delete(link_id) != 0)
-      fatal("failed to delete link %lld", (long long)link_id);
-
-   if (ctx->json_output)
-      emit_ok_ctx(ctx->json_fields, ctx->response_profile);
-   else
-      printf("Deleted link %lld\n", (long long)link_id);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "view", "console");
+   cJSON_AddStringToObject(request, "link_id", argv[0]);
+   memory_inspection_output(ctx, "memory.link_delete", request);
 }
 
 void mem_tag(app_ctx_t *ctx, int argc, char **argv)

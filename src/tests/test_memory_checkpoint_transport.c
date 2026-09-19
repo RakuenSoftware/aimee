@@ -11,6 +11,10 @@
 
 void mem_checkpoint(app_ctx_t *, int, char **);
 void mem_history(app_ctx_t *, int, char **);
+void mem_mlink(app_ctx_t *, int, char **);
+void mem_mlinks(app_ctx_t *, int, char **);
+void mem_munlink(app_ctx_t *, int, char **);
+static int link_mode;
 static int history_mode;
 static const char *history_reply;
 static const char *forced;
@@ -26,6 +30,31 @@ void kb_client_memory_scope_context_apply(cJSON *args)
 }
 char *kb_v1_action_request(const char *method, cJSON *args)
 {
+   if (link_mode)
+   {
+      assert(!strcmp(jo_cstr(args, "view"), "console"));
+      assert(!strcmp(jo_cstr(args, "format"), "json"));
+      if (link_mode == 1)
+      {
+         assert(!strcmp(method, "memory.link_create"));
+         assert(!strcmp(jo_cstr(args, "source_id"), "9007199254740993"));
+         assert(!strcmp(jo_cstr(args, "target_id"), "9223372036854775807"));
+         assert(!strcmp(jo_cstr(args, "relation"), "related_to"));
+      }
+      else if (link_mode == 2)
+      {
+         assert(!strcmp(method, "memory.link_query"));
+         assert(!strcmp(jo_cstr(args, "memory_id"), "9007199254740993"));
+         assert(jo_int(args, "max", 0) == 32);
+      }
+      else
+      {
+         assert(!strcmp(method, "memory.link_delete"));
+         assert(!strcmp(jo_cstr(args, "link_id"), "9007199254740993"));
+      }
+      cJSON_Delete(args);
+      return strdup("{\"status\":\"ok\",\"output\":\"9007199254740993\\n\"}");
+   }
    if (history_mode)
    {
       assert(!strcmp(method, "memory.fact_history"));
@@ -198,6 +227,34 @@ static void test_history_output_transport(void)
    }
 }
 
+static void test_link_output_transport(void)
+{
+   app_ctx_t ctx = {0};
+   ctx.json_output = 1;
+   char *args[] = {"9007199254740993", "9223372036854775807", "related_to"};
+   FILE *capture = tmpfile();
+   assert(capture);
+   fflush(stdout);
+   int saved_stdout = dup(STDOUT_FILENO);
+   assert(saved_stdout >= 0 && dup2(fileno(capture), STDOUT_FILENO) >= 0);
+   link_mode = 1;
+   mem_mlink(&ctx, 3, args);
+   link_mode = 2;
+   mem_mlinks(&ctx, 1, args);
+   link_mode = 3;
+   mem_munlink(&ctx, 1, args);
+   link_mode = 0;
+   fflush(stdout);
+   assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+   close(saved_stdout);
+   rewind(capture);
+   char actual[128] = {0};
+   size_t size = fread(actual, 1, sizeof(actual) - 1, capture);
+   const char *expected = "9007199254740993\n9007199254740993\n9007199254740993\n";
+   assert(size == strlen(expected) && !strcmp(actual, expected));
+   fclose(capture);
+}
+
 int main(void)
 {
    memset(fact_text, 'x', 4000);
@@ -245,5 +302,6 @@ int main(void)
    assert(tasks_checkpoint_create("label", "source-session", 42, &cp) == -1);
    assert(inserts == 1); /* No partial/oversized snapshots persisted. */
    test_history_output_transport();
+   test_link_output_transport();
    return 0;
 }

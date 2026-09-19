@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -24,6 +26,16 @@ func (args commandArgs) stringValue(name string) (string, bool) {
 	return value, valid
 }
 
+// Decimal strings preserve full int64 IDs across native JSON transports.
+// Numeric IDs remain limited to the exactly representable transport range.
+func (args commandArgs) decimalID(name string) (int64, bool) {
+	if raw, ok := args.stringValue(name); ok {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		return id, err == nil && id > 0 && strconv.FormatInt(id, 10) == raw
+	}
+	return args.positiveID(name)
+}
+
 func commandScope(args commandArgs, request *DataRequest) bool {
 	var scoped bool
 	_ = json.Unmarshal(args["scope_context"], &scoped)
@@ -40,6 +52,13 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 	scoped := false
 	invalid := func(message string) ([]byte, bus.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
+	}
+	consoleLinks := args.stringOr("view", "") == "console" &&
+		(verb == "link_create" || verb == "link_query" || verb == "link_delete")
+	if consoleLinks {
+		if format := args.stringOr("format", "json"); format != "json" && format != "text" {
+			return invalid("format must be json or text")
+		}
 	}
 	switch verb {
 	case "scene_list":
@@ -86,6 +105,9 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 	case "get_provenance", "link_query":
 		var ok bool
 		request.ID, ok = args.positiveID("memory_id")
+		if verb == "link_query" {
+			request.ID, ok = args.decimalID("memory_id")
+		}
 		if !ok {
 			return invalid("missing memory_id")
 		}
@@ -96,16 +118,23 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		}
 	case "link_create":
 		var sourceOK, targetOK bool
-		request.SourceID, sourceOK = args.positiveID("source_id")
-		request.TargetID, targetOK = args.positiveID("target_id")
+		request.SourceID, sourceOK = args.decimalID("source_id")
+		request.TargetID, targetOK = args.decimalID("target_id")
 		request.Relation = args.stringOr("relation", "")
 		if !sourceOK || !targetOK || request.SourceID == request.TargetID || request.Relation == "" {
 			return invalid("missing source_id/target_id/relation")
 		}
+		if consoleLinks {
+			switch request.Relation {
+			case "supersedes", "depends_on", "contradicts", "related_to":
+			default:
+				return invalid("relation must be: supersedes, depends_on, contradicts, or related_to")
+			}
+		}
 		request.Operation = "link-create"
 	case "link_delete":
 		var ok bool
-		request.ID, ok = args.positiveID("link_id")
+		request.ID, ok = args.decimalID("link_id")
 		if !ok {
 			return invalid("missing link_id")
 		}
@@ -179,6 +208,28 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 			rows = append(rows, map[string]any{"id": r.ID, "source_id": r.SourceID, "target_id": r.TargetID, "relation": r.Relation, "created_at": r.CreatedAt})
 		}
 		result["links"] = rows
+		if consoleLinks {
+			var output strings.Builder
+			if len(response.Links) == 0 {
+				fmt.Fprintf(&output, "No links for memory %d\n", request.ID)
+			}
+			for _, link := range response.Links {
+				direction, other := "->", link.TargetID
+				if link.SourceID != request.ID {
+					direction, other = "<-", link.SourceID
+				}
+				fmt.Fprintf(&output, "  [%d] %s [%s] %d  (%s)\n", link.ID, direction, link.Relation, other, link.CreatedAt)
+			}
+			return inspectionOutput(rows, output.String(), args)
+		}
+	case "link_create":
+		if consoleLinks {
+			return inspectionOutput(result, fmt.Sprintf("Linked memory %d -[%s]-> %d\n", request.SourceID, request.Relation, request.TargetID), args)
+		}
+	case "link_delete":
+		if consoleLinks {
+			return inspectionOutput(result, fmt.Sprintf("Deleted link %d\n", request.ID), args)
+		}
 	case "list_conflicts":
 		rows := make([]map[string]any, 0, len(response.Conflicts))
 		for _, r := range response.Conflicts {

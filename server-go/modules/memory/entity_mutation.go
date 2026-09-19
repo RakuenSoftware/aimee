@@ -15,11 +15,7 @@ var errEntityTransition = errors.New("memory: entity transition no longer applie
 // Decimal strings allow the entire int64 range through native JSON transports.
 // Numeric input is limited to the exact range those transports can represent.
 func entityMutationID(args commandArgs, key string) (int64, bool) {
-	if raw, ok := args.stringValue(key); ok {
-		id, err := strconv.ParseInt(raw, 10, 64)
-		return id, err == nil && id > 0 && strconv.FormatInt(id, 10) == raw
-	}
-	return args.positiveID(key)
+	return args.decimalID(key)
 }
 
 func handleEntityMutation(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
