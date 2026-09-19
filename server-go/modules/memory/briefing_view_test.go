@@ -99,3 +99,10 @@ func exerciseBriefingViewsReplay(t *testing.T, handler bus.ModuleHandler, b brie
 		t.Fatal(out)
 	}
 }
+
+func TestMemoryJSONArrayFields(t *testing.T) {
+	out, err := memoryJSONOutput(json.RawMessage(`[{"id":9223372036854775807,"key":"長い鍵","created_at":"old","nested":{"key":"keep","other":1}},7,[{"key":"untouched","other":2}]]`), commandArgs{"fields": json.RawMessage(`"id,nested"`), "profile": json.RawMessage(`"compact"`)})
+	if err != nil || out != `[{"id":9223372036854775807,"nested":{"key":"keep","other":1}},7,[{"key":"untouched","other":2}]]` {
+		t.Fatal(out, err)
+	}
+}

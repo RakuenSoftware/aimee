@@ -10,6 +10,9 @@
 #include <unistd.h>
 
 void mem_checkpoint(app_ctx_t *, int, char **);
+void mem_history(app_ctx_t *, int, char **);
+static int history_mode;
+static const char *history_reply;
 static const char *forced;
 static int unavailable, inserts, task_failure, decision_failure;
 static db1_checkpoint_t saved;
@@ -23,6 +26,18 @@ void kb_client_memory_scope_context_apply(cJSON *args)
 }
 char *kb_v1_action_request(const char *method, cJSON *args)
 {
+   if (history_mode)
+   {
+      assert(!strcmp(method, "memory.fact_history"));
+      assert(!strcmp(jo_cstr(args, "key"), "full-history-key"));
+      assert(!strcmp(jo_cstr(args, "view"), "console"));
+      assert(!strcmp(jo_cstr(args, "format"), "json"));
+      assert(!strcmp(jo_cstr(args, "fields"), "id,content"));
+      assert(!strcmp(jo_cstr(args, "profile"), "compact"));
+      assert(jo_int(args, "max", 0) == 64);
+      cJSON_Delete(args);
+      return history_reply ? strdup(history_reply) : NULL;
+   }
    assert(!strcmp(method, "memory.checkpoint"));
    assert(jo_bool(args, "scope_context", 0));
    assert(!strcmp(jo_cstr(args, "project"), "checkpoint-project"));
@@ -129,6 +144,60 @@ static void restore_cli(void)
    char *args[] = {"restore", "9223372036854775807", "--session", "restore-session"};
    mem_checkpoint(&ctx, 4, args);
 }
+static void test_history_output_transport(void)
+{
+   history_mode = 1;
+   app_ctx_t ctx = {0};
+   ctx.json_output = 1;
+   ctx.json_fields = "id,content";
+   ctx.response_profile = "compact";
+   char *args[] = {"full-history-key"};
+   char payload[10000];
+   snprintf(payload, sizeof(payload), "[{\"id\":9007199254740993,\"content\":\"%s 日本語\"}]\n",
+            fact_text);
+   cJSON *owner = cJSON_CreateObject();
+   cJSON_AddStringToObject(owner, "status", "ok");
+   cJSON_AddStringToObject(owner, "output", payload);
+   char *encoded = cJSON_PrintUnformatted(owner);
+   cJSON_Delete(owner);
+   history_reply = encoded;
+   FILE *capture = tmpfile();
+   assert(capture);
+   fflush(stdout);
+   int saved_stdout = dup(STDOUT_FILENO);
+   assert(saved_stdout >= 0 && dup2(fileno(capture), STDOUT_FILENO) >= 0);
+   mem_history(&ctx, 1, args);
+   fflush(stdout);
+   assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+   close(saved_stdout);
+   rewind(capture);
+   char actual[10000] = {0};
+   size_t size = fread(actual, 1, sizeof(actual) - 1, capture);
+   assert(size == strlen(payload) && !strcmp(actual, payload));
+   fclose(capture);
+   free(encoded);
+   const char *bad[] = {NULL,
+                        "bad-json",
+                        "{}",
+                        "{\"status\":\"ok\"}",
+                        "{\"status\":\"error\",\"output\":\"[]\"}",
+                        "{\"status\":\"ok\",\"output\":[]} ",
+                        "{\"status\":\"ok\",\"output\":\"[]\"} trailing"};
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i)
+   {
+      history_reply = bad[i];
+      pid_t child = fork();
+      assert(child >= 0);
+      if (!child)
+      {
+         mem_history(&ctx, 1, args);
+         _exit(0);
+      }
+      int status;
+      assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 1);
+   }
+}
+
 int main(void)
 {
    memset(fact_text, 'x', 4000);
@@ -175,5 +244,6 @@ int main(void)
    memset(fact_text, 'x', sizeof(fact_text) - 1);
    assert(tasks_checkpoint_create("label", "source-session", 42, &cp) == -1);
    assert(inserts == 1); /* No partial/oversized snapshots persisted. */
+   test_history_output_transport();
    return 0;
 }

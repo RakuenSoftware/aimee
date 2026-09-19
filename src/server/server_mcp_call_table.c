@@ -1217,33 +1217,21 @@ static cJSON *mcph_memory_fact_history(struct mcp_call *c)
    cJSON *jk = cJSON_GetObjectItemCaseSensitive(c->jargs, "key");
    if (!cJSON_IsString(jk) || !jk->valuestring[0])
       return text_content("error: memory_fact_history requires 'key'");
-   const int max = 100;
-   memory_t *mems = calloc((size_t)max, sizeof(*mems));
-   if (!mems)
-      return text_content("error: out of memory");
-   int n = kb_client_memory_fact_history(jk->valuestring, mems, max);
-   if (n < 0)
-   {
-      free(mems);
-      return mcph_kb_last_result("memory fact history returned no result");
-   }
-   cJSON *result = cJSON_CreateObject();
-   cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
-   cJSON *arr = cJSON_AddArrayToObject(result, "history");
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *m = cJSON_CreateObject();
-      cJSON_AddNumberToObject(m, "id", (double)mems[i].id);
-      cJSON_AddStringToObject(m, "tier", mems[i].tier);
-      cJSON_AddStringToObject(m, "kind", mems[i].kind);
-      cJSON_AddStringToObject(m, "content", mems[i].content);
-      cJSON_AddNumberToObject(m, "confidence", mems[i].confidence);
-      cJSON_AddStringToObject(m, "updated_at", mems[i].updated_at);
-      cJSON_AddItemToArray(arr, m);
-   }
-   cJSON_AddNumberToObject(result, "count", n);
-   free(mems);
-   return json_result_content(result);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "key", jk->valuestring);
+   cJSON_AddNumberToObject(request, "max", 100);
+   cJSON_AddStringToObject(request, "format", "mcp");
+   char *raw = kb_v1_action_request("memory.fact_history", request);
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+   cJSON *content;
+   if (strcmp(jo_cstr(reply, "status"), "ok") == 0 && cJSON_IsString(output))
+      content = text_content(output->valuestring);
+   else
+      content = text_content("error: memory fact history unavailable or invalid response");
+   cJSON_Delete(reply);
+   return content;
 }
 
 static cJSON *mcph_dashboard_metrics(struct mcp_call *c)

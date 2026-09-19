@@ -97,7 +97,7 @@ RETIRED_NATIVE_SYMBOLS = re.compile(
     r"\b(?:memory_alerts|kb_client_memory_alerts_json|db2_memory_lifecycle_(?:list_newly_superseded|update_state))\b(?=\s*\()|"
     r"\b(?:memory_briefing|kb_client_memory_briefing|db2_memory_briefing_list_key_facts|db2_memory_briefing_list_recent_activity|db2_memory_briefing_list_active_entities)\b(?=\s*\()|"
     r"\bkb_client_memory_find_facts_visible\b(?=\s*\()|"
-    r"\bkb_client_memory_(?:restore|review_list_json|stats|stats_json|query_health|effectiveness_stats)\b(?=\s*\()|"
+    r"\bkb_client_memory_(?:restore|review_list_json|stats|stats_json|query_health|effectiveness_stats|fact_history|list_low_effectiveness|list_unused_l2|list_superseded_keys)\b(?=\s*\()|"
     r"\b(?:reflect_call_synthesis_agent|reflect_synthesis_result_t|REFLECT_MAX_RESULTS|REFLECT_RULE_THRESHOLD)\b|"
     r"\bmemory_touch(?:_many)?\b(?=\s*\()|"
     r"\bdb2_memory_(?:top_l2_facts|list_session_scope_priority(?:_like)?)\b(?=\s*\()|"

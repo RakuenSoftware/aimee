@@ -17,27 +17,52 @@ func memoryJSONOutput(payload json.RawMessage, args commandArgs) (string, error)
 		}
 	}
 	if fields, exists := args.stringValue("fields"); exists {
-		var object map[string]json.RawMessage
-		if err := json.Unmarshal(payload, &object); err != nil {
-			return "", err
-		}
-		filtered := map[string]json.RawMessage{}
-		for _, field := range strings.Split(fields, ",") {
-			field = strings.TrimSpace(field)
-			if value, ok := object[field]; ok {
-				filtered[field] = value
-			}
-		}
-		if status, ok := object["status"]; ok {
-			filtered["status"] = status
-		}
 		var err error
-		payload, err = json.Marshal(filtered)
+		payload, err = filterMemoryJSONFields(payload, fields)
 		if err != nil {
 			return "", err
 		}
 	}
 	return string(payload), nil
+}
+
+// Match emit_json_ctx: filter an object or each object in the top-level array.
+// Nested objects retain their fields; raw number tokens retain full int64 IDs.
+func filterMemoryJSONFields(payload json.RawMessage, fields string) (json.RawMessage, error) {
+	raw := strings.TrimSpace(string(payload))
+	if strings.HasPrefix(raw, "[") {
+		var rows []json.RawMessage
+		if err := json.Unmarshal(payload, &rows); err != nil {
+			return nil, err
+		}
+		for i, row := range rows {
+			if strings.HasPrefix(strings.TrimSpace(string(row)), "{") {
+				var err error
+				rows[i], err = filterMemoryJSONFields(row, fields)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		return json.Marshal(rows)
+	}
+	if !strings.HasPrefix(raw, "{") {
+		return payload, nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &object); err != nil {
+		return nil, err
+	}
+	filtered := map[string]json.RawMessage{}
+	for _, field := range strings.Split(fields, ",") {
+		if value, ok := object[strings.TrimSpace(field)]; ok {
+			filtered[strings.TrimSpace(field)] = value
+		}
+	}
+	if status, ok := object["status"]; ok {
+		filtered["status"] = status
+	}
+	return json.Marshal(filtered)
 }
 
 func compactMemoryJSON(payload json.RawMessage) (json.RawMessage, error) {

@@ -201,6 +201,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
+	if verb == "fact_history" && (args.stringOr("view", "") == "console" || args.stringOr("format", "") == "mcp") {
+		return historyInspection(response.PublicRecords, args)
+	}
 	if request.Operation == "wiki-bundle" {
 		if len(response.Payload) == 0 {
 			return nil, bus.ModuleStatusInternal
@@ -247,4 +250,29 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}
 	return commandResult(result)
+}
+
+func historyInspection(records []publicMemoryRecord, args commandArgs) ([]byte, bus.ModuleStatus) {
+	rows := make([]map[string]any, 0, len(records))
+	mcp := args.stringOr("format", "") == "mcp"
+	for _, r := range records {
+		row := map[string]any{"id": r.ID, "tier": r.Tier, "kind": r.Kind, "content": r.Content, "confidence": r.Confidence, "updated_at": r.UpdatedAt}
+		if !mcp {
+			row["key"], row["use_count"], row["last_used_at"] = r.Key, r.UseCount, r.LastUsedAt
+			row["created_at"], row["source_session"], row["provenance_category"] = r.CreatedAt, r.SourceSession, r.ProvenanceCategory
+		}
+		rows = append(rows, row)
+	}
+	if mcp {
+		status := "ok"
+		if len(rows) == 0 {
+			status = "empty"
+		}
+		raw, err := json.Marshal(map[string]any{"status": status, "count": len(rows), "history": rows})
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		return commandResult(map[string]any{"status": "ok", "output": string(raw)})
+	}
+	return inspectionOutput(rows, "", args)
 }

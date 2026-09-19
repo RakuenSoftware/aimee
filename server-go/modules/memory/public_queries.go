@@ -2,7 +2,9 @@ package memory
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
+	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -16,6 +18,9 @@ func (args commandArgs) integer(name string, fallback int) int {
 }
 
 func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation, verb string, args commandArgs) ([]byte, bus.ModuleStatus) {
+	if verb == "list_unused_l2" && args.stringOr("view", "") == "stale" {
+		return handleStaleInspection(options, invocation, args)
+	}
 	request := DataRequest{IncludeAll: true}
 	scoped := false
 	invalid := func(message string) ([]byte, bus.ModuleStatus) {
@@ -40,6 +45,9 @@ func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		}
 	case "list_low_effectiveness":
 		threshold := 0.5
+		if args.stringOr("view", "") == "console" {
+			threshold = 0.3
+		}
 		if n, ok := args.number("threshold"); ok {
 			threshold = n
 		}
@@ -47,6 +55,9 @@ func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation,
 			return invalid("threshold must be between zero and one")
 		}
 		request.Operation, request.Confidence, request.Limit = "low-effectiveness", &threshold, args.limit("limit", 50, 256)
+		if args.stringOr("view", "") == "console" && args.integer("limit", 50) <= 0 {
+			request.Limit = 256
+		}
 	case "list_unused_l2":
 		request.Operation, request.Days, request.Limit = "unused-l2", args.integer("days", 14), args.limit("max", 64, 256)
 	case "list_superseded_keys":
@@ -100,6 +111,9 @@ func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		if rows == nil {
 			rows = []LowEffectiveness{}
 		}
+		if args.stringOr("view", "") == "console" {
+			return inspectionOutput(rows, "", args)
+		}
 		result["rows"] = rows
 	case "list_unused_l2":
 		rows := make([]map[string]any, 0, len(response.Records))
@@ -137,4 +151,63 @@ func handleQueryCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""
 	}
 	return commandResult(result)
+}
+
+func inspectionOutput(payload any, text string, args commandArgs) ([]byte, bus.ModuleStatus) {
+	format := args.stringOr("format", "json")
+	if format == "text" {
+		return commandResult(map[string]any{"status": "ok", "output": text})
+	}
+	if format != "json" {
+		return commandResult(commandError("invalid_argument", "format must be json or text"))
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	output, err := memoryJSONOutput(raw, args)
+	if err != nil {
+		return nil, bus.ModuleStatusInternal
+	}
+	return commandResult(map[string]any{"status": "ok", "output": output + "\n"})
+}
+
+// The stale provenance console is a composite read. Both queries must succeed
+// before emitting any output; an unavailable half is not an empty result.
+func handleStaleInspection(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
+	var unused, superseded DataResponse
+	for i, raw := range []string{`{"operation":"unused-l2","days":14,"limit":256,"include_all":true}`, `{"operation":"superseded-keys","min_versions":3,"limit":256,"include_all":true}`} {
+		data, status := handleData(options, invocation, []byte(raw))
+		if status != bus.ModuleStatusOK {
+			return nil, status
+		}
+		out := &unused
+		if i == 1 {
+			out = &superseded
+		}
+		if json.Unmarshal(data, out) != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+	}
+	rows := make([]map[string]any, 0, len(unused.Records))
+	var text strings.Builder
+	text.WriteString("Never-used L2 memories (>14 days old):\n")
+	for _, row := range unused.Records {
+		rows = append(rows, map[string]any{"id": row.ID, "key": row.Key})
+		fmt.Fprintf(&text, "  #%-6d %s\n", row.ID, row.Key)
+	}
+	if len(rows) == 0 {
+		text.WriteString("  (none)\n")
+	}
+	text.WriteString("\nFrequently superseded keys (3+ versions):\n")
+	if superseded.SupersededKeys == nil {
+		superseded.SupersededKeys = []SupersededKey{}
+	}
+	for _, row := range superseded.SupersededKeys {
+		fmt.Fprintf(&text, "  %-40s %d versions\n", row.BaseKey, row.Versions)
+	}
+	if len(superseded.SupersededKeys) == 0 {
+		text.WriteString("  (none)\n")
+	}
+	return inspectionOutput(map[string]any{"never_used": rows, "frequently_superseded": superseded.SupersededKeys}, text.String(), args)
 }

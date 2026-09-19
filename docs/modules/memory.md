@@ -108,6 +108,15 @@ Operator and scheduler maintenance retain their existing unrestricted path.
 The retired native mode-policy functions are forbidden by the boundary guard;
 MCP mutation-verb routing and other native clients still await migration.
 
+History and stale-memory inspection also render in Go. CLI history preserves its
+12-field record shape, MCP history preserves its six-field rows and empty/count
+envelope, and both carry complete content and int64 IDs as rendered text through
+native transport. The low-effectiveness console retains its 0.3 threshold and
+limit behavior. Stale provenance combines the 14-day unused-L2 and three-version
+queries with a 256-row cap each; a failed query never becomes an empty half of
+the report. JSON field filtering now handles top-level arrays while retaining
+number tokens. Four native history/stale reader APIs are retired and guarded.
+
 The supervised `aimee-module-memory` process is pure Go. It owns extraction,
 write gating, embedding, retrieval safety, reranking, command declaration, and
 the scoped memory data API.

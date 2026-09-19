@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -25,6 +26,11 @@ func TestRecordPublicValidation(t *testing.T) {
 	}
 	if r := runPublicCommand(t, client, "scope_visibility_rank", `{"ids":[]}`); r["status"] != "ok" || len(r["ranks"].([]any)) != 0 {
 		t.Fatal(r)
+	}
+	for _, args := range []string{`{"key":"missing","view":"console"}`, `{"key":"missing","format":"mcp"}`} {
+		if r := runPublicCommand(t, client, "fact_history", args); r["kind"] != "unavailable" || r["output"] != nil {
+			t.Fatal(r)
+		}
 	}
 	// A failed module must never look like a successful, empty recall.
 	for _, verb := range []string{"list", "get", "fact_history", "find_facts_visible", "find_facts_scoped"} {
@@ -153,6 +159,43 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	}
 	if r := runPublicCommand(t, client, "tag_workspace", `{"memory_id":9999,"workspace":"team"}`); r["kind"] != "not_found" {
 		t.Fatal(r)
+	}
+	longKey := strings.Repeat("履歴", 180)
+	fullContent := strings.Repeat("長い記憶", 1800)
+	_, err = tx.Exec(ctx, `INSERT INTO memories(id,key,content) SELECT 9007199254740993+g,$1||'#v'||g::text,$2 FROM generate_series(0,69) g`, longKey, fullContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, _ := json.Marshal(map[string]any{"key": longKey, "max": 100, "view": "console", "format": "json"})
+	out := run("fact_history", string(args))["output"].(string)
+	var history []struct {
+		ID                               int64
+		Key, Content, ProvenanceCategory string
+	}
+	if err := json.Unmarshal([]byte(out), &history); err != nil || len(history) != 64 || history[0].ID != 9007199254741062 || history[0].Content != fullContent || history[0].Key != longKey+"#v69" {
+		t.Fatal("history truncated/rounded", err, len(history))
+	}
+	args, _ = json.Marshal(map[string]any{"key": longKey, "max": 1, "view": "console", "fields": "id,key,created_at,content", "profile": "compact"})
+	out = run("fact_history", string(args))["output"].(string)
+	if strings.Contains(out, "created_at") || !strings.Contains(out, "9007199254741062") || !strings.Contains(out, fullContent) || strings.Contains(out, "confidence") {
+		t.Fatal("filtered history", out)
+	}
+	args, _ = json.Marshal(map[string]any{"key": longKey, "max": 100, "format": "mcp"})
+	out = run("fact_history", string(args))["output"].(string)
+	var mcp struct {
+		Status  string
+		Count   int
+		History []struct {
+			ID      int64
+			Content string
+		}
+	}
+	if err := json.Unmarshal([]byte(out), &mcp); err != nil || mcp.Status != "ok" || mcp.Count != 64 || mcp.History[0].ID != 9007199254741062 || mcp.History[0].Content != fullContent {
+		t.Fatal("MCP history truncated/rounded", err)
+	}
+	out = run("fact_history", `{"key":"no-such-key","format":"mcp"}`)["output"].(string)
+	if err := json.Unmarshal([]byte(out), &mcp); err != nil || mcp.Status != "empty" || mcp.Count != 0 || len(mcp.History) != 0 {
+		t.Fatal(out, err)
 	}
 	// Verify visibility with a real non-owner connection, including metadata.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_record_test NOINHERIT NOBYPASSRLS;

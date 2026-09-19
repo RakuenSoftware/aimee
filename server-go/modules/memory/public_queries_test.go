@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -224,6 +225,41 @@ INSERT INTO memory_rejection_tombstones(memory_key,memory_content,scope_type,sco
 	if stats["low_effectiveness_count"] != float64(305) || stats["never_surfaced_l2"] != float64(305) || len(stats) != 4 {
 		t.Fatal(stats)
 	}
+	longKey := strings.Repeat("長い鍵", 400)
+	_, err = tx.Exec(ctx, `INSERT INTO memories(id,key,created_at,effectiveness) VALUES(9007199254740993,$1,pg_now_text('-90 days'),0.1)`, longKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	low := run("list_low_effectiveness", `{"view":"console","format":"json","limit":1,"fields":"id,key","profile":"compact"}`)["output"].(string)
+	var lowRows []struct {
+		ID  int64
+		Key string
+	}
+	if err := json.Unmarshal([]byte(low), &lowRows); err != nil || len(lowRows) != 1 || lowRows[0].ID != 9007199254740993 || lowRows[0].Key != longKey {
+		t.Fatal(low, err)
+	}
+	for _, limit := range []string{"0", "-1", "999"} {
+		output := run("list_low_effectiveness", `{"view":"console","limit":`+limit+`}`)["output"].(string)
+		var rows []json.RawMessage
+		if json.Unmarshal([]byte(output), &rows) != nil || len(rows) != 256 {
+			t.Fatal("inspection limit", limit, len(rows))
+		}
+	}
+	stale := run("list_unused_l2", `{"view":"stale","format":"json","operation":"delete","days":0,"max":1}`)["output"].(string)
+	var bundle struct {
+		NeverUsed []struct {
+			ID  int64
+			Key string
+		} `json:"never_used"`
+		Superseded []SupersededKey `json:"frequently_superseded"`
+	}
+	if err := json.Unmarshal([]byte(stale), &bundle); err != nil || len(bundle.NeverUsed) != 256 || bundle.NeverUsed[0].ID != 9007199254740993 || bundle.NeverUsed[0].Key != longKey || len(bundle.Superseded) != 1 {
+		t.Fatal("stale bundle", err, len(bundle.NeverUsed))
+	}
+	text := run("list_unused_l2", `{"view":"stale","format":"text"}`)["output"].(string)
+	if !strings.Contains(text, "#9007199254740993 "+longKey) || !strings.Contains(text, "3 versions") {
+		t.Fatal("stale text truncated")
+	}
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_query_scope_test NOINHERIT NOBYPASSRLS;
  GRANT USAGE ON SCHEMA query_command_test TO memory_query_scope_test;
  GRANT SELECT ON memories TO memory_query_scope_test;
@@ -242,4 +278,42 @@ INSERT INTO memory_rejection_tombstones(memory_key,memory_content,scope_type,sco
 		}
 	}
 
+}
+
+type inspectionStore struct {
+	recordingDataStore
+	queryDataStore
+	failFirst, failSecond bool
+}
+
+func (s *inspectionStore) UnusedL2(_ context.Context, days, limit int) ([]Record, error) {
+	if s.failFirst {
+		return nil, errors.New("unused query failed")
+	}
+	return nil, nil
+}
+func (s *inspectionStore) SupersededKeys(_ context.Context, minimum, limit int) ([]SupersededKey, error) {
+	if s.failSecond {
+		return nil, errors.New("superseded query failed")
+	}
+	return nil, nil
+}
+func TestStaleInspectionEmptyAndUnavailable(t *testing.T) {
+	s := &inspectionStore{}
+	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, s)))
+	r := runPublicCommand(t, client, "list_unused_l2", `{"view":"stale","format":"text"}`)
+	if r["output"] != "Never-used L2 memories (>14 days old):\n  (none)\n\nFrequently superseded keys (3+ versions):\n  (none)\n" {
+		t.Fatal(r)
+	}
+	r = runPublicCommand(t, client, "list_unused_l2", `{"view":"stale","fields":"never_used","profile":"compact"}`)
+	if r["output"] != "{\"never_used\":[]}\n" {
+		t.Fatal(r)
+	}
+	for _, first := range []bool{true, false} {
+		s.failFirst, s.failSecond = first, !first
+		body, err := client.Command(context.Background(), 73, "list_unused_l2", json.RawMessage(`{"view":"stale","format":"json"}`))
+		if err == nil || len(body) != 0 {
+			t.Fatalf("failed query emitted a partial/empty result: %s %v", body, err)
+		}
+	}
 }

@@ -41,6 +41,26 @@ static cJSON *memory_console_reply(const char *method, int effectiveness)
    return memory_console_request(method, request);
 }
 
+/* Go renders complete inspection output, including field/profile selection.
+ * Keeping output as a string avoids cJSON rounding integer IDs in row arrays. */
+static void memory_inspection_output(app_ctx_t *ctx, const char *method, cJSON *request)
+{
+   cJSON_AddStringToObject(request, "format", ctx->json_output ? "json" : "text");
+   if (ctx->json_fields)
+      cJSON_AddStringToObject(request, "fields", ctx->json_fields);
+   if (ctx->response_profile)
+      cJSON_AddStringToObject(request, "profile", ctx->response_profile);
+   char *raw = kb_v1_action_request(method, request);
+   cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   free(raw);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+   if (strcmp(jo_cstr(reply, "status"), "ok") != 0 || !cJSON_IsString(output))
+      fatal("%s: %s", method,
+            jo_str(reply, "message", "memory inspection unavailable or invalid response"));
+   fputs(output->valuestring, stdout);
+   cJSON_Delete(reply);
+}
+
 void mem_store(app_ctx_t *ctx, int argc, char **argv)
 {
    opt_parsed_t opts;
@@ -201,25 +221,10 @@ void mem_list(app_ctx_t *ctx, int argc, char **argv)
 
    if (low_eff)
    {
-      db2_memory_low_eff_row_t lrows[256];
-      int n = kb_client_memory_list_low_effectiveness(EFFECTIVENESS_DEMOTE_THRESHOLD,
-                                                      limit > 256 ? 256 : limit, lrows, 256);
-      cJSON *arr = cJSON_CreateArray();
-      for (int i = 0; i < n; i++)
-      {
-         cJSON *m = cJSON_CreateObject();
-         jo_add_i64(m, "id", lrows[i].id);
-         jo_add_str(m, "tier", lrows[i].tier);
-         jo_add_str(m, "kind", lrows[i].kind);
-         jo_add_str(m, "key", lrows[i].key);
-         jo_add_num(m, "effectiveness", lrows[i].effectiveness);
-         jo_add_i64(m, "use_count", lrows[i].use_count);
-         cJSON_AddItemToArray(arr, m);
-      }
-      if (ctx->json_output)
-         emit_json_ctx(arr, ctx->json_fields, ctx->response_profile);
-      else
-         cJSON_Delete(arr);
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request, "view", "console");
+      cJSON_AddNumberToObject(request, "limit", limit);
+      memory_inspection_output(ctx, "memory.list_low_effectiveness", request);
       return;
    }
 
@@ -721,50 +726,9 @@ void mem_provenance(app_ctx_t *ctx, int argc, char **argv)
    /* --stale flag: show memories with suspicious provenance */
    if (argc >= 1 && strcmp(argv[0], "--stale") == 0)
    {
-      db2_memory_unused_l2_row_t unused_rows[256];
-      int unused_n = kb_client_memory_list_unused_l2(14, unused_rows, 256);
-      db2_memory_superseded_row_t sup_rows[256];
-      int sup_n = kb_client_memory_list_superseded_keys(3, sup_rows, 256);
-
-      if (ctx->json_output)
-      {
-         cJSON *root = cJSON_CreateObject();
-         cJSON *unused = cJSON_CreateArray();
-         for (int i = 0; i < unused_n; i++)
-         {
-            cJSON *m = cJSON_CreateObject();
-            jo_add_i64(m, "id", unused_rows[i].id);
-            jo_add_str(m, "key", unused_rows[i].key);
-            cJSON_AddItemToArray(unused, m);
-         }
-         cJSON_AddItemToObject(root, "never_used", unused);
-
-         cJSON *superseded = cJSON_CreateArray();
-         for (int i = 0; i < sup_n; i++)
-         {
-            cJSON *m = cJSON_CreateObject();
-            jo_add_str(m, "base_key", sup_rows[i].base_key);
-            jo_add_i64(m, "versions", sup_rows[i].versions);
-            cJSON_AddItemToArray(superseded, m);
-         }
-         cJSON_AddItemToObject(root, "frequently_superseded", superseded);
-
-         emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         printf("Never-used L2 memories (>14 days old):\n");
-         for (int i = 0; i < unused_n; i++)
-            printf("  #%-6lld %s\n", (long long)unused_rows[i].id, unused_rows[i].key);
-         if (unused_n == 0)
-            printf("  (none)\n");
-
-         printf("\nFrequently superseded keys (3+ versions):\n");
-         for (int i = 0; i < sup_n; i++)
-            printf("  %-40s %d versions\n", sup_rows[i].base_key, sup_rows[i].versions);
-         if (sup_n == 0)
-            printf("  (none)\n");
-      }
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request, "view", "stale");
+      memory_inspection_output(ctx, "memory.list_unused_l2", request);
       return;
    }
 
@@ -1694,15 +1658,11 @@ void mem_history(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
       fatal("memory history requires a key");
-   memory_t mems[64];
-   int count = kb_client_memory_fact_history(argv[0], mems, 64);
-   if (ctx->json_output)
-   {
-      cJSON *arr = cJSON_CreateArray();
-      for (int i = 0; i < count; i++)
-         cJSON_AddItemToArray(arr, memory_to_json(&mems[i]));
-      emit_json_ctx(arr, ctx->json_fields, ctx->response_profile);
-   }
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "view", "console");
+   cJSON_AddStringToObject(request, "key", argv[0]);
+   cJSON_AddNumberToObject(request, "max", 64);
+   memory_inspection_output(ctx, "memory.fact_history", request);
 }
 
 void mem_checkpoint(app_ctx_t *ctx, int argc, char **argv)

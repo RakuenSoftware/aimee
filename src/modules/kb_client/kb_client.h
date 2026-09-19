@@ -759,20 +759,6 @@ int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind);
 int kb_client_memory_supersede(int64_t old_id, const char *new_content, double confidence,
                                const char *session_id, memory_t *out);
 
-/* Fetch the version history for a memory key via aimee-kb.  Returns
- * the number of rows written into |out| (0 if kb is unreachable).
- * Mirrors memory_fact_history(). */
-int kb_client_memory_fact_history(const char *key, memory_t *out, int max);
-
-/* Stale-memory inspection helpers via aimee-kb (the DB2 owner).
- * Each mirrors the local db2_memory_list_* signature; returns the
- * number of rows written (0 if kb is unreachable). */
-int kb_client_memory_list_low_effectiveness(double threshold, int limit,
-                                            db2_memory_low_eff_row_t *out, int max);
-int kb_client_memory_list_unused_l2(int days, db2_memory_unused_l2_row_t *out, int max);
-int kb_client_memory_list_superseded_keys(int min_versions, db2_memory_superseded_row_t *out,
-                                          int max);
-
 /* Set the artifact_type / artifact_ref / artifact_hash columns on a
  * memory row via aimee-kb.  Returns 0 on success, -1 on failure /
  * missing row.  Mirrors db2_memory_set_artifact(). */
