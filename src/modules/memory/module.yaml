@@ -2,20 +2,18 @@
   "descriptor_version": 1,
   "id": "memory",
   "dependencies": [
+    "audit",
     "config",
     "egress",
-    "postgres",
     "ir",
     "module-runtime",
-    "audit"
+    "postgres"
   ],
   "runtime_toggle": {
     "supported": false
   },
   "ownership_complete": true,
-  "sources": [
-    "src/modules/memory/memory_data_bus.c"
-  ],
+  "sources": [],
   "go_sources": [
     "server-go/modules/memory/process.go",
     "server-go/modules/memory/cmd/aimee-memory-bus-probe/main.go",
@@ -91,7 +89,6 @@
     "server-go/modules/memory/episode_card.go",
     "server-go/modules/memory/cognify.go",
     "server-go/modules/memory/cognify_queue.go",
-    "server-go/modules/memory/cognify_test.go",
     "server-go/modules/memory/public_vector.go",
     "server-go/modules/memory/answer.go",
     "server-go/modules/memory/public_answer.go",
@@ -107,7 +104,6 @@
     "server-go/modules/memory/public_reembed.go",
     "server-go/modules/memory/public_facts.go",
     "server-go/modules/memory/gateway.go",
-    "server-go/modules/memory/gateway_test.go",
     "server-go/modules/memory/gateway_plan.go",
     "server-go/modules/memory/ingress_task_packet.go",
     "server-go/modules/memory/ingress_task_state.go",
@@ -145,7 +141,8 @@
     "server-go/modules/memory/cmd/aimee-memory-eval/main.go",
     "server-go/modules/memory/shared_recall.go",
     "server-go/modules/memory/evaluation.go",
-    "server-go/modules/memory/cmd/aimee-memory-eval/corpus.go"
+    "server-go/modules/memory/cmd/aimee-memory-eval/corpus.go",
+    "server-go/modules/memory/lane_metrics.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -246,15 +243,18 @@
     "server-go/modules/memory/entity_registry_test.go",
     "server-go/modules/memory/cmd/aimee-memory-eval/main_test.go",
     "server-go/modules/memory/shared_recall_test.go",
-    "server-go/modules/memory/cmd/aimee-memory-eval/corpus_test.go"
+    "server-go/modules/memory/cmd/aimee-memory-eval/corpus_test.go",
+    "server-go/modules/memory/lane_metrics_test.go",
+    "server-go/modules/memory/host_contract_test.go",
+    "server-go/modules/memory/cognify_test.go",
+    "server-go/modules/memory/gateway_test.go",
+    "server-go/modules/memory/fact_invalidation_test.go",
+    "server-go/modules/memory/fact_mutation_test.go",
+    "server-go/modules/memory/fact_review_test.go",
+    "server-go/modules/memory/public_facts_test.go"
   ],
-  "public_headers": [
-    "src/modules/memory/include/aimee/memory/module_api.h"
-  ],
-  "private_headers": [
-    "src/modules/memory/memory_core_internal.h",
-    "src/modules/memory/memory_ontology.h"
-  ],
+  "public_headers": [],
+  "private_headers": [],
   "tests": [],
   "docs": [
     "docs/modules/memory.md"

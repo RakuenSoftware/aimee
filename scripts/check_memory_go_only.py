@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Check the complete G0 boundary, including native clients outside the module.
+"""Audit the historical all-native-callers inventory and the Go memory boundary.
 
-Unlike the transitional C allowlist, this gate never treats native adapters as
-complete migration. --report prints all remaining violations as JSON for the
+The default inventory retains its broader historical criterion unchanged.
+--module-only applies the clarified language boundary: memory is Go, the bus
+and external transport-only hosts remain C. Retired native policy is also
+checked by check_memory_c_boundary.py. --report prints all remaining violations as JSON for the
 cutover inventory; it still exits unsuccessfully when any violation remains.
 """
 
@@ -64,24 +66,12 @@ def unrelated_module_api(root: Path, include: str) -> bool:
     return header.is_file() and header.resolve() == header.absolute()
 
 
-def violations(root: Path, manifest: dict) -> list[dict[str, str]]:
+def module_violations(root: Path) -> list[dict[str, str]]:
+    """The module-only language gate; the existing C bus stays outside it."""
     failures = []
 
     def fail(rule: str, path: Path, detail: str) -> None:
         failures.append({"rule": rule, "file": path.relative_to(root).as_posix(), "detail": detail})
-
-    if manifest.get("version") != 1 or not manifest.get("native_symbols") or not manifest.get("native_files"):
-        raise ValueError("missing or invalid immutable native retirement inventory")
-    native_patterns = [re.escape(symbol) if symbol not in CAPTURED_MEMBERS
-                       else CAPTURED_MEMBERS[symbol] for symbol in manifest["native_symbols"]]
-    symbols = re.compile(r"\b(?:" + "|".join(native_patterns)
-                         + r"|AIMEE_MEMORY_\w+|aimee_memory_\w+|server_module_memory_\w+"
-                         + r"|kb_module_memory_\w+|kb_client_memory_\w+)\b")
-    native_names = {Path(p).name for p in manifest["native_files"]}
-    native_build_names = native_names | {str(Path(p).with_suffix(".o").name) for p in manifest["native_files"]}
-    native_include = re.compile(r'#\s*include\s*[<"](?:[^>"\n]*/)?(?:'
-                                + "|".join(re.escape(name) for name in native_names)
-                                + r')[>"]')
 
     for relative in MEMORY_ROOTS:
         directory = root / relative
@@ -106,6 +96,30 @@ def violations(root: Path, manifest: dict) -> list[dict[str, str]]:
         for value in descriptor.get(role, []):
             if Path(value).suffix.lower() in NATIVE_SUFFIXES:
                 fail("memory-native-descriptor", descriptor_path, f"{role}: {value}")
+
+    return failures
+
+
+def violations(root: Path, manifest: dict) -> list[dict[str, str]]:
+    failures = []
+
+    def fail(rule: str, path: Path, detail: str) -> None:
+        failures.append({"rule": rule, "file": path.relative_to(root).as_posix(), "detail": detail})
+
+    if manifest.get("version") != 1 or not manifest.get("native_symbols") or not manifest.get("native_files"):
+        raise ValueError("missing or invalid immutable native retirement inventory")
+    native_patterns = [re.escape(symbol) if symbol not in CAPTURED_MEMBERS
+                       else CAPTURED_MEMBERS[symbol] for symbol in manifest["native_symbols"]]
+    symbols = re.compile(r"\b(?:" + "|".join(native_patterns)
+                         + r"|AIMEE_MEMORY_\w+|aimee_memory_\w+|server_module_memory_\w+"
+                         + r"|kb_module_memory_\w+|kb_client_memory_\w+)\b")
+    native_names = {Path(p).name for p in manifest["native_files"]}
+    native_build_names = native_names | {str(Path(p).with_suffix(".o").name) for p in manifest["native_files"]}
+    native_include = re.compile(r'#\s*include\s*[<"](?:[^>"\n]*/)?(?:'
+                                + "|".join(re.escape(name) for name in native_names)
+                                + r')[>"]')
+
+    failures.extend(module_violations(root))
 
     for path in source_files(root):
         suffix = path.suffix.lower()
@@ -132,11 +146,13 @@ def violations(root: Path, manifest: dict) -> list[dict[str, str]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--module-only", action="store_true", help="check both memory trees and descriptor; preserve the external C bus")
     parser.add_argument("--report", action="store_true", help="emit JSON without accepting outstanding debt")
     args = parser.parse_args()
     root = args.root.resolve()
     try:
-        failures = violations(root, json.loads((root / MANIFEST).read_text(encoding="utf-8")))
+        failures = module_violations(root) if args.module_only else violations(
+            root, json.loads((root / MANIFEST).read_text(encoding="utf-8")))
     except (ValueError, OSError) as exc:
         print(f"memory-go-only: {exc}")
         return 1

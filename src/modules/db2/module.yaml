@@ -159,7 +159,6 @@
     "src/modules/db2/eventcontract/operations.json"
   ],
   "private_headers": [
-    "src/modules/db2/c/memory_export.h",
     "src/modules/db2/c/memory_health.h",
     "src/modules/db2/c/memory_lifecycle.h",
     "src/modules/db2/c/memory_promotion.h",
@@ -304,7 +303,8 @@
     "src/modules/db2/support/db2_runtime_config.h",
     "src/modules/db2/support/db2_text.h",
     "src/modules/db2/support/db2_time.h",
-    "src/modules/db2/support/sketch.h"
+    "src/modules/db2/support/sketch.h",
+    "src/modules/db2/c/graph_kinds.h"
   ],
   "tests": [
     "src/tests/test_bus_db2_module.c",
@@ -400,7 +400,6 @@
       "src/modules/css/css_analyze.h",
       "src/modules/guardrails/guardrails.h",
       "src/modules/learning/include/aimee/learning/learning.h",
-      "src/modules/memory/memory_ontology.h",
       "src/modules/vault/vault_crypto.h",
       "src/modules/vault/vault_internal.h",
       "src/modules/vault/vault_principal.h",

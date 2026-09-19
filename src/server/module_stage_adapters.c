@@ -28,7 +28,7 @@
 #include <aimee/git/module_api.h>
 #include <aimee/governance/module_api.h>
 #include <aimee/learning/module_api.h>
-#include <aimee/memory/module_api.h>
+#include "headers/memory_stage_contract.h"
 #include <aimee/response-composition/module_api.h>
 #include <aimee/runtime-web/module_api.h>
 #include <aimee/skills/module_api.h>

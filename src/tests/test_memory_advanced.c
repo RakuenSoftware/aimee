@@ -13,7 +13,7 @@
 #include "support/test_time.h"
 #include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
 #include "modules/db2/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
-#include "modules/memory/memory_ontology.h"
+#include "modules/db2/c/graph_kinds.h"
 #include "../modules/db2/c/bandit.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"

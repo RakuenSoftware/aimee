@@ -83,7 +83,16 @@ func negationOverlap(query, content []string) float64 {
 	return min(10, 3*float64(shared)*(.5+.5*min(1, float64(shared)/float64(len(query)))))
 }
 
-func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest, exact bool, base []Record) ([]Record, error) {
+func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest, exact bool, base []Record) (result []Record, resultErr error) {
+	if req.lanes == nil {
+		req.lanes = recallLanes{}
+		req.lanes.add(base, laneLexical)
+	}
+	defer func() {
+		if resultErr == nil && req.Query != "" {
+			req.lanes.observe(result)
+		}
+	}()
 	base, err := s.fuseSharedSemantic(ctx, req, exact, base)
 	if err != nil {
 		return nil, err
@@ -122,6 +131,7 @@ func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest,
 		if err != nil {
 			return nil, err
 		}
+		req.lanes.add(extra, laneLexical)
 		candidates = append(candidates, extra...)
 	}
 	type scored struct {
@@ -158,7 +168,7 @@ func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest,
 		}
 		return ordered[i].score > ordered[j].score
 	})
-	result := make([]Record, 0, min(req.Limit, len(ordered)))
+	result = make([]Record, 0, min(req.Limit, len(ordered)))
 	for _, item := range ordered {
 		if len(result) == req.Limit {
 			break

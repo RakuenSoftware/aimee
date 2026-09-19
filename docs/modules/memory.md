@@ -13,8 +13,13 @@ belong in Go; moving those into a C host does not complete the migration.
 The memory process must build and communicate without cgo. Integration tests
 must exercise its Go producer and consumer against the actual C bus.
 
-The migration is still incomplete: one C source (127 lines) and three headers
-remain under `src/modules/memory` at this checkpoint.
+Both memory trees now contain zero native files, and the memory descriptor has
+no native sources, headers or tests. `check_memory_c_boundary.py` enforces this
+recursively, rejects cgo and retains the repository-wide retired-policy checks.
+`check_memory_go_only.py --module-only` exposes the same source/descriptor gate.
+The memory executable and live Go probe must also build with `CGO_ENABLED=0`.
+This language boundary does not certify all historical behavioral parity or the
+numbered reliability proposals.
 
 ## Isolated Go evaluation transport
 
@@ -375,40 +380,43 @@ An expired call still fails rather than retrying indefinitely or changing stores
 
 ## Compatibility
 
-Native files remaining inside the memory module must be retired or receive an
-explicit host-only ownership disposition. External C transport does not itself
-require a language migration, but may not retain memory behavior:
+The final native-file dispositions separate external protocol consumers from
+memory implementation. The C bus itself is unchanged by this cutover.
 
-- `memory_data_bus.c` encodes/decodes bounded event-bus messages for legacy
-  native benchmark callers. It still resides in the memory tree and remains
-  unfinished boundary work. The separate `memory_domain_bus.c` is deleted.
-  Scope travels in explicit Go request fields; the native thread-local context
-  bridge and callback registration have been deleted.
-- `server_hooks.c` connects retired local memory-file writes to the Go policy over
-  memory stage 7; classification and shell-write detection live in `redirect.go`.
-- `kb_memory_facts.c` connects the KB drain to its existing curator provider and
-  transactional fact-commit connection. Job leasing/reclaim, retry policy,
-  exponential jittered backoff, prompt construction, deterministic extraction, model-output parsing,
-  grounding, relation canonicalization, kind selection, and provenance are in
-  `memory_facts.go`.
+| Retired memory-tree file | Disposition |
+|---|---|
+| `memory_data_bus.c` | Its only production callers are native benchmark hosts. Their request/response transport is now owned by `src/modules/benchmarks/agent_eval_memory_transport.c`; it calls the existing C bus and contains no memory storage, ranking or lifecycle implementation. Memory's producer and consumer remain Go. |
+| `include/aimee/memory/module_api.h` | Host stage identifiers live in `src/headers/memory_stage_contract.h`, outside the memory module. Go conformance tests compare every identifier with the owner; event durability coverage follows the host contract. |
+| `memory_ontology.h` | Persisted graph codes shared with native indexing belong to `src/modules/db2/c/graph_kinds.h`. They contain enum declarations only. Go conformance tests pin node and relation codes to the Go ontology. |
+| `memory_core_internal.h` | Deleted obsolete declarations for the removed native engine. The unregistered lane-outcome fixture is ported to Go and runs in the normal package tests. The native performance harness explicitly reports its retired memory cases unavailable. |
 
-`scripts/check_memory_c_boundary.py` reduces that boundary: only the remaining
-`memory_data_bus.c` translation unit may exist under the memory module, none may
-include a DB client, and DB2 may not regain a `memory_*.c` implementation.
-The same check prevents the former POSIX/Windows regex-policy files and the
-retired in-process C query rewriter from returning; those gates now use
-`content_gate.go` through the generic command route.
-It also rejects restoring or relocating the deleted native gate, extraction and
-context-assembly APIs, including declarations and macro aliases.
+`check_memory_c_boundary.py` also forbids database access from the benchmark
+transport and rejects restored native memory policy in other owners. Existing
+external C transport callers may remain; they cannot replace an unavailable Go
+owner with local memory behavior. There are no forwarding memory headers or
+native memory include roots in Make/CMake.
 
-`scripts/check_memory_go_only.py --report` retains the immutable, broader native
-inventory, including external callers, types, forwarding headers, cgo imports
-and build registrations. It still exits unsuccessfully when any finding remains.
-Its historical all-native-callers criterion predates the clarified module-only
-language boundary, so findings need ownership classification: permitted C host
-transport is distinct from forbidden native memory behavior or module-side C
-communication. Neither reclassifying findings nor passing the transitional
-allowlist demonstrates that G0 is complete.
+The historical `check_memory_go_only.py --report` inventory remains available
+with its original all-native-callers criterion and immutable baseline. It still
+reports external C callers and shared types, so its total is not the module's
+native-file count. The default audit has not been weakened or made to pass by
+renaming retained host interfaces.
+
+Recall lane counters now live in Go and are exposed by `recall-metrics` as
+`lane_counters`. They count unique eligible candidates and the final store
+selection for lexical, semantic and graph lanes, including overlapping sources
+and a shutout when a populated lane supplies no selected record. Empty lanes
+emit no keys. Counters are process-local, concurrency-safe and diagnostic only;
+they are not evidence of final context packing, transaction commit or provider
+delivery. Route-qualified counts distinguish lexical from hybrid contributions.
+
+The native `bench-perf` memory cases depended on deleted in-process functions.
+They now emit null timings with `status=unavailable`, exit 2, and cannot save or
+certify a baseline. Use `aimee-memory-eval` for isolated Go corpus measurements;
+its results are not interchangeable with the old in-process timing baseline.
+Legacy PageRank timing and unit/temporal semantic weighting still need separate
+behavioral parity work. Removing dead declarations does not establish those
+capabilities.
 
 There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report

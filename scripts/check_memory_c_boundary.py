@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze remaining native memory debt and prevent retired C clients returning."""
+"""Require a Go-only memory module and prevent retired native memory behavior."""
 
 from __future__ import annotations
 
@@ -7,11 +7,15 @@ import argparse
 import json
 import re
 from pathlib import Path
+import importlib.util
+
+_spec = importlib.util.spec_from_file_location("memory_go_only", Path(__file__).with_name("check_memory_go_only.py"))
+assert _spec and _spec.loader
+_go_only = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_go_only)
 
 
-ALLOWED_C = {
-    "src/modules/memory/memory_data_bus.c",
-}
+ALLOWED_C: set[str] = set()
 
 FORBIDDEN_INCLUDES = (
     "db1_client/",
@@ -188,7 +192,7 @@ FORBIDDEN_STORE_CALLS = (
     "aimee_pg_",
 )
 
-EXTERNAL_CONNECTION_C: set[str] = set()
+EXTERNAL_CONNECTION_C = {"src/modules/benchmarks/agent_eval_memory_transport.c"}
 
 KB_CONNECTION_C = {
     "src/kb/kb_memory_facts.c",
@@ -218,18 +222,9 @@ class BoundaryError(ValueError):
 
 
 def validate(root: Path) -> None:
-    descriptor_path = root / "src/modules/memory/module.yaml"
-    descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
-    declared = {source for source in descriptor.get("sources", []) if source.endswith(".c")}
-    physical = {
-        path.relative_to(root).as_posix()
-        for path in (root / "src/modules/memory").glob("*.c")
-    }
-    if declared != ALLOWED_C or physical != ALLOWED_C:
-        raise BoundaryError(
-            f"rule=memory-c-allowlist declared={sorted(declared)} physical={sorted(physical)} "
-            f"expected={sorted(ALLOWED_C)}"
-        )
+    failures = _go_only.module_violations(root)
+    if failures:
+        raise BoundaryError(f"rule=memory-go-only violations={failures}")
 
     retired = sorted((root / "src/modules/db2/c").glob("memory_*.c"))
     if retired:
@@ -257,7 +252,7 @@ def validate(root: Path) -> None:
                 f"symbol={match.group(0)}"
             )
 
-    missing_connections = [relative for relative in KB_CONNECTION_C if not (root / relative).exists()]
+    missing_connections = [relative for relative in KB_CONNECTION_C | EXTERNAL_CONNECTION_C if not (root / relative).exists()]
     if missing_connections:
         raise BoundaryError(f"rule=memory-c-connection-inventory missing={missing_connections}")
 

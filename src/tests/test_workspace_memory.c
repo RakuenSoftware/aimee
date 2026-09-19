@@ -13,7 +13,6 @@
 #include "../modules/db2/c/lifecycle.h"
 #include "../modules/db2/c/memory_query.h"
 #include "../modules/db2/c/memory_relations.h"
-#include "../modules/memory/memory_core_internal.h"
 
 static char tmpdir[64];
 

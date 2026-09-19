@@ -109,7 +109,13 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 		}
 		return result, status
 	}
+	beforeLanes := laneMetrics()
 	got, status := call()
+	afterLanes := laneMetrics()
+	if afterLanes["memory.query.lane.semantic.served"] != beforeLanes["memory.query.lane.semantic.served"]+1 ||
+		afterLanes["memory.query.lane.lexical.served"] != beforeLanes["memory.query.lane.lexical.served"] {
+		t.Fatal("semantic-only result attribution lost", beforeLanes, afterLanes)
+	}
 	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
 		t.Fatal("semantic-only recall failed or leaked hidden/stale rows", got, status)
 	}

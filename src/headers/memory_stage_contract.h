@@ -1,7 +1,9 @@
-/* Remaining fixed-stage identifiers for native callers awaiting retirement.
- * Memory wire encoding/decoding and all scoring/extraction policy live in Go. */
-#ifndef AIMEE_MEMORY_MODULE_API_H
-#define AIMEE_MEMORY_MODULE_API_H 1
+/* Host-side protocol identifiers for calls to the Go memory process.
+ * These numbers must match process-contracts.json and the Go stage constants.
+ * No module implementation or module-side bus adapter is defined here.
+ */
+#ifndef AIMEE_HOST_MEMORY_STAGE_CONTRACT_H
+#define AIMEE_HOST_MEMORY_STAGE_CONTRACT_H 1
 
 #define AIMEE_MEMORY_EVENT_EXTRACT_INDEX    5889u
 #define AIMEE_MEMORY_EVENT_WRITE            5890u
@@ -19,8 +21,5 @@
 #define AIMEE_MEMORY_STAGE_DECLARE_COMMANDS 6u
 #define AIMEE_MEMORY_STAGE_DATA             7u
 #define AIMEE_MEMORY_STAGE_COMMAND          8u
-
-/* Bound on raw relation labels accepted by the Go write decision. */
-#define AIMEE_MEMORY_REL_TYPE_MAX 256u
 
 #endif

@@ -16384,7 +16384,6 @@
     },
     {
       "consumers": [
-        "src/tests/bench_perf.c",
         "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
         "src/tests/test_calibration.c",
@@ -16509,7 +16508,6 @@
     },
     {
       "consumers": [
-        "src/tests/bench_perf.c",
         "src/tests/test_approach_memory.c",
         "src/tests/test_artifacts.c",
         "src/tests/test_bandit.c",
@@ -19987,13 +19985,13 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "fac47e1dd1513ce5e0b79a906236d298344d418022ad4e1904077f7c7aefbacf",
+  "fingerprint": "4118f5c26375793aaee6aa551c6dcf87928d34a1bc09132ee68114236499b62f",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 429,
     "declarations": 1097,
-    "headers": 125,
+    "headers": 126,
     "internal_unconsumed": 204,
     "private_test_only": 275,
     "reviewed": 189

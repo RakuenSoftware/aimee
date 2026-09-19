@@ -98,7 +98,7 @@ func exerciseGraphFusionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
  VALUES('graph-replay-seed','fact.assert','test:graph','model',10,'open')`)
 	execSQL(`INSERT INTO entity_edges(source,relation,target,edge_class,lifecycle_state,commit_id,ontology_version)
  VALUES('graph-shared-entity','works_for','graph-candidate-node','semantic','candidate','graph-replay-seed',1)`)
-	req := DataRequest{Query: "graph-direct-seed", Project: "graph-visible", Limit: 64}
+	req := DataRequest{Query: "graph-direct-seed", Project: "graph-visible", Limit: 64, lanes: recallLanes{}}
 	records, err := backend.fuseMemoryGraph(ctx, req, false, []Record{first})
 	if err != nil {
 		t.Fatal(err)
@@ -113,6 +113,9 @@ func exerciseGraphFusionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	}
 	if !has(records, bridge.ID) || !has(records, second.ID) || has(records, hidden.ID) || has(records, code.ID) || has(records, stale.ID) || has(records, candidate.ID) {
 		t.Fatal("bridge, scope or graph admission failed", records)
+	}
+	if req.lanes[bridge.ID] != laneGraph || req.lanes[second.ID] != laneGraph || req.lanes[hidden.ID] != 0 {
+		t.Fatal("graph attribution lost or included hidden rows", req.lanes)
 	}
 	req.Query = "graph-direct-seed parser.go"
 	records, err = backend.fuseMemoryGraph(ctx, req, false, []Record{first})

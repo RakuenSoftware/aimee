@@ -16,14 +16,14 @@
  * validation, and ontology self-validation. It links without libpq so it is unit-
  * testable in isolation.
  *
- * Entity kinds reuse memory_node_kind_t (memory_ontology.h); NODE_OTHER is the
+ * Entity kinds reuse memory_node_kind_t (DB2 graph_kinds.h); NODE_OTHER is the
  * ANY wildcard (matching the existing schema-rule convention) and NODE_SCALAR is
  * a value-typed object (age=30). */
 #ifndef DEC_REL_TYPES_H
 #define DEC_REL_TYPES_H 1
 
 #include <stddef.h>
-#include "modules/memory/memory_ontology.h"
+#include "modules/db2/c/graph_kinds.h"
 
 #ifdef __cplusplus
 extern "C"

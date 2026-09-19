@@ -1,14 +1,12 @@
-/* Legacy ABI translation for the Go memory data stage.
- *
- * This file is intentionally limited to event-bus connection work: build a
- * bounded JSON request, invoke memory:7, and copy the reply into the existing C
- * structs while callers migrate. No persistence, ranking, lifecycle, or scope
- * policy is implemented here.
+/* Host-side transport for native benchmark callers of the Go memory owner.
+ * This belongs to the benchmark host, not the memory process. The memory-side
+ * producer/consumer and all persistence, ranking, lifecycle and scope decisions
+ * are Go. The existing C bus remains the transport substrate.
  */
 #include "aimee.h"
 #include "headers/module_json_call.h"
 
-#include <aimee/memory/module_api.h>
+#include "headers/memory_stage_contract.h"
 #include <aimee/core/event_bus/module_protocol.h>
 
 #include "cJSON.h"

@@ -31,7 +31,7 @@
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/learning.h>
 #include <aimee/learning/module_api.h>
-#include <aimee/memory/module_api.h>
+#include "headers/memory_stage_contract.h"
 #include <aimee/postgres/module_api.h>
 
 #include <limits.h>

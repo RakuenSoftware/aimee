@@ -123,3 +123,17 @@ New suites register offline harness/data/metric contracts without adding runtime
 compatibility-alias candidates for a later source slice. Stale corpora, duplicate runners, committed
 sample results, and self-tested-only harnesses are candidates, not confirmed dead; removal requires
 consumer, CI, reproducibility, licensing, and liveness evidence.
+
+## Native memory callers
+
+`agent_eval_memory_transport.c` owns the native benchmark host's legacy memory
+request/response adapter. It uses the existing C bus; the shared memory process
+and its producer/consumer remain pure Go. This ownership move does not fix the
+legacy dataset runners' scratch-store isolation: their C connection cannot
+redirect the Go owner. Use the explicit disposable store in `aimee-memory-eval`
+for the supported Go corpus path.
+
+The separate native `bench-perf` harness keeps retired memory case names as
+`unavailable` with null timings and exits 2 without saving or certifying a
+baseline. Its deleted in-process memory calls are not a valid benchmark of the
+Go service.

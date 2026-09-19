@@ -29,6 +29,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
         root = Path(tmp.name)
         (root / "src/modules/memory").mkdir(parents=True)
         (root / "src/modules/db2/c").mkdir(parents=True)
+        (root / "server-go/modules/memory").mkdir(parents=True)
         for relative in ALLOWED_C:
             path = root / relative
             path.write_text("/* event bus adapter */\n", encoding="utf-8")
@@ -53,6 +54,30 @@ class MemoryCBoundaryTest(unittest.TestCase):
         (root / "src/modules/memory/ranker.c").write_text("int rank(void);\n", encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)
+
+    def test_rejects_nested_headers_cgo_and_native_descriptor(self) -> None:
+        for relative, source in (
+            ("server-go/modules/memory/nested/adapter.h", "int native(void);"),
+            ("src/modules/memory/include/adapter.h", "int native(void);"),
+            ("server-go/modules/memory/adapter.go", 'package memory\nimport "C"\n'),
+            ("src/modules/memory/module.yaml", '{"sources":["src/host/adapter.c"]}'),
+        ):
+            with self.subTest(relative=relative):
+                root = self.fixture()
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source)
+                with self.assertRaisesRegex(BoundaryError, "memory-go-only"):
+                    validate(root)
+
+    def test_keeps_bus_and_host_transport_in_c(self) -> None:
+        root = self.fixture()
+        path = root / "src/core/event_bus/bus_host.c"
+        path.parent.mkdir(parents=True)
+        path.write_text("int bus_host(void) { return 0; }\n")
+        path = root / next(iter(EXTERNAL_CONNECTION_C))
+        path.write_text("void *host_call(void) { return aimee_module_json_call(5895, 7); }\n")
+        validate(root)
 
     def test_rejects_retired_db2_memory_source(self) -> None:
         root = self.fixture()
@@ -102,7 +127,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
 
     def test_rejects_direct_storage_include(self) -> None:
         root = self.fixture()
-        target = root / next(iter(ALLOWED_C))
+        target = root / next(iter(EXTERNAL_CONNECTION_C))
         target.write_text('#include "db1_client/user_memory.h"\n', encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)
@@ -126,7 +151,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
 
     def test_rejects_direct_store_call_without_include(self) -> None:
         root = self.fixture()
-        target = root / next(iter(ALLOWED_C))
+        target = root / next(iter(EXTERNAL_CONNECTION_C))
         target.write_text("void *p = db2_conn();\n", encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)

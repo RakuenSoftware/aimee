@@ -18,6 +18,7 @@ type RuntimeMetrics struct {
 	Assemblies     int64            `json:"assemblies"`
 	Starts         int64            `json:"starts"`
 	AnswerCounters map[string]int64 `json:"answer_counters,omitempty"`
+	LaneCounters   map[string]int64 `json:"lane_counters,omitempty"`
 }
 
 type durationCounters struct {
@@ -85,6 +86,7 @@ func recallMetrics() RuntimeMetrics {
 	_, average, maximum := runtimeMetricState.recallCalls.snapshot()
 	return RuntimeMetrics{Assemblies: runtimeMetricState.recallAssemblies.Load(),
 		Starts: runtimeMetricState.recallStarts.Load(), AverageMS: average, MaximumMS: maximum,
+		LaneCounters: laneMetrics(),
 		AnswerCounters: map[string]int64{
 			"memory.citation.required":   runtimeMetricState.citationRequired.Load(),
 			"memory.citation.reprompted": runtimeMetricState.citationReprompted.Load(),

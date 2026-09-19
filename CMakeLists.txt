@@ -89,7 +89,6 @@ include_directories(
     ${AIMEE_PROTOCOLS_INCLUDE_DIR}
     ${AIMEE_CORE_CONNECTION_INCLUDE_DIR}
     ${AIMEE_CORE_EVENT_BUS_INCLUDE_DIR}
-    "${AIMEE_SRC_DIR}/modules/memory/include"
     "${AIMEE_SRC_DIR}/modules/learning/include"
     "${AIMEE_SRC_DIR}/modules/tools/include"
     "${AIMEE_SRC_DIR}/modules/workspace/include"
@@ -898,7 +897,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
     ${AIMEE_SRC_DIR}/server/ir_host_bindings.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
+    ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_transport.c
     ${AIMEE_SRC_DIR}/server/obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/server/module_routing_adapter.c
     ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
@@ -1049,7 +1048,6 @@ list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c)
 
 set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_main.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
     ${AIMEE_SRC_DIR}/kb/kb_document_inspector.c
     ${AIMEE_SRC_DIR}/kb/kb_obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/kb/kb_background.c

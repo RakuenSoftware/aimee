@@ -111,6 +111,7 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 	if err != nil {
 		return nil, err
 	}
+	req.lanes.add(semantic, laneSemantic)
 	combined := fusePersonal(base, semantic, len(base)+len(semantic))
 	if !exact {
 		scopeRank := func(r Record) int {

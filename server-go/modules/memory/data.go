@@ -30,6 +30,7 @@ const (
 )
 
 type DataRequest struct {
+	lanes          recallLanes             // request-local attribution; never accepted from wire input
 	TypedContext   *typedContextOptions    `json:"typed_context,omitempty"`
 	Assertions     *assertionSearchRequest `json:"assertions,omitempty"`
 	TraceBatch     *traceMiningBatch       `json:"trace_batch,omitempty"`
@@ -689,6 +690,8 @@ ORDER BY (lower(key)=lower($7)) DESC,
 		return nil, err
 	}
 	rows.Close()
+	lanes := recallLanes{}
+	lanes.add(records, laneLexical)
 	if s.personal != nil && query != "" {
 		// Leave time to return the local lexical result when DNS or the model
 		// stalls. Consuming the bus deadline would discard that valid result.
@@ -700,10 +703,11 @@ ORDER BY (lower(key)=lower($7)) DESC,
 		semantic, err := s.personal.search(semanticCtx, query, kind, tier, limit)
 		cancel()
 		if err == nil {
+			lanes.add(semantic, laneSemantic)
 			records = fusePersonal(records, semantic, limit)
 		}
 	}
-	return s.finalizeRecall(ctx, DataRequest{Scope: scope, Query: query, Kind: kind, Tier: tier, Limit: limit}, true, records)
+	return s.finalizeRecall(ctx, DataRequest{Scope: scope, Query: query, Kind: kind, Tier: tier, Limit: limit, lanes: lanes}, true, records)
 }
 
 // searchPattern keeps a multi-word query useful when callers supply keyword

@@ -1,21 +1,10 @@
-#ifndef DEC_MEMORY_ONTOLOGY_H
-#define DEC_MEMORY_ONTOLOGY_H 1
+#ifndef AIMEE_DB2_GRAPH_KINDS_H
+#define AIMEE_DB2_GRAPH_KINDS_H 1
 
-/* memory_ontology.h: typed node and edge ontology for the aimee memory graph.
- *
- * entity_edges rows are S-R-O triples.  Each row carries:
- *   source      TEXT  — subject entity name
- *   relation    TEXT  — text relation label
- *   target      TEXT  — object entity name
- *   relation_id INT   — integer code matching memory_relation_kind_t (nullable;
- *                        NULL is treated as REL_CO_DISCUSSED)
- *   subject_kind INT  — integer code matching memory_node_kind_t (nullable)
- *   object_kind  INT  — integer code matching memory_node_kind_t (nullable)
- *
- * memory_relation_schema(relation_id, subject_kind, object_kind) holds the
- * allowed (subject_kind, object_kind) pairs per relation.  Writes are
- * validated at insert time; invalid triples are logged and downgraded to
- * REL_CO_DISCUSSED with a warning.
+/* Persisted DB2 graph schema codes shared by native code-index writers and
+ * the Go memory owner. Values are an on-disk contract, not memory policy.
+ * Historical typedef names remain for native storage consumers. No validation,
+ * extraction, ranking or memory-side communication is implemented here.
  */
 
 /* ---- Node kinds --------------------------------------------------------- */
@@ -65,4 +54,4 @@ typedef enum
    REL_OTHER = 99
 } memory_relation_kind_t;
 
-#endif /* DEC_MEMORY_ONTOLOGY_H */
+#endif /* AIMEE_DB2_GRAPH_KINDS_H */

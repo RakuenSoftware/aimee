@@ -113,6 +113,8 @@ def analyse(root: Path = ROOT) -> tuple[dict[str, int], list[str]]:
     header_kinds: set[int] = set()
     for module_id in sorted(registered_processes):
         header = root / "src/modules" / module_id / "include" / "aimee" / module_id / "module_api.h"
+        if module_id == "memory":
+            header = root / "src/headers/memory_stage_contract.h"
         if not header.exists():
             continue  # C db1 exposes its generated family contract elsewhere.
         resolved = resolve_header_kinds(header.read_text(encoding="utf-8"))

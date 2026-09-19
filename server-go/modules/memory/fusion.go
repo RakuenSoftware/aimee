@@ -216,6 +216,7 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	if err != nil {
 		return nil, err
 	}
+	req.lanes.add(graph, laneGraph)
 	out := fusePersonal(base, graph, len(base)+len(graph))
 	for i := range out {
 		if signal, ok := signals[out[i].ID]; ok {
