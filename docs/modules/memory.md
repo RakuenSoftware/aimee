@@ -557,6 +557,15 @@ The Go package tests cover placement isolation, scope expansion, CRUD,
 maintenance, workflow identity, recall gating, extraction, ontology, embedding,
 typed-fact planning/grounding, and PII behavior. Active C transport tests cover message framing and host/connection integration;
 retired-engine fixtures are not substitutes for Go owner regressions.
+The required `db2-process-replay` CI job initializes the packaged DB2 owner,
+then runs `make -C src memory-owner-replay-check` with separate packaged-replay
+and empty scratch connections. `AIMEE_DB2_URL`, `AIMEE_MEMORY_EVAL_URL` and
+`AIMEE_DB_TEST_URL` are required; the evaluator provisions isolated databases.
+The target runs the full memory, isolated evaluator and module race suites with
+required PostgreSQL variables, including the restricted-role replay. Missing
+DSNs fail instead of skipping. This gate proves fixture contracts; it does not
+certify real-provider quality or the complete restart/failure matrix.
+
 Descriptor validation enforces the source inventory, and both `aimee-server`
 and `aimee-kb` must link without any retired C memory implementation.
 

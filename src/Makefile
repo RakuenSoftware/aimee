@@ -1439,6 +1439,18 @@ check-transport-artifact:
 test-transport-artifact:
 	@python3 ../tests/test_transport_artifact.py
 
+.PHONY: memory-owner-replay-check
+# Reuse the packaged DB2 module replay database; do not invent a memory scratch
+# store. Missing runtime-role or evaluator DSNs must fail rather than skip CI.
+memory-owner-replay-check:
+	@test -n "$$AIMEE_DB2_URL" || (echo "memory-owner-replay-check requires AIMEE_DB2_URL for a disposable packaged DB2 database" >&2; exit 2)
+	@test -n "$$AIMEE_MEMORY_EVAL_URL" || (echo "memory-owner-replay-check requires AIMEE_MEMORY_EVAL_URL for a separate disposable scratch database" >&2; exit 2)
+	@test -n "$$AIMEE_DB_TEST_URL" || (echo "memory-owner-replay-check requires AIMEE_DB_TEST_URL for isolated evaluator provisioning" >&2; exit 2)
+	cd ../server-go && AIMEE_DB2_REPLAY_URL="$$AIMEE_DB2_URL" \
+	  AIMEE_MEMORY_REPLAY_REQUIRED=1 AIMEE_MEMORY_EVAL_REQUIRED=1 \
+	  AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 -v \
+	  ./modules/memory ./modules/memory/cmd/aimee-memory-eval ./cmd/aimee-module
+
 memory-retrieval-eval-check:
 	cd ../server-go && AIMEE_MEMORY_EVAL_REQUIRED=1 go test -race -count=1 -v ./modules/memory -run '^(TestRetrievalCorpus|TestPersonalMemoryPrivacyRegression|TestContentGateEmitsCleanVerdict|TestPrivateCode.*|TestKBGraphFusionUsesInstancePolicyAndVisibility|TestCodeVectorsRejectStaleContentAndModel)$$'
 
