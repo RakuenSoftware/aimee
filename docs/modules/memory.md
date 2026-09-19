@@ -262,6 +262,12 @@ The placement is validated before every data operation. The server's C bus
 adapter also replaces any supplied scope with `user`, so a client cannot use the
 server placement to address KB memory. The KB placement rejects user scope.
 
+The Go owner stores embedding generations in an unconstrained `vector` column,
+with dimensions recorded per version. Global DB2 dimension reset only discovers
+columns declared with a fixed vector dimension, so it cannot drop these Go-owned
+generations. Unknown dimension-bound tables still refuse the reset, including
+with force enabled. Rebuild/cutover of memory generations stays with Go.
+
 ## Public contracts
 
 Server KB store, list and supersede forward complete Go-rendered responses through

@@ -28,6 +28,7 @@ func TestMemoryPostgresReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
+	exerciseVersionedEmbeddingResetBoundary(t, ctx, tx)
 	backend := NewPGMemoryBackend(MemorySeams{
 		QueryRow: func(ctx context.Context, sql string, args ...any) HealthRow { return tx.QueryRow(ctx, sql, args...) },
 		Query:    func(ctx context.Context, sql string, args ...any) (Rows, error) { return tx.Query(ctx, sql, args...) },
@@ -86,4 +87,44 @@ func TestMemoryPostgresReplay(t *testing.T) {
 	if _, status := handler(memoryInvocation(), request); status != bus.ModuleStatusInternal {
 		t.Fatalf("missing memory approval must report backend failure, got %v", status)
 	}
+}
+
+func exerciseVersionedEmbeddingResetBoundary(t *testing.T, ctx context.Context, tx pgx.Tx) {
+	t.Helper()
+	backend := NewPGLifecycleBackend(LifecycleSeams{
+		QueryRow: func(ctx context.Context, sql string, args ...any) HealthRow { return tx.QueryRow(ctx, sql, args...) },
+		Query:    func(ctx context.Context, sql string, args ...any) (Rows, error) { return tx.Query(ctx, sql, args...) },
+	}).(*pgLifecycleBackend)
+	var dimension int
+	if err := tx.QueryRow(ctx, `SELECT atttypmod FROM pg_attribute WHERE attrelid='memory_embedding_versions'::regclass AND attname='embedding'`).Scan(&dimension); err != nil || dimension != -1 {
+		t.Fatalf("versioned memory vectors must retain independent dimensions: %d %v", dimension, err)
+	}
+	tables, unknown, err := backend.discoverVectorTables(ctx)
+	if err != nil || len(unknown) != 0 || len(tables) == 0 {
+		t.Fatal("packaged reset discovery", tables, unknown, err)
+	}
+	for _, table := range tables {
+		if table == "memory_embedding_versions" {
+			t.Fatal("global reset would destroy Go-owned embedding versions")
+		}
+	}
+	exec := func(sql string) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`SAVEPOINT vector_reset_boundary;
+CREATE TABLE public.replay_unbounded_vectors (embedding vector);
+CREATE TABLE public.replay_unknown_vectors (embedding vector(384));
+CREATE TABLE public.replay_mixed_vectors (owned vector, fixed vector(384))`)
+	_, unknown, err = backend.discoverVectorTables(ctx)
+	if err != nil || len(unknown) != 2 || unknown[0] != "replay_mixed_vectors" || unknown[1] != "replay_unknown_vectors" {
+		t.Fatal("unknown dimension-bound vectors must refuse reset", unknown, err)
+	}
+	outcome, _, err := backend.DimensionReset(ctx, 385, true, true)
+	if err != nil || outcome != DimensionResetRefused {
+		t.Fatal("unknown vectors admitted despite force/dry-run", outcome, err)
+	}
+	exec(`ROLLBACK TO SAVEPOINT vector_reset_boundary; RELEASE SAVEPOINT vector_reset_boundary`)
 }

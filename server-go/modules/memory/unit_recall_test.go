@@ -56,7 +56,14 @@ func exerciseUnitRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, back
 	defer exec(`ROLLBACK TO SAVEPOINT unit_recall_replay; RELEASE SAVEPOINT unit_recall_replay`)
 	exec(`RESET ROLE; SELECT set_config('aimee.memory_scope_all','1',true)`)
 	weak := make([]float32, dimension)
-	weak[0], weak[1] = .1, float32(math.Sqrt(.99))
+	// The default admission floor is higher for <=384 dimensions. Keep
+	// intended unit lanes above that floor, while summary and unrelated
+	// intents remain below it; the production dimension policy is unchanged.
+	similarity := .1
+	if dimension <= 384 {
+		similarity = .25
+	}
+	weak[0], weak[1] = float32(similarity), float32(math.Sqrt(1-similarity*similarity))
 	strong := make([]float32, dimension)
 	strong[0] = 1
 	off := make([]float32, dimension)

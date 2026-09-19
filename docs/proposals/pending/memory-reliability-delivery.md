@@ -44,6 +44,13 @@ counts and pending statements are dated checkpoints, not current certification.
 The full cross-language bus conformance suite passes locally, including memory
 termination/restart in both placements. Its egress fixture advertised one
 uninitialized extra stage; the fixture now matches the seven shipping stages.
-The previous remote packaged-DB2 replay failed at its dimension-reset assertion
-before reaching the memory suite. Memory replay now runs after an earlier step
-failure to report its own result; the required job still retains every failure.
+Remote CI exposed a reset-discovery boundary: unconstrained Go-owned embedding
+versions were treated as unknown global-dimension tables. Reset discovery now
+includes only dimension-bound vector columns; unknown fixed-dimension tables
+still refuse reset. Memory replay reports independently after earlier failures.
+The unit-semantic fixture now accounts for the existing dimension-specific floor;
+restricted-role replay passes locally at both 384 and 1024 dimensions.
+The shared-database bootstrap fixture now writes through the real Go memory
+handler so canonical KB mutations get their scoped transaction and Server writes
+use user scope. Both bootstrap orders and concurrent bootstrap pass with the
+existing rows preserved.
