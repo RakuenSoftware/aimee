@@ -7780,32 +7780,6 @@
       "symbol": "db2_exec_text_id"
     },
     {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 67
-        }
-      ],
-      "signature": "int db2_fact_actor_capture_memory ( int64_t memory_id , int user_authority )",
-      "signature_sha256": "cd8a34302668a50cded9fdc21183065aa939a255693944c5558a49da41c9d395",
-      "status": "internal-unconsumed",
-      "symbol": "db2_fact_actor_capture_memory"
-    },
-    {
-      "consumers": [],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 68
-        }
-      ],
-      "signature": "int db2_fact_actor_for_memory ( int64_t memory_id , fact_actor_t * out )",
-      "signature_sha256": "a0817533765b98d855a3f952afd78dee8b02de3b52eabdaa4bec8e796e718f5f",
-      "status": "internal-unconsumed",
-      "symbol": "db2_fact_actor_for_memory"
-    },
-    {
       "consumers": [
         "src/kb/http/kb_http_console.c",
         "src/tests/support/kb_http_route_stubs.c"
@@ -7847,7 +7821,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 168
+          "line": 149
         }
       ],
       "signature": "int db2_fact_commit_preview ( const char * commit_id , fact_commit_change_t * out , int max )",
@@ -7866,7 +7840,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 172
+          "line": 153
         }
       ],
       "signature": "int db2_fact_commit_rollback ( const fact_actor_t * actor , const char * commit_id , char rollback_commit_id [ FACT_COMMIT_ID_MAX ] )",
@@ -7883,7 +7857,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 192
+          "line": 173
         }
       ],
       "signature": "int db2_fact_erasure_execute ( const fact_actor_t * actor , const char * source , const char * relation , const char * target , fact_erasure_impact_t * out , char commit_id [ FACT_COMMIT_ID_MAX ] )",
@@ -7900,7 +7874,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 190
+          "line": 171
         }
       ],
       "signature": "int db2_fact_erasure_preview ( const char * source , const char * relation , const char * target , fact_erasure_impact_t * out )",
@@ -7916,7 +7890,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 199
+          "line": 180
         }
       ],
       "signature": "int db2_fact_graph_record_external_in_txn ( const fact_actor_t * actor , const char * operation , const char * object_kind , const char * object_key , const char * action , const char * before_state , const char * after_state , int reversible , char commit_id [ FACT_COMMIT_ID_MAX ] )",
@@ -7933,7 +7907,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 177
+          "line": 158
         }
       ],
       "signature": "int db2_fact_ingest_run_preview ( const char * ingest_run_id , fact_commit_change_t * out , int max )",
@@ -7950,7 +7924,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 178
+          "line": 159
         }
       ],
       "signature": "int db2_fact_ingest_run_rollback ( const fact_actor_t * actor , const char * ingest_run_id , char rollback_commit_id [ FACT_COMMIT_ID_MAX ] )",
@@ -7963,7 +7937,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 137
+          "line": 118
         }
       ],
       "signature": "int db2_fact_mutation_annotate ( const fact_actor_t * actor , int64_t assertion_id , const char * annotation , fact_mutation_result_t * out )",
@@ -7979,7 +7953,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 133
+          "line": 114
         }
       ],
       "signature": "int db2_fact_mutation_assert ( const fact_actor_t * actor , const fact_assertion_input_t * input , fact_mutation_result_t * out )",
@@ -7996,7 +7970,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
-          "line": 149
+          "line": 130
         }
       ],
       "signature": "int db2_fact_mutation_review ( const fact_actor_t * actor , int64_t assertion_id , fact_review_action_t action , fact_mutation_result_t * out )",
@@ -19955,14 +19929,14 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "ecda87a1f3d68bdf6aa229df416bf216773dee39ed0ec8edc5aa6fb5c6d087bf",
+  "fingerprint": "63eed00980f0e2f669cb466c405349e0ec506cc3e877d662a3c9a7ffb40ff14e",
   "module": "db2",
   "schema_version": 1,
   "summary": {
     "audit_pending": 427,
-    "declarations": 1097,
+    "declarations": 1095,
     "headers": 126,
-    "internal_unconsumed": 204,
+    "internal_unconsumed": 202,
     "private_test_only": 277,
     "reviewed": 189
   }
