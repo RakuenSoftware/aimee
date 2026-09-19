@@ -5,7 +5,7 @@ new rank order reproduces the retired native engine. The C bus remains C.
 
 | Area | Decision | Evidence / migration consequence |
 |---|---|---|
-| Query expansion | Retire the legacy benchmark question normalization/truncation and implicit native semantic expansion. The owner receives the original query; its ordinary lexical parser and embedding input bounds still apply. No benchmark-only query rewriting or gold injection. Server search in both placements preserves queries up to 16,384 bytes and rejects longer ones instead of silently cutting at 2,047 bytes. | `dataset_test.go`, `corpus_test.go`, `label_audit_test.go`, `public_commands_test.go` and restricted-role Server search replay; artifact fixture policy `full-text-raw-query-v1`. Historical native scores need paired remeasurement. |
+| Query expansion | Retire the legacy benchmark question normalization/truncation and implicit native semantic expansion. The owner receives the original query; its ordinary lexical parser and embedding input bounds still apply. No benchmark-only query rewriting or gold injection. Server search in both placements preserves queries up to 16,384 bytes and rejects longer ones instead of silently cutting at 2,047 bytes. | `dataset_test.go`, `corpus_test.go`, `label_audit_test.go`, `public_commands_test.go` and restricted-role Server search replay; artifact fixture policy `full-text-raw-query-v1`. The [paired real-provider run](../../validation/memory-g0-2026-09-19.md) records the measured quality/latency changes. |
 | Candidate admission | Keep scoped lexical plus active-version whole-record/unit/temporal semantic recall; apply visibility, lifecycle, suppression and current-input checks before limits. | Packaged-role `shared_recall_test.go` and `unit_recall_test.go`, including a matching unversioned vector that must not be admitted. |
 | Graph evidence audience | Every memory-backed source must resolve to a current parent in the request audience; one visible source cannot admit a dependency on a hidden, missing, suppressed, future or expired source. Shared-workspace sources remain valid for a contextual query but cannot widen an exact project query. | Restricted-role graph replay exercises mixed evidence and positive all-visible controls. The eligibility fingerprint is `current-validity-v5`. |
 | Unversioned vectors | Do not infer model compatibility from vector width. Legacy vector rows are retained for maintenance, but they do not supply this semantic lane. Re-embed and activate a named version with a verified serving identity. | `reembed_test.go` and `shared_recall_test.go`. Lexical recall remains available on ordinary dependency failure; evaluation explicitly refuses semantic fallback. |
@@ -21,9 +21,11 @@ schema snapshot, embedding identity/dimension and effective ranking configuratio
 An old baseline with only aggregate metrics is unbound and cannot pass this gate;
 creating a replacement requires explicit `--update-baseline` after a successful run.
 
-Still required: real-provider paired quality/performance, the complete adversarial
-manifest and transport/restart/failure matrix, pinned temporal anchors and all
-MR-18 release gates. Command embedder identity binds its configured command; it
+The [fresh-environment release report](../../validation/memory-g0-2026-09-19.md)
+provides the initial real-provider paired quality/performance results and bounded
+HTTP/CLI/MCP/owner restart/failure coverage. Still required for MR-18: the complete
+adversarial manifest and cross-surface failure matrix, pinned temporal anchors
+and its remaining release gates. Command embedder identity binds its configured command; it
 does not independently attest every executable or model-weight file that command
 may read. This limitation must not be described as full reproducibility.
 

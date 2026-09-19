@@ -60,8 +60,13 @@ The migration has passed these local checks against its production Go owner:
 Clean CI exposed stale native test link dependencies, generated-header ordering,
 a command-help loop bound, generated ownership findings and export/inventory
 bookkeeping. The PR includes the corresponding repairs and the privacy-definer
-queue grant required by Go indexing invalidation. Required CI must validate
-the pushed revision before merge; local evidence does not assert all CI is green.
+queue grant required by Go indexing invalidation. The subsequent
+[fresh-environment release validation](../../validation/memory-g0-2026-09-19.md)
+records real Docker deployments on a new `.253` guest, HTTP/CLI/MCP placement
+and outage checks, concurrent large-ID exploration, published upgrade/rollback,
+and a real-provider paired quality/latency comparison. It also records CI status
+for the tested implementation. Exact-ID transport, failure classification and
+retryable PostgreSQL initialization repairs found by that run are included.
 
 ## Deferred work
 
