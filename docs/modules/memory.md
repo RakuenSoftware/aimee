@@ -276,6 +276,15 @@ while the ordinary KB command retains its nested memory response. Missing privat
 memory still cannot trigger a KB fallback.
 
 
+Private store/get/list/search/delete/supersede/stats commands also forward complete
+Go envelopes through the Server placement. Their runtime transport quotes the
+JSON so the native parser cannot round record IDs or error receipts. Private
+get/delete/supersede accept canonical positive decimal-string int64 IDs;
+unsafe numeric IDs remain rejected. Supersede retains a typed integer in its flat
+Go response. The host adds HTTP error classification through its existing
+runtime-web provider without rewriting owner tokens. This transport change does
+not implement personal version history or durable mutation receipts.
+
 Personal review-list rendering now belongs to the Go owner through the private
 `user-review-list` runtime operation. It retains the Server envelope, both
 `lifecycle_state` and `lifecycle` fields, complete content and integer IDs. The

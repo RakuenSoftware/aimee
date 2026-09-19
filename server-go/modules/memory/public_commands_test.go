@@ -80,7 +80,13 @@ func testPrivateCommandsPreserveEnvelopesAndScope(t *testing.T, named bool) {
 		}
 		args["operation"] = "user-" + verb
 		encoded, _ := json.Marshal(args)
-		return runHostRuntime(t, handler, string(encoded))
+		outer := runHostRuntime(t, handler, string(encoded))
+		var result map[string]any
+		body, ok := outer["json"].(string)
+		if !ok || json.Unmarshal([]byte(body), &result) != nil {
+			t.Fatal("missing complete private envelope", outer)
+		}
+		return result
 	}
 	for _, test := range []struct{ verb, args, want string }{
 		{"store", `{"key":"editor","content":"vim","project":"secret-project","scope":{"type":"global"},"authority":"user","operation":"visible-search"}`, `{"status":"ok","store":"user","id":41}`},
@@ -123,7 +129,7 @@ func TestPublicCommandValidation(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementServer, s)))
 	for _, test := range []struct{ verb, args string }{
 		{"get", `{"id":0}`}, {"get", `{"id":1.5}`}, {"get", `{"id":9007199254740992}`},
-		{"get", `{"id":"42"}`}, {"get", `{"id":42,"as_of":null}`}, {"get", `{"id":42,"store":"kb"}`},
+		{"get", `{"id":"042"}`}, {"get", `{"id":42,"as_of":null}`}, {"get", `{"id":42,"store":"kb"}`},
 		{"get", `{"id":42,"store":null}`}, {"delete", `{"id":-1}`},
 		{"store", `{"key":"","content":"x"}`}, {"store", `{"key":null,"content":"x"}`},
 		{"store", `{"key":"x","content":{}}`}, {"store", `{"key":"x","content":"x","confidence":null}`},

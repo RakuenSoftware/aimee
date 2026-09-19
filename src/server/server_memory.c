@@ -126,6 +126,57 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
                                          "KB memory owner unavailable or invalid response", NULL);
 }
 
+/* The runtime envelope quotes the owner's JSON so cJSON never rewrites its
+ * integer tokens. Only the Go owner shapes private command results. */
+static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
+{
+   cJSON *transport = server_invoke_module_operation("memory.runtime", operation, req,
+                                                     "user memory module unavailable");
+   if (transport && !strcmp(jo_cstr(transport, "status"), "error"))
+      return transport;
+   const char *raw = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(transport, "json"));
+   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+                       ? cJSON_ParseWithOpts(raw, NULL, 1)
+                       : NULL;
+   const char *status = jo_cstr(parsed, "status");
+   cJSON *reply = NULL;
+   if (cJSON_IsObject(parsed) && !strcmp(status, "ok") &&
+       (!strcmp(operation, "user-search") || !strcmp(jo_cstr(parsed, "store"), "user")))
+      reply = cJSON_CreateRaw(raw);
+   else if (cJSON_IsObject(parsed) && !strcmp(status, "error") &&
+            cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "kind")) &&
+            !cJSON_HasObjectItem(parsed, "http_status"))
+   {
+      /* HTTP classification belongs to the host's runtime-web provider. Add
+       * only that transport field; preserve all owner tokens, including IDs
+       * inside error receipts. Owner envelopes cannot supply this host field. */
+      cJSON *classification = cJSON_CreateObject();
+      server_error_kind_apply(classification, jo_cstr(parsed, "kind"));
+      const cJSON *http = cJSON_GetObjectItemCaseSensitive(classification, "http_status");
+      if (cJSON_IsNumber(http) && http->valuedouble >= 400 && http->valuedouble <= 599 &&
+          floor(http->valuedouble) == http->valuedouble)
+      {
+         size_t capacity = strlen(raw) + 64;
+         char *classified = malloc(capacity);
+         if (classified)
+         {
+            snprintf(classified, capacity, "{\"http_status\":%d,%s", http->valueint,
+                     strchr(raw, '{') + 1);
+            reply = cJSON_CreateRaw(classified);
+            free(classified);
+         }
+      }
+      else
+         reply = cJSON_CreateRaw(raw);
+      cJSON_Delete(classification);
+   }
+   cJSON_Delete(parsed);
+   cJSON_Delete(transport);
+   return reply ? reply
+                : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                         "user memory owner unavailable or invalid response", NULL);
+}
+
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -136,8 +187,7 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return send_and_free(conn,
                            kb_memory_owner_command("memory.search", req, MEMORY_AUTHORITY_MODEL,
                                                    "facts", cJSON_Array));
-   return send_and_free(conn, server_invoke_module_operation("memory.runtime", "user-search", req,
-                                                             "user memory module unavailable"));
+   return send_and_free(conn, user_memory_owner_command("user-search", req));
 }
 
 static cJSON *kb_memory_store_command(const cJSON *req, memory_authority_t authority)
@@ -153,8 +203,7 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
    if (selection)
       return kb_memory_store_command(req, authority);
 
-   return server_invoke_module_operation("memory.runtime", "user-store", req,
-                                         "user memory module unavailable");
+   return user_memory_owner_command("user-store", req);
 }
 
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -180,8 +229,7 @@ cJSON *memory_list_command(const cJSON *req)
       return memory_bad_store();
    if (selection)
       return kb_memory_list_command(req);
-   return server_invoke_module_operation("memory.runtime", "user-list", req,
-                                         "user memory module unavailable");
+   return user_memory_owner_command("user-list", req);
 }
 
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -196,8 +244,7 @@ cJSON *memory_stats_command(const cJSON *req)
    if (selection < 0)
       return memory_bad_store();
    if (!selection)
-      return server_invoke_module_operation("memory.runtime", "user-stats", req,
-                                            "user memory module unavailable");
+      return user_memory_owner_command("user-stats", req);
    char *raw = kb_v1_action_request("memory.stats", cJSON_CreateObject());
    cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
@@ -265,9 +312,7 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (selection < 0)
       return send_and_free(conn, memory_bad_store());
    if (!selection)
-      return send_and_free(conn,
-                           server_invoke_module_operation("memory.runtime", "user-supersede", req,
-                                                          "user memory module unavailable"));
+      return send_and_free(conn, user_memory_owner_command("user-supersede", req));
 
    return send_and_free(conn, kb_memory_owner_command("memory.supersede", req,
                                                       MEMORY_AUTHORITY_MODEL, "id", cJSON_Number));
@@ -288,8 +333,7 @@ cJSON *memory_delete_command(cJSON *req, const char *account)
       return memory_bad_store();
    if (selection)
       return kb_memory_delete_command(req, account);
-   return server_invoke_module_operation("memory.runtime", "user-delete", req,
-                                         "user memory module unavailable");
+   return user_memory_owner_command("user-delete", req);
 }
 
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -311,8 +355,7 @@ cJSON *memory_get_command(cJSON *req)
       return memory_bad_store();
    if (selection)
       return kb_memory_get_command(req);
-   return server_invoke_module_operation("memory.runtime", "user-get", req,
-                                         "user memory module unavailable");
+   return user_memory_owner_command("user-get", req);
 }
 
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

@@ -72,7 +72,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		}
 		return runtimeJSONText(encoded, status)
 	case "user-store", "user-get", "user-list", "user-search", "user-delete", "user-supersede", "user-stats":
-		return handleUserCommand(options, invocation, operation[len("user-"):], args)
+		return runtimeJSONText(handleUserCommand(options, invocation, operation[len("user-"):], args))
 	case "prospective-dashboard", "prospective-briefing", "directive-dashboard", "directive-briefing", "stats-dashboard":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusCapabilityAbsent

@@ -62,6 +62,16 @@ cJSON *server_error_kind_json(const char *kind, const char *message, const char 
 }
 
 static int user_calls, user_result, store_calls;
+static const char *private_command_reply, *private_command_operation;
+static cJSON *materialize_reply(cJSON *reply);
+static cJSON *private_envelope(const char *json)
+{
+   cJSON *reply = cJSON_CreateObject();
+   cJSON_AddStringToObject(reply, "status", "ok");
+   cJSON_AddStringToObject(reply, "json", json);
+   return reply;
+}
+
 static const char *personal_recall_reply;
 static int personal_quarantine;
 int integrity_ingress_decide(const char *text, integrity_source_t source, const char *boundary,
@@ -112,14 +122,22 @@ cJSON *server_invoke_module_operation(const char *method, const char *operation,
       return reply;
    }
 
+   if (private_command_operation)
+   {
+      assert(!strcmp(operation, private_command_operation));
+      return private_command_reply
+                 ? private_envelope(private_command_reply)
+                 : server_error_kind_json(SERVER_ERR_UNAVAILABLE, unavailable_message, NULL);
+   }
+
    if (strcmp(operation, "user-stats") == 0)
-      return cJSON_Parse("{\"status\":\"ok\",\"store\":\"user\",\"stats\":{\"total\":3}}");
+      return private_envelope("{\"status\":\"ok\",\"store\":\"user\",\"stats\":{\"total\":3}}");
    if (strcmp(operation, "user-store") == 0)
    {
       store_calls++;
       cJSON *confidence = cJSON_GetObjectItemCaseSensitive(request, "confidence");
       assert((confidence ? confidence->valuedouble : 1.0) == expected_confidence);
-      return cJSON_Parse("{\"status\":\"ok\",\"store\":\"user\",\"id\":42}");
+      return private_envelope("{\"status\":\"ok\",\"store\":\"user\",\"id\":42}");
    }
    user_calls++;
    assert(strcmp(operation, "user-get") == 0);
@@ -128,8 +146,9 @@ cJSON *server_invoke_module_operation(const char *method, const char *operation,
       return server_error_kind_json(SERVER_ERR_UNAVAILABLE, unavailable_message, NULL);
    if (user_result == 1)
       return server_error_kind_json(SERVER_ERR_NOT_FOUND, "user memory not found", NULL);
-   return cJSON_Parse("{\"status\":\"ok\",\"store\":\"user\",\"memory\":{\"id\":42,\"content\":"
-                      "\"private local memory\"}}");
+   return private_envelope(
+       "{\"status\":\"ok\",\"store\":\"user\",\"memory\":{\"id\":42,\"content\":"
+       "\"private local memory\"}}");
 }
 
 static const char *review_reply, *review_method;
@@ -224,13 +243,14 @@ void server_error_kind_apply(cJSON *response, const char *kind)
 {
    cJSON_DeleteItemFromObjectCaseSensitive(response, "kind");
    cJSON_AddStringToObject(response, "kind", kind);
+   cJSON_AddNumberToObject(response, "http_status", !strcmp(kind, "not_found") ? 404 : 503);
 }
 static void test_stats_transport(void)
 {
    cJSON *request =
        cJSON_Parse("{\"operation\":\"delete\",\"authority\":\"user\",\"view\":\"console\"}");
    int previous_calls = review_calls;
-   cJSON *reply = memory_stats_command(request);
+   cJSON *reply = materialize_reply(memory_stats_command(request));
    assert(strcmp(cJSON_GetObjectItemCaseSensitive(reply, "store")->valuestring, "user") == 0);
    assert(review_calls == previous_calls);
    cJSON_Delete(reply);
@@ -333,7 +353,7 @@ static void test_user_namespace(void)
 {
    expected_time = "";
    cJSON *request = cJSON_Parse("{\"id\":42,\"project\":\"some-project\"}");
-   cJSON *response = memory_get_command(request);
+   cJSON *response = materialize_reply(memory_get_command(request));
    cJSON *memory = cJSON_GetObjectItem(response, "memory");
    assert(cJSON_IsObject(memory));
    assert(strcmp(cJSON_GetObjectItem(memory, "content")->valuestring, "private local memory") == 0);
@@ -536,6 +556,92 @@ static void test_get_delete_owner_envelopes(void)
    cJSON_Delete(request);
 }
 
+extern int handle_memory_supersede(server_ctx_t *, server_conn_t *, cJSON *);
+static void test_private_command_envelopes(void)
+{
+   const char *operations[] = {"user-store",  "user-get",       "user-list", "user-search",
+                               "user-delete", "user-supersede", "user-stats"};
+   const char *responses[] = {
+       "{\"status\":\"ok\",\"store\":\"user\",\"id\":9007199254740993}",
+       "{\"status\":\"ok\",\"store\":\"user\",\"memory\":{\"id\":9007199254740993,\"content\":"
+       "\"個人設定\"}}",
+       "{\"status\":\"ok\",\"store\":\"user\",\"memories\":[{\"id\":9007199254740993}]}",
+       "{\"status\":\"ok\",\"facts\":[{\"id\":9007199254740993}],\"windows\":[]}",
+       "{\"status\":\"ok\",\"store\":\"user\",\"id\":9007199254740993,\"deleted\":true,"
+       "\"destroyed\":false}",
+       "{\"status\":\"ok\",\"store\":\"user\",\"id\":9007199254740993,\"content\":\"complete "
+       "replacement\"}",
+       "{\"status\":\"ok\",\"store\":\"user\",\"stats\":{\"total\":9007199254740993}}"};
+   cJSON *request = cJSON_Parse("{\"id\":\"9007199254740993\",\"old_id\":\"9007199254740993\"}");
+   int shared_calls = calls;
+   for (size_t i = 0; i < sizeof(operations) / sizeof(operations[0]); i++)
+   {
+      private_command_operation = operations[i];
+      for (int failure = 0; failure < 2; failure++)
+      {
+         private_command_reply =
+             failure
+                 ? "{\"status\":\"error\",\"kind\":\"unavailable\",\"receipt\":9007199254740995}"
+                 : responses[i];
+         cJSON *reply = NULL;
+         switch (i)
+         {
+         case 0:
+            reply = memory_store_command(request, MEMORY_AUTHORITY_MODEL);
+            break;
+         case 1:
+            reply = memory_get_command(request);
+            break;
+         case 2:
+            reply = memory_list_command(request);
+            break;
+         case 3:
+            handle_memory_search(NULL, NULL, request);
+            break;
+         case 4:
+            reply = memory_delete_command(request, "model");
+            break;
+         case 5:
+            handle_memory_supersede(NULL, NULL, request);
+            break;
+         case 6:
+            reply = memory_stats_command(request);
+            break;
+         }
+         char *wire = reply ? cJSON_PrintUnformatted(reply) : strdup(search_wire_reply);
+         if (failure)
+         {
+            const char *prefix = "{\"http_status\":503,";
+            assert(wire && !strncmp(wire, prefix, strlen(prefix)) &&
+                   !strcmp(wire + strlen(prefix), private_command_reply + 1));
+         }
+         else
+            assert(wire && !strcmp(wire, private_command_reply));
+         free(wire);
+         cJSON_Delete(reply);
+      }
+   }
+   private_command_operation = "user-get";
+   const char *bad[] = {NULL,
+                        "{}",
+                        "[]",
+                        "{\"status\":\"unknown\"}",
+                        "{\"status\":\"ok\",\"store\":\"kb\"}",
+                        "{\"status\":\"ok\",\"store\":\"user\"} trailing"};
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+   {
+      private_command_reply = bad[i];
+      cJSON *reply = materialize_reply(memory_get_command(request));
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(reply, "kind")->valuestring,
+                     SERVER_ERR_UNAVAILABLE));
+      cJSON_Delete(reply);
+   }
+   assert(calls == shared_calls);
+   private_command_operation = NULL;
+   private_command_reply = NULL;
+   cJSON_Delete(request);
+}
+
 static void test_personal_recall_owner_envelope(void)
 {
    personal_recall_reply = "{\"status\":\"ok\",\"store\":\"user\",\"recall\":{\"identity\":[{"
@@ -601,5 +707,6 @@ int main(void)
    test_get_delete_owner_envelopes();
    test_read_owner_refusal();
    test_personal_recall_owner_envelope();
+   test_private_command_envelopes();
    return 0;
 }

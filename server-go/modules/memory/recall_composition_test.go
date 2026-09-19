@@ -58,6 +58,7 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	sharedJSON, _ := json.Marshal(map[string]any{"status": "ok", "recall": shared, "receipt": json.RawMessage(`{"id":9007199254740995}`)})
 	backend, _ := NewPostgresDataStore(evalQueryer{tx}, PlacementServer)
 	handler := NewHandler(nil, WithDataStore(PlacementServer, backend))
+	exercisePrivateCommandEnvelopes(t, handler, tx, full)
 	call := func(input string, limit int) ([]byte, bus.ModuleStatus) {
 		t.Helper()
 		args, _ := json.Marshal(map[string]any{"operation": "compose-recall", "shared_json": input, "limit_tokens": limit})
@@ -172,4 +173,81 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	if _, status := handler(bus.ModuleInvocation{StageID: StageData, PrincipalRef: 73}, data); status != bus.ModuleStatusInvalidRequest {
 		t.Fatal("plugin data composition", status)
 	}
+}
+
+// Exercise the private commands against the shipping schema and adjacent IDs
+// that collapse to the same double in a native JSON decode/re-encode.
+func exercisePrivateCommandEnvelopes(t *testing.T, handler bus.ModuleHandler, tx pgx.Tx, content string) {
+	t.Helper()
+	ctx := context.Background()
+	exec := func(sql string) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(args string) string {
+		t.Helper()
+		outer := runHostRuntime(t, handler, args)
+		body, ok := outer["json"].(string)
+		if !ok || !json.Valid([]byte(body)) {
+			t.Fatal("private command lost its owner envelope", outer)
+		}
+		return body
+	}
+	exec(`SAVEPOINT private_envelopes;
+INSERT INTO user_memories(id,key,content) VALUES (9007199254740992,'neighbor','unchanged');
+ALTER TABLE user_memories ALTER COLUMN id RESTART WITH 9007199254741001`)
+	for _, args := range []string{
+		`{"operation":"user-get","id":"9007199254740993","project":"forged","scope":{"type":"global"}}`,
+		`{"operation":"user-list"}`,
+		`{"operation":"user-search","keywords":["identity:name"]}`,
+	} {
+		body := call(args)
+		if !strings.Contains(body, `"id":9007199254740993`) || !strings.Contains(body, content) {
+			t.Fatal("private read lost integer/content precision", body)
+		}
+	}
+	for _, id := range []string{`9007199254740992`, `9007199254740993`, `"09007199254740993"`, `"9223372036854775808"`, `"+42"`, `"42 "`, `1.5`, `null`} {
+		for _, args := range []string{
+			`{"operation":"user-get","id":` + id + `}`,
+			`{"operation":"user-delete","id":` + id + `}`,
+			`{"operation":"user-supersede","old_id":` + id + `,"new_content":"invalid change"}`,
+		} {
+			if body := call(args); !strings.Contains(body, `"kind":"invalid_argument"`) {
+				t.Fatal("unsafe private ID admitted", args, body)
+			}
+		}
+	}
+	for _, test := range []struct{ args, want string }{
+		{`{"operation":"user-store","key":"new","content":"private create"}`, `"id":9007199254741001`},
+		{`{"operation":"user-supersede","old_id":"9007199254740993","new_content":"private replacement"}`, `"id":9007199254740993`},
+		{`{"operation":"user-delete","id":"9007199254740993"}`, `"id":9007199254740993`},
+		{`{"operation":"user-get","id":"9007199254740993"}`, `"kind":"not_found"`},
+		{`{"operation":"user-get","id":"9007199254740992"}`, `"content":"unchanged"`},
+		{`{"operation":"user-stats"}`, `"stats":`},
+	} {
+		if body := call(test.args); !strings.Contains(body, test.want) {
+			t.Fatal(test.args, body)
+		}
+	}
+	exec(`SAVEPOINT private_outage; ALTER TABLE user_memories RENAME TO unavailable_commands`)
+	for _, args := range []string{
+		`{"operation":"user-get","id":"9007199254740992"}`,
+		`{"operation":"user-list"}`,
+		`{"operation":"user-search","keywords":["neighbor"]}`,
+		`{"operation":"user-store","key":"new","content":"failed create"}`,
+		`{"operation":"user-supersede","old_id":"9007199254740992","new_content":"failed replacement"}`,
+		`{"operation":"user-delete","id":"9007199254740992"}`,
+		`{"operation":"user-stats"}`,
+	} {
+		if body := call(args); !strings.Contains(body, `"kind":"unavailable"`) {
+			t.Fatal("private outage disguised", args, body)
+		}
+	}
+	exec(`ROLLBACK TO SAVEPOINT private_outage; RELEASE SAVEPOINT private_outage`)
+	if body := call(`{"operation":"user-get","id":"9007199254740992"}`); !strings.Contains(body, `"content":"unchanged"`) {
+		t.Fatal("private owner did not recover", body)
+	}
+	exec(`ROLLBACK TO SAVEPOINT private_envelopes; RELEASE SAVEPOINT private_envelopes`)
 }

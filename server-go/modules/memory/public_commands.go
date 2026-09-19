@@ -163,7 +163,7 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 	switch verb {
 	case "get", "delete":
 		var ok bool
-		request.ID, ok = args.positiveID("id")
+		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("memory." + verb + " requires a positive integer id")
 		}
@@ -192,7 +192,7 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			request.Tier, request.Kind = args.stringOr("tier", "L2"), args.stringOr("kind", "fact")
 		} else {
 			var ok bool
-			request.ID, ok = args.positiveID("old_id")
+			request.ID, ok = args.decimalID("old_id")
 			if !ok {
 				return invalid("memory.supersede requires a positive integer old_id")
 			}
@@ -261,10 +261,11 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			result["memory"] = record
 		case "supersede":
 			// Supersede's established envelope contains the record at the root.
-			encoded, _ := json.Marshal(record)
-			if json.Unmarshal(encoded, &result) != nil {
-				return nil, bus.ModuleStatusInternal
-			}
+			return commandResult(struct {
+				Record
+				Status string `json:"status"`
+				Store  string `json:"store"`
+			}{record, "ok", "user"})
 		}
 	case "delete":
 		if !response.Deleted {
