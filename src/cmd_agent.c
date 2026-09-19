@@ -663,6 +663,57 @@ static void ag_run(app_ctx_t *ctx, int argc, char **argv)
    free(result.response);
 }
 
+/* Plain completion transport for callers supplying their own context. Provider
+ * selection/execution stays in agent_generate; this entry point never invokes
+ * the agentic run path, consumes memory hints, or records memory feedback. */
+static void ag_generate(app_ctx_t *ctx, int argc, char **argv)
+{
+   (void)argv;
+   if (argc != 0)
+      fatal("usage: aimee agent generate < request.json");
+   const size_t limit = 1048576;
+   char *raw = malloc(limit + 2);
+   if (!raw)
+      fatal("cannot allocate completion request");
+   size_t len = fread(raw, 1, limit + 1, stdin);
+   if (ferror(stdin) || len > limit || memchr(raw, '\0', len))
+      fatal("completion request must be JSON of at most 1 MiB");
+   raw[len] = '\0';
+   cJSON *request = cJSON_ParseWithOpts(raw, NULL, 1);
+   free(raw);
+   const cJSON *prompt = cJSON_GetObjectItemCaseSensitive(request, "prompt");
+   const cJSON *system = cJSON_GetObjectItemCaseSensitive(request, "system");
+   const cJSON *tokens = cJSON_GetObjectItemCaseSensitive(request, "max_tokens");
+   const cJSON *temperature = cJSON_GetObjectItemCaseSensitive(request, "temperature");
+   if (!cJSON_IsObject(request) || !cJSON_IsString(prompt) || !prompt->valuestring[0] ||
+       !cJSON_IsString(system) || !cJSON_IsNumber(tokens) || !isfinite(tokens->valuedouble) ||
+       tokens->valuedouble < 1 || tokens->valuedouble > 4096 ||
+       floor(tokens->valuedouble) != tokens->valuedouble || !cJSON_IsNumber(temperature) ||
+       !isfinite(temperature->valuedouble) || temperature->valuedouble < 0 ||
+       temperature->valuedouble > 2)
+      fatal("completion requires prompt, system, max_tokens (1..4096), and temperature (0..2)");
+   agent_http_init();
+   agent_result_t result;
+   int rc = agent_generate(&s_agent_cfg, NULL, system->valuestring, prompt->valuestring,
+                           (int)tokens->valuedouble, temperature->valuedouble, &result);
+   agent_http_cleanup();
+   cJSON_Delete(request);
+   if (rc != 0)
+      fatal("completion failed: %s", result.error);
+   if (ctx->json_output)
+   {
+      cJSON *obj = cJSON_CreateObject();
+      cJSON_AddStringToObject(obj, "agent", result.agent_name);
+      cJSON_AddStringToObject(obj, "response", result.response ? result.response : "");
+      cJSON_AddNumberToObject(obj, "prompt_tokens", result.prompt_tokens);
+      cJSON_AddNumberToObject(obj, "completion_tokens", result.completion_tokens);
+      emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
+   }
+   else
+      printf("%s\n", result.response ? result.response : "");
+   free(result.response);
+}
+
 static void ag_parallel(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -1337,6 +1388,8 @@ static const subcmd_t agent_subcmds[] = {
     {"tunnel", "Show tunnel configuration", ag_tunnel},
     {"test", "Test connectivity to an agent", ag_test},
     {"run", "Run a prompt on a specific agent", ag_run},
+    {"generate", "Generate text from a JSON stdin request without tools or memory feedback",
+     ag_generate},
     {"parallel", "Run a prompt across multiple agents", ag_parallel},
     {"stats", "Show agent usage statistics", ag_stats},
     {"add", "Add a new agent", ag_add},

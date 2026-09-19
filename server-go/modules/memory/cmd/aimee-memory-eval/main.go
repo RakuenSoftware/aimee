@@ -95,11 +95,11 @@ func serve(ctx context.Context, input io.Reader, output io.Writer, handler bus.M
 
 func run(ctx context.Context, schemaPath string, dimension int, input io.Reader, output io.Writer) error {
 	return evaluationSession(ctx, schemaPath, dimension, func(db *postgres.EvaluationStore) error {
-		data, err := memory.NewPostgresDataStore(db, memory.PlacementKB)
+		module, err := memory.NewEvaluationModule(ctx, db, nil)
 		if err != nil {
 			return err
 		}
-		return serve(ctx, input, output, memory.NewHandler(nil, memory.WithDataStore(memory.PlacementKB, data)))
+		return serve(ctx, input, output, module.Handler)
 	})
 }
 
@@ -154,6 +154,13 @@ func main() {
 	format := flag.String("format", "json", "corpus output: json or text")
 	fields := flag.String("fields", "", "comma-separated output fields")
 	profile := flag.String("profile", "", "response profile")
+	agentExecutable := flag.String("agent-executable", "", "aimee CLI providing configured tool-free completions for QA")
+	topK := flag.Int("top-k", 10, "QA context results (1..32)")
+	tokenBudget := flag.Int("token-budget", 2000, "QA context token budget")
+	reportFailures := flag.Bool("report-failures", false, "include QA failure details from the scored attempt")
+	maxFailures := flag.Int("max-failures", 5, "maximum QA failure details (1..100)")
+	missLimit := flag.Int("limit", 5, "miss report retrieval cutoff (1..20)")
+	maxMisses := flag.Int("max-misses", 20, "maximum miss details (1..100)")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "evaluation accepts JSON lines on stdin, not positional arguments")
@@ -167,6 +174,10 @@ func main() {
 	if *suite != "" || *dataset != "" {
 		if *corpus != "" || *baseline != "" || *update {
 			err = errors.New("dataset evaluation cannot use corpus/baseline options")
+		} else if strings.HasSuffix(*suite, "-misses") {
+			err = runDatasetMisses(ctx, *schema, *dimension, *dataset, *suite, *maxCases, *command, *socket, *format, *fields, *profile, *missLimit, *maxMisses, os.Stdout)
+		} else if strings.HasSuffix(*suite, "-qa") {
+			err = runDatasetQA(ctx, *schema, *dimension, *dataset, *suite, *maxCases, *command, *socket, *format, *fields, *profile, qaOptions{*topK, *tokenBudget, *maxFailures, *reportFailures, agentModel(*agentExecutable)}, os.Stdout)
 		} else {
 			err = runDataset(ctx, *schema, *dimension, *dataset, *suite, *maxCases, *command, *socket, *format, *fields, *profile, os.Stdout)
 		}

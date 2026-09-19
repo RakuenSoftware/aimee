@@ -27,9 +27,10 @@ type datasetTurn struct {
 	Text    string `json:"text"`
 }
 type datasetQuestion struct {
-	ID       string   `json:"question_id"`
-	Question string   `json:"question"`
-	Evidence []string `json:"evidence"`
+	ID       string          `json:"question_id"`
+	Question string          `json:"question"`
+	Evidence []string        `json:"evidence"`
+	Answer   json.RawMessage `json:"answer"`
 }
 type datasetSessionTurn struct {
 	Role    string `json:"role"`
@@ -40,6 +41,14 @@ type datasetSessionTurn struct {
 // its own isolated Go owner, preserving conversation/haystack evaluation scope.
 func readDataset(path, suite string, maxCases int) (datasetPlan, error) {
 	plan := datasetPlan{suite: suite, excluded: map[string]int{}}
+	switch suite {
+	case "locomo", "longmemeval", "locomo-qa", "longmemeval-qa", "locomo-session-support", "locomo-misses", "longmemeval-misses":
+	default:
+		return plan, errors.New("unsupported memory evaluation suite")
+	}
+	qaMode := strings.HasSuffix(suite, "-qa")
+	support := suite == "locomo-session-support"
+	suite = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(suite, "-qa"), "-misses"), "-session-support")
 	if (suite != "locomo" && suite != "longmemeval") || maxCases < 0 {
 		return plan, errors.New("dataset evaluation requires locomo or longmemeval and nonnegative max-cases")
 	}
@@ -67,6 +76,7 @@ func readDataset(path, suite string, maxCases int) (datasetPlan, error) {
 			break
 		}
 		corpus := memory.EvaluationCorpus{Version: 1}
+		scopes := map[string]string{}
 		if suite == "locomo" {
 			var sample struct {
 				Conversation map[string]json.RawMessage `json:"conversation"`
@@ -109,14 +119,15 @@ func readDataset(path, suite string, maxCases int) (datasetPlan, error) {
 					if strings.TrimSpace(turn.Text) == "" {
 						return plan, errors.New("dataset turn is empty")
 					}
+					scopes[turn.ID] = field
 					corpus.Fixtures = append(corpus.Fixtures, memory.EvaluationFixture{FID: turn.ID, Tier: "L2", Kind: "fact", Key: "locomo " + speaker + " " + turn.ID, Content: "[" + date + "] " + speaker + ": " + turn.Text})
 				}
 			}
 			for questionIndex, q := range sample.QA {
-				if strings.TrimSpace(q.Question) == "" || q.Evidence == nil {
+				if strings.TrimSpace(q.Question) == "" || (!qaMode && q.Evidence == nil) {
 					return plan, fmt.Errorf("sample %d has malformed question", index)
 				}
-				if len(q.Evidence) == 0 {
+				if !qaMode && len(q.Evidence) == 0 {
 					plan.excluded["no_evidence"]++
 					continue
 				}
@@ -124,7 +135,31 @@ func readDataset(path, suite string, maxCases int) (datasetPlan, error) {
 				if id == "" {
 					id = fmt.Sprintf("%d:%d", index, questionIndex)
 				}
-				corpus.Cases = append(corpus.Cases, memory.EvaluationCase{ID: id, Query: q.Question, Expected: q.Evidence})
+				expected := q.Evidence
+				if support {
+					selected := map[string]bool{}
+					for _, fid := range expected {
+						if scopes[fid] == "" {
+							return plan, fmt.Errorf("unknown relevance label %q", fid)
+						}
+						selected[scopes[fid]] = true
+					}
+					expected = nil
+					for _, f := range corpus.Fixtures {
+						if selected[scopes[f.FID]] {
+							expected = append(expected, f.FID)
+						}
+					}
+				}
+				answer := ""
+				if qaMode {
+					var err error
+					answer, err = datasetAnswer(q.Answer)
+					if err != nil {
+						return plan, err
+					}
+				}
+				corpus.Cases = append(corpus.Cases, memory.EvaluationCase{ID: id, Query: q.Question, Expected: expected, Answer: answer})
 			}
 		} else {
 			var sample struct {
@@ -134,6 +169,7 @@ func readDataset(path, suite string, maxCases int) (datasetPlan, error) {
 				Dates    []string               `json:"haystack_dates"`
 				Sessions [][]datasetSessionTurn `json:"haystack_sessions"`
 				Answers  []string               `json:"answer_session_ids"`
+				Answer   json.RawMessage        `json:"answer"`
 			}
 			if err = json.Unmarshal(raw, &sample); err != nil {
 				return plan, err
@@ -173,12 +209,28 @@ func readDataset(path, suite string, maxCases int) (datasetPlan, error) {
 			if id == "" {
 				id = strconv.Itoa(index)
 			}
-			corpus.Cases = []memory.EvaluationCase{{ID: id, Query: sample.Question, Expected: sample.Answers}}
+			answer := ""
+			if qaMode {
+				var err error
+				answer, err = datasetAnswer(sample.Answer)
+				if err != nil {
+					return plan, err
+				}
+			}
+			corpus.Cases = []memory.EvaluationCase{{ID: id, Query: sample.Question, Expected: sample.Answers, Answer: answer}}
 		}
 		if len(corpus.Cases) == 0 {
 			continue
 		}
-		if err = corpus.Validate(); err != nil {
+		if qaMode {
+			err = corpus.ValidateFixtures()
+			if len(corpus.Cases) > 4096 {
+				err = errors.New("dataset exceeds 4096 questions per sample")
+			}
+		} else {
+			err = corpus.Validate()
+		}
+		if err != nil {
 			return plan, fmt.Errorf("sample %d: %w", index, err)
 		}
 		plan.groups = append(plan.groups, corpus)
@@ -238,4 +290,16 @@ func runDataset(ctx context.Context, schema string, dimension int, path, suite s
 	}
 	_, err = output.Write(rendered)
 	return err
+}
+
+func datasetAnswer(raw json.RawMessage) (string, error) {
+	var text string
+	if json.Unmarshal(raw, &text) == nil && strings.TrimSpace(text) != "" {
+		return text, nil
+	}
+	var number json.Number
+	if string(raw) != "null" && json.Unmarshal(raw, &number) == nil && number != "" {
+		return number.String(), nil
+	}
+	return "", errors.New("QA question requires a nonempty string or numeric answer")
 }

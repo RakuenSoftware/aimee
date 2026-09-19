@@ -150,7 +150,7 @@ type benchmarkMiss struct {
 
 func handleBenchmarkMiss(options handlerOptions, invocation bus.ModuleInvocation, args commandArgs) ([]byte, bus.ModuleStatus) {
 	query, ok := args.stringValue("query")
-	expectedIDs, validIDs := benchmarkExpectedIDs(args, 20)
+	expectedIDs, validIDs := benchmarkExpectedIDs(args, 128)
 	if !ok || !validIDs {
 		return nil, bus.ModuleStatusInvalidRequest
 	}

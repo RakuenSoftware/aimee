@@ -982,52 +982,6 @@ static void mem_print_eval_report(const char *title, const mem_eval_scores_t *sc
    }
 }
 
-static void mem_print_eval_qa_report(const char *title, const mem_eval_qa_scores_t *scores,
-                                     const mem_eval_latency_t *latency)
-{
-   printf("%s (%d cases)\n", title, scores->n_cases);
-   printf("  Accuracy:              %.4f\n", scores->accuracy);
-   printf("  Hallucination Rate:    %.4f\n", scores->hallucination_rate);
-   printf("  Exact Match:           %.4f\n", scores->exact_match);
-   printf("  Citation Coverage:     %.4f\n", scores->citation_coverage);
-   printf("  Citation Miss Rate:    %.4f\n", scores->citation_miss_rate);
-   printf("  Answered Cases:        %d\n", scores->answered_cases);
-   printf("  Judged Cases:          %d\n", scores->judged_cases);
-   printf("  Cited Answers:         %d\n", scores->cited_answers);
-   printf("  Uncited Answers:       %d\n", scores->uncited_answers);
-   printf("  Low-Confidence Answers:%d\n", scores->low_confidence_answers);
-   printf("  Avg Retrieved Tokens:  %.1f\n", scores->avg_retrieved_tokens);
-   printf("  Answer Tokens:         prompt=%d completion=%d\n", scores->total_answer_prompt_tokens,
-          scores->total_answer_completion_tokens);
-   printf("  Judge Tokens:          prompt=%d completion=%d\n", scores->total_judge_prompt_tokens,
-          scores->total_judge_completion_tokens);
-   if (latency && latency->n_queries > 0)
-   {
-      printf("  End-to-End Latency:    p50=%.3fms p95=%.3fms p99=%.3fms min=%.3fms max=%.3fms (%d "
-             "cases)\n",
-             latency->p50_ms, latency->p95_ms, latency->p99_ms, latency->min_ms, latency->max_ms,
-             latency->n_queries);
-   }
-   printf("  Route Buckets:\n");
-   for (int i = 0; i < MEM_EVAL_ROUTE_BUCKET_COUNT; i++)
-   {
-      if (scores->route_buckets[i].cases <= 0)
-         continue;
-      printf("    %s: cases=%d accuracy=%.4f exact_match=%.4f\n",
-             memory_query_route_name((memory_query_route_t)i), scores->route_buckets[i].cases,
-             scores->route_buckets[i].metric_a, scores->route_buckets[i].metric_b);
-   }
-   printf("  Shape Buckets:\n");
-   for (int i = 0; i < MEM_EVAL_SHAPE_BUCKET_COUNT; i++)
-   {
-      if (scores->shape_buckets[i].cases <= 0)
-         continue;
-      printf("    %s: cases=%d accuracy=%.4f exact_match=%.4f\n",
-             memory_query_shape_name((memory_query_shape_t)i), scores->shape_buckets[i].cases,
-             scores->shape_buckets[i].metric_a, scores->shape_buckets[i].metric_b);
-   }
-}
-
 static cJSON *mem_eval_bucket_json(const mem_eval_bucket_scores_t *buckets, int count, int is_route,
                                    const char *metric_a_name, const char *metric_b_name)
 {
@@ -1148,54 +1102,6 @@ void mem_emit_eval_json(app_ctx_t *ctx, const char *suite, const char *dataset,
    emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
 }
 
-void mem_emit_eval_qa_json(app_ctx_t *ctx, const char *suite, const char *dataset,
-                           const mem_eval_qa_scores_t *scores, const mem_eval_latency_t *latency,
-                           const char *weight_profile)
-{
-   cJSON *obj = cJSON_CreateObject();
-   jo_add_str(obj, "suite", suite);
-   if (dataset && dataset[0])
-      jo_add_str(obj, "dataset", dataset);
-   if (weight_profile && weight_profile[0])
-      jo_add_str(obj, "weight_profile", weight_profile);
-   cJSON *metrics = cJSON_CreateObject();
-   jo_add_num(metrics, "accuracy", scores->accuracy);
-   jo_add_num(metrics, "hallucination_rate", scores->hallucination_rate);
-   jo_add_num(metrics, "exact_match", scores->exact_match);
-   jo_add_num(metrics, "citation_coverage", scores->citation_coverage);
-   jo_add_num(metrics, "citation_miss_rate", scores->citation_miss_rate);
-   jo_add_num(metrics, "avg_retrieved_tokens", scores->avg_retrieved_tokens);
-   jo_add_i64(metrics, "cases", scores->n_cases);
-   jo_add_i64(metrics, "answered_cases", scores->answered_cases);
-   jo_add_i64(metrics, "judged_cases", scores->judged_cases);
-   jo_add_i64(metrics, "cited_answers", scores->cited_answers);
-   jo_add_i64(metrics, "uncited_answers", scores->uncited_answers);
-   jo_add_i64(metrics, "low_confidence_answers", scores->low_confidence_answers);
-   jo_add_i64(metrics, "answer_prompt_tokens", scores->total_answer_prompt_tokens);
-   jo_add_i64(metrics, "answer_completion_tokens", scores->total_answer_completion_tokens);
-   jo_add_i64(metrics, "judge_prompt_tokens", scores->total_judge_prompt_tokens);
-   jo_add_i64(metrics, "judge_completion_tokens", scores->total_judge_completion_tokens);
-   cJSON_AddItemToObject(obj, "metrics", metrics);
-   cJSON_AddItemToObject(obj, "route_buckets",
-                         mem_eval_bucket_json(scores->route_buckets, MEM_EVAL_ROUTE_BUCKET_COUNT, 1,
-                                              "accuracy", "exact_match"));
-   cJSON_AddItemToObject(obj, "shape_buckets",
-                         mem_eval_bucket_json(scores->shape_buckets, MEM_EVAL_SHAPE_BUCKET_COUNT, 0,
-                                              "accuracy", "exact_match"));
-   if (latency && latency->n_queries > 0)
-   {
-      cJSON *lat = cJSON_CreateObject();
-      jo_add_num(lat, "p50_ms", latency->p50_ms);
-      jo_add_num(lat, "p95_ms", latency->p95_ms);
-      jo_add_num(lat, "p99_ms", latency->p99_ms);
-      jo_add_num(lat, "min_ms", latency->min_ms);
-      jo_add_num(lat, "max_ms", latency->max_ms);
-      jo_add_i64(lat, "queries", latency->n_queries);
-      cJSON_AddItemToObject(obj, "latency", lat);
-   }
-   emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
-}
-
 static int mem_load_live_cases(mem_eval_case_t *cases, int max_cases, char *basis, size_t basis_len)
 {
    if (max_cases <= 0)
@@ -1260,14 +1166,19 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       suite = "corpus";
 
    if (strcmp(suite, "corpus") == 0 || strcmp(suite, "memory-retrieval") == 0 ||
-       strcmp(suite, "locomo") == 0 || strcmp(suite, "longmemeval") == 0)
+       strcmp(suite, "locomo") == 0 || strcmp(suite, "longmemeval") == 0 ||
+       strcmp(suite, "locomo-qa") == 0 || strcmp(suite, "longmemeval-qa") == 0 ||
+       strcmp(suite, "locomo-session-support") == 0 || strcmp(suite, "locomo-misses") == 0 ||
+       strcmp(suite, "longmemeval-misses") == 0)
    {
-      int dataset_suite = strcmp(suite, "locomo") == 0 || strcmp(suite, "longmemeval") == 0;
+      int dataset_suite = strcmp(suite, "corpus") != 0 && strcmp(suite, "memory-retrieval") != 0;
+      int qa_suite = strcmp(suite, "locomo-qa") == 0 || strcmp(suite, "longmemeval-qa") == 0;
       if (benchmark_weight_profile[0])
          fatal("legacy weight profiles are not supported by Go memory evaluation");
-      char helper[4096], dimension[32];
+      char helper[4096], executable[4096], dimension[32];
       if (platform_get_exe_path(helper, sizeof(helper)) != 0)
          fatal("cannot locate the Go memory evaluator");
+      snprintf(executable, sizeof(executable), "%s", helper);
       char *slash = strrchr(helper, '/');
 #ifdef _WIN32
       char *backslash = strrchr(helper, '\\');
@@ -1282,7 +1193,7 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       strcpy(slash, suffix);
       snprintf(dimension, sizeof(dimension), "%d", config_resolve_embedder_dims_current());
       const char *embedder = config_embedder_command_current(NULL);
-      const char *args[32] = {helper,
+      const char *args[48] = {helper,
                               "-embedding-command",
                               embedder ? embedder : "",
                               "-embedding-dim",
@@ -1298,7 +1209,7 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
          args[next++] = suite;
          args[next++] = "-dataset";
          args[next++] = dataset ? dataset
-                                : (strcmp(suite, "locomo") == 0
+                                : (strncmp(suite, "locomo", 6) == 0
                                        ? "data/locomo/locomo10.json"
                                        : "data/longmemeval/longmemeval_s_cleaned.json");
          args[next++] = "-max-cases";
@@ -1314,6 +1225,31 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
          args[next++] = corpus ? corpus : "tests/eval/memory_retrieval_corpus.json";
          args[next++] = "-baseline";
          args[next++] = baseline ? baseline : "tests/eval/memory_retrieval_baseline.json";
+      }
+      if (strcmp(suite, "locomo-misses") == 0 || strcmp(suite, "longmemeval-misses") == 0)
+      {
+         const char *limit = opt_get(&opts, "limit");
+         const char *max_misses = opt_get(&opts, "max-misses");
+         args[next++] = "-limit";
+         args[next++] = limit ? limit : "5";
+         args[next++] = "-max-misses";
+         args[next++] = max_misses ? max_misses : "20";
+      }
+      if (qa_suite)
+      {
+         const char *top_k = opt_get(&opts, "top-k");
+         const char *budget = opt_get(&opts, "token-budget");
+         const char *failures = opt_get(&opts, "max-failures");
+         args[next++] = "-agent-executable";
+         args[next++] = executable;
+         args[next++] = "-top-k";
+         args[next++] = top_k ? top_k : "10";
+         args[next++] = "-token-budget";
+         args[next++] = budget ? budget : "2000";
+         args[next++] = "-max-failures";
+         args[next++] = failures ? failures : "5";
+         if (opt_get_flag(&opts, "report-failures"))
+            args[next++] = "-report-failures";
       }
       if (ctx->json_fields && ctx->json_fields[0])
       {
@@ -1343,74 +1279,6 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       }
       fputs(output, stdout);
       free(output);
-      BENCHMARK_RETURN;
-   }
-
-   if (strcmp(suite, "locomo-qa") == 0)
-   {
-      const char *dataset_path = opt_get(&opts, "dataset");
-      int max_cases = opt_get_int(&opts, "max-cases", 0);
-      int top_k = opt_get_int(&opts, "top-k", 10);
-      int token_budget = opt_get_int(&opts, "token-budget", 2000);
-      int report_failures = opt_get_flag(&opts, "report-failures");
-      int max_failures = opt_get_int(&opts, "max-failures", 5);
-      if (!dataset_path)
-         dataset_path = "data/locomo/locomo10.json";
-      mem_eval_qa_scores_t scores;
-      mem_eval_latency_t latency;
-      int samples = 0;
-      if (mem_eval_run_locomo_qa(dataset_path, max_cases, top_k, token_budget, &scores, &latency,
-                                 &samples) != 0)
-         fatal("LoCoMo QA benchmark failed for %s", dataset_path);
-      if (ctx->json_output)
-      {
-         mem_emit_eval_qa_json(ctx, "locomo-qa", dataset_path, &scores, &latency,
-                               benchmark_weight_profile);
-         BENCHMARK_RETURN;
-      }
-      char title[1024];
-      snprintf(title, sizeof(title),
-               "Memory Benchmark — LoCoMo QA: %s (%d conversations, top_k=%d token_budget=%d)",
-               dataset_path, samples, top_k, token_budget);
-      mem_print_eval_qa_report(title, &scores, &latency);
-      mem_benchmark_print_weight_profile(benchmark_weight_profile);
-      if (report_failures)
-         (void)mem_eval_report_locomo_qa_failures(dataset_path, max_cases, top_k, token_budget,
-                                                  max_failures, stdout);
-      BENCHMARK_RETURN;
-   }
-
-   if (strcmp(suite, "longmemeval-qa") == 0)
-   {
-      const char *dataset_path = opt_get(&opts, "dataset");
-      int max_cases = opt_get_int(&opts, "max-cases", 0);
-      int top_k = opt_get_int(&opts, "top-k", 10);
-      int token_budget = opt_get_int(&opts, "token-budget", 2000);
-      int report_failures = opt_get_flag(&opts, "report-failures");
-      int max_failures = opt_get_int(&opts, "max-failures", 5);
-      if (!dataset_path)
-         dataset_path = "data/longmemeval/longmemeval_s_cleaned.json";
-      mem_eval_qa_scores_t scores;
-      mem_eval_latency_t latency;
-      int cases = 0;
-      if (mem_eval_run_longmemeval_qa(dataset_path, max_cases, top_k, token_budget, &scores,
-                                      &latency, &cases) != 0)
-         fatal("LongMemEval QA benchmark failed for %s", dataset_path);
-      if (ctx->json_output)
-      {
-         mem_emit_eval_qa_json(ctx, "longmemeval-qa", dataset_path, &scores, &latency,
-                               benchmark_weight_profile);
-         BENCHMARK_RETURN;
-      }
-      char title[1024];
-      snprintf(title, sizeof(title),
-               "Memory Benchmark — LongMemEval QA: %s (%d cases, top_k=%d token_budget=%d)",
-               dataset_path, cases, top_k, token_budget);
-      mem_print_eval_qa_report(title, &scores, &latency);
-      mem_benchmark_print_weight_profile(benchmark_weight_profile);
-      if (report_failures)
-         (void)mem_eval_report_longmemeval_qa_failures(dataset_path, max_cases, top_k, token_budget,
-                                                       max_failures, stdout);
       BENCHMARK_RETURN;
    }
 

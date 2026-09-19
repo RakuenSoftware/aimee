@@ -512,7 +512,7 @@ $(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Icore/event_bus/include
 $(OBJDIR)/server/execution_policy_bus.o: C_FLAGS += -Imodules/execution-policy/include
 
 # --- Layer 2: Agent execution (agent loop, tools, HTTP, policy) ---
-AGENT_SRCS = core/turn_integrity/turn_integrity.c agent_job_release.c delegate_exit_classify.c primary_session_release.c model_catalog_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/tool_call_args.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/execution_policy_bus.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c modules/benchmarks/agent_eval_baseline.c modules/benchmarks/agent_eval_benchmarks.c server/agent_coord.c \
+AGENT_SRCS = core/turn_integrity/turn_integrity.c agent_job_release.c delegate_exit_classify.c primary_session_release.c model_catalog_release.c server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/tool_call_args.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/execution_policy_bus.c modules/benchmarks/agent_eval.c modules/benchmarks/agent_eval_memory_support.c modules/benchmarks/agent_eval_baseline.c server/agent_coord.c \
              server/agent_tasks.c server/agent_tools.c server/computer_use.c server/script_runner.c server/script_rpc.c toolset.c server/tool_args_coerce.c server/tool_schema_sanitizer.c server/osv_check.c server/http_retry.c server/failover.c \
              server/web_search.c server/web_search_fuse.c server/web_search_breaker.c server/token_tracker.c server/token_tracker_registry.c server/token_tracker_db1.c server/middleware.c server/agent_pipeline.c \
              server/process_mgr.c server/agent_loop.c server/liveness.c server/cli_session.c server/cli_session_pty.c server/cli_codex.c server/provider_cli_adapter.c server/cli_claude.c  server/cli_mistral.c server/cli_acp.c server/session_compact.c server/rounds_to_resume.c server/compact_prune.c server/context_engine.c \
@@ -1691,8 +1691,7 @@ write-tier-enforce-live: ../write-tier-enforce-live
 # See docs/proposals/pending/eval-temp-store-schema-relocation.md for the Go-owned
 # disposable-run plan and retirement gate.
 #
-# mem_eval_open_temp_db / db2_eval_open_temp_store are KEPT: they still back
-# src/tests/test_memory_retrieval_eval.c and mem_eval_load_corpus.
+# Memory datasets use the shared Go module with injected evaluation storage.
 
 # aimee_client.o for the same reason as $(SERVER): cli_v1_client_endpoint calls
 # the dependency-free remote-target accessors; --gc-sections drops the transport.

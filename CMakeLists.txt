@@ -688,7 +688,6 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_support.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_baseline.c
-    ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_benchmarks.c
     ${AIMEE_SRC_DIR}/server/agent_coord.c
     ${AIMEE_SRC_DIR}/server/agent_tools.c
     ${AIMEE_SRC_DIR}/server/computer_use.c

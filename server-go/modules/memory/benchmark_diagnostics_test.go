@@ -127,7 +127,7 @@ func TestBenchmarkDiagnosticBoundaries(t *testing.T) {
 				t.Fatal(status)
 			}
 		}
-		for _, ids := range []string{`null`, `[9007199254740993]`, `["9007199254740993.0"]`, `["9223372036854775808"]`, `["0"]`, `["-1"]`, `["01"]`, `["+1"]`, `[` + strings.Repeat(`"1",`, 20) + `"1"]`} {
+		for _, ids := range []string{`null`, `[9007199254740993]`, `["9007199254740993.0"]`, `["9223372036854775808"]`, `["0"]`, `["-1"]`, `["01"]`, `["+1"]`, `[` + strings.Repeat(`"1",`, 128) + `"1"]`} {
 			frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"benchmark-miss","query":"q","expected_ids":`+ids+`}`))
 			if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
 				t.Fatal(ids, status)
@@ -135,6 +135,18 @@ func TestBenchmarkDiagnosticBoundaries(t *testing.T) {
 		}
 		if s.searched != 0 || s.read != 0 {
 			t.Fatal("invalid requests reached store")
+		}
+		// Match the scorer's full relevance-label budget, including labels beyond
+		// the old 20-ID native adapter limit.
+		ids := make([]string, 128)
+		for i := range ids {
+			ids[i] = strconv.Itoa(i + 1)
+		}
+		s.rows = []Record{{ID: 128, Key: "q", Content: "q", Tier: "L2", Kind: "fact"}}
+		args, _ := json.Marshal(map[string]any{"operation": "benchmark-miss", "query": "q", "expected_ids": ids})
+		result := runHostRuntime(t, handler, string(args))
+		if result["is_miss"] != false || result["rank"] != float64(1) {
+			t.Fatal(result)
 		}
 	}
 }

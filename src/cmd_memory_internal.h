@@ -32,9 +32,6 @@ cJSON *memory_score_parts_to_json(const memory_score_parts_t *parts);
 void mem_emit_eval_json(app_ctx_t *ctx, const char *suite, const char *dataset,
                         const mem_eval_scores_t *scores, const mem_eval_latency_t *latency,
                         const char *weight_profile);
-void mem_emit_eval_qa_json(app_ctx_t *ctx, const char *suite, const char *dataset,
-                           const mem_eval_qa_scores_t *scores, const mem_eval_latency_t *latency,
-                           const char *weight_profile);
 
 /* Subcommand handlers — each is a subcmd_t entry in `memory_subcmds[]`
  * (cmd_memory.c). Grouped by file for grep-ability; the split is purely for

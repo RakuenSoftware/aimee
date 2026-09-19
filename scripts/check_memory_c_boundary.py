@@ -26,6 +26,7 @@ FORBIDDEN_INCLUDES = (
 )
 
 RETIRED_POLICY_C = (
+    "src/modules/benchmarks/agent_eval_benchmarks.c",
     "src/modules/memory/memory_scope_connection.c",
     "src/modules/memory/memory_bus_context.h",
     "src/modules/db2/c/memory_scope_query.h",
@@ -91,7 +92,8 @@ RETIRED_POLICY_C = (
 # cover their wire/domain fixtures. Reject relocation as well as restoration;
 # the remaining C inventory is unfinished G0 work, not permission to add a shim.
 RETIRED_NATIVE_SYMBOLS = re.compile(
-    r"\bmem_eval_run_(?:locomo|longmemeval)\b(?=\s*\()|"
+    r"\bmem_eval_(?:open_temp_db|close_temp_db|normalize_question|insert_longmemeval_qa_session)\b(?=\s*\()|"
+    r"\bmem_eval_(?:run|report)_(?:locomo|longmemeval)[a-z_]*\b(?=\s*\()|"
     r"\b(?:db2_memory_scope_context_\w+|memory_bus_(?:read_context|set_context_reader|add_context))\b(?=\s*\()|"
     r"\b(?:db2_kb_service_memory_(?:search_assertions|assemble_typed_context)_json|kb_handle_memory_(?:search_assertions|assemble_typed_context)|kb_memory_scope_(?:begin|end))\b(?=\s*\()|"
     r"\bmem_eval_load_corpus\b(?=\s*\()|"

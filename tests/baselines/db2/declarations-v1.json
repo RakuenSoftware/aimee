@@ -385,10 +385,6 @@
       "path": "src/kb/roadmap.c"
     },
     {
-      "classification": "kb-generated-client",
-      "path": "src/modules/benchmarks/agent_eval_benchmarks.c"
-    },
-    {
       "classification": "module-placement-audit",
       "path": "src/modules/guardrails/guardrails_semantic.c"
     },
@@ -9938,7 +9934,6 @@
     {
       "consumers": [
         "src/kb/http/kb_http.c",
-        "src/modules/benchmarks/agent_eval_benchmarks.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_http_routes.c"
       ],
@@ -19277,7 +19272,6 @@
     },
     {
       "consumers": [
-        "src/modules/benchmarks/agent_eval_benchmarks.c",
         "src/tests/test_kb.c"
       ],
       "locations": [
@@ -19334,7 +19328,6 @@
       "consumers": [
         "src/kb/http/kb_http.c",
         "src/kb/kb.c",
-        "src/modules/benchmarks/agent_eval_benchmarks.c",
         "src/tests/test_kb.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_pgvec.c"
@@ -19985,7 +19978,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "4118f5c26375793aaee6aa551c6dcf87928d34a1bc09132ee68114236499b62f",
+  "fingerprint": "1156c427d21b4ed0dc738423ef71cec61db522eaa304d3c4d2d42a30da83a971",
   "module": "db2",
   "schema_version": 1,
   "summary": {

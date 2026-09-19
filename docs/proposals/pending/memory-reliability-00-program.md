@@ -103,6 +103,16 @@ Update affected production/test callers, Make/CMake registration, installed head
 
 Scope clarification (2026-09-19): this boundary follows the explicit requirement to keep the C bus and unrelated C modules in C. Earlier progress entries below used a broader all-native-callers criterion. The immutable `check_memory_go_only.py --report` inventory remains unchanged and still reports that broader criterion; its total is not a count of C memory implementations. Classify its findings against this boundary before closing G0. The final native-file cutover now leaves zero native files in both memory trees and zero native entries in the memory descriptor. The [module guide](../../modules/memory.md#compatibility) records each disposition: benchmark-host transport stays C outside memory, host wire identifiers and DB2 persisted graph codes have their external owners, and the obsolete internal header is deleted. No C bus implementation changed. `check_memory_c_boundary.py` and `check_memory_go_only.py --module-only` enforce the language boundary; the broad default audit remains separate and unchanged. CGO-disabled builds and live C-bus process tests cover both placements. Go lane metrics replace the orphan native fixture. The native performance harness reports its removed memory cases unavailable instead of certifying missing measurements. Full historical behavior and performance parity, including legacy PageRank timing and unit/temporal semantic weighting, remains distinct unfinished work; this checkpoint does not claim every G0 parity or numbered proposal gate has passed.
 
+The memory evaluation setup now instantiates the production Go module with
+caller-owned isolated storage and embedding dependencies. Corpus, JSON-lines,
+LoCoMo/LongMemEval retrieval and QA, session-support scoring and miss reporting
+share this setup. Native dataset runners, QA orchestration and memory scratch-store
+hooks are removed. QA uses the existing tool-free C agent executor through a thin
+CLI transport, avoiding agent-run hints/feedback; the C bus remains unchanged.
+The [module guide](../../modules/memory.md) records the versioned fixture and QA
+policies, provider requirements, bounds and historical-comparability limits.
+
+
 Implementation progress: PR #2984's Go client is integrated into this branch. The
 next removal slice deletes the unused native extraction and fact-gate callbacks,
 their Server registrations, and the obsolete inline context-assembly helpers.

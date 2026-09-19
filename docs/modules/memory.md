@@ -57,10 +57,9 @@ embedding-enabled retrieval benchmark. SQL uses the disposable database owner's
 permissions; the separate restricted-runtime-role replay remains necessary.
 
 The `locomo` and `longmemeval` retrieval suites use this Go evaluator, with a
-separate disposable database for each conversation or question. The remaining
-native QA, session-support and miss-report runners refuse their old temporary
-store setup before seeding: a native scratch connection cannot redirect the Go
-owner and therefore cannot isolate their memory operations.
+separate disposable database for each conversation or question. QA, session-support
+and miss-report suites now use the same injected Go module setup. The native
+dataset runners and memory scratch-store hooks are deleted.
 
 ## Purpose and non-goals
 
@@ -1131,8 +1130,7 @@ has closed successfully. Scores and latency come from the shared Go owner;
 latency does not include a Server-to-KB hop. Legacy route/shape buckets are
 unmeasured and remain empty. This evaluates the Go owner's current retrieval
 behavior; unit/temporal candidate weights now run in Go, but this does not
-certify the entire historical ranking pipeline. Other native judge/support runners
-remain migration work and now refuse the unsafe scratch-store setup. The C corpus loader and its dependent corpus fixtures are
+certify the entire historical ranking pipeline. The C corpus loader and its dependent corpus fixtures are
 retired; production-corpus/agent-manifest C fixtures remain until those runners
 migrate. Go tests cover isolated semantic recall, command and governed HTTP
 embedders, full fixture identities, input failures and baseline protection.
@@ -1155,6 +1153,49 @@ Dataset input is bounded to 512 MiB and each sample to 4096 fixtures and 4096
 questions; the labelled-corpus input retains its 4 MiB bound. Dataset suites do
 not accept corpus baseline options, and Go evaluation rejects legacy weight
 profiles. `AIMEE_DB2_EVAL_URL` remains required; there is no live-store fallback.
+
+All local memory evaluation uses `memory.NewEvaluationModule(ctx, store, executor)`:
+instantiate the production handler with caller-owned isolated storage, call
+`Seed(fixtures, embedder)`, then invoke normal module operations through `Call`.
+`Seed` uses the production metadata worker and embedding activation path. The
+caller closes the store; no global database retargeting or alternate memory
+implementation is involved. JSON-lines, corpus, retrieval, QA, support and miss
+adapters share this setup. In-process invocation measures owner behavior; the
+separate live C-bus tests still cover transport in both placements.
+
+Additional CLI suites are `locomo-qa`, `longmemeval-qa`,
+`locomo-session-support`, `locomo-misses` and `longmemeval-misses`. Session support
+expands each evidence label to the records from its conversation session, bounded
+by the existing 128-label scoring contract. Miss reports use the module's
+`benchmark-miss` operation; `--limit` (1..20) controls the cutoff and
+`--max-misses` (1..100) caps reported details without changing the evaluated count.
+
+QA requests `benchmark-context` from the same isolated module, then uses the
+existing tool-free `agent_generate` executor via `aimee --json agent generate`.
+Its bounded JSON stdin protocol carries `system`, `prompt`, `max_tokens` and
+`temperature`. The helper receives `-agent-executable` from the CLI automatically.
+Provider selection follows `agent_generate`: configured default or first enabled
+non-CLI agent. Missing eligible providers fail; there is no implicit Codex fallback.
+The ordinary agent-run path is deliberately avoided because it consumes hints
+and stores feedback. The C agent runtime and C bus remain their existing owners.
+
+`--top-k` (1..32) and `--token-budget` (1..131072) bound context. The
+`module-context-strict-judge-v1` QA policy requires every answer and judge call to
+succeed, with a judge JSON score of exactly 0 or 1. Failures produce no partial
+score or exact-match fallback. LoCoMo QA includes gold-labelled questions without
+retrieval evidence; LongMemEval retains explicit abstention/no-evidence exclusions.
+QA uses the same full-text fixtures as retrieval, replacing the old native QA-only
+turn/fact expansion. Exact-match normalization retains full Unicode text. These
+versioned choices change historical comparability and do not certify old QA parity.
+
+`--report-failures` includes at most `--max-failures` (1..100) details from the
+attempts already scored; it does not rerun either model. Token counts use provider
+usage when available and otherwise a labelled byte/4 estimate. Citation coverage
+measures numbered-marker presence, not citation validity. The legacy
+`hallucination_rate` field remains 1 minus judged accuracy; it is not a separate
+hallucination classifier. QA latency includes context retrieval, answer and judge
+calls. Route/shape buckets remain unmeasured. Text QA/miss reports use formatted
+JSON so all provenance and exclusions remain visible.
 
 The public `memory.search_assertions` and `memory.assemble_typed_context` routes
 now invoke the shared Go owner directly. Their native handlers and receipt

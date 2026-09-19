@@ -144,28 +144,6 @@ typedef struct
    int n_queries;
 } mem_eval_latency_t;
 
-typedef struct
-{
-   double accuracy;
-   double exact_match;
-   double citation_coverage;
-   double citation_miss_rate;
-   double hallucination_rate;
-   double avg_retrieved_tokens;
-   int n_cases;
-   int answered_cases;
-   int judged_cases;
-   int cited_answers;
-   int uncited_answers;
-   int low_confidence_answers;
-   int total_answer_prompt_tokens;
-   int total_answer_completion_tokens;
-   int total_judge_prompt_tokens;
-   int total_judge_completion_tokens;
-   mem_eval_bucket_scores_t route_buckets[MEM_EVAL_ROUTE_BUCKET_COUNT];
-   mem_eval_bucket_scores_t shape_buckets[MEM_EVAL_SHAPE_BUCKET_COUNT];
-} mem_eval_qa_scores_t;
-
 int mem_eval_run(mem_eval_case_t *cases, int n_cases, mem_eval_scores_t *out);
 int mem_eval_run_with_latency(mem_eval_case_t *cases, int n_cases, mem_eval_scores_t *out,
                               mem_eval_latency_t *latency_out);
@@ -189,29 +167,6 @@ int mem_eval_load_production_corpus(const char *corpus_path, mem_eval_case_t *ca
  * Returns 0 if the named arm was found, -1 otherwise. */
 int mem_eval_fusion_arm_resolve(const char *matrix_path, const char *arm, char *state_out,
                                 size_t state_len, int *utility_out, int *projection_out);
-
-/* Close the per-call scratch DB opened by mem_eval_load_corpus or
- * mem_eval_open_temp_db. Idempotent. */
-void mem_eval_close_temp_db(void);
-
-int mem_eval_run_locomo_session_support(const char *dataset_path, int max_samples,
-                                        mem_eval_scores_t *out, mem_eval_latency_t *latency_out,
-                                        int *samples_out);
-int mem_eval_run_locomo_qa(const char *dataset_path, int max_samples, int top_k, int token_budget,
-                           mem_eval_qa_scores_t *out, mem_eval_latency_t *latency_out,
-                           int *samples_out);
-int mem_eval_report_locomo_qa_failures(const char *dataset_path, int max_samples, int top_k,
-                                       int token_budget, int max_failures, FILE *out);
-int mem_eval_report_locomo_misses(const char *dataset_path, int max_samples, int limit,
-                                  int max_misses, FILE *out, const char *progress_path);
-
-int mem_eval_run_longmemeval_qa(const char *dataset_path, int max_cases, int top_k,
-                                int token_budget, mem_eval_qa_scores_t *out,
-                                mem_eval_latency_t *latency_out, int *cases_out);
-int mem_eval_report_longmemeval_qa_failures(const char *dataset_path, int max_cases, int top_k,
-                                            int token_budget, int max_failures, FILE *out);
-int mem_eval_report_longmemeval_misses(const char *dataset_path, int max_cases, int limit,
-                                       int max_misses, FILE *out, const char *progress_path);
 
 /* Load baseline metrics from a JSON file. Returns 0 on success, -1 on error. */
 int mem_eval_load_baseline(const char *baseline_path, mem_eval_scores_t *out,

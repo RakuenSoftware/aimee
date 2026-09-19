@@ -660,6 +660,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-trace-transport \
                $(TESTPREFIX)/unit-test-assertion-transport \
                $(TESTPREFIX)/unit-test-benchmark-context-transport \
+               $(TESTPREFIX)/unit-test-agent-generate-transport \
                $(TESTPREFIX)/unit-test-kb-memory-facts-connection \
                $(TESTPREFIX)/unit-test-server-facts-transport \
                $(TESTPREFIX)/unit-test-server-memory-domain \
@@ -7905,4 +7906,7 @@ $(TESTPREFIX)/unit-test-benchmark-context-transport: $(OBJDIR)/tests/test_benchm
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
 
 $(TESTPREFIX)/unit-test-assertion-transport: $(OBJDIR)/tests/test_assertion_transport.o $(OBJDIR)/kb/db2_adapters/kb_service_backend_context.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
+
+$(TESTPREFIX)/unit-test-agent-generate-transport: $(OBJDIR)/tests/test_agent_generate_transport.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread

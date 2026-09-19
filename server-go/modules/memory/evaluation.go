@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
@@ -34,6 +32,7 @@ type EvaluationCase struct {
 	ID       string   `json:"id"`
 	Query    string   `json:"query"`
 	Expected []string `json:"expected"`
+	Answer   string   `json:"answer,omitempty"`
 }
 type EvaluationScores struct {
 	MRR      float64 `json:"mrr"`
@@ -56,14 +55,14 @@ type EvaluationResult struct {
 
 // Validate rejects a changed/partial denominator before any fixture is stored.
 func (c EvaluationCorpus) Validate() error {
-	if c.Version != 1 || len(c.Fixtures) < 1 || len(c.Fixtures) > 4096 || len(c.Cases) < 1 || len(c.Cases) > 4096 {
+	if err := c.ValidateFixtures(); err != nil {
+		return err
+	}
+	if len(c.Cases) < 1 || len(c.Cases) > 4096 {
 		return errors.New("evaluation requires corpus version 1, 1..4096 fixtures and 1..4096 cases")
 	}
 	fixtures := make(map[string]bool)
 	for _, f := range c.Fixtures {
-		if f.FID == "" || fixtures[f.FID] || strings.TrimSpace(f.Key) == "" || strings.TrimSpace(f.Content) == "" || f.Tier == "" || f.Kind == "" {
-			return errors.New("evaluation fixture has a missing field or duplicate fid")
-		}
 		fixtures[f.FID] = true
 	}
 	for _, row := range c.Cases {
@@ -81,6 +80,22 @@ func (c EvaluationCorpus) Validate() error {
 	return nil
 }
 
+// ValidateFixtures is shared by retrieval and QA suites; QA need not have
+// retrieval relevance labels, but must use the same complete fixture identity.
+func (c EvaluationCorpus) ValidateFixtures() error {
+	if c.Version != 1 || len(c.Fixtures) < 1 || len(c.Fixtures) > 4096 {
+		return errors.New("evaluation requires version 1 and 1..4096 fixtures")
+	}
+	fixtures := make(map[string]bool)
+	for _, f := range c.Fixtures {
+		if f.FID == "" || fixtures[f.FID] || strings.TrimSpace(f.Key) == "" || strings.TrimSpace(f.Content) == "" || f.Tier == "" || f.Kind == "" {
+			return errors.New("evaluation fixture has a missing field or duplicate fid")
+		}
+		fixtures[f.FID] = true
+	}
+	return nil
+}
+
 // EvaluateCorpus uses the production owner for all writes, derivation, versioned
 // embedding, activation and retrieval. db MUST belong to a disposable evaluation
 // session; the standalone evaluator obtains it from postgres.OpenEvaluationStore.
@@ -90,120 +105,13 @@ func EvaluateCorpus(ctx context.Context, db store.DB, executor egress.Executor, 
 	if err := corpus.Validate(); err != nil {
 		return result, err
 	}
-	if db == nil || strings.TrimSpace(command) == "" {
-		return result, errors.New("evaluation requires an isolated store and an embedder")
-	}
-	if EmbedIsHTTP(command) && executor == nil {
-		return result, errors.New("evaluation HTTP embedder requires governed egress")
-	}
-	data, err := NewPostgresDataStore(db, PlacementKB)
+	module, err := NewEvaluationModule(ctx, db, executor)
 	if err != nil {
 		return result, err
 	}
-	backend := data.(*postgresDataStore)
-	backend.requireSemantic = true
-	handler := NewHandler(executor, WithDataStore(PlacementKB, data), func(options *handlerOptions) { options.dataContext = ctx })
-	call := func(stage uint32, verb string, request any, target any) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		raw, err := json.Marshal(request)
-		if err != nil {
-			return err
-		}
-		if stage == StageCommand {
-			raw, err = bus.EncodeCommand(verb, raw)
-			if err != nil {
-				return err
-			}
-		}
-		raw, status := handler(bus.ModuleInvocation{StageID: stage}, raw)
-		if status != bus.ModuleStatusOK {
-			return fmt.Errorf("evaluation %s: owner status %d", verb, status)
-		}
-		if stage == StageCommand {
-			raw, err = bus.DecodeCommandResult(raw)
-			if err != nil {
-				return err
-			}
-		}
-		var receipt struct {
-			Status  string `json:"status"`
-			Message string `json:"message"`
-		}
-		if err := json.Unmarshal(raw, &receipt); err != nil {
-			return err
-		}
-		if receipt.Status == "error" {
-			return fmt.Errorf("evaluation %s: %s", verb, receipt.Message)
-		}
-		return json.Unmarshal(raw, target)
-	}
-	ids := make(map[string]string)
-	unique := make(map[int64]bool)
-	confidence := .9
-	for _, f := range corpus.Fixtures {
-		var response DataResponse
-		err := call(StageData, "seed", DataRequest{Operation: "insert-epistemic", Tier: f.Tier, Kind: f.Kind, Key: f.Key, Content: f.Content, Confidence: &confidence, SessionID: "corpus", EpistemicKind: "world_fact", IncludeAll: true}, &response)
-		if err != nil {
-			return result, err
-		}
-		if len(response.Records) != 1 || response.Records[0].ID <= 0 || unique[response.Records[0].ID] {
-			return result, errors.New("evaluation fixture was rejected or aliases an existing fixture")
-		}
-		id := response.Records[0].ID
-		ids[f.FID], unique[id] = strconv.FormatInt(id, 10), true
-	}
-	// Drain metadata with the same transaction/context and derivation as the
-	// production worker. Finish this before freezing the version's input set.
-	for {
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		tx, err := db.Begin(ctx)
-		if err != nil {
-			return result, err
-		}
-		worked := false
-		err = func() error {
-			defer tx.Rollback(context.Background())
-			if err := sharedIndexContext(ctx, tx); err != nil {
-				return err
-			}
-			bound := *backend
-			bound.db = tx
-			var err error
-			worked, err = bound.indexSharedRecord(ctx)
-			if err != nil {
-				return err
-			}
-			return tx.Commit(ctx)
-		}()
-		if err != nil {
-			return result, err
-		}
-		if !worked {
-			break
-		}
-	}
-	var ready struct {
-		Ready  bool `json:"ready"`
-		Failed int  `json:"failed"`
-	}
-	if err := call(StageCommand, "reembed_start", map[string]any{"version": "evaluation", "embedding_command": command}, &ready); err != nil {
+	ids, err := module.Seed(corpus.Fixtures, command)
+	if err != nil {
 		return result, err
-	}
-	if !ready.Ready || ready.Failed != 0 {
-		return result, fmt.Errorf("evaluation corpus embedding incomplete (ready=%t, failed=%d)", ready.Ready, ready.Failed)
-	}
-	var activated struct {
-		Status string `json:"status"`
-	}
-	if err := call(StageCommand, "reembed_cutover", map[string]any{}, &activated); err != nil {
-		return result, err
-	}
-	if activated.Status != "ok" {
-		return result, errors.New("evaluation embedding activation failed")
 	}
 	result.LatenciesMS = make([]float64, 0, len(corpus.Cases))
 	for _, row := range corpus.Cases {
@@ -213,7 +121,7 @@ func EvaluateCorpus(ctx context.Context, db store.DB, executor egress.Executor, 
 		}
 		var score benchmarkScore
 		start := time.Now()
-		err := call(StageCommand, "runtime", map[string]any{"operation": "benchmark-score", "query": row.Query, "expected_ids": expected}, &score)
+		err := module.Call(StageCommand, "runtime", map[string]any{"operation": "benchmark-score", "query": row.Query, "expected_ids": expected}, &score)
 		if err != nil {
 			return EvaluationResult{}, err
 		}
@@ -273,6 +181,11 @@ func FormatEvaluation(result EvaluationResult, path, format, fields, profile str
 		view["excluded_cases"] = result.ExcludedCases
 		view["fixture_policy"] = "full-text-raw-query-v1"
 	}
+	return FormatEvaluationJSON(view, fields, profile)
+}
+
+// FormatEvaluationJSON applies the same field/profile projection to every suite.
+func FormatEvaluationJSON(view any, fields, profile string) ([]byte, error) {
 	payload, err := json.Marshal(view)
 	if err != nil {
 		return nil, err
