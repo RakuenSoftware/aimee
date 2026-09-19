@@ -22,6 +22,16 @@ func TestActivationSnapshotValidation(t *testing.T) {
 	if got == nil || !reflect.DeepEqual(got.Rows, []ActivationRow{{3, 1}, {4, 2}}) {
 		t.Fatalf("rows=%+v", got)
 	}
+	got = parseActivation(json.RawMessage(`{"current_turn":"9223372036854775807","rows":[
+ {"memory_id":"9007199254740993","last_turn":"9223372036854775806"},
+ {"memory_id":"9223372036854775807","last_turn":"1"},
+ {"memory_id":"9007199254740993","last_turn":"1"},
+ {"memory_id":"01","last_turn":"1"},{"memory_id":"+3","last_turn":"1"},
+ {"memory_id":"9223372036854775808","last_turn":"1"},
+ {"memory_id":9007199254740992,"last_turn":1}]}`))
+	if got == nil || got.CurrentTurn != 9223372036854775807 || !reflect.DeepEqual(got.Rows, []ActivationRow{{9007199254740993, 9223372036854775806}, {9223372036854775807, 1}}) {
+		t.Fatalf("exact activation state lost: %+v", got)
+	}
 	rows := make([]ActivationRow, activationMaxRows+10)
 	for i := range rows {
 		rows[i] = ActivationRow{int64(i + 1), 1}
@@ -127,6 +137,19 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 		if turn == 4 && (len(records) != 1 || why[4] != "") {
 			t.Fatal("sticky did not expire")
 		}
+	}
+	// Adjacent IDs above double precision remain distinct through the actual
+	// JSON recordset and PostgreSQL activation join.
+	if _, err := tx.Exec(ctx, `INSERT INTO memories(id,key) VALUES(9007199254740992,'exact-activation'),(9007199254740993,'exact-activation')`); err != nil {
+		t.Fatal(err)
+	}
+	exact := parseActivation(json.RawMessage(`{"current_turn":"7","rows":[{"memory_id":"9007199254740993","last_turn":"6"}]}`))
+	records, _, held, err = s.recallActivated(ctx, exact, "key='exact-activation'", 2, false, false)
+	if err != nil || !reflect.DeepEqual(ids(records), []int64{9007199254740992}) || held != 1 {
+		t.Fatalf("exact ID cooldown=%v held=%d err=%v", ids(records), held, err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM memories WHERE key='exact-activation'`); err != nil {
+		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(snapshot)
 	if _, err := s.RecallBundleWithActivation(ctx, "", 0, false, raw); err != nil {

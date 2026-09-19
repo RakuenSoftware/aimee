@@ -26,6 +26,8 @@
 #include "tasks.h"
 #include "integrity.h"
 
+#include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +53,27 @@ typedef struct
    int loaded;
 } kbc_memory_activation_t;
 
+/* Decimal transport fields must not pass through cJSON's double storage. */
+static int kbc_memory_activation_integer(const char *text, char **end, int64_t *value)
+{
+   if (!text || text[0] < '0' || text[0] > '9' ||
+       (text[0] == '0' && text[1] >= '0' && text[1] <= '9'))
+      return 0;
+   errno = 0;
+   long long parsed = strtoll(text, end, 10);
+   if (errno == ERANGE || parsed < 0 || parsed > INT64_MAX)
+      return 0;
+   *value = (int64_t)parsed;
+   return 1;
+}
+
+static void kbc_memory_activation_add_integer(cJSON *object, const char *key, int64_t value)
+{
+   char text[32];
+   snprintf(text, sizeof(text), "%lld", (long long)value);
+   cJSON_AddStringToObject(object, key, text);
+}
+
 static void kbc_memory_activation_load(kbc_memory_activation_t *activation)
 {
    memset(activation, 0, sizeof(*activation));
@@ -60,17 +83,16 @@ static void kbc_memory_activation_load(kbc_memory_activation_t *activation)
 
    char rows[KBC_MEMORY_ACTIVATION_MAX_ROWS][DB1_CONTEXT_ACTIVATION_ROW_LEN];
    int n = db1_context_snapshot_activation(conversation_id, rows, KBC_MEMORY_ACTIVATION_MAX_ROWS);
-   if (n < 0)
+   if (n < 0 || n > KBC_MEMORY_ACTIVATION_MAX_ROWS)
       return;
 
    for (int i = 0; i < n && activation->count < KBC_MEMORY_ACTIVATION_MAX_ROWS; i++)
    {
       char *end = NULL;
-      long long memory_id = strtoll(rows[i], &end, 10);
-      if (memory_id < 0 || !end)
+      int64_t memory_id, turn;
+      if (!kbc_memory_activation_integer(rows[i], &end, &memory_id) || *end != ' ')
          continue;
-      long long turn = strtoll(end, NULL, 10);
-      if (turn < 0)
+      if (!kbc_memory_activation_integer(end + 1, &end, &turn) || *end != '\0')
          continue;
       if (memory_id == 0)
       {
@@ -93,14 +115,14 @@ static void kbc_memory_activation_add(cJSON *req, kbc_memory_activation_t *activ
    cJSON *rows = obj ? cJSON_AddArrayToObject(obj, "rows") : NULL;
    if (!obj || !rows)
       return;
-   cJSON_AddNumberToObject(obj, "current_turn", (double)activation->current_turn);
+   kbc_memory_activation_add_integer(obj, "current_turn", activation->current_turn);
    for (int i = 0; i < activation->count; i++)
    {
       cJSON *row = cJSON_CreateObject();
       if (!row)
          break;
-      cJSON_AddNumberToObject(row, "memory_id", (double)activation->rows[i].memory_id);
-      cJSON_AddNumberToObject(row, "last_turn", (double)activation->rows[i].last_turn);
+      kbc_memory_activation_add_integer(row, "memory_id", activation->rows[i].memory_id);
+      kbc_memory_activation_add_integer(row, "last_turn", activation->rows[i].last_turn);
       cJSON_AddItemToArray(rows, row);
    }
 }
@@ -122,10 +144,26 @@ static void kbc_memory_activation_record_recall(const cJSON *response,
          const cJSON *managed = cJSON_GetObjectItemCaseSensitive(item, "activation_managed");
          if (!cJSON_IsTrue(managed))
             continue;
-         const cJSON *mid = cJSON_GetObjectItemCaseSensitive(item, "memory_id");
-         if (!cJSON_IsNumber(mid) || mid->valuedouble <= 0.0)
-            continue;
-         int64_t id = (int64_t)mid->valuedouble;
+         int64_t id;
+         const cJSON *handle = cJSON_GetObjectItemCaseSensitive(item, "handle");
+         if (handle)
+         {
+            const char *text = cJSON_GetStringValue(handle);
+            char *end = NULL;
+            if (!text || strncmp(text, "kb:memory:", 10) != 0 ||
+                !kbc_memory_activation_integer(text + 10, &end, &id) || *end != '\0' || id <= 0)
+               continue;
+         }
+         else
+         {
+            /* Compatibility with older owners is bounded to exact doubles. */
+            const cJSON *mid = cJSON_GetObjectItemCaseSensitive(item, "memory_id");
+            if (!cJSON_IsNumber(mid) || !isfinite(mid->valuedouble) || mid->valuedouble <= 0.0 ||
+                mid->valuedouble > 9007199254740991.0 ||
+                floor(mid->valuedouble) != mid->valuedouble)
+               continue;
+            id = (int64_t)mid->valuedouble;
+         }
          int duplicate = 0;
          for (int i = 0; i < seen_n; i++)
             if (seen[i] == id)

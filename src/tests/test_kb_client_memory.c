@@ -72,11 +72,15 @@ int db1_context_snapshot_activation(const char *session_id_arg,
                                     char (*out)[DB1_CONTEXT_ACTIVATION_ROW_LEN], int max)
 {
    assert(strcmp(session_id_arg, "activation-client-session") == 0);
-   assert(max >= 3);
+   assert(max >= 7);
    snprintf(out[0], DB1_CONTEXT_ACTIVATION_ROW_LEN, "0 7");
    snprintf(out[1], DB1_CONTEXT_ACTIVATION_ROW_LEN, "41 6");
    snprintf(out[2], DB1_CONTEXT_ACTIVATION_ROW_LEN, "52 3");
-   return 3;
+   snprintf(out[3], DB1_CONTEXT_ACTIVATION_ROW_LEN, "9007199254740993 6");
+   snprintf(out[4], DB1_CONTEXT_ACTIVATION_ROW_LEN, "9223372036854775808 1");
+   snprintf(out[5], DB1_CONTEXT_ACTIVATION_ROW_LEN, "12 3junk");
+   snprintf(out[6], DB1_CONTEXT_ACTIVATION_ROW_LEN, "13 9223372036854775808");
+   return 7;
 }
 
 int db1_context_snapshot_insert_turn(const char *session_id_arg, int64_t memory_id,
@@ -267,9 +271,12 @@ static int activation_recall_post_handler(const char *url, const char *auth_head
    (void)timeout_ms;
    (void)extra_headers;
    assert(url && strstr(url, "/v1/actions/memory.recall") != NULL);
-   assert(body && strstr(body, "\"current_turn\":7") != NULL);
-   assert(strstr(body, "\"memory_id\":41") != NULL);
-   assert(strstr(body, "\"last_turn\":6") != NULL);
+   assert(body && strstr(body, "\"current_turn\":\"7\"") != NULL);
+   assert(strstr(body, "\"memory_id\":\"41\"") != NULL);
+   assert(strstr(body, "\"last_turn\":\"6\"") != NULL);
+   assert(strstr(body, "\"memory_id\":\"9007199254740993\"") != NULL);
+   assert(strstr(body, "9223372036854775808") == NULL);
+   assert(strstr(body, "3junk") == NULL);
    if (response_buf)
       *response_buf =
           strdup("{\"status\":\"ok\",\"recall\":{\"identity\":[{\"memory_id\":73,"
@@ -307,6 +314,23 @@ static void test_recall_carries_and_records_production_activation(void)
    json = kb_client_memory_recall_json("failed composition", 128, 0);
    assert(json != NULL && strcmp(json, composition_reply) == 0 && activation_writes == writes);
    free(json);
+   composition_reply =
+       "{\"status\":\"ok\",\"recall\":{\"identity\":["
+       "{\"memory_id\":9007199254740993,\"handle\":\"kb:memory:9007199254740993\",\"activation_"
+       "managed\":true},"
+       "{\"memory_id\":9007199254740993,\"handle\":\"kb:memory:9007199254740993\",\"activation_"
+       "managed\":true},"
+       "{\"memory_id\":9007199254740993,\"activation_managed\":true},"
+       "{\"memory_id\":73.5,\"activation_managed\":true},"
+       "{\"memory_id\":73,\"handle\":\"user:memory:73\",\"activation_managed\":true},"
+       "{\"memory_id\":73,\"handle\":\"kb:memory:9223372036854775808\",\"activation_managed\":true}"
+       ","
+       "{\"memory_id\":73,\"handle\":\"kb:memory:073\",\"activation_managed\":true}]}}";
+   json = kb_client_memory_recall_json("exact activation receipts", 128, 0);
+   assert(json && strcmp(json, composition_reply) == 0);
+   free(json);
+   assert(activation_writes == writes + 1 && activation_write_id == INT64_C(9007199254740993));
+   writes = activation_writes;
    composition_reply = NULL;
    composition_transport = -1;
    assert(kb_client_memory_recall_json("missing local owner", 128, 0) == NULL);

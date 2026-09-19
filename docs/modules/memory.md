@@ -45,7 +45,10 @@ cannot invoke this personal-store operation. A failed private read refuses the
 whole composition; shared errors/quarantine remain refusals. The retired
 `src/user_memory_merge.c` policy and mutable-array ABI are guarded against return.
 This does not make cross-store reads one atomic snapshot or provide durable
-release receipts; activation receipt transport still needs its own exact-ID work.
+release receipts. Activation snapshots transport canonical decimal strings; the
+Go owner validates them and returns scoped handles. Native receipt transport
+uses those handles without double conversion and refuses ambiguous legacy IDs
+above 2^53-1.
 
 ## Current-state retrieval validity
 

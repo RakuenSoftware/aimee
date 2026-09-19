@@ -27,7 +27,7 @@ func parseActivation(raw json.RawMessage) *ActivationSnapshot {
 	if len(raw) == 0 || len(raw) > 65536 || json.Unmarshal(raw, &object) != nil || object == nil {
 		return nil
 	}
-	turn, ok := object.positiveID("current_turn")
+	turn, ok := object.decimalID("current_turn")
 	if !ok {
 		return nil
 	}
@@ -45,8 +45,8 @@ func parseActivation(raw json.RawMessage) *ActivationSnapshot {
 		if json.Unmarshal(rawRow, &row) != nil {
 			continue
 		}
-		id, validID := row.positiveID("memory_id")
-		last, validTurn := row.positiveID("last_turn")
+		id, validID := row.decimalID("memory_id")
+		last, validTurn := row.decimalID("last_turn")
 		if !validID || !validTurn || last > turn || seen[id] {
 			continue
 		}
