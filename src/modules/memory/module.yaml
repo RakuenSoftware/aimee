@@ -142,7 +142,8 @@
     "server-go/modules/memory/shared_recall.go",
     "server-go/modules/memory/evaluation.go",
     "server-go/modules/memory/cmd/aimee-memory-eval/corpus.go",
-    "server-go/modules/memory/lane_metrics.go"
+    "server-go/modules/memory/lane_metrics.go",
+    "server-go/modules/memory/pagerank.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -251,7 +252,8 @@
     "server-go/modules/memory/fact_invalidation_test.go",
     "server-go/modules/memory/fact_mutation_test.go",
     "server-go/modules/memory/fact_review_test.go",
-    "server-go/modules/memory/public_facts_test.go"
+    "server-go/modules/memory/public_facts_test.go",
+    "server-go/modules/memory/pagerank_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

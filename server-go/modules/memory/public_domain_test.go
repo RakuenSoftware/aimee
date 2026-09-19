@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -165,9 +166,10 @@ func TestDomainPublicPostgres(t *testing.T) {
 		display["effectiveness"].(map[string]any)["never_surfaced_l2"] != float64(2) {
 		t.Fatal(console)
 	}
+	timing := pageRankMetricState.snapshot()
 	if !strings.Contains(console["text"].(string), "L0=0 L1=1 L2=2 L3=0 L4=0 L5=0\n") ||
-		console["pagerank_timing"].(map[string]any)["elapsed_ms"] != float64(0) ||
-		console["pagerank_text"] != "PageRank: elapsed=0.000ms avg=0.000ms max=0.000ms samples=0 candidates=0 edges=0\n" {
+		console["pagerank_timing"].(map[string]any)["elapsed_ms"] != timing.LastMS ||
+		console["pagerank_text"] != fmt.Sprintf("PageRank: elapsed=%.3fms avg=%.3fms max=%.3fms samples=%d candidates=%d edges=%d\n", timing.LastMS, timing.AverageMS, timing.MaximumMS, timing.Samples, timing.Candidates, timing.Edges) {
 		t.Fatal(console)
 	}
 	if _, exists := run("stats", `{"view":"console"}`)["display"].(map[string]any)["effectiveness"]; exists {

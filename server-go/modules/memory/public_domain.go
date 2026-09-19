@@ -281,10 +281,11 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		for i, name := range names {
 			kinds[i] = s.KindCounts[name]
 		}
+		timing := pageRankMetricState.snapshot()
 		result["stats"] = map[string]any{"total": s.Total, "conflicts": s.Conflicts, "tier_counts": tiers, "kind_counts": kinds,
-			"pagerank_last_ms": 0, "pagerank_avg_ms": 0, "pagerank_max_ms": 0, "pagerank_samples": 0, "pagerank_last_candidates": 0, "pagerank_last_edges": 0}
+			"pagerank_last_ms": timing.LastMS, "pagerank_avg_ms": timing.AverageMS, "pagerank_max_ms": timing.MaximumMS, "pagerank_samples": timing.Samples, "pagerank_last_candidates": timing.Candidates, "pagerank_last_edges": timing.Edges}
 		if args.stringOr("view", "") == "console" {
-			addStatsConsole(result, *s)
+			addStatsConsole(result, *s, timing)
 			// The historical CLI includes effectiveness only in JSON output and
 			// treats this secondary query as optional. Never hide a primary stats failure.
 			var effectiveness bool
@@ -307,21 +308,23 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 	return commandResult(result)
 }
 
-// Keep the CLI's presentation contract in the same owner as the public stats.
-// PageRank timing remains unmeasured by this owner; these compatibility fields
-// retain their existing zero values until real measurements are available.
-func addStatsConsole(result map[string]any, stats MemoryStats) {
+// Keep all stats projections on one snapshot from the Go PageRank scorer.
+// No samples means unmeasured; these counters do not claim retrieval activation.
+func addStatsConsole(result map[string]any, stats MemoryStats, timing pageRankMetrics) {
 	tiers := make(map[string]int, 6)
 	for i := 0; i < 6; i++ {
 		name := fmt.Sprintf("L%d", i)
 		tiers[name] = stats.TierCounts[name]
 	}
-	result["display"] = map[string]any{"total": stats.Total, "conflicts": stats.Conflicts, "tiers": tiers,
-		"pagerank": map[string]any{"last_ms": 0, "avg_ms": 0, "max_ms": 0, "samples": 0, "last_candidates": 0, "last_edges": 0}}
-	result["pagerank_timing"] = map[string]any{"elapsed_ms": 0, "avg_ms": 0, "max_ms": 0, "samples": 0, "candidates": 0, "edges": 0}
-	result["pagerank_text"] = "PageRank: elapsed=0.000ms avg=0.000ms max=0.000ms samples=0 candidates=0 edges=0\n"
+	result["display"] = map[string]any{"total": stats.Total, "conflicts": stats.Conflicts, "tiers": tiers, "pagerank": timing}
+	state := "measured"
+	if timing.Samples == 0 {
+		state = "unmeasured"
+	}
+	result["pagerank_timing"] = map[string]any{"elapsed_ms": timing.LastMS, "avg_ms": timing.AverageMS, "max_ms": timing.MaximumMS, "samples": timing.Samples, "candidates": timing.Candidates, "edges": timing.Edges, "state": state, "source": "candidate-scorer"}
+	result["pagerank_text"] = fmt.Sprintf("PageRank: elapsed=%.3fms avg=%.3fms max=%.3fms samples=%d candidates=%d edges=%d\n", timing.LastMS, timing.AverageMS, timing.MaximumMS, timing.Samples, timing.Candidates, timing.Edges)
 	result["text"] = fmt.Sprintf("Memory Stats:\n  Total:              %d\n  Conflicts:          %d\n"+
 		"  Tiers:              L0=%d L1=%d L2=%d L3=%d L4=%d L5=%d\n"+
-		"  PageRank latency:   last=0.000ms avg=0.000ms max=0.000ms samples=0 candidates=0 edges=0\n",
-		stats.Total, stats.Conflicts, tiers["L0"], tiers["L1"], tiers["L2"], tiers["L3"], tiers["L4"], tiers["L5"])
+		"  PageRank latency:   last=%.3fms avg=%.3fms max=%.3fms samples=%d candidates=%d edges=%d\n",
+		stats.Total, stats.Conflicts, tiers["L0"], tiers["L1"], tiers["L2"], tiers["L3"], tiers["L4"], tiers["L5"], timing.LastMS, timing.AverageMS, timing.MaximumMS, timing.Samples, timing.Candidates, timing.Edges)
 }

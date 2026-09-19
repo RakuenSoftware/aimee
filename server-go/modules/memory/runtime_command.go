@@ -30,6 +30,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return handleTypedContext(options, invocation, args)
 	case "assertion-search":
 		return handleAssertionSearch(options, invocation, args)
+	case "pagerank":
+		return handlePageRank(options, invocation, args)
 	case "benchmark-score":
 		return handleBenchmarkScore(options, invocation, args)
 	case "benchmark-hard-negative":

@@ -30,6 +30,7 @@ const (
 )
 
 type DataRequest struct {
+	PageRank       *pageRankRequest        `json:"pagerank,omitempty"`
 	lanes          recallLanes             // request-local attribution; never accepted from wire input
 	TypedContext   *typedContextOptions    `json:"typed_context,omitempty"`
 	Assertions     *assertionSearchRequest `json:"assertions,omitempty"`
@@ -1243,6 +1244,24 @@ set_config('aimee.correlation_id',$9,true)`,
 			if len(response.Payload) > maxDataBody {
 				err = errors.New("memory: assertion response exceeds capacity")
 			}
+		}
+	case "pagerank":
+		if invocation.PrincipalRef != 0 || !validPageRankRequest(request.PageRank) {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var ranked pageRankResult
+		defer func() {
+			if status == bus.ModuleStatusOK {
+				pageRankMetricState.observe(ranked)
+			}
+		}()
+		ranked, err = backend.pageRank(ctx, request, explicitScope)
+		if err == nil {
+			response.Payload, err = json.Marshal(ranked)
 		}
 	case "trace-state", "trace-apply":
 		backend, ok := options.data.(*postgresDataStore)

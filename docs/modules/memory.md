@@ -109,8 +109,10 @@ The CLI forwards Go's display/text fields and search timing view. Server KB stat
 forward the complete validated owner envelope, preserving integer tokens and
 error kinds. Missing or malformed replies never become healthy zero statistics.
 The four native stats, raw-stats, effectiveness and health client APIs are retired.
-PageRank timing compatibility fields remain zero, and write-to-readable latency
-remains explicitly unmeasured; this migration does not introduce measurements.
+PageRank timing fields use one process-local snapshot of successful Go candidate
+scoring calls. The console timing envelope labels zero samples `unmeasured` and
+identifies its source as `candidate-scorer`; these measurements do not imply
+PageRank is enabled for recall. Write-to-readable latency remains unmeasured.
 
 The same console view owns maintenance mode parsing, summary rendering and the
 vector-maintenance handoff indicator. The CLI passes mode names and watch timing;
@@ -323,12 +325,11 @@ bus. Internal dashboard and briefing builders are not declared as RPC actions.
 The legacy plugin version-1 admission and invocation protocol remains compatible.
 Authenticated admission and the server-to-KB transport remain native callers.
 
-Production C memory clients, native headers and gateway integration still need
-replacement by Go callers. They must be deleted at cutover, not moved into host
-directories. Passing a pure-Go process/client build does not complete G0 while
-those C paths remain. The module currently retains three C sources and five
-headers. The descriptor's `ownership_complete` flag verifies the declared file
-inventory; it does not assert that the Go migration is complete.
+The memory module has no native sources or headers. External C hosts retain
+transport and shared protocol declarations as described in Compatibility below;
+the C bus stays C. Memory behavior and its producer/consumer belong in Go. The
+descriptor's `ownership_complete` flag verifies the declared file inventory; it
+does not certify historical behavior or performance parity.
 
 ## Data and migrations
 
@@ -414,9 +415,24 @@ The native `bench-perf` memory cases depended on deleted in-process functions.
 They now emit null timings with `status=unavailable`, exit 2, and cannot save or
 certify a baseline. Use `aimee-memory-eval` for isolated Go corpus measurements;
 its results are not interchangeable with the old in-process timing baseline.
-Legacy PageRank timing and unit/temporal semantic weighting still need separate
-behavioral parity work. Removing dead declarations does not establish those
-capabilities.
+The private, host-only `runtime` operation `pagerank` now scores an explicit
+candidate set in Go. Supply `ids`, optional `iterations` (default 6, range 1–16),
+`weight` (default 0.35, range greater than zero through 10), and `relations`
+(default `depends_on`, `related_to`, `co_edited`, `fixes`; an empty list accepts
+all nonempty relation labels). Normal project/workspace or exact-scope filtering
+applies before graph work; suppressed and inactive records cannot contribute.
+The work budget is 128 unique positive IDs and 8192 links. Oversized graphs and
+SQL errors fail instead of producing partial scores. IDs retain int64 precision.
+
+The Go kernel matches captured output from the retired C implementation:
+undirected adjacency, parallel-edge multiplicity, damping 0.85, uniform dangling
+mass, and maximum-normalized bonuses. Successful owner calls record graph-query
+plus kernel time only after the request transaction commits. Measurements are
+process-local, not an end-to-end retrieval latency or a replacement for the old
+native baseline. `BenchmarkPageRankKernel50` measures CPU work alone. This private
+operation makes scoring available to the isolated evaluator; recall ordering is
+unchanged at this checkpoint. PageRank retrieval integration and unit/temporal
+semantic weighting still need separate behavioral parity work.
 
 There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report
