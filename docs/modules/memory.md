@@ -1,5 +1,21 @@
 # memory module
 
+## Language and bus boundary
+
+The memory module, including its bus producer and consumer, must be pure Go.
+The existing bus in `src/core/event_bus` remains C. `server-go/bus` is the Go
+binding to that bus, not a replacement implementation. Server and KB use one
+shared Go memory implementation with placement-specific storage and permissions.
+
+External C hosts may retain transport callers and their protocol declarations.
+Memory policy, retrieval, ranking, persistence orchestration and fallback behavior
+belong in Go; moving those into a C host does not complete the migration.
+The memory process must build and communicate without cgo. Integration tests
+must exercise its Go producer and consumer against the actual C bus.
+
+The migration is still incomplete: one C source (127 lines) and three headers
+remain under `src/modules/memory` at this checkpoint.
+
 ## Isolated Go evaluation transport
 
 `server-go/modules/memory/cmd/aimee-memory-eval` runs the ordinary Go KB memory
@@ -359,11 +375,15 @@ An expired call still fails rather than retrying indefinitely or changing stores
 
 ## Compatibility
 
-The remaining C transport and host integration is migration debt:
+Native files remaining inside the memory module must be retired or receive an
+explicit host-only ownership disposition. External C transport does not itself
+require a language migration, but may not retain memory behavior:
 
-- `memory_data_bus.c` and `memory_domain_bus.c` encode/decode bounded event-bus
-  messages. Scope travels in explicit Go request fields; the native thread-local
-  context bridge and callback registration have been deleted.
+- `memory_data_bus.c` encodes/decodes bounded event-bus messages for legacy
+  native benchmark callers. It still resides in the memory tree and remains
+  unfinished boundary work. The separate `memory_domain_bus.c` is deleted.
+  Scope travels in explicit Go request fields; the native thread-local context
+  bridge and callback registration have been deleted.
 - `server_hooks.c` connects retired local memory-file writes to the Go policy over
   memory stage 7; classification and shell-write detection live in `redirect.go`.
 - `kb_memory_facts.c` connects the KB drain to its existing curator provider and
@@ -381,10 +401,14 @@ retired in-process C query rewriter from returning; those gates now use
 It also rejects restoring or relocating the deleted native gate, extraction and
 context-assembly APIs, including declarations and macro aliases.
 
-`scripts/check_memory_go_only.py --report` audits the final G0 boundary across
-the repository, including native callers, types, forwarding headers, cgo imports
-and build registrations. It exits unsuccessfully while any such debt remains;
-the transitional allowlist passing is not evidence that G0 is complete.
+`scripts/check_memory_go_only.py --report` retains the immutable, broader native
+inventory, including external callers, types, forwarding headers, cgo imports
+and build registrations. It still exits unsuccessfully when any finding remains.
+Its historical all-native-callers criterion predates the clarified module-only
+language boundary, so findings need ownership classification: permitted C host
+transport is distinct from forbidden native memory behavior or module-side C
+communication. Neither reclassifying findings nor passing the transitional
+allowlist demonstrates that G0 is complete.
 
 There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report
