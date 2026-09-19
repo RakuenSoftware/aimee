@@ -546,64 +546,6 @@ void mem_calibrate(app_ctx_t *ctx, int argc, char **argv)
    mem_label_analysis(ctx, argc, argv, "memory.calibrate");
 }
 
-static void mem_print_eval_report(const char *title, const mem_eval_scores_t *scores,
-                                  const mem_eval_latency_t *latency)
-{
-   printf("%s (%d cases)\n", title, scores->n_cases);
-   printf("  MRR:       %.4f\n", scores->mrr);
-   printf("  NDCG@5:    %.4f\n", scores->ndcg_5);
-   printf("  NDCG@10:   %.4f\n", scores->ndcg_10);
-   printf("  Recall@5:  %.4f\n", scores->recall_5);
-   printf("  Recall@10: %.4f\n", scores->recall_10);
-   if (latency && latency->n_queries > 0)
-   {
-      printf("  Latency:   p50=%.3fms p95=%.3fms p99=%.3fms min=%.3fms max=%.3fms (%d queries)\n",
-             latency->p50_ms, latency->p95_ms, latency->p99_ms, latency->min_ms, latency->max_ms,
-             latency->n_queries);
-   }
-   printf("  Route Buckets:\n");
-   for (int i = 0; i < MEM_EVAL_ROUTE_BUCKET_COUNT; i++)
-   {
-      if (scores->route_buckets[i].cases <= 0)
-         continue;
-      printf("    %s: cases=%d mrr=%.4f recall@10=%.4f\n",
-             memory_query_route_name((memory_query_route_t)i), scores->route_buckets[i].cases,
-             scores->route_buckets[i].metric_a, scores->route_buckets[i].metric_b);
-   }
-   printf("  Shape Buckets:\n");
-   for (int i = 0; i < MEM_EVAL_SHAPE_BUCKET_COUNT; i++)
-   {
-      if (scores->shape_buckets[i].cases <= 0)
-         continue;
-      printf("    %s: cases=%d mrr=%.4f recall@10=%.4f\n",
-             memory_query_shape_name((memory_query_shape_t)i), scores->shape_buckets[i].cases,
-             scores->shape_buckets[i].metric_a, scores->shape_buckets[i].metric_b);
-   }
-}
-
-static cJSON *mem_eval_bucket_json(const mem_eval_bucket_scores_t *buckets, int count, int is_route,
-                                   const char *metric_a_name, const char *metric_b_name)
-{
-   cJSON *obj = cJSON_CreateObject();
-   if (!obj)
-      return NULL;
-   for (int i = 0; i < count; i++)
-   {
-      if (buckets[i].cases <= 0)
-         continue;
-      const char *name = is_route ? memory_query_route_name((memory_query_route_t)i)
-                                  : memory_query_shape_name((memory_query_shape_t)i);
-      cJSON *row = cJSON_CreateObject();
-      if (!row)
-         continue;
-      jo_add_i64(row, "cases", buckets[i].cases);
-      jo_add_num(row, metric_a_name, buckets[i].metric_a);
-      jo_add_num(row, metric_b_name, buckets[i].metric_b);
-      cJSON_AddItemToObject(obj, name, row);
-   }
-   return obj;
-}
-
 static const char *mem_benchmark_cli_weight_profile(int argc, char **argv)
 {
    for (int i = 0; i < argc; i++)
@@ -656,88 +598,6 @@ static void mem_benchmark_restore_weight_profile(const char *previous)
 {
    platform_setenv("AIMEE_MEMORY_WEIGHT_PROFILE", (previous && previous[0]) ? previous : "");
 }
-
-static void mem_benchmark_print_weight_profile(const char *weight_profile)
-{
-   if (weight_profile && weight_profile[0])
-      printf("Weight profile: %s\n", weight_profile);
-}
-
-void mem_emit_eval_json(app_ctx_t *ctx, const char *suite, const char *dataset,
-                        const mem_eval_scores_t *scores, const mem_eval_latency_t *latency,
-                        const char *weight_profile)
-{
-   cJSON *obj = cJSON_CreateObject();
-   jo_add_str(obj, "suite", suite);
-   if (dataset && dataset[0])
-      jo_add_str(obj, "dataset", dataset);
-   if (weight_profile && weight_profile[0])
-      jo_add_str(obj, "weight_profile", weight_profile);
-   cJSON *metrics = cJSON_CreateObject();
-   jo_add_num(metrics, "mrr", scores->mrr);
-   jo_add_num(metrics, "ndcg_5", scores->ndcg_5);
-   jo_add_num(metrics, "ndcg_10", scores->ndcg_10);
-   jo_add_num(metrics, "recall_5", scores->recall_5);
-   jo_add_num(metrics, "recall_10", scores->recall_10);
-   jo_add_i64(metrics, "cases", scores->n_cases);
-   cJSON_AddItemToObject(obj, "metrics", metrics);
-   cJSON_AddItemToObject(obj, "route_buckets",
-                         mem_eval_bucket_json(scores->route_buckets, MEM_EVAL_ROUTE_BUCKET_COUNT, 1,
-                                              "mrr", "recall_10"));
-   cJSON_AddItemToObject(obj, "shape_buckets",
-                         mem_eval_bucket_json(scores->shape_buckets, MEM_EVAL_SHAPE_BUCKET_COUNT, 0,
-                                              "mrr", "recall_10"));
-   if (latency && latency->n_queries > 0)
-   {
-      cJSON *lat = cJSON_CreateObject();
-      jo_add_num(lat, "p50_ms", latency->p50_ms);
-      jo_add_num(lat, "p95_ms", latency->p95_ms);
-      jo_add_num(lat, "p99_ms", latency->p99_ms);
-      jo_add_num(lat, "min_ms", latency->min_ms);
-      jo_add_num(lat, "max_ms", latency->max_ms);
-      jo_add_i64(lat, "queries", latency->n_queries);
-      cJSON_AddItemToObject(obj, "latency", lat);
-   }
-   emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
-}
-
-static int mem_load_live_cases(mem_eval_case_t *cases, int max_cases, char *basis, size_t basis_len)
-{
-   if (max_cases <= 0)
-   {
-      if (basis && basis_len > 0)
-         basis[0] = '\0';
-      return 0;
-   }
-
-   memory_t rows[100];
-   int row_cap = max_cases < (int)(sizeof(rows) / sizeof(rows[0]))
-                     ? max_cases
-                     : (int)(sizeof(rows) / sizeof(rows[0]));
-   int n_rows = kb_client_memory_load_eval_corpus(rows, row_cap, basis, basis_len);
-   if (n_rows <= 0)
-      return 0;
-
-   memset(cases, 0, (size_t)max_cases * sizeof(*cases));
-   int n_cases = 0;
-   for (int i = 0; i < n_rows && n_cases < max_cases; i++)
-   {
-      const char *key = rows[i].key;
-      const char *content = rows[i].content;
-      snprintf(cases[n_cases].query, sizeof(cases[n_cases].query), "%s",
-               key && key[0] ? key : (content ? content : ""));
-      if (!cases[n_cases].query[0])
-         continue;
-      cases[n_cases].expected_ids[0] = rows[i].id;
-      cases[n_cases].n_expected = 1;
-      n_cases++;
-   }
-   return n_cases;
-}
-
-/* Ablation-arm resolution lives in agent_eval_memory_support.c
- * (mem_eval_fusion_arm_resolve) so the server's memory.benchmark handler shares
- * it; the CLI runner below calls the same function. */
 
 void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
 {
@@ -881,76 +741,36 @@ void mem_benchmark(app_ctx_t *ctx, int argc, char **argv)
       BENCHMARK_RETURN;
    }
 
-   if (strcmp(suite, "live") == 0)
+   if (strcmp(suite, "live") == 0 || strcmp(suite, "code-graph-fusion") == 0)
    {
-      mem_eval_case_t cases[100];
-      char basis[64];
-      int n_cases = mem_load_live_cases(cases, 100, basis, sizeof(basis));
-      if (n_cases == 0)
-         fatal("no suitable memories available for live benchmark");
-
-      mem_eval_scores_t scores;
-      mem_eval_latency_t latency;
-      mem_eval_run_with_latency(cases, n_cases, &scores, &latency);
-      if (ctx->json_output)
-      {
-         mem_emit_eval_json(ctx, "live", NULL, &scores, &latency, benchmark_weight_profile);
-         BENCHMARK_RETURN;
-      }
-      char title[128];
-      snprintf(title, sizeof(title), "Memory Benchmark — live DB (%s)",
-               basis[0] ? basis : "seeded");
-      mem_print_eval_report(title, &scores, &latency);
-      mem_benchmark_print_weight_profile(benchmark_weight_profile);
-      BENCHMARK_RETURN;
-   }
-
-   if (strcmp(suite, "code-graph-fusion") == 0)
-   {
-      const char *corpus_path = opt_get(&opts, "corpus");
-      if (!corpus_path)
-         corpus_path = "benchmarks/code-vector-graph/production-corpus.json";
-      if (opt_get(&opts, "arm") || opt_get(&opts, "fusion-state"))
-         fatal("fusion is per-instance; configure AIMEE_GRAPH_FUSION=on|off and restart");
-      cJSON *state_args = cJSON_CreateObject(), *state = NULL;
-      cJSON_AddStringToObject(state_args, "operation", "fusion-state");
-      int state_rc = aimee_module_commands_dispatch_internal("memory.runtime", state_args, &state);
-      cJSON_Delete(state_args);
-      int fusion_on =
-          state_rc > 0 && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(state, "enabled"));
-      cJSON_Delete(state);
-      const char *fstate = fusion_on ? "on" : "off";
-
-      mem_eval_case_t cases[200];
-      int n_cases = mem_eval_load_production_corpus(corpus_path, cases,
-                                                    (int)(sizeof(cases) / sizeof(cases[0])));
-      if (n_cases <= 0)
-         fatal("code-graph-fusion: failed to load corpus %s", corpus_path);
-      int labelled = 0;
-      for (int i = 0; i < n_cases; i++)
-         if (cases[i].n_expected > 0)
-            labelled++;
-
-      mem_eval_scores_t scores;
-      mem_eval_latency_t latency;
-      mem_eval_run_with_latency(cases, n_cases, &scores, &latency);
-
-      if (ctx->json_output)
-      {
-         mem_emit_eval_json(ctx, "code-graph-fusion", corpus_path, &scores, &latency,
-                            benchmark_weight_profile);
-         BENCHMARK_RETURN;
-      }
-      char title[256];
-      snprintf(title, sizeof(title),
-               "Code-Graph Fusion — instance fusion=%s (%d queries, %d labelled)", fstate, n_cases,
-               labelled);
-      mem_print_eval_report(title, &scores, &latency);
-      if (labelled < n_cases)
-         printf("  note: %d/%d queries have no expected_ids yet — recall undercounts until the "
-                "corpus is labelled\n",
-                n_cases - labelled, n_cases);
-      mem_benchmark_print_weight_profile(benchmark_weight_profile);
+      if (benchmark_weight_profile[0])
+         fatal("legacy weight profiles are not supported by Go memory evaluation");
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "suite", suite);
+      cJSON_AddStringToObject(request, "format", ctx->json_output ? "json" : "text");
+      if (ctx->json_fields)
+         cJSON_AddStringToObject(request, "fields", ctx->json_fields);
+      if (ctx->response_profile)
+         cJSON_AddStringToObject(request, "profile", ctx->response_profile);
+      if (opt_get(&opts, "arm"))
+         cJSON_AddStringToObject(request, "arm", opt_get(&opts, "arm"));
+      if (opt_get(&opts, "fusion-state"))
+         cJSON_AddStringToObject(request, "fusion_state", opt_get(&opts, "fusion-state"));
+      const char *path = opt_get(&opts, "corpus");
+      if (path)
+         cJSON_AddStringToObject(request, "corpus", path);
+      if (!strcmp(suite, "code-graph-fusion") && !path)
+         path = "benchmarks/code-vector-graph/production-corpus.json";
+      cJSON *result =
+          mem_rpc_unwrap(kb_client_memory_benchmark_json(
+                             request, !strcmp(suite, "code-graph-fusion") ? path : NULL),
+                         "Go memory benchmark failed");
+      const cJSON *output = cJSON_GetObjectItemCaseSensitive(result, "output");
+      if (!cJSON_IsString(output))
+         fatal("Go memory benchmark returned invalid output");
+      fputs(output->valuestring, stdout);
+      cJSON_Delete(result);
       BENCHMARK_RETURN;
    }
 

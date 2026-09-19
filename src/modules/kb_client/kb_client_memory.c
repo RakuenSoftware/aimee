@@ -1295,3 +1295,41 @@ char *kb_client_evidence_fidelity_retrieval_event(const char *turn_id)
     * report + attribution_count). kb_v1_action_request owns req. */
    return kb_v1_action_request("evidence.fidelity_retrieval_event", req);
 }
+
+/* Host-owned file bytes travel unchanged; parsing, case selection, retrieval,
+ * scoring and report construction belong to the Go memory command. Consumes req. */
+char *kb_client_memory_benchmark_json(cJSON *req, const char *corpus_path)
+{
+   if (!req)
+      return NULL;
+   if (corpus_path)
+   {
+      FILE *fp = fopen(corpus_path, "rb");
+      char *input = fp ? malloc(1048578) : NULL;
+      if (!fp || !input)
+      {
+         if (fp)
+            fclose(fp);
+         cJSON_Delete(req);
+         return NULL;
+      }
+      size_t count = fread(input, 1, 1048577, fp);
+      int failed = ferror(fp);
+      fclose(fp);
+      if (failed || count > 1048576 || memchr(input, '\0', count))
+      {
+         free(input);
+         cJSON_Delete(req);
+         return NULL;
+      }
+      input[count] = '\0';
+      if (!cJSON_AddStringToObject(req, "corpus_json", input))
+      {
+         free(input);
+         cJSON_Delete(req);
+         return NULL;
+      }
+      free(input);
+   }
+   return kb_v1_action_request_with_timeout("memory.benchmark", req, 120000);
+}

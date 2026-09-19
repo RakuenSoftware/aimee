@@ -576,11 +576,6 @@ double ir_recall_at_k(const int64_t *retrieved, int n_retrieved, const int64_t *
 
 /* --- Memory Retrieval Eval --- */
 
-int mem_eval_run(mem_eval_case_t *cases, int n_cases, mem_eval_scores_t *out)
-{
-   return mem_eval_run_with_latency(cases, n_cases, out, NULL);
-}
-
 double elapsed_ms(const struct timespec *start, const struct timespec *end);
 
 static void mem_eval_increment_bucket(const char *bucket, int *temporal_miss, int *entity_miss,
@@ -638,74 +633,6 @@ static void mem_eval_append_miss_progress_row(FILE *fp, const char *dataset, con
       free(line);
    }
    cJSON_Delete(root);
-}
-
-static void mem_eval_bucket_add(mem_eval_bucket_scores_t *bucket, double metric_a, double metric_b)
-{
-   if (!bucket)
-      return;
-   bucket->cases++;
-   bucket->metric_a += metric_a;
-   bucket->metric_b += metric_b;
-}
-
-static void mem_eval_bucket_finalize(mem_eval_bucket_scores_t *bucket)
-{
-   if (!bucket || bucket->cases <= 0)
-      return;
-   bucket->metric_a /= bucket->cases;
-   bucket->metric_b /= bucket->cases;
-}
-
-static void mem_eval_finalize_bucket_array(mem_eval_bucket_scores_t *buckets, int count)
-{
-   if (!buckets || count <= 0)
-      return;
-   for (int i = 0; i < count; i++)
-      mem_eval_bucket_finalize(&buckets[i]);
-}
-
-static int mem_eval_route_bucket_index(memory_query_route_t route)
-{
-   switch (route)
-   {
-   case MEM_ROUTE_LEXICAL:
-      return 0;
-   case MEM_ROUTE_SEMANTIC:
-      return 1;
-   case MEM_ROUTE_GRAPH:
-      return 2;
-   case MEM_ROUTE_HYBRID:
-   default:
-      return 3;
-   }
-}
-
-static int mem_eval_shape_bucket_index(memory_query_shape_t shape)
-{
-   switch (shape)
-   {
-   case MEM_SHAPE_UNKNOWN:
-      return 0;
-   case MEM_SHAPE_FACTOID:
-      return 1;
-   case MEM_SHAPE_LIST:
-      return 2;
-   case MEM_SHAPE_YES_NO:
-      return 3;
-   case MEM_SHAPE_WHEN:
-      return 4;
-   case MEM_SHAPE_HOW:
-      return 5;
-   case MEM_SHAPE_WHY:
-      return 6;
-   case MEM_SHAPE_QUANTITATIVE:
-      return 7;
-   case MEM_SHAPE_TEMPORAL_INTERVAL:
-      return 8;
-   default:
-      return 0;
-   }
 }
 
 static int mem_eval_valid_miss_bucket(const char *bucket, int miss)
@@ -849,64 +776,6 @@ void mem_eval_latency_finalize(const double *samples, int n_samples, mem_eval_la
    out->p95_ms = sorted[n_samples * 95 / 100];
    out->p99_ms = sorted[n_samples * 99 / 100];
    free(sorted);
-}
-
-int mem_eval_run_with_latency(mem_eval_case_t *cases, int n_cases, mem_eval_scores_t *out,
-                              mem_eval_latency_t *latency_out)
-{
-   if (!cases || !out || n_cases <= 0)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-   out->n_cases = n_cases;
-   if (latency_out)
-      memset(latency_out, 0, sizeof(*latency_out));
-
-   double total_mrr = 0, total_ndcg5 = 0, total_ndcg10 = 0;
-   double total_recall5 = 0, total_recall10 = 0;
-   double *latencies = latency_out ? calloc((size_t)n_cases, sizeof(double)) : NULL;
-   if (latency_out && !latencies)
-      return -1;
-
-   for (int c = 0; c < n_cases; c++)
-   {
-      memory_query_plan_t plan;
-      memset(&plan, 0, sizeof(plan));
-      (void)memory_query_plan(cases[c].query, 10, 96, &plan);
-      int route_bucket = mem_eval_route_bucket_index(plan.route);
-      int shape_bucket = mem_eval_shape_bucket_index(plan.shape);
-
-      mem_eval_direct_trace_t trace;
-      if (mem_eval_score_case(&cases[c], &trace) != 0)
-      {
-         free(latencies);
-         return -1;
-      }
-      if (latency_out)
-         latencies[c] = trace.latency_ms;
-      total_mrr += trace.mrr;
-      total_ndcg5 += trace.ndcg_5;
-      total_ndcg10 += trace.ndcg_10;
-      total_recall5 += trace.recall_5;
-      total_recall10 += trace.recall_10;
-      if (route_bucket >= 0 && route_bucket < MEM_EVAL_ROUTE_BUCKET_COUNT)
-         mem_eval_bucket_add(&out->route_buckets[route_bucket], trace.mrr, trace.recall_10);
-      if (shape_bucket >= 0 && shape_bucket < MEM_EVAL_SHAPE_BUCKET_COUNT)
-         mem_eval_bucket_add(&out->shape_buckets[shape_bucket], trace.mrr, trace.recall_10);
-   }
-
-   out->mrr = total_mrr / n_cases;
-   out->ndcg_5 = total_ndcg5 / n_cases;
-   out->ndcg_10 = total_ndcg10 / n_cases;
-   out->recall_5 = total_recall5 / n_cases;
-   out->recall_10 = total_recall10 / n_cases;
-   mem_eval_finalize_bucket_array(out->route_buckets, MEM_EVAL_ROUTE_BUCKET_COUNT);
-   mem_eval_finalize_bucket_array(out->shape_buckets, MEM_EVAL_SHAPE_BUCKET_COUNT);
-   if (latency_out)
-      mem_eval_latency_finalize(latencies, n_cases, latency_out);
-   free(latencies);
-
-   return 0;
 }
 
 /* Corpus/QA benchmark helpers live in agent_eval_memory_support.c. */

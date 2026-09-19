@@ -144,29 +144,7 @@ typedef struct
    int n_queries;
 } mem_eval_latency_t;
 
-int mem_eval_run(mem_eval_case_t *cases, int n_cases, mem_eval_scores_t *out);
-int mem_eval_run_with_latency(mem_eval_case_t *cases, int n_cases, mem_eval_scores_t *out,
-                              mem_eval_latency_t *latency_out);
-
 /* --- Corpus-based memory retrieval eval --- */
-
-/* Maximum fixtures and cases supported by the corpus loader. */
-#define MEM_CORPUS_MAX_FIXTURES 256
-#define MEM_CORPUS_MAX_CASES    512
-
-/* Load the code-vector-graph production corpus (queries with already-resolved
- * live DB2 memory ids in `expected_ids`). Opens NO scratch DB — cases run
- * against the live store (for the graph-code fusion ablation). Returns the
- * number of cases loaded (>= 0), or -1 on read/parse error. No teardown needed. */
-int mem_eval_load_production_corpus(const char *corpus_path, mem_eval_case_t *cases, int max_cases);
-
-/* Resolve a code-graph-fusion ablation arm from the matrix JSON
- * (benchmarks/code-vector-graph/ablation-matrix.json) into the wired knobs:
- * *state_out ("off"/"shadow"/"on"), *utility_out, *projection_out. Leaves any
- * output the arm's config does not set untouched (caller seeds defaults).
- * Returns 0 if the named arm was found, -1 otherwise. */
-int mem_eval_fusion_arm_resolve(const char *matrix_path, const char *arm, char *state_out,
-                                size_t state_len, int *utility_out, int *projection_out);
 
 /* Load baseline metrics from a JSON file. Returns 0 on success, -1 on error. */
 int mem_eval_load_baseline(const char *baseline_path, mem_eval_scores_t *out,

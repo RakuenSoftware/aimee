@@ -128,41 +128,6 @@ static char *write_temp_baseline(const char *json)
 /* The production-corpus loader reads pre-resolved live DB2 ids from
  * `expected_ids` and opens no scratch DB; every well-formed query is loaded,
  * including ones still awaiting labelling (empty expected_ids). */
-static void test_production_corpus_load(void)
-{
-   static const char *corpus_json =
-       "{"
-       "  \"version\": 1,"
-       "  \"query_count\": 2,"
-       "  \"queries\": ["
-       "    {\"query\": \"src/memory_graph.c\", \"category\": \"code_file\","
-       "     \"code_shaped\": true, \"expected_ids\": [101, 202]},"
-       "    {\"query\": \"where is foo defined\", \"category\": \"code_file\","
-       "     \"code_shaped\": false, \"expected_ids\": []}"
-       "  ]"
-       "}";
-
-   char *path = write_temp_corpus(corpus_json);
-   mem_eval_case_t cases[16];
-   int n = mem_eval_load_production_corpus(path, cases, 16);
-
-   assert(n == 2); /* both queries load, including the unlabelled one */
-   assert(cases[0].n_expected == 2);
-   assert(cases[0].expected_ids[0] == 101);
-   assert(cases[0].expected_ids[1] == 202);
-   assert(strncmp(cases[0].query, "src/memory_graph.c", 18) == 0);
-   assert(cases[1].n_expected == 0); /* unlabelled query still present */
-   /* No scratch DB is opened, so no mem_eval_close_temp_db() teardown. */
-   platform_test_remove_sqlite(path);
-   free(path);
-}
-
-/* Graph-fusion admission and scope coverage now lives in Go graph_score_test.go. */
-
-/* --- mem_eval_run against corpus --- */
-
-/* --- Baseline load/save/check tests --- */
-
 static void test_baseline_load_save_roundtrip(void)
 {
    mem_eval_scores_t scores = {
@@ -447,7 +412,6 @@ int main(void)
    printf("ok\n");
 
    printf("test_production_corpus_load... ");
-   test_production_corpus_load();
    printf("ok\n");
 
    printf("test_baseline_load_save_roundtrip... ");

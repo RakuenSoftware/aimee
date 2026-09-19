@@ -59,6 +59,23 @@ of 16,384 bytes and reject longer queries explicitly. The old 2,047-byte silent
 truncation is retired. This changes long-query behavior intentionally; the frozen
 retrieval manifest must be used for comparisons.
 
+## Live benchmark owner
+
+`memory.benchmark` parses the live code-graph corpus, chooses scoped live-memory
+self-retrieval cases, runs retrieval, scores and renders reports in Go. CLI and
+Server transport raw host-owned file bytes and complete responses. Corpus text is
+bounded at 1 MiB; malformed cases or labels fail before retrieval. Integer labels
+are preserved exactly and duplicate labels are rejected. The retired native
+case loader, ablation resolver and live scoring loops cannot be restored.
+
+Every successful report includes per-case queries, expected/retrieved IDs and
+owner latency. Any failed query refuses the entire report. Unlabelled queries
+contribute latency only; quality metrics divide by the labelled-query count.
+Live self-retrieval is identified separately from labelled evaluation. Reports
+explicitly state that these are live diagnostics without snapshot isolation,
+not frozen release gates. Latency measures owner retrieval, not the Server/KB
+network hop. Dataset suites point to the isolated Go evaluator.
+
 ## Labelled audit and calibration
 
 `memory.audit` and `memory.calibrate` are Go command-owner operations. They accept

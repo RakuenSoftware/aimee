@@ -16,6 +16,7 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "benchmark", "Evaluate live scoped retrieval with complete per-case receipts.", handleLiveBenchmark, true},
 	{"memory", "audit", "Audit labelled queries against actual scoped candidate order.", handleLabelAudit, true},
 	{"memory", "calibrate", "Fit diagnostic multipliers without changing the serving ranker.", handleLabelAudit, true},
 	{"memory", "search_assertions", "Search visible semantic assertions across valid and belief time.", handleEvidenceCommand, true},

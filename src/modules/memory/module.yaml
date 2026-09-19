@@ -151,7 +151,8 @@
     "server-go/modules/memory/evaluation_module.go",
     "server-go/modules/memory/cmd/aimee-memory-eval/qa.go",
     "server-go/modules/memory/cmd/aimee-memory-eval/misses.go",
-    "server-go/modules/memory/label_audit.go"
+    "server-go/modules/memory/label_audit.go",
+    "server-go/modules/memory/live_benchmark.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -267,7 +268,8 @@
     "server-go/modules/memory/cmd/aimee-memory-eval/dataset_test.go",
     "server-go/modules/memory/cmd/aimee-memory-eval/qa_test.go",
     "server-go/modules/memory/label_audit_test.go",
-    "server-go/modules/memory/candidate_fusion_test.go"
+    "server-go/modules/memory/candidate_fusion_test.go",
+    "server-go/modules/memory/live_benchmark_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

@@ -1205,5 +1205,7 @@ void kb_client_memory_scope_context_set(const char *workspace, const char *proje
                                         int include_all);
 void kb_client_memory_scope_context_clear(void);
 void kb_client_memory_scope_context_apply(cJSON *req);
+/* Consumes req; optional host file is bounded and sent as unchanged text. */
+char *kb_client_memory_benchmark_json(cJSON *req, const char *corpus_path);
 
 #endif /* DEC_KB_CLIENT_H */

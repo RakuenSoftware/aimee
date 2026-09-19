@@ -36,7 +36,7 @@ func (c *Client) Command(ctx context.Context, trace uint64, verb string, args js
 		return nil, ErrClientResponse
 	}
 	var status string
-	if json.Unmarshal(object["status"], &status) != nil || (status != "ok" && status != "error" && status != "degraded") {
+	if json.Unmarshal(object["status"], &status) != nil || (status != "ok" && status != "error" && status != "degraded" && !(verb == "benchmark" && status == "async-only")) {
 		return nil, ErrClientResponse
 	}
 	return body, nil

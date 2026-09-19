@@ -1711,9 +1711,9 @@ $(TESTPREFIX)/unit-test-db2-code-audit: $(OBJDIR)/tests/test_db2_code_audit.o \
 $(TESTPREFIX)/unit-test-server-memory-benchmark: \
                      $(OBJDIR)/tests/test_server_memory_benchmark.o \
                      $(OBJDIR)/server/server_memory_benchmark.o \
-                     $(OBJDIR)/tests/module_handlers/benchmarks.o \
-                     $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
+                     $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
 
 $(TESTPREFIX)/unit-test-delegate-sandbox-image: $(OBJDIR)/tests/test_delegate_sandbox_image.o \
                       $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \

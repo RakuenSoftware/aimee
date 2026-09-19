@@ -141,6 +141,23 @@ func exerciseBenchmarkScoreReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	if !reflect.DeepEqual(result["retrieved_ids"], []any{strconv.FormatInt(global, 10)}) {
 		t.Fatal("absent context widened", result)
 	}
+	// The public live benchmark uses the same restricted owner path, and its
+	// seed IDs and retrieved IDs cannot cross into another project.
+	client := clientForHandler(t, handler)
+	live := runPublicCommand(t, client, "benchmark", `{"suite":"live","project":"benchmark-score-local","max_cases":100}`)
+	if live["status"] != "ok" || live["quality_basis"] != "self_retrieval" || live["release_gate"] != false {
+		t.Fatal(live)
+	}
+	for _, item := range live["case_results"].([]any) {
+		row := item.(map[string]any)
+		for _, key := range []string{"expected_ids", "retrieved_ids"} {
+			for _, id := range row[key].([]any) {
+				if id == strconv.FormatInt(private, 10) || id == strconv.FormatInt(archived, 10) {
+					t.Fatal("live benchmark leaked hidden source", row)
+				}
+			}
+		}
+	}
 	exec(`RESET ROLE; REVOKE SELECT ON memories FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	raw, _ := json.Marshal(args)
 	frame, _ := bus.EncodeCommand("runtime", raw)

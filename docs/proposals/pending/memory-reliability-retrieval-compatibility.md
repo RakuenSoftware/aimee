@@ -24,3 +24,9 @@ manifest and transport/restart/failure matrix, pinned temporal anchors and all
 MR-18 release gates. Command embedder identity binds its configured command; it
 does not independently attest every executable or model-weight file that command
 may read. This limitation must not be described as full reproducibility.
+
+Live benchmark compatibility: CLI and Server now share the Go live owner. Invalid
+corpus rows/duplicate labels refuse the run instead of being skipped or truncated.
+Unlabelled queries are excluded from the quality denominator and retained in
+latency measurements. Every retrieval must succeed. Live metrics measure owner
+latency and cannot be compared directly to the old Server-to-KB hop timings.

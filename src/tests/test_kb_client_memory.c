@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* The classifier itself belongs to the memory module. This suite exercises the
  * client-side no-transmit boundary with a deterministic module answer. */
@@ -762,6 +763,57 @@ static void test_screen_failures(void)
    screen_reply = NULL;
 }
 
+static int benchmark_posts;
+static int benchmark_post(const char *url, const char *auth, const char *body, char **response,
+                          int timeout, const char *headers)
+{
+   (void)headers;
+   assert(strstr(url, "memory.benchmark") && auth && strstr(auth, "test-token"));
+   assert(timeout == 120000);
+   cJSON *request = cJSON_Parse(body);
+   const char *corpus =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "corpus_json"));
+   assert(corpus && strstr(corpus, "9007199254740993") && strstr(corpus, "完整"));
+   cJSON_Delete(request);
+   ++benchmark_posts;
+   *response = strdup("{\"status\":\"ok\",\"case_results\":[]}");
+   return 200;
+}
+static void test_benchmark_file_transport(void)
+{
+   const char *tmp = getenv("TMPDIR");
+   if (!tmp || !tmp[0])
+      tmp = "/tmp";
+   char path[4096];
+   int length = snprintf(path, sizeof(path), "%s/aimee-benchmark-transport-XXXXXX", tmp);
+   assert(length > 0 && (size_t)length < sizeof(path));
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   FILE *fp = fdopen(fd, "wb");
+   assert(fp);
+   const char *raw = "{\"queries\":[{\"query\":\"完整\",\"expected_ids\":[9007199254740993]}]}";
+   assert(fwrite(raw, 1, strlen(raw), fp) == strlen(raw));
+   assert(fclose(fp) == 0);
+   mock_agent_http_set_post_handler(benchmark_post);
+   char *reply = kb_client_memory_benchmark_json(cJSON_CreateObject(), path);
+   assert(reply && benchmark_posts == 1);
+   free(reply);
+   fp = fopen(path, "wb");
+   assert(fp && fwrite("x\0y", 1, 3, fp) == 3);
+   assert(fclose(fp) == 0);
+   assert(!kb_client_memory_benchmark_json(cJSON_CreateObject(), path));
+   fp = fopen(path, "wb");
+   assert(fp);
+   for (int i = 0; i < 1048577; i++)
+      assert(fputc('x', fp) != EOF);
+   assert(fclose(fp) == 0);
+   assert(!kb_client_memory_benchmark_json(cJSON_CreateObject(), path));
+   assert(unlink(path) == 0);
+   assert(!kb_client_memory_benchmark_json(cJSON_CreateObject(), path));
+   assert(benchmark_posts == 1);
+   mock_agent_http_reset();
+}
+
 int main(void)
 {
    test_screen_failures();
@@ -770,6 +822,7 @@ int main(void)
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
    assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
+   test_benchmark_file_transport();
    test_generic_action_preserves_budget_auth_and_refusal();
    test_readers_distinguish_unreachable_from_empty();
    test_single_record_miss_is_not_dependency_failure();
