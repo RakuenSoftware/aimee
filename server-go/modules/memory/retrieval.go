@@ -13,6 +13,8 @@ type Diagnostic struct {
 }
 
 type DiagnosticParts struct {
+	RankingPolicy string  `json:"ranking_policy,omitempty"`
+	RetrievalBase float64 `json:"retrieval_base,omitempty"`
 	Entity        float64 `json:"entity"`
 	Temporal      float64 `json:"temporal"`
 	Evidence      float64 `json:"evidence"`
@@ -166,6 +168,9 @@ func diagnosticFor(record Record, query string) Diagnostic {
 	parts := rankText(rankingInput{record.Key, record.Content}, query)
 	parts.Confidence = record.Confidence
 	parts.GraphScore, parts.CodeProximity = record.graphScore, record.codeProximity
+	if record.pageRankApplied {
+		parts = DiagnosticParts{RankingPolicy: pageRankRecallPolicy, RetrievalBase: record.retrievalBase, PageRank: record.pageRankBonus, Confidence: record.Confidence, Total: record.retrievalScore, HybridTotal: record.retrievalScore, BlendedTotal: record.retrievalScore}
+	}
 	return Diagnostic{Memory: record, Parts: parts}
 }
 

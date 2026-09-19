@@ -264,6 +264,7 @@ func fusePersonal(lexical, semantic []Record, limit int) []Record {
 	}
 	out := make([]Record, 0, len(records))
 	for _, r := range records {
+		r.retrievalScore = scores[r.ID]
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {

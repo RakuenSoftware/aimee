@@ -30,6 +30,8 @@ const (
 )
 
 type DataRequest struct {
+	pageRankConfig *pageRankConfig
+	requestedLimit int
 	PageRank       *pageRankRequest        `json:"pagerank,omitempty"`
 	lanes          recallLanes             // request-local attribution; never accepted from wire input
 	TypedContext   *typedContextOptions    `json:"typed_context,omitempty"`
@@ -144,15 +146,19 @@ type DataRequest struct {
 }
 
 type Record struct {
-	graphScore    float64
-	codeProximity float64
-	ID            int64   `json:"id"`
-	Scope         Scope   `json:"scope"`
-	Tier          string  `json:"tier"`
-	Kind          string  `json:"kind"`
-	Key           string  `json:"key"`
-	Content       string  `json:"content"`
-	Confidence    float64 `json:"confidence"`
+	retrievalScore  float64
+	retrievalBase   float64
+	pageRankBonus   float64
+	pageRankApplied bool
+	graphScore      float64
+	codeProximity   float64
+	ID              int64   `json:"id"`
+	Scope           Scope   `json:"scope"`
+	Tier            string  `json:"tier"`
+	Kind            string  `json:"kind"`
+	Key             string  `json:"key"`
+	Content         string  `json:"content"`
+	Confidence      float64 `json:"confidence"`
 }
 
 type DataResponse struct {
@@ -428,6 +434,7 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
+	pageRankSamples *[]pageRankResult
 	recallExecutor  egress.Executor
 	requireSemantic bool // standalone evaluation must not silently fall back to lexical recall
 	auditAction     func(context.Context, audit.Action) error
@@ -638,6 +645,11 @@ FROM prospective_memories`).Scan(&armed, &triggered, &completed, &expired)
 }
 
 func (s *postgresDataStore) Search(ctx context.Context, scope Scope, query, kind, tier string, limit int) ([]Record, error) {
+	req, planErr := s.planRecall(DataRequest{Scope: scope, Query: query, Kind: kind, Tier: tier, Limit: limit})
+	if planErr != nil {
+		return nil, planErr
+	}
+	limit = req.Limit
 	pattern := searchPattern(query)
 	var (
 		rows store.Rows
@@ -708,7 +720,8 @@ ORDER BY (lower(key)=lower($7)) DESC,
 			records = fusePersonal(records, semantic, limit)
 		}
 	}
-	return s.finalizeRecall(ctx, DataRequest{Scope: scope, Query: query, Kind: kind, Tier: tier, Limit: limit, lanes: lanes}, true, records)
+	req.lanes = lanes
+	return s.finalizeRecall(ctx, req, true, records)
 }
 
 // searchPattern keeps a multi-word query useful when callers supply keyword
@@ -920,6 +933,14 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if backend, ok := options.data.(*postgresDataStore); ok {
 		bound := *backend
 		bound.recallExecutor = options.executor
+		bound.pageRankSamples = &[]pageRankResult{}
+		defer func() {
+			if status == bus.ModuleStatusOK {
+				for _, sample := range *bound.pageRankSamples {
+					pageRankMetricState.observe(sample)
+				}
+			}
+		}()
 		options.data = &bound
 	}
 	request, err := decodeDataRequest(body)
@@ -1254,14 +1275,10 @@ set_config('aimee.correlation_id',$9,true)`,
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
 		var ranked pageRankResult
-		defer func() {
-			if status == bus.ModuleStatusOK {
-				pageRankMetricState.observe(ranked)
-			}
-		}()
 		ranked, err = backend.pageRank(ctx, request, explicitScope)
 		if err == nil {
 			response.Payload, err = json.Marshal(ranked)
+			backend.recordPageRankSample(ranked)
 		}
 	case "trace-state", "trace-apply":
 		backend, ok := options.data.(*postgresDataStore)

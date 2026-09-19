@@ -316,6 +316,7 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 	exerciseSharedIndexReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseGraphFusionReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exercisePageRankReplay(t, ctx, tx, backend.(*postgresDataStore))
+	exercisePageRankRecallReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseCognifyReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseRejectionReplay(t, ctx, tx, handler)
 	exerciseGraphFeedbackReplay(t, ctx, tx, backend.(*postgresDataStore))

@@ -321,7 +321,7 @@ func addStatsConsole(result map[string]any, stats MemoryStats, timing pageRankMe
 	if timing.Samples == 0 {
 		state = "unmeasured"
 	}
-	result["pagerank_timing"] = map[string]any{"elapsed_ms": timing.LastMS, "avg_ms": timing.AverageMS, "max_ms": timing.MaximumMS, "samples": timing.Samples, "candidates": timing.Candidates, "edges": timing.Edges, "state": state, "source": "candidate-scorer"}
+	result["pagerank_timing"] = map[string]any{"elapsed_ms": timing.LastMS, "avg_ms": timing.AverageMS, "max_ms": timing.MaximumMS, "samples": timing.Samples, "candidates": timing.Candidates, "edges": timing.Edges, "state": state, "source": "go-pagerank", "recall_samples": timing.RecallSamples, "candidate_samples": timing.CandidateSamples}
 	result["pagerank_text"] = fmt.Sprintf("PageRank: elapsed=%.3fms avg=%.3fms max=%.3fms samples=%d candidates=%d edges=%d\n", timing.LastMS, timing.AverageMS, timing.MaximumMS, timing.Samples, timing.Candidates, timing.Edges)
 	result["text"] = fmt.Sprintf("Memory Stats:\n  Total:              %d\n  Conflicts:          %d\n"+
 		"  Tiers:              L0=%d L1=%d L2=%d L3=%d L4=%d L5=%d\n"+

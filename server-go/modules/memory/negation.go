@@ -88,11 +88,27 @@ func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest,
 		req.lanes = recallLanes{}
 		req.lanes.add(base, laneLexical)
 	}
-	defer func() {
-		if resultErr == nil && req.Query != "" {
+	for i := range base {
+		base[i].retrievalScore = 1 / (recallRankK + float64(i) + 1)
+	}
+	result, resultErr = s.collectRecall(ctx, req, exact, base)
+	if resultErr == nil {
+		result, resultErr = s.rerankPageRank(ctx, req, exact, result)
+	}
+	if resultErr == nil {
+		limit := req.requestedLimit
+		if limit <= 0 {
+			limit = req.Limit
+		}
+		result = result[:min(len(result), max(0, limit))]
+		if req.Query != "" {
 			req.lanes.observe(result)
 		}
-	}()
+	}
+	return result, resultErr
+}
+
+func (s *postgresDataStore) collectRecall(ctx context.Context, req DataRequest, exact bool, base []Record) ([]Record, error) {
 	base, err := s.fuseSharedSemantic(ctx, req, exact, base)
 	if err != nil {
 		return nil, err
@@ -160,6 +176,7 @@ func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest,
 			}
 		}
 		score := 1/float64(60+i+1) + negationOverlap(query, negationTokens(textBound(r.Key+" "+r.Content, 3071)))
+		r.retrievalScore = score
 		ordered = append(ordered, scored{r, score, scope})
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {
@@ -168,7 +185,7 @@ func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest,
 		}
 		return ordered[i].score > ordered[j].score
 	})
-	result = make([]Record, 0, min(req.Limit, len(ordered)))
+	result := make([]Record, 0, min(req.Limit, len(ordered)))
 	for _, item := range ordered {
 		if len(result) == req.Limit {
 			break

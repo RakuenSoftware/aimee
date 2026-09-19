@@ -28,6 +28,8 @@ type pageRankScore struct {
 }
 
 type pageRankResult struct {
+	visibleIDs []int64
+	recall     bool
 	Status     string          `json:"status"`
 	Scores     []pageRankScore `json:"scores"`
 	Candidates int             `json:"candidates"`
@@ -166,6 +168,7 @@ func (s *postgresDataStore) pageRank(ctx context.Context, req DataRequest, exact
 		return result, err
 	}
 	result.Candidates = len(ids)
+	result.visibleIDs = ids
 	links := []MemoryLink{}
 	if len(ids) > 1 {
 		relations, err := json.Marshal(append([]string{}, req.PageRank.Relations...))
@@ -210,7 +213,7 @@ func handlePageRank(options handlerOptions, invocation bus.ModuleInvocation, arg
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 	}
-	request := pageRankRequest{Iterations: 6, Weight: .35, Relations: []string{"depends_on", "related_to", "co_edited", "fixes"}}
+	request := defaultPageRankRequest()
 	raw, err := json.Marshal(args)
 	if err != nil || json.Unmarshal(raw, &request) != nil || !validPageRankRequest(&request) {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -226,12 +229,14 @@ func handlePageRank(options handlerOptions, invocation bus.ModuleInvocation, arg
 }
 
 type pageRankMetrics struct {
-	LastMS     float64 `json:"last_ms"`
-	AverageMS  float64 `json:"avg_ms"`
-	MaximumMS  float64 `json:"max_ms"`
-	Samples    int64   `json:"samples"`
-	Candidates int     `json:"last_candidates"`
-	Edges      int     `json:"last_edges"`
+	RecallSamples    int64   `json:"recall_samples"`
+	CandidateSamples int64   `json:"candidate_samples"`
+	LastMS           float64 `json:"last_ms"`
+	AverageMS        float64 `json:"avg_ms"`
+	MaximumMS        float64 `json:"max_ms"`
+	Samples          int64   `json:"samples"`
+	Candidates       int     `json:"last_candidates"`
+	Edges            int     `json:"last_edges"`
 }
 
 type pageRankMetricCounters struct {
@@ -245,6 +250,11 @@ func (m *pageRankMetricCounters) observe(result pageRankResult) {
 	m.Lock()
 	defer m.Unlock()
 	m.value.Samples++
+	if result.recall {
+		m.value.RecallSamples++
+	} else {
+		m.value.CandidateSamples++
+	}
 	m.value.LastMS = result.ElapsedMS
 	m.value.AverageMS += (result.ElapsedMS - m.value.AverageMS) / float64(m.value.Samples)
 	m.value.MaximumMS = max(m.value.MaximumMS, result.ElapsedMS)

@@ -228,7 +228,7 @@ func TestPageRankMetricsConcurrent(t *testing.T) {
 		if timing.Samples == 0 {
 			expected = "unmeasured"
 		}
-		if view["state"] != expected || view["source"] != "candidate-scorer" || result["display"].(map[string]any)["pagerank"] != timing {
+		if view["state"] != expected || view["source"] != "go-pagerank" || result["display"].(map[string]any)["pagerank"] != timing {
 			t.Fatal(result)
 		}
 	}

@@ -360,7 +360,9 @@ func (s *postgresDataStore) askWithPolicy(ctx context.Context, request DataReque
 	}
 	for i := range rows {
 		rows[i].HybridRank = i + 1
-		rows[i].RetrievalScore = diagnosticFor(records[i], request.Query).Parts.Total
+		// Answer admission uses text support on its existing 0..1 scale.
+		// A graph popularity bonus is a ranking signal, not corroborating evidence.
+		rows[i].RetrievalScore = rankText(rankingInput{records[i].Key, records[i].Content}, request.Query).Total
 	}
 	anchor := answerAnchor(rows)
 	result.Answer, err = s.extractAnswer(ctx, rows, anchor, request.Query)

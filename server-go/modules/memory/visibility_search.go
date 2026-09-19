@@ -12,6 +12,10 @@ func (s *postgresDataStore) SearchVisible(ctx context.Context, req DataRequest) 
 	if s.placement != PlacementKB {
 		return nil, errors.New("visible search requires KB placement")
 	}
+	req, err := s.planRecall(req)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
 FROM memories
 WHERE lifecycle_state='active' AND activation_suppressed=0

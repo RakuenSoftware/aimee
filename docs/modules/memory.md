@@ -121,10 +121,12 @@ The CLI forwards Go's display/text fields and search timing view. Server KB stat
 forward the complete validated owner envelope, preserving integer tokens and
 error kinds. Missing or malformed replies never become healthy zero statistics.
 The four native stats, raw-stats, effectiveness and health client APIs are retired.
-PageRank timing fields use one process-local snapshot of successful Go candidate
-scoring calls. The console timing envelope labels zero samples `unmeasured` and
-identifies its source as `candidate-scorer`; these measurements do not imply
-PageRank is enabled for recall. Write-to-readable latency remains unmeasured.
+PageRank timing fields use one process-local snapshot of successful Go scoring
+calls. The console timing envelope labels zero samples `unmeasured`, identifies
+its source as `go-pagerank`, and separates recall and explicit candidate-scoring
+sample counts. Timings publish only after the owner request commits; recall
+timing includes neighbor expansion, graph loading and reranking. These are not
+end-to-end retrieval or write-to-readable latency measurements.
 
 The same console view owns maintenance mode parsing, summary rendering and the
 vector-maintenance handoff indicator. The CLI passes mode names and watch timing;
@@ -442,9 +444,40 @@ mass, and maximum-normalized bonuses. Successful owner calls record graph-query
 plus kernel time only after the request transaction commits. Measurements are
 process-local, not an end-to-end retrieval latency or a replacement for the old
 native baseline. `BenchmarkPageRankKernel50` measures CPU work alone. This private
-operation makes scoring available to the isolated evaluator. PageRank does not
-yet rerank recall. Its retrieval integration and legacy query/candidate expansion
-still need separate behavioral parity work.
+operation makes scoring available to the isolated evaluator.
+
+PageRank recall is disabled by default. The KB owner honors the existing
+`memory_pagerank_enabled`, `memory_pagerank_iterations`, `memory_pagerank_weight`
+and comma-separated `memory_pagerank_relations` settings, with the corresponding
+`AIMEE_MEMORY_PAGERANK_*` environment overrides. Defaults match the private scorer.
+Environment integers clamp to the existing enable/iteration bounds; malformed
+numbers, non-finite/out-of-range weights and invalid relation filters fail the
+request. A settings-provider failure also fails the lookup. Caller JSON cannot
+activate or override the deployment policy. Personal memory bypasses KB graph
+configuration entirely.
+
+When enabled, retrieval collects up to four times the requested result count
+(minimum 16, maximum 128), applies its existing semantic/graph/negation fusion,
+and adds eligible one-hop memory-link neighbors while space remains. Both ends
+must satisfy scope, kind, tier, lifecycle and suppression checks before links can
+consume the 8192-link neighbor budget. Candidate scoring has a separate 8192-link
+budget. Overflow and required SQL failures fail the lookup, without successful
+fallback metrics. Candidate visibility is checked again before graph scoring.
+Project/workspace/global priority precedes the final score and result limit.
+
+The versioned `rrf60-pagerank-v1` integration adds the kernel bonus divided by 61
+to the existing Go reciprocal-rank/negation score. Link-only neighbors start with
+zero base contribution. Diagnostics and traces report the actual `retrieval_base`,
+`pagerank` contribution and total used in that decision, rather than recomputing
+a text score. The answer-support gate still uses its existing text-support scale;
+graph popularity is not corroborating evidence. Disabling PageRank restores the
+previous retrieval path and does not query memory links for this feature.
+
+This integration preserves the native PageRank kernel and its opt-in setting,
+but does not reproduce the retired C ranker's different score units. Historical
+end-to-end ranking parity, legacy query/candidate expansion and unversioned-vector
+admission remain separate work. No production enablement or quality improvement
+is claimed without paired evaluation.
 
 There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report
