@@ -697,7 +697,8 @@ void pt_print_memory_list(const char *method, cJSON *resp)
 }
 void pt_print_memory_get(const char *method, cJSON *resp)
 {
-   print_memory_row(resp);
+   cJSON *memory = cJSON_GetObjectItemCaseSensitive(resp, "memory");
+   print_memory_row(cJSON_IsObject(memory) ? memory : resp);
    /* Present only when --as-of was asked. "unknown" is a real third answer: the
     * server could not tell, which is not the same as "not in force". */
    cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "valid_at");

@@ -216,12 +216,10 @@ func (r *txRegistry) reapLocked() {
 // reporting on the pool it borrows reads healthy right up until it cannot
 // answer at all.
 var (
-	sqlPoolOnce       sync.Once
-	sqlPool           *pgxpool.Pool
-	sqlPoolErr        error
-	migrationPoolOnce sync.Once
-	migrationPool     *pgxpool.Pool
-	migrationPoolErr  error
+	sqlPoolMu       sync.Mutex
+	sqlPool         *pgxpool.Pool
+	migrationPoolMu sync.Mutex
+	migrationPool   *pgxpool.Pool
 )
 
 func parseStoreConfig(dsn string) (*pgxpool.Config, error) {
@@ -271,36 +269,41 @@ func parseMigrationConfig(migrationDSN, runtimeDSN string) (*pgxpool.Config, err
 	return config, nil
 }
 
-// SQLPool opens (once) the pool this stage serves from.
+// SQLPool caches successful initialization. Credentials and TLS files can arrive
+// after the first request during startup or upgrade; failed attempts must retry.
 func SQLPool(ctx context.Context) (*pgxpool.Pool, error) {
-	sqlPoolOnce.Do(func() {
-		dsn, credentialErr := storeDSN(ctx, "AIMEE_STORE_URL")
-		if credentialErr != nil || dsn == "" {
-			sqlPoolErr = errors.New("postgres: AIMEE_STORE_URL is unset, so the SQL " +
-				"stage has no database to serve")
-			return
-		}
-		config, err := parseStoreConfig(dsn)
-		if err != nil {
-			sqlPoolErr = err
-			return
-		}
-		// Room for the transaction ceiling plus ordinary traffic. A pool smaller
-		// than maxOpenTx would let leaked transactions starve every other
-		// caller, which presents as the store hanging rather than as the leak
-		// it is.
-		if config.MaxConns < maxOpenTx+8 {
-			config.MaxConns = maxOpenTx + 8
-		}
-		config.MinConns = 0
-		pool, err := pgxpool.NewWithConfig(ctx, config)
-		if err != nil {
-			sqlPoolErr = fmt.Errorf("postgres: the SQL stage could not open its pool: %w", err)
-			return
-		}
-		sqlPool, sqlPoolErr = pool, nil
-	})
-	return sqlPool, sqlPoolErr
+	sqlPoolMu.Lock()
+	defer sqlPoolMu.Unlock()
+	if sqlPool != nil {
+		return sqlPool, nil
+	}
+	return initializeSQLPool(ctx)
+}
+
+func initializeSQLPool(ctx context.Context) (*pgxpool.Pool, error) {
+	dsn, credentialErr := storeDSN(ctx, "AIMEE_STORE_URL")
+	if credentialErr != nil || dsn == "" {
+		return nil, errors.New("postgres: AIMEE_STORE_URL is unset, so the SQL " +
+			"stage has no database to serve")
+	}
+	config, err := parseStoreConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	// Room for the transaction ceiling plus ordinary traffic. A pool smaller
+	// than maxOpenTx would let leaked transactions starve every other
+	// caller, which presents as the store hanging rather than as the leak
+	// it is.
+	if config.MaxConns < maxOpenTx+8 {
+		config.MaxConns = maxOpenTx + 8
+	}
+	config.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: the SQL stage could not open its pool: %w", err)
+	}
+	sqlPool = pool
+	return sqlPool, nil
 }
 
 // MigrationPool is deliberately separate from the runtime pool. Schema creation
@@ -308,46 +311,47 @@ func SQLPool(ctx context.Context) (*pgxpool.Pool, error) {
 // the ordinary query path does not inherit DDL authority. Deployments must supply
 // a distinct owner DSN and may remove it after startup migration completes.
 func MigrationPool(ctx context.Context) (*pgxpool.Pool, error) {
-	migrationPoolOnce.Do(func() {
-		dsn, credentialErr := storeDSN(ctx, "AIMEE_STORE_MIGRATION_URL")
-		if credentialErr != nil || dsn == "" {
-			migrationPoolErr = errors.New("postgres: AIMEE_STORE_MIGRATION_URL is unset")
-			return
-		}
-		runtimeDSN, credentialErr := storeDSN(ctx, "AIMEE_STORE_URL")
-		if credentialErr != nil || runtimeDSN == "" {
-			migrationPoolErr = errors.New("postgres: AIMEE_STORE_URL is unset")
-			return
-		}
-		config, err := parseMigrationConfig(dsn, runtimeDSN)
-		if err != nil {
-			migrationPoolErr = err
-			return
-		}
-		config.MaxConns = 2
-		config.MinConns = 0
-		pool, err := pgxpool.NewWithConfig(ctx, config)
-		if err != nil {
-			migrationPoolErr = fmt.Errorf("postgres: migration pool initialization failed: %w", err)
-			return
-		}
-		if err := ensureSearchPathSchema(ctx, pool, config); err != nil {
-			pool.Close()
-			migrationPoolErr = err
-			return
-		}
-		runtime, err := SQLPool(ctx)
-		if err == nil {
-			err = validateStoreNamespace(ctx, runtime, pool)
-		}
-		if err != nil {
-			pool.Close()
-			migrationPoolErr = err
-			return
-		}
-		migrationPool = pool
-	})
-	return migrationPool, migrationPoolErr
+	migrationPoolMu.Lock()
+	defer migrationPoolMu.Unlock()
+	if migrationPool != nil {
+		return migrationPool, nil
+	}
+	return initializeMigrationPool(ctx)
+}
+
+func initializeMigrationPool(ctx context.Context) (*pgxpool.Pool, error) {
+	dsn, credentialErr := storeDSN(ctx, "AIMEE_STORE_MIGRATION_URL")
+	if credentialErr != nil || dsn == "" {
+		return nil, errors.New("postgres: AIMEE_STORE_MIGRATION_URL is unset")
+	}
+	runtimeDSN, credentialErr := storeDSN(ctx, "AIMEE_STORE_URL")
+	if credentialErr != nil || runtimeDSN == "" {
+		return nil, errors.New("postgres: AIMEE_STORE_URL is unset")
+	}
+	config, err := parseMigrationConfig(dsn, runtimeDSN)
+	if err != nil {
+		return nil, err
+	}
+	config.MaxConns = 2
+	config.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: migration pool initialization failed: %w", err)
+	}
+	if err := ensureSearchPathSchema(ctx, pool, config); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	runtime, err := SQLPool(ctx)
+	if err == nil {
+		err = validateStoreNamespace(ctx, runtime, pool)
+	}
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	migrationPool = pool
+	return migrationPool, nil
 }
 
 // Role defaults and the implicit $user search-path entry can resolve identical
