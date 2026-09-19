@@ -59,16 +59,21 @@ const (
 	factRecallLineCap     = 256
 )
 
+// Serving typed facts requires every memory source to remain current and
+// visible. Review/history queries retain their separate operator semantics.
+var currentFactRecallSQL = `e.edge_class='semantic' AND e.lifecycle_state IN ('persistent','promoted')
+ AND e.suppressed=0 AND ` + assertionCurrent + `
+ AND NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN memories m
+ ON f.source_id='memory:'||m.id::text AND ` + currentMemorySQL("m.") + `
+ WHERE f.assertion_id=e.id AND f.source_kind='memory' AND m.id IS NULL)`
+
 // recallFactBlock owns typed-fact selection, ordering, formatting, and PII
 // policy. C callers receive the finished block over the event bus and do not
 // inspect the database or make memory decisions.
 func (s *postgresDataStore) recallFactBlock(ctx context.Context, entity string,
 	turnRequestsSensitive bool, capacity int) (string, int, error) {
 	rows, err := s.db.Query(ctx, `SELECT relation, target, confidence FROM entity_edges e
-WHERE source = $1 AND edge_class = 'semantic'
-  AND lifecycle_state IN ('persistent','promoted')
-  AND superseded_at = '' AND invalidated_at = '' AND suppressed = 0
-  AND `+factEvidenceVisible+`
+WHERE source = $1 AND `+currentFactRecallSQL+`
 ORDER BY confidence DESC, id ASC LIMIT $2`, entity, factRecallMaxFacts)
 	if err != nil {
 		return "", 0, err
@@ -105,7 +110,7 @@ ORDER BY confidence DESC, id ASC LIMIT $2`, entity, factRecallMaxFacts)
 	return block.String(), count, nil
 }
 
-func (s *postgresDataStore) mentionedEntities(ctx context.Context, query string) []string {
+func (s *postgresDataStore) mentionedEntities(ctx context.Context, query string) ([]string, error) {
 	rows, err := s.db.Query(ctx, `SELECT (
   SELECT name FROM entity_aliases p WHERE p.canonical_id = r.canonical_id
     AND p.suppressed = 0 ORDER BY is_preferred DESC, id ASC LIMIT 1
@@ -117,14 +122,15 @@ WHERE r.status = 'active'
     AND lower($1) LIKE '%' || a.name_norm || '%')
 LIMIT $2`, query, factRecallMaxEntities)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	names := make([]string, 0, factRecallMaxEntities)
 	seen := make(map[string]struct{}, factRecallMaxEntities)
 	for rows.Next() && len(names) < factRecallMaxEntities {
 		var name string
 		if scanErr := rows.Scan(&name); scanErr != nil {
-			break
+			rows.Close()
+			return nil, scanErr
 		}
 		if name != "" && name != "user" {
 			if _, exists := seen[name]; !exists {
@@ -133,26 +139,28 @@ LIMIT $2`, query, factRecallMaxEntities)
 			}
 		}
 	}
+	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return nil, err
+	}
 
 	if len(names) >= factRecallMaxEntities {
-		return names
+		return names, nil
 	}
 	rows, err = s.db.Query(ctx, `SELECT DISTINCT source FROM entity_edges e
-WHERE edge_class = 'semantic' AND source <> 'user' AND length(source) >= 3
-  AND lifecycle_state IN ('persistent','promoted')
-  AND superseded_at = '' AND invalidated_at = '' AND suppressed = 0
-  AND `+factEvidenceVisible+`
+WHERE source <> 'user' AND length(source) >= 3 AND `+currentFactRecallSQL+`
   AND lower($1) LIKE '%' || lower(source) || '%'
 ORDER BY source LIMIT $2`, query, factRecallMaxEntities)
 	if err != nil {
-		return names
+		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() && len(names) < factRecallMaxEntities {
 		var name string
 		if scanErr := rows.Scan(&name); scanErr != nil {
-			break
+			rows.Close()
+			return nil, scanErr
 		}
 		if name == "" {
 			continue
@@ -163,7 +171,7 @@ ORDER BY source LIMIT $2`, query, factRecallMaxEntities)
 		seen[name] = struct{}{}
 		names = append(names, name)
 	}
-	return names
+	return names, rows.Err()
 }
 
 func (s *postgresDataStore) RecallFacts(ctx context.Context, entity, query string,
@@ -186,14 +194,18 @@ func (s *postgresDataStore) RecallFacts(ctx context.Context, entity, query strin
 	if err != nil {
 		return "", 0, err
 	}
-	for _, name := range s.mentionedEntities(ctx, query) {
+	names, err := s.mentionedEntities(ctx, query)
+	if err != nil {
+		return "", 0, err
+	}
+	for _, name := range names {
 		remaining := capacity - len(block)
 		if remaining <= 1 {
 			break
 		}
 		addition, count, recallErr := s.recallFactBlock(ctx, name, turnRequestsSensitive, remaining)
 		if recallErr != nil {
-			continue
+			return "", 0, recallErr
 		}
 		block += addition
 		total += count

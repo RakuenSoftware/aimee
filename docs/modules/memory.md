@@ -52,7 +52,7 @@ above 2^53-1.
 
 ## Current-state retrieval validity
 
-The Go `current-validity-v4` predicate applies active lifecycle, suppression and
+The Go `current-validity-v5` predicate applies active lifecycle, suppression and
 half-open valid time before shared lexical, whole-record/unit semantic, graph/
 PageRank, compatibility-window, recall-bundle, activation and briefing limits.
 Pending commitments retain their lifecycle while sharing the time predicate;
@@ -74,6 +74,11 @@ Assertion search normalizes stored offsets and fractions for both world-valid
 and belief-time intervals, including its current/historical projection. The
 request contract still accepts second-precision UTC anchors; historical access
 authorization and parent-version closure remain separate acceptance work.
+
+Current typed-fact blocks apply the same assertion time checks before their
+limit and require every memory source to resolve to a current visible parent.
+Entity discovery and later fact reads propagate errors; a failed read cannot
+leave a successful partial block. Operator review/history semantics are separate.
 
 The baseline policy fingerprint includes this version. This current-state slice
 does not certify all MR-01 surfaces, privileged historical/belief-time access,
