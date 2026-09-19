@@ -31,13 +31,15 @@ forwards the Go envelope too; a retrieval outage is no longer an empty context.
 
 ## Current-state retrieval validity
 
-The Go `current-validity-v1` predicate applies active lifecycle, suppression and
+The Go `current-validity-v2` predicate applies active lifecycle, suppression and
 half-open valid time before shared lexical, whole-record/unit semantic, graph/
 PageRank, compatibility-window, recall-bundle, activation and briefing limits.
 Pending commitments retain their lifecycle while sharing the time predicate;
 sticky activation cannot extend expired validity. Briefing episode summaries and
 entity counts require current parents. Memory-backed graph evidence and
-semantic edge intervals share the same timestamp normalization. UTC legacy wall
+semantic edge intervals share the same timestamp normalization. Every memory
+evidence source on a graph edge must resolve inside the request audience; a
+visible source cannot admit an edge with hidden or inapplicable dependencies. UTC legacy wall
 time and explicit offsets compare as instants against one transaction clock;
 malformed nonempty values refuse retrieval. Scope/RLS and current embedding
 fingerprints remain additional admission requirements.

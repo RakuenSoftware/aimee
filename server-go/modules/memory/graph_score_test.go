@@ -190,6 +190,40 @@ func exerciseGraphFusionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	if err != nil || !has(records, shared.ID) || !has(records, sharedTarget.ID) || has(records, hidden.ID) {
 		t.Fatal("shared graph visibility", records, err)
 	}
+	// A visible source must not launder a hidden, expired, future, suppressed or
+	// missing second dependency. Keep the visible result node unchanged.
+	for _, state := range []string{"hidden", "future", "expired", "suppressed", "missing"} {
+		execSQL(`SAVEPOINT mixed_graph_evidence; SELECT set_config('aimee.memory_scope_all','1',true)`)
+		dependency := seed("graph-mixed-"+state, "graph-visible", "graph-mixed-source-"+state)
+		switch state {
+		case "hidden":
+			execSQL(`UPDATE memories SET scope_value='graph-hidden' WHERE id=$1`, dependency.ID)
+		case "future":
+			execSQL(`UPDATE memories SET valid_from=(CURRENT_TIMESTAMP+interval '1 day')::text WHERE id=$1`, dependency.ID)
+		case "expired":
+			execSQL(`UPDATE memories SET valid_until=CURRENT_TIMESTAMP::text WHERE id=$1`, dependency.ID)
+		case "suppressed":
+			execSQL(`UPDATE memories SET activation_suppressed=1 WHERE id=$1`, dependency.ID)
+		}
+		locator := fmt.Sprintf("memory:%d", dependency.ID)
+		if state == "missing" {
+			locator = "memory:9223372036854775807"
+		}
+		execSQL(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id) VALUES($1,'memory',$2)`, sharedEdge, locator)
+		execSQL(`SELECT set_config('aimee.memory_scope_all','0',true)`)
+		records, err = backend.fuseMemoryGraph(ctx, sharedReq, false, nil)
+		if err != nil || has(records, sharedTarget.ID) || !has(records, first.ID) || !has(records, shared.ID) {
+			t.Fatal("mixed graph evidence admitted", state, records, err)
+		}
+		execSQL(`ROLLBACK TO SAVEPOINT mixed_graph_evidence; RELEASE SAVEPOINT mixed_graph_evidence`)
+	}
+	// All dependencies in the requested audience remain usable; an exact scope
+	// still excludes an edge backed by a shared-workspace parent.
+	execSQL(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id) VALUES($1,'memory','memory:'||$2::bigint::text)`, sharedEdge, first.ID)
+	records, err = backend.fuseMemoryGraph(ctx, sharedReq, false, nil)
+	if err != nil || !has(records, sharedTarget.ID) {
+		t.Fatal("all-visible graph evidence rejected", records, err)
+	}
 	sharedReq.Scope, sharedReq.IncludeAll = Scope{Type: ScopeProject, Value: "graph-visible"}, true
 	records, err = backend.fuseMemoryGraph(ctx, sharedReq, true, nil)
 	if err != nil || has(records, shared.ID) || has(records, sharedTarget.ID) || has(records, hidden.ID) || !has(records, first.ID) {

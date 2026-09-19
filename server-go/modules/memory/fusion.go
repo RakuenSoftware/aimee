@@ -50,6 +50,8 @@ func graphScopeArgs(req DataRequest, exact bool) []any {
 // Bounded breadth-first traversal across all seeds together. Each level is one
 // store read, with a per-node neighbor cap and a total visit budget. Direct seed
 // attachments are evidence too; they do not require an unrelated outgoing edge.
+// Every memory evidence locator must resolve inside the current request audience.
+// A second visible source cannot admit an edge with hidden or expired dependencies.
 func (s *postgresDataStore) expandGraph(ctx context.Context, seeds []string, code bool, req DataRequest, exact bool) ([]graphVisit, error) {
 	visits := make([]graphVisit, 0, graphNodeBudget)
 	seen := map[string]int{}
@@ -84,11 +86,11 @@ func (s *postgresDataStore) expandGraph(ctx context.Context, seeds []string, cod
  AND (e.edge_class<>'semantic' OR (e.suppressed=0 AND e.superseded_at='' AND e.invalidated_at=''
  AND e.lifecycle_state IN ('persistent','promoted')
  AND (`+memoryValiditySQL("e.")+`)))
- AND (NOT EXISTS(SELECT 1 FROM fact_evidence fe WHERE fe.assertion_id=e.id AND fe.source_kind='memory')
- OR EXISTS(SELECT 1 FROM fact_evidence fe JOIN memories m ON fe.source_id='memory:'||m.id::text
- WHERE fe.assertion_id=e.id AND fe.source_kind='memory' AND `+currentMemorySQL("m.")+`
+ AND NOT EXISTS(SELECT 1 FROM fact_evidence fe LEFT JOIN memories m
+ ON fe.source_id='memory:'||m.id::text AND `+currentMemorySQL("m.")+`
  AND CASE WHEN $2 THEN m.scope_type=$3 AND m.scope_value=$4 ELSE $5 OR m.scope_type='global' OR (m.scope_type='workspace' AND m.scope_value='_shared')
- OR (m.scope_type='project' AND m.scope_value=$6) OR (m.scope_type='workspace' AND m.scope_value=$7) END))
+ OR (m.scope_type='project' AND m.scope_value=$6) OR (m.scope_type='workspace' AND m.scope_value=$7) END
+ WHERE fe.assertion_id=e.id AND fe.source_kind='memory' AND m.id IS NULL)
  AND (e.edge_origin<>'code_projection' OR EXISTS(SELECT 1 FROM code_projection_generations g
  JOIN projects p ON p.name=g.project WHERE g.id=e.projection_generation_id AND g.state='visible' AND p.lifecycle_state='current'
  AND CASE WHEN $2 THEN $3='project' AND p.name=$4 ELSE $5 OR p.name=$6 END))
