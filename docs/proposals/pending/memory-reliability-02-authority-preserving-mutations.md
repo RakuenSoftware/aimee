@@ -206,6 +206,9 @@ idempotency keys, trusted author/reviewer admission and proposal parity remain
 open. The snapshot mechanism preserves available metadata but does not infer
 human authorship from the placement or request body.
 
+[Fresh validation](../../validation/memory-private-versions-2026-09-20.md) records
+346 passing topology/placement/review checks with the corrected store image.
+
 ## Existing integration points
 
 `server-go/modules/memory/mutations.go` contains `InsertEpistemic`, `UpdateAs` and `DeleteAs`. Preserve existing episode/experience immutability, instruction/policy replacement rules, rejection tombstones and fact changesets. Extend the current schema and audit mechanism instead of adding a parallel write service.

@@ -42,7 +42,33 @@ now includes the two correction-review commands; the golden includes the new
 memory version fields. Both native registry and real C-host/Go-process probes
 pass. The frozen semantic-context comparison records only exact memory changes
 in the shared MCP files and continues to reject unrelated semantic-context drift.
-A complete new fresh T2 result is still pending.
+The corrected implementation and harness
+`f5c3a6f2c28c66032493d050b6d908c7ecc0166c` passed the complete fresh T2 gate:
+**346/346 verdicts**, comprising 87 private, 208 shared, 27 correction-review,
+six identity and 18 topology checks. The
+[sanitized receipt](memory-shared-reliability-2026-09-20/fresh-t2-f5c3a6f2c2.json)
+contains only verdict names and booleans.
+
+Both application containers were verified against
+`sha256:4515b57c8b3d53be4c9fe096faf791cc081f6493231a23ac7c28cdbbc64381eb`;
+both PostgreSQL containers used
+`sha256:b6209cde68c9a7a65c562b8a4ca45682f138b4a2de5b5dbcfe7ca04ec48e962f`.
+The embedder remains pinned to
+`sha256:b03199bee881bf632f7194f472de7bc370e66d16b7215bb6aa506fb2b1510209`.
+Raw evidence is retained at
+`/opt/aimee-memory-proposals-evidence/t2-f5c3a6f2c2` in owned CT 9498;
+the disposable containers are stopped, with volumes and evidence retained.
+
+The actual HTTP/MCP tests verify exact private versions, labelled history,
+stale-correction conflicts, current/history persistence after restart, forbidden
+runtime history/progress writes and helper execution, atomic rollback on injected
+history failure, and payload erasure. Existing shared isolation, correction review,
+retry, rollback, outage/recovery and immutable identity checks also pass.
+
+The earlier CI failures in command discovery, MCP registry golden expectations
+and Linux/macOS semantic-context source validation pass on the corrected commit.
+The entire CI workflow was still running when this evidence was recorded; this
+fresh deployment receipt does not claim completion of that workflow.
 
 ## Remaining scope
 
