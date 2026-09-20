@@ -282,11 +282,22 @@ int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int 
    int found = 0;
    if (rc == AIMEE_PG_ROW)
    {
-      found = 1;
-      if (id_out && id_out_len > 0)
-         snprintf(id_out, (size_t)id_out_len, "%s", aimee_pg_column_text(st, 0));
-      if (payload_out && payload_out_len > 0)
-         snprintf(payload_out, (size_t)payload_out_len, "%s", aimee_pg_column_text(st, 1));
+      const char *id = aimee_pg_column_text(st, 0);
+      const char *payload = aimee_pg_column_text(st, 1);
+      id = id ? id : "";
+      payload = payload ? payload : "";
+      size_t id_bytes = strlen(id), payload_bytes = strlen(payload);
+      if ((id_out && (id_out_len <= 0 || id_bytes >= (size_t)id_out_len)) ||
+          (payload_out && (payload_out_len <= 0 || payload_bytes >= (size_t)payload_out_len)))
+         found = -1; /* Never label a truncated event or identity as a complete trace. */
+      else
+      {
+         found = 1;
+         if (id_out)
+            memcpy(id_out, id, id_bytes + 1);
+         if (payload_out)
+            memcpy(payload_out, payload, payload_bytes + 1);
+      }
    }
    aimee_pg_finalize(st);
    /* Distinguish a DB error (-1) from a genuine no-event (0): /v1/audit/trace

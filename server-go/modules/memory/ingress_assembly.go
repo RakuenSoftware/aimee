@@ -117,6 +117,13 @@ type ingressRetainedMemory struct {
 	Preview string `json:"preview"`
 }
 
+// These references identify occurrences in an assembled projection. They do not
+// assert a canonical source revision, delivery to a provider, or task success.
+type ingressProjectionEvidenceRef struct {
+	Type string `json:"type"`
+	Ref  string `json:"ref"`
+}
+
 type ingressAssemblyRequest struct {
 	TypedRequested   bool                   `json:"typed_requested"`
 	TypedContextJSON string                 `json:"typed_context_json"`
@@ -288,6 +295,14 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		"omitted_count": omitted, "headline_missing_count": missing, "folded_count": folded,
 		"folded_saved": saved, "facts_unavailable": factsUnavailable, "typed_unavailable": typedUnavailable}
 	if typed != nil {
+		refs := make([]ingressProjectionEvidenceRef, 0, len(typed.Retained))
+		for _, item := range typed.Retained {
+			refs = append(refs, ingressProjectionEvidenceRef{
+				Type: "memory_projection_item",
+				Ref:  "typed:v1:" + typed.SelectionDigest + ":" + item.Channel + ":" + item.ID,
+			})
+		}
+		result["retained_typed_refs"] = refs
 		result["typed_projection"] = map[string]any{
 			"schema_version": 1, "boundary": "ingress_envelope", "source_projection_digest": sourceDigest,
 			"projection_digest": typed.ProjectionDigest, "rendered_bytes": typed.RenderedBytes,

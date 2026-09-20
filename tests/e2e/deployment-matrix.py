@@ -148,6 +148,7 @@ def typed_context_budget_gate(kb, check):
                   rendered == b'' and result.get('retained_items') == [] and
                   result.get('context_sufficiency') == 'insufficient')
         if limit == 400:
+            partial_projection = result
             check('Typed byte packing preserves the earlier small item',
                   [r['stable_id'] for r in result['retained_items']] == ['turn:0'] and
                   b'LIMIT_7' in rendered)
@@ -158,6 +159,56 @@ def typed_context_budget_gate(kb, check):
         code, result = call(dict(schema_version=1, **{field:0}))
         check('Typed projection refuses unavailable ' + field,
               code == 200 and result.get('kind') == 'unsupported_mode')
+
+
+    # The native C-host/Go test covers actual integrity-gated emission. Here the
+    # real authenticated writer/reader persists the projection-reference contract.
+    turn = 'typed-evidence-' + uuid.uuid4().hex
+    def refs_for(projection):
+        return [dict(type='memory_projection_item',
+                     ref='typed:v1:' + projection['selection_digest'] + ':' + r['channel'] + ':' + r['stable_id'])
+                for r in projection['retained_items']]
+    def merge(turn_id, refs):
+        return kb.kb_request('/v1/actions/evidence.merge_retrieval_event',
+                            dict(turn_id=turn_id, role='Recall', query_fingerprint='typed-fixture', surfaced_refs=refs))
+    def trace(turn_id):
+        return kb.kb_request('/v1/actions/evidence.trace_retrieval_event', dict(turn_id=turn_id))
+    refs = refs_for(baseline)
+    code, first = merge(turn, refs)
+    check('Typed assembly references commit through authenticated evidence writer',
+          code == 200 and first.get('status') == 'ok' and bool(first.get('retrieval_event_id')))
+    code, found = trace(turn)
+    check('Typed evidence preserves exact references without invented source versions',
+          code == 200 and found.get('trace_status') == 'ok' and found.get('event', {}).get('surfaced_refs') == refs)
+    code, again = merge(turn, refs)
+    check('Repeated typed evidence merge preserves event identity', code == 200 and
+          again.get('retrieval_event_id') == first['retrieval_event_id'])
+    code, found = trace(turn)
+    check('Repeated typed evidence merge does not duplicate references',
+          code == 200 and found.get('event', {}).get('surfaced_refs') == refs)
+    partial_refs = refs_for(partial_projection)
+    code, changed = merge(turn, partial_refs)
+    check('Repacked typed selection joins the same turn event', code == 200 and
+          changed.get('retrieval_event_id') == first['retrieval_event_id'])
+    code, found = trace(turn)
+    check('Distinct accepted projection identities remain distinguishable', code == 200 and
+          found.get('event', {}).get('surfaced_refs') == refs + partial_refs)
+    code, empty = merge(turn + '-empty', [])
+    check('Empty typed evidence does not create a bare event', code == 200 and
+          empty.get('status') == 'ok' and empty.get('retrieval_event_id') == '')
+    code, found = trace(turn + '-empty')
+    check('Empty typed evidence trace remains explicitly unavailable',
+          code == 200 and found.get('trace_status') == 'evidence_unavailable')
+    large_refs = [dict(type='memory_projection_item', ref=refs[0]['ref'] + ':fixture:' + str(i)) for i in range(100)]
+    code, large = merge(turn + '-large', large_refs)
+    check('Large typed evidence writer accepts the reference batch', code == 200 and
+          large.get('status') == 'ok' and bool(large.get('retrieval_event_id')))
+    code, found = trace(turn + '-large')
+    check('Bounded trace refuses a truncated event instead of reporting success', code == 200 and
+          found.get('trace_status') == 'evidence_unavailable' and 'event' not in found and 'event_raw' not in found)
+    code, replay = merge(turn + '-large', large_refs)
+    check('Bounded-read refusal preserves subsequent event merge retries', code == 200 and
+          replay.get('retrieval_event_id') == large['retrieval_event_id'])
 
 
 def correction_review_gate(kb, server, placement, output):

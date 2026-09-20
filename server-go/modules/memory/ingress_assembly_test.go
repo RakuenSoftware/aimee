@@ -237,6 +237,15 @@ func TestIngressTypedProjectionRepackingAndIdentity(t *testing.T) {
 			envelope := result["envelope"].(string)
 			typed := result["typed_projection"].(map[string]any)
 			refs := typed["retained_items"].([]typedProjectionRef)
+			evidence := result["retained_typed_refs"].([]ingressProjectionEvidenceRef)
+			if len(evidence) != len(refs) {
+				t.Fatal("unselected items received evidence", result)
+			}
+			for i, ref := range refs {
+				if evidence[i].Type != "memory_projection_item" || evidence[i].Ref != "typed:v1:"+typed["selection_digest"].(string)+":"+ref.Channel+":"+ref.ID {
+					t.Fatal("evidence does not identify the accepted projection item", result)
+				}
+			}
 			if len(envelope) > budget || typed["source_projection_digest"] != source.ProjectionDigest || typed["source_selection_digest"] != source.SelectionDigest || typed["omitted_count"] != 2-len(refs) {
 				t.Fatal(result)
 			}

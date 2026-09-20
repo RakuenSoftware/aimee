@@ -136,6 +136,12 @@ application/harness `e88fe83a20` passes **824/824** checks (534 T2, 290 T3),
 including 24 typed-budget/identity checks. This does not yet constitute a
 provider release or durable dispatch receipt.
 
+[Typed assembly evidence](../../validation/memory-typed-assembly-evidence-2026-09-20.md)
+now forwards Go-selected projection references only after host integrity acceptance,
+including typed-only assemblies. A bounded-read repair prevents truncated stored
+events from being reported as complete traces. This is an optional assembly event
+path; source versions, full channel coverage and durable dispatch remain open.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

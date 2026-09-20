@@ -62,6 +62,19 @@ static void test_retrieval_event_turn(void)
    assert(strcmp(got_id, ev_id) == 0);
    assert(strstr(json_canonical(payload), "\"surfaced_ids\":[11,22]") != NULL);
 
+   /* A trace is either complete or explicitly unavailable, never truncated. */
+   int bytes = (int)strlen(payload);
+   assert(db2_demotion_retrieval_event_by_turn("turn-abc", got_id, sizeof(got_id), payload,
+                                               bytes + 1) == 1);
+   assert((int)strlen(payload) == bytes);
+   assert(db2_demotion_retrieval_event_by_turn("turn-abc", got_id, sizeof(got_id), payload,
+                                               bytes) == -1);
+   assert(got_id[0] == 0 && payload[0] == 0);
+   char tiny_id[8];
+   assert(db2_demotion_retrieval_event_by_turn("turn-abc", tiny_id, sizeof(tiny_id), payload,
+                                               sizeof(payload)) == -1);
+   assert(tiny_id[0] == 0 && payload[0] == 0);
+
    /* an unknown turn -> no event (0), not an error. */
    assert(db2_demotion_retrieval_event_by_turn("turn-missing", got_id, sizeof(got_id), NULL, 0) ==
           0);

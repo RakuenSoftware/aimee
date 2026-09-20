@@ -20,8 +20,10 @@ and crash recovery remain open.
 The [typed outer assembler](../../validation/memory-typed-outer-packing-2026-09-20.md)
 now returns retained typed IDs and source/final projection and selection digests
 after row-level repacking. This is an assembly response before host integrity
-acceptance. The host's existing exposure events still cover ordinary memory/code;
-connecting typed/fact coverage to durable host/provider receipts remains open.
+acceptance. The host now also [emits Go-retained typed projection references](../../validation/memory-typed-assembly-evidence-2026-09-20.md)
+after integrity acceptance, preserving final selection identity without inventing
+source versions. The legacy plain-text facts block and durable host/provider
+receipt pipeline remain open. Bounded trace reads now refuse partial payloads.
 
 Record distinct retrieval, selection, assembly, preparation, dispatch and acknowledgement stages. Connect them to the existing audit/WORM infrastructure with bounded metadata and truthful evidence states.
 

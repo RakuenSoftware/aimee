@@ -249,6 +249,40 @@ char *ingress_preinject_last_assistant_from_messages(const cJSON *messages)
    return out;
 }
 
+/* Forward only owner-selected references after the assembled envelope has
+ * passed the host integrity gate. Reference interpretation stays in Go. */
+static void ingress_emit_projection_refs(const cJSON *rows, const char *turn_id,
+                                         const char *fingerprint)
+{
+   int count = cJSON_GetArraySize(rows);
+   if (count <= 0)
+      return;
+   const char **types = calloc((size_t)count, sizeof(*types));
+   const char **refs = calloc((size_t)count, sizeof(*refs));
+   if (!types || !refs)
+   {
+      free(types);
+      free(refs);
+      return;
+   }
+   int retained = 0;
+   const cJSON *row;
+   cJSON_ArrayForEach(row, rows)
+   {
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "type"));
+      const char *ref = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "ref"));
+      if (!type || !type[0] || !ref || !ref[0])
+         continue;
+      types[retained] = type;
+      refs[retained++] = ref;
+   }
+   if (retained > 0)
+      (void)kb_client_evidence_merge_retrieval_event(turn_id, "Recall", fingerprint, types, refs,
+                                                     NULL, retained);
+   free(types);
+   free(refs);
+}
+
 char *ingress_preinject_build(const char *query, int request_disabled)
 {
    char active_workspace[512] = "";
@@ -448,8 +482,10 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * It does not assert provider admission, dispatch, or acknowledgement. */
    const cJSON *retained_memories = cJSON_GetObjectItemCaseSensitive(response, "retained_memories");
    const cJSON *retained_code = cJSON_GetObjectItemCaseSensitive(response, "retained_code_indices");
+   const cJSON *retained_typed = cJSON_GetObjectItemCaseSensitive(response, "retained_typed_refs");
    if (result && config_kb_evidence_emit_enabled() &&
-       (cJSON_GetArraySize(retained_memories) > 0 || cJSON_GetArraySize(retained_code) > 0))
+       (cJSON_GetArraySize(retained_memories) > 0 || cJSON_GetArraySize(retained_code) > 0 ||
+        cJSON_GetArraySize(retained_typed) > 0))
    {
       const char *tid = ingress_preinject_turn_id();
       char minted[40];
@@ -532,6 +568,8 @@ char *ingress_preinject_build(const char *query, int request_disabled)
             (void)kb_client_evidence_merge_retrieval_event(tid, "Recall", fp, types, refs, versions,
                                                            cn);
       }
+      /* Merge after the legacy memory writer, whose turn creation is first-wins. */
+      ingress_emit_projection_refs(retained_typed, tid, fp);
    }
 
    kb_client_memory_scope_context_clear();

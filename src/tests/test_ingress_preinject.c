@@ -15,7 +15,8 @@ static int g_runtime_failure;
 static int g_scope_active;
 static int g_evidence_enabled;
 static int g_assembly_budget = 1200;
-static int g_evidence_count, g_bridge_count, g_code_count;
+static int g_evidence_count, g_bridge_count, g_code_count, g_typed_count;
+static char g_typed_first_ref[512];
 static int64_t g_evidence_ids[5];
 static char g_evidence_preview[256];
 static int g_long_code_path;
@@ -359,6 +360,22 @@ int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *ro
                                              const char *const *versions, int n)
 {
    assert(g_scope_active && turn_id && role && query_fingerprint);
+   if (n > 0 && !strcmp(types[0], "memory_projection_item"))
+   {
+      assert(versions == NULL); /* No canonical storage version is being claimed. */
+      for (int i = 0; i < n; i++)
+      {
+         assert(!strcmp(types[i], "memory_projection_item"));
+         assert(strncmp(refs[i], "typed:v1:sha256:", 16) == 0);
+         assert(strstr(refs[i], ":observations:obs:1") ||
+                strstr(refs[i], ":approved_procedures:proc:1"));
+      }
+      if (!g_memory_returns_none)
+         assert(g_evidence_count > 0); /* Keep the first-wins memory writer first. */
+      snprintf(g_typed_first_ref, sizeof(g_typed_first_ref), "%s", refs[0]);
+      g_typed_count += n;
+      return 0;
+   }
    assert(n == 1 && !strcmp(types[0], "code"));
    assert(!strcmp(refs[0], "code:active-project:src/server/ingress_preinject.c"));
    assert(!strcmp(versions[0], "fixture-version"));
@@ -841,7 +858,8 @@ static void test_small_budget_does_not_retrieve_or_claim(void)
 
 static void reset_evidence(void)
 {
-   g_evidence_count = g_bridge_count = g_code_count = 0;
+   g_evidence_count = g_bridge_count = g_code_count = g_typed_count = 0;
+   g_typed_first_ref[0] = 0;
    g_evidence_preview[0] = 0;
 }
 
@@ -902,8 +920,58 @@ static void test_evidence_matches_accepted_envelope(void)
    printf("evidence_matches_accepted_envelope OK\n");
 }
 
+static void test_typed_evidence_after_integrity_and_packing(void)
+{
+   g_evidence_enabled = g_temporal_enabled = 1;
+   ingress_preinject_set_turn_id("typed-evidence-turn");
+   reset_evidence();
+   char *env = ingress_preinject_build("deployment matrix", 0);
+   assert(env && g_typed_count == 2 && g_evidence_count == 2 && g_code_count == 1);
+   char full_ref[512];
+   snprintf(full_ref, sizeof(full_ref), "%s", g_typed_first_ref);
+   free(env);
+
+   g_assembly_budget = 1040;
+   reset_evidence();
+   env = ingress_preinject_build("deployment matrix", 0);
+   assert(env && g_typed_count == 1);
+   assert(strstr(g_typed_first_ref, ":observations:obs:1"));
+   assert(strcmp(full_ref, g_typed_first_ref)); /* Final selection, not the source digest. */
+   assert(!strstr(env, "\"text\":\"procedure\""));
+   free(env);
+
+   g_assembly_budget = 740;
+   g_memory_returns_none = g_long_code_path = 1;
+   reset_evidence();
+   env = ingress_preinject_build("deployment matrix", 0);
+   assert(env && g_typed_count == 2 && !g_evidence_count && !g_code_count);
+   free(env);
+   g_memory_returns_none = g_long_code_path = 0;
+
+   for (int mode = 0; mode < 3; mode++)
+   {
+      reset_evidence();
+      g_malicious_preview = mode == 0;
+      g_assembly_failure = mode == 1;
+      g_assembly_budget = mode == 2 ? 384 : 1200;
+      assert(ingress_preinject_build("deployment matrix", 0) == NULL);
+      assert(!g_typed_count && !g_evidence_count && !g_code_count);
+   }
+   g_malicious_preview = g_assembly_failure = 0;
+   g_assembly_budget = 1200;
+   g_evidence_enabled = 0;
+   reset_evidence();
+   env = ingress_preinject_build("deployment matrix", 0);
+   assert(env && !g_typed_count && !g_evidence_count && !g_code_count);
+   free(env);
+   g_temporal_enabled = 0;
+   ingress_preinject_set_turn_id(NULL);
+   printf("typed_evidence_after_integrity_and_packing OK\n");
+}
+
 int main(void)
 {
+   test_typed_evidence_after_integrity_and_packing();
    test_evidence_matches_accepted_envelope();
    test_small_budget_does_not_retrieve_or_claim();
    test_scope_cleanup_on_failed_event_id();

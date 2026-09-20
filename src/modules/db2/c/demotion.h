@@ -55,7 +55,8 @@ extern "C"
    /* Look up a turn-keyed retrieval_event by its caller-visible `turn_id` (the
     * /v1/audit/trace read). Writes the internal event id into id_out and the JSON
     * payload into payload_out (either may be NULL). Returns 1 on hit, 0 if no
-    * event for that turn, -1 on error. */
+    * event for that turn, -1 on error or insufficient output capacity. A failed
+    * bounded read leaves both supplied outputs empty. */
    int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int id_out_len,
                                             char *payload_out, int payload_out_len);
 
