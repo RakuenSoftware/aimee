@@ -122,6 +122,17 @@ The baseline policy fingerprint includes this version. This current-state slice
 does not certify all MR-01 surfaces, privileged historical/belief-time access,
 utility horizons or a final release/revocation generation check.
 
+## Context projection and limits
+
+The Go ingress planner emits version-one `context_limits.max_context_bytes` for
+its assembler. The assembler checks the serialized memory envelope, returns
+exact UTF-8 byte accounting and retained memory IDs, and treats an explicit zero
+as zero. Token caps and reserves currently return `unsupported_mode` because
+complete provider-bound token counting is unavailable. The result certifies
+neither the complete provider request nor source freshness. Typed context keeps
+packing diagnostics outside the prompt, renders reviewed procedures once, and
+reports unknown task coverage until requirements are evaluated.
+
 ## Memory invalidation producers
 
 Personal storage now records a monotonic `record_revision` and a content-free

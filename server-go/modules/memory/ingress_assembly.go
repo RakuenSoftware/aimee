@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -16,8 +17,14 @@ type ingressEntry struct {
 // Keep the deployed grouping and footer contract while the remaining retrieval
 // transports migrate. Limits count UTF-8 bytes, not characters or token guesses.
 func ingressRenderBlock(entries []ingressEntry, budget, missing int) (string, int) {
+	block, omitted, _ := ingressRenderBlockSelected(entries, budget, missing)
+	return block, omitted
+}
+
+func ingressRenderBlockSelected(entries []ingressEntry, budget, missing int) (string, int, []int) {
 	available := max(0, budget-384)
 	var block strings.Builder
+	selected := []int{}
 	omitted, previous, first := 0, "", true
 	for i, entry := range entries {
 		if i == 0 || entry.kind != previous {
@@ -35,6 +42,7 @@ func ingressRenderBlock(entries []ingressEntry, budget, missing int) (string, in
 		}
 		if block.Len()+len(candidate) <= available {
 			block.WriteString(candidate)
+			selected = append(selected, i)
 			first = false
 		} else {
 			omitted++
@@ -52,7 +60,7 @@ func ingressRenderBlock(entries []ingressEntry, budget, missing int) (string, in
 			}
 		}
 	}
-	return block.String(), omitted
+	return block.String(), omitted, selected
 }
 
 func ingressEnvelope(block string, score float64) string {
@@ -89,6 +97,7 @@ type ingressMemoryPreview struct {
 }
 
 type ingressAssemblyRequest struct {
+	ContextLimits  *ContextLimits         `json:"context_limits,omitempty"`
 	Budget         int                    `json:"budget"`
 	Compress       bool                   `json:"compress"`
 	CompressMin    int                    `json:"compress_min"`
@@ -109,10 +118,16 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 	if request.Budget <= 0 {
 		request.Budget = 6144
 	}
+	var err error
+	request.Budget, err = request.ContextLimits.byteLimit(request.Budget)
+	if err != nil {
+		return nil, err
+	}
 	if request.CompressMin <= 0 {
 		request.CompressMin = 80
 	}
 	entries := make([]ingressEntry, 0, 15)
+	memoryEntries := make(map[int]string, len(request.Memories))
 	score, missing, folded, saved := 0.0, 0, 0, 0
 	if request.TaskBlock != "" {
 		entries = append(entries, ingressEntry{"code", "", request.TaskBlock})
@@ -162,6 +177,7 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		if preview != "" {
 			body += "    > " + ingressSingleLine(preview, 220) + "\n"
 		}
+		memoryEntries[len(entries)] = row.ID
 		entries = append(entries, ingressEntry{"memory", "recommended (memory previews):\n", body})
 	}
 	if n := len(request.Memories); n > 0 {
@@ -190,8 +206,20 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		entries = append(entries, ingressEntry{"audit", "", "recommended (audit context):\n" + ingressTerminated(request.Audit)})
 		score = max(score, .4)
 	}
-	block, omitted := ingressRenderBlock(entries, request.Budget, missing)
-	return map[string]any{"status": "ok", "block": block, "envelope": ingressEnvelope(block, score),
+	block, omitted, selected := ingressRenderBlockSelected(entries, request.Budget, missing)
+	envelope := ingressEnvelope(block, score)
+	accounting, err := accountMemoryEnvelope(envelope, request.Budget)
+	if err != nil {
+		return nil, err
+	}
+	retained := []string{}
+	for _, index := range selected {
+		if id, ok := memoryEntries[index]; ok {
+			retained = append(retained, id)
+		}
+	}
+	return map[string]any{"status": "ok", "block": block, "envelope": envelope,
+		"context_accounting": accounting, "retained_memory_ids": retained,
 		"omitted_count": omitted, "headline_missing_count": missing, "folded_count": folded,
 		"folded_saved": saved, "facts_unavailable": factsUnavailable}, nil
 }
@@ -204,6 +232,10 @@ func handleIngressAssembly(args commandArgs) ([]byte, bus.ModuleStatus) {
 	}
 	result, err := ingressAssemble(request)
 	if err != nil {
+		var refusal *contextBudgetError
+		if errors.As(err, &refusal) {
+			return commandResult(commandError(refusal.kind, refusal.message))
+		}
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	return commandResult(result)

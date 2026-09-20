@@ -31,6 +31,10 @@ func TestIngressPlanModesScopeAndOptOut(t *testing.T) {
 					if assembly["budget"] != 6144 || assembly["compress"] != false {
 						t.Fatal(assembly)
 					}
+					limits := assembly["context_limits"].(ContextLimits)
+					if limits.SchemaVersion != 1 || limits.MaxContextBytes == nil || *limits.MaxContextBytes != 6144 {
+						t.Fatal("shipping host plan lacks versioned byte limit", limits)
+					}
 				}
 				request.Disabled = true
 				if plan := ingressBegin(state, request); plan["active"] != false {

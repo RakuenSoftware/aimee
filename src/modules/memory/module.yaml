@@ -158,7 +158,8 @@
     "server-go/modules/memory/live_benchmark.go",
     "server-go/modules/memory/eligibility.go",
     "server-go/modules/memory/session_view.go",
-    "server-go/modules/memory/shared_change_feed.go"
+    "server-go/modules/memory/shared_change_feed.go",
+    "server-go/modules/memory/context_budget.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",

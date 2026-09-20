@@ -45,12 +45,17 @@ func ingressBegin(state *gatewayState, request ingressBeginRequest) map[string]a
 	if budget <= 384 {
 		return result
 	}
+	if budget > maxDataBody {
+		result["warning"] = "context byte limit exceeds memory message capacity"
+		return result
+	}
 	result["active"], result["mode"] = true, mode
 	result["legacy_preview"] = request.PreviewEnabled && mode != "on"
 	result["facts"], result["temporal"] = facts, request.PreviewEnabled
 	result["task"] = request.PreviewEnabled && mode != "off" && state.tasks.claim(request.Session, request.Project, request.Query)
 	result["assembly"] = map[string]any{"operation": "ingress-assemble", "budget": budget,
-		"compress": request.Compress && !request.CompressDisabled, "compress_min": request.CompressMin,
+		"context_limits": ContextLimits{SchemaVersion: 1, MaxContextBytes: &budget},
+		"compress":       request.Compress && !request.CompressDisabled, "compress_min": request.CompressMin,
 		"facts_requested": facts}
 	return result
 }

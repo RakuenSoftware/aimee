@@ -131,3 +131,48 @@ func TestIngressAssemblyFactsFailureAndTaskConfidence(t *testing.T) {
 		t.Fatal("overflow identity accepted")
 	}
 }
+
+func TestVersionedIngressByteBudget(t *testing.T) {
+	for _, limit := range []int{0, 1, 384, 512, 1024} {
+		request := ingressAssemblyRequest{Budget: 9000,
+			ContextLimits: &ContextLimits{SchemaVersion: 1, MaxContextBytes: &limit},
+			Memories:      []ingressMemoryPreview{{ID: "9007199254740993", Key: "small", Content: "do not erase 界"}},
+			Code:          []ingressCodeHit{{FilePath: strings.Repeat("large", 500)}},
+		}
+		r, err := ingressAssemble(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		envelope := r["envelope"].(string)
+		a := r["context_accounting"].(ContextAccounting)
+		if len(envelope) > limit || a.RenderedBytes != len(envelope) || a.MaxContextBytes != limit || a.CountState != "exact" || a.Unit != "utf8_bytes" || a.Boundary != "memory_envelope" || a.TokenCountState != "unavailable" {
+			t.Fatal("serialized byte accounting mismatch", limit, r)
+		}
+		retained := r["retained_memory_ids"].([]string)
+		if limit <= 384 && (envelope != "" || len(retained) != 0) {
+			t.Fatal("literal zero/small byte limit inherited a larger legacy budget", r)
+		}
+		if limit == 1024 && (len(retained) != 1 || retained[0] != "9007199254740993" || !strings.Contains(envelope, "do not erase 界")) {
+			t.Fatal("oversized first item displaced small evidence", r)
+		}
+	}
+	for _, placement := range []Placement{PlacementKB, PlacementServer} {
+		handler := NewHandler(nil, WithDataStore(placement, nil))
+		for _, tt := range []struct{ limits, kind string }{
+			{`{"schema_version":2}`, "unsupported_version"},
+			{`{"schema_version":1,"max_context_tokens":0}`, "unsupported_mode"},
+			{`{"schema_version":1,"max_request_tokens":2000}`, "unsupported_mode"},
+			{`{"schema_version":1,"reserved_response_tokens":100}`, "unsupported_mode"},
+			{`{"schema_version":1,"max_context_bytes":-1}`, "invalid_argument"},
+		} {
+			r := runHostRuntime(t, handler, `{"operation":"ingress-assemble","context_limits":`+tt.limits+`}`)
+			if r["status"] != "error" || r["kind"] != tt.kind || r["envelope"] != nil {
+				t.Fatal("unsupported or invalid budget silently accepted", tt, r)
+			}
+		}
+		frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"ingress-assemble","context_limits":{"schema_version":1,"max_context_byte":0}}`))
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal("unknown limit silently ignored", status)
+		}
+	}
+}

@@ -19,6 +19,14 @@ size result, not a provider token or latency measurement. Full provider-request
 accounting, source-version binding, protected packing and host-retained feedback
 remain acceptance work.
 
+The shipping Go ingress plan also supplies version-one `context_limits` with
+`max_context_bytes`. The assembler verifies the final memory envelope's UTF-8
+byte length, reports its digest and exact retained memory IDs, and preserves
+literal zero separately from the legacy inherited budget. Unknown limit fields,
+unsupported schemas and token caps/reserves without provider counting are
+refused. This boundary covers the memory envelope; subsequent provider formatting,
+full-request token accounting and protected content still require integration.
+
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
 Use a single model-facing projection and verify the final request budget after every provider-affecting transformation. Keep explanation metadata outside the prompt unless a small field is explicitly useful to the model.
