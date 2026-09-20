@@ -136,9 +136,13 @@ lookup, a recent-order index and a parent index support review and erasure.
 
 A review requires verified authenticated user authority, `proposal_id`,
 `payload_digest`, the proposal's `expected_version`, and `action` (`approve` or
-`reject`). Body claims cannot grant user authority. Approval locks the parent
-before the proposal, compares the current target version, and creates a new
-canonical version through the same Go writer. It preserves model provenance
+`reject`). Body claims cannot grant user authority. A scoped service bearer
+alone on direct KB HTTP does not supply human authority. The existing mTLS
+host-caller transport separately verifies the enrolled Server certificate,
+rotating bearer, service identity and caller assertion before Go sees the actor.
+Approval locks the parent before the proposal, compares the current target
+version and creates a new canonical version through the same Go writer.
+It preserves model provenance
 (`reviewed_model`), confidence ceilings and the model extraction actor. The
 reviewer and exact draft digest are recorded separately in
 `knowledge_review_decisions`, with the existing changeset/WORM audit. Requested

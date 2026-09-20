@@ -234,6 +234,85 @@ containers in projects `aimee-e2e-kb-299b0c4e3c` and
 `aimee-e2e-server-327059924c` were stopped after validation, retaining volumes
 and evidence. No additional PR was opened.
 
+## Linked correction proposals and exact-draft review
+
+Implementation `64b00a092ca5172187028250c811caf57315693f` adds schema-25 linked
+model drafts and authenticated review through the Go owner. Model updates,
+supersede calls, same-key upserts and legacy content edits preserve authoritative
+memory and return a proposal reference. Drafts live outside recall storage;
+background writers retain proposal outcomes without extracting them as facts.
+The bounded proposal list and retry path fetch references only; explicit lookup
+loads one draft. Review resolves and locks the parent in one joined query, then
+locks the proposal in the same order used by creation and erasure.
+
+Approval binds the exact digest and target owner/revision and creates a successor
+with `reviewed_model` provenance, recomputed model confidence and a model
+extraction actor. The authenticated reviewer is recorded separately in the
+existing review-decision and changeset/WORM stores. Tier, use cases and mutable
+epistemic-kind changes are included in the reviewed digest; immutable episode
+and policy protections remain. A screening change cannot silently replace the
+reviewed text. Rejection is terminal for that owner/target/revision/draft, even
+if another proposer repeats it.
+
+Keyed draft outcomes share the existing actor-isolated retry namespace and bind
+the request digest. Their zero result revision cannot match a canonical record,
+so a schema-24 reader refuses instead of incorrectly treating a draft as a
+completed correction. Parent erasure removes draft payloads but retains
+content-free retry references. Current eligibility and exact result revision
+are rechecked when an approved outcome is replayed.
+
+The full memory race suite with required PostgreSQL evaluation/replay fixtures
+passes (54.217 seconds). Restricted-role tests cover same-key/edit/supersede
+proposal parity, stale target/digest conflicts, hidden parents, blocked model
+approval, immutable draft and decision guards, late approval rollback,
+model-author/confidence preservation, reviewed metadata, rejected-draft reuse
+across proposers, approval replay and erased/obsolete outcomes. Actual separate
+connections verify two competing approvals and approval versus rejection:
+one canonical successor and one decision survive. The native HTTP authorization
+test, schema-sync, generated-document and memory/C-bus ownership gates pass.
+All memory behavior remains Go; the C bus is unchanged.
+
+The first fresh run passed the 61 private and 208 shared placement checks but
+stopped at the new review fixture. Its direct HTTP credential was service-scoped,
+which intentionally supplies no human actor. The fixture incorrectly expected
+`user_stated` authorship. An attempted harness change (`6cec6b42cb`)
+used an install-owner bearer, which then failed the Server enrollment readiness
+check because that bearer does not match the service certificate. Harness `5ed5f6786b`
+retains the service credentials and exercises the existing mTLS
+host-caller transport for operator actions. It also verifies that direct service
+and unauthenticated requests cannot approve drafts. No application or
+authorization behavior changed. Failed-run evidence is retained at
+`/opt/aimee-memory-proposals-evidence/t2-64b00a092c` and
+`/opt/aimee-memory-proposals-evidence/t2-6cec6b42cb`. The first failed run's
+containers/networks were removed; the second run's containers were stopped.
+Their volumes and raw evidence remain available.
+
+### Redundant scope projection must preserve reviewed versions
+
+The fresh `5ed5f6786b` run reached the authenticated review workflow and passed
+MCP proposal creation, scope isolation, restart retry, service-only refusal,
+anonymous refusal and exact-digest conflict checks. Approval correctly refused
+because the target revision changed from 1 to 2 during background indexing.
+The indexer had copied the canonical primary scope into `memory_scopes`; the
+scope trigger incorrectly treated that redundant projection as a governed
+change. The raw run is retained at
+`/opt/aimee-memory-proposals-evidence/t2-5ed5f6786b` and its containers were stopped.
+
+Implementation `abfa42e5d4` (schema 26) filters redundant primary tags from the
+parent invalidation trigger. Primary-tag insert/no-op update/delete preserve the
+record version. Changes between primary and secondary tags still invalidate,
+as do ordinary secondary-tag batches. The existing parent lock, RLS and audit
+boundaries remain. This avoids a parent rewrite and associated audit/invalidation
+work for the redundant projection; it is not a whole-request P95 measurement.
+
+The full memory race suite with both required PostgreSQL fixtures passes
+(51.432 seconds, uncached). The added regressions cover both primary/secondary
+transitions, redundant materialization/deletion and rollback. Two concurrent
+connections verify that a primary-scope move is locked before classifying a
+new tag, preserving invalidation when the old primary becomes secondary. Schema, generated-document and
+Go-memory/C-bus ownership gates pass. The fresh harness explicitly checks that
+the reviewed target version survives owner restart and derived primary indexing.
+
 ## Local correctness and performance scope
 
 Restricted-role replay exercises the shipping schema, RLS, transactional scope
