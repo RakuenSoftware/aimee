@@ -18,7 +18,7 @@ Implement the shared eligibility decision in `server-go/modules/memory` and use 
 
 ## Implemented foundation
 
-The Go `current-validity-v5` predicate now applies active lifecycle, explicit
+The Go `current-validity-v6` predicate now applies active lifecycle, explicit
 suppression and half-open valid time before lexical, active-version whole-record
 semantic, unit/temporal semantic, graph/PageRank parent, compatibility-window,
 recall-bundle, activation and briefing limits. Pending commitments use the same
@@ -41,7 +41,13 @@ sweeps use the same exact upper boundary. PostgreSQL replay covers offsets,
 pre-limit exclusion, malformed timestamps and recovery. Operator lists preserve
 unswept lifecycle state. Assertion world-valid and belief-time SQL now preserves
 stored offsets and fractions and uses the same inclusive-start/exclusive-end
-semantics, with non-UTC replay coverage. The public anchor format remains
+semantics, with non-UTC replay coverage. Direct-ID current reads use the same predicate. Legacy `as_of` inspection retains
+superseded, archived and retired versions while refusing deleted, rejected,
+revoked, quarantined and unknown lifecycle states, plus suppressed active rows.
+This preserves diagnostic `valid_at` labeling rather than claiming a new
+historical reconstruction contract. Mutation admission stays separate from
+serving eligibility so excluded active rows can still be retired when authorized.
+The public anchor format remains
 second-precision UTC. Current typed-fact blocks share assertion time checks and
 require every memory parent to remain current/visible before limits. Late entity
 discovery/read errors refuse the complete block. This does not complete the host

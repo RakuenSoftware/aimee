@@ -493,9 +493,13 @@ WHERE id = $1 AND lifecycle_state = 'active'
 		}
 		return r, err
 	}
+	predicate := currentMemorySQL("")
+	if historical {
+		predicate = historicalMemoryInspectionSQL("")
+	}
 	err := s.db.QueryRow(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
 FROM memories
-WHERE id = $1 AND ($2 OR lifecycle_state='active')`, id, historical).
+WHERE id = $1 AND `+predicate, id).
 		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
@@ -768,14 +772,19 @@ RETURNING id`, r.Kind, r.Tier, r.Key, r.Content, r.Confidence).Scan(&r.ID)
 
 func (s *postgresDataStore) Delete(ctx context.Context, scope Scope, id int64) (changed bool, err error) {
 	if s.placement == PlacementKB {
-		current, err := s.get(ctx, scope, id, false)
-		if errors.Is(err, ErrMemoryNotFound) {
+		// Mutation admission is distinct from serving eligibility. An expired or
+		// suppressed active record can still be retired by its authorized author.
+		// Read only its identity here; DeleteAs owns the authority decision.
+		var currentScope Scope
+		err := s.db.QueryRow(ctx, `SELECT scope_type,scope_value FROM memories
+ WHERE id=$1 AND lifecycle_state='active'`, id).Scan(&currentScope.Type, &currentScope.Value)
+		if store.IsNoRows(err) {
 			return false, nil
 		}
 		if err != nil {
 			return false, err
 		}
-		if current.Scope != scope {
+		if currentScope != scope {
 			return false, nil
 		}
 		return s.DeleteAs(ctx, id, AuthorityModel)
