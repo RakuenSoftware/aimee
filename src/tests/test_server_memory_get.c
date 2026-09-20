@@ -91,6 +91,11 @@ memory_authority_t server_account_memory_authority(const char *account)
    return account && !strcmp(account, "user") ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
 }
 static int expected_store_authority;
+static const char *request_account;
+const char *server_request_account(void)
+{
+   return request_account;
+}
 
 /* Go validates and shapes these commands. This native test only verifies the
  * explicit user/KB routing boundary and propagation of complete module replies. */
@@ -213,7 +218,8 @@ char *kb_v1_action_request(const char *method, cJSON *request)
       cJSON_Delete(reply);
       return raw;
    }
-   if (!strcmp(method, "memory.store") || !strcmp(method, "memory.delete"))
+   if (!strcmp(method, "memory.store") || !strcmp(method, "memory.delete") ||
+       !strcmp(method, "memory.supersede"))
    {
       store_calls++;
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
@@ -586,6 +592,22 @@ static void test_get_delete_owner_envelopes(void)
 }
 
 extern int handle_memory_supersede(server_ctx_t *, server_conn_t *, cJSON *);
+static void test_shared_supersede_authority(void)
+{
+   cJSON *request = cJSON_Parse("{\"store\":\"kb\",\"old_id\":42,\"new_content\":\"corrected\","
+                                "\"authority\":\"user\",\"actor\":\"forged\"}");
+   store_reply = "{\"status\":\"ok\",\"store\":\"kb\",\"id\":9007199254740993}";
+   for (expected_store_authority = 0; expected_store_authority < 2; expected_store_authority++)
+   {
+      request_account = expected_store_authority ? "user" : NULL;
+      handle_memory_supersede(NULL, NULL, request);
+      assert(search_wire_reply && !strcmp(search_wire_reply, store_reply));
+   }
+   request_account = NULL;
+   expected_store_authority = 0;
+   store_reply = NULL;
+   cJSON_Delete(request);
+}
 static void test_private_command_envelopes(void)
 {
    const char *operations[] = {"user-store",  "user-get",       "user-list", "user-search",
@@ -747,5 +769,6 @@ int main(void)
    test_read_owner_refusal();
    test_personal_recall_owner_envelope();
    test_private_command_envelopes();
+   test_shared_supersede_authority();
    return 0;
 }

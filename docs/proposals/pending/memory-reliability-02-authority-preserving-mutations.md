@@ -17,6 +17,13 @@ preserve identity and captured authorship, and concurrent same-key creators are
 serialized. PostgreSQL tests cover rollback, protected writer/verb combinations,
 private metadata preservation and an actual blocked concurrent writer.
 
+Authenticated HTTP supersede now forwards the host's user authority, matching
+store, and the Go owner independently verifies it before creating a correction
+and capturing its author. Previously that route always requested model authority
+and refused corrections to a user's own stored facts. Model calls and caller
+supplied authority text still cannot replace authoritative content. A review
+refusal maps to HTTP 409 rather than an upstream-failure status.
+
 This is a foundation slice. Review-required writes currently refuse without
 creating a linked proposal. Personal versioning, explicit expected versions,
 idempotency keys, durable guards/outbox/consumer replay and full retention policy

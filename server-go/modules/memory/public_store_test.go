@@ -181,6 +181,25 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	if low := put(`{"key":"hypothesis","content":"tentative","tier":"L5","authority":"user"}`, true); low["status"] != "ok" || low["memory"].(map[string]any)["confidence"] != 0.5 {
 		t.Fatal(low)
 	}
+	// Supersede has the same host-authorized user correction path as update.
+	supersedeSource := put(`{"key":"verified-supersede","content":"user original","authority":"user"}`, true)
+	supersedeArgs := fmt.Sprintf(`{"old_id":%.0f,"new_content":"user correction","authority":"user"}`, supersedeSource["id"])
+	for _, unverified := range []bus.CommandContext{
+		{}, {Authenticated: true, Principal: "model:host"},
+	} {
+		if got, status := invokeContextCommand(t, handler, 0, unverified, "supersede", supersedeArgs); status != bus.ModuleStatusOK || got["kind"] != "review_required" {
+			t.Fatal("supersede accepted unverified authority", unverified, got, status)
+		}
+	}
+	correction, status := invokeContextCommand(t, handler, 0, caller, "supersede", supersedeArgs)
+	if status != bus.ModuleStatusOK || correction["status"] != "ok" {
+		t.Fatal("verified user correction refused", correction, status)
+	}
+	correctedMemory := correction["memory"].(map[string]any)
+	if correctedMemory["id"] == supersedeSource["id"] || correctedMemory["provenance_category"] != "user_stated" {
+		t.Fatal("verified correction lost version or authority", correction)
+	}
+	checkActor(correctedMemory["id"], "user:alice", 30, 1)
 	// Both failure positions roll back the memory row, actor capture and enqueue.
 	for _, tt := range []struct{ table, check, key string }{
 		{"memory_fact_actors", "authority_rank<0", "capture-failure"}, {"kb_async_jobs", "document_id<0", "enqueue-failure"},

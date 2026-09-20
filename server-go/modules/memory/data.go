@@ -1955,9 +1955,13 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 		var record Record
 		if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB {
-			record, err = backend.supersedeKB(ctx, request.ID, request.Content, *request.Confidence, request.SessionID)
+			authority := AuthorityModel
+			if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+				authority = AuthorityUser
+			}
+			record, err = backend.replaceKBAs(ctx, request.ID, request.Content, *request.Confidence, request.SessionID, authority, nil)
 			if err == nil && options.publicWrite {
-				err = backend.captureStoredFactActor(ctx, record.ID, AuthorityModel, nil)
+				err = backend.captureStoredFactActor(ctx, record.ID, authority, options.commandContext)
 			}
 		} else {
 			record, err = advanced.Supersede(ctx, scope, request.ID, request.Content, *request.Confidence)

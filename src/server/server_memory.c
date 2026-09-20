@@ -325,8 +325,10 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!selection)
       return send_and_free(conn, user_memory_owner_command("user-supersede", req));
 
-   return send_and_free(conn, kb_memory_owner_command("memory.supersede", req,
-                                                      MEMORY_AUTHORITY_MODEL, "id", cJSON_Number));
+   return send_and_free(
+       conn, kb_memory_owner_command("memory.supersede", req,
+                                     server_account_memory_authority(server_request_account()),
+                                     "id", cJSON_Number));
 }
 
 /* Retire one user memory by id. Physical deletion and KB provenance are not

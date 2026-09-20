@@ -10,7 +10,7 @@ func HTTPStatusForRPCFault(kind string) int {
 	switch kind {
 	case "invalid_argument", "unsupported_mode", "unsupported_version":
 		return http.StatusBadRequest
-	case "conflict":
+	case "conflict", "review_required":
 		return http.StatusConflict
 	case "not_found":
 		return http.StatusNotFound

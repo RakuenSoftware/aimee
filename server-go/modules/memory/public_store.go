@@ -116,6 +116,9 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 		}
 	}
 	request := DataRequest{Operation: "supersede", ID: id, Content: content, Confidence: &confidence, SessionID: args.stringOr("session_id", ""), PublicView: true, IncludeAll: true}
+	if caller := options.commandContext; args.stringOr("authority", "") == "user" && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+		request.Authority = AuthorityUser
+	}
 	scoped := commandScope(args, &request)
 	options.publicWrite = true
 	encoded, err := json.Marshal(request)
