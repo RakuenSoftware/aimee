@@ -27,7 +27,7 @@ content-free invalidation outbox with record revisions and a collection generati
 Generation reservation and publication are in the mutation transaction, in
 commit order; ordinary read counters bypass capture. The Go host-only bounded
 feed pins head/page to one SQL snapshot and requires canonical resynchronization
-on bootstrap, owner change, rewind or retention gap. A non-owner fixture exercises
+on bootstrap, owner change, a cursor beyond the head or retention gap. A non-owner fixture exercises
 actual concurrent writers, rollback, outbox failure, replay and forbidden progress
 mutation. This does not complete personal content versioning, the shared-KB
 producer, consumer application/checkpoints or the release-freshness contract.

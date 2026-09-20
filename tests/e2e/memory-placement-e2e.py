@@ -52,6 +52,18 @@ class Gate:
         rows = self.sql("SELECT id,key,content FROM memories ORDER BY id")
         return hashlib.sha256(rows.encode()).hexdigest()
 
+    def personal_sql(self, query):
+        return self.docker('exec', self.args.store_db, 'psql', '-U', 'postgres',
+                           '-d', 'aimee_store', '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c', query)
+
+    def personal_changes(self, mid):
+        return json.loads(self.personal_sql(f"""SELECT json_build_object(
+            'owner_id',g.owner_id,'generation',g.generation,'revision',m.record_revision,
+            'events',(SELECT json_agg(json_build_object('generation',e.generation,
+               'revision',e.record_revision,'operation',e.operation) ORDER BY e.generation)
+               FROM user_memory_invalidation_outbox e WHERE e.memory_id=m.id))
+            FROM user_memory_collection_generation g,user_memories m WHERE g.id=1 AND m.id={int(mid)}"""))
+
     def assert_no_personal_canary(self):
         tables = self.sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename").splitlines()
         queries = []
@@ -155,6 +167,10 @@ class Gate:
         content = 'Personal local-only fixture person@local.invalid 🦊'
         row = self.good('KB-free local store', self.call('store', dict(key=self.prefix, content=content)))
         mid = row['id']
+        stored_changes = self.personal_changes(mid)
+        self.check('HTTP store commits personal invalidation', stored_changes.get('revision') == 1 and
+                   stored_changes.get('events', [])[-1:] == [dict(
+                       generation=stored_changes['generation'], revision=1, operation='insert')])
         for explicit in ({}, {'store': 'user'}):
             bundle = self.good('KB-free recall ' + str(explicit),
                 self.call('recall', dict(query=self.prefix, **explicit)))
@@ -171,8 +187,23 @@ class Gate:
         self.check('KB-free MCP recall', code == 200 and 'Personal local-only fixture' in mcp)
         code, invalid = self.call('recall', dict(query=self.prefix, store='invalid'))
         self.check('recall rejects invalid store', code == 400, [code, invalid])
+        read_changes = self.personal_changes(mid)
+        self.check('HTTP CLI MCP recall leaves personal invalidations unchanged',
+                   read_changes['revision'] == stored_changes['revision'] and
+                   read_changes['events'] == stored_changes['events'])
+        self.personal_sql(f'ALTER TABLE user_memory_invalidation_outbox ADD CONSTRAINT e2e_outbox_failure CHECK(memory_id<>{int(mid)}) NOT VALID')
+        try:
+            code, failure = self.call('supersede', dict(old_id=mid, new_content='must roll back'))
+            self.check('HTTP mutation refuses failed invalidation commit', code >= 500 and failure.get('status') == 'error')
+            got = self.good('personal content after failed invalidation', self.call('get', dict(id=mid)))
+            self.check('failed invalidation preserves canonical content and progress',
+                       got.get('memory', {}).get('content') == content and
+                       self.personal_changes(mid) == read_changes)
+        finally:
+            self.personal_sql('ALTER TABLE user_memory_invalidation_outbox DROP CONSTRAINT e2e_outbox_failure')
         self.docker('restart', self.args.server)
         self.good('KB-free recall survives restart', self.wait('recall', dict(query=self.prefix)))
+        self.check('personal invalidations survive application restart', self.personal_changes(mid) == read_changes)
         self.docker('stop', self.args.store_db)
         try:
             code, failure = self.call('recall', dict(query=self.prefix))
@@ -180,7 +211,13 @@ class Gate:
         finally:
             self.docker('start', self.args.store_db)
         self.good('KB-free recall recovers', self.wait('recall', dict(query=self.prefix)))
+        self.check('personal invalidations survive storage restart', self.personal_changes(mid) == read_changes)
         self.good('KB-free local retirement', self.call('delete', dict(id=mid)))
+        retired_changes = self.personal_changes(mid)
+        self.check('HTTP retirement commits a new personal invalidation',
+                   retired_changes['owner_id'] == stored_changes['owner_id'] and
+                   retired_changes['revision'] == 2 and retired_changes['events'][-1]['revision'] == 2 and
+                   len(retired_changes['events']) == len(stored_changes['events']) + 1)
         bundle = self.good('KB-free recall after retirement', self.call('recall', dict(query=self.prefix)))
         self.check('retired personal record excluded from recall', all(
             r.get('memory_id') != mid and r.get('handle') != 'user:memory:' + str(mid)

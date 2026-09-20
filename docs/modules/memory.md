@@ -135,7 +135,7 @@ invalidation during ordinary reads.
 The host-only data operation `change-feed` accepts `changes` with
 `schema_version: 1`, an optional `after: {owner_id, generation}` cursor and a
 bounded `limit` (default 64, maximum 256). It reads the current head and page in
-one SQL snapshot. A new consumer, changed owner, rewound database or missing
+one SQL snapshot. A new consumer, changed owner, cursor beyond the current head or missing
 event requires a new canonical snapshot (`snapshot_required: true`); the feed
 does not supply that snapshot or acknowledge consumer application. Events remain
 retained. Only Server/personal placement currently supports this operation;
@@ -143,7 +143,10 @@ shared-KB and non-host access cannot silently consume a private stream.
 
 This is the producer foundation for MR-02. Personal content history, shared-KB
 collection generations, durable consumer checkpoints and release checks remain
-separate work; the feed cannot certify derivative freshness by itself.
+separate work; the feed cannot certify derivative freshness by itself. Backup
+restoration must rotate the producer identity before replay resumes; automatic
+restore identity rotation and restore-resistant erasure intent are not implemented
+by this producer slice.
 
 ## Canonical KB mutation admission
 
