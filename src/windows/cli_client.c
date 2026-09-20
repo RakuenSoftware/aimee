@@ -4,6 +4,7 @@
  * ("unix:" / absolute-path) transport is unsupported here — those callers fail
  * gracefully; the cross-platform remote path goes through aimee_client_request. */
 #include "cli_client.h"
+#include "json_wire.h"
 #include "aimee_client.h"
 #include "aimee_home.h"
 #include "aimee_version.h"
@@ -579,7 +580,10 @@ cJSON *cli_http_request(const char *endpoint, const char *method, const char *pa
    if (http_status)
       *http_status = status;
    const char *bodyp = strstr(resp, "\r\n\r\n");
-   cJSON *parsed = bodyp ? cJSON_Parse(bodyp + 4) : NULL;
+   cJSON *parsed =
+       bodyp ? (!strncmp(path, "/v1/memory/", 11) ? json_wire_parse_exact_integers(bodyp + 4)
+                                                  : cJSON_Parse(bodyp + 4))
+             : NULL;
    free(resp);
    return parsed;
 }

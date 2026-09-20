@@ -31,6 +31,30 @@
   `aimee-kb` has no direct DB2 linkage, replace that module's internals with pure Go without
   changing its event contract.
 
+## Future proposal TODO: retire DB2 completely
+
+Requested 2026-09-19. Draft a separate proposal to remove DB2 as a module,
+backend, and compatibility layer entirely. This is deferred work, outside
+PR #2983's G0 memory migration; the existing C bus remains C.
+
+The proposal must inventory every live DB2 consumer and assign each behavior,
+schema/migration, permission, and persisted identity to its continuing domain
+owner and the PostgreSQL module. Include indexing, tenancy, vault/custody,
+learning, and management as well as the remaining memory dependencies. Preserve
+supported behavior and data through explicit upgrade and rollback contracts.
+
+Acceptance must remove the standalone C process, dormant Go DB2 provider,
+generated clients and reserved-stage registrations, direct native backend
+linkage, DB2-specific configuration/packaging, and obsolete fixtures/build/CI
+paths. Replace schema bootstrap and replay with the continuing owners' module
+fixtures. Merely moving or renaming the native DB2 implementation is not
+retirement. Audit any retained compatibility names and define their removal.
+
+This TODO changes the eventual objective from the older two-step DB2 module
+port described below. It does not authorize implementing that broader cutover
+as part of G0; the detailed replacement proposal and its acceptance plan remain
+future work.
+
 ## 1. Decision
 
 DB2 moves in two ownership transfers:

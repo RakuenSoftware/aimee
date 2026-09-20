@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 /* src/kb/kb_service_code_embed.c: KB-side code embedding refresh.
  *
  * All writes to code_embeddings run through this KB-side module; server and
@@ -78,7 +80,18 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
       texts[i] = pend[i].text;
 
    int wrote = 0;
-   if (memory_embed_texts(texts, n, embed_command, EMBED_INPUT_DOCUMENT, vecs, embed_dim) == n)
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "batch");
+   cJSON_AddStringToObject(args, "base_url", embed_command);
+   cJSON_AddStringToObject(args, "input_type", "document");
+   cJSON_AddNumberToObject(args, "max_dim", embed_dim);
+   cJSON_AddItemToObject(args, "texts", cJSON_CreateStringArray(texts, n));
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", args, &reply);
+   cJSON_Delete(args);
+   int batch_count =
+       jo_float_matrix(cJSON_GetObjectItemCaseSensitive(reply, "vectors"), vecs, n, embed_dim);
+   cJSON_Delete(reply);
+   if (batch_count == n)
    {
       wrote = n;
    }
@@ -90,8 +103,17 @@ static int ce_flush_batch(ce_pending_t *pend, int n, const char **texts, float *
       {
          const ce_file_row_t *r = &rows[pend[i].row_idx];
          float *slot = vecs + (size_t)i * (size_t)embed_dim;
-         int dim =
-             memory_embed_text(pend[i].text, embed_command, EMBED_INPUT_DOCUMENT, slot, embed_dim);
+         cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+         cJSON_AddStringToObject(embed_0_args, "base_url", embed_command);
+         cJSON_AddStringToObject(embed_0_args, "input_type", "document");
+         cJSON_AddStringToObject(embed_0_args, "text", pend[i].text);
+         cJSON_AddNumberToObject(embed_0_args, "max_dim", embed_dim);
+         (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args,
+                                                       &embed_0_reply);
+         cJSON_Delete(embed_0_args);
+         int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), slot,
+                                  embed_dim);
+         cJSON_Delete(embed_0_reply);
          if (dim != embed_dim)
          {
             db2_code_index_op_record(pend[i].point_id, project, pend[i].node_key, r->path, 0,

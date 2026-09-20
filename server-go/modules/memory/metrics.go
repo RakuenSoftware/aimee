@@ -6,17 +6,19 @@ import (
 )
 
 type RuntimeMetrics struct {
-	Created    int64   `json:"created"`
-	Resolved   int64   `json:"resolved"`
-	Expired    int64   `json:"expired"`
-	Surfaced   int64   `json:"surfaced"`
-	Triggered  int64   `json:"triggered"`
-	Completed  int64   `json:"completed"`
-	Calls      int64   `json:"calls"`
-	AverageMS  float64 `json:"average_ms"`
-	MaximumMS  float64 `json:"maximum_ms"`
-	Assemblies int64   `json:"assemblies"`
-	Starts     int64   `json:"starts"`
+	Created        int64            `json:"created"`
+	Resolved       int64            `json:"resolved"`
+	Expired        int64            `json:"expired"`
+	Surfaced       int64            `json:"surfaced"`
+	Triggered      int64            `json:"triggered"`
+	Completed      int64            `json:"completed"`
+	Calls          int64            `json:"calls"`
+	AverageMS      float64          `json:"average_ms"`
+	MaximumMS      float64          `json:"maximum_ms"`
+	Assemblies     int64            `json:"assemblies"`
+	Starts         int64            `json:"starts"`
+	AnswerCounters map[string]int64 `json:"answer_counters,omitempty"`
+	LaneCounters   map[string]int64 `json:"lane_counters,omitempty"`
 }
 
 type durationCounters struct {
@@ -43,6 +45,9 @@ func (m *durationCounters) snapshot() (int64, float64, float64) {
 }
 
 var runtimeMetricState struct {
+	maintenanceCalls   durationCounters
+	maintenanceSkips   atomic.Int64
+	maintenanceChanges atomic.Int64
 	directiveCreated   atomic.Int64
 	directiveResolved  atomic.Int64
 	directiveExpired   atomic.Int64
@@ -55,6 +60,12 @@ var runtimeMetricState struct {
 	recallAssemblies   atomic.Int64
 	recallStarts       atomic.Int64
 	recallCalls        durationCounters
+	citationRequired   atomic.Int64
+	citationReprompted atomic.Int64
+	citationMissing    atomic.Int64
+	citationStripped   atomic.Int64
+	citationVerified   atomic.Int64
+	answerAbstained    atomic.Int64
 }
 
 func directiveMetrics() RuntimeMetrics {
@@ -74,5 +85,14 @@ func prospectiveMetrics() RuntimeMetrics {
 func recallMetrics() RuntimeMetrics {
 	_, average, maximum := runtimeMetricState.recallCalls.snapshot()
 	return RuntimeMetrics{Assemblies: runtimeMetricState.recallAssemblies.Load(),
-		Starts: runtimeMetricState.recallStarts.Load(), AverageMS: average, MaximumMS: maximum}
+		Starts: runtimeMetricState.recallStarts.Load(), AverageMS: average, MaximumMS: maximum,
+		LaneCounters: laneMetrics(),
+		AnswerCounters: map[string]int64{
+			"memory.citation.required":   runtimeMetricState.citationRequired.Load(),
+			"memory.citation.reprompted": runtimeMetricState.citationReprompted.Load(),
+			"memory.citation.missing":    runtimeMetricState.citationMissing.Load(),
+			"memory.citation.stripped":   runtimeMetricState.citationStripped.Load(),
+			"memory.citation.verified":   runtimeMetricState.citationVerified.Load(),
+			"memory.answer.abstained":    runtimeMetricState.answerAbstained.Load(),
+		}}
 }

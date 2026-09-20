@@ -155,18 +155,15 @@ if ! printf '%s\n' "$tc_out" | grep -q "test_bus_tool_completion: OK"; then
 fi
 echo "tool-completion audit: ok (dispatch outcome -> bridge -> bus -> ledger; no content)"
 
-# 7. The KB store-side memory audit: memory_core_crud fires the hook on every
-#    mutation (insert / merge / update / reject / delete) and, end-to-end, the REAL
-#    aimee-kb bridge lands a fingerprinted, content-free row in the KB ledger.
-echo "checking KB store-side memory-audit hook (end to end)..."
-kbmem_out=$(make -C src --no-print-directory unit-test-memory-audit-hook 2>&1 || true)
-if ! printf '%s\n' "$kbmem_out" | grep -q "test_memory_audit_hook: OK"; then
-   echo "" >&2
-   echo "FAIL: the KB store-side memory-audit test did not pass — memory_core_crud is" >&2
-   echo "      not firing the hook correctly, or the KB bridge/ledger path regressed." >&2
-   printf '%s\n' "$kbmem_out" | tail -8 >&2
+# 7. Go-owned memory mutation observations, commit/savepoint behavior and a real
+#    Go producer -> authenticated daemon bus -> ledger round trip. PostgreSQL
+#    runtime-role replay is required; missing configuration is not a pass.
+echo "checking Go memory mutation audit..."
+if ! kbmem_out=$(make -C src --no-print-directory unit-test-memory-audit-hook 2>&1); then
+   echo "FAIL: Go memory mutation audit or PostgreSQL replay failed" >&2
+   printf '%s\n' "$kbmem_out" | tail -12 >&2
    exit 1
 fi
-echo "KB memory audit: ok (memory_core_crud -> hook -> KB bridge -> bus -> ledger)"
+echo "Go memory audit: ok (transaction/savepoint rollback + runtime role + authenticated bus/ledger)"
 
 echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; vault-access + sandbox + memory (server + kb) audit hold; memory rows pending"

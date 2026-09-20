@@ -423,7 +423,21 @@ func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	scheduler.Cancel("wi_cancel")
-	time.Sleep(30 * time.Millisecond)
+	// Observe the durable cancellation result, not whichever state happens to
+	// be visible after an arbitrary sleep while the runner is still unwinding.
+	deadline := time.Now().Add(schedulerTestTimeout)
+	for {
+		scheduler.mu.Lock()
+		_, running := scheduler.running["wi_cancel"]
+		scheduler.mu.Unlock()
+		if !running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("cancelled runner did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	item, err := store.WorkItem(t.Context(), "wi_cancel")
 	if err != nil {
 		t.Fatal(err)

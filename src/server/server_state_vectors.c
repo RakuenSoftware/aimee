@@ -104,8 +104,15 @@ int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!all && memory_id <= 0)
       return server_send_error(conn, "memory.embed requires all=true or memory_id", NULL);
 
-   return kb_relay_send_checked(conn, kb_client_memory_embed_json(all, memory_id, version, NULL),
-                                "knowledge service memory embed failed");
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddBoolToObject(request, "all", all);
+   if (memory_id > 0)
+      cJSON_AddNumberToObject(request, "memory_id", (double)memory_id);
+   if (version && version[0])
+      cJSON_AddStringToObject(request, "version", version);
+   return kb_relay_send_checked(
+       conn, kb_v1_action_request_with_timeout("memory.embed", request, 10 * 60 * 1000),
+       "knowledge service memory embed failed");
 }
 
 int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

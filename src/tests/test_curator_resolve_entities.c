@@ -1,3 +1,6 @@
+#include "module_commands.h"
+#include "json_fluent.h"
+#include <assert.h>
 /* test_curator_resolve_entities.c: unit tests for the resolve_entities pure
  * helpers (embed-text composition + deterministic point id) and a graceful
  * no-data call into the drain handler under the sqlite test shim. */
@@ -16,16 +19,16 @@
  * 384-dim vector so the resolve match/upsert path is exercised (the builtin
  * embedder is not linked here). Keeps the link off memory_core.o /
  * pgvec_transport.o. */
-int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
-                      float *out, int max_dim)
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   (void)text;
-   (void)command;
-   (void)input_type;
+   assert(strcmp(method, "memory.embed_text") == 0);
+   *result = cJSON_CreateObject();
+   int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
    int dim = max_dim < 384 ? max_dim : 384;
-   for (int i = 0; i < dim; i++)
-      out[i] = 0.01f * (float)(i + 1);
-   return dim;
+   cJSON *vector = cJSON_AddArrayToObject(*result, "vector");
+   for (int i = 0; i < dim; ++i)
+      cJSON_AddItemToArray(vector, cJSON_CreateNumber(0.0f));
+   return 1;
 }
 
 /* Self-contained scope-lattice stub (the real one lives in kb_curator_promote.o,

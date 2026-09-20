@@ -4,6 +4,7 @@
 #endif
 
 #include "headers/module_commands.h"
+#include <aimee/core/event_bus/module_protocol.h>
 
 #include "aimee/audit/obs_bus.h"
 #include "aimee_sha256.h"
@@ -64,7 +65,7 @@
 #define INVOKE_RESPONSE_MAGIC  0x53504d43u /* "CMPS" */
 #define INVOKE_REQUEST_HEADER  16u
 #define INVOKE_RESPONSE_HEADER 12u
-#define INVOKE_MAX_RESPONSE    (1024u * 1024u)
+#define INVOKE_MAX_RESPONSE    AIMEE_MODULE_MESSAGE_MAX_BODY
 #define INVOKE_TIMEOUT_MS      60000
 
 /* One registered command's owned backing.
@@ -78,9 +79,11 @@ typedef struct
    char *group;
    char *verb;
    char *summary;
-   char *module;         /* registry `module` field, also the withdrawal key */
-   uint32_t invoke_kind; /* 0 for a fixed module: not bus-dispatchable here */
-   char verb_wire[128];  /* verb as sent to the module, for the invoke frame */
+   char *module; /* registry `module` field, also the withdrawal key */
+   int internal; /* fixed-module route, absent from every external surface */
+   uint32_t invoke_kind;
+   uint32_t invoke_stage;
+   char verb_wire[128]; /* verb as sent to the module, for the invoke frame */
 } owned_command_t;
 
 /* An array of POINTERS, not of structs.
@@ -173,17 +176,16 @@ static void wr_u16(unsigned char *p, uint16_t v)
    p[1] = (unsigned char)((v >> 8) & 0xff);
 }
 
-/* --- plugin command dispatch ------------------------------------------------ */
+/* --- shared command dispatch ------------------------------------------------ */
 
-/* Handler for a command that lives in a plugin module.
- *
- * Encodes the invoke frame, calls the instance's invoke stage, and returns the
- * plugin's MCP result object. Returns NULL on any failure; the surface that
- * called decides what that means, exactly as module_json_call.c does. */
-static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
+/* Encodes the shared invoke frame and returns the owner's JSON result.
+ * Fixed modules use their declared stage; plugins retain their stage-1 route. Returns NULL on any
+ * failure; the surface that called decides what that means, exactly as module_json_call.c does. */
+static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                   const cJSON *args, const cJSON *context, int timeout_ms,
+                                   int raw_result)
 {
-   const owned_command_t *cmd = (const owned_command_t *)ud;
-   if (!cmd || cmd->invoke_kind == 0)
+   if (!event_kind || !stage_id || !verb || !verb[0] || strlen(verb) > 127)
       return NULL;
 
    char *args_json = NULL;
@@ -196,22 +198,42 @@ static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
       args_len = strlen(args_json);
    }
 
-   size_t verb_len = strlen(cmd->verb_wire);
-   size_t request_len = INVOKE_REQUEST_HEADER + verb_len + args_len;
-   unsigned char *request = malloc(request_len);
-   if (!request)
+   char *context_json = context && cJSON_IsObject(context) ? cJSON_PrintUnformatted(context) : NULL;
+   if (context && !context_json)
    {
       free(args_json);
       return NULL;
    }
+   size_t context_len = context_json ? strlen(context_json) : 0;
+   size_t header_len = context ? 20 : INVOKE_REQUEST_HEADER;
+   size_t verb_len = strlen(verb);
+   size_t request_len = header_len + verb_len + args_len + context_len;
+   if (request_len > AIMEE_MODULE_MESSAGE_MAX_BODY || context_len > 4096)
+   {
+      free(context_json);
+      free(args_json);
+      return NULL;
+   }
+   unsigned char *request = malloc(request_len);
+   if (!request)
+   {
+      free(context_json);
+      free(args_json);
+      return NULL;
+   }
    wr_u32(request, INVOKE_REQUEST_MAGIC);
-   wr_u32(request + 4, DECL_WIRE_VERSION);
+   wr_u32(request + 4, context ? 2 : DECL_WIRE_VERSION);
    wr_u16(request + 8, (uint16_t)verb_len);
    wr_u16(request + 10, 0);
    wr_u32(request + 12, (uint32_t)args_len);
-   memcpy(request + INVOKE_REQUEST_HEADER, cmd->verb_wire, verb_len);
+   if (context)
+      wr_u32(request + 16, (uint32_t)context_len);
+   memcpy(request + header_len, verb, verb_len);
    if (args_len)
-      memcpy(request + INVOKE_REQUEST_HEADER + verb_len, args_json, args_len);
+      memcpy(request + header_len + verb_len, args_json, args_len);
+   if (context_len)
+      memcpy(request + header_len + verb_len + args_len, context_json, context_len);
+   free(context_json);
    free(args_json);
 
    unsigned char *response = malloc(INVOKE_MAX_RESPONSE);
@@ -222,14 +244,13 @@ static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
    }
    uint32_t response_len = 0;
    aimee_module_call_result_t rc = obs_bus_module_call(
-       cmd->invoke_kind, AIMEE_PLUGIN_STAGE_INVOKE, 0,
-       aimee_module_call_deadline_ns(INVOKE_TIMEOUT_MS), request, (uint32_t)request_len, response,
-       INVOKE_MAX_RESPONSE, &response_len, NULL, NULL);
+       event_kind, stage_id, 0, aimee_module_call_deadline_ns(timeout_ms), request,
+       (uint32_t)request_len, response, INVOKE_MAX_RESPONSE, &response_len, NULL, NULL);
    free(request);
 
    if (rc != AIMEE_MODULE_CALL_OK)
    {
-      LOG_WARN("commands", "%s.%s: plugin invoke failed: %s", cmd->group, cmd->verb,
+      LOG_WARN("commands", "command %s: invoke failed: %s", verb,
                aimee_module_call_result_name(rc));
       free(response);
       return NULL;
@@ -237,21 +258,62 @@ static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
    if (response_len < INVOKE_RESPONSE_HEADER || rd_u32(response) != INVOKE_RESPONSE_MAGIC ||
        rd_u32(response + 4) != DECL_WIRE_VERSION)
    {
-      LOG_WARN("commands", "%s.%s: plugin returned a malformed frame", cmd->group, cmd->verb);
+      LOG_WARN("commands", "command %s: malformed frame", verb);
       free(response);
       return NULL;
    }
    uint32_t body_len = rd_u32(response + 8);
    if ((uint64_t)INVOKE_RESPONSE_HEADER + body_len != response_len)
    {
-      LOG_WARN("commands", "%s.%s: plugin frame length disagrees with its header", cmd->group,
-               cmd->verb);
+      LOG_WARN("commands", "command %s: frame length disagrees with its header", verb);
       free(response);
       return NULL;
    }
-   cJSON *parsed = cJSON_ParseWithLength((const char *)response + INVOKE_RESPONSE_HEADER, body_len);
+   /* Validate the complete body before forwarding its exact JSON tokens. Native
+    * numeric nodes use double and cannot round-trip the owner's int64 IDs. */
+   char *body = malloc((size_t)body_len + 1);
+   if (!body)
+   {
+      free(response);
+      return NULL;
+   }
+   memcpy(body, response + INVOKE_RESPONSE_HEADER, body_len);
+   body[body_len] = '\0';
    free(response);
+   const char *end = NULL;
+   cJSON *parsed = cJSON_ParseWithLengthOpts(body, (size_t)body_len + 1, &end, 1);
+   if (parsed && end != body + body_len)
+   {
+      cJSON_Delete(parsed);
+      parsed = NULL;
+   }
+   if (parsed && raw_result)
+   {
+      cJSON_Delete(parsed);
+      parsed = cJSON_CreateRaw(body);
+   }
+   free(body);
    return parsed;
+}
+
+cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                         const cJSON *args, const cJSON *context)
+{
+   return command_call_timeout(event_kind, stage_id, verb, args, context, INVOKE_TIMEOUT_MS, 0);
+}
+
+cJSON *aimee_module_command_call(uint32_t event_kind, uint32_t stage_id, const char *verb,
+                                 const cJSON *args)
+{
+   return aimee_module_command_call_context(event_kind, stage_id, verb, args, NULL);
+}
+
+static cJSON *plugin_command_invoke(const cJSON *args, void *ud)
+{
+   const owned_command_t *cmd = ud;
+   if (!cmd)
+      return NULL;
+   return aimee_module_command_call(cmd->invoke_kind, cmd->invoke_stage, cmd->verb_wire, args);
 }
 
 /* --- owned-string bookkeeping ---------------------------------------------- */
@@ -416,15 +478,16 @@ static int admit_pending(uint32_t declare_kind, const char *module_id, const uns
    return 1;
 }
 
-static int collect_one(uint32_t declare_kind, uint32_t invoke_kind, const char *module_id,
-                       aimee_plugin_state_t *state_out, char *err_out, size_t err_cap)
+static int collect_one(uint32_t declare_kind, uint32_t declare_stage, uint32_t invoke_kind,
+                       uint32_t version, const char *module_id, aimee_plugin_state_t *state_out,
+                       char *err_out, size_t err_cap)
 {
    int refused = 0;
    if (state_out)
       *state_out = AIMEE_PLUGIN_STATE_ERROR;
    unsigned char request[8];
    wr_u32(request, DECL_REQUEST_MAGIC);
-   wr_u32(request + 4, DECL_WIRE_VERSION);
+   wr_u32(request + 4, version);
 
    unsigned char *response = malloc(DECL_MAX_RESPONSE);
    if (!response)
@@ -439,9 +502,9 @@ static int collect_one(uint32_t declare_kind, uint32_t invoke_kind, const char *
    for (;;)
    {
       response_len = 0;
-      rc = obs_bus_module_call(declare_kind, AIMEE_PLUGIN_STAGE_DECLARE, 0,
-                               aimee_module_call_deadline_ns(5000), request, sizeof request,
-                               response, DECL_MAX_RESPONSE, &response_len, NULL, NULL);
+      rc = obs_bus_module_call(declare_kind, declare_stage, 0, aimee_module_call_deadline_ns(5000),
+                               request, sizeof request, response, DECL_MAX_RESPONSE, &response_len,
+                               NULL, NULL);
       if (rc != AIMEE_MODULE_CALL_OK)
       {
          LOG_WARN("commands", "module %s declaration failed: %s", module_id,
@@ -451,8 +514,9 @@ static int collect_one(uint32_t declare_kind, uint32_t invoke_kind, const char *
          free(response);
          return -1;
       }
-      if (response_len >= DECL_HEADER_LEN && rd_u32(response) == DECL_PENDING_MAGIC &&
-          rd_u32(response + 4) == DECL_WIRE_VERSION && rounds == 0)
+      if (version == 1 && response_len >= DECL_HEADER_LEN &&
+          rd_u32(response) == DECL_PENDING_MAGIC && rd_u32(response + 4) == DECL_WIRE_VERSION &&
+          rounds == 0)
       {
          uint32_t argv_len = rd_u32(response + 8);
          if ((uint64_t)DECL_HEADER_LEN + argv_len != response_len)
@@ -483,7 +547,7 @@ static int collect_one(uint32_t declare_kind, uint32_t invoke_kind, const char *
    }
 
    if (response_len < DECL_HEADER_LEN || rd_u32(response) != DECL_RESPONSE_MAGIC ||
-       rd_u32(response + 4) != DECL_WIRE_VERSION)
+       rd_u32(response + 4) != version)
    {
       LOG_WARN("commands", "module %s sent a malformed declaration header", module_id);
       if (err_out)
@@ -492,6 +556,67 @@ static int collect_one(uint32_t declare_kind, uint32_t invoke_kind, const char *
       return -1;
    }
    uint32_t count = rd_u32(response + 8);
+   uint32_t header_len = DECL_HEADER_LEN;
+   uint32_t invoke_stage = AIMEE_PLUGIN_STAGE_INVOKE;
+   if (version == 2)
+   {
+      header_len = 16;
+      if (response_len < header_len || count > 4096)
+      {
+         free(response);
+         return -1;
+      }
+      invoke_stage = rd_u32(response + 12);
+      if (!invoke_stage || invoke_stage >= AIMEE_MODULE_STAGE_DESCRIBE_COMMANDS)
+      {
+         free(response);
+         return -1;
+      }
+      invoke_kind = declare_kind - declare_stage + invoke_stage;
+      /* Refuse the complete declaration before changing the registry if any
+       * record is malformed. A truncated owner table must not partly replace
+       * a previously working public surface. */
+      uint32_t cursor = header_len;
+      for (uint32_t i = 0; i < count; ++i)
+      {
+         if ((uint64_t)cursor + DECL_RECORD_LEN > response_len)
+            goto malformed_routes;
+         uint32_t surfaces = rd_u32(response + cursor);
+         uint32_t visibility = rd_u32(response + cursor + 4);
+         uint16_t gl = rd_u16(response + cursor + 8);
+         uint16_t vl = rd_u16(response + cursor + 10);
+         uint16_t sl = rd_u16(response + cursor + 12);
+         if ((surfaces & ~15u) || visibility > 1 || !gl || !vl || gl > 127 || vl > 127 ||
+             rd_u16(response + cursor + 14) ||
+             ((surfaces & AIMEE_SURFACE_MCP) && !(surfaces & AIMEE_SURFACE_CLI)) ||
+             (uint64_t)cursor + DECL_RECORD_LEN + gl + vl + sl > response_len)
+            goto malformed_routes;
+         uint32_t previous = header_len;
+         for (uint32_t j = 0; j < i; ++j)
+         {
+            uint16_t previous_gl = rd_u16(response + previous + 8);
+            uint16_t previous_vl = rd_u16(response + previous + 10);
+            uint16_t previous_sl = rd_u16(response + previous + 12);
+            if (gl == previous_gl && vl == previous_vl &&
+                memcmp(response + cursor + DECL_RECORD_LEN, response + previous + DECL_RECORD_LEN,
+                       (size_t)gl + vl) == 0)
+               goto malformed_routes;
+            previous += DECL_RECORD_LEN + previous_gl + previous_vl + previous_sl;
+         }
+         cursor += DECL_RECORD_LEN;
+         for (uint32_t j = 0; j < (uint32_t)gl + vl; ++j)
+         {
+            unsigned char c = response[cursor + j];
+            if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+               goto malformed_routes;
+         }
+         if (memchr(response + cursor, 0, (size_t)gl + vl + sl))
+            goto malformed_routes;
+         cursor += (uint32_t)gl + vl + sl;
+      }
+      if (cursor != response_len)
+         goto malformed_routes;
+   }
 
    /* Withdraw before re-registering: a duplicate (group, verb) is refused, so a
     * module whose tool set changed would otherwise never converge. */
@@ -499,7 +624,7 @@ static int collect_one(uint32_t declare_kind, uint32_t invoke_kind, const char *
    owned_release_module(module_id);
 
    int registered = 0;
-   uint32_t off = DECL_HEADER_LEN;
+   uint32_t off = header_len;
    for (uint32_t i = 0; i < count; i++)
    {
       if ((uint64_t)off + DECL_RECORD_LEN > response_len)
@@ -537,6 +662,7 @@ static int collect_one(uint32_t declare_kind, uint32_t invoke_kind, const char *
       owned->summary = dup_n(sp, sl);
       owned->module = dup_n((const unsigned char *)module_id, strlen(module_id));
       owned->invoke_kind = invoke_kind;
+      owned->invoke_stage = invoke_stage;
       memcpy(owned->verb_wire, vp, vl);
       owned->verb_wire[vl] = '\0';
       if (!owned->group || !owned->verb || !owned->summary || !owned->module)
@@ -544,6 +670,10 @@ static int collect_one(uint32_t declare_kind, uint32_t invoke_kind, const char *
          owned_pop_last();
          break;
       }
+
+      owned->internal = version == 2 && surfaces == 0;
+      if (owned->internal)
+         continue;
 
       aimee_command_t cmd;
       memset(&cmd, 0, sizeof cmd);
@@ -557,14 +687,6 @@ static int collect_one(uint32_t declare_kind, uint32_t invoke_kind, const char *
       cmd.ud = owned;
       cmd.module = owned->module;
 
-      /* A fixed module owns its own handler and is registered elsewhere; this
-       * driver only dispatches PLUGIN commands. Registering a fixed command
-       * with a NULL fn would be refused anyway (command_registry.c:48). */
-      if (!cmd.fn)
-      {
-         owned_pop_last();
-         continue;
-      }
       if (aimee_command_register(&cmd) != 0)
       {
          /* register() already logged why. Drop the backing we just took. */
@@ -589,7 +711,13 @@ static int collect_one(uint32_t declare_kind, uint32_t invoke_kind, const char *
    }
    if (refused && err_out)
       snprintf(err_out, err_cap, "blocked by the supply-chain gate");
+   free(response);
    return registered;
+
+malformed_routes:
+   LOG_WARN("commands", "module %s sent malformed command routes", module_id);
+   free(response);
+   return -1;
 }
 
 /* --- public ----------------------------------------------------------------- */
@@ -599,6 +727,25 @@ int aimee_module_commands_collect(void)
    int total = 0;
    g_plugin_count = 0;
    g_status_count = 0;
+
+   /* Fixed modules opt into one common discovery stage. Its reply carries the
+    * invocation stage, so the host has no per-module command routing table. */
+   for (uint32_t ref = 1; ref < AIMEE_PLUGIN_REF_FIRST; ++ref)
+   {
+      uint32_t kind = AIMEE_PLUGIN_KIND(ref, AIMEE_MODULE_STAGE_DESCRIBE_COMMANDS);
+      char module_id[64];
+      snprintf(module_id, sizeof module_id, "module:%u", ref);
+      if (!obs_bus_module_available(kind))
+      {
+         aimee_command_unregister_module(module_id);
+         owned_release_module(module_id);
+         continue;
+      }
+      int n =
+          collect_one(kind, AIMEE_MODULE_STAGE_DESCRIBE_COMMANDS, 0, 2, module_id, NULL, NULL, 0);
+      if (n > 0)
+         total += n;
+   }
 
    /* Plugin instances: probe the reserved principal-ref band for an attached
     * declare stage, deriving each candidate's kinds by the canonical rule.
@@ -616,7 +763,8 @@ int aimee_module_commands_collect(void)
 
       aimee_plugin_state_t state = AIMEE_PLUGIN_STATE_ERROR;
       char err[128] = "";
-      int n = collect_one(declare_kind, invoke_kind, module_id, &state, err, sizeof err);
+      int n = collect_one(declare_kind, AIMEE_PLUGIN_STAGE_DECLARE, invoke_kind, 1, module_id,
+                          &state, err, sizeof err);
 
       /* The group is whatever this instance's commands landed under; read it
        * back from the registry rather than tracking it separately. */
@@ -638,7 +786,7 @@ int aimee_module_commands_collect(void)
    }
 
    if (total)
-      LOG_INFO("commands", "registered %d plugin command(s) from %zu instance(s)", total,
+      LOG_INFO("commands", "registered %d module command(s), %zu plugin instance(s)", total,
                g_plugin_count);
    return total;
 }
@@ -672,6 +820,92 @@ int aimee_module_commands_refresh(int ttl_ms)
    g_last_collect_ms = now;
    pthread_mutex_unlock(&g_collect_lock);
    return registered;
+}
+
+static int commands_dispatch_context(const char *method, const cJSON *args, const cJSON *context,
+                                     cJSON **result, int raw_result)
+{
+   if (!method || !result)
+      return 0;
+   *result = NULL;
+   (void)aimee_module_commands_refresh(2000);
+   uint32_t kind = 0, stage = 0;
+   int fixed = 0;
+   char verb[128] = "";
+   pthread_mutex_lock(&g_collect_lock);
+   const aimee_command_t *command = aimee_command_find_method(method);
+   if (command && command->fn == plugin_command_invoke && (command->surfaces & AIMEE_SURFACE_RPC))
+   {
+      const owned_command_t *owned = command->ud;
+      kind = owned->invoke_kind;
+      stage = owned->invoke_stage;
+      fixed = strncmp(owned->module, "module:", 7) == 0;
+      snprintf(verb, sizeof verb, "%s", owned->verb_wire);
+   }
+   pthread_mutex_unlock(&g_collect_lock);
+   if (!kind)
+      return 0;
+   /* A refresh may replace the registry while this call waits on the bus; only
+    * the copied route crosses that wait, never a borrowed registry pointer. */
+   *result = command_call_timeout(kind, stage, verb, args, fixed ? context : NULL,
+                                  INVOKE_TIMEOUT_MS, raw_result);
+   return *result ? 1 : -1;
+}
+
+int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
+                                           const cJSON *context, cJSON **result)
+{
+   return commands_dispatch_context(method, args, context, result, 0);
+}
+
+int aimee_module_commands_dispatch_raw_context(const char *method, const cJSON *args,
+                                               const cJSON *context, cJSON **result)
+{
+   return commands_dispatch_context(method, args, context, result, 1);
+}
+
+int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
+{
+   return aimee_module_commands_dispatch_context(method, args, NULL, result);
+}
+
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+{
+   return aimee_module_commands_dispatch_internal_timeout(method, args, 125000, result);
+}
+
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
+                                                    int timeout_ms, cJSON **result)
+{
+   if (!result)
+      return 0;
+   *result = NULL;
+   if (!method || timeout_ms <= 0)
+      return -1;
+   (void)aimee_module_commands_refresh(2000);
+   uint32_t kind = 0, stage = 0;
+   char verb[128] = "";
+   int matches = 0;
+   pthread_mutex_lock(&g_collect_lock);
+   for (size_t i = 0; i < g_owned_count; ++i)
+   {
+      const owned_command_t *owned = g_owned[i];
+      if (!owned->internal)
+         continue;
+      size_t group_len = strlen(owned->group);
+      if (strncmp(method, owned->group, group_len) != 0 || method[group_len] != '.' ||
+          strcmp(method + group_len + 1, owned->verb) != 0)
+         continue;
+      ++matches;
+      kind = owned->invoke_kind;
+      stage = owned->invoke_stage;
+      snprintf(verb, sizeof verb, "%s", owned->verb_wire);
+   }
+   pthread_mutex_unlock(&g_collect_lock);
+   if (matches != 1 || !kind)
+      return matches ? -1 : 0;
+   *result = command_call_timeout(kind, stage, verb, args, NULL, timeout_ms, 0);
+   return *result ? 1 : -1;
 }
 
 void aimee_module_commands_reset(void)

@@ -1,3 +1,6 @@
+#include "module_commands.h"
+#include "json_fluent.h"
+#include <assert.h>
 /* test_curator_index_narrative.c: smoke test for the narrative vector indexer.
  * The pure text/id helpers are static; this exercises the public drain entry
  * under the sqlite shim (no seeded narrative artifacts -> returns 0, no crash). */
@@ -14,15 +17,13 @@
 
 /* Stub the heavy embed + vector deps the handler references but this test never
  * reaches (the handler returns early with no seeded narrative artifacts). */
-int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
-                      float *out, int max_dim)
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   (void)text;
-   (void)command;
-   (void)input_type;
-   (void)out;
+   assert(strcmp(method, "memory.embed_text") == 0);
+   *result = cJSON_CreateObject();
+   int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
    (void)max_dim;
-   return 0;
+   return 1;
 }
 int pgvec_curator_narrative_upsert(int64_t point_id, const float *vec, int dim,
                                    const char *artifact_id, const char *kind, const char *doc_id,

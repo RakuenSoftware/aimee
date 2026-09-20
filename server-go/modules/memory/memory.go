@@ -73,7 +73,7 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 }
 
 func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHandler {
-	options := handlerOptions{}
+	options := handlerOptions{executor: executor, gateway: &gatewayState{}}
 	for _, apply := range option {
 		if apply != nil {
 			apply(&options)
@@ -92,12 +92,18 @@ func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHan
 			return handleRetrieve(invocation, request)
 		case StageEmbed:
 			return handleEmbed(executor, options, invocation, request)
+		case bus.StageDescribeCommands:
+			return describeCommandRoutes(options, invocation, request)
 		case StageDeclareCommands:
 			return handleDeclareCommands(invocation, request)
 		case StageData:
 			return handleData(options, invocation, request)
+		case StageCommand:
+			return handleCommand(options, invocation, request)
+		case StageRerank:
+			return handleRerank(invocation, request)
 		}
-		return handleRerank(invocation, request)
+		return nil, bus.ModuleStatusInvalidRequest
 	}
 }
 
@@ -225,7 +231,9 @@ func handleSensitivity(invocation bus.ModuleInvocation, request []byte) ([]byte,
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	count := int(binary.LittleEndian.Uint32(request[8:12]))
-	if count <= 0 {
+	// Each relation needs at least its two-byte length. Bound the peer-supplied
+	// count before allocating a response, including on 32-bit hosts.
+	if count <= 0 || count > (len(request)-sensRequestHeaderLen)/2 {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
@@ -291,14 +299,19 @@ func handleRerank(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.
 	}
 
 	score := int64(binary.LittleEndian.Uint64(request[8:16]))
-	confidence := uint32(ConfidenceLow)
-	if score >= 660000 {
-		confidence = ConfidenceHigh
-	} else if score >= 330000 {
-		confidence = ConfidenceMedium
-	}
+	confidence := confidenceForMicros(float64(score))
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], confidence)
 	return response, bus.ModuleStatusOK
+}
+
+func confidenceForMicros(score float64) uint32 {
+	if score >= 660000 {
+		return ConfidenceHigh
+	}
+	if score >= 330000 {
+		return ConfidenceMedium
+	}
+	return ConfidenceLow
 }

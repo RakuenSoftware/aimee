@@ -105,7 +105,7 @@ func appendString(buf []byte, s string) []byte { return append(buf, s...) }
 
 // handleDeclareCommands answers the declaration request.
 func handleDeclareCommands(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-	if len(request) < commandsRequestLen ||
+	if len(request) != commandsRequestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != commandsRequestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion {
 		// Refuse rather than answer a request we did not understand. A malformed
@@ -113,6 +113,9 @@ func handleDeclareCommands(invocation bus.ModuleInvocation, request []byte) ([]b
 		// surface, and a MISSING command is invisible -- it reads as "aimee cannot
 		// do that" rather than as an error.
 		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if invocation.Cancelled() {
+		return nil, bus.ModuleStatusCancelled
 	}
 
 	out := make([]byte, 0, 12+len(declaredCommands)*64)

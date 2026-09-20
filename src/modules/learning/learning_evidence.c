@@ -2,12 +2,12 @@
  * See docs/proposals/done/cross-source-learning-substrate.md */
 
 #include "learning_evidence.h"
+#include "module_commands.h"
 #include "aimee.h" /* memory_directive_t and friends, TIER_* */
 #include "modules/db2/c/artifacts.h"
 #include "modules/db2/c/anti_patterns.h"
 #include "modules/db2/c/workflow_patterns.h"
 #include "modules/db2/c/rules.h"
-#include "modules/db2/c/epistemic_directives.h"
 #include "modules/db2/c/entity_nodes.h"
 #include "modules/db2/c/evidence_vectors.h"
 #include "modules/db2/c/learning_synth_ops.h"
@@ -223,10 +223,17 @@ static int promote_memory(const db2_artifact_row_t *art, int flagged)
    if (!content[0])
       snprintf(content, sizeof(content), "%s", key);
 
-   /* Durable tier; routes through db2_kb_service_memory_insert_json -> the
-    * memory_insert typed-verb "store" path defined by memory-public-contract. */
-   cJSON *resp =
-       db2_kb_service_memory_insert_json(TIER_L1, "preference", key, content, art->confidence, "");
+   /* The memory owner performs the write and schedules extraction atomically. */
+   cJSON *request = cJSON_CreateObject(), *resp = NULL;
+   if (!request)
+      return -1;
+   cJSON_AddStringToObject(request, "tier", "L1");
+   cJSON_AddStringToObject(request, "kind", "preference");
+   cJSON_AddStringToObject(request, "key", key);
+   cJSON_AddStringToObject(request, "content", content);
+   cJSON_AddNumberToObject(request, "confidence", art->confidence);
+   (void)aimee_module_commands_dispatch("memory.store", request, &resp);
+   cJSON_Delete(request);
    if (!resp)
       return -1;
    const cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
@@ -326,10 +333,19 @@ static int promote_epistemic_directive(const db2_artifact_row_t *art, int flagge
    if (!topic[0])
       snprintf(topic, sizeof(topic), "%s", art->scope_id);
 
-   int64_t dir_id = 0;
-   int existed = 0;
-   if (db2_directive_insert_ignore(question, topic, "", "", "promoted_directive", 50, 0, 0, "", "",
-                                   "", &dir_id, &existed) != 0)
+   cJSON *args = cJSON_CreateObject(), *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "directive-create");
+   cJSON_AddStringToObject(args, "question", question);
+   cJSON_AddStringToObject(args, "topic", topic);
+   cJSON_AddStringToObject(args, "cause", "promoted_directive");
+   cJSON_AddNumberToObject(args, "priority", 50);
+   int dispatched = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   cJSON_Delete(args);
+   const cJSON *directive = cJSON_GetObjectItemCaseSensitive(response, "directive");
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(directive, "id");
+   int64_t dir_id = cJSON_IsNumber(id) ? (int64_t)id->valuedouble : 0;
+   cJSON_Delete(response);
+   if (dispatched != 1 || dir_id <= 0)
       return -1;
    char target_id[32];
    snprintf(target_id, sizeof(target_id), "%lld", (long long)dir_id);

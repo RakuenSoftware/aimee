@@ -1,9 +1,8 @@
 #!/bin/bash
-# Drive a REAL chat turn so the memory module's two server-only stages run.
+# Drive a real chat turn through the shared Go memory runtime.
 #
-# aimee-server calls RERANK (5893) for the ingress confidence tier and RETRIEVE
-# (5892) for the PII recall gate. Neither is reachable from the kb, and reaching
-# them through a live turn needs every one of these, in order:
+# The host-only memory.runtime command owns gateway plans and ingress envelope
+# assembly, including confidence. Reaching it through a live turn requires:
 #
 #   1. a chat provider  (install-chat-provider.sh)
 #   2. the request on /v1/messages -- pre-injection hooks the Anthropic-native
@@ -18,7 +17,7 @@
 #      scores in an unscoped query. This is the step that was missing.
 #
 # The control is the module itself: the same turn with the server-side module
-# stopped, where ingress_preinject_confidence() returns -1.
+# stopped, where the Go gateway/assembly command is unavailable.
 # Run AS ROOT in the container.
 set -u
 SOCK=/root/aimee-http.sock
@@ -52,8 +51,7 @@ intok() { sed 's/.*"input_tokens":\([0-9]*\).*/\1/'; }
 
 # input_tokens is the measurement. The envelope is prepended to the prompt, so a
 # turn that got one is materially larger than the same turn that did not -- and
-# ingress_preinject_confidence() fails without the module, which drops the tier
-# and with it the envelope's confidence line.
+# the host omits the envelope when its Go plan or assembly is unavailable.
 echo
 echo "=== turn WITH the server-side memory module (instances: $(mod)) ==="
 WITH="$(ask)"
@@ -74,10 +72,10 @@ echo "=== verdict ==="
 a="$(printf '%s' "$WITH" | intok)"; b="$(printf '%s' "$WITHOUT" | intok)"
 if [ "${a:-0}" -gt "${b:-0}" ] 2>/dev/null; then
   echo "  prompt grew by $(( a - b )) tokens with the module running:"
-  echo "  the envelope was built, so RERANK answered the confidence request."
+  echo "  the Go memory owner built the ingress envelope."
 else
   echo "  no measurable difference (with=$a without=$b) -- the envelope is not"
-  echo "  reaching the prompt, so this does not demonstrate RERANK."
+  echo "  reaching the prompt, so this does not demonstrate Go memory assembly."
 fi
 
 echo

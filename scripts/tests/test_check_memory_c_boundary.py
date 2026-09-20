@@ -29,6 +29,7 @@ class MemoryCBoundaryTest(unittest.TestCase):
         root = Path(tmp.name)
         (root / "src/modules/memory").mkdir(parents=True)
         (root / "src/modules/db2/c").mkdir(parents=True)
+        (root / "server-go/modules/memory").mkdir(parents=True)
         for relative in ALLOWED_C:
             path = root / relative
             path.write_text("/* event bus adapter */\n", encoding="utf-8")
@@ -54,6 +55,38 @@ class MemoryCBoundaryTest(unittest.TestCase):
         with self.assertRaises(BoundaryError):
             validate(root)
 
+    def test_rejects_nested_headers_cgo_and_native_descriptor(self) -> None:
+        for relative, source in (
+            ("server-go/modules/memory/nested/adapter.h", "int native(void);"),
+            ("src/modules/memory/include/adapter.h", "int native(void);"),
+            ("server-go/modules/memory/adapter.go", 'package memory\nimport "C"\n'),
+            ("src/modules/memory/module.yaml", '{"sources":["src/host/adapter.c"]}'),
+        ):
+            with self.subTest(relative=relative):
+                root = self.fixture()
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source)
+                with self.assertRaisesRegex(BoundaryError, "memory-go-only"):
+                    validate(root)
+
+    def test_rejects_native_benchmark_store_retarget(self) -> None:
+        root = self.fixture()
+        target = root / "src/modules/benchmarks/unsafe_eval.c"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("int setup(void) { return db2_eval_open_temp_store(); }\n")
+        with self.assertRaisesRegex(BoundaryError, "native-evaluation-store-retarget"):
+            validate(root)
+
+    def test_keeps_bus_and_host_transport_in_c(self) -> None:
+        root = self.fixture()
+        path = root / "src/core/event_bus/bus_host.c"
+        path.parent.mkdir(parents=True)
+        path.write_text("int bus_host(void) { return 0; }\n")
+        path = root / next(iter(EXTERNAL_CONNECTION_C))
+        path.write_text("void *host_call(void) { return aimee_module_json_call(5895, 7); }\n")
+        validate(root)
+
     def test_rejects_retired_db2_memory_source(self) -> None:
         root = self.fixture()
         (root / "src/modules/db2/c/memory_query.c").write_text("int query(void);\n", encoding="utf-8")
@@ -68,23 +101,71 @@ class MemoryCBoundaryTest(unittest.TestCase):
         with self.assertRaises(BoundaryError):
             validate(root)
 
+    def test_rejects_retired_gate_or_extraction_file(self) -> None:
+        for name in ("memory_fact_gate.c", "memory_extract_patterns.c",
+                     "memory_extract_patterns.h", "memory_assemble_util.h",
+                     "memory_pii_gate.c", "memory_pii_gate.h"):
+            with self.subTest(name=name):
+                root = self.fixture()
+                (root / "src/modules/memory" / name).write_text("/* retired */\n", encoding="utf-8")
+                with self.assertRaises(BoundaryError):
+                    validate(root)
+
+    def test_rejects_relocated_native_client_or_declaration(self) -> None:
+        for suffix, declaration in (
+            ("c", "int memory_extract_patterns(void) { return 0; }"),
+            ("c", "int session_append_scope_section(void) { return 0; }"),
+            ("h", "int kb_client_memory_find_facts(void);"),
+            ("c", "int cmd_memory(void) { return 0; }"),
+            ("c", "int mem_eval_run_locomo_qa(void) { return 0; }"),
+            ("h", "int mem_eval_report_longmemeval_misses(void);"),
+            ("h", "int mem_eval_open_temp_db(void);"),
+            ("h", "void memory_fact_gate_register_checker(void *checker);"),
+            ("h", "#define memory_pattern_scan_turn host_scan"),
+            ("h", "static inline int assemble_texts_near_duplicate(void) { return 1; }"),
+            ("c", "int memory_pii_turn_requests_sensitive(const char *turn) { return 1; }"),
+        ):
+            with self.subTest(declaration=declaration):
+                root = self.fixture()
+                target = root / "src/server" / ("moved_memory." + suffix)
+                target.parent.mkdir(parents=True)
+                target.write_text(declaration, encoding="utf-8")
+                with self.assertRaisesRegex(BoundaryError, "retired-memory-native-client"):
+                    validate(root)
+
+    def test_allows_historical_comment_without_native_client(self) -> None:
+        root = self.fixture()
+        target = root / "src/history.c"
+        target.write_text("/* memory_extract_patterns was removed. */\nint history;\n", encoding="utf-8")
+        validate(root)
+
     def test_rejects_direct_storage_include(self) -> None:
         root = self.fixture()
-        target = root / next(iter(ALLOWED_C))
+        target = root / next(iter(EXTERNAL_CONNECTION_C))
         target.write_text('#include "db1_client/user_memory.h"\n', encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)
 
-    def test_rejects_external_adapter_storage_include(self) -> None:
+    def test_rejects_adapter_storage_include(self) -> None:
         root = self.fixture()
-        target = root / next(iter(EXTERNAL_CONNECTION_C))
+        target = root / next(iter(ALLOWED_C | EXTERNAL_CONNECTION_C))
         target.write_text('#include "db_postgres.h"\n', encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)
 
+    def test_rejects_retired_scope_bridge_relocation(self) -> None:
+        for symbol in ("db2_memory_scope_context_set", "memory_bus_read_context",
+                       "memory_bus_set_context_reader", "memory_bus_add_context"):
+            with self.subTest(symbol=symbol):
+                root = self.fixture()
+                (root / "src/another_owner.c").write_text(
+                    f"void {symbol}(void);\n", encoding="utf-8")
+                with self.assertRaises(BoundaryError):
+                    validate(root)
+
     def test_rejects_direct_store_call_without_include(self) -> None:
         root = self.fixture()
-        target = root / next(iter(ALLOWED_C))
+        target = root / next(iter(EXTERNAL_CONNECTION_C))
         target.write_text("void *p = db2_conn();\n", encoding="utf-8")
         with self.assertRaises(BoundaryError):
             validate(root)

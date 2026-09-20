@@ -249,27 +249,6 @@
       "reason": "The legacy cJSON delete facade is not a wire shape; the typed learning mutation owns deletion and exposes only its closed result."
     },
     {
-      "symbol": "db2_kb_service_anti_pattern_escalate_json",
-      "signature_sha256": "e0abc48fb7f50c91363ea18c9aeb5af9adc28c4373dadbc7b83df024cf0e90f1",
-      "disposition": "private-db2",
-      "family": "learning",
-      "reason": "The cJSON escalation report stays with the caller; DB2 applies the bounded threshold atomically and returns typed aggregate evidence."
-    },
-    {
-      "symbol": "db2_kb_service_anti_pattern_extract_from_failures_json",
-      "signature_sha256": "d2b6aeefc0f79c3a4dc5d8ea66ce6f96c5c6f390919bcf510813808a89dcddb8",
-      "disposition": "private-db2",
-      "family": "learning",
-      "reason": "The cJSON maintenance response is not a transport contract; one typed learning operation owns failure extraction and returns bounded counts."
-    },
-    {
-      "symbol": "db2_kb_service_anti_pattern_extract_from_feedback_json",
-      "signature_sha256": "fcbfac0cf16e32c1fa5154bda3ede046d27dc871a16f8ebde3a9ce8fee83212b",
-      "disposition": "private-db2",
-      "family": "learning",
-      "reason": "The cJSON maintenance response remains local presentation; one typed learning operation owns feedback extraction and returns bounded counts."
-    },
-    {
       "symbol": "db2_kb_service_anti_pattern_insert_json",
       "signature_sha256": "e571c9d7b6d62f8c1380232f59312c0eaf67d3abcf2bdc4c95be22d96ec0d55f",
       "disposition": "private-db2",
@@ -445,13 +424,6 @@
       "reason": "The cJSON expiry report does not cross the bus; one typed learning maintenance operation owns session expiry and returns bounded counts."
     },
     {
-      "symbol": "db2_kb_service_directive_list_json",
-      "signature_sha256": "1fb783c58ebe4cc185fe630de3b79f26660259f99a030d1de74b033a797cd935",
-      "disposition": "private-db2",
-      "family": "learning",
-      "reason": "The cJSON directive-list facade cannot define the stable contract; DB2 returns bounded state- and cause-filtered typed records."
-    },
-    {
       "symbol": "db2_kb_service_feedback_record_json",
       "signature_sha256": "cda9db3e47e1286f00298298a4c54d77bed81435811660b36ae66f0f3e08348e",
       "disposition": "private-db2",
@@ -487,482 +459,6 @@
       "reason": "The legacy cJSON mutation wrapper is retired at the process boundary; DB2 performs rejection and returns the bounded typed proposal before any caller-specific JSON encoding."
     },
     {
-      "symbol": "db2_kb_service_memory_alerts_json",
-      "signature_sha256": "eec0b776d9d01e70b8230f84a55ac18495571fb7843eb221530d8b5149ebc210",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON memory-alert response is caller presentation; a typed bounded memory query returns alert records and explicit truncation evidence."
-    },
-    {
-      "symbol": "db2_kb_service_memory_ask_json",
-      "signature_sha256": "6f96ef961d233c1eb21cf47d9d163742f5a217928bca62ec138aac7f583e4f53",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON memory-question facade is local serialization; a typed operation validates bounded query and scope fields and returns structured answer evidence."
-    },
-    {
-      "symbol": "db2_kb_service_memory_assemble_context_json",
-      "signature_sha256": "e9e096bbb6094bf7ea588418833f258ece5907f6488be9fabf5d0e536309053c",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The assembled-context cJSON tree cannot define the module ABI; a complete bounded memory operation owns retrieval and returns typed context sections."
-    },
-    {
-      "symbol": "db2_kb_service_memory_briefing_json",
-      "signature_sha256": "afd1f44ae0a58b71cd92e1ff28494c0a17f13017269c736173fe389c823c85a9",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON briefing document is presentation-only; typed bounded briefing sections form the stable memory reply."
-    },
-    {
-      "symbol": "db2_kb_service_memory_check_drift_json",
-      "signature_sha256": "1e09988d1dea3863b632002e9d2c9fd130d10ba5cf5784773b09d9f948c31a9e",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON drift report remains local rendering; a typed memory diagnostic returns bounded counters and findings."
-    },
-    {
-      "symbol": "db2_kb_service_memory_compact_windows_json",
-      "signature_sha256": "6392347314e7864304ad112d6388b992cd9b19cffc65aa6d6ebc84a474ec52aa",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON compaction facade cannot split or define the mutation boundary; a typed memory operation owns the complete window compaction and returns bounded results."
-    },
-    {
-      "symbol": "db2_kb_service_memory_context_block_json",
-      "signature_sha256": "8c9ed979ae2752b963bdb0ea04561b2590970bc66a458d9dd6c6f21cb31d87a0",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The context-block cJSON envelope is caller presentation; a typed bounded query returns the context block and provenance fields."
-    },
-    {
-      "symbol": "db2_kb_service_memory_decisions_export_jsonl_json",
-      "signature_sha256": "f687bb7a84ff8076e271adef8de2cddb7a818b1fa3e5657779d794630e9386fe",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON export-status wrapper is local presentation; a declared export operation validates its destination policy and returns a typed row count."
-    },
-    {
-      "symbol": "db2_kb_service_memory_delete_json",
-      "signature_sha256": "3941a4875c934903aa6dc31476b353798dde44a9db4a4fd9edddb06a4bd0f838",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON deletion facade is not the mutation contract; a typed memory.delete operation owns relational cleanup and returns explicit status before caller serialization. Now carries an authority argument (a memory_authority_t value, spelled int so the frozen DB2 outbound surface gains no edge): model authority retires the row (recoverable via fact history), user authority destroys it, so the typed operation must express authority rather than assume destruction."
-    },
-    {
-      "symbol": "db2_kb_service_memory_diagnose_scoped_json",
-      "signature_sha256": "241e4fe67ce20019b8d5d990cd9592b14d123a0abc9e3cd2aea974f7927c233b",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The scoped-diagnostic cJSON document remains a compatibility view; a typed operation validates explicit bounded scope and returns structured findings."
-    },
-    {
-      "symbol": "db2_kb_service_memory_effectiveness_stats_json",
-      "signature_sha256": "34e37ee22a6ed024376bb47aff06499d938549f64bb1c41028dee72c724aa362",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The effectiveness-stat cJSON response is presentation code; bounded typed counters and scores define the stable memory reply."
-    },
-    {
-      "symbol": "db2_kb_service_memory_entity_edges_json",
-      "signature_sha256": "336e478c753419932625b565abec8b60433aec7df2218643c7f49dc1fb4eaf79",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The entity-edge cJSON array is caller serialization; a typed bounded query returns edge records and truncation state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_entity_profile_json",
-      "signature_sha256": "de652743d15d5dec814bf4ae740c20b7dabb64e093d55d6a90c91e415887e15b",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The entity-profile cJSON tree stays local presentation; a typed memory operation returns bounded profile statistics and relation records."
-    },
-    {
-      "symbol": "db2_kb_service_memory_episode_card_generate_json",
-      "signature_sha256": "24295ef8a045390f4a6bab2eb84dfc6c43f1cf98af925956e39ced5980259bc4",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The episode-card cJSON response is presentation-only; a complete typed memory operation owns generation and returns bounded card fields."
-    },
-    {
-      "symbol": "db2_kb_service_memory_explain_match_json",
-      "signature_sha256": "6dcce6804d5a516ea5841a2830eaf583e30619c8d5d77c7bd76b46fa9564a7a1",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The match-explanation cJSON document is caller rendering; typed bounded scoring evidence forms the stable memory reply."
-    },
-    {
-      "symbol": "db2_kb_service_memory_export_jsonl_json",
-      "signature_sha256": "6b34336bc9b69bfef2e49e7ec128b512e072fd94130e9a68b8cb6372ee634e8e",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON export-status wrapper stays local presentation; a typed export operation owns destination validation and returns its bounded row count."
-    },
-    {
-      "symbol": "db2_kb_service_memory_fact_history_json",
-      "signature_sha256": "100cb4aed0e5c22ce460251fc5f5ca5fcc1bd9e678dc0a3cff88147d4582766d",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The fact-history cJSON array is caller serialization; a typed operation returns bounded version records and explicit truncation state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_facts_json",
-      "signature_sha256": "f53ea5067a8a2713878057ac5b889ef937a03a61afcc78ba880b80f254e7bc31",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON facts response is a compatibility view; a bounded typed memory query returns canonical fact records."
-    },
-    {
-      "symbol": "db2_kb_service_memory_find_facts_json",
-      "signature_sha256": "da7b66ffc25d1c4e1e7ca54f65dfffb2968441f2d56186bf7d7d3fef2a3a3df2",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON fact-search response does not cross the typed ABI; a bounded query returns structured matches and truncation evidence."
-    },
-    {
-      "symbol": "db2_kb_service_memory_find_facts_scoped_json",
-      "signature_sha256": "0a3229393f7228731092b83e4d6150e134f4d12d12b2fa5abe648d8b1ff9ed59",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The scoped fact-search cJSON wrapper remains presentation; explicit bounded scope fields and typed matches define the memory operation."
-    },
-    {
-      "symbol": "db2_kb_service_memory_find_facts_visible_json",
-      "signature_sha256": "d5f8c42dd37676170cb4edca0568379bd940d0cda0e361de6a87bdbd87f89a4b",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The visibility-filtered cJSON result is local rendering; a typed query enforces scope and returns only bounded visible matches."
-    },
-    {
-      "symbol": "db2_kb_service_memory_find_id_by_key_kind_json",
-      "signature_sha256": "f5fcc29350f0ad76cbe66a040d345f07a4e55b4c7af266dbface6b85f0980f07",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The identifier-lookup cJSON envelope is presentation-only; a typed bounded key/kind request returns explicit found state and identifier."
-    },
-    {
-      "symbol": "db2_kb_service_memory_fold_session_json",
-      "signature_sha256": "68f5de45d2cab8368b0b61cbdb90b0b1c619bf86ac3bdc47b8e1cb742d0ac07a",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON session-fold wrapper cannot define or split the transaction; a typed memory.session_fold operation owns checkpoint creation and L0 cleanup before replying."
-    },
-    {
-      "symbol": "db2_kb_service_memory_get_episode_json",
-      "signature_sha256": "12a34b457fceded4f6be5995ecddeec6c7d4c55a3f516a5e532df1d192931805",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The episode cJSON response remains caller serialization; a typed bounded lookup returns the episode record and explicit found state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_get_json",
-      "signature_sha256": "4b3162d73b2fa727cadf53aed611965a3bff2a9179880e7bc63dfd619857dc2a",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The memory-record cJSON builder is a compatibility facade; typed bounded fields and explicit not-found status define the retrieval contract."
-    },
-    {
-      "symbol": "db2_kb_service_memory_get_provenance_json",
-      "signature_sha256": "0ade9c6db181e7fc24e75f2c8ff67f849dc755402447e41db4f5b032ff7c3523",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The provenance cJSON object stays local presentation; a typed lookup returns bounded provenance fields and explicit missing state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_insert_ex_json",
-      "signature_sha256": "dcc24d31a3c30dbd0de3f55f2d3ecdcddd9545612344c2a16b5daced5c1e2bb7",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The extended-insert cJSON facade is not the mutation boundary; one typed memory.insert operation validates all bounded fields and owns the complete transactional insert."
-    },
-    {
-      "symbol": "db2_kb_service_memory_insert_json",
-      "signature_sha256": "6447c87043a81c766cdf9b095223b8c2c24160b43f5a89668765512edb629856",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The legacy insert cJSON wrapper remains caller presentation; the typed memory.insert operation owns validation, provenance, and its structured result."
-    },
-    {
-      "symbol": "db2_kb_service_memory_key_exists_json",
-      "signature_sha256": "c73d0293ab3ff0bacf00c4d0d1bee40c7a4f1a723589c19a846063ee9f1289be",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The key-existence cJSON envelope is local compatibility output; a typed bounded key request returns a boolean domain value."
-    },
-    {
-      "symbol": "db2_kb_service_memory_learn_style_json",
-      "signature_sha256": "d410aa57cfd1f5ab7fbbb134dacc1fedf7fb792d9d3a95cf9874d5f6fa29d665",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON style-learning result is caller presentation; a typed operation validates bounded evidence and returns structured learning status."
-    },
-    {
-      "symbol": "db2_kb_service_memory_link_create_json",
-      "signature_sha256": "3ae2d85c0f6a752e3d1d1ff6bc9fefa999ea5858493f77f7c939de37a944ff05",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The link-create cJSON envelope is not the mutation contract; a typed operation validates the IDs and closed relation before returning explicit status."
-    },
-    {
-      "symbol": "db2_kb_service_memory_link_delete_json",
-      "signature_sha256": "2a34a96e942ff79512f23122fd3164e0df0d79b2b2e4b600bc7735de2c9ad67f",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The link-delete cJSON wrapper remains local serialization; a typed memory mutation owns deletion and returns explicit found and result state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_link_query_json",
-      "signature_sha256": "787c99ed14f1545f7fd94d2c71842b6319c2f925cba50ad52f883484a694890f",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The link-query cJSON array is caller rendering; a typed bounded query returns canonical link records and truncation evidence."
-    },
-    {
-      "symbol": "db2_kb_service_memory_lint_json",
-      "signature_sha256": "c5e363162815d56db8e7c9598f858360fd90ab509ddf6a547c97acef7b55f561",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The memory-lint cJSON report is presentation-only; a typed diagnostic returns bounded findings and aggregate counts."
-    },
-    {
-      "symbol": "db2_kb_service_memory_list_conflicts_json",
-      "signature_sha256": "b08c91d1fa6e5ecf1f94d8eee98c2720e91ceba37f109ed4b8ec4b3a064933f7",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The conflict-list cJSON response stays local presentation; a typed bounded query returns unresolved conflict records."
-    },
-    {
-      "symbol": "db2_kb_service_memory_list_json",
-      "signature_sha256": "6c089169eeccbd96f206bd7321db22e1e8bf2044d4c22c564e947dff15561c20",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The general memory-list cJSON builder is a compatibility view; typed bounded filters and records define the stable operation."
-    },
-    {
-      "symbol": "db2_kb_service_memory_list_low_effectiveness_json",
-      "signature_sha256": "eb67105aacd2d119ac8c58b5e8081c39a41b204cf1326c3096b67c6f71358c78",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The low-effectiveness cJSON array is caller serialization; a typed query bounds threshold, limit, result rows, and truncation state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_list_session_scope_priority_json",
-      "signature_sha256": "c2da757e47054b5e7a439f22af1da0f6da824c5765919bc7a7baf2b70b4233f9",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The session-priority cJSON list remains presentation; a typed bounded query returns scope-ranked memory records."
-    },
-    {
-      "symbol": "db2_kb_service_memory_list_session_scope_priority_like_json",
-      "signature_sha256": "1323dc4dfd3ba18ed6dfbf69afc190ae7ca4598c1aa3ddf75fa789c36ff499dc",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The pattern-filtered session-priority cJSON list is local rendering; a typed request bounds the pattern and returns bounded ranked rows."
-    },
-    {
-      "symbol": "db2_kb_service_memory_list_superseded_keys_json",
-      "signature_sha256": "1e8a2b97bc982c7c537a7323d700464c9771008baf763312afe7c45fbae4e753",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The superseded-key cJSON array is presentation-only; typed bounded version summaries form the stable query reply."
-    },
-    {
-      "symbol": "db2_kb_service_memory_list_unused_l2_json",
-      "signature_sha256": "867c003b3477710e2f544007f3d1652078e9713d950e4b84d3c4018882251308",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The unused-L2 cJSON report stays local serialization; a typed query bounds age and result rows and returns explicit truncation."
-    },
-    {
-      "symbol": "db2_kb_service_memory_load_eval_corpus_json",
-      "signature_sha256": "d933f9f30f1097e2be1c289e0564fab58b36345e9df65438eddc41d66d6b3328",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The evaluation-corpus cJSON document is caller presentation; a typed bounded query returns labeled memory records and truncation state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_maintenance_run_json",
-      "signature_sha256": "e1db9917b620d26dc8c9409f4b311c4e41f2cd3088a806e67aec1be20ca54af8",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON maintenance report cannot define the work boundary; a typed operation owns the complete maintenance run and returns bounded counters."
-    },
-    {
-      "symbol": "db2_kb_service_memory_prospective_complete_json",
-      "signature_sha256": "89fcf674c97a98c02a41975329d82e2be1b8aa93553b73bb81bc2032a4741040",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The prospective-complete cJSON wrapper is local presentation; a typed mutation validates the transition and returns explicit status."
-    },
-    {
-      "symbol": "db2_kb_service_memory_prospective_create_json",
-      "signature_sha256": "4be3e36cfe7b54083a8729e2e6db5e3d23378f79e2a4ed74766abfb6d2410978",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The prospective-create cJSON facade is not the mutation contract; a typed operation bounds all fields and returns the new identifier and result."
-    },
-    {
-      "symbol": "db2_kb_service_memory_prospective_list_json",
-      "signature_sha256": "37994230778ef27ad647d903ec07a2204aec45236678173459e488a919e9e12b",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The prospective-memory cJSON list is caller rendering; a typed bounded query returns prospective records and truncation evidence."
-    },
-    {
-      "symbol": "db2_kb_service_memory_prospective_mark_triggered_json",
-      "signature_sha256": "24dbfc7bf0df084ec2b81bffe404dec8a735a2838a3f15f9025ca8f7c2c93fd7",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The trigger-state cJSON wrapper remains local presentation; a typed mutation owns the state change and returns explicit affected state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_prospective_match_json",
-      "signature_sha256": "7d257e267abfc1d7d07f4ed9690f2daa33bde2eff376dc01ff01259c6c18959a",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The prospective-match cJSON response is compatibility rendering; a typed request bounds the observation and returns structured matches."
-    },
-    {
-      "symbol": "db2_kb_service_memory_prospective_sweep_expired_json",
-      "signature_sha256": "998938fc9d3a8d8dd14cb46b14b9411fb52393e13382dbb3d94b46b4f7138a09",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The expiry-sweep cJSON report stays local presentation; a typed maintenance mutation owns the sweep and returns bounded counts."
-    },
-    {
-      "symbol": "db2_kb_service_memory_query_edges_json",
-      "signature_sha256": "11018a2cde4fb802baeebcd1a42f3692fbea55bf25615154a849ed2e26961634",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The graph-edge cJSON response is caller rendering; a typed bounded query returns canonical edge records and truncation state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_query_health_json",
-      "signature_sha256": "cf9b0e50e85689142c20c903b8e40a8ff64dd8d91e8669a85c10a52871fc54e8",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The memory-health cJSON document is presentation-only; typed bounded counters and diagnostic flags define the operation reply."
-    },
-    {
-      "symbol": "db2_kb_service_memory_recall_json",
-      "signature_sha256": "93b9585aadd545ebd1ae4ea61685c8b5fb39b03688356b890f8480a5e21d46e4",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The recall cJSON envelope and activation input remain local serialization; a typed request bounds query, scope, and activation fields and returns structured recall records."
-    },
-    {
-      "symbol": "db2_kb_service_memory_reject_json",
-      "signature_sha256": "22cea8b9945d973688698ab373adae111ff68b5d104be8c5e3886af54a8b3d68",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The memory-reject cJSON wrapper is not the state-transition contract; a typed mutation validates the reason and returns explicit status."
-    },
-    {
-      "symbol": "db2_kb_service_memory_scan_conversations_json",
-      "signature_sha256": "f5d42bc8b000d6446ce51a38b54afb803af6f6410476657fa3e38073f213b1cb",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The conversation-scan cJSON input and report are compatibility presentation; a typed operation validates bounded directories and returns structured counts."
-    },
-    {
-      "symbol": "db2_kb_service_memory_scope_visibility_rank_json",
-      "signature_sha256": "7745a0a00f0127402cd0742066d61c6ab2b2177e854c3f83439587f66f6f9605",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The scope-rank cJSON object is caller presentation; a typed bounded request returns explicit visibility and rank fields."
-    },
-    {
-      "symbol": "db2_kb_service_memory_search_facts_patterns_by_keyword_json",
-      "signature_sha256": "bea6fee7be7aeef2deedf79d1023cc4d1cd7455d8c5b1a2be23f2beb58e860a1",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The keyword-search cJSON array is local rendering; a typed request bounds the keyword and returns bounded fact and pattern records."
-    },
-    {
-      "symbol": "db2_kb_service_memory_search_graph_as_of_json",
-      "signature_sha256": "c7f4503d311b0565e196413113554b4a6793191dd5d66d36a91e6d93be023d9b",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The temporal graph-search cJSON response is presentation-only; a typed operation validates the timestamp and returns bounded relation records."
-    },
-    {
-      "symbol": "db2_kb_service_memory_search_graph_json",
-      "signature_sha256": "f0bcbd12a88a054771ab7052d7a5db3a54efdc63f659556169cca0186bf6a7be",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The graph-search cJSON document remains caller serialization; typed bounded query fields and relation records define the stable reply."
-    },
-    {
-      "symbol": "db2_kb_service_memory_search_json",
-      "signature_sha256": "46f1050929505ea123cb546043465fd326da5fc268390e041ecc6b5b66c5dd38",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The general search cJSON response cannot cross the typed ABI; a bounded operation returns structured matches and explicit truncation."
-    },
-    {
-      "symbol": "db2_kb_service_memory_set_artifact_json",
-      "signature_sha256": "6146629c248d0dc124c41f797862371c2d2f1d3c7d0a065f0bd732267d195959",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The artifact-update cJSON facade is not the mutation contract; a typed operation validates bounded artifact fields and returns explicit status."
-    },
-    {
-      "symbol": "db2_kb_service_memory_stats_json",
-      "signature_sha256": "7a8d87441743282ef4ca5c64784d1044876c818f7aec459920c36770ae21994d",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The memory-stat cJSON response is compatibility rendering; fixed typed counters and scores form the stable operation reply."
-    },
-    {
-      "symbol": "db2_kb_service_memory_supersede_json",
-      "signature_sha256": "8f92a5522f742371116ff11f1f45696293536f69bfe035c07749d703c6821cb5",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The supersede cJSON wrapper cannot define or split the transaction; a typed memory.supersede operation owns version closure, replacement insert, provenance, and result."
-    },
-    {
-      "symbol": "db2_kb_service_memory_tag_scope_json",
-      "signature_sha256": "0f60d71bba322bee533f02dbcb258fde8a39675adcab059d9640896bc9f51578",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The scope-tag cJSON facade remains local presentation; a typed mutation validates the closed scope type and bounded value."
-    },
-    {
-      "symbol": "db2_kb_service_memory_tag_workspace_json",
-      "signature_sha256": "85b4d6efe781a08231e9ad0e241acd11e68095da43dcdb12f0399595e4d673e0",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The workspace-tag cJSON wrapper is not the mutation ABI; a typed operation bounds the workspace and returns explicit status."
-    },
-    {
-      "symbol": "db2_kb_service_memory_top_l2_facts_json",
-      "signature_sha256": "cb9e83e64cb01e724ea20aca72cbc29e8d81119aa060a900ef78335ed7bea6a4",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The top-L2 cJSON array is caller rendering; a typed bounded query returns ranked fact records and truncation state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_touch_json",
-      "signature_sha256": "d4eacde4ecbabaa04cdefeab0d841c36c500d9503870e99b99a15f1124a60a19",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The touch cJSON wrapper remains local presentation; a typed idempotent mutation owns usage updates and returns explicit found state."
-    },
-    {
-      "symbol": "db2_kb_service_memory_update_json",
-      "signature_sha256": "d2cafe934fb7c06b37e568be4460a0bac4a3492cddc33921d27317c7423802b1",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The memory-update cJSON facade is not the mutation contract; a typed operation validates bounded content and returns structured update status. Now carries an authority argument (a memory_authority_t value, spelled int so the frozen DB2 outbound surface gains no edge): model authority supersedes (prior content kept as a version, new id returned), user authority overwrites in place, so the typed operation must express authority rather than assume overwrite."
-    },
-    {
-      "symbol": "db2_kb_service_memory_upsert_workflow_json",
-      "signature_sha256": "d27788f0beb3146bad08d2aca1775f9f5eec493bde5c1274ed731bf6f1cabfe8",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The workflow-upsert cJSON response is compatibility presentation; a typed composite operation bounds workflow fields and owns the complete upsert."
-    },
-    {
       "symbol": "db2_kb_service_note_create_json",
       "signature_sha256": "b38f3d397de14bdd287340a701dad79c0a8d60ef73e6b0d66c505fa0a2c96b50",
       "disposition": "private-db2",
@@ -982,13 +478,6 @@
       "disposition": "private-db2",
       "family": "learning",
       "reason": "The cJSON note-search response cannot define the wire shape; DB2 returns bounded typed matches for caller-owned serialization."
-    },
-    {
-      "symbol": "db2_kb_service_relations_schema_list_json",
-      "signature_sha256": "97fdaec26b95aad3cb59d23df19b3a449e39853ad7813f696c38c77835db3dae",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The relation-schema cJSON list is caller presentation; a typed bounded query returns canonical relation definitions and truncation state."
     },
     {
       "symbol": "db2_kb_service_rules_decay_json",
@@ -1038,20 +527,6 @@
       "disposition": "private-db2",
       "family": "learning",
       "reason": "The cJSON directive-type update is a legacy facade; a typed learning mutation validates the closed type and returns structured status."
-    },
-    {
-      "symbol": "db2_kb_service_scene_list_json",
-      "signature_sha256": "2593262bb0b8ddccaebf5907e9a3ce393db0c84dcbbb4774755d90d4a4b447dd",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON scene-list facade is process-local presentation code; the existing fixed scene rows define a bounded memory operation reply instead."
-    },
-    {
-      "symbol": "db2_kb_service_scene_members_json",
-      "signature_sha256": "cd890d7fc480daa25fe93685549bc47d2276d1d33417392b425f6240f65f00da",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The cJSON scene-member facade stays out of the transport contract; DB2 returns a bounded array of fixed member records and the caller renders JSON."
     },
     {
       "symbol": "db2_kb_service_session_briefing_commitments_json",
@@ -1243,13 +718,6 @@
       "reason": "The typed memory.orphaned_l0_count operation replaces the bounded integrity diagnostic for unlinked short-term memories; canonical relational links remain DB2 authority."
     },
     {
-      "symbol": "db2_memory_count_versions",
-      "signature_sha256": "0e9657771c2772838c537e3c9c5739a336443a54250cda10fa23cd786fb605ac",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Counting version suffixes is private read-modify-write state for the future composite memory.supersede operation; exposing the count separately would race concurrent supersedes and split one logical DB2 mutation."
-    },
-    {
       "symbol": "db2_memory_find_id_by_key_kind",
       "signature_sha256": "702e7ac3ac2ee62f32188dc2b85e8e9df635f51cdf51b8e699e56d1948269804",
       "disposition": "wire-operation",
@@ -1387,7 +855,7 @@
       "signature_sha256": "7774ad32c2c5d27c72f22ce7ebdcf2608add0a25daddc4b23f5bdec5d52f5e4f",
       "disposition": "wire-operation",
       "family": "memory",
-      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy — tier, kinds, confidence floor, use count, and settling window — so callers cannot promote rows into the slow-changing tier on terms of their own."
+      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy \u2014 tier, kinds, confidence floor, use count, and settling window \u2014 so callers cannot promote rows into the slow-changing tier on terms of their own."
     },
     {
       "symbol": "db2_memory_promotion_reclassify_directives",
@@ -1404,95 +872,11 @@
       "reason": "The typed memory.record_l4_approval operation fixes the approved tier and carries the bounded approver and note an operator supplies; DB2 owns the approval row that memory.reclassify_directives later reads under its gate."
     },
     {
-      "symbol": "db2_memory_provenance_delete",
-      "signature_sha256": "914917a0c85169d571d2b2615ac28b6612a305ff3d2773f7240b59502a30c267",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Provenance cleanup is an internal compatibility step of the complete memory.delete operation; it must commit with canonical row, vector, relation, and derived-state deletion rather than cross the bus independently."
-    },
-    {
-      "symbol": "db2_memory_row_insert_ex",
-      "signature_sha256": "de78809fdd631d91ea77d8459db864e2672c99ec225f4cc1540687b8dee46786",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The raw row insert is private implementation of a complete memory.insert operation, which must validate input, insert the canonical row, attach provenance and scope, and commit before replying."
-    },
-    {
-      "symbol": "db2_memory_scope_context_clear",
-      "signature_sha256": "5d6ec5c28d8a03daa5e5943336638a584b47a7cd8e2c566b97945cf896cc2461",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Clearing thread-local memory query context has no wire representation; each bounded memory request carries its scope and DB2 discards that request-local state before replying."
-    },
-    {
-      "symbol": "db2_memory_scope_context_get",
-      "signature_sha256": "55d1008e106a1147103b87726e4c0833c1a94acbe8962c4d65b71b3e4ba658a9",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Reading process thread-local scope is private memory-operation plumbing; explicit bounded scope fields replace implicit caller-owned state across the bus."
-    },
-    {
-      "symbol": "db2_memory_scope_context_rank",
-      "signature_sha256": "284878b4cdc500db2a5e7288465e3522ff5481857669ffec3f8ddaf7c0de5845",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Per-candidate rank probes would expose chatty implicit state; DB2 applies scope ranking inside the complete bounded memory search and returns only the ranked result set."
-    },
-    {
-      "symbol": "db2_memory_scope_context_set",
-      "signature_sha256": "3219f9f3e18ec28009676eb767569485cdcf9b6afe51a138e3c5a155840c8674",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "A setter for thread-local workspace and project scope cannot cross a process boundary; typed memory requests carry the bounded scope with the operation that consumes it."
-    },
-    {
-      "symbol": "db2_memory_scope_matches",
-      "signature_sha256": "be1d8067178fc0a27dc4174b1f972632a318b6cdb1fa64c38769be0408f196d6",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "A single-row scope-tag SQL probe is private DB2 query planning; complete memory search and retrieval operations enforce scope before returning bounded rows."
-    },
-    {
-      "symbol": "db2_memory_session_l0_list",
-      "signature_sha256": "b8dbcc2d55245e60afc0709039bfa0ee50f80c82e9ed488b02e6305f44f024f8",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Listing a session's L0 rows is a private step of the future memory.session_fold operation; exposing the list separately would race the L1 checkpoint insert and subsequent provenance-aware purge."
-    },
-    {
-      "symbol": "db2_memory_session_l0_purge",
-      "signature_sha256": "5ed60bf8363726a7f84f87b4fe0a1e25059e3d0fe9106fc8159157d015c990a5",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Purging the exact L0 source set and its provenance is a private transactional step of memory.session_fold; exposing it independently would permit deletion without the derived checkpoint and its complete lineage."
-    },
-    {
-      "symbol": "db2_memory_set_valid_from",
-      "signature_sha256": "c4e1e242a8f75d2d21c7d46f6210348f825cd8ca4f673abd91396d865e6aa444",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Setting replacement validity is an internal post-insert step of the future composite memory.supersede transaction and cannot be exposed as a separately committed caller mutation."
-    },
-    {
-      "symbol": "db2_memory_set_versioned_key",
-      "signature_sha256": "a1b55c1fd8914ff4b89841bda0d051b2f0d1b7a515c69fd71eeefe410d099e4f",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "Renaming and closing the prior row is an internal step of the future composite memory.supersede transaction; callers cannot safely sequence this mutation across the event bus."
-    },
-    {
       "symbol": "db2_memory_stats_counts",
       "signature_sha256": "efca90ae907b5403f429a06f1db17932f70a1941071d46e86b4e5630ab4a4a3b",
       "disposition": "wire-operation",
       "family": "memory",
       "reason": "The typed memory.stats_counts operation returns the complete tier, kind, and conflict breakdown of the canonical relational corpus; the host layers its own PageRank timings on top and DB2 owns none of those."
-    },
-    {
-      "symbol": "db2_memory_workspace_matches",
-      "signature_sha256": "20497944db190512bcd0cfe009a9d24fb48a73d301cb1d4ad2c9bee4dbb21732",
-      "disposition": "private-db2",
-      "family": "memory",
-      "reason": "The legacy-workspace membership probe remains an internal compatibility predicate folded into scoped memory operations, not a separately callable bus capability."
     },
     {
       "symbol": "db2_pg_stat_summary",
@@ -1803,13 +1187,6 @@
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
     },
     {
-      "symbol": "pgvec_kb_service_search_memory_points",
-      "signature_sha256": "7efc1baf6ea4b77cb09f179f7c740d83bbd9d0087c658519de1cb3275294365f",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
       "symbol": "pgvec_kb_service_upsert_document_point",
       "signature_sha256": "d99c58a927c8c7accbba579380d14527daa0c3ed53655247527be7fa24940857",
       "disposition": "private-db2",
@@ -1894,29 +1271,8 @@
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
     },
     {
-      "symbol": "pgvec_memory_search",
-      "signature_sha256": "4f54500f1f9b1b636fc682423c43a42ae0c36da57b7e0c77ac48e51b01d76d72",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
       "symbol": "pgvec_memory_upsert",
       "signature_sha256": "423d68121bcc9365889fd7a85cf5dd6dd1dfb403fab2d7c221315e2ff2632796",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_memory_vector_collection_exists",
-      "signature_sha256": "970a6597e3d80bf37c459184affec3b199a1ce4f302bca36fe4e1d5eb88e20f1",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_memory_vector_collection_name",
-      "signature_sha256": "57f73e52f17277bcf9060901228faf957a6c3cd7dfacbe7d8a7c40bf9fc1e5fe",
       "disposition": "private-db2",
       "family": "index",
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
@@ -1936,13 +1292,6 @@
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
     },
     {
-      "symbol": "pgvec_memory_vector_ensure_payload_indexes",
-      "signature_sha256": "72d24c8dd27be2b744b45cf51f5e1eaca3ba300ca9bfd81b4d50bfd38aa46156",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
       "symbol": "pgvec_memory_vector_near_duplicate_pairs",
       "signature_sha256": "0ba356f46dad8fb5f7811ae8ccd560c370484662068a90cc8f40552402602e89",
       "disposition": "private-db2",
@@ -1950,50 +1299,8 @@
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
     },
     {
-      "symbol": "pgvec_memory_vector_scope_hint_clear",
-      "signature_sha256": "695496a9f1cada5b20d5a2b4830e0f5f6123995f0181a99be9fb25b4d2fd9b65",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_memory_vector_scope_hint_set",
-      "signature_sha256": "1f7f43922a05e55657831b84d8296102e1ebbc9d4f1e616a3054ede3aeee5e58",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_memory_vector_search_record_type",
-      "signature_sha256": "5162275eb78ab6fe04703289917cf9e4879000392e43d8a8781bc98b20f20c1c",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_memory_vector_search_with_kinds",
-      "signature_sha256": "56b8ac66e565b078b3450caf4e5729c2765277fa18fa89b3dd12882b8607ec9f",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
       "symbol": "pgvec_memory_vector_upsert_memory",
       "signature_sha256": "629d7ab90d15ee8f0b91eab9d4b81b4c0efd45602189c162437e33fa9b6d59e0",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_memory_vector_upsert_unit",
-      "signature_sha256": "4ebd3a8cfe08c36894061425adf0462c8f6bd27b37600b0803219b3ee289f30e",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_schema_version",
-      "signature_sha256": "10ae2794b5c396967b625a66f50f1fe1a586f7d48ae86ef11eb53142f16d97ff",
       "disposition": "private-db2",
       "family": "index",
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
@@ -2015,20 +1322,6 @@
     {
       "symbol": "pgvec_vector_status_json",
       "signature_sha256": "6f6e2d213226a72f8e8a1252f95f3140a7af7c5b7b91a4b7e818d0f2b5c8926f",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_verify_snapshot",
-      "signature_sha256": "a2df700d9d2e82cc3776c9d842485aa8ed35be287ddfd6c61a058a6adbd64e3f",
-      "disposition": "private-db2",
-      "family": "index",
-      "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."
-    },
-    {
-      "symbol": "pgvec_verify_snapshot_cleanup",
-      "signature_sha256": "9a63ecd2682eab302576a2d023d3dd00dd2a4b4c2d3e779213dda9a9fb7857fa",
       "disposition": "private-db2",
       "family": "index",
       "reason": "Provider-specific pgvector symbol: private DB2 execution state. A typed wire operation names what a caller wants, not which index answers it, so the index and its extension stay inside the owner process."

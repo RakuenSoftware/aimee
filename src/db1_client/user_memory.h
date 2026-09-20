@@ -41,14 +41,6 @@ int db1_user_memory_list_recall(db1_user_recall_section_t section, db1_user_memo
  * production case until capture is wired). */
 int db1_user_memory_any(void);
 
-/* Merge this user's db1 rows for a recall section INTO an existing recall array
- * (as produced by aimee-kb for db2/org memory). db1 rows are surfaced first and
- * win on key collision (the org duplicate is removed) — the user>soft-org half
- * of the precedence lattice. Each injected row is tagged scope="user". A no-op
- * when db1 has no matching rows. */
-void db1_user_memory_merge_into_array(cJSON *arr, db1_user_recall_section_t section,
-                                      const char *why);
-
 /* Upsert a user memory (insert or replace by (kind,key)). Returns 0 on success.
  * S1 uses this for seeding + tests; the ergonomic capture commands
  * (aimee identity/prefer) arrive in S2. */

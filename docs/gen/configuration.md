@@ -290,7 +290,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 251 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 249 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -447,7 +447,6 @@ The binaries read 251 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_DB2_STATEMENT_TIMEOUT_MS` | Per-connection `statement_timeout` in ms. Defaults to the pool's stuck-lease ceiling (`DB2_POOL_HOLD_CEILING_MS`, 300000), because a statement must not outlive the duration that defines a lease as stuck. The pool can report such a lease but cannot reclaim it. The value must be canonical decimal digits with no sign, surrounding whitespace or leading zero. Exactly `0` disables the bound. This is a deliberate opt-out for genuinely long work. Every other spelling of zero (`00`, `+0`, `-0`, ` 0`) is treated as malformed. Anything malformed or out-of-range falls back to the default and never to unlimited, so no typo can silently remove the bound. |
 | `AIMEE_DB2_URL` | Postgres (DB2) connection URL for the KB store. |
 | `AIMEE_DIM_PROBE_BUDGET_MS` | Time budget for probing an embedder's output dimension. |
-| `AIMEE_PGVEC_SLOW_QUERY_MS` | Slow-query log threshold (ms) for the pgvector transport. |
 | `AIMEE_TEST_DB2_TEMPLATE_URL` | Test-only. Postgres template database the DB2 test shim clones per test process, so unit tests run against the real engine instead of the sqlite shim (which translates DB2's SQL rather than executing it). Build the template with `make db2-test-template` and the suite with `make unit-tests-pg`; unset, tests use the sqlite shim as before. Read only by test binaries; no production code path consults it. |
 
 ### Memory
@@ -456,7 +455,6 @@ The binaries read 251 `AIMEE_*` environment variables (scanned from `getenv()` i
 |----------|-------------|
 | `AIMEE_CONTEXT_NO_KB` | Skip KB lookups during context assembly. |
 | `AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED` | Enable the async cognify pipeline. |
-| `AIMEE_MEMORY_WEIGHT_PROFILE` | Recall scoring weight profile. |
 | `AIMEE_NO_CACHE` | Disable the memory-assembly cache. |
 
 ### Delegates & backends

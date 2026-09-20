@@ -5,7 +5,6 @@
 #include "decision_log.h"  /* db2_decision_log_row_t */
 #include "index.h"         /* project_info_t, term_hit_t, blast_radius_t */
 #include "memory.h"        /* memory_t, edge_t */
-#include "entity_edges.h"  /* db2_relation_schema_row_t */
 #include "memory_query.h"  /* db2_memory_low_eff_row_t etc. */
 #include "rules.h"         /* rule_t */
 #include "tasks.h"         /* aimee_task_t */
@@ -270,44 +269,23 @@ char *kb_client_corpus_pipeline_drain_json(int limit);
  * {"status":"error","message":"..."}. */
 char *kb_client_reconcile_json(int dry_run);
 
-/* Rebuild derived retrieval indexes for memories.  Sends
- * `memory.reindex` with {limit} and returns the heap-allocated JSON
- * response (caller frees).  A limit of 0 means "as many as the
- * server wants to do in one call". */
-char *kb_client_memory_reindex_json(int limit);
-
-/* Rebuild the memory vector index from DB2 embeddings for a
- * specific embedder version.  Sends `memory.rebuild` with {version}
- * (version may be empty/NULL, in which case aimee-kb resolves the
- * active embedder) and returns the heap-allocated JSON response
- * (caller frees). */
-char *kb_client_memory_rebuild_json(const char *version);
-
 /* Create a memory directive via the aimee-kb sidecar.  Sends
  * `memory.directive_create` with the usual field set and returns
  * {"status":"ok","dedup":0|1,"directive":{...}} on success.  dedup=1
  * means the server rejected as duplicate of an existing row (no
  * directive object returned).  Caller frees. */
-char *kb_client_memory_directive_create_json(const char *question, const char *topic,
-                                             const char *entity, const char *file,
-                                             const char *cause, int priority, const char *session,
-                                             const char *valid_until);
 
 /* Transition an open directive to resolved.  Sends
  * `memory.directive_resolve` with {id, with_memory, note}.  Caller frees. */
-char *kb_client_memory_directive_resolve_json(int64_t id, int64_t with_memory, const char *note);
 
 /* Mark an open directive as suppressed.  Sends
  * `memory.directive_suppress` with {id}.  Caller frees. */
-char *kb_client_memory_directive_suppress_json(int64_t id);
 
 /* Sweep expired directives.  Returns {"status":"ok","expired":N}.  Caller
  * frees. */
-char *kb_client_memory_directive_sweep_expired_json(void);
 
 /* List directives filtered by state/cause with a cap of `limit` rows.
  * Returns {"status":"ok","directives":[...]} on success.  Caller frees. */
-char *kb_client_memory_directive_list_json(const char *state, const char *cause, int limit);
 
 /* Fetch curiosity items via the aimee-kb sidecar. Sends `curiosity.list`
  * with {state, limit} and returns the heap-allocated JSON response
@@ -480,12 +458,6 @@ int kb_client_anti_pattern_check(const char *file_path, const char *command, ant
  * db2_anti_pattern_bump(). */
 int kb_client_anti_pattern_bump(int64_t id);
 
-/* Session-prune helpers wrapped on the kb side so prune_stale_sessions
- * (CLI-fork) actually runs the maintenance work.  Each returns the
- * count of rows acted on, or -1 if kb is unreachable.  Mirrors
- * memory_fold_session(). */
-int kb_client_memory_fold_session(const char *session_id);
-
 /* Rules + feedback CRUD via aimee-kb (the DB2 owner).  Mirrors the
  * local db2_* signatures.  rules.delete / update_directive_type
  * return 0 on success, -1 on failure; feedback.record returns the
@@ -519,32 +491,6 @@ char *kb_client_dashboard_reminders_json(void);
 char *kb_client_dashboard_recall_json(void);
 char *kb_client_dashboard_directives_json(void);
 
-/* Search stored memory facts via aimee-kb (the DB2 owner).  Returns
- * the number of rows written into |out| (0..|max|), or -1 if kb is
- * unreachable or the vector index is unavailable.  Mirrors
- * memory_find_facts() in shape so daemon-side handlers can swap the
- * direct call for this RPC without changing their downstream code. */
-int kb_client_memory_find_facts(const char *query, int limit, memory_t *out, int max);
-
-/* ABI-compatible legacy form. graph_code_fusion_state is ignored; every
- * request uses the receiving instance's configured fusion policy. */
-int kb_client_memory_find_facts_ex(const char *query, int limit, memory_t *out, int max,
-                                   const char *graph_code_fusion_state);
-
-/* List stored memories filtered by tier/kind via aimee-kb.  Returns
- * the number of rows written into |out| (0 if kb is unreachable).
- * Mirrors memory_list(). */
-int kb_client_memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max);
-
-/* Load the eval-corpus memories via aimee-kb (DB2 owner).  Returns the
- * number of rows written into |out| (0 on failure / empty corpus).
- * Mirrors db2_memory_load_eval_corpus(). */
-int kb_client_memory_load_eval_corpus(memory_t *out, int max, char *label_out, size_t label_len);
-
-/* Top L2 facts via aimee-kb.  Returns row count.  Mirrors
- * db2_memory_top_l2_facts(). */
-int kb_client_memory_top_l2_facts(memory_t *out, int max);
-
 /* Render the "Open Commitments" / "Unresolved Questions" briefing
  * sections via aimee-kb.  Returns a heap-allocated markdown fragment
  * (caller frees) or NULL when the section is empty / kb is unreachable.
@@ -552,41 +498,12 @@ int kb_client_memory_top_l2_facts(memory_t *out, int max);
 char *kb_client_session_briefing_commitments(int limit);
 char *kb_client_session_briefing_directives(int limit);
 
-/* Prospective memory CRUD via aimee-kb.  Each returns the kb response
- * envelope as JSON (caller frees) or NULL when kb is unreachable.
- * Mirror memory_prospective_list / _create / _complete. */
-char *kb_client_memory_prospective_list_json(const char *state, int limit);
-char *kb_client_memory_prospective_create_json(const char *trigger_text, const char *action_text,
-                                               const char *anchor_entity, const char *anchor_file,
-                                               const char *recurrence, const char *valid_until);
-char *kb_client_memory_prospective_complete_json(int64_t id);
-
-/* Match active prospective memories against the current turn / entity / file
- * via aimee-kb. Returns count written into `out` (capped at `max`), or 0 if
- * kb is unreachable. Mirrors memory_prospective_match(). */
-int kb_client_memory_prospective_match(const char *turn_text, const char *active_entity,
-                                       const char *active_file, memory_prospective_t *out, int max);
-
-/* Bump the trigger counter on a prospective memory via aimee-kb.  Returns
- * 0 on success, -1 on failure or if kb is unreachable.  Mirrors
- * memory_prospective_mark_triggered(). */
-int kb_client_memory_prospective_mark_triggered(int64_t id);
-
-/* Sweep expired prospective memories via aimee-kb.  Returns the number
- * expired (0 on failure / kb unreachable).  Mirrors
- * memory_prospective_sweep_expired(). */
-int kb_client_memory_prospective_sweep_expired(void);
-
 /* Run memory maintenance (replay/compact/prune/summarize) inside aimee-kb.
  * Returns the kb response envelope as JSON (caller frees) including the
  * summary object.  Mirrors memory_maintenance_run(). */
-char *kb_client_memory_maintenance_run_json(unsigned int modes, int force, int dry_run);
-char *kb_client_memory_lint_json(void);
 
-/* Memory alerts / session recall via aimee-kb.  Each returns the kb
- * response envelope as JSON (caller frees) with the bundle nested under
- * "alerts" or "recall".  Mirror memory_alerts / memory_recall. */
-char *kb_client_memory_alerts_json(const char *since);
+/* Session recall via aimee-kb. Returns the response envelope as JSON
+ * (caller frees), with the bundle nested under "recall". */
 char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int session_start);
 /* Shared-store recall without the legacy personal-memory merge. */
 char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,
@@ -595,44 +512,6 @@ char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_token
  * instance applies its own configuration. */
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
                                       const char *graph_code_fusion_state);
-
-/* Upsert a workflow:<workspace>:<signal_type> memory via aimee-kb.
- * Returns the new memory id (>0) or -1 on failure / kb unreachable.
- * Mirrors memory_upsert_workflow(). */
-int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *signal_type,
-                                         const char *rule, double observed_confidence,
-                                         const char *session_id);
-
-/* Read provenance entries for a memory via aimee-kb.  Returns count
- * written into `out` (capped at `max`), or 0 if kb is unreachable.
- * Mirrors memory_get_provenance(). */
-int kb_client_memory_get_provenance(int64_t memory_id, provenance_entry_t *out, int max);
-
-/* Apply a workspace / scope tag to a memory via aimee-kb.  Both return
- * 0 on success, -1 on failure or if kb is unreachable.  Mirror
- * memory_tag_workspace / memory_tag_scope. */
-int kb_client_memory_tag_workspace(int64_t memory_id, const char *workspace);
-int kb_client_memory_tag_scope(int64_t memory_id, const char *scope_type, const char *scope_value);
-
-/* Generate (and store) an episode card summarising one session via aimee-kb.
- * Returns the new memory_unit row id on success, 0 on failure or when
- * episode summarisation is disabled in config.  Mirrors
- * memory_episode_card_generate(). */
-int64_t kb_client_memory_episode_card_generate(const char *source_session);
-
-/* Compute the scope-visibility rank (0-3) for each memory id in `ids`
- * (length `id_count`), filling `out_ranks` with the per-id rank.  Returns
- * the number of ranks filled (0 if kb is unreachable).  Mirrors per-id
- * memory_scope_visibility_rank() in batch form. */
-int kb_client_memory_scope_visibility_rank(const int64_t *ids, int id_count, const char *workspace,
-                                           const char *project, int *out_ranks);
-
-/* Memory-to-memory link CRUD via aimee-kb.  Mirror memory_link_create
- * / _query / _delete.  Return 0/-1 on success/failure for create+delete,
- * row count for query (0 on failure / kb unreachable). */
-int kb_client_memory_link_create(int64_t source_id, int64_t target_id, const char *relation);
-int kb_client_memory_link_query(int64_t memory_id, memory_link_t *out, int max);
-int kb_client_memory_link_delete(int64_t link_id);
 
 /* Audit hook: notified after each SERVER-INITIATED memory mutation via aimee-kb
  * (insert / update / delete / reject) with NON-CONTENT fields only — the
@@ -657,64 +536,10 @@ void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, c
                                  const char *key, double confidence, const char *session_id,
                                  int ok);
 
-/* Delete a memory by id via aimee-kb.  Returns 0 on success, -1 on
- * failure / kb unreachable.  Mirrors memory_delete(). */
-int kb_client_memory_delete(int64_t id);
-
-/* Same, but says who is asking. MEMORY_AUTHORITY_MODEL retires the memory
- * (recoverable via memory_fact_history); MEMORY_AUTHORITY_USER destroys it.
- * kb_client_memory_delete() above is the USER-authority spelling. */
-int kb_client_memory_delete_as(int64_t id, memory_authority_t authority);
-
-/* Increment use_count and stamp last_used_at (positive reinforcement).
- * Returns 0 on success, -1 on failure / kb unreachable. */
-int kb_client_memory_touch(int64_t id);
-
-/* Replace a memory's content in place (update verb).
- * Returns 0 on success, -1 on failure / kb unreachable. */
-int kb_client_memory_update(int64_t id, const char *content);
-
-/* Same, but says who is asking. MEMORY_AUTHORITY_MODEL versions the old content
- * via supersede and reports the new current id through `new_id_out` (optional);
- * MEMORY_AUTHORITY_USER overwrites in place and reports `id`. */
-int kb_client_memory_update_as(int64_t id, const char *content, memory_authority_t authority,
-                               int64_t *new_id_out);
-
 /* Reject a memory: preserve it as reviewable history, remove it from recall,
  * and install an exact-value tombstone that blocks automatic re-extraction.
  * Optional reason is retained with the row and mutation evidence.
  * Returns 0 on success, -1 on failure / kb unreachable. */
-int kb_client_memory_reject(int64_t id, const char *reason);
-/* Explicit operator reversal of a rejection; retires the active tombstone. */
-int kb_client_memory_restore(int64_t id);
-/* Owned JSON response from memory.review_list; caller frees. */
-char *kb_client_memory_review_list_json(const char *state, int limit);
-
-/* Read aggregate memory stats via aimee-kb.  Returns 0 on success,
- * -1 on failure / kb unreachable.  Mirrors memory_stats(). */
-int kb_client_memory_stats(memory_stats_t *out);
-
-/* Raw-JSON variant: returns the kb "stats" object as a malloc'd JSON string
- * (caller frees), or NULL when the kb is unreachable / returns a non-"ok"
- * envelope.  Used by handle_memory_stats to forward the payload verbatim. */
-char *kb_client_memory_stats_json(void);
-
-/* List unresolved conflicts via aimee-kb.  Returns row count.
- * Mirrors memory_list_conflicts(). */
-int kb_client_memory_list_conflicts(conflict_t *out, int max);
-
-/* Read 7-day rolling health stats via aimee-kb.  Returns 0 / -1.
- * Mirrors memory_query_health(). */
-int kb_client_memory_query_health(memory_health_t *out);
-
-/* Read effectiveness stats via aimee-kb.  Returns 0 / -1.
- * Mirrors memory_effectiveness_stats(). */
-int kb_client_memory_effectiveness_stats(effectiveness_stats_t *out);
-
-/* List entity-graph edges incident to |entity| via aimee-kb.  Returns
- * row count.  Mirrors memory_query_edges(). */
-int kb_client_memory_query_edges(const char *entity, edge_t *out, int max);
-
 /* Compact conversation windows (raw->summary, summary->fact) via aimee-kb.
  * Returns 0 / -1.  Mirrors memory_compact_windows(). */
 int kb_client_memory_compact_windows(int *summary_count, int *fact_count);
@@ -728,34 +553,6 @@ char *kb_client_memory_assemble_context(const char *task_hint);
  * active observations, and reviewed procedures) via aimee-kb. Returns the
  * trust-labelled rendered context, or NULL when unavailable or empty. */
 char *kb_client_memory_assemble_typed_context(const char *query);
-
-/* Search conversation windows via aimee-kb.  Returns row count.
- * Mirrors memory_search(). */
-int kb_client_memory_search(char **clusters, int cluster_count, int limit, search_result_t *out,
-                            int max);
-
-/* Workspace/project-scoped fact search via aimee-kb.  Returns row count.
- * Mirrors memory_find_facts_visible() / memory_find_facts_scoped(). */
-int kb_client_memory_find_facts_visible(const char *query, const char *workspace,
-                                        const char *project, int limit, memory_t *out, int max);
-int kb_client_memory_find_facts_scoped(const char *query, const char *scope_type,
-                                       const char *scope_value, int limit, memory_t *out, int max);
-/* ABI-compatible legacy form; the fusion argument is ignored. The receiving
- * instance applies its own configuration. */
-int kb_client_memory_find_facts_scoped_ex(const char *query, const char *scope_type,
-                                          const char *scope_value, int limit, memory_t *out,
-                                          int max, const char *graph_code_fusion_state);
-
-/* Export memories / decisions to a JSONL file via aimee-kb.  Returns
- * row count or -1.  Mirrors the wholesale-export flow used by
- * `aimee export`. */
-int kb_client_memory_export_jsonl(const char *path);
-int kb_client_memory_decisions_export_jsonl(const char *path);
-
-/* Check whether a memory key already exists via aimee-kb.  Returns 1
- * if present, 0 otherwise (or on kb-unreachable).  Mirrors
- * db2_memory_key_exists(). */
-int kb_client_memory_key_exists(const char *key);
 
 /* Export rules to JSONL via aimee-kb.  Returns row count or -1. */
 int kb_client_rules_export_jsonl(const char *path);
@@ -789,23 +586,6 @@ int kb_client_mcp_call(const char *qualified_name, const cJSON *args, int timeou
 
 /* List the memory_relation_schema rows owned by aimee-kb.  Writes up
  * to |max| rows into |out| and returns the number written. */
-int kb_client_relations_schema_list(db2_relation_schema_row_t *out, int max);
-
-/* Diagnose a query (returns memory_t + memory_score_parts_t per row)
- * via aimee-kb.  Returns row count.  Mirrors memory_diagnose() and
- * memory_diagnose_scoped(). */
-int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max);
-int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
-                                     const char *scope_value, int limit, memory_diagnostic_t *out,
-                                     int max);
-
-/* Explain how a specific memory matches a query via aimee-kb.
- * Returns 0 / -1.  Mirrors memory_explain_match(). */
-int kb_client_memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic_t *out);
-
-/* memory_cognify_drain crosses DB1 queue state and DB2 memory reads. Ports
- * must split that flow across aimee-server and aimee-kb; do not add a client
- * or auxiliary process with both tiers linked. */
 
 /* Fetch a single memory row by id via aimee-kb. Returns 0 on success,
  * 1 for a valid missing row, or -1 when the service/result is unavailable. */
@@ -885,57 +665,17 @@ int64_t kb_client_memory_find_id_by_key_kind(const char *key, const char *kind);
  * DB2 owner).  The kb side runs the full version-bump + provenance +
  * link pipeline.  Returns 0 on success (out filled if non-NULL) or
  * -1 if kb is unreachable / supersede failed.  Mirrors
- * memory_supersede(). */
-int kb_client_memory_supersede(int64_t old_id, const char *new_content, double confidence,
-                               const char *session_id, memory_t *out);
-
-/* Typed-fact §4 retraction via aimee-kb.  `target` NULL/empty retracts every
- * current value of (source, relation); `authority` is "user" or "model" (NULL
- * and anything unrecognised read as model, which cannot retract a user-stated
- * Class A fact).  *out_retracted receives the number of edges affected — 0 is a
- * success meaning nothing current matched.  *out_immutable is set when the
- * relation is immutable and this authority may not override it, so a caller can
- * report a refusal rather than an unexplained failure.  Both out params may be
- * NULL.  Returns 0 on success, -1 on refusal / kb unreachable. */
-int kb_client_facts_retract(const char *source, const char *relation, const char *target,
-                            const char *authority, int *out_retracted, int *out_immutable);
-
-/* §3 entity merge via aimee-kb: collapse from_id into into_id.  *out_merge_id
- * receives the audit id, which is the handle kb_client_entities_unmerge needs —
- * a caller that discards it cannot reverse the merge.  0 / -1. */
-int kb_client_entities_merge(int64_t from_id, int64_t into_id, int64_t *out_merge_id);
-
-/* Reverse a recorded merge by its audit id.  0 on success, -1 if unknown or
- * already undone. */
-int kb_client_entities_unmerge(int64_t merge_id);
-
-/* Fetch the version history for a memory key via aimee-kb.  Returns
- * the number of rows written into |out| (0 if kb is unreachable).
- * Mirrors memory_fact_history(). */
-int kb_client_memory_fact_history(const char *key, memory_t *out, int max);
-
-/* Stale-memory inspection helpers via aimee-kb (the DB2 owner).
- * Each mirrors the local db2_memory_list_* signature; returns the
- * number of rows written (0 if kb is unreachable). */
-int kb_client_memory_list_low_effectiveness(double threshold, int limit,
-                                            db2_memory_low_eff_row_t *out, int max);
-int kb_client_memory_list_unused_l2(int days, db2_memory_unused_l2_row_t *out, int max);
-int kb_client_memory_list_superseded_keys(int min_versions, db2_memory_superseded_row_t *out,
-                                          int max);
+ * the shared Go replacement command. */
 
 /* Set the artifact_type / artifact_ref / artifact_hash columns on a
  * memory row via aimee-kb.  Returns 0 on success, -1 on failure /
  * missing row.  Mirrors db2_memory_set_artifact(). */
-int kb_client_memory_set_artifact(int64_t memory_id, const char *artifact_type,
-                                  const char *artifact_ref, const char *artifact_hash);
 
 /* Session-scope priority memory listings via aimee-kb.  Used by the
  * session-start prompt builder to populate # Project / # Workspace /
  * # Global Context sections.  Each returns the number of rows
  * written into |out| (0 if kb is unreachable).  Mirrors
- * db2_memory_list_session_scope_priority{,_like}(). */
-int kb_client_memory_list_session_scope_priority(memory_t *out, int max);
-int kb_client_memory_list_session_scope_priority_like(const char *pattern, memory_t *out, int max);
+ * the Go memory.list_session_scope_priority commands. */
 
 /* Run the active-task drift check via aimee-kb.  Returns 0 on
  * success (|out| filled) or -1 if kb is unreachable / task missing.
@@ -947,7 +687,6 @@ int kb_client_memory_check_drift(int64_t task_id, const char *file_path, const c
 /* Search facts/patterns by free-text keyword via aimee-kb.  Returns
  * the number of rows written into |out| (0 if kb is unreachable).
  * Mirrors db2_memory_search_facts_patterns_by_keyword(). */
-int kb_client_memory_search_facts_patterns_by_keyword(const char *keyword, memory_t *out, int max);
 
 /* Task CRUD via aimee-kb (the DB2 owner).  Each mirrors the local
  * db2_task_* signature.  See db2/tasks.h for aimee_task_t /
@@ -960,22 +699,6 @@ int kb_client_task_update_state(int64_t id, const char *state);
 int kb_client_task_delete(int64_t id);
 int kb_client_task_add_edge(int64_t source, int64_t target, const char *relation);
 int kb_client_task_get_edges(int64_t task_id, task_edge_t *out, int max);
-
-/* Build the memory briefing bundle via aimee-kb.  Returns a heap-
- * allocated cJSON object (caller cJSON_Delete()s) or NULL on failure.
- * Mirrors memory_briefing(). */
-struct cJSON *kb_client_memory_briefing(int limit_tokens);
-
-/* Fetch a context block via aimee-kb.  Returns a heap-allocated
- * string (caller frees) or NULL if kb is unreachable.  Mirrors
- * memory_get_context_block(). */
-char *kb_client_memory_context_block(const char *query, const char *block_type, int limit);
-
-/* Read-only typed-fact recall for the turn: facts about entities named in the
- * query, PII-gated. Returns the facts block (caller frees), NULL if kb is
- * unreachable or there are no facts. Cheaper than context_block (no memory
- * assembly); used by ingress_preinject to auto-inject known facts. */
-char *kb_client_memory_facts(const char *query);
 
 /* Auditable-correctness P1: ask the KB to record a single per-turn
  * retrieval_event keyed by `turn_id` (a UUID), listing the int64 memory row ids
@@ -1029,36 +752,11 @@ char *kb_client_evidence_provenance_retrieval_event(const char *turn_id);
  * (malloc'd, caller frees; NULL on bad arg or kb error). */
 char *kb_client_evidence_fidelity_retrieval_event(const char *turn_id);
 
-/* Fetch the entity profile card via aimee-kb. Returns 0 on success,
- * 1 for a valid missing entity, or -1 when the service/result is unavailable. */
-int kb_client_memory_get_entity_profile(const char *entity, memory_entity_profile_t *out);
-
-/* Fetch up to |max| graph edges for an entity via aimee-kb.  Returns
- * the number of edges written into |out| (0 if kb is unreachable).
- * Mirrors memory_get_entity_edges(). */
-int kb_client_memory_get_entity_edges(const char *entity, int limit, memory_relation_t *out,
-                                      int max);
-
-/* Search graph relations by free-text query via aimee-kb.  Returns
- * the number of relations written into |out| (0 if kb is unreachable).
- * Mirrors memory_search_graph(). */
-int kb_client_memory_search_graph(const char *query, int limit, memory_relation_t *out, int max);
-
-/* Search the entity graph as of a wall-clock timestamp via aimee-kb.
- * Returns row count.  Mirrors memory_search_graph_as_of(). */
-int kb_client_memory_search_graph_as_of(const char *query, const char *as_of, int limit,
-                                        memory_relation_t *out, int max);
-
-/* Fetch a single episode by key via aimee-kb. Returns 0 on success,
- * 1 for a valid missing episode, or -1 when the service/result is unavailable. */
-int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out);
-
-/* Run the memory Q&A pipeline via aimee-kb (the DB2 owner).  Returns
- * 0 on success (|out| filled) or -1 if kb is unreachable or
- * memory_ask_query failed (out->error has the message).  Mirrors
- * memory_ask_query(). */
-int kb_client_memory_ask(const char *query, const char *scope_type, const char *scope_value,
-                         int limit, memory_answer_result_t *out);
+/* Invoke an action through the authenticated KB transport. Takes ownership of
+ * req; the caller frees the returned JSON, including non-success envelopes. */
+char *kb_v1_action_request(const char *action, cJSON *req);
+/* Same ownership and authentication, with a caller-selected operation budget. */
+char *kb_v1_action_request_with_timeout(const char *action, cJSON *req, int timeout_ms);
 
 /* Fetch learning proposals via the aimee-kb sidecar.  Sends
  * `learning.list_proposals` with {state, sink, limit} and returns the
@@ -1141,17 +839,6 @@ char *kb_client_artifact_set_state_json(const char *id, const char *new_state,
                                         const char *verdict_tag, const char *verdict_scope,
                                         const char *counter_example, const char *reason);
 
-/* Replay vector upserts for memory points.  Sends `memory.repair` with
- * {limit, failed_only, reset_stuck, memory_id, embedding_command} and
- * returns the heap-allocated JSON response (caller frees).  Behaviour:
- *   reset_stuck=1   -> zero attempts on stuck vector-index rows.
- *   memory_id>0     -> repair exactly that memory.
- *   failed_only=1   -> repair rows surfaced by vector-index scan.
- *   otherwise       -> sweep the memories table (limit caps the sweep).
- * On any failure the returned JSON has {"status":"error","message":"..."}. */
-char *kb_client_memory_repair_json(int limit, int failed_only, int reset_stuck, int64_t memory_id,
-                                   const char *embedding_command);
-
 /* Gather memory + kb collection state for `aimee memory verify`.  Sends
  * `memory.verify` with {detail, timings, embedding_command} and returns the
  * heap-allocated JSON response (caller frees).  The response shape contains:
@@ -1162,40 +849,12 @@ char *kb_client_memory_repair_json(int limit, int failed_only, int reset_stuck, 
  *   index_ops{ok, pending, failed, stuck},
  *   failed_ops[] (when detail=1), timings{trials,total_us,max_us} (when
  *   timings=1).  On any failure {"status":"error","message":"..."}. */
-char *kb_client_memory_verify_json(int detail, int timings, const char *embedding_command);
-
-/* Embed one memory (memory_id>0) or all stale L1/L2 memories (all=1).  For
- * batch mode the caller must pass `version` — the active embedder version —
- * so aimee-kb does not need to consult CLI-side config.  Returns the
- * heap-allocated JSON response (caller frees). */
-char *kb_client_memory_embed_json(int all, int64_t memory_id, const char *version,
-                                  const char *embedding_command);
-
-/* Begin or resume a versioned re-embed job.  The caller passes the target
- * version and embedder command; aimee-kb upserts memory_reembed_progress,
- * loops memory_embed over every stale memory, and returns counts.  This is
- * long-running for large corpora — plan timeouts accordingly. */
-char *kb_client_memory_reembed_start_json(const char *version, const char *embedding_command);
-
-/* Report active embedder version + current memory_reembed_progress row. */
-char *kb_client_memory_reembed_status_json(void);
-
-/* Activate the completed target version of the in-flight re-embed job.
- * Writes memory_active_embedder, marks memory_reembed_progress finished,
- * and rebuilds the vector index at the new version. */
-char *kb_client_memory_reembed_cutover_json(void);
-
-/* Activate an arbitrary previously-embedded version and rebuild the vector index at it. Fails
- * cleanly if the version has no pgvector memory rows. */
-char *kb_client_memory_reembed_rollback_json(const char *version);
 
 /* List the 100 most recent scenes (memory_scenes).  Returns
  * {"status":"ok","scenes":[{id, workspace_id, turn_count, created_at}, ...]}. */
-char *kb_client_memory_scene_list_json(void);
 
 /* List members of a single scene.  Returns
  * {"status":"ok","scene_id","members":[{memory_id,key,membership_strength}, ...]}. */
-char *kb_client_memory_scene_show_json(int64_t scene_id);
 
 /* --- Canonical index thin-client RPCs --------------------------------
  *
@@ -1456,5 +1115,7 @@ void kb_client_memory_scope_context_set(const char *workspace, const char *proje
                                         int include_all);
 void kb_client_memory_scope_context_clear(void);
 void kb_client_memory_scope_context_apply(cJSON *req);
+/* Consumes req; optional host file is bounded and sent as unchanged text. */
+char *kb_client_memory_benchmark_json(cJSON *req, const char *corpus_path);
 
 #endif /* DEC_KB_CLIENT_H */

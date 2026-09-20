@@ -22,23 +22,6 @@ extern "C"
 
    int db2_memory_promotion_list_kinds_in_tier(const char *tier, db2_memory_promotion_kind_t *out,
                                                int max);
-   /* Expiry policy is the one lifecycle operation keyed by epistemic kind.
-    * Keep it separate from content-kind promotion/calibration (P6). */
-   int db2_memory_promotion_list_epistemic_kinds_in_tier(const char *tier,
-                                                         db2_memory_promotion_kind_t *out, int max);
-
-   /* L1 -> L2 promotion for a single kind, with the kind's own thresholds.
-    * `ts` is the updated_at value to stamp. Returns rows changed. */
-   int db2_memory_promotion_promote_kind(const char *ts, const char *kind, int promote_use_count,
-                                         double promote_confidence);
-
-   /* L1 -> L2 promotion for one deterministic A/B slot. When slot_match is
-    * non-zero, only rows where id % slot_modulo == slot_remainder are eligible;
-    * otherwise only rows outside that slot are eligible. Falls back to the
-    * regular kind promotion when slot_modulo <= 0. */
-   int db2_memory_promotion_promote_kind_slot(const char *ts, const char *kind,
-                                              int promote_use_count, double promote_confidence,
-                                              int slot_modulo, int slot_remainder, int slot_match);
 
    /* L2 -> L1 demotion for a single kind, gated by confidence and idle days
     * (`days_neg_str` is "-N", embedded into `datetime('now', ?||' days')`).
@@ -58,19 +41,6 @@ extern "C"
     * an idle-window (`days_neg_str` is "-N"). Returns L1 rows deleted. */
    int db2_memory_promotion_delete_stale_l1_provenance(const char *kind, const char *days_neg_str);
    int db2_memory_promotion_delete_stale_l1(const char *kind, const char *days_neg_str);
-
-   /* Match a lowered error string against memory keys via
-    * `error LIKE '%'||LOWER(key)||'%'`. Fills up to `max` ids; returns
-    * count. */
-   int db2_memory_promotion_match_error_keys(const char *error_lowered, int64_t *ids_out, int max);
-
-   /* `UPDATE memories SET confidence = confidence * 0.9 WHERE id = ? AND
-    * confidence > 0.3`. Returns rows changed. */
-   int db2_memory_promotion_demote_id(int64_t memory_id);
-
-   /* List L2 memory ids that lack a versioned embedding row for `version`.
-    * Up to `max` ids; returns count. */
-   int db2_memory_promotion_list_unembedded_l2(const char *version, int64_t *ids_out, int max);
 
    /* Promote stable L2 facts/preferences to L3 (confidence >= 0.95,
     * use_count >= 5, untouched for 30+ days). `ts` is the updated_at
@@ -109,10 +79,6 @@ extern "C"
       char scope_value[512];
       int session_count;
    } db2_memory_l5_candidate_t;
-
-   /* Find up to `max` L5 synthesis candidates (LIMIT 20 in SQL). Returns
-    * count written, or -1 on SQL error. */
-   int db2_memory_promotion_l5_pattern_candidates(db2_memory_l5_candidate_t *out, int max);
 
 #ifdef __cplusplus
 }

@@ -4,7 +4,8 @@
 #include "kb_client.h"
 #include "cJSON.h"
 
-char *kb_v1_action_request(const char *method, cJSON *req);
+int64_t kbc_memory_response_id(const cJSON *object);
+
 void kbc_memory_row_from_json(cJSON *f, memory_t *m);
 
 #endif

@@ -519,7 +519,7 @@
 
 {"memory.get",
  "{\"fields\":["
- "{\"json\":\"id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient_int64\",\"empty\":\"emit\"}"
+ "{\"json\":\"id\",\"from\":\"positional\",\"index\":0,\"type\":\"string\",\"empty\":\"emit\"}"
  ",{\"json\":\"as_of\",\"from\":\"flag\",\"flag\":\"as-of\",\"alt_flag\":\"as_of\"}"
  ",{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
  ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
@@ -962,7 +962,7 @@
 
 {"memory.delete",
  "{\"fields\":["
- "{\"json\":\"id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient_int64\",\"empty\":\"emit\"}"
+ "{\"json\":\"id\",\"from\":\"positional\",\"index\":0,\"type\":\"string\",\"empty\":\"emit\"}"
  ",{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
  ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
  ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"}"

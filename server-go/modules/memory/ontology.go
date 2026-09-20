@@ -72,14 +72,18 @@ const (
 	SensSecret RelSensitivity = 2
 )
 
-// relTypeDef is the slice of a seed row this module reads. The C row carries
-// more (inverse, correction behaviour, category, hierarchy flag, status); those
-// belong to the DB-backed commit path in core, not to either gate here.
+// relTypeDef is the authoritative seed row for both memory gates and schema
+// initialization. Generated native compatibility data remains migration debt.
 type relTypeDef struct {
 	RelType     string
 	HeadKinds   []NodeKind
 	TailKinds   []NodeKind
 	Sensitivity RelSensitivity
+	Symmetric   bool
+	Inverse     string
+	Correction  string
+	Category    string
+	Hierarchy   bool
 }
 
 // relTypeNameMax mirrors REL_TYPE_NAME_MAX. Normalization truncates to it, so a

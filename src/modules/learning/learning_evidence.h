@@ -35,8 +35,7 @@ extern "C"
     * committed candidate, -2 if the target surface is not yet wired. Wires the
     * anti_pattern surface (anti_pattern + mistake_pattern kinds, into the
     * anti_patterns table), the memory surface (preference kind, through the
-    * memory-public-contract typed-verb store path,
-    * db2_kb_service_memory_insert_json), and the workflow_pattern surface
+    * Go memory.store command), and the workflow_pattern surface
     * (workflow kind, into the workflow_patterns table). */
    int learning_promote(const char *candidate_id, double threshold);
 

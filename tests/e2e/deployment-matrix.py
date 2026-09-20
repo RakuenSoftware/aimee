@@ -91,7 +91,7 @@ class Stack:
 
     def kb_request(self, path, body=None, authenticated=True):
         code = '''import http.client,json,sys
-a=json.load(sys.stdin); c=http.client.HTTPConnection('127.0.0.1',8741,timeout=40)
+a=json.load(sys.stdin); c=http.client.HTTPConnection('127.0.0.1',8741,timeout=70)
 h={'Content-Type':'application/json'}
 if a['token']: h['Authorization']='Bearer '+a['token']
 c.request('GET' if a['body'] is None else 'POST',a['path'],None if a['body'] is None else json.dumps(a['body']),h)
@@ -166,7 +166,7 @@ def main():
             check('Server application metadata contains no database or enrollment credential', application_metadata_is_private(server))
             gate_script = ROOT / 'tests/e2e/memory-placement-e2e.py'
             common = ['--server', server.application, '--store-db', server.postgres]
-            command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'))
+            command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'), timeout=900)
             check('KB-free personal memory regression gate', True)
             if kb:
                 # The two projects retain separate stores, model identities and
@@ -204,6 +204,9 @@ def main():
                 command('python3', str(ROOT / 'tests/e2e/local-model-memory-e2e.py'), *common,
                     '--embedder', server.embedder, '--output', str(args.output / 'semantic-memory.json'), timeout=600)
                 check('Real local semantic recall, outage recovery and retirement gate', True)
+                command('python3', str(ROOT / 'tests/e2e/memory-exploratory-e2e.py'), *common,
+                    '--output', str(args.output / 'exploratory-memory.json'), timeout=300)
+                check('Concurrent memory, exact IDs and supervised owner recovery gate', True)
     except (RuntimeError, subprocess.SubprocessError, ValueError, OSError) as error:
         checks.append(dict(name='topology completed', passed=False, error=str(error)))
         print('FAIL ' + str(error), flush=True)

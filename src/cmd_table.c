@@ -86,9 +86,7 @@ void cmd_help(app_ctx_t *ctx, int argc, char **argv)
          fprintf(stderr, "aimee %s: %s\n", commands[i].name, commands[i].help);
 
          const subcmd_t *subs = NULL;
-         if (strcmp(target, "memory") == 0)
-            subs = get_memory_subcmds();
-         else if (strcmp(target, "agent") == 0)
+         if (strcmp(target, "agent") == 0)
             subs = get_agent_subcmds();
          else if (strcmp(target, "index") == 0)
             subs = get_index_subcmds();
@@ -142,7 +140,6 @@ const command_t commands[] = {
     {"wm", "Working memory (session-scoped scratch)", cmd_wm, CMD_TIER_CORE},
     {"index", "Code indexing (scan, overview, find, blast-radius, ...)", cmd_index, CMD_TIER_CORE},
     {"graph", "Code-graph projection and explain (sync-code, explain)", cmd_graph, CMD_TIER_CORE},
-    {"memory", "Tiered memory management", cmd_memory, CMD_TIER_CORE},
     {"rules", "Rule management (list, generate, delete)", cmd_rules, CMD_TIER_CORE},
     {"roadmap", "Spec-driven roadmaps (new, show, list, status, rebuild, validate)", cmd_roadmap,
      CMD_TIER_ADVANCED},

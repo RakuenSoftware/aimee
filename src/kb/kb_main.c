@@ -1,3 +1,5 @@
+#include "json_fluent.h"
+#include "module_commands.h"
 #include <aimee/core/event_bus/bus_runtime.h>
 #include "aimee.h"
 #include "aimee_home.h"
@@ -42,9 +44,7 @@
 #include "util.h"
 #include "cJSON.h"
 #include "memory.h"
-#include "modules/memory/memory_graph_fusion.h"
 #include "modules/db2/c/memory_vectors.h"
-#include "modules/db2/c/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include "modules/db2/c/vault_pg.h" /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"     /* kb_vault_policy_select (custody selection, P7 §3) */
 #include "kb/kb_management_runtime.h"
@@ -53,12 +53,10 @@
 #include "kb_vault_tpm_runtime_lock.h"
 #include "modules/db2/c/kb_audit_worm.h"
 #include "modules/db2/c/vault_operator_status_runtime.h"
-#include "modules/memory/memory_bus_context.h"
 #include "vault_server_key.h"         /* startup durable seal-epoch synchronization */
 #include "vault_env_bootstrap.h"      /* first-boot credential env -> Vault */
 #include "vault_config_bootstrap.h"   /* legacy config credential -> Vault */
 #include "runtime_secret.h"           /* wipe Vault-sourced runtime cache at exit */
-#include "kb_memory_audit_bridge.h"   /* record memory mutations on aimee-kb's own obs bus */
 #include "kb_module_stage_adapters.h" /* process-module calls over aimee-kb's event bus */
 #include "kb_obs_bus_adapter.h"       /* bus durability rows -> PostgreSQL WORM */
 #include <aimee/audit/obs_bus.h>
@@ -704,17 +702,24 @@ static int kb_cmd_enroll(int argc, char **argv)
  * instances externally; a probe never changes live fusion policy. */
 static int kb_run_fusion_probe(const char *query)
 {
-   memory_t results[20];
-   int count = memory_find_facts(query, 20, results, 20);
-   if (count < 0)
+   cJSON *args = cJSON_CreateObject(), *response = NULL;
+   if (!args || !cJSON_AddStringToObject(args, "operation", "fusion-probe") ||
+       !cJSON_AddStringToObject(args, "query", query))
    {
+      cJSON_Delete(args);
+      return 1;
+   }
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", args, &response);
+   cJSON_Delete(args);
+   const cJSON *output = cJSON_GetObjectItemCaseSensitive(response, "output");
+   if (rc <= 0 || strcmp(jo_cstr(response, "status"), "ok") || !cJSON_IsString(output))
+   {
+      cJSON_Delete(response);
       fprintf(stderr, "fusion probe: instance memory retrieval unavailable\n");
       return 1;
    }
-   printf("fusion=%s (instance setting), results=%d\n", memory_fusion_state_is_on() ? "on" : "off",
-          count);
-   for (int i = 0; i < count; i++)
-      printf("  #%-2d id=%-8lld %s\n", i + 1, (long long)results[i].id, results[i].key);
+   fputs(output->valuestring, stdout);
+   cJSON_Delete(response);
    return 0;
 }
 
@@ -1782,10 +1787,8 @@ int main(int argc, char **argv)
    config_vault_tpm2_nv_index_copy(vault_tpm2_nv_index, sizeof(vault_tpm2_nv_index));
    config_vault_custody_copy(vault_custody, sizeof(vault_custody));
 
-   /* Install KB-owned memory audit and request-context transport hooks. */
+   /* Install KB-owned module audit hooks. */
    kb_module_stage_adapters_configure();
-   kb_memory_audit_bridge_install();
-   memory_bus_set_context_reader(db2_memory_scope_context_get);
 
    /* P7-D3a is an all-or-none service-manager contract. The listener fd and
     * pathname are fixed in the wire module; only activation and the dedicated
@@ -1916,16 +1919,6 @@ int main(int argc, char **argv)
          attempt++;
       }
    }
-
-   /* Seed the relation-type ontology into the shared rel_types table now that DB2
-    * is up. The fact-commit path resolves each seed relation's id from this table
-    * (db2_fact_commit -> db2_rel_types_resolve); without the seed every seed-relation
-    * commit DEFERs and no typed fact ever lands. ensure_seed is idempotent
-    * (ON CONFLICT DO NOTHING) and cheap, so running it on each start is safe.
-    * Non-fatal: a failure is logged but does not block the KB. */
-   if (db2_rel_types_ensure_seed() != 0)
-      fprintf(stderr, "aimee-kb: warning: rel_types ontology seed failed; typed-fact "
-                      "commits will DEFER until the seed lands on a later start\n");
 
    /* Instance custody stays local in both roles, including enrollment and
     * pre-database keys. Only tenant credentials use the organization store. */

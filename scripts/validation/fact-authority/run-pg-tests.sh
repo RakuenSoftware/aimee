@@ -88,7 +88,8 @@ printf '%s\n' "$tpl_out" | tail -3
 echo
 echo "== typed-fact tests, real postgres =="
 rc=0
-# THE WHOLE TYPED-FACT LAYER, not two of its tests.
+# Native compatibility layer. Shared Go typed-fact coverage is required via
+# scripts/test_temporal_assertion_retrieval.sh against the packaged DB2 schema.
 #
 # This ran only fact-lifecycle and fact-ingest, which is a thin slice of the
 # thing this branch changes. unit-test-typed-facts was not run at all, and
@@ -101,11 +102,9 @@ rc=0
 TESTS="unit-test-fact-lifecycle
 unit-test-fact-ingest
 unit-test-fact-recall
-unit-test-typed-facts
 unit-test-entity-nodes
 unit-test-entity-registry
-unit-test-ontology-evolution
-unit-test-rel-types-store"
+unit-test-ontology-evolution"
 
 for t in $TESTS; do
   printf '%-30s ' "$t"
@@ -122,4 +121,13 @@ for t in $TESTS; do
     echo "$out" | tail -15 | sed 's/^/    /'
   fi
 done
+# Typed-fact policy is now Go; require its PostgreSQL replay rather than silently
+# dropping the migrated coverage from this validation entrypoint.
+go_driver="${AIMEE_GO_FACT_REPLAY_DRIVER:-$(dirname "$0")/../../test_temporal_assertion_retrieval.sh}"
+if [ ! -x "$go_driver" ] || [ -z "${AIMEE_DB2_REPLAY_URL:-}" ]; then
+  echo "MISSING Go fact replay driver or AIMEE_DB2_REPLAY_URL (nothing claimed)"
+  rc=1
+elif ! "$go_driver"; then
+  rc=1
+fi
 exit $rc

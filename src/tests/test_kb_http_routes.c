@@ -1,3 +1,7 @@
+#include "module_commands.h"
+#include "support/module_runtime_fixture.h"
+#include "json_fluent.h"
+#include <assert.h>
 /* test_kb_http_routes.c: unit tests for kb_http_route() (Phase 1+5). */
 #include <assert.h>
 #include <signal.h>
@@ -16,6 +20,7 @@
 #include "command_registry.h"
 #include "cJSON.h"
 #include "kb_http.h"
+extern int handle_get_code_context(const char *query_string, char *out_buf, int out_cap);
 #include "kb_route_acl.h"
 #include "kb_scope.h"
 #include "kb/http/kb_http_search.h"  /* kb_http_search_project_scope: "scope" parsing */
@@ -23,7 +28,6 @@
 #include "kb/kb_surprising_judge.h"  /* §4 judge stub seam (kb_surprising_verdict_t) */
 #include "modules/db2/c/lifecycle.h" /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
 #include "modules/db2/c/code_project_lifecycle.h"
-#include "rel_types.h"        /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
@@ -395,12 +399,6 @@ typedef int (*pgvec_kb_service_record_exists_fn)(int64_t record_id);
 
 typedef struct
 {
-   int64_t row_id;
-   int attribution_n;
-} db2_demotion_candidate_t;
-
-typedef struct
-{
    long long n_decisions;
    long long n_rewards;
    double sum_reward;
@@ -732,44 +730,6 @@ int db2_curator_invalidations_since(int64_t since_id, void *out, int max)
    return 0;
 }
 
-/* Ontology-console db2 stubs: the typed_facts ontology console added
- * these refs into kb_http_console.o; the real defs pull the whole db2 stack,
- * so stub them link-only (this test exercises routing, not the ontology backend). */
-long db2_ontology_eval_count(const char *rel_type)
-{
-   (void)rel_type;
-   return 0;
-}
-int db2_ontology_eval_status(const char *rel_type, char *out, size_t out_len)
-{
-   (void)rel_type;
-   if (out && out_len)
-      out[0] = '\0';
-   return 0;
-}
-int db2_ontology_eval_candidates(int threshold, char (*out)[REL_TYPE_NAME_MAX], int max)
-{
-   (void)threshold;
-   (void)out;
-   (void)max;
-   return 0;
-}
-int db2_ontology_approve(const char *rel_type)
-{
-   (void)rel_type;
-   return 0;
-}
-int db2_ontology_map(const char *novel, const char *target)
-{
-   (void)novel;
-   (void)target;
-   return 0;
-}
-int db2_ontology_reject(const char *rel_type)
-{
-   (void)rel_type;
-   return 0;
-}
 /* The console writes through the module client. Report success without touching
  * a real config file; this route test owns only the HTTP-facing contract. */
 int config_set(const char *key, const char *value)
@@ -930,6 +890,8 @@ static char g_code_find_project[128];
 static int g_code_local_first_fixture;
 static int g_code_hybrid_path_collision_fixture;
 static int g_code_context_memory_scope_rank = 3;
+static int g_code_context_owner_available = 1;
+static int64_t g_code_context_generation = 2;
 static int g_code_context_memory_anchored = 1;
 
 int canonical_index_find(const char *identifier, void *out, int max)
@@ -985,7 +947,7 @@ int db2_code_index_project_current_generation(const char *project, int64_t *gene
    if (!project || !project[0])
       return -2;
    if (generation_out)
-      *generation_out = 2;
+      *generation_out = g_code_context_generation;
    return 0;
 }
 
@@ -1144,22 +1106,6 @@ int canonical_index_code_search_excluding_project(const char *query, const char 
 
 /* canonical_index_find_callers stub lives in the _code.inc (line-count limit). */
 
-int memory_get_entity_profile(const char *e, void *out)
-{
-   (void)e;
-   (void)out;
-   return -1;
-}
-
-int memory_search_graph(const char *q, int l, void *out, int m)
-{
-   (void)q;
-   (void)l;
-   (void)out;
-   (void)m;
-   return 0;
-}
-
 int db2_artifact_read(const char *id, void *out, void *c, int mc, int *cc)
 {
    (void)id;
@@ -1267,9 +1213,29 @@ static int g_reconcile_rc;
 static kb_service_ctx_t g_test_kb_ctx = {.worker_count = 2};
 kb_service_ctx_t *g_kb_ctx = &g_test_kb_ctx;
 
+static const char *entity_reply;
+static int entity_status = 200;
 int kb_dispatch_action_json(const char *action, const char *body, int body_len, char *out_buf,
                             int out_cap)
 {
+   if (strcmp(action, "memory.search_graph") == 0 || strcmp(action, "memory.entity_profile") == 0)
+   {
+      cJSON *request = cJSON_ParseWithLength(body, (size_t)body_len);
+      assert(cJSON_IsObject(request));
+      if (strcmp(action, "memory.search_graph") == 0)
+      {
+         assert(strcmp(jo_cstr(request, "query"), "alice") == 0);
+         assert(jo_int(request, "limit", 0) == 10);
+      }
+      else
+         assert(strcmp(jo_cstr(request, "entity"), "nobody") == 0);
+      cJSON_Delete(request);
+      const char *fallback = strcmp(action, "memory.search_graph") == 0
+                                 ? "{\"status\":\"ok\",\"relations\":[]}"
+                                 : "{\"status\":\"error\",\"kind\":\"not_found\"}";
+      snprintf(out_buf, (size_t)out_cap, "%s", entity_reply ? entity_reply : fallback);
+      return entity_status;
+   }
    assert(strcmp(action, "memory.directive_sweep_expired") == 0);
    assert(body && body_len == 2);
    snprintf(out_buf, (size_t)out_cap, "{\"status\":\"ok\",\"expired\":1}");
@@ -1651,43 +1617,6 @@ int kb_ranker_fit_run(char *id_out, int id_out_len, char **report_out)
    if (report_out)
       *report_out = strdup("{\"status\":\"disabled\"}");
    return 1;
-}
-
-int db2_demotion_candidates(int n_min, db2_demotion_candidate_t *out, int max)
-{
-   assert(n_min == 2);
-   assert(out != NULL);
-   assert(max >= 2);
-   out[0].row_id = 101;
-   out[1].row_id = 102;
-   return 2;
-}
-
-double db2_demotion_score(int64_t row_id, int window_size, double half_life_days, int n_min)
-{
-   assert(window_size == 64);
-   assert(half_life_days == 30.0);
-   assert(n_min == 2);
-   return row_id == 101 ? 0.20 : 0.80;
-}
-
-int db2_memory_get(int64_t memory_id, memory_t *out)
-{
-   assert(out != NULL);
-   memset(out, 0, sizeof(*out));
-   out->id = memory_id;
-   snprintf(out->kind, sizeof(out->kind), "%s", "fact");
-   return 0;
-}
-
-int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
-                              const char *scope_id, char *buf, size_t len)
-{
-   assert(strcmp(memory_class, "fact") == 0);
-   assert(strcmp(scope_kind, "global") == 0);
-   assert(strcmp(scope_id, "") == 0);
-   snprintf(buf, len, "{\"score_percentiles\":{\"p10\":0.5}}");
-   return 0;
 }
 
 /* kb_intel_payload's bandit.sample/close builders call these (kb_bandit.o unlinked):
@@ -2725,6 +2654,102 @@ static void test_console_pipeline(void)
    printf("  PASS: console pipeline (registry + key allowlist)\n");
 }
 
+static const char *review_reply;
+static int review_transport = 1;
+static int review_calls;
+static const char *ontology_json =
+    "{\"schema\":\"console.typed_facts.v1\",\"id\":9007199254740993,\"name\":\"完整名称\"}";
+static int ontology_status = 200;
+static int ontology_transport = 1;
+static int ontology_calls;
+
+static int ontology_owner_fixture(cJSON **result)
+{
+   ontology_calls++;
+   *result = NULL;
+   if (ontology_transport != 1)
+      return ontology_transport;
+   *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(*result, "status", "ok");
+   cJSON_AddNumberToObject(*result, "http_status", ontology_status);
+   cJSON_AddStringToObject(*result, "json", ontology_json);
+   return 1;
+}
+
+static void test_console_ontology_owner(void)
+{
+   extern void test_kb_fact_actor_set(int enabled);
+   char buf[4096];
+   const char *path = "/v1/console/typed_facts";
+   assert(kb_http_route_ex("GET", path, NULL, NULL, NULL, NULL, 0, buf, sizeof(buf)) == 200);
+   assert(!strcmp(buf, ontology_json));
+   const char *body =
+       "{\"action\":\"map\",\"relation\":\"novel\",\"target\":\"works_for\",\"actor\":\"forged\"}";
+   path = "/v1/console/typed_facts/relation";
+   test_kb_fact_actor_set(1);
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 200);
+   assert(!strcmp(buf, ontology_json));
+   const int statuses[] = {400, 403, 500, 503};
+   for (unsigned i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++)
+   {
+      ontology_status = statuses[i];
+      assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                              sizeof(buf)) == statuses[i]);
+   }
+   ontology_status = 201;
+   assert(kb_http_route_ex("GET", "/v1/console/typed_facts", NULL, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 503);
+   ontology_status = 200;
+   const char *saved = ontology_json;
+   const char *bad[] = {"bad", "[]", "{} trailing"};
+   for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+   {
+      ontology_json = bad[i];
+      assert(kb_http_route_ex("GET", "/v1/console/typed_facts", NULL, NULL, NULL, NULL, 0, buf,
+                              sizeof(buf)) == 503);
+   }
+   char large[8192];
+   memset(large, 'x', sizeof(large));
+   large[0] = '{';
+   large[1] = '"';
+   large[sizeof(large) - 5] = '"';
+   large[sizeof(large) - 4] = ':';
+   large[sizeof(large) - 3] = '0';
+   large[sizeof(large) - 2] = '}';
+   large[sizeof(large) - 1] = 0;
+   ontology_json = large;
+   assert(kb_http_route_ex("GET", "/v1/console/typed_facts", NULL, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 500);
+   ontology_json = saved;
+   ontology_transport = -1;
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 503);
+   ontology_transport = 1;
+   int before = ontology_calls;
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, "[]", 2, buf, sizeof(buf)) == 400);
+   test_kb_fact_actor_set(0);
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 403);
+   assert(before == ontology_calls);
+   path = "/v1/console/typed_facts/entity";
+   body =
+       "{\"action\":\"merge\",\"from_id\":\"9007199254740993\",\"into_id\":2,\"actor\":\"forged\"}";
+   test_kb_fact_actor_set(1);
+   ontology_status = 200;
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 200);
+   assert(!strcmp(buf, ontology_json));
+   ontology_status = 409;
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 409);
+   test_kb_fact_actor_set(0);
+   assert(kb_http_route_ex("POST", path, NULL, NULL, NULL, body, (int)strlen(body), buf,
+                           sizeof(buf)) == 403);
+   ontology_status = 200;
+   puts("  PASS: ontology owner transport preserves JSON and verified context");
+}
+
 static void test_console_memories(void)
 {
    extern void test_kb_fact_actor_set(int enabled);
@@ -2752,8 +2777,66 @@ static void test_console_memories(void)
                            sizeof(buf)) == 405);
    assert(kb_http_route_ex("GET", "/v1/console/memories/review", NULL, NULL, NULL, NULL, 0, buf,
                            sizeof(buf)) == 405);
+   const char *failures[] = {"bad-json", "{}", "{\"status\":\"error\",\"kind\":\"not_found\"}",
+                             "{\"status\":\"error\",\"kind\":\"forbidden\"}"};
+   const int codes[] = {503, 503, 404, 403};
+   for (unsigned i = 0; i < sizeof(codes) / sizeof(codes[0]); i++)
+   {
+      review_reply = failures[i];
+      assert(kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, restore,
+                              (int)strlen(restore), buf, sizeof(buf)) == codes[i]);
+   }
+   review_reply = NULL;
+   review_transport = -1;
+   assert(kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, restore,
+                           (int)strlen(restore), buf, sizeof(buf)) == 503);
+   review_transport = 1;
+   const char *fraction = "{\"memory_id\":42.5,\"action\":\"reject\"}";
+   int before = review_calls;
+   assert(kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, fraction,
+                           (int)strlen(fraction), buf, sizeof(buf)) == 400);
+   test_kb_fact_actor_set(0);
+   assert(kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, restore,
+                           (int)strlen(restore), buf, sizeof(buf)) == 403);
+   assert(review_calls == before);
    test_kb_fact_actor_set(0);
    printf("  PASS: console memory review (list + reject + restore)\n");
+}
+
+static void test_console_fact_review(void)
+{
+   extern void test_kb_fact_actor_set(int enabled);
+   test_kb_fact_actor_set(1);
+   char buf[2048];
+   const char *body = "{\"assertion_id\":42,\"action\":\"approve\",\"actor\":\"forged\"}";
+   assert(kb_http_route_ex("POST", "/v1/console/typed_facts/assertion", NULL, NULL, NULL, body,
+                           (int)strlen(body), buf, sizeof(buf)) == 200);
+   assert(strstr(buf, "verified-commit") && strstr(buf, "promoted"));
+   const char *failures[] = {"{}", "{\"status\":\"ok\"}",
+                             "{\"status\":\"error\",\"kind\":\"conflict\"}",
+                             "{\"status\":\"error\",\"kind\":\"not_found\"}",
+                             "{\"status\":\"error\",\"kind\":\"unauthorized\"}"};
+   const int codes[] = {503, 503, 409, 404, 403};
+   for (unsigned i = 0; i < sizeof(codes) / sizeof(codes[0]); i++)
+   {
+      review_reply = failures[i];
+      assert(kb_http_route_ex("POST", "/v1/console/typed_facts/assertion", NULL, NULL, NULL, body,
+                              (int)strlen(body), buf, sizeof(buf)) == codes[i]);
+   }
+   review_reply = NULL;
+   review_transport = -1;
+   assert(kb_http_route_ex("POST", "/v1/console/typed_facts/assertion", NULL, NULL, NULL, body,
+                           (int)strlen(body), buf, sizeof(buf)) == 503);
+   review_transport = 1;
+   const char *fraction = "{\"assertion_id\":42.5,\"action\":\"approve\"}";
+   int before = review_calls;
+   assert(kb_http_route_ex("POST", "/v1/console/typed_facts/assertion", NULL, NULL, NULL, fraction,
+                           (int)strlen(fraction), buf, sizeof(buf)) == 400);
+   test_kb_fact_actor_set(0);
+   assert(kb_http_route_ex("POST", "/v1/console/typed_facts/assertion", NULL, NULL, NULL, body,
+                           (int)strlen(body), buf, sizeof(buf)) == 403);
+   assert(review_calls == before);
+   puts("  PASS: Go fact review transport and verified operator context");
 }
 
 static void test_console_settings(void)
@@ -4405,68 +4488,6 @@ static void test_curator_routes(void)
  * the surprising_judged:/surprising_confirmed: keys (-1 = key absent). */
 static int g_sj_judged = -1;
 static int g_sj_confirmed = -1;
-/* Full memory_t layout (mirrors headers/memory.h) so the stub writes each field
- * at the offset the handler — compiled against the real struct — reads. The main
- * file keeps a truncated local memory_t for other stubs, so we cast a void* here
- * rather than redeclare the type, exactly like canonical_index_code_search. Lives
- * here (with the hybrid test it feeds) to keep test_kb_http_routes.c under the
- * 2000-line build-integrity limit. */
-typedef struct
-{
-   int64_t id;
-   char tier[4];
-   char kind[16];
-   char key[512];
-   char headline[512];
-   char content[2048];
-   char use_cases[1024];
-   double confidence;
-   int use_count;
-   char last_used_at[32];
-   char created_at[32];
-   char updated_at[32];
-   char source_session[128];
-   double salience;
-   char provenance_category[32];
-   double retrieval_score;
-   int hybrid_rank;
-} test_full_memory_t;
-
-int db2_memory_find_facts_like(const char *query, int limit, void *out, int max)
-{
-   assert(out);
-   if (!query || strcmp(query, "needle") != 0 || limit < 1 || max < 1)
-      return 0;
-   test_full_memory_t *m = (test_full_memory_t *)out;
-   memset(&m[0], 0, sizeof(m[0]));
-   m[0].id = 7;
-   snprintf(m[0].kind, sizeof(m[0].kind), "decision");
-   snprintf(m[0].headline, sizeof(m[0].headline), "why needle exists");
-   snprintf(m[0].content, sizeof(m[0].content), "%schose needle over haystack for O(1) lookup",
-            g_code_context_memory_anchored ? "src/search.c: " : "");
-   return 1;
-}
-
-int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
-                                 int include_all, int limit, void *out, int max)
-{
-   (void)workspace;
-   assert(project == NULL || strcmp(project, "proj-alpha") == 0);
-   assert(include_all == 0 || include_all == 1);
-   int n = db2_memory_find_facts_like(query, limit, out, max);
-   if (n > 0)
-      ((test_full_memory_t *)out)[0].confidence = 0.91;
-   return n;
-}
-
-int memory_scope_visibility_rank(int64_t memory_id, const char *workspace, const char *project)
-{
-   (void)workspace;
-   return memory_id == 7 && project && strcmp(project, "proj-alpha") == 0
-              ? g_code_context_memory_scope_rank
-              : 0;
-}
-
 /* canonical_index_find_callers stub (used by the callers + hybrid route tests
  * below) — moved here from test_kb_http_routes.c to keep that file under the
  * 2000-line build-integrity limit; cast a void* like the other canonical stubs. */
@@ -4599,27 +4620,187 @@ int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
  * (g_vec_enabled=0 -> memory_embed_text returns 0 -> the leg is skipped), so the
  * existing hybrid tests are unaffected; test_code_hybrid_vector_ok flips it on. */
 static int g_vec_enabled = 0;
+static int instance_fusion_enabled = 1;
 static int g_vec_search_unavailable = 0;
 static int g_vec_unauthorized = 0;
-int memory_embed_text(const char *text, const char *command, embed_input_type_t input_type,
-                      float *out, int max_dim)
+/* The module's query behavior is exercised in Go; this fixture owns HTTP
+ * rendering of its command result. */
+int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
+                                           const cJSON *context, cJSON **result)
 {
-   (void)text;
-   (void)command;
-   (void)input_type;
-   if (!g_vec_enabled || !out || max_dim <= 0)
-      return 0;
-   int d = 2560; /* the stub embedder's FIXED output dim (independent of the corpus
-                  * dim) so the route's qdim==db2_embedding_dim() gate can mismatch. */
-   if (d > max_dim)
-      return 0;
-   for (int i = 0; i < d; i++)
-      out[i] = 0.01f * (float)(i % 7);
-   return d;
+   if (!strcmp(method, "memory.runtime") && !strcmp(jo_cstr(args, "operation"), "ontology-review"))
+   {
+      assert(!strcmp(jo_cstr(args, "action"), "map"));
+      assert(!strcmp(jo_cstr(args, "relation"), "novel"));
+      assert(!strcmp(jo_cstr(args, "target"), "works_for"));
+      assert(!cJSON_GetObjectItemCaseSensitive(args, "actor"));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
+      assert(!strcmp(jo_cstr(context, "principal"), "test:operator"));
+      assert(!strcmp(jo_cstr(context, "transport_identity"), "test-transport"));
+      return ontology_owner_fixture(result);
+   }
+   if (!strcmp(method, "memory.runtime") && !strcmp(jo_cstr(args, "operation"), "entity-review"))
+   {
+      assert(!strcmp(jo_cstr(args, "action"), "merge"));
+      assert(!strcmp(jo_cstr(args, "from_id"), "9007199254740993"));
+      assert(jo_int((cJSON *)args, "into_id", 0) == 2);
+      assert(!cJSON_GetObjectItemCaseSensitive(args, "actor"));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
+      assert(!strcmp(jo_cstr(context, "principal"), "test:operator"));
+      assert(!strcmp(jo_cstr(context, "transport_identity"), "test-transport"));
+      return ontology_owner_fixture(result);
+   }
+   review_calls++;
+   assert(strcmp(method, "memory.reject") == 0 || strcmp(method, "memory.restore") == 0 ||
+          strcmp(method, "memory.runtime") == 0);
+   if (!strcmp(method, "memory.runtime"))
+      assert(!strcmp(jo_cstr(args, "operation"), "fact-review"));
+   assert(jo_i64((cJSON *)args, "id", 0) == 42);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
+   assert(strcmp(jo_cstr(context, "principal"), "test:operator") == 0);
+   assert(strcmp(jo_cstr(context, "transport_identity"), "test-transport") == 0);
+   assert(!cJSON_GetObjectItemCaseSensitive(args, "actor"));
+   *result = review_transport == 1
+                 ? cJSON_Parse(
+                       review_reply
+                           ? review_reply
+                           : (!strcmp(method, "memory.runtime")
+                                  ? "{\"status\":\"ok\",\"ok\":true,\"assertion_id\":42,"
+                                    "\"lifecycle\":\"promoted\",\"commit_id\":\"verified-commit\"}"
+                                  : "{\"status\":\"ok\"}"))
+                 : NULL;
+   return review_transport;
 }
-int memory_embedder_last_result_unauthorized(void)
+
+static int hybrid_owner_unavailable;
+static const char *hybrid_why_override;
+
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
+                                                    int timeout_ms, cJSON **result)
 {
-   return g_vec_unauthorized;
+   if (strcmp(jo_cstr(args, "operation"), "hybrid-context") == 0)
+   {
+      assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 10000);
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(args, "scope_context")));
+      if (hybrid_owner_unavailable)
+      {
+         *result = NULL;
+         return -1;
+      }
+      *result = cJSON_CreateObject();
+      cJSON_AddStringToObject(*result, "status", "ok");
+      cJSON *files = cJSON_AddArrayToObject(*result, "files");
+      if (instance_fusion_enabled && !strcmp(jo_cstr(args, "symbol"), "target_fn") &&
+          !strcmp(jo_cstr(args, "project"), "proj-alpha"))
+      {
+         cJSON *file = cJSON_CreateObject();
+         cJSON_AddStringToObject(file, "project", "proj-alpha");
+         cJSON_AddStringToObject(file, "file_path", "src/design_notes.c");
+         cJSON_AddNumberToObject(file, "structural_weight", 0);
+         cJSON_AddItemToArray(files, file);
+      }
+      cJSON_AddStringToObject(
+          *result, "why_json",
+          hybrid_why_override ? hybrid_why_override
+          : !strcmp(jo_cstr(args, "query"), "needle")
+              ? "[{\"id\":7,\"kind\":\"decision\",\"headline\":\"why needle "
+                "exists\",\"content\":\"chose needle over haystack for O(1) lookup\"}]"
+              : "[]");
+      return 1;
+   }
+
+   if (strcmp(jo_cstr(args, "operation"), "code-context") == 0)
+   {
+      assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 10000);
+      if (!g_code_context_owner_available)
+      {
+         *result = NULL;
+         return -1;
+      }
+      cJSON *plan = cJSON_Duplicate(args, 1);
+      cJSON_ReplaceItemInObjectCaseSensitive(plan, "operation",
+                                             cJSON_CreateString("code-context-plan"));
+      cJSON *memories = cJSON_AddArrayToObject(plan, "memories");
+      if (strcmp(jo_cstr(args, "query"), "needle") == 0)
+      {
+         cJSON *memory = cJSON_CreateObject();
+         cJSON_AddNumberToObject(memory, "id", 7);
+         cJSON_AddStringToObject(memory, "kind", "decision");
+         cJSON_AddStringToObject(memory, "headline", "why needle exists");
+         cJSON_AddStringToObject(memory, "content",
+                                 g_code_context_memory_anchored
+                                     ? "src/search.c: chose needle over haystack for O(1) lookup"
+                                     : "chose needle over haystack for O(1) lookup");
+         cJSON_AddNumberToObject(memory, "confidence", 0.91);
+         cJSON *scope = cJSON_AddObjectToObject(memory, "scope");
+         cJSON_AddStringToObject(scope, "type",
+                                 g_code_context_memory_scope_rank == 3 ? "project" : "global");
+         cJSON_AddStringToObject(scope, "value",
+                                 g_code_context_memory_scope_rank == 3 ? "proj-alpha" : "_global");
+         cJSON_AddItemToArray(memories, memory);
+      }
+      int rc = module_runtime_fixture_call(plan, result);
+      cJSON_Delete(plan);
+      return rc;
+   }
+   assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 120000);
+   assert(strcmp(jo_cstr(args, "operation"), "demotion-check") == 0);
+   const cJSON *config = cJSON_GetObjectItemCaseSensitive(args, "config");
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(config, "n_min")) == 2);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(config, "window")) == 64);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(config, "half_life_days")) == 30);
+   *result = cJSON_Parse(
+       "{\"status\":\"ok\",\"candidates\":2,\"scored\":2,\"would_demote\":1,\"demotion_enabled\":1,"
+       "\"by_kind\":[{\"kind\":\"fact\",\"scored\":2,\"would_demote\":1,\"p10\":0.5}]}");
+   return 1;
+}
+
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+{
+   if (strcmp(method, "memory.review_console") == 0)
+   {
+      *result =
+          cJSON_Parse("{\"status\":\"ok\",\"schema\":\"console.memories.v1\",\"memories\":[]}");
+      return 1;
+   }
+   if (strcmp(method, "memory.runtime") == 0)
+   {
+      if (!strcmp(jo_cstr(args, "operation"), "ontology-dashboard"))
+         return ontology_owner_fixture(result);
+      if (!strcmp(jo_cstr(args, "operation"), "fact-candidates"))
+      {
+         *result = cJSON_Parse("{\"status\":\"ok\",\"candidates\":[]}");
+         return 1;
+      }
+      if (strcmp(jo_cstr(args, "operation"), "record") == 0)
+      {
+         *result = cJSON_CreateObject();
+         cJSON_AddStringToObject(*result, "status", "ok");
+         cJSON *record = cJSON_AddObjectToObject(*result, "memory");
+         cJSON_AddNumberToObject(
+             record, "id", cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "id")));
+         cJSON_AddStringToObject(record, "kind", "fact");
+         return 1;
+      }
+      assert(strcmp(jo_cstr(args, "operation"), "fusion-state") == 0);
+      *result = cJSON_CreateObject();
+      cJSON_AddBoolToObject(*result, "enabled", instance_fusion_enabled);
+      return 1;
+   }
+   assert(strcmp(method, "memory.embed_text") == 0);
+   *result = cJSON_CreateObject();
+   int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
+   cJSON_AddBoolToObject(*result, "unauthorized", g_vec_unauthorized);
+   if (!g_vec_enabled || max_dim < 2560)
+      return 1;
+   int dim = 2560;
+   cJSON *vector = cJSON_AddArrayToObject(*result, "vector");
+   for (int i = 0; i < dim; ++i)
+      cJSON_AddItemToArray(vector, cJSON_CreateNumber(0.01f * (float)(i % 7)));
+   return 1;
 }
 int pgvec_code_search_paths(const char *project, const float *vec, int dim, int limit, char *paths,
                             int path_cap, double *scores, int max)
@@ -4988,11 +5169,6 @@ static void test_code_scope_all_keeps_active_project_first(void)
 }
 
 /* §5 hybrid retrieval: fuse lexical-code + graph-callers (RRF) + memory "why". */
-static int instance_fusion_enabled = 1;
-int memory_fusion_state_is_on(void)
-{
-   return instance_fusion_enabled;
-}
 
 static void test_code_hybrid_instance_off(void)
 {
@@ -5033,6 +5209,35 @@ static void test_code_hybrid_ok(void)
 /* §6 cross-session memory fusion: the knowledge graph connects the seed symbol to a
  * memory-extracted entity that resolves to a file the code/graph/vector legs never
  * see, fused in as a ranked "memory" signal (not just a why annotation). */
+static void test_code_hybrid_owner_transport(void)
+{
+   char buf[16384];
+   const char *query = "query=needle&symbol=target_fn&project=proj-alpha";
+   hybrid_owner_unavailable = 1;
+   assert(kb_http_route_ex("GET", "/v1/code/hybrid", query, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 200);
+   assert(strstr(buf, "\"memory_status\":\"unavailable\""));
+   assert(strstr(buf, "src/search.c") && strstr(buf, "\"why\":[]"));
+   hybrid_owner_unavailable = 0;
+   char why[8192];
+   const char *prefix = "[{\"id\":9223372036854775807,\"kind\":\"fact\",\"content\":\"";
+   size_t n = strlen(prefix);
+   memcpy(why, prefix, n);
+   memset(why + n, 'x', 5000);
+   strcpy(why + n + 5000, "END\"}]");
+   hybrid_why_override = why;
+   assert(kb_http_route_ex("GET", "/v1/code/hybrid", query, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 200);
+   assert(strstr(buf, "9223372036854775807") && strstr(buf, "END"));
+   assert(kb_http_route_ex("GET", "/v1/code/hybrid", query, NULL, NULL, NULL, 0, buf, 2048) == 413);
+   assert(strstr(buf, "result_too_large"));
+   hybrid_why_override = "invalid";
+   assert(kb_http_route_ex("GET", "/v1/code/hybrid", query, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 200);
+   assert(strstr(buf, "\"memory_status\":\"unavailable\""));
+   hybrid_why_override = NULL;
+}
+
 static void test_code_hybrid_memory_leg(void)
 {
    char buf[2048];
@@ -5202,6 +5407,20 @@ static void test_code_context_bounded_current_project(void)
  *
  * Genuine abstention — a live embedder that matches nothing — is not reachable through
  * this stub set: g_vec_enabled=1 returns canned hits regardless of the query. */
+static void test_code_context_owner_transport(void)
+{
+   char buf[8192];
+   g_code_context_owner_available = 0;
+   assert(handle_get_code_context("query=needle&project=proj-alpha", buf, sizeof(buf)) == 503);
+   assert(strstr(buf, "\"dependency\":\"memory\"") != NULL);
+   g_code_context_owner_available = 1;
+   assert(handle_get_code_context("query=needle&project=proj-alpha", buf, 64) == 413);
+   g_code_context_generation = INT64_MAX;
+   assert(handle_get_code_context("query=needle&project=proj-alpha", buf, sizeof(buf)) == 200);
+   assert(strstr(buf, "\"generation\":9223372036854775807") != NULL);
+   g_code_context_generation = 2;
+}
+
 static void test_code_context_without_an_embedder_reports_the_dependency(void)
 {
    char buf[2048];
@@ -5334,72 +5553,6 @@ static void test_code_lessons_missing_project(void)
    int s = kb_http_route_ex("GET", "/v1/code/lessons", "", NULL, NULL, NULL, 0, buf, sizeof(buf));
    assert(s == 409);
    assert(strstr(buf, "scope_required") != NULL);
-}
-
-/* §6 memory-fusion leg stubs. The real db2_entity_edge_explain_t / db2_entity_node_t
- * (db2/entity_*.h) pull in memory.h's edge_t, which conflicts with this file's
- * simplified memory_t; so mirror the layouts and take void* (same pattern as the
- * code-projection stub). A symbol seed -> one knowledge-graph edge to a memory-
- * extracted entity that resolves to a file the code/graph/vector legs never see. */
-typedef struct
-{
-   int64_t id;
-   char source[512];
-   char relation[64];
-   char target[512];
-   int weight;
-   int structural_weight;
-   double utility_score;
-   char edge_origin[32];
-} test_entity_edge_explain_t;
-typedef struct
-{
-   char node_key[512];
-   int node_kind;
-   char project[256];
-   char display_name[256];
-   char full_key[512];
-   char file_path[512];
-   char symbol[256];
-   char node_origin[32];
-   int64_t last_seen_generation_id;
-} test_entity_node_t;
-
-int db2_entity_node_key_symbol(const char *project, const char *name, char *out, size_t cap)
-{
-   (void)project;
-   if (!name || !out || cap == 0)
-      return -1;
-   snprintf(out, cap, "symbol:proj:%s", name);
-   return 0;
-}
-int db2_entity_edge_explain_by_entity(const char *entity, void *out, int max)
-{
-   if (!entity || !out || max < 1)
-      return 0;
-   if (strcmp(entity, "symbol:proj:target_fn") != 0)
-      return 0;
-   test_entity_edge_explain_t *e = (test_entity_edge_explain_t *)out;
-   memset(&e[0], 0, sizeof(e[0]));
-   snprintf(e[0].source, sizeof(e[0].source), "%s", entity);
-   snprintf(e[0].relation, sizeof(e[0].relation), "relates_to");
-   snprintf(e[0].target, sizeof(e[0].target), "mement:proj:design");
-   e[0].weight = 80;
-   e[0].structural_weight = 0;
-   return 1;
-}
-int db2_entity_node_get(const char *node_key, void *out)
-{
-   if (!node_key || !out)
-      return -1;
-   if (strcmp(node_key, "mement:proj:design") != 0)
-      return -1;
-   test_entity_node_t *n = (test_entity_node_t *)out;
-   memset(n, 0, sizeof(*n));
-   snprintf(n->node_key, sizeof(n->node_key), "%s", node_key);
-   snprintf(n->file_path, sizeof(n->file_path), "src/design_notes.c");
-   snprintf(n->node_origin, sizeof(n->node_origin), "memory_extraction");
-   return 0;
 }
 
 /* §4 judge stub: confirm the first link (the disconnected file:x/file:y pair) with a
@@ -6704,6 +6857,42 @@ static void test_entity_search_ok(void)
                             "{\"query\":\"alice\"}", 16, buf, sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"entities\"") != NULL);
+   const char *failures[] = {"not-json", "{\"status\":\"ok\"}",
+                             "{\"status\":\"error\",\"kind\":\"unavailable\"}",
+                             "{\"status\":\"error\",\"kind\":\"forbidden\"}"};
+   for (size_t i = 0; i < sizeof(failures) / sizeof(failures[0]); i++)
+   {
+      entity_reply = failures[i];
+      s = kb_http_route_ex("POST", "/v1/entities/search", NULL, NULL, NULL, "{\"query\":\"alice\"}",
+                           17, buf, sizeof(buf));
+      assert(s == (i == 3 ? 403 : 503));
+      s = kb_http_route_ex("GET", "/v1/entities/nobody", NULL, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf));
+      assert(s == (i == 3 ? 403 : 503));
+   }
+   entity_status = 503;
+   assert(kb_http_route_ex("POST", "/v1/entities/search", NULL, NULL, NULL, "{\"query\":\"alice\"}",
+                           17, buf, sizeof(buf)) == 503);
+   entity_status = 200;
+   char long_summary[12001], large[16000];
+   memset(long_summary, 'x', 12000);
+   long_summary[12000] = 0;
+   cJSON *response = cJSON_Parse("{\"status\":\"ok\",\"profile\":{\"entity\":\"nobody\"}}");
+   cJSON_AddStringToObject(cJSON_GetObjectItemCaseSensitive(response, "profile"), "summary",
+                           long_summary);
+   char *raw = cJSON_PrintUnformatted(response);
+   entity_reply = raw;
+   s = kb_http_route_ex("GET", "/v1/entities/nobody", NULL, NULL, NULL, NULL, 0, large,
+                        sizeof(large));
+   assert(s == 200);
+   cJSON *result = cJSON_Parse(large);
+   assert(result && strcmp(jo_cstr(result, "summary"), long_summary) == 0);
+   cJSON_Delete(result);
+   assert(kb_http_route_ex("GET", "/v1/entities/nobody", NULL, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 503);
+   free(raw);
+   cJSON_Delete(response);
+   entity_reply = NULL;
 }
 
 static void test_phase5_auth_rejected(void)
@@ -7591,6 +7780,8 @@ int main(void)
    test_console_admin_requires_authorization_module();
    test_console_pipeline();
    test_console_memories();
+   test_console_fact_review();
+   test_console_ontology_owner();
    test_console_settings();
    test_console_evidence_operator_boundary();
    test_accounts_routes();
@@ -7650,6 +7841,7 @@ int main(void)
    test_code_hybrid_ok();
    test_code_hybrid_instance_off();
    test_code_hybrid_memory_leg();
+   test_code_hybrid_owner_transport();
    test_code_hybrid_keeps_same_path_projects_distinct();
    test_code_hybrid_missing_query();
    test_code_hybrid_no_symbol();
@@ -7658,6 +7850,7 @@ int main(void)
    test_code_context_vector_store_outage_is_not_empty();
    test_code_context_dimension_mismatch_is_stale();
    test_code_context_bounded_current_project();
+   test_code_context_owner_transport();
    test_code_context_without_an_embedder_reports_the_dependency();
    test_code_context_embedder_outage_is_not_no_answer();
    test_code_context_embedder_auth_is_unauthorized();

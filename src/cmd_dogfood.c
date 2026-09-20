@@ -1,3 +1,4 @@
+#include "modules/kb_client/kb_client_pii.h"
 /* cmd_dogfood.c: dogfood qualitative log surfaces.
  *
  *   aimee dogfood tag <record-id> [--outcome X] [--richness N]
@@ -315,7 +316,10 @@ static int arm_review_reminder_if_needed(const char *month, int unlabelled)
    char trigger[96];
    snprintf(trigger, sizeof(trigger), "dogfood-review-%s", month);
 
-   cJSON *existing = dogfood_detach_prospectives(kb_client_memory_prospective_list_json(NULL, 256));
+   cJSON *list_args = cJSON_CreateObject();
+   cJSON_AddNumberToObject(list_args, "limit", 256);
+   cJSON *existing =
+       dogfood_detach_prospectives(kb_v1_action_request("memory.prospective_list", list_args));
    if (existing)
    {
       cJSON *r = NULL;
@@ -337,8 +341,25 @@ static int arm_review_reminder_if_needed(const char *month, int unlabelled)
    char valid_until[32];
    compute_review_deadline(month, valid_until, sizeof(valid_until));
 
-   char *envelope =
-       kb_client_memory_prospective_create_json(trigger, action, "", "", "", valid_until);
+   cJSON *create_args = cJSON_CreateObject();
+   int withheld = !create_args ||
+                  kb_client_pii_add_string_required(create_args, "trigger_text", trigger) != 0 ||
+                  kb_client_pii_add_string_required(create_args, "action_text", action) != 0 ||
+                  kb_client_pii_add_string(create_args, "anchor_entity", "") != 0 ||
+                  kb_client_pii_identifier_sensitive("");
+   char *envelope = NULL;
+   if (withheld)
+   {
+      cJSON_Delete(create_args);
+      kb_client_memory_audit_note("memory.prospective_create.withheld_pii", 0, NULL, NULL, NULL, 0,
+                                  NULL, 0);
+      envelope = kb_client_pii_withheld_json();
+   }
+   else
+   {
+      cJSON_AddStringToObject(create_args, "valid_until", valid_until);
+      envelope = kb_v1_action_request("memory.prospective_create", create_args);
+   }
    if (!envelope)
       return 0;
    cJSON *resp = cJSON_Parse(envelope);
@@ -357,7 +378,11 @@ static int arm_review_reminder_if_needed(const char *month, int unlabelled)
  * complete every armed review reminder so the loop closes cleanly. */
 static int complete_review_reminders(void)
 {
-   cJSON *armed = dogfood_detach_prospectives(kb_client_memory_prospective_list_json("armed", 64));
+   cJSON *list_args = cJSON_CreateObject();
+   cJSON_AddNumberToObject(list_args, "limit", 64);
+   cJSON_AddStringToObject(list_args, "state", "armed");
+   cJSON *armed =
+       dogfood_detach_prospectives(kb_v1_action_request("memory.prospective_list", list_args));
    if (!armed)
       return 0;
    int closed = 0;
@@ -370,7 +395,9 @@ static int complete_review_reminders(void)
          continue;
       if (strncmp(trig->valuestring, "dogfood-review-", 15) != 0)
          continue;
-      char *env = kb_client_memory_prospective_complete_json((int64_t)id_j->valuedouble);
+      cJSON *complete_args = cJSON_CreateObject();
+      cJSON_AddNumberToObject(complete_args, "id", (double)((int64_t)id_j->valuedouble));
+      char *env = kb_v1_action_request("memory.prospective_complete", complete_args);
       if (!env)
          continue;
       cJSON *resp = cJSON_Parse(env);

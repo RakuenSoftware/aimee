@@ -143,3 +143,13 @@ The [slice 31 liveness audit](../validation/core-modularization-slice-31.md) fou
 in the shipping server build with non-test consumers. It also records three narrower test-support or
 currently test-only API cleanup candidates. Removing or privatizing them requires a separate
 compatibility-focused slice rather than being hidden in an ownership-metadata change.
+
+The generic module-plan executor accepts host-only plans through named command
+discovery. It snapshots roles, tool names and last-user text, then validates every
+step before invoking any supplied connection or editing the IR. Bindings and
+text resources are explicitly supplied by the host; plans cannot invoke arbitrary
+commands. Supported steps call a binding, append typed context or remove a
+validated descending list of tool indices. Context metadata follows the existing
+IR authority-promotion rule, revision epochs retain their full 64-bit value,
+and appended blocks preserve the existing cached prefix. Domain selection,
+rendering and policy belong to the Go module producing the plan.

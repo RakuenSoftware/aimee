@@ -344,6 +344,8 @@ int server_send_error(server_conn_t *conn, const char *message, const char *requ
  * so splitting an RPC handler through it downgrades a typed error to an untyped
  * one. Same function builds both forms, so they cannot drift. */
 cJSON *server_error_kind_json(const char *kind, const char *message, const char *request_id);
+cJSON *server_invoke_module_operation(const char *method, const char *operation, const cJSON *args,
+                                      const char *unavailable_message);
 
 /* Add or replace the typed-error classification on an existing response. This
  * preserves richer dependency fields (retryability, dependency, retry delay)

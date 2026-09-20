@@ -1,3 +1,4 @@
+#include "json_fluent.h"
 /* kb_http.c: aimee-kb public HTTP/1.1 API server (Phase 1).
  *
  * Serves /v1/health, /v1/version, /v1/capabilities on a plain TCP port.
@@ -491,10 +492,16 @@ static void purge_store_add(cJSON *stores, const char *name, int rc, int *all_ok
 static int purge_respond(cJSON *resp, char *out_buf, int out_cap, int status)
 {
    char *out = resp ? cJSON_PrintUnformatted(resp) : NULL;
-   snprintf(out_buf, (size_t)out_cap, "%s", out ? out : "{\"error\":\"out of memory\"}");
+   if (!out || strlen(out) >= (size_t)out_cap)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"response unavailable or exceeds limit\"}");
+      status = 500;
+   }
+   else
+      memcpy(out_buf, out, strlen(out) + 1);
    free(out);
    cJSON_Delete(resp);
-   return out ? status : 500;
+   return status;
 }
 
 /* Parse the shared purge-route body {project, generation, purge_id}. Returns 0
@@ -2225,32 +2232,41 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       if (limit > 50)
          limit = 50;
 
-      memory_relation_t *rels = malloc((size_t)limit * sizeof(memory_relation_t));
-      if (!rels)
-      {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request, "query", query);
+      cJSON_AddNumberToObject(request, "limit", limit);
+      char *encoded = cJSON_PrintUnformatted(request);
+      cJSON_Delete(request);
+      if (!encoded)
          return 500;
-      }
-      int nrels = memory_search_graph(query, limit, rels, limit);
-      if (nrels < 0)
-         nrels = 0;
-
-      int pos = 0;
-      pos = js_appendf(out_buf, pos, out_cap, "{\"entities\":[");
-      for (int i = 0; i < nrels && pos + 64 < out_cap; i++)
+      int status = kb_dispatch_action_json("memory.search_graph", encoded, (int)strlen(encoded),
+                                           out_buf, out_cap);
+      free(encoded);
+      if (status != 200)
+         return status;
+      cJSON *response = cJSON_Parse(out_buf);
+      cJSON *relations = cJSON_GetObjectItemCaseSensitive(response, "relations");
+      if (strcmp(jo_cstr(response, "status"), "ok") || !cJSON_IsArray(relations))
       {
-         if (i > 0)
-            out_buf[pos++] = ',';
-         pos = js_appendf(out_buf, pos, out_cap, "{\"entity\":\"");
-         pos = json_escape(rels[i].src_entity, out_buf, pos, out_cap);
-         pos = js_appendf(out_buf, pos, out_cap, "\",\"kind\":\"\",\"summary\":\"");
-         pos = json_escape(rels[i].fact_text, out_buf, pos, out_cap);
-         pos +=
-             snprintf(out_buf + pos, (size_t)(out_cap - pos), "\",\"score\":%.6f}", rels[i].weight);
+         status = strcmp(jo_cstr(response, "kind"), "forbidden") == 0 ? 403 : 503;
+         cJSON_Delete(response);
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"entity search unavailable\"}");
+         return status;
       }
-      pos = js_appendf(out_buf, pos, out_cap, "],\"next_cursor\":null}");
-      free(rels);
-      return 200;
+      cJSON *result = cJSON_CreateObject(), *entities = cJSON_AddArrayToObject(result, "entities");
+      cJSON *relation;
+      cJSON_ArrayForEach(relation, relations)
+      {
+         cJSON *entity = cJSON_CreateObject();
+         cJSON_AddStringToObject(entity, "entity", jo_cstr(relation, "src_entity"));
+         cJSON_AddStringToObject(entity, "kind", "");
+         cJSON_AddStringToObject(entity, "summary", jo_cstr(relation, "fact_text"));
+         cJSON_AddNumberToObject(entity, "score", jo_num(relation, "weight", 0));
+         cJSON_AddItemToArray(entities, entity);
+      }
+      cJSON_AddNullToObject(result, "next_cursor");
+      cJSON_Delete(response);
+      return purge_respond(result, out_buf, out_cap, 200);
    }
 
    /* GET /v1/entities/{id} */
@@ -2268,21 +2284,38 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
             snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
             return 405;
          }
-         memory_entity_profile_t profile;
-         memset(&profile, 0, sizeof(profile));
-         if (memory_get_entity_profile(seg2, &profile) != 0)
+         cJSON *request = cJSON_CreateObject();
+         cJSON_AddStringToObject(request, "entity", seg2);
+         char *encoded = cJSON_PrintUnformatted(request);
+         cJSON_Delete(request);
+         if (!encoded)
+            return 500;
+         int status = kb_dispatch_action_json("memory.entity_profile", encoded,
+                                              (int)strlen(encoded), out_buf, out_cap);
+         free(encoded);
+         if (status != 200)
+            return status;
+         cJSON *response = cJSON_Parse(out_buf);
+         cJSON *profile = cJSON_GetObjectItemCaseSensitive(response, "profile");
+         if (strcmp(jo_cstr(response, "status"), "ok") || !cJSON_IsObject(profile))
          {
-            snprintf(out_buf, (size_t)out_cap, "{\"error\":\"not found\"}");
-            return 404;
+            status = strcmp(jo_cstr(response, "kind"), "not_found") == 0   ? 404
+                     : strcmp(jo_cstr(response, "kind"), "forbidden") == 0 ? 403
+                                                                           : 503;
+            cJSON_Delete(response);
+            snprintf(out_buf, (size_t)out_cap, "{\"error\":\"%s\"}",
+                     status == 404 ? "not found" : "entity lookup unavailable");
+            return status;
          }
-         int pos = 0;
-         pos = js_appendf(out_buf, pos, out_cap, "{\"entity\":\"");
-         pos = json_escape(profile.entity, out_buf, pos, out_cap);
-         pos = js_appendf(out_buf, pos, out_cap, "\",\"kind\":\"\",\"summary\":\"");
-         pos = json_escape(profile.summary, out_buf, pos, out_cap);
-         pos =
-             js_appendf(out_buf, pos, out_cap, "\",\"facts\":[],\"tags\":[],\"updated_at\":\"\"}");
-         return 200;
+         cJSON *result = cJSON_CreateObject();
+         cJSON_AddStringToObject(result, "entity", jo_cstr(profile, "entity"));
+         cJSON_AddStringToObject(result, "kind", "");
+         cJSON_AddStringToObject(result, "summary", jo_cstr(profile, "summary"));
+         cJSON_AddArrayToObject(result, "facts");
+         cJSON_AddArrayToObject(result, "tags");
+         cJSON_AddStringToObject(result, "updated_at", "");
+         cJSON_Delete(response);
+         return purge_respond(result, out_buf, out_cap, 200);
       }
    }
    /* ── Phase 3: Ingest API routes ──────────────────────────────────────── */

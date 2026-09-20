@@ -1,3 +1,5 @@
+#include "json_fluent.h"
+#include <limits.h>
 /* cmd_data.c: data management commands (db, export, import, config) */
 #include "aimee.h"
 #include "db1_client/db1.h"
@@ -94,7 +96,19 @@ void cmd_export(app_ctx_t *ctx, int argc, char **argv)
    {
       char path[4096];
       snprintf(path, sizeof(path), "%s/memories.jsonl", output);
-      int n = kb_client_memory_export_jsonl(path);
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "path", path);
+      char *raw = kb_v1_action_request("memory.export_jsonl", request);
+      cJSON *response = raw ? cJSON_Parse(raw) : NULL;
+      free(raw);
+      cJSON *count = cJSON_GetObjectItemCaseSensitive(response, "count");
+      if (strcmp(jo_cstr(response, "status"), "ok") || !cJSON_IsNumber(count) ||
+          count->valuedouble < 0 || count->valuedouble > INT_MAX ||
+          count->valuedouble != count->valueint)
+         fatal("memory export failed: %s", jo_cstr(response, "message"));
+      int n = count->valueint;
+      cJSON_Delete(response);
       if (n >= 0)
       {
          printf("Exported %d memories\n", n);
@@ -120,7 +134,19 @@ void cmd_export(app_ctx_t *ctx, int argc, char **argv)
    {
       char path[4096];
       snprintf(path, sizeof(path), "%s/decisions.jsonl", output);
-      int n = kb_client_memory_decisions_export_jsonl(path);
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "path", path);
+      char *raw = kb_v1_action_request("memory.decisions_export_jsonl", request);
+      cJSON *response = raw ? cJSON_Parse(raw) : NULL;
+      free(raw);
+      cJSON *count = cJSON_GetObjectItemCaseSensitive(response, "count");
+      if (strcmp(jo_cstr(response, "status"), "ok") || !cJSON_IsNumber(count) ||
+          count->valuedouble < 0 || count->valuedouble > INT_MAX ||
+          count->valuedouble != count->valueint)
+         fatal("memory export failed: %s", jo_cstr(response, "message"));
+      int n = count->valueint;
+      cJSON_Delete(response);
       if (n >= 0)
       {
          printf("Exported %d decisions\n", n);
@@ -247,20 +273,36 @@ void cmd_import(app_ctx_t *ctx, int argc, char **argv)
                continue;
             }
 
-            /* Check for duplicate by key */
-            if (strcmp(conflict, "skip") == 0 && kb_client_memory_key_exists(jkey->valuestring))
+            /* A dependency failure must not turn skip into overwrite. */
+            if (strcmp(conflict, "skip") == 0)
             {
-               skipped++;
-               cJSON_Delete(obj);
-               continue;
+               cJSON *request = cJSON_CreateObject();
+               kb_client_memory_scope_context_apply(request);
+               cJSON_AddStringToObject(request, "key", jkey->valuestring);
+               char *raw = kb_v1_action_request("memory.key_exists", request);
+               cJSON *response = raw ? cJSON_Parse(raw) : NULL;
+               free(raw);
+               cJSON *exists = cJSON_GetObjectItemCaseSensitive(response, "exists");
+               if (strcmp(jo_cstr(response, "status"), "ok") || !cJSON_IsBool(exists))
+                  fatal("memory import duplicate check failed: %s", jo_cstr(response, "message"));
+               int duplicate = cJSON_IsTrue(exists);
+               cJSON_Delete(response);
+               if (duplicate)
+               {
+                  skipped++;
+                  cJSON_Delete(obj);
+                  continue;
+               }
             }
 
             memory_t m;
             const char *tier = cJSON_IsString(jtier) ? jtier->valuestring : "L2";
             const char *kind = cJSON_IsString(jkind) ? jkind->valuestring : "fact";
             double conf = cJSON_IsNumber(jconf) ? jconf->valuedouble : 1.0;
-            kb_client_memory_insert(tier, kind, jkey->valuestring, jcontent->valuestring, conf,
-                                    "import", &m);
+            int rc = kb_client_memory_insert(tier, kind, jkey->valuestring, jcontent->valuestring,
+                                             conf, "import", &m);
+            if (rc != 0)
+               fatal("memory import failed for input record");
             imported++;
             cJSON_Delete(obj);
          }

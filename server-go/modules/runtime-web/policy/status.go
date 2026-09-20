@@ -10,6 +10,8 @@ func HTTPStatusForRPCFault(kind string) int {
 	switch kind {
 	case "invalid_argument":
 		return http.StatusBadRequest
+	case "conflict":
+		return http.StatusConflict
 	case "not_found":
 		return http.StatusNotFound
 	case "permission_denied":

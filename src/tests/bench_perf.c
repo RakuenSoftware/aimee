@@ -21,8 +21,6 @@
 #include "aimee.h"
 #include "db1_client/db1.h"
 #include "modules/db2/c/db2.h"
-#include "modules/db2/c/db2_test_shim.h"
-#include "modules/memory/memory_core_internal.h"
 #include "agent_config.h"
 #include "guardrails.h"
 #include "platform_test_util.h"
@@ -67,9 +65,6 @@ static void compute_percentiles(double *samples, int n, percentiles_t *out)
 #define BENCH_ITERATIONS 200
 #define BENCH_WARMUP     10
 
-static memory_t s_pagerank_nodes[50];
-static int s_pagerank_node_count;
-
 typedef struct
 {
    const char *name;
@@ -79,45 +74,6 @@ typedef struct
    percentiles_t results;
 } bench_entry_t;
 
-static void bench_db_setup(int memory_count)
-{
-   db2_test_shim_open();
-
-   /* Seed memories for search benchmarks */
-   for (int i = 0; i < memory_count; i++)
-   {
-      char key[128], content[256];
-      const char *kinds[] = {KIND_FACT, KIND_PREFERENCE, KIND_DECISION, KIND_EPISODE};
-      const char *tiers[] = {TIER_L0, TIER_L1, TIER_L2};
-      snprintf(key, sizeof(key), "bench_key_%04d", i);
-      snprintf(content, sizeof(content),
-               "Benchmark memory %d: contains information about performance "
-               "testing, latency measurement, and regression detection for "
-               "operation number %d in the system.",
-               i, i);
-      memory_t m;
-      memory_insert(tiers[i % 3], kinds[i % 4], key, content, 0.5 + (i % 50) * 0.01, "bench", &m);
-   }
-
-   memory_t hub;
-   assert(memory_insert(TIER_L2, KIND_FACT, "ReleasePlan",
-                        "ReleasePlan defines deployment approvals, windows, and release checks.",
-                        0.95, "bench-graph", &hub) == 0);
-   s_pagerank_nodes[s_pagerank_node_count++] = hub;
-   for (int i = 0; i < 49; i++)
-   {
-      char key[128];
-      char content[256];
-      snprintf(key, sizeof(key), "release_step_%02d", i);
-      snprintf(content, sizeof(content),
-               "release_step_%02d depends on deployment approvals and windows in ReleasePlan.", i);
-      memory_t leaf;
-      assert(memory_insert(TIER_L2, KIND_FACT, key, content, 0.88, "bench-graph", &leaf) == 0);
-      assert(memory_link_create(leaf.id, hub.id, "depends_on") == 0);
-      s_pagerank_nodes[s_pagerank_node_count++] = leaf;
-   }
-}
-
 /* Benchmark: db1 init + shutdown (in-memory) — exercises the production
  * cold-start path for DB1. */
 static void bench_db_open(double *samples, int n)
@@ -126,47 +82,6 @@ static void bench_db_open(double *samples, int n)
    {
       int64_t t0 = now_ns();
       int64_t t1 = now_ns();
-      samples[i] = (double)(t1 - t0) / 1e6;
-   }
-}
-
-/* Benchmark: indexed lexical fallback (FTS5 search). Hybrid retrieval has a
- * separate quality/latency evaluation; this SLO protects the local indexed
- * recall primitive used when the semantic collection is unavailable. */
-static void bench_memory_search(double *samples, int n)
-{
-   const char *queries[] = {"performance", "testing", "latency", "regression",
-                            "measurement", "system",  "bench",   "operation"};
-   int nq = (int)(sizeof(queries) / sizeof(queries[0]));
-
-   for (int i = 0; i < n; i++)
-   {
-      memory_t results[64];
-      int64_t t0 = now_ns();
-      memory_find_facts_lexical_fallback(queries[i % nq], NULL, NULL, 20, results, 64);
-      int64_t t1 = now_ns();
-      samples[i] = (double)(t1 - t0) / 1e6;
-   }
-}
-
-static void bench_memory_pagerank_search(double *samples, int n)
-{
-   memory_pagerank_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.enabled = 1;
-   cfg.iterations = 8;
-   cfg.weight = 1.2;
-   snprintf(cfg.relations, sizeof(cfg.relations), "depends_on");
-   assert(s_pagerank_node_count == 50);
-
-   for (int i = 0; i < n; i++)
-   {
-      memory_pagerank_score_t scores[50];
-      int64_t t0 = now_ns();
-      int count =
-          memory_compute_pagerank_scores(s_pagerank_nodes, s_pagerank_node_count, &cfg, scores, 50);
-      int64_t t1 = now_ns();
-      assert(count == 50);
       samples[i] = (double)(t1 - t0) / 1e6;
    }
 }
@@ -199,47 +114,6 @@ static void bench_pre_tool_check(double *samples, int n)
       assert(platform_setenv("AIMEE_ANTIPATTERNS_BYPASS", previous_bypass_buf) == 0);
    else
       assert(platform_unsetenv("AIMEE_ANTIPATTERNS_BYPASS") == 0);
-}
-
-/* Benchmark: memory_insert (single record) */
-static void bench_memory_insert(double *samples, int n)
-{
-   for (int i = 0; i < n; i++)
-   {
-      char key[128];
-      snprintf(key, sizeof(key), "bench_insert_%06d", i + 10000);
-      memory_t m;
-      int64_t t0 = now_ns();
-      memory_insert(TIER_L1, KIND_FACT, key, "Benchmark insert content for timing.", 0.75, "bench",
-                    &m);
-      int64_t t1 = now_ns();
-      samples[i] = (double)(t1 - t0) / 1e6;
-   }
-}
-
-/* Benchmark: memory_stats */
-static void bench_memory_stats(double *samples, int n)
-{
-   for (int i = 0; i < n; i++)
-   {
-      memory_stats_t stats;
-      int64_t t0 = now_ns();
-      memory_stats(&stats);
-      int64_t t1 = now_ns();
-      samples[i] = (double)(t1 - t0) / 1e6;
-   }
-}
-
-/* Benchmark: memory_promote cycle */
-static void bench_memory_promote(double *samples, int n)
-{
-   for (int i = 0; i < n; i++)
-   {
-      int64_t t0 = now_ns();
-      memory_promote();
-      int64_t t1 = now_ns();
-      samples[i] = (double)(t1 - t0) / 1e6;
-   }
 }
 
 /* Benchmark: startup_cold — fresh disk DB with migrations (cold path) */
@@ -536,6 +410,8 @@ static void print_json(bench_entry_t *entries, int count)
    {
       cJSON *item = cJSON_CreateObject();
       cJSON_AddStringToObject(item, "name", entries[i].name);
+      cJSON_AddStringToObject(item, "status",
+                              isfinite(entries[i].results.p95_ms) ? "ok" : "unavailable");
       cJSON_AddNumberToObject(item, "p50_ms", entries[i].results.p50_ms);
       cJSON_AddNumberToObject(item, "p95_ms", entries[i].results.p95_ms);
       cJSON_AddNumberToObject(item, "p99_ms", entries[i].results.p99_ms);
@@ -593,28 +469,27 @@ int main(int argc, char **argv)
    double *samples = calloc((size_t)total, sizeof(double));
    assert(samples);
 
-   /* Setup shared database with 1000 memories */
-   bench_db_setup(1000);
+   /* The removed in-process memory engine cannot be measured from this native
+    * harness. Preserve its case names as unavailable so a historical baseline
+    * cannot silently pass with those measurements omitted. Real Go memory
+    * measurements use aimee-memory-eval and its isolated PostgreSQL session. */
+   int unavailable = 0;
 
    /* Run each benchmark */
    for (int b = 0; b < bench_count; b++)
    {
       memset(samples, 0, (size_t)total * sizeof(double));
+      if (strncmp(benchmarks[b].name, "memory_", 7) == 0)
+      {
+         benchmarks[b].results = (percentiles_t){NAN, NAN, NAN};
+         unavailable++;
+         continue;
+      }
 
       if (strcmp(benchmarks[b].name, "db_open") == 0)
          bench_db_open(samples, total);
-      else if (strcmp(benchmarks[b].name, "memory_search") == 0)
-         bench_memory_search(samples, total);
-      else if (strcmp(benchmarks[b].name, "memory_pagerank_search") == 0)
-         bench_memory_pagerank_search(samples, total);
       else if (strcmp(benchmarks[b].name, "pre_tool_check") == 0)
          bench_pre_tool_check(samples, total);
-      else if (strcmp(benchmarks[b].name, "memory_insert") == 0)
-         bench_memory_insert(samples, total);
-      else if (strcmp(benchmarks[b].name, "memory_stats") == 0)
-         bench_memory_stats(samples, total);
-      else if (strcmp(benchmarks[b].name, "memory_promote") == 0)
-         bench_memory_promote(samples, total);
       else if (strcmp(benchmarks[b].name, "startup_cold") == 0)
          bench_startup_cold(samples, total);
       else if (strcmp(benchmarks[b].name, "startup_warm") == 0)
@@ -626,7 +501,6 @@ int main(int argc, char **argv)
       compute_percentiles(samples + BENCH_WARMUP, BENCH_ITERATIONS, &benchmarks[b].results);
    }
 
-   db2_test_shim_close();
    free(samples);
 
    /* Output results */
@@ -645,6 +519,15 @@ int main(int argc, char **argv)
                 benchmarks[i].results.p50_ms, benchmarks[i].results.p95_ms,
                 benchmarks[i].results.p99_ms);
       }
+   }
+
+   if (unavailable)
+   {
+      fprintf(stderr,
+              "%d memory benchmarks unavailable in the native harness; "
+              "use aimee-memory-eval. No baseline was saved or certified.\n",
+              unavailable);
+      return 2;
    }
 
    /* Save baseline if requested */

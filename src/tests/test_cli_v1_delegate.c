@@ -789,7 +789,7 @@ static void test_memory_show_alias_route(void)
    cJSON *req = marshal_request(route.method, 1, show_args);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "memory.get") == 0);
-   assert((long long)cJSON_GetObjectItem(req, "id")->valuedouble == 181);
+   assert(!strcmp(cJSON_GetObjectItem(req, "id")->valuestring, "181"));
    cJSON_Delete(req);
 
    printf("  PASS: test_memory_show_alias_route\n");
@@ -858,7 +858,7 @@ static void test_memory_delete_and_supersede_routes(void)
    cJSON *req = marshal_request(route.method, 1, delete_lookup + 1);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "memory.delete") == 0);
-   assert((long long)cJSON_GetObjectItem(req, "id")->valuedouble == 181);
+   assert(!strcmp(cJSON_GetObjectItem(req, "id")->valuestring, "181"));
    cJSON_Delete(req);
 
    char *supersede_lookup[] = {"supersede", "181", "corrected fact", "--confidence=0.75",
@@ -870,7 +870,7 @@ static void test_memory_delete_and_supersede_routes(void)
    req = marshal_request(route.method, 4, supersede_lookup + 1);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "memory.supersede") == 0);
-   assert((long long)cJSON_GetObjectItem(req, "old_id")->valuedouble == 181);
+   assert(!strcmp(cJSON_GetObjectItem(req, "old_id")->valuestring, "181"));
    assert(strcmp(cJSON_GetObjectItem(req, "new_content")->valuestring, "corrected fact") == 0);
    assert(cJSON_GetObjectItem(req, "confidence")->valuedouble == 0.75);
    assert(strcmp(cJSON_GetObjectItem(req, "session_id")->valuestring, "release-e2e") == 0);

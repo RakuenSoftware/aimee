@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -223,12 +224,27 @@ func TestSharedDatabaseBothDomainSchemas(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				record, err := data.Put(ctx, scope, memory.Record{Tier: "L0", Kind: "fact", Key: "shared-memory-probe", Content: string(placement) + " retained content", Confidence: 0.8})
+				// Use the actual owner entry point: canonical KB mutations require
+				// its scoped transaction, including provenance and admission writes.
+				handler := memory.NewHandler(nil, memory.WithDataStore(placement, data))
+				confidence := 0.8
+				writeScope := scope
+				if placement == memory.PlacementServer {
+					writeScope = memory.Scope{Type: memory.ScopeUser}
+				}
+				request, err := json.Marshal(memory.DataRequest{Operation: "store", Scope: writeScope,
+					Tier: "L0", Kind: "fact", Key: "shared-memory-probe",
+					Content: string(placement) + " retained content", Confidence: &confidence})
 				if err != nil {
 					t.Fatal(err)
 				}
+				raw, status := handler(bus.ModuleInvocation{StageID: memory.StageData}, request)
+				var reply memory.DataResponse
+				if status != bus.ModuleStatusOK || json.Unmarshal(raw, &reply) != nil || len(reply.Records) != 1 {
+					t.Fatalf("memory owner mutation failed: %s %d %s", placement, status, raw)
+				}
 				dataStores = append(dataStores, data)
-				records = append(records, record)
+				records = append(records, reply.Records[0])
 			}
 			// Exercise both domains through the same shared database client, then
 			// replay both bootstraps and prove the existing rows survive.
@@ -257,6 +273,7 @@ func TestSharedDatabaseBothDomainSchemas(t *testing.T) {
 				t.Fatal("bootstrap changed existing domain data")
 			}
 			for i, data := range dataStores {
+				scope := records[i].Scope
 				got, err := data.Get(ctx, scope, records[i].ID)
 				if err != nil || got.Content != records[i].Content {
 					t.Fatalf("placement data changed across bootstrap: %+v: %v", got, err)

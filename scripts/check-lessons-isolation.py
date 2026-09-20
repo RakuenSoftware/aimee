@@ -23,9 +23,11 @@ GUARDED = [
     "server-go/modules/db2/memory_lifecycle.go",
     "server-go/modules/db2/memory_sweeps.go",
     "server-go/modules/db2/memory_aggregates.go",
-    "src/modules/db2/c/fact_recall.c",
+    "server-go/modules/memory/fact_recall.go",
+    "server-go/modules/memory/assertion_search.go",
+    "server-go/modules/memory/typed_context.go",
     "src/modules/db2/c/kb_maintenance.c",          # decay / prune sweep
-    "src/modules/db2/c/fact_lifecycle.c",
+    "server-go/modules/memory/fact_maintenance.go",
     "src/modules/db2/c/demotion.c",
 ]
 

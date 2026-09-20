@@ -74,7 +74,7 @@ func (s *postgresDataStore) requireKBDirective() error {
 
 func validDirectiveCause(cause string) bool {
 	switch cause {
-	case "contradiction", "retrieval_failure", "missing_config", "user_follow_up":
+	case "contradiction", "retrieval_failure", "missing_config", "user_follow_up", "promoted_directive":
 		return true
 	}
 	return false
@@ -89,16 +89,18 @@ func validDirectiveState(state string) bool {
 }
 
 func (s *postgresDataStore) DirectiveCreate(ctx context.Context, request DataRequest) (Directive, error) {
+	item, _, err := s.DirectiveCreateWithOutcome(ctx, request)
+	return item, err
+}
+
+func (s *postgresDataStore) DirectiveCreateWithOutcome(ctx context.Context, request DataRequest) (Directive, bool, error) {
 	if err := s.requireKBDirective(); err != nil {
-		return Directive{}, err
+		return Directive{}, false, err
 	}
 	if !validDirectiveCause(request.Cause) || request.Priority < 0 || request.Priority > 100 {
-		return Directive{}, errors.New("memory: invalid directive")
+		return Directive{}, false, errors.New("memory: invalid directive")
 	}
 	priority := request.Priority
-	if priority == 0 {
-		priority = 50
-	}
 	var item Directive
 	err := scanDirective(s.db.QueryRow(ctx, `INSERT INTO epistemic_directives
 (question,topic,anchor_entity,anchor_file,cause,priority,memory_a_id,memory_b_id,evidence,
@@ -110,14 +112,15 @@ ON CONFLICT DO NOTHING RETURNING `+directiveColumns,
 		request.ValidUntil), &item)
 	if store.IsNoRows(err) {
 		err = scanDirective(s.db.QueryRow(ctx, `SELECT `+directiveColumns+` FROM epistemic_directives
-WHERE (cause='contradiction' AND memory_a_id=$1 AND memory_b_id=$2) OR
-      (cause=$3 AND topic=$4 AND $3 IN ('retrieval_failure','missing_config'))
+WHERE cause=$3 AND ((cause='contradiction' AND memory_a_id=$1 AND memory_b_id=$2) OR
+      (topic=$4 AND cause IN ('retrieval_failure','missing_config')))
 ORDER BY id DESC LIMIT 1`, request.MemoryAID, request.MemoryBID, request.Cause, request.Topic), &item)
+		return item, true, err
 	}
 	if err == nil {
 		runtimeMetricState.directiveCreated.Add(1)
 	}
-	return item, err
+	return item, false, err
 }
 
 func (s *postgresDataStore) DirectiveList(ctx context.Context, state, cause string, limit int) ([]Directive, error) {
@@ -177,8 +180,7 @@ func (s *postgresDataStore) DirectiveSweep(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE epistemic_directives SET state='expired', updated_at=pg_now_text()
-WHERE state='open' AND valid_until<>''
-  AND rtrim(replace(valid_until,'T',' '),'Z') < rtrim(replace(pg_now_text(),'T',' '),'Z')`)
+WHERE state='open' AND `+memoryTimeSQL("valid_until")+`<=CURRENT_TIMESTAMP`)
 	if err != nil {
 		return 0, err
 	}
@@ -194,8 +196,7 @@ func (s *postgresDataStore) DirectiveMatch(ctx context.Context, turn, entity, fi
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+directiveColumns+` FROM epistemic_directives
-WHERE state='open' AND (valid_until='' OR
- rtrim(replace(valid_until,'T',' '),'Z') >= rtrim(replace(pg_now_text(),'T',' '),'Z'))
+WHERE state='open' AND `+memoryUnexpiredSQL("")+`
 AND (($2<>'' AND lower(anchor_entity)=lower($2)) OR
      ($3<>'' AND lower(anchor_file)=lower($3)) OR
      ($1<>'' AND (lower(question) LIKE '%'||lower($1)||'%' OR

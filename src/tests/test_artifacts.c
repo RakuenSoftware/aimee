@@ -26,28 +26,36 @@
 #include "kb_mdl.h"
 #include "modules/learning/learning_evidence.h"
 
-/* Stub the memory-store typed verb so learning_promote's memory dispatch is
- * exercisable without linking the whole memory subsystem. The real
- * db2_kb_service_memory_insert_json (memory_insert path) is covered by the
- * memory tests; here we just confirm promote routes to it and records the
- * audit. Records the last call so the test can assert routing. */
+/* Exercise learning's generic command dispatch and promotion audit. The Go
+ * memory tests cover the store implementation and its transaction boundary. */
 static int g_mem_insert_calls;
 static char g_mem_insert_kind[64];
-cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, const char *key,
-                                         const char *content, double confidence,
-                                         const char *session_id)
+int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
 {
-   (void)tier;
-   (void)key;
-   (void)content;
-   (void)confidence;
-   (void)session_id;
+   assert(strcmp(method, "memory.store") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "tier")), "L1") == 0);
+   const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "kind"));
    g_mem_insert_calls++;
    snprintf(g_mem_insert_kind, sizeof(g_mem_insert_kind), "%s", kind ? kind : "");
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddNumberToObject(resp, "id", 4242);
-   return resp;
+   *result = resp;
+   return 1;
+}
+
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+{
+   assert(strcmp(method, "memory.runtime") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
+                 "directive-create") == 0);
+
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "cause")),
+                 "promoted_directive") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "question")), "q1") ==
+          0);
+   *result = cJSON_Parse("{\"status\":\"ok\",\"directive\":{\"id\":4243}}");
+   return 1;
 }
 
 /* Stub the DB1 working-profile observer (weak in learning_evidence.c) so the

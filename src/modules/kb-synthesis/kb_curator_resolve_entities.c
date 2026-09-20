@@ -1,3 +1,5 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 /* kb_curator_resolve_entities.c: deep-curator resolve_entities pass.
  *
  * Claims one proposed `entity` mention artifact, embeds its name+context via the
@@ -209,8 +211,16 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
    kb_curator_entity_embed_text(name, context, embed_text, sizeof(embed_text));
    const char *embed_cmd = config_embedder_command_current(NULL);
    float vec[CURATOR_ENTITY_DIM];
-   int dim =
-       memory_embed_text(embed_text, embed_cmd, EMBED_INPUT_DOCUMENT, vec, CURATOR_ENTITY_DIM);
+   cJSON *embed_0_args = cJSON_CreateObject(), *embed_0_reply = NULL;
+   cJSON_AddStringToObject(embed_0_args, "base_url", embed_cmd);
+   cJSON_AddStringToObject(embed_0_args, "input_type", "document");
+   cJSON_AddStringToObject(embed_0_args, "text", embed_text);
+   cJSON_AddNumberToObject(embed_0_args, "max_dim", CURATOR_ENTITY_DIM);
+   (void)aimee_module_commands_dispatch_internal("memory.embed_text", embed_0_args, &embed_0_reply);
+   cJSON_Delete(embed_0_args);
+   int dim = jo_float_array(cJSON_GetObjectItemCaseSensitive(embed_0_reply, "vector"), vec,
+                            CURATOR_ENTITY_DIM);
+   cJSON_Delete(embed_0_reply);
    if (dim > 0)
    {
       /* Resolve to an existing canonical entity in this scope, or — per the

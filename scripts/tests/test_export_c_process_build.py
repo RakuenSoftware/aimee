@@ -25,7 +25,7 @@ SPEC.loader.exec_module(exporter)
 
 class CProcessBuildTests(unittest.TestCase):
     def test_shared_database_and_domain_contracts_follow_consumers(self) -> None:
-        for module in ("aimee", "memory"):
+        for module in ("aimee", "memory", "postgres"):
             with self.subTest(module=module):
                 sources = exporter.go_process_shared_sources(module)
                 for filename in ("db.go", "store_client.go", "store_wire.go"):
@@ -37,8 +37,33 @@ class CProcessBuildTests(unittest.TestCase):
                 sources = exporter.go_process_shared_sources(module)
                 self.assertIn("server-go/aimee/client.go", sources)
                 self.assertFalse(any(path.startswith("server-go/db1/") for path in sources))
-        self.assertEqual(exporter.go_process_shared_sources("postgres"), [])
         self.assertIn("server-go/modules/egress/egress.go", exporter.go_process_shared_sources("memory"))
+        self.assertIn("server-go/modules/audit/action.go", exporter.go_process_shared_sources("memory"))
+
+    def test_audit_publication_is_not_an_arbitrary_request_grant(self) -> None:
+        client = {"id": "memory-postgres", "principal_ref": 73,
+                  "executable": "/module", "placements": ["server", "kb"],
+                  "request": [11266], "publish": [3000]}
+        exporter.process_contracts.validate_clients([client], {11266}, {7})
+        for publish in ([11266], [3000, 3000], [True], [{}], "3000"):
+            with self.subTest(publish=publish), self.assertRaises(exporter.process_contracts.ContractError):
+                exporter.process_contracts.validate_clients(
+                    [{**client, "publish": publish}], {11266}, {7})
+
+    def test_discovery_stage_keeps_its_reserved_slot(self) -> None:
+        contract = json.loads(exporter.process_contracts.CONTRACTS.read_text())
+        exporter.process_contracts.validate()
+        memory = next(c for c in contract["components"] if c["id"] == "memory")
+        discovery = memory["stages"][-1]
+        self.assertEqual(discovery["id"], 255)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "contracts.json"
+            for stage_id, name in ((254, "public-command-discovery"), (255, "other-stage")):
+                discovery.update(id=stage_id, name=name, event_kind=4096 + 7 * 256 + stage_id)
+                path.write_text(json.dumps(contract))
+                with mock.patch.object(exporter.process_contracts, "CONTRACTS", path), \
+                        self.assertRaises(exporter.process_contracts.ContractError):
+                    exporter.process_contracts.validate()
 
     def descriptor(self) -> dict[str, object]:
         return {
@@ -353,7 +378,11 @@ class CProcessBuildTests(unittest.TestCase):
                 json.dumps({"required": ["db2"], "optional": []}), encoding="utf-8"
             )
             contracts_path = root / "process-contracts.json"
-            contracts_path.write_text('{"clients": []}\n', encoding="utf-8")
+            contracts_path.write_text(json.dumps({"clients": [{
+                "id": "memory-postgres", "principal_ref": 73,
+                "executable": "/module", "placements": ["server", "kb"],
+                "request": [11266], "publish": [3000],
+            }]}), encoding="utf-8")
             contract = {
                 "execution": "process",
                 "runtime": "c",
@@ -367,6 +396,13 @@ class CProcessBuildTests(unittest.TestCase):
                     mock.patch.object(exporter.process_contracts, "validate",
                                       return_value={"db2": contract}):
                 self.assertEqual(exporter.export_runtime_bundle(bundle), 1)
+
+            for placement in ("server", "kb"):
+                grant = (bundle / "grants" / placement / "memory-postgres.grant").read_text()
+                self.assertIn("publish=3000\n", grant)
+                self.assertIn("request=11266\n", grant)
+                self.assertIn("subscribe=\n", grant)
+                self.assertIn("serve=\n", grant)
 
             build = json.loads((bundle / "c-build.json").read_text(encoding="utf-8"))
             self.assertEqual(build["modules"], [{

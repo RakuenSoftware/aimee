@@ -18,7 +18,7 @@
 #include "kb_client_memory_internal.h"
 #include "kb_client_pii.h"
 #include "db1_client/caches.h"
-#include "db1_client/user_memory.h"
+#include "headers/module_commands.h"
 #include "db1_optional.h"
 #include "cJSON.h"
 #include "config.h"
@@ -26,6 +26,8 @@
 #include "tasks.h"
 #include "integrity.h"
 
+#include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +53,27 @@ typedef struct
    int loaded;
 } kbc_memory_activation_t;
 
+/* Decimal transport fields must not pass through cJSON's double storage. */
+static int kbc_memory_activation_integer(const char *text, char **end, int64_t *value)
+{
+   if (!text || text[0] < '0' || text[0] > '9' ||
+       (text[0] == '0' && text[1] >= '0' && text[1] <= '9'))
+      return 0;
+   errno = 0;
+   long long parsed = strtoll(text, end, 10);
+   if (errno == ERANGE || parsed < 0 || parsed > INT64_MAX)
+      return 0;
+   *value = (int64_t)parsed;
+   return 1;
+}
+
+static void kbc_memory_activation_add_integer(cJSON *object, const char *key, int64_t value)
+{
+   char text[32];
+   snprintf(text, sizeof(text), "%lld", (long long)value);
+   cJSON_AddStringToObject(object, key, text);
+}
+
 static void kbc_memory_activation_load(kbc_memory_activation_t *activation)
 {
    memset(activation, 0, sizeof(*activation));
@@ -60,17 +83,16 @@ static void kbc_memory_activation_load(kbc_memory_activation_t *activation)
 
    char rows[KBC_MEMORY_ACTIVATION_MAX_ROWS][DB1_CONTEXT_ACTIVATION_ROW_LEN];
    int n = db1_context_snapshot_activation(conversation_id, rows, KBC_MEMORY_ACTIVATION_MAX_ROWS);
-   if (n < 0)
+   if (n < 0 || n > KBC_MEMORY_ACTIVATION_MAX_ROWS)
       return;
 
    for (int i = 0; i < n && activation->count < KBC_MEMORY_ACTIVATION_MAX_ROWS; i++)
    {
       char *end = NULL;
-      long long memory_id = strtoll(rows[i], &end, 10);
-      if (memory_id < 0 || !end)
+      int64_t memory_id, turn;
+      if (!kbc_memory_activation_integer(rows[i], &end, &memory_id) || *end != ' ')
          continue;
-      long long turn = strtoll(end, NULL, 10);
-      if (turn < 0)
+      if (!kbc_memory_activation_integer(end + 1, &end, &turn) || *end != '\0')
          continue;
       if (memory_id == 0)
       {
@@ -93,14 +115,14 @@ static void kbc_memory_activation_add(cJSON *req, kbc_memory_activation_t *activ
    cJSON *rows = obj ? cJSON_AddArrayToObject(obj, "rows") : NULL;
    if (!obj || !rows)
       return;
-   cJSON_AddNumberToObject(obj, "current_turn", (double)activation->current_turn);
+   kbc_memory_activation_add_integer(obj, "current_turn", activation->current_turn);
    for (int i = 0; i < activation->count; i++)
    {
       cJSON *row = cJSON_CreateObject();
       if (!row)
          break;
-      cJSON_AddNumberToObject(row, "memory_id", (double)activation->rows[i].memory_id);
-      cJSON_AddNumberToObject(row, "last_turn", (double)activation->rows[i].last_turn);
+      kbc_memory_activation_add_integer(row, "memory_id", activation->rows[i].memory_id);
+      kbc_memory_activation_add_integer(row, "last_turn", activation->rows[i].last_turn);
       cJSON_AddItemToArray(rows, row);
    }
 }
@@ -122,10 +144,26 @@ static void kbc_memory_activation_record_recall(const cJSON *response,
          const cJSON *managed = cJSON_GetObjectItemCaseSensitive(item, "activation_managed");
          if (!cJSON_IsTrue(managed))
             continue;
-         const cJSON *mid = cJSON_GetObjectItemCaseSensitive(item, "memory_id");
-         if (!cJSON_IsNumber(mid) || mid->valuedouble <= 0.0)
-            continue;
-         int64_t id = (int64_t)mid->valuedouble;
+         int64_t id;
+         const cJSON *handle = cJSON_GetObjectItemCaseSensitive(item, "handle");
+         if (handle)
+         {
+            const char *text = cJSON_GetStringValue(handle);
+            char *end = NULL;
+            if (!text || strncmp(text, "kb:memory:", 10) != 0 ||
+                !kbc_memory_activation_integer(text + 10, &end, &id) || *end != '\0' || id <= 0)
+               continue;
+         }
+         else
+         {
+            /* Compatibility with older owners is bounded to exact doubles. */
+            const cJSON *mid = cJSON_GetObjectItemCaseSensitive(item, "memory_id");
+            if (!cJSON_IsNumber(mid) || !isfinite(mid->valuedouble) || mid->valuedouble <= 0.0 ||
+                mid->valuedouble > 9007199254740991.0 ||
+                floor(mid->valuedouble) != mid->valuedouble)
+               continue;
+            id = (int64_t)mid->valuedouble;
+         }
          int duplicate = 0;
          for (int i = 0; i < seen_n; i++)
             if (seen[i] == id)
@@ -194,6 +232,25 @@ static int kbc_memory_single_miss(const cJSON *resp)
           (cJSON_IsString(message) && strstr(message->valuestring, "not found") != NULL);
 }
 
+/* Owner-provided decimal IDs preserve full int64 tokens across cJSON. Older
+ * peers are accepted only when their numeric token is exactly representable. */
+int64_t kbc_memory_response_id(const cJSON *object)
+{
+   const cJSON *text = cJSON_GetObjectItemCaseSensitive(object, "id_text");
+   if (text)
+   {
+      const char *raw = cJSON_GetStringValue(text);
+      char *end = NULL;
+      int64_t id = 0;
+      return kbc_memory_activation_integer(raw, &end, &id) && end && !*end ? id : 0;
+   }
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(object, "id");
+   return cJSON_IsNumber(id) && isfinite(id->valuedouble) && id->valuedouble > 0 &&
+                  id->valuedouble <= 9007199254740991.0 && floor(id->valuedouble) == id->valuedouble
+              ? (int64_t)id->valuedouble
+              : 0;
+}
+
 void kbc_memory_row_from_json(cJSON *f, memory_t *m)
 {
    memset(m, 0, sizeof(*m));
@@ -238,139 +295,6 @@ void kbc_memory_row_from_json(cJSON *f, memory_t *m)
       snprintf(m->source_session, sizeof(m->source_session), "%s", src_j->valuestring);
 }
 
-int kb_client_memory_find_facts(const char *query, int limit, memory_t *out, int max)
-{
-   if (!query || !out || max <= 0)
-      return -1;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   /* Fusion policy belongs to the receiving instance. */
-   char *json = kb_v1_action_request("memory.find_facts", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-
-   cJSON *facts = cJSON_GetObjectItemCaseSensitive(resp, "facts");
-   int n = 0;
-   if (cJSON_IsArray(facts))
-   {
-      cJSON *f;
-      cJSON_ArrayForEach(f, facts)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_row_from_json(f, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_memory_find_facts_ex(const char *query, int limit, memory_t *out, int max,
-                                   const char *graph_code_fusion_state)
-{
-   if (!query || !out || max <= 0)
-      return -1;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   /* The legacy fusion argument is retained for ABI compatibility only. */
-   (void)graph_code_fusion_state; /* legacy argument; instance policy always wins */
-   char *json = kb_v1_action_request("memory.find_facts", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-
-   cJSON *facts = cJSON_GetObjectItemCaseSensitive(resp, "facts");
-   int n = 0;
-   if (cJSON_IsArray(facts))
-   {
-      cJSON *f;
-      cJSON_ArrayForEach(f, facts)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_row_from_json(f, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_memory_list(const char *tier, const char *kind, int limit, memory_t *out, int max)
-{
-   if (!out || max <= 0)
-      return 0;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   if (tier && tier[0])
-      cJSON_AddStringToObject(req, "tier", tier);
-   if (kind && kind[0])
-      cJSON_AddStringToObject(req, "kind", kind);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.list", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "memories");
-   int n = 0;
-   if (cJSON_IsArray(rows))
-   {
-      cJSON *f;
-      cJSON_ArrayForEach(f, rows)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_row_from_json(f, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
 static char *kb_client_v1_session_briefing_section(const char *method, int limit)
 {
    cJSON *req = cJSON_CreateObject();
@@ -391,345 +315,6 @@ static char *kb_client_v1_session_briefing_section(const char *method, int limit
       out = strdup(body->valuestring);
    cJSON_Delete(resp);
    return out;
-}
-
-char *kb_client_memory_maintenance_run_json(unsigned int modes, int force, int dry_run)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "modes", (double)modes);
-   cJSON_AddBoolToObject(req, "force", force ? 1 : 0);
-   cJSON_AddBoolToObject(req, "dry_run", dry_run ? 1 : 0);
-   return kb_v1_action_request("memory.maintenance_run", req);
-}
-
-char *kb_client_memory_alerts_json(const char *since)
-{
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   if (since && since[0])
-      cJSON_AddStringToObject(req, "since", since);
-   return kb_v1_action_request("memory.alerts", req);
-}
-
-int kb_client_memory_list_conflicts(conflict_t *out, int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "max", max);
-   char *json = kb_v1_action_request("memory.list_conflicts", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, "conflicts");
-   int n = 0;
-   if (cJSON_IsArray(arr))
-   {
-      cJSON *c;
-      cJSON_ArrayForEach(c, arr)
-      {
-         if (n >= max)
-            break;
-         memset(&out[n], 0, sizeof(out[n]));
-         cJSON *id_j = cJSON_GetObjectItemCaseSensitive(c, "id");
-         cJSON *a_j = cJSON_GetObjectItemCaseSensitive(c, "memory_a");
-         cJSON *b_j = cJSON_GetObjectItemCaseSensitive(c, "memory_b");
-         cJSON *det_j = cJSON_GetObjectItemCaseSensitive(c, "detected_at");
-         cJSON *res_j = cJSON_GetObjectItemCaseSensitive(c, "resolved");
-         cJSON *resn_j = cJSON_GetObjectItemCaseSensitive(c, "resolution");
-         if (cJSON_IsNumber(id_j))
-            out[n].id = (int64_t)id_j->valuedouble;
-         if (cJSON_IsNumber(a_j))
-            out[n].memory_a = (int64_t)a_j->valuedouble;
-         if (cJSON_IsNumber(b_j))
-            out[n].memory_b = (int64_t)b_j->valuedouble;
-         if (cJSON_IsString(det_j))
-            snprintf(out[n].detected_at, sizeof(out[n].detected_at), "%s", det_j->valuestring);
-         if (cJSON_IsNumber(res_j))
-            out[n].resolved = (int)res_j->valuedouble;
-         if (cJSON_IsString(resn_j))
-            snprintf(out[n].resolution, sizeof(out[n].resolution), "%s", resn_j->valuestring);
-         n++;
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-static int kbc_facts_array_from_envelope(const char *json, memory_t *out, int max)
-{
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *facts = cJSON_GetObjectItemCaseSensitive(resp, "facts");
-   int n = 0;
-   if (cJSON_IsArray(facts))
-   {
-      cJSON *f;
-      cJSON_ArrayForEach(f, facts)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_row_from_json(f, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-static void kbc_memory_diagnostic_from_json(cJSON *j, memory_diagnostic_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   cJSON *mem = cJSON_GetObjectItemCaseSensitive(j, "memory");
-   if (cJSON_IsObject(mem))
-      kbc_memory_row_from_json(mem, &out->memory);
-   cJSON *parts = cJSON_GetObjectItemCaseSensitive(j, "parts");
-   if (cJSON_IsObject(parts))
-   {
-#define PICK(field)                                                                                \
-   do                                                                                              \
-   {                                                                                               \
-      cJSON *v = cJSON_GetObjectItemCaseSensitive(parts, #field);                                  \
-      if (cJSON_IsNumber(v))                                                                       \
-         out->parts.field = v->valuedouble;                                                        \
-   } while (0)
-      PICK(lexical);
-      PICK(coverage);
-      PICK(entity);
-      PICK(temporal);
-      PICK(evidence);
-      PICK(semantic);
-      PICK(state);
-      PICK(intent);
-      PICK(confidence);
-      PICK(salience);
-      PICK(surprise);
-      PICK(pagerank);
-      PICK(hybrid_total);
-      PICK(blended_total);
-      PICK(total);
-#undef PICK
-   }
-}
-
-int kb_client_memory_diagnose_scoped(const char *query, const char *scope_type,
-                                     const char *scope_value, int limit, memory_diagnostic_t *out,
-                                     int max)
-{
-   if (!query || !out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   if (scope_type && scope_type[0])
-      cJSON_AddStringToObject(req, "scope_type", scope_type);
-   if (scope_value && scope_value[0])
-      cJSON_AddStringToObject(req, "scope_value", scope_value);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.diagnose_scoped", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "rows");
-   int n = 0;
-   if (cJSON_IsArray(rows))
-   {
-      cJSON *r;
-      cJSON_ArrayForEach(r, rows)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_diagnostic_from_json(r, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
-{
-   return kb_client_memory_diagnose_scoped(query, NULL, NULL, limit, out, max);
-}
-
-int kb_client_memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic_t *out)
-{
-   if (!query || !out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "query", query);
-   cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
-   char *json = kb_v1_action_request("memory.explain_match", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *row = cJSON_GetObjectItemCaseSensitive(resp, "row");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsObject(row))
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   kbc_memory_diagnostic_from_json(row, out);
-   cJSON_Delete(resp);
-   return 0;
-}
-
-int kb_client_memory_find_facts_visible(const char *query, const char *workspace,
-                                        const char *project, int limit, memory_t *out, int max)
-{
-   if (!query || !out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddBoolToObject(req, "scope_context", 1);
-   cJSON_AddStringToObject(req, "query", query);
-   if (workspace && workspace[0])
-      cJSON_AddStringToObject(req, "workspace", workspace);
-   if (project && project[0])
-      cJSON_AddStringToObject(req, "project", project);
-   kbc_memory_add_scope_context(req);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.find_facts_visible", req);
-   int n = kbc_facts_array_from_envelope(json, out, max);
-   free(json);
-   return n;
-}
-
-int kb_client_memory_find_facts_scoped_ex(const char *query, const char *scope_type,
-                                          const char *scope_value, int limit, memory_t *out,
-                                          int max, const char *graph_code_fusion_state)
-{
-   if (!query || !out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "query", query);
-   if (scope_type && scope_type[0])
-      cJSON_AddStringToObject(req, "scope_type", scope_type);
-   if (scope_value && scope_value[0])
-      cJSON_AddStringToObject(req, "scope_value", scope_value);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   (void)graph_code_fusion_state; /* legacy argument; instance policy always wins */
-   char *json = kb_v1_action_request("memory.find_facts_scoped", req);
-   int n = kbc_facts_array_from_envelope(json, out, max);
-   free(json);
-   return n;
-}
-
-int kb_client_memory_find_facts_scoped(const char *query, const char *scope_type,
-                                       const char *scope_value, int limit, memory_t *out, int max)
-{
-   return kb_client_memory_find_facts_scoped_ex(query, scope_type, scope_value, limit, out, max,
-                                                "on");
-}
-
-int kb_client_memory_search(char **clusters, int cluster_count, int limit, search_result_t *out,
-                            int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON *arr = cJSON_AddArrayToObject(req, "clusters");
-   for (int i = 0; i < cluster_count; i++)
-      if (clusters[i] && clusters[i][0])
-         cJSON_AddItemToArray(arr, cJSON_CreateString(clusters[i]));
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.search", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *results = cJSON_GetObjectItemCaseSensitive(resp, "results");
-   int n = 0;
-   if (cJSON_IsArray(results))
-   {
-      cJSON *r;
-      cJSON_ArrayForEach(r, results)
-      {
-         if (n >= max)
-            break;
-         memset(&out[n], 0, sizeof(out[n]));
-         cJSON *sid = cJSON_GetObjectItemCaseSensitive(r, "session_id");
-         cJSON *seq = cJSON_GetObjectItemCaseSensitive(r, "seq");
-         cJSON *fp = cJSON_GetObjectItemCaseSensitive(r, "file_path");
-         cJSON *sl = cJSON_GetObjectItemCaseSensitive(r, "start_line");
-         cJSON *el = cJSON_GetObjectItemCaseSensitive(r, "end_line");
-         cJSON *sm = cJSON_GetObjectItemCaseSensitive(r, "summary");
-         cJSON *sc = cJSON_GetObjectItemCaseSensitive(r, "score");
-         cJSON *files = cJSON_GetObjectItemCaseSensitive(r, "files");
-         if (cJSON_IsString(sid))
-            snprintf(out[n].session_id, sizeof(out[n].session_id), "%s", sid->valuestring);
-         if (cJSON_IsNumber(seq))
-            out[n].seq = (int)seq->valuedouble;
-         if (cJSON_IsString(fp))
-            snprintf(out[n].file_path, sizeof(out[n].file_path), "%s", fp->valuestring);
-         if (cJSON_IsNumber(sl))
-            out[n].start_line = (int)sl->valuedouble;
-         if (cJSON_IsNumber(el))
-            out[n].end_line = (int)el->valuedouble;
-         if (cJSON_IsString(sm))
-            snprintf(out[n].summary, sizeof(out[n].summary), "%s", sm->valuestring);
-         if (cJSON_IsNumber(sc))
-            out[n].score = sc->valuedouble;
-         if (cJSON_IsArray(files))
-         {
-            int fc = 0;
-            cJSON *f;
-            cJSON_ArrayForEach(f, files)
-            {
-               if (fc >= 32)
-                  break;
-               if (cJSON_IsString(f))
-                  snprintf(out[n].files[fc++], sizeof(out[n].files[0]), "%s", f->valuestring);
-            }
-            out[n].file_count = fc;
-         }
-         n++;
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
 }
 
 char *kb_client_memory_assemble_context(const char *task_hint)
@@ -810,413 +395,8 @@ int kb_client_memory_compact_windows(int *summary_count, int *fact_count)
    return 0;
 }
 
-int kb_client_memory_query_edges(const char *entity, edge_t *out, int max)
-{
-   if (!entity || !out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "entity", entity);
-   cJSON_AddNumberToObject(req, "max", max);
-   char *json = kb_v1_action_request("memory.query_edges", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *arr = cJSON_GetObjectItemCaseSensitive(resp, "edges");
-   int n = 0;
-   if (cJSON_IsArray(arr))
-   {
-      cJSON *e;
-      cJSON_ArrayForEach(e, arr)
-      {
-         if (n >= max)
-            break;
-         memset(&out[n], 0, sizeof(out[n]));
-         cJSON *id_j = cJSON_GetObjectItemCaseSensitive(e, "id");
-         cJSON *src_j = cJSON_GetObjectItemCaseSensitive(e, "source");
-         cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(e, "relation");
-         cJSON *tgt_j = cJSON_GetObjectItemCaseSensitive(e, "target");
-         cJSON *w_j = cJSON_GetObjectItemCaseSensitive(e, "weight");
-         if (cJSON_IsNumber(id_j))
-            out[n].id = (int64_t)id_j->valuedouble;
-         if (cJSON_IsString(src_j))
-            snprintf(out[n].source, sizeof(out[n].source), "%s", src_j->valuestring);
-         if (cJSON_IsString(rel_j))
-            snprintf(out[n].relation, sizeof(out[n].relation), "%s", rel_j->valuestring);
-         if (cJSON_IsString(tgt_j))
-            snprintf(out[n].target, sizeof(out[n].target), "%s", tgt_j->valuestring);
-         if (cJSON_IsNumber(w_j))
-            out[n].weight = (int)w_j->valuedouble;
-         n++;
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_memory_effectiveness_stats(effectiveness_stats_t *out)
-{
-   if (!out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   cJSON *req = cJSON_CreateObject();
-   char *json = kb_v1_action_request("memory.effectiveness_stats", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *stats = cJSON_GetObjectItemCaseSensitive(resp, "stats");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsObject(stats))
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *avg = cJSON_GetObjectItemCaseSensitive(stats, "avg_effectiveness");
-   cJSON *low = cJSON_GetObjectItemCaseSensitive(stats, "low_effectiveness_count");
-   cJSON *hi = cJSON_GetObjectItemCaseSensitive(stats, "high_impact_count");
-   cJSON *ns = cJSON_GetObjectItemCaseSensitive(stats, "never_surfaced_l2");
-   if (cJSON_IsNumber(avg))
-      out->avg_effectiveness = avg->valuedouble;
-   if (cJSON_IsNumber(low))
-      out->low_effectiveness_count = (int)low->valuedouble;
-   if (cJSON_IsNumber(hi))
-      out->high_impact_count = (int)hi->valuedouble;
-   if (cJSON_IsNumber(ns))
-      out->never_surfaced_l2 = (int)ns->valuedouble;
-   cJSON_Delete(resp);
-   return 0;
-}
-
-int kb_client_memory_query_health(memory_health_t *out)
-{
-   if (!out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   cJSON *req = cJSON_CreateObject();
-   char *json = kb_v1_action_request("memory.query_health", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *health = cJSON_GetObjectItemCaseSensitive(resp, "health");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsObject(health))
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *cy = cJSON_GetObjectItemCaseSensitive(health, "cycles");
-   cJSON *cr = cJSON_GetObjectItemCaseSensitive(health, "contradiction_rate");
-   cJSON *pr = cJSON_GetObjectItemCaseSensitive(health, "promotion_rate");
-   cJSON *dr = cJSON_GetObjectItemCaseSensitive(health, "demotion_rate");
-   cJSON *st = cJSON_GetObjectItemCaseSensitive(health, "staleness");
-   cJSON *tc = cJSON_GetObjectItemCaseSensitive(health, "total_contradictions");
-   cJSON *tp = cJSON_GetObjectItemCaseSensitive(health, "total_promotions");
-   cJSON *td = cJSON_GetObjectItemCaseSensitive(health, "total_demotions");
-   cJSON *te = cJSON_GetObjectItemCaseSensitive(health, "total_expirations");
-   cJSON *lag = cJSON_GetObjectItemCaseSensitive(health, "write_to_readable_lag");
-   if (cJSON_IsNumber(cy))
-      out->cycles = (int)cy->valuedouble;
-   if (cJSON_IsNumber(cr))
-      out->contradiction_rate = cr->valuedouble;
-   if (cJSON_IsNumber(pr))
-      out->promotion_rate = pr->valuedouble;
-   if (cJSON_IsNumber(dr))
-      out->demotion_rate = dr->valuedouble;
-   if (cJSON_IsNumber(st))
-      out->staleness = st->valuedouble;
-   if (cJSON_IsNumber(tc))
-      out->total_contradictions = (int)tc->valuedouble;
-   if (cJSON_IsNumber(tp))
-      out->total_promotions = (int)tp->valuedouble;
-   if (cJSON_IsNumber(td))
-      out->total_demotions = (int)td->valuedouble;
-   if (cJSON_IsNumber(te))
-      out->total_expirations = (int)te->valuedouble;
-   if (cJSON_IsObject(lag))
-   {
-      cJSON *samples = cJSON_GetObjectItemCaseSensitive(lag, "samples");
-      cJSON *p50 = cJSON_GetObjectItemCaseSensitive(lag, "p50_secs");
-      cJSON *p95 = cJSON_GetObjectItemCaseSensitive(lag, "p95_secs");
-      cJSON *p99 = cJSON_GetObjectItemCaseSensitive(lag, "p99_secs");
-      if (cJSON_IsNumber(samples))
-         out->write_to_readable_samples = (int64_t)samples->valuedouble;
-      out->write_to_readable_p50_secs = cJSON_IsNumber(p50) ? p50->valuedouble : -1.0;
-      out->write_to_readable_p95_secs = cJSON_IsNumber(p95) ? p95->valuedouble : -1.0;
-      out->write_to_readable_p99_secs = cJSON_IsNumber(p99) ? p99->valuedouble : -1.0;
-   }
-   cJSON_Delete(resp);
-   return 0;
-}
-
-int kb_client_memory_delete_as(int64_t id, memory_authority_t authority)
-{
-   cJSON *req = cJSON_CreateObject();
-   kb_client_memory_scope_context_apply(req);
-   cJSON_AddNumberToObject(req, "id", (double)id);
-   /* Only ever sent for a user/operator caller. The KB treats an absent field as
-    * model authority, so a stale client cannot destroy anything. */
-   if (authority == MEMORY_AUTHORITY_USER)
-      cJSON_AddStringToObject(req, "authority", "user");
-   char *json = kb_v1_action_request("memory.delete", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
-   cJSON_Delete(resp);
-   kb_client_memory_audit_note(authority == MEMORY_AUTHORITY_USER ? "memory.delete"
-                                                                  : "memory.retire",
-                               id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
-   return rc;
-}
-
-int kb_client_memory_delete(int64_t id)
-{
-   return kb_client_memory_delete_as(id, MEMORY_AUTHORITY_USER);
-}
-
-int kb_client_memory_stats(memory_stats_t *out)
-{
-   if (!out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-   cJSON *req = cJSON_CreateObject();
-   char *json = kb_v1_action_request("memory.stats", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *stats = cJSON_GetObjectItemCaseSensitive(resp, "stats");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsObject(stats))
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *total_j = cJSON_GetObjectItemCaseSensitive(stats, "total");
-   cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(stats, "conflicts");
-   cJSON *pr_last = cJSON_GetObjectItemCaseSensitive(stats, "pagerank_last_ms");
-   cJSON *pr_avg = cJSON_GetObjectItemCaseSensitive(stats, "pagerank_avg_ms");
-   cJSON *pr_max = cJSON_GetObjectItemCaseSensitive(stats, "pagerank_max_ms");
-   cJSON *pr_samp = cJSON_GetObjectItemCaseSensitive(stats, "pagerank_samples");
-   cJSON *pr_lc = cJSON_GetObjectItemCaseSensitive(stats, "pagerank_last_candidates");
-   cJSON *pr_le = cJSON_GetObjectItemCaseSensitive(stats, "pagerank_last_edges");
-   cJSON *tiers = cJSON_GetObjectItemCaseSensitive(stats, "tier_counts");
-   cJSON *kinds = cJSON_GetObjectItemCaseSensitive(stats, "kind_counts");
-   if (cJSON_IsNumber(total_j))
-      out->total = (int)total_j->valuedouble;
-   if (cJSON_IsNumber(conf_j))
-      out->conflicts = (int)conf_j->valuedouble;
-   if (cJSON_IsNumber(pr_last))
-      out->pagerank_last_ms = pr_last->valuedouble;
-   if (cJSON_IsNumber(pr_avg))
-      out->pagerank_avg_ms = pr_avg->valuedouble;
-   if (cJSON_IsNumber(pr_max))
-      out->pagerank_max_ms = pr_max->valuedouble;
-   if (cJSON_IsNumber(pr_samp))
-      out->pagerank_samples = (int)pr_samp->valuedouble;
-   if (cJSON_IsNumber(pr_lc))
-      out->pagerank_last_candidates = (int)pr_lc->valuedouble;
-   if (cJSON_IsNumber(pr_le))
-      out->pagerank_last_edges = (int)pr_le->valuedouble;
-   if (cJSON_IsArray(tiers))
-   {
-      int n = cJSON_GetArraySize(tiers);
-      for (int i = 0; i < n && i < 6; i++)
-      {
-         cJSON *v = cJSON_GetArrayItem(tiers, i);
-         if (cJSON_IsNumber(v))
-            out->tier_counts[i] = (int)v->valuedouble;
-      }
-   }
-   if (cJSON_IsArray(kinds))
-   {
-      int n = cJSON_GetArraySize(kinds);
-      for (int i = 0; i < n && i < KIND_COUNT; i++)
-      {
-         cJSON *v = cJSON_GetArrayItem(kinds, i);
-         if (cJSON_IsNumber(v))
-            out->kind_counts[i] = (int)v->valuedouble;
-      }
-   }
-   cJSON_Delete(resp);
-   return 0;
-}
-
-/* Raw-JSON variant of the stats reader: returns the kb "stats" object as a
- * detached JSON string (caller frees), or NULL when the kb is unreachable or
- * returns a non-"ok" envelope. Lets handle_memory_stats forward the payload
- * verbatim without re-marshalling the memory_stats_t struct. */
-char *kb_client_memory_stats_json(void)
-{
-   cJSON *req = cJSON_CreateObject();
-   char *json = kb_v1_action_request("memory.stats", req);
-   if (!json)
-      return NULL;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return NULL;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *stats = cJSON_GetObjectItemCaseSensitive(resp, "stats");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsObject(stats))
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON *detached = cJSON_DetachItemViaPointer(resp, stats);
-   char *out = detached ? cJSON_PrintUnformatted(detached) : NULL;
-   cJSON_Delete(detached);
-   cJSON_Delete(resp);
-   return out;
-}
-
-int kb_client_memory_link_create(int64_t source_id, int64_t target_id, const char *relation)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "source_id", (double)source_id);
-   cJSON_AddNumberToObject(req, "target_id", (double)target_id);
-   cJSON_AddStringToObject(req, "relation", relation ? relation : "");
-   char *json = kb_v1_action_request("memory.link_create", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
-   cJSON_Delete(resp);
-   return rc;
-}
-
-int kb_client_memory_link_query(int64_t memory_id, memory_link_t *out, int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
-   cJSON_AddNumberToObject(req, "max", max);
-   char *json = kb_v1_action_request("memory.link_query", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *links = cJSON_GetObjectItemCaseSensitive(resp, "links");
-   int n = 0;
-   if (cJSON_IsArray(links))
-   {
-      cJSON *l;
-      cJSON_ArrayForEach(l, links)
-      {
-         if (n >= max)
-            break;
-         memset(&out[n], 0, sizeof(out[n]));
-         cJSON *id_j = cJSON_GetObjectItemCaseSensitive(l, "id");
-         cJSON *src_j = cJSON_GetObjectItemCaseSensitive(l, "source_id");
-         cJSON *tgt_j = cJSON_GetObjectItemCaseSensitive(l, "target_id");
-         cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(l, "relation");
-         cJSON *cre_j = cJSON_GetObjectItemCaseSensitive(l, "created_at");
-         if (cJSON_IsNumber(id_j))
-            out[n].id = (int64_t)id_j->valuedouble;
-         if (cJSON_IsNumber(src_j))
-            out[n].source_id = (int64_t)src_j->valuedouble;
-         if (cJSON_IsNumber(tgt_j))
-            out[n].target_id = (int64_t)tgt_j->valuedouble;
-         if (cJSON_IsString(rel_j))
-            snprintf(out[n].relation, sizeof(out[n].relation), "%s", rel_j->valuestring);
-         if (cJSON_IsString(cre_j))
-            snprintf(out[n].created_at, sizeof(out[n].created_at), "%s", cre_j->valuestring);
-         n++;
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_memory_link_delete(int64_t link_id)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "link_id", (double)link_id);
-   char *json = kb_v1_action_request("memory.link_delete", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
-   cJSON_Delete(resp);
-   return rc;
-}
-
-int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *signal_type,
-                                         const char *rule, double observed_confidence,
-                                         const char *session_id)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "workspace", workspace ? workspace : "");
-   cJSON_AddStringToObject(req, "signal_type", signal_type ? signal_type : "");
-   /* The learned rule is prose; workspace and signal_type are enumerated
-    * handles the kb groups on. */
-   if (kb_client_pii_add_string_required(req, "rule", rule ? rule : "") != 0)
-   {
-      cJSON_Delete(req);
-      return KB_CLIENT_WITHHELD_PII;
-   }
-   cJSON_AddNumberToObject(req, "observed_confidence", observed_confidence);
-   if (session_id && session_id[0])
-      cJSON_AddStringToObject(req, "session_id", session_id);
-   char *json = kb_v1_action_request("memory.upsert_workflow", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(resp, "id");
-   int64_t id = -1;
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsNumber(id_j))
-      id = (int64_t)id_j->valuedouble;
-   cJSON_Delete(resp);
-   return id;
-}
-
-/* Proposal 2 Phase 1: recall assembly runs IN aimee-kb (the shared, db2-only,
- * many-user store) which has no access to this user's db1, so the db1<->db2
- * merge happens here in aimee-server (1:1 per user) — the single proxy seam
- * every recall consumer (the /v1 endpoint AND the primary-agent pre-turn
- * injection) shares. The per-section merge logic lives in db1/user_memory.c
- * (db1_user_memory_merge_into_array) so it is unit-testable without kb. */
+/* The native host transports the scoped shared bundle to its local Go memory
+ * owner. Selection, collision precedence and final budgeting belong to Go. */
 static char *memory_recall_json(const char *task_hint, int limit_tokens, int session_start,
                                 const char *graph_code_fusion_state, int include_user)
 {
@@ -1245,42 +425,36 @@ static char *memory_recall_json(const char *task_hint, int limit_tokens, int ses
                     "\"integrity_verdict\":\"quarantine\"}");
    }
 
-   /* Fast path: when this user has no db1 memory (the case until capture is
-    * wired), skip the parse/merge/reserialize entirely and pass the kb bundle
-    * through verbatim — recall is on the primary agent's hot per-turn loop. */
-   if (!include_user || !db1_user_memory_any())
+   if (include_user)
    {
-      cJSON *response = cJSON_Parse(j);
-      if (response)
-      {
-         kbc_memory_activation_record_recall(response, &activation);
-         cJSON_Delete(response);
-      }
-      return j;
-   }
-
-   /* Merge this user's db1 identity/preferences on top of the org bundle. */
-   cJSON *bundle = cJSON_Parse(j);
-   if (bundle)
-   {
-      cJSON *recall = cJSON_GetObjectItemCaseSensitive(bundle, "recall");
-      if (recall)
-      {
-         db1_user_memory_merge_into_array(cJSON_GetObjectItemCaseSensitive(recall, "identity"),
-                                          DB1_USER_RECALL_IDENTITY, "user identity");
-         db1_user_memory_merge_into_array(cJSON_GetObjectItemCaseSensitive(recall, "preferences"),
-                                          DB1_USER_RECALL_PREFERENCES, "user preference");
-      }
-      kbc_memory_activation_record_recall(bundle, &activation);
-      char *merged = cJSON_PrintUnformatted(bundle);
-      cJSON_Delete(bundle);
-      if (merged)
+      cJSON *request = cJSON_CreateObject();
+      if (!request)
       {
          free(j);
-         return merged;
+         return NULL;
       }
+      cJSON_AddStringToObject(request, "operation", "compose-recall");
+      cJSON_AddStringToObject(request, "shared_json", j);
+      cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
+      cJSON_AddBoolToObject(request, "session_start", session_start != 0);
+      cJSON *reply = NULL;
+      int rc = aimee_module_commands_dispatch_internal("memory.runtime", request, &reply);
+      cJSON_Delete(request);
+      free(j);
+      const char *body =
+          rc == 1 ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "json")) : NULL;
+      j = body ? strdup(body) : NULL;
+      cJSON_Delete(reply);
+      if (!j)
+         return NULL;
    }
-   return j; /* parse/merge failed: return the kb bundle verbatim */
+   cJSON *response = cJSON_Parse(j);
+   if (response)
+   {
+      kbc_memory_activation_record_recall(response, &activation);
+      cJSON_Delete(response);
+   }
+   return j;
 }
 
 /* Explicit shared-store reads must never merge personal rows into the result. */
@@ -1310,87 +484,6 @@ char *kb_client_session_briefing_commitments(int limit)
 char *kb_client_session_briefing_directives(int limit)
 {
    return kb_client_v1_session_briefing_section("session_briefing.directives", limit);
-}
-
-int kb_client_memory_top_l2_facts(memory_t *out, int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddNumberToObject(req, "max", max);
-   char *json = kb_v1_action_request("memory.top_l2_facts", req);
-   if (!json)
-      return -1;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "memories");
-   int n = 0;
-   if (cJSON_IsArray(rows))
-   {
-      cJSON *f;
-      cJSON_ArrayForEach(f, rows)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_row_from_json(f, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_memory_load_eval_corpus(memory_t *out, int max, char *label_out, size_t label_len)
-{
-   if (label_out && label_len > 0)
-      label_out[0] = '\0';
-   if (!out || max <= 0)
-      return 0;
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "max", max);
-   char *json = kb_v1_action_request("memory.load_eval_corpus", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-
-   cJSON *label_j = cJSON_GetObjectItemCaseSensitive(resp, "label");
-   if (label_out && label_len > 0 && cJSON_IsString(label_j))
-      snprintf(label_out, label_len, "%s", label_j->valuestring);
-
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "memories");
-   int n = 0;
-   if (cJSON_IsArray(rows))
-   {
-      cJSON *f;
-      cJSON_ArrayForEach(f, rows)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_row_from_json(f, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
 }
 
 int kb_client_memory_get(int64_t id, memory_t *out)
@@ -1465,511 +558,6 @@ int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_
    kbc_memory_row_from_json(mem_j, out);
    cJSON_Delete(mem_j);
    return 0;
-}
-
-cJSON *kb_client_memory_briefing(int limit_tokens)
-{
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   if (limit_tokens > 0)
-      cJSON_AddNumberToObject(req, "limit_tokens", limit_tokens);
-   char *json = kb_v1_action_request("memory.briefing", req);
-   if (!json)
-      return NULL;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return NULL;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-
-   cJSON *briefing = cJSON_GetObjectItemCaseSensitive(resp, "briefing");
-   cJSON *detached = briefing ? cJSON_DetachItemViaPointer(resp, briefing) : NULL;
-   cJSON_Delete(resp);
-   return detached;
-}
-
-static void kbc_memory_relation_from_json(cJSON *r, memory_relation_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(r, "id");
-   cJSON *mid_j = cJSON_GetObjectItemCaseSensitive(r, "memory_id");
-   cJSON *eid_j = cJSON_GetObjectItemCaseSensitive(r, "episode_id");
-   cJSON *src_j = cJSON_GetObjectItemCaseSensitive(r, "src_entity");
-   cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(r, "relation");
-   cJSON *dst_j = cJSON_GetObjectItemCaseSensitive(r, "dst_entity");
-   cJSON *fact_j = cJSON_GetObjectItemCaseSensitive(r, "fact_text");
-   cJSON *valid_j = cJSON_GetObjectItemCaseSensitive(r, "valid_at");
-   cJSON *invalid_j = cJSON_GetObjectItemCaseSensitive(r, "invalid_at");
-   cJSON *weight_j = cJSON_GetObjectItemCaseSensitive(r, "weight");
-   cJSON *created_j = cJSON_GetObjectItemCaseSensitive(r, "created_at");
-   if (cJSON_IsNumber(id_j))
-      out->id = (int64_t)id_j->valuedouble;
-   if (cJSON_IsNumber(mid_j))
-      out->memory_id = (int64_t)mid_j->valuedouble;
-   if (cJSON_IsNumber(eid_j))
-      out->episode_id = (int64_t)eid_j->valuedouble;
-   if (cJSON_IsString(src_j))
-      snprintf(out->src_entity, sizeof(out->src_entity), "%s", src_j->valuestring);
-   if (cJSON_IsString(rel_j))
-      snprintf(out->relation, sizeof(out->relation), "%s", rel_j->valuestring);
-   if (cJSON_IsString(dst_j))
-      snprintf(out->dst_entity, sizeof(out->dst_entity), "%s", dst_j->valuestring);
-   if (cJSON_IsString(fact_j))
-      snprintf(out->fact_text, sizeof(out->fact_text), "%s", fact_j->valuestring);
-   if (cJSON_IsString(valid_j))
-      snprintf(out->valid_at, sizeof(out->valid_at), "%s", valid_j->valuestring);
-   if (cJSON_IsString(invalid_j))
-      snprintf(out->invalid_at, sizeof(out->invalid_at), "%s", invalid_j->valuestring);
-   if (cJSON_IsNumber(weight_j))
-      out->weight = weight_j->valuedouble;
-   if (cJSON_IsString(created_j))
-      snprintf(out->created_at, sizeof(out->created_at), "%s", created_j->valuestring);
-}
-
-int kb_client_memory_get_entity_profile(const char *entity, memory_entity_profile_t *out)
-{
-   if (!entity || !out)
-      return -1;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "entity", entity);
-   char *json = kb_v1_action_request("memory.entity_profile", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      int miss = kbc_memory_single_miss(resp);
-      cJSON_Delete(resp);
-      return miss ? 1 : -1;
-   }
-   cJSON *prof = cJSON_GetObjectItemCaseSensitive(resp, "profile");
-   if (!cJSON_IsObject(prof))
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   memset(out, 0, sizeof(*out));
-   cJSON *ent_j = cJSON_GetObjectItemCaseSensitive(prof, "entity");
-   cJSON *mc_j = cJSON_GetObjectItemCaseSensitive(prof, "mention_count");
-   cJSON *rc_j = cJSON_GetObjectItemCaseSensitive(prof, "relation_count");
-   cJSON *le_j = cJSON_GetObjectItemCaseSensitive(prof, "latest_episode");
-   cJSON *sm_j = cJSON_GetObjectItemCaseSensitive(prof, "summary");
-   if (cJSON_IsString(ent_j))
-      snprintf(out->entity, sizeof(out->entity), "%s", ent_j->valuestring);
-   if (cJSON_IsNumber(mc_j))
-      out->mention_count = (int)mc_j->valuedouble;
-   if (cJSON_IsNumber(rc_j))
-      out->relation_count = (int)rc_j->valuedouble;
-   if (cJSON_IsString(le_j))
-      snprintf(out->latest_episode, sizeof(out->latest_episode), "%s", le_j->valuestring);
-   if (cJSON_IsString(sm_j))
-      snprintf(out->summary, sizeof(out->summary), "%s", sm_j->valuestring);
-   cJSON_Delete(resp);
-   return 0;
-}
-
-int kb_client_memory_get_entity_edges(const char *entity, int limit, memory_relation_t *out,
-                                      int max)
-{
-   if (!entity || !out || max <= 0)
-      return 0;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "entity", entity);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.entity_edges", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *edges = cJSON_GetObjectItemCaseSensitive(resp, "edges");
-   int n = 0;
-   if (cJSON_IsArray(edges))
-   {
-      cJSON *r;
-      cJSON_ArrayForEach(r, edges)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_relation_from_json(r, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_memory_search_graph(const char *query, int limit, memory_relation_t *out, int max)
-{
-   if (!query || !out || max <= 0)
-      return 0;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.search_graph", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *rels = cJSON_GetObjectItemCaseSensitive(resp, "relations");
-   int n = 0;
-   if (cJSON_IsArray(rels))
-   {
-      cJSON *r;
-      cJSON_ArrayForEach(r, rels)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_relation_from_json(r, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_memory_search_graph_as_of(const char *query, const char *as_of, int limit,
-                                        memory_relation_t *out, int max)
-{
-   if (!query || !as_of || !out || max <= 0)
-      return 0;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   cJSON_AddStringToObject(req, "as_of", as_of);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.search_graph_as_of", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *rels = cJSON_GetObjectItemCaseSensitive(resp, "relations");
-   int n = 0;
-   if (cJSON_IsArray(rels))
-   {
-      cJSON *r;
-      cJSON_ArrayForEach(r, rels)
-      {
-         if (n >= max)
-            break;
-         kbc_memory_relation_from_json(r, &out[n++]);
-      }
-   }
-   cJSON_Delete(resp);
-   return n;
-}
-
-int kb_client_memory_ask(const char *query, const char *scope_type, const char *scope_value,
-                         int limit, memory_answer_result_t *out)
-{
-   if (!query || !out)
-      return -1;
-   memset(out, 0, sizeof(*out));
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   if (scope_type && scope_type[0])
-      cJSON_AddStringToObject(req, "scope_type", scope_type);
-   if (scope_value && scope_value[0])
-      cJSON_AddStringToObject(req, "scope_value", scope_value);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.ask", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *msg_j = cJSON_GetObjectItemCaseSensitive(resp, "message");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      if (cJSON_IsString(msg_j))
-         snprintf(out->error, sizeof(out->error), "%s", msg_j->valuestring);
-      cJSON_Delete(resp);
-      return -1;
-   }
-   cJSON *answer_j = cJSON_GetObjectItemCaseSensitive(resp, "answer");
-   cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(resp, "confidence");
-   cJSON *mode_j = cJSON_GetObjectItemCaseSensitive(resp, "evidence_mode");
-   cJSON *no_j = cJSON_GetObjectItemCaseSensitive(resp, "no_answer");
-   cJSON *low_j = cJSON_GetObjectItemCaseSensitive(resp, "low_confidence");
-   cJSON *retr_j = cJSON_GetObjectItemCaseSensitive(resp, "retrieval_count");
-   cJSON *cits = cJSON_GetObjectItemCaseSensitive(resp, "citation_ids");
-   cJSON *trace = cJSON_GetObjectItemCaseSensitive(resp, "evidence_trace");
-   if (cJSON_IsString(answer_j))
-      snprintf(out->answer, sizeof(out->answer), "%s", answer_j->valuestring);
-   if (cJSON_IsNumber(conf_j))
-      out->confidence = conf_j->valuedouble;
-   if (cJSON_IsString(mode_j))
-      snprintf(out->evidence_mode, sizeof(out->evidence_mode), "%s", mode_j->valuestring);
-   if (cJSON_IsBool(no_j))
-      out->no_answer = cJSON_IsTrue(no_j) ? 1 : 0;
-   if (cJSON_IsBool(low_j))
-      out->low_confidence = cJSON_IsTrue(low_j) ? 1 : 0;
-   if (cJSON_IsNumber(retr_j))
-      out->retrieval_count = (int)retr_j->valuedouble;
-   if (cJSON_IsArray(cits))
-   {
-      cJSON *id_j;
-      cJSON_ArrayForEach(id_j, cits)
-      {
-         if (out->citation_count >= MEMORY_ANSWER_MAX_CITATIONS)
-            break;
-         if (cJSON_IsNumber(id_j))
-            out->citation_ids[out->citation_count++] = (int64_t)id_j->valuedouble;
-      }
-   }
-   if (cJSON_IsObject(trace))
-   {
-      cJSON *decision = cJSON_GetObjectItemCaseSensitive(trace, "decision");
-      cJSON *reason = cJSON_GetObjectItemCaseSensitive(trace, "reason");
-      if (cJSON_IsString(decision))
-      {
-         if (strcmp(decision->valuestring, "answerable") == 0)
-            out->evidence.decision = MEMORY_ANSWER_DECISION_ANSWERABLE;
-         else if (strcmp(decision->valuestring, "exempt") == 0)
-            out->evidence.decision = MEMORY_ANSWER_DECISION_EXEMPT;
-         else
-            out->evidence.decision = MEMORY_ANSWER_DECISION_ABSTAIN;
-      }
-      if (cJSON_IsString(reason))
-      {
-         if (strcmp(reason->valuestring, "structural_empty") == 0)
-            out->evidence.reason = MEMORY_ANSWER_REASON_STRUCTURAL_EMPTY;
-         else if (strcmp(reason->valuestring, "structural_no_extract") == 0)
-            out->evidence.reason = MEMORY_ANSWER_REASON_STRUCTURAL_NO_EXTRACT;
-         else if (strcmp(reason->valuestring, "citation_required") == 0)
-            out->evidence.reason = MEMORY_ANSWER_REASON_CITATION_REQUIRED;
-         else if (strcmp(reason->valuestring, "grounding_low") == 0)
-            out->evidence.reason = MEMORY_ANSWER_REASON_GROUNDING_LOW;
-         else if (strcmp(reason->valuestring, "chunk_floor") == 0)
-            out->evidence.reason = MEMORY_ANSWER_REASON_CHUNK_FLOOR;
-         else if (strcmp(reason->valuestring, "curated_exempt") == 0)
-            out->evidence.reason = MEMORY_ANSWER_REASON_CURATED_EXEMPT;
-         else if (strcmp(reason->valuestring, "db_unavailable") == 0)
-            out->evidence.reason = MEMORY_ANSWER_REASON_DB_UNAVAILABLE;
-         else
-            out->evidence.reason = MEMORY_ANSWER_REASON_OK;
-      }
-      cJSON *ids = cJSON_GetObjectItemCaseSensitive(trace, "candidate_ids");
-      if (cJSON_IsArray(ids))
-      {
-         cJSON *id_j;
-         cJSON_ArrayForEach(id_j, ids)
-         {
-            if (out->evidence.candidate_id_count >= MEMORY_ANSWER_TRACE_MAX_IDS)
-               break;
-            if (cJSON_IsNumber(id_j))
-               out->evidence.candidate_ids[out->evidence.candidate_id_count++] =
-                   (int64_t)id_j->valuedouble;
-         }
-      }
-      cJSON *n = cJSON_GetObjectItemCaseSensitive(trace, "ranked_count");
-      if (cJSON_IsNumber(n))
-         out->evidence.ranked_count = (int)n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(trace, "anchor_id");
-      if (cJSON_IsNumber(n))
-         out->evidence.anchor_id = (int64_t)n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(trace, "anchor_rank");
-      if (cJSON_IsNumber(n))
-         out->evidence.anchor_rank = (int)n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(trace, "topk_grounding");
-      if (cJSON_IsNumber(n))
-         out->evidence.topk_grounding = n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(trace, "anchor_coverage");
-      if (cJSON_IsNumber(n))
-         out->evidence.anchor_coverage = n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(trace, "cluster_coverage");
-      if (cJSON_IsNumber(n))
-         out->evidence.cluster_coverage = n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(trace, "threshold");
-      if (cJSON_IsNumber(n))
-         out->evidence.threshold = n->valuedouble;
-      n = cJSON_GetObjectItemCaseSensitive(trace, "chunk_floor");
-      if (cJSON_IsNumber(n))
-         out->evidence.chunk_floor = n->valuedouble;
-      cJSON *b = cJSON_GetObjectItemCaseSensitive(trace, "structural");
-      if (cJSON_IsBool(b))
-         out->evidence.structural = cJSON_IsTrue(b) ? 1 : 0;
-      b = cJSON_GetObjectItemCaseSensitive(trace, "exempt");
-      if (cJSON_IsBool(b))
-         out->evidence.exempt = cJSON_IsTrue(b) ? 1 : 0;
-      b = cJSON_GetObjectItemCaseSensitive(trace, "trace_truncated");
-      if (cJSON_IsBool(b))
-         out->evidence.trace_truncated = cJSON_IsTrue(b) ? 1 : 0;
-   }
-   cJSON_Delete(resp);
-   return 0;
-}
-
-int kb_client_memory_get_episode(const char *episode_key, memory_episode_t *out)
-{
-   if (!episode_key || !out)
-      return -1;
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "episode_key", episode_key);
-   char *json = kb_v1_action_request("memory.get_episode", req);
-   if (!json)
-      return -1;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return -1;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      int miss = kbc_memory_single_miss(resp);
-      cJSON_Delete(resp);
-      return miss ? 1 : -1;
-   }
-   cJSON *ep = cJSON_GetObjectItemCaseSensitive(resp, "episode");
-   if (!cJSON_IsObject(ep))
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   memset(out, 0, sizeof(*out));
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(ep, "id");
-   cJSON *mid_j = cJSON_GetObjectItemCaseSensitive(ep, "memory_id");
-   cJSON *key_j = cJSON_GetObjectItemCaseSensitive(ep, "episode_key");
-   cJSON *txt_j = cJSON_GetObjectItemCaseSensitive(ep, "episode_text");
-   cJSON *src_j = cJSON_GetObjectItemCaseSensitive(ep, "source_session");
-   cJSON *ref_j = cJSON_GetObjectItemCaseSensitive(ep, "reference_time");
-   cJSON *cre_j = cJSON_GetObjectItemCaseSensitive(ep, "created_at");
-   if (cJSON_IsNumber(id_j))
-      out->id = (int64_t)id_j->valuedouble;
-   if (cJSON_IsNumber(mid_j))
-      out->memory_id = (int64_t)mid_j->valuedouble;
-   if (cJSON_IsString(key_j))
-      snprintf(out->episode_key, sizeof(out->episode_key), "%s", key_j->valuestring);
-   if (cJSON_IsString(txt_j))
-      snprintf(out->episode_text, sizeof(out->episode_text), "%s", txt_j->valuestring);
-   if (cJSON_IsString(src_j))
-      snprintf(out->source_session, sizeof(out->source_session), "%s", src_j->valuestring);
-   if (cJSON_IsString(ref_j))
-      snprintf(out->reference_time, sizeof(out->reference_time), "%s", ref_j->valuestring);
-   if (cJSON_IsString(cre_j))
-      snprintf(out->created_at, sizeof(out->created_at), "%s", cre_j->valuestring);
-   cJSON_Delete(resp);
-   return 0;
-}
-
-char *kb_client_memory_context_block(const char *query, const char *block_type, int limit)
-{
-   if (!query)
-      return NULL;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   if (block_type && block_type[0])
-      cJSON_AddStringToObject(req, "block_type", block_type);
-   if (limit > 0)
-      cJSON_AddNumberToObject(req, "limit", limit);
-   char *json = kb_v1_action_request("memory.context_block", req);
-   if (!json)
-      return NULL;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return NULL;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *block = cJSON_GetObjectItemCaseSensitive(resp, "block");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsString(block))
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   char *out = strdup(block->valuestring);
-   cJSON_Delete(resp);
-   return out;
-}
-
-char *kb_client_memory_facts(const char *query)
-{
-   if (!query || !query[0])
-      return NULL;
-
-   cJSON *req = cJSON_CreateObject();
-   kbc_memory_add_scope_context(req);
-   cJSON_AddStringToObject(req, "query", query);
-   char *json = kb_v1_action_request("memory.facts", req);
-   if (!json)
-      return NULL;
-
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return NULL;
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *facts = cJSON_GetObjectItemCaseSensitive(resp, "facts");
-   char *out = NULL;
-   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsString(facts) &&
-       facts->valuestring[0])
-      out = strdup(facts->valuestring);
-   cJSON_Delete(resp);
-   return out;
 }
 
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
@@ -2159,8 +747,40 @@ char *kb_client_evidence_fidelity_retrieval_event(const char *turn_id)
    return kb_v1_action_request("evidence.fidelity_retrieval_event", req);
 }
 
-char *kb_client_memory_lint_json(void)
+/* Host-owned file bytes travel unchanged; parsing, case selection, retrieval,
+ * scoring and report construction belong to the Go memory command. Consumes req. */
+char *kb_client_memory_benchmark_json(cJSON *req, const char *corpus_path)
 {
-   cJSON *req = cJSON_CreateObject();
-   return kb_v1_action_request("memory.lint", req);
+   if (!req)
+      return NULL;
+   if (corpus_path)
+   {
+      FILE *fp = fopen(corpus_path, "rb");
+      char *input = fp ? malloc(1048578) : NULL;
+      if (!fp || !input)
+      {
+         if (fp)
+            fclose(fp);
+         cJSON_Delete(req);
+         return NULL;
+      }
+      size_t count = fread(input, 1, 1048577, fp);
+      int failed = ferror(fp);
+      fclose(fp);
+      if (failed || count > 1048576 || memchr(input, '\0', count))
+      {
+         free(input);
+         cJSON_Delete(req);
+         return NULL;
+      }
+      input[count] = '\0';
+      if (!cJSON_AddStringToObject(req, "corpus_json", input))
+      {
+         free(input);
+         cJSON_Delete(req);
+         return NULL;
+      }
+      free(input);
+   }
+   return kb_v1_action_request_with_timeout("memory.benchmark", req, 120000);
 }

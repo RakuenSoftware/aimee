@@ -50,13 +50,12 @@ char *build_capabilities_text(void)
       const char *parent;
       const subcmd_t *(*getter)(void);
    } sub_tables[] = {
-       {"memory", get_memory_subcmds},
        {"index", get_index_subcmds},
        {"wm", get_wm_subcmds},
        {"agent", get_agent_subcmds},
    };
 
-   for (int t = 0; t < 4 && pos < cap - 256; t++)
+   for (size_t t = 0; t < sizeof(sub_tables) / sizeof(sub_tables[0]) && pos < cap - 256; t++)
    {
       const subcmd_t *subs = sub_tables[t].getter();
       pos += (size_t)snprintf(buf + pos, cap - pos, "## aimee %s\n", sub_tables[t].parent);

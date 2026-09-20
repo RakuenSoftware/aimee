@@ -2,6 +2,7 @@
  * export/import composition for kb.export / kb.import RPCs. */
 
 #include "kb_service_backend_export.h"
+#include "module_commands.h"
 #include "../headers/aimee.h" /* memory_t for memory_query.h */
 #include "kb_service_backend.h"
 #include "db2_internal.h"
@@ -220,17 +221,27 @@ int db2_kb_service_memory_import_json(cJSON *memories_arr, const char *workspace
 
       if (!dry_run)
       {
-         cJSON *r =
-             db2_kb_service_memory_insert_json(tier, kind_j->valuestring, key_j->valuestring,
-                                               content_j->valuestring, confidence, session_id);
-         cJSON *id_j = cJSON_GetObjectItemCaseSensitive(r, "id");
-         if (workspace_override && workspace_override[0] && cJSON_IsNumber(id_j))
+         cJSON *request = cJSON_CreateObject(), *r = NULL;
+         if (!request)
+            return -1;
+         cJSON_AddStringToObject(request, "tier", tier);
+         cJSON_AddStringToObject(request, "kind", kind_j->valuestring);
+         cJSON_AddStringToObject(request, "key", key_j->valuestring);
+         cJSON_AddStringToObject(request, "content", content_j->valuestring);
+         cJSON_AddNumberToObject(request, "confidence", confidence);
+         cJSON_AddStringToObject(request, "session_id", session_id);
+         if (workspace_override && workspace_override[0])
          {
-            int64_t id = (int64_t)id_j->valuedouble;
-            db2_memory_scope_tag_insert(id, "workspace", workspace_override);
-            db2_memory_workspace_tag_insert(id, workspace_override);
+            cJSON_AddBoolToObject(request, "scope_context", 1);
+            cJSON_AddStringToObject(request, "workspace", workspace_override);
          }
+         (void)aimee_module_commands_dispatch("memory.store", request, &r);
+         cJSON_Delete(request);
+         const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "status"));
+         int ok = status && strcmp(status, "ok") == 0;
          cJSON_Delete(r);
+         if (!ok)
+            return -1;
       }
       count++;
    }

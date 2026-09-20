@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "cli_client.h"
+#include "json_wire.h"
 #include "aimee_home.h"
 #include "aimee_version.h"
 #include "cli_server_compat.h"
@@ -535,7 +536,10 @@ cJSON *cli_http_request(const char *endpoint, const char *method, const char *pa
    }
    /* JSON body follows the blank line. */
    const char *body = strstr(buf, "\r\n\r\n");
-   cJSON *parsed = body ? cJSON_Parse(body + 4) : NULL;
+   cJSON *parsed =
+       body ? (!strncmp(path, "/v1/memory/", 11) ? json_wire_parse_exact_integers(body + 4)
+                                                 : cJSON_Parse(body + 4))
+            : NULL;
    free(buf);
    if (http_status)
       *http_status = status;

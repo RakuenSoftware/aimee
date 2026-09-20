@@ -5,7 +5,6 @@
 
 #include "aimee.h"
 #include "commands.h"
-#include "db1_client/db1.h"
 #include "wiki_render.h"
 
 #include <stdio.h>
@@ -30,7 +29,7 @@ static void wiki_render_cmd(app_ctx_t *ctx, int argc, char **argv)
       exit(1);
    }
    if (wiki_render(out_dir) != 0)
-      fatal("wiki render failed: could not write to %s", out_dir);
+      fatal("wiki render failed: memory export or file write failed for %s", out_dir);
    printf("wiki written to %s\n", out_dir);
 }
 
@@ -47,8 +46,6 @@ void cmd_wiki(app_ctx_t *ctx, int argc, char **argv)
                       "Subcommands: render --out <dir>\n");
       exit(1);
    }
-
-   cmd_require_db1("cannot initialize DB1");
 
    const char *sub = argv[0];
    argc--;

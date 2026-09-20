@@ -53,7 +53,10 @@ static void rpt(db2_reembed_plan_t *p, const char *fmt, ...)
    va_end(ap);
 }
 
-/* Does any vector table in the live schema fall outside the known set? Fills the
+/* Only dimension-bound vector columns participate in the global width reset.
+ * Unconstrained vector columns (for example Go memory's versioned embeddings)
+ * retain their own dimensions and must never enter this drop/recreate plan.
+ * Does any dimension-bound table in the live schema fall outside the known set? Fills the
  * report with the discovered tables. Returns 0 if all known, -1 if an unknown one
  * exists (refuse), -2 on a query error. */
 static int discover_and_check(void *conn, db2_reembed_plan_t *p)
@@ -61,8 +64,13 @@ static int discover_and_check(void *conn, db2_reembed_plan_t *p)
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
-       "SELECT DISTINCT table_name FROM information_schema.columns"
-       " WHERE table_schema = 'public' AND udt_name = 'vector' ORDER BY table_name",
+       "SELECT DISTINCT c.relname FROM pg_catalog.pg_attribute a"
+       " JOIN pg_catalog.pg_class c ON c.oid=a.attrelid"
+       " JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace"
+       " JOIN pg_catalog.pg_type t ON t.oid=a.atttypid"
+       " WHERE n.nspname='public' AND t.typname='vector' AND a.atttypmod>0"
+       " AND a.attnum>0 AND NOT a.attisdropped AND c.relkind IN ('r','p','f','v','m')"
+       " ORDER BY c.relname",
        err, sizeof(err));
    if (!st)
       return -2;
