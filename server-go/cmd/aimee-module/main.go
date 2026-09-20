@@ -545,7 +545,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "economizer":
 		// Final request admission is on the provider dispatch path. Avoid the
 		// generic consumer's 10ms idle backoff; keep reduction policy unchanged.
-		config.MaxIdlePollInterval = time.Millisecond
+		config.MaxIdlePollInterval = economizer.RequestAdmissionPollInterval
 		config.ModuleName = name
 		config.PrincipalRef = 27
 		config.Stages = []bus.ModuleStage{

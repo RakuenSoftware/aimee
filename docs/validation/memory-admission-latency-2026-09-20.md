@@ -22,6 +22,13 @@ admission stage returns the correct exact-fit/overflow decision and metadata
 commitment through the C caller. This exposed a stale conformance grant listing
 only five economizer stages; the harness now advertises all eight.
 
+The independently exported economizer entry point now uses the same owner-defined
+polling constant as the bundled multicall. Its export previously referenced a
+nonexistent `Handle` function; it now uses the public `NewHandler` constructor.
+The generated Go executable builds and passes the real C caller's admission
+conformance checks. This export repair and replacing the bundled 1ms literal
+with the same 1ms constant do not change the bundled admission algorithm.
+
 The provider benchmark additionally measures process user/system CPU ticks over
 10 seconds without issuing requests. The previous image's controlled rerun
 passes 200 correctness checks and measures 0.03 CPU seconds over 10 wall seconds

@@ -362,6 +362,12 @@ class CProcessBuildTests(unittest.TestCase):
         self.assertIn("OpenSSL::Crypto", cmake)
         self.assertIn("OpenSSL::SSL", cmake)
 
+    def test_exported_admission_process_uses_owner_poll_ceiling(self) -> None:
+        main = exporter.go_module_main("economizer", 27, [])
+        self.assertIn("MaxIdlePollInterval: handler.RequestAdmissionPollInterval", main)
+        self.assertIn("Handler: handler.NewHandler()", main)
+        self.assertNotIn("MaxIdlePollInterval", exporter.go_module_main("memory", 7, []))
+
     def test_final_request_admission_is_started_and_granted(self) -> None:
         # Exercise the shipping descriptors, rather than merely proving the
         # multicall binary knows a stage that no deployed process will serve.

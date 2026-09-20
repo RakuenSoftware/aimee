@@ -622,6 +622,8 @@ def go_module_main(module_id: str, principal_ref: int,
         for stage in stages
     )
     handler = "handler.NewDefaultHandler()" if module_id == "delegates" else "handler.Handle"
+    if module_id == "economizer":
+        handler = "handler.NewHandler()"
     extra_imports = ""
     watchdog = """\tif handled, code := handler.RunWatchdog(os.Args); handled {
 \t\tos.Exit(code)
@@ -632,6 +634,7 @@ def go_module_main(module_id: str, principal_ref: int,
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     setup = ""
     process_setup = ""
+    process_options = "\t\tMaxIdlePollInterval: handler.RequestAdmissionPollInterval,\n" if module_id == "economizer" else ""
     if module_id in {"config", "providers"}:
         handler = "moduleHandler"
         setup = """\tmoduleHandler, err := handler.NewDefaultHandler()
@@ -699,7 +702,7 @@ func main() {{
 {entries}
 \t\t}},
 \t\tHandler: {handler},
-\t}}
+{process_options}\t}}
 \tif err := bus.RunModuleProcess(ctx, config); err != nil {{
 \t\tfmt.Fprintf(os.Stderr, "aimee-module-{module_id}: %v\\n", err)
 \t\tos.Exit(1)
