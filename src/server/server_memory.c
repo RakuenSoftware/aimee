@@ -134,6 +134,7 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
                                   "read_policy",
                                   "include_version",
                                   "expected_version",
+                                  "idempotency_key",
                                   NULL};
    for (int i = 0; fields[i]; i++)
    {

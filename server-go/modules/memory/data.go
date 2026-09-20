@@ -31,6 +31,8 @@ const (
 )
 
 type DataRequest struct {
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+
 	IncludeVersion  bool                 `json:"include_version,omitempty"`
 	ExpectedVersion *MemoryRecordVersion `json:"expected_version,omitempty"`
 
@@ -171,6 +173,8 @@ type Record struct {
 }
 
 type DataResponse struct {
+	MutationReceipt *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
+
 	Changes            *MemoryChangePage    `json:"changes,omitempty"`
 	Read               *MemoryReadResult    `json:"read,omitempty"`
 	ContextAssembly    *ContextAssembly     `json:"context_assembly,omitempty"`
@@ -987,6 +991,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if request.ExpectedVersion != nil && (options.placement != PlacementKB || request.Operation != "supersede" || !request.ExpectedVersion.validFor(request.ID)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if request.IdempotencyKey != "" && (options.placement != PlacementKB || request.Operation != "supersede" || request.ExpectedVersion == nil || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
 	var readResult *MemoryReadResult
 	if request.ReadPolicy != nil {
 		readResult = request.ReadPolicy.validate(options.placement, request.Operation, request.AsOf)
@@ -1189,6 +1196,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 
 	response := DataResponse{Read: readResult}
+	rollbackOnly := false
 	// Pin policy to one lazy snapshot per request, including its error. A
 	// request must not mix settings from successive configuration generations;
 	// the next request still observes changes immediately.
@@ -1202,6 +1210,10 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		bound.auditBatch = &mutationAuditBatch{}
 		options.data = &bound
 		defer func() {
+			if rollbackOnly {
+				publishMutationAudit(bound.auditAction, request, response, status)
+				return
+			}
 			if status == bus.ModuleStatusOK && len(bound.auditBatch.actions) > 0 {
 				bound.auditBatch.flush(bound.auditAction)
 			} else {
@@ -1988,9 +2000,18 @@ set_config('aimee.correlation_id',$9,true)`,
 			if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
 				authority = AuthorityUser
 			}
-			record, err = backend.replaceKBVersion(ctx, request.ID, request.Content, *request.Confidence, request.SessionID, authority, nil, request.ExpectedVersion)
-			if err == nil && options.publicWrite {
-				err = backend.captureStoredFactActor(ctx, record.ID, authority, options.commandContext)
+			if request.IdempotencyKey != "" {
+				if transaction == nil || !options.publicWrite {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				request.Scope = scope
+				record, response.MutationReceipt, err = backend.replaceKBIdempotent(ctx, request, authority, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
+				rollbackOnly = err != nil
+			} else {
+				record, err = backend.replaceKBVersion(ctx, request.ID, request.Content, *request.Confidence, request.SessionID, authority, nil, request.ExpectedVersion)
+				if err == nil && options.publicWrite {
+					err = backend.captureStoredFactActor(ctx, record.ID, authority, options.commandContext)
+				}
 			}
 		} else {
 			record, err = advanced.Supersede(ctx, scope, request.ID, request.Content, *request.Confidence)
@@ -2638,7 +2659,7 @@ set_config('aimee.correlation_id',$9,true)`,
 	if err != nil {
 		return nil, bus.ModuleStatusInternal
 	}
-	if transaction != nil {
+	if transaction != nil && !rollbackOnly {
 		if err := transaction.Commit(ctx); err != nil {
 			return nil, bus.ModuleStatusInternal
 		}

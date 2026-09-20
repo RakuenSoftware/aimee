@@ -1,0 +1,169 @@
+package memory
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"strconv"
+
+	"github.com/JBailes/aimee/server-go/bus"
+	store "github.com/JBailes/aimee/server-go/db"
+)
+
+var errIdempotencyConflict = errors.New("memory: idempotency key was already used for a different correction")
+var errReplayUnavailable = errors.New("memory: correction was already committed but its result is no longer available at the committed version; the correction was not repeated")
+
+// MemoryMutationReceipt identifies the existing canonical audit commit, never a
+// cached content response. A replay must pass current visibility and revision checks.
+type MemoryMutationReceipt struct {
+	SchemaVersion int                 `json:"schema_version"`
+	CommitID      string              `json:"commit_id"`
+	Version       MemoryRecordVersion `json:"version"`
+	Replayed      bool                `json:"replayed"`
+}
+
+func validIdempotencyKey(key string) bool {
+	if len(key) < 16 || len(key) > 128 {
+		return false
+	}
+	for _, c := range key {
+		if c < 33 || c > 126 {
+			return false
+		}
+	}
+	return true
+}
+
+func verifiedRetryCaller(c *bus.CommandContext) bool {
+	return c != nil && c.Authenticated && c.Principal != "" && len(c.Principal) <= 1024
+}
+
+func retryHash(value []byte) string {
+	sum := sha256.Sum256(value)
+	return hex.EncodeToString(sum[:])
+}
+
+// Hash the request admitted by the owner, excluding presentation, trace IDs and
+// connection identity. The authenticated principal namespaces the opaque key;
+// effective authority, scope and the expected version are part of the request.
+func correctionDigest(r DataRequest, authority int) (string, error) {
+	raw, err := json.Marshal(struct {
+		SchemaVersion      int
+		Operation          string
+		ID                 int64
+		Content            string
+		Confidence         *float64
+		SessionID          string
+		Authority          int
+		Scope              Scope
+		Workspace, Project string
+		IncludeAll         bool
+		ExpectedVersion    *MemoryRecordVersion
+	}{1, "supersede", r.ID, r.Content, r.Confidence, r.SessionID, authority, r.Scope, r.Workspace, r.Project, r.IncludeAll, r.ExpectedVersion})
+	if err != nil {
+		return "", err
+	}
+	return retryHash(raw), nil
+}
+
+// The caller must roll back its transaction on ANY error, including a normal
+// refusal: the open audit commit, mutation, extraction job and receipt are atomic.
+// Only keyed corrections pay for the additional lock and receipt queries.
+func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *bus.CommandContext, correlation string) (Record, *MemoryMutationReceipt, error) {
+	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.validFor(r.ID) || r.Confidence == nil {
+		return Record{}, nil, errors.New("memory: invalid idempotent correction")
+	}
+	digest, err := correctionDigest(r, authority)
+	if err != nil {
+		return Record{}, nil, err
+	}
+	keyHash := retryHash([]byte(r.IdempotencyKey))
+	var owner string
+	if err = s.db.QueryRow(ctx, `SELECT owner_id::text FROM memory_collection_owner WHERE id=1`).Scan(&owner); err != nil {
+		return Record{}, nil, err
+	}
+	if owner != r.ExpectedVersion.OwnerID {
+		return Record{}, nil, errMutationVersionConflict
+	}
+	identity, _ := json.Marshal([]string{owner, caller.Principal, keyHash})
+	if _, err = s.db.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,5748))`, string(identity)); err != nil {
+		return Record{}, nil, err
+	}
+	receipt := &MemoryMutationReceipt{SchemaVersion: 1, Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner}}
+	var storedDigest string
+	var id, revision int64
+	err = s.db.QueryRow(ctx, `SELECT request_hash,commit_id,result_id,result_revision FROM memory_mutation_receipts
+ WHERE owner_id=$1::uuid AND actor_principal=$2 AND key_hash=$3`, owner, caller.Principal, keyHash).Scan(&storedDigest, &receipt.CommitID, &id, &revision)
+	if err == nil {
+		if storedDigest != digest {
+			return Record{}, nil, errIdempotencyConflict
+		}
+		// Never requeue extraction or return stored content. The ordinary exact read
+		// applies current RLS, expiry, lifecycle, suppression and rejection policy.
+		record, readErr := s.getAtVersioned(ctx, r.Scope, id, false, "", true)
+		if errors.Is(readErr, ErrMemoryNotFound) {
+			return Record{}, nil, errReplayUnavailable
+		}
+		if readErr != nil {
+			return Record{}, nil, readErr
+		}
+		if record.Version.OwnerID != owner || record.Version.RecordRevision != strconv.FormatInt(revision, 10) {
+			return Record{}, nil, errReplayUnavailable
+		}
+		receipt.Version = *record.Version
+		receipt.Replayed = true
+		// The receipt carries the exact version without changing the legacy row shape.
+		record.Version = nil
+		return record, receipt, nil
+	}
+	if !store.IsNoRows(err) {
+		return Record{}, nil, err
+	}
+	actor := FactActor{Principal: caller.Principal, Role: "model", Rank: 10, Authenticated: 1, TransportIdentity: caller.TransportIdentity}
+	if authority == AuthorityUser {
+		if !caller.UserAuthority {
+			return Record{}, nil, errors.New("memory: verified user authority required")
+		}
+		actor.Role, actor.Rank = "user", 30
+	}
+	if actor.TransportIdentity == "" {
+		actor.TransportIdentity = actor.Principal
+	}
+	var previous string
+	if err = s.db.QueryRow(ctx, `SELECT COALESCE(current_setting('aimee.changeset_id',true),'')`).Scan(&previous); err != nil {
+		return Record{}, nil, err
+	}
+	// Join the existing changeset/WORM path, not a second audit service.
+	receipt.CommitID, err = s.openFactCommit(ctx, actor, "memory.supersede", correlation)
+	if err != nil {
+		return Record{}, nil, err
+	}
+	if _, err = s.db.Exec(ctx, `SELECT set_config('aimee.changeset_id',$1,true)`, receipt.CommitID); err != nil {
+		return Record{}, nil, err
+	}
+	record, err := s.replaceKBVersion(ctx, r.ID, r.Content, *r.Confidence, r.SessionID, authority, nil, r.ExpectedVersion)
+	if err != nil {
+		return Record{}, nil, err
+	}
+	if err = s.captureStoredFactActor(ctx, record.ID, authority, caller); err != nil {
+		return Record{}, nil, err
+	}
+	if err = s.db.QueryRow(ctx, `SELECT record_revision FROM memories WHERE id=$1`, record.ID).Scan(&revision); err != nil {
+		return Record{}, nil, err
+	}
+	if err = s.closeFactCommit(ctx, receipt.CommitID, record.ID); err != nil {
+		return Record{}, nil, err
+	}
+	if _, err = s.db.Exec(ctx, `INSERT INTO memory_mutation_receipts(owner_id,actor_principal,key_hash,request_hash,commit_id,result_id,result_revision)
+ VALUES($1::uuid,$2,$3,$4,$5,$6,$7)`, owner, caller.Principal, keyHash, digest, receipt.CommitID, record.ID, revision); err != nil {
+		return Record{}, nil, err
+	}
+	if _, err = s.db.Exec(ctx, `SELECT set_config('aimee.changeset_id',$1,true)`, previous); err != nil {
+		return Record{}, nil, err
+	}
+	receipt.Version.RecordID = strconv.FormatInt(record.ID, 10)
+	receipt.Version.RecordRevision = strconv.FormatInt(revision, 10)
+	return record, receipt, nil
+}

@@ -98,16 +98,29 @@ class Gate:
         self.check('shared HTTP rejects stale expected version', code == 409 and stale.get('reason') == 'expected_version_conflict')
         observed = self.good('shared refreshed versioned HTTP get', self.call('get', dict(store='kb', id=old_id, include_version=True)))
         version = observed['memory']['version']
+        retry_key = self.prefix + '-journal-correction'
         self.sql(f"ALTER TABLE memory_scopes ADD CONSTRAINT e2e_scope_copy_failure CHECK(memory_id={old_id} OR scope_value<>'journal-one') NOT VALID")
         try:
-            code, failure = self.call('supersede', dict(store='kb', old_id=old_id, new_content='must roll back', expected_version=version))
+            code, failure = self.call('supersede', dict(store='kb', old_id=old_id, new_content='must roll back', expected_version=version, idempotency_key=retry_key))
             self.check('shared HTTP replacement refuses failed tag copy', code >= 500 and failure.get('kind') == 'unavailable')
             retained = self.good('shared original after failed copy', self.call('get', dict(store='kb', id=old_id)))
             self.check('failed tag copy preserves original and invalidation',
                        retained.get('memory', {}).get('content') == original and self.shared_changes(old_id) == tagged)
         finally:
             self.sql('ALTER TABLE memory_scopes DROP CONSTRAINT e2e_scope_copy_failure')
-        updated = self.good('shared HTTP version replacement', self.call('supersede', dict(store='kb', old_id=old_id, new_content='shared journal corrected', expected_version=version)))
+        correction = dict(store='kb', old_id=old_id, new_content='shared journal corrected', expected_version=version, idempotency_key=retry_key)
+        updated = self.good('shared HTTP version replacement', self.call('supersede', correction))
+        receipt = updated['mutation_receipt']
+        self.check('shared correction returns canonical commit receipt', receipt['schema_version'] == 1 and
+                   receipt['replayed'] is False and bool(receipt['commit_id']))
+        replay = self.good('shared HTTP idempotent correction replay', self.call('supersede', correction))
+        self.check('shared correction replay preserves identity and commit', replay.get('id') == updated['id'] and
+                   replay.get('mutation_receipt', {}).get('replayed') is True and
+                   replay.get('mutation_receipt', {}).get('commit_id') == receipt['commit_id'])
+        code, conflict = self.call('supersede', dict(correction, new_content='different payload'))
+        self.check('shared HTTP refuses idempotency key reuse', code == 409 and conflict.get('reason') == 'idempotency_conflict')
+        self.retry_correction = (correction, receipt)
+
         new_id = int(updated['id'])
         code, retry = self.call('supersede', dict(store='kb', old_id=old_id, new_content='shared journal corrected', expected_version=version))
         self.check('shared HTTP correction retry conflicts without duplicating', code == 409 and retry.get('reason') == 'expected_version_conflict')
@@ -415,6 +428,22 @@ class Gate:
                    restarted['revision'] >= journal['revision'] and
                    all(event in restarted['events'] for event in journal['events']) and
                    max(event['revision'] for event in restarted['events']) == restarted['revision'])
+        correction, receipt = self.retry_correction
+        code, replay = self.call('supersede', correction)
+        # Background normalization can change the result revision after restart.
+        # Replay may return the original commit only while that version remains
+        # eligible; otherwise it must refuse without repeating the correction.
+        self.check('shared correction receipt survives KB restart',
+                   (code == 200 and replay.get('mutation_receipt', {}).get('replayed') is True and
+                    replay.get('mutation_receipt', {}).get('commit_id') == receipt['commit_id']) or
+                   (code == 409 and replay.get('reason') == 'idempotent_result_unavailable'))
+        self.check('shared restarted correction never duplicates result',
+                   self.sql(f"SELECT count(*) FROM memories WHERE key='{self.prefix}-journal'") == '2')
+        self.sql(f"UPDATE memories SET lifecycle_state='retired' WHERE id={journal_id}")
+        code, unavailable = self.call('supersede', correction)
+        self.check('shared HTTP retry refuses retired result without cached content', code == 409 and
+                   unavailable.get('reason') == 'idempotent_result_unavailable' and 'memory' not in unavailable and
+                   'mutation_receipt' not in unavailable)
         long_shared = 'shared release fixture ' + 'αβ🦊 ' * 1000
         row = self.good('explicit long KB store', self.call('store', dict(store='kb', key=self.prefix + '-long', content=long_shared)))
         got = self.good('explicit long KB get', self.call('get', dict(store='kb', id=row['id'])))

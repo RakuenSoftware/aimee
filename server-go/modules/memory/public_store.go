@@ -119,7 +119,16 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 	if !valid {
 		return commandResult(commandError("invalid_argument", "expected_version must identify the owner, target and positive revision using schema_version=1"))
 	}
-	request := DataRequest{ExpectedVersion: expected, Operation: "supersede", ID: id, Content: content, Confidence: &confidence, SessionID: args.stringOr("session_id", ""), PublicView: true, IncludeAll: true}
+	key := ""
+	if raw, exists := args["idempotency_key"]; exists {
+		if json.Unmarshal(raw, &key) != nil || !validIdempotencyKey(key) || expected == nil {
+			return commandResult(commandError("invalid_argument", "idempotency_key requires 16-128 printable ASCII characters and expected_version"))
+		}
+		if !verifiedRetryCaller(options.commandContext) {
+			return commandResult(commandError("forbidden", "idempotent corrections require an authenticated principal"))
+		}
+	}
+	request := DataRequest{IdempotencyKey: key, ExpectedVersion: expected, Operation: "supersede", ID: id, Content: content, Confidence: &confidence, SessionID: args.stringOr("session_id", ""), PublicView: true, IncludeAll: true}
 	if caller := options.commandContext; args.stringOr("authority", "") == "user" && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
 		request.Authority = AuthorityUser
 	}
@@ -160,14 +169,18 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 	}
 	if args.stringOr("view", "") == "server" {
 		return commandResult(struct {
-			Status string `json:"status"`
-			Store  string `json:"store"`
+			Status          string                 `json:"status"`
+			Store           string                 `json:"store"`
+			MutationReceipt *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
 			publicMemoryRecord
-		}{"ok", "kb", response.PublicRecords[0]})
+		}{"ok", "kb", response.MutationReceipt, response.PublicRecords[0]})
 	}
 	result := map[string]any{"status": "ok", "memory": response.PublicRecords[0]}
+	if response.MutationReceipt != nil {
+		result["mutation_receipt"] = response.MutationReceipt
+	}
 	if args.stringOr("view", "") == "mcp" {
-		return mutationMCPResult("supersede", id, response.PublicRecords[0].ID, "")
+		return mutationMCPResult("supersede", id, response.PublicRecords[0].ID, "", response.MutationReceipt)
 	}
 	if scoped {
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""

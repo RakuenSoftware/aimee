@@ -231,6 +231,9 @@ char *kb_v1_action_request(const char *method, cJSON *request)
          char *encoded =
              cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(request, "expected_version"));
          assert(encoded && !strcmp(encoded, expected_version));
+         assert(!strcmp(
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "idempotency_key")),
+             "fixture-retry-key-001"));
          free(encoded);
       }
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
@@ -610,6 +613,7 @@ static void test_shared_supersede_authority(void)
    expected_version = "{\"schema_version\":1,\"owner_id\":\"00000000-0000-0000-0000-000000000001\","
                       "\"record_id\":\"42\",\"record_revision\":\"9007199254740993\"}";
    cJSON_AddItemToObject(request, "expected_version", cJSON_Parse(expected_version));
+   cJSON_AddStringToObject(request, "idempotency_key", "fixture-retry-key-001");
    store_reply = "{\"status\":\"ok\",\"store\":\"kb\",\"id\":9007199254740993}";
    for (expected_store_authority = 0; expected_store_authority < 2; expected_store_authority++)
    {

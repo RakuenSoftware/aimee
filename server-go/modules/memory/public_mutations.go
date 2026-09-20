@@ -12,6 +12,14 @@ func commandMutationRefusal(code *int) map[string]any {
 		return nil
 	}
 	switch *code {
+	case MutationIdempotencyConflict:
+		result := commandError("conflict", errIdempotencyConflict.Error())
+		result["reason"] = "idempotency_conflict"
+		return result
+	case MutationReplayUnavailable:
+		result := commandError("conflict", errReplayUnavailable.Error())
+		result["reason"] = "idempotent_result_unavailable"
+		return result
 	case MutationVersionConflict:
 		result := commandError("conflict", errMutationVersionConflict.Error())
 		result["reason"] = "expected_version_conflict"
@@ -156,7 +164,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	return commandResult(result)
 }
 
-func mutationMCPResult(verb string, id, newID int64, key string) ([]byte, bus.ModuleStatus) {
+func mutationMCPResult(verb string, id, newID int64, key string, receipts ...*MemoryMutationReceipt) ([]byte, bus.ModuleStatus) {
 	var text string
 	switch verb {
 	case "store":
@@ -177,5 +185,9 @@ func mutationMCPResult(verb string, id, newID int64, key string) ([]byte, bus.Mo
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	return commandResult(map[string]any{"status": "ok", "text": text, "audit_id": fmt.Sprint(newID)})
+	result := map[string]any{"status": "ok", "text": text, "audit_id": fmt.Sprint(newID)}
+	if len(receipts) > 0 && receipts[0] != nil {
+		result["mutation_receipt"] = receipts[0]
+	}
+	return commandResult(result)
 }

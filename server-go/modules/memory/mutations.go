@@ -18,6 +18,8 @@ const (
 	MutationRequiresReplacement = -3
 	MutationReviewRequired      = -4
 	MutationVersionConflict     = -5
+	MutationIdempotencyConflict = -6
+	MutationReplayUnavailable   = -7
 )
 
 var validEpistemicKinds = map[string]bool{
@@ -135,6 +137,10 @@ func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content stri
 
 func mutationRefusal(err error) int {
 	switch {
+	case errors.Is(err, errIdempotencyConflict):
+		return MutationIdempotencyConflict
+	case errors.Is(err, errReplayUnavailable):
+		return MutationReplayUnavailable
 	case errors.Is(err, errMutationVersionConflict):
 		return MutationVersionConflict
 	case errors.Is(err, errImmutableExperience):

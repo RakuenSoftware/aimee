@@ -26,7 +26,7 @@ refusal maps to HTTP 409 rather than an upstream-failure status.
 
 This is a foundation slice. Review-required writes currently refuse without
 creating a linked proposal. Personal versioning, expected versions on remaining mutation verbs,
-idempotency keys, durable guards/outbox/consumer replay and full retention policy
+idempotency on remaining verbs, further durable guards/consumer replay and full retention policy
 remain acceptance work.
 
 The personal-store producer now captures governed row mutations in a durable,
@@ -65,8 +65,39 @@ schema; counter-only reads and unchanged governed writes retain their revision.
 
 This opt-in contract currently supports shared exact-ID get and supersede only.
 Other operations and personal placement refuse the fields explicitly. It does
-not supply idempotent replay results, automatic restore-owner rotation, historical
+not supply automatic restore-owner rotation, historical
 belief reconstruction, or final-release freshness proofs.
+
+### Durable retries for shared corrections
+
+Authenticated shared `supersede` accepts an optional `idempotency_key` (16–128
+printable ASCII characters, no spaces) together with `expected_version`. Reuse the
+same key for a retry of the same owner-admitted request. Its digest includes the
+content, confidence, target, expected version, effective authority, session and
+scope; it excludes view formatting, trace IDs and connection identity. The host
+may already have screened the incoming payload, so this does not claim a digest
+of original HTTP bytes before host transformations.
+
+A transaction-scoped key lock orders concurrent retries. The immutable,
+actor-isolated receipt stores hashes and result references alongside the existing
+`fact_graph_commits` audit. Replacement, copied scope tags, extraction actor/job,
+WORM sealing, invalidation and receipt insertion commit together. Failure even at
+the final receipt insert rolls all of them back. A disconnected uncommitted writer
+leaves the key reusable; a committed writer needs no in-process retry state.
+Ordinary requests do not pay for receipt lookup or key locking.
+
+Success includes `mutation_receipt` with schema version, canonical commit ID,
+exact decimal-string result version and `replayed`. Replays re-read current
+eligibility and revision, without recapturing authorship, queuing extraction,
+creating another canonical audit commit or publishing invalidation. A different
+admitted payload returns HTTP 409 / `idempotency_conflict`. An erased, hidden,
+retired, expired or revised result returns HTTP 409 /
+`idempotent_result_unavailable`, without cached content or repeating the write.
+The receipt is a canonical commit reference, not proof that derivatives caught up.
+
+This contract currently covers shared corrections only. Other verbs and personal
+placement explicitly refuse the field. Broader create/update/delete idempotency,
+retention/restore policy, review proposals and consumer progress remain open.
 
 ## Existing integration points
 

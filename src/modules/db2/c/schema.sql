@@ -17914,6 +17914,45 @@ END
 $memory_change_acl$;
 -- END memory change journal
 
+-- BEGIN memory mutation receipts
+-- Content-free, immutable retry references into the existing canonical audit.
+-- No foreign key to memories: erasure must not permit a retry to repeat a write.
+CREATE TABLE IF NOT EXISTS memory_mutation_receipts (
+ owner_id UUID NOT NULL,
+ actor_principal TEXT NOT NULL CHECK(length(actor_principal) BETWEEN 1 AND 1024),
+ key_hash TEXT NOT NULL CHECK(key_hash ~ '^[0-9a-f]{64}$'),
+ request_hash TEXT NOT NULL CHECK(request_hash ~ '^[0-9a-f]{64}$'),
+ commit_id TEXT NOT NULL REFERENCES fact_graph_commits(commit_id),
+ result_id BIGINT NOT NULL CHECK(result_id>0),
+ result_revision BIGINT NOT NULL CHECK(result_revision>0),
+ created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(owner_id,actor_principal,key_hash)
+);
+ALTER TABLE memory_mutation_receipts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_mutation_receipt_actor ON memory_mutation_receipts;
+CREATE POLICY memory_mutation_receipt_actor ON memory_mutation_receipts
+ USING(actor_principal=current_setting('aimee.principal',true))
+ WITH CHECK(actor_principal=current_setting('aimee.principal',true));
+REVOKE ALL ON memory_mutation_receipts FROM PUBLIC;
+DO $memory_receipt_grants$
+DECLARE recipient RECORD; role_name TEXT;
+BEGIN
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class AS relation,
+  LATERAL aclexplode(relation.relacl) AS acl
+  WHERE relation.oid='memory_mutation_receipts'::regclass AND acl.grantee<>relation.relowner
+ LOOP
+  role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+  EXECUTE format('REVOKE ALL ON TABLE memory_mutation_receipts FROM %s',role_name);
+ END LOOP;
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  -- Reconcile broad historical default grants on upgrades, too.
+  REVOKE ALL ON memory_mutation_receipts FROM aimee_store_runtime;
+  GRANT SELECT,INSERT ON memory_mutation_receipts TO aimee_store_runtime;
+ END IF;
+END
+$memory_receipt_grants$;
+-- END memory mutation receipts
+
 -- The embedded Go store has a separate, non-owner runtime role. The KB owner
 -- creates these objects, so the Go migrator's default privileges do not cover
 -- them. Grant only the memory domain's relations, never the Vault/control or
@@ -17987,6 +18026,8 @@ BEGIN
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id,last_accessed_at) ON artifacts TO aimee_store_runtime;
   GRANT SELECT ON memory_collection_owner, memory_collection_generations, memory_invalidation_outbox TO aimee_store_runtime;
+  REVOKE ALL ON memory_mutation_receipts FROM aimee_store_runtime;
+  GRANT SELECT,INSERT ON memory_mutation_receipts TO aimee_store_runtime;
   GRANT SELECT ON bandit_promotions, tasks, fact_evidence, docs, evidence_lifecycle_settings,
     memory_active_embedder, kb_embeddings, kb_documents,
     document_versions, derivation_policy_versions TO aimee_store_runtime;
@@ -18017,5 +18058,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '23')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '24')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
