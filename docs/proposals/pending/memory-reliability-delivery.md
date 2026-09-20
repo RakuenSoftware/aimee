@@ -82,8 +82,9 @@ request P95 claim is made. Remaining work stays on the single branch described
 above; these foundations do not certify all MR-01–18 acceptance gates.
 
 [Private revision and restart-permission validation](../../validation/memory-private-versions-2026-09-20.md)
-adds the latest complete fresh T2 receipt: **348/348 checks**, using application
-`f5c3a6f2c2` and restart-readiness harness `1d37efd79d`.
+adds the latest complete fresh T2 receipt: **348/348 checks** on `68eaab6d44`,
+including verified private caller-context transport and the enrolled restart
+readiness check.
 Private history and conditional correction pass HTTP/MCP, restart, rollback and
 erasure checks. This run caught and repaired PostgreSQL restart reconciliation
 restoring forbidden journal/history grants. It uses corrected application and

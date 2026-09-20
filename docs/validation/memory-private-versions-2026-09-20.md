@@ -101,8 +101,26 @@ authority and operation fields cannot replace host-selected context or routing.
 Native module-command, HTTP memory adapter and MCP adapter tests pass, including
 context isolation and exact large integer tokens. This prepares private mutation
 admission; it does not itself persist private authorship or supply review parity.
-The 348-check receipt predates this transport addition; a new image must validate
-its shipping HTTP/MCP integration. The C event bus implementation is unchanged.
+The C event bus implementation is unchanged.
+
+Implementation and harness `68eaab6d44696f7f0190df7b3bf09a2e7d709fe2` now pass
+another complete fresh T2 run: **348/348 checks** with the same per-group counts
+above. The [new receipt](memory-shared-reliability-2026-09-20/fresh-t2-68eaab6d44.json)
+is distinct from the pre-transport run. Both application containers were verified
+against `sha256:4d8f87e7c6030f9d6c41f5e1dffb753ab23b8006d7b5f803c4982603b4cfc6e5`;
+both PostgreSQL containers retain the corrected `b6209cde68c9…` image identified
+above. HTTP/MCP private mutation envelopes and exact versions, shared scope
+isolation, review/retry, rollback, restart and outage recovery all pass.
+
+The first provisioning attempt stopped before application tests because Docker
+had exhausted its default IPv4 pools; a direct network-create probe confirmed
+that cause. Removing only completed, stopped owned fixtures and their networks
+resolved it without changing source or images. Failed provisioning evidence is
+retained at `/opt/aimee-memory-proposals-evidence/t2-68eaab6d44`; passing evidence
+is at `/opt/aimee-memory-proposals-evidence/t2-68eaab6d44-r2`, inside owned CT 9498.
+Passing fixture containers are stopped with volumes and evidence retained.
+CI on the same implementation had 48 successful jobs and no failures when this
+receipt was recorded; full workflow completion is not claimed.
 
 ## Remaining scope
 

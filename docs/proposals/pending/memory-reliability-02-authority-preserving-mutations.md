@@ -207,7 +207,8 @@ open. The snapshot mechanism preserves available metadata but does not infer
 human authorship from the placement or request body.
 
 [Fresh validation](../../validation/memory-private-versions-2026-09-20.md) records
-346 passing topology/placement/review checks with the corrected store image.
+348 passing topology/placement/review checks with the corrected store image
+and verified private caller-context transport.
 
 The private adapter now forwards verified host caller context separately from
 request arguments, preserving model authority for MCP calls. This is the ingress
