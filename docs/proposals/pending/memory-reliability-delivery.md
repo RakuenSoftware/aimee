@@ -140,7 +140,9 @@ provider release or durable dispatch receipt.
 now forwards Go-selected projection references only after host integrity acceptance,
 including typed-only assemblies. A bounded-read repair prevents truncated stored
 events from being reported as complete traces. This is an optional assembly event
-path; source versions, full channel coverage and durable dispatch remain open.
+path. Fresh application/harness `440144e437` passes **835/835** checks
+(545 T2, 290 T3), including 11 authenticated evidence writer/reader checks.
+Source versions, full channel coverage and durable dispatch remain open.
 
 ## Supporting indexed-lookup repair
 
@@ -174,7 +176,7 @@ worktree without `--project` against the existing remote service.
 | MR-03 budgets | Go typed-context assembly, final personal/shared recall rebudgeting and existing packing limits; minimal typed projection with one reviewed-procedure rendering, exact byte count/digest and retained IDs; automatic ingress evidence uses only Go-retained items after host integrity acceptance; buffered Responses retains instructions/tools and Anthropic targets use the correct final serializer; Responses stages run once at final provider assembly; Go economizer token evidence is digest-bound to the exact request; typed projection byte caps count complete JSON and wrappers with literal zero handling and linear repacking; verified typed rows fit the remaining outer envelope allocation with source/final projection and selection commitments | Final serialized provider byte/token caps, source-version binding and protected-projection accounting |
 | MR-04 lineage | Fact lineage/review and invalidation paths | Independent-family accounting, full derivative closure and restore-resistant erasure |
 | MR-05 sufficiency | Typed context and answer abstention; retrieval availability separated from unknown task coverage rather than nonempty-to-complete inference | Requirement/coherence coverage of retained evidence and bounded recovery |
-| MR-06 receipts | Owner diagnostic parts and postcommit observations; ingress assembly evidence excludes omitted/rejected context and feedback uses the rendered preview | Durable pre-inference receipts, dispatched/acknowledged stages and crash uncertainty |
+| MR-06 receipts | Owner diagnostic parts and postcommit observations; ingress assembly evidence excludes omitted/rejected context and feedback uses the rendered preview; Go-selected typed projection references merge after integrity acceptance; bounded trace reads refuse truncated payloads | Durable pre-inference receipts, dispatched/acknowledged stages and crash uncertainty |
 | MR-07 exploration | Existing adaptive recall limits | Host-issued task contracts, calibrated starvation recovery and operator ceilings |
 | MR-08 health | Go lane counters and PageRank timing | Served-population concentration/entropy/fanout/reentry metrics with exact denominators |
 | MR-09 ranking | Eligible semantic lanes, RRF, per-arm deduplication, bounded opt-in PageRank | Aggregate prior bounds, final exposure diversity/type floors and adversarial quality gates |
