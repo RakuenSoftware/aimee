@@ -67,7 +67,7 @@ above 2^53-1.
 
 ## Current-state retrieval validity
 
-The Go `current-validity-v5` predicate applies active lifecycle, suppression and
+The Go `current-validity-v6` predicate applies active lifecycle, suppression and
 half-open valid time before shared lexical, whole-record/unit semantic, graph/
 PageRank, compatibility-window, recall-bundle, activation and briefing limits.
 Pending commitments retain their lifecycle while sharing the time predicate;
@@ -79,6 +79,15 @@ visible source cannot admit an edge with hidden or inapplicable dependencies. UT
 time and explicit offsets compare as instants against one transaction clock;
 malformed nonempty values refuse retrieval. Scope/RLS and current embedding
 fingerprints remain additional admission requirements.
+
+Direct-ID current reads apply the same lifecycle, suppression and valid-time
+predicate. Legacy `get --as-of` remains an inspection of a specific retained
+version with a separate `valid_at` label; it does not reconstruct belief time.
+It permits superseded, archived and retired versions, including their ordinary
+activation suppression, but excludes deleted, rejected, revoked, quarantined and
+unknown states and suppressed active rows. Scope checks still apply. Mutation
+admission reads the scoped identity independently of serving eligibility so an
+authorized caller can retire an excluded active row.
 
 Directive/reminder matching, recall fallback and briefing views share the same
 normalized expiry gate. Sweeps expire a row at the exact upper boundary; serving

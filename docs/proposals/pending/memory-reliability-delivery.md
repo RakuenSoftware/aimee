@@ -1,6 +1,8 @@
 # Memory reliability delivery tracker
 
-This records implementation evidence and remaining acceptance work for PR #2983.
+This records implementation evidence and remaining acceptance work for the
+18-proposal program. PR #2983 merged as `7aea4e5221`; G0 and its performance
+follow-up form the starting point for the remaining work.
 It does not turn proposal requirements into passing release gates. The scope is
 one Go memory implementation in Server/private and KB/shared placements, with
 Go module-side producers/consumers using the existing C bus. The bus stays C.
@@ -17,6 +19,31 @@ or replace the C bus.
 | 2. Retrieval compatibility | Versioned whole-record/unit/temporal semantic recall, opt-in Go PageRank, independent-arm RRF with per-arm deduplication | [Compatibility decisions](memory-reliability-retrieval-compatibility.md) are recorded; the [paired quality/latency run](../../validation/memory-g0-2026-09-19.md) is recorded. [Performance follow-up](../../validation/memory-performance-2026-09-20.md) records reduced overhead and unchanged Go rankings. Extend the frozen corpus to the full adversarial matrix. |
 | 3. Evaluation and release evidence | Shared injected Go module; isolated corpus/dataset/QA/support/miss runners; scoped runtime-role and transport regressions; complete owner/evaluator race suite added to required packaged-DB2 CI | Initial frozen 105-case input and manifest-bound corpus baselines/per-case receipts are implemented; live CLI/Server benchmarks share the Go owner and refuse partial results; fresh-image paired quality/performance and bounded CLI/MCP/HTTP restart/failure coverage are [recorded](../../validation/memory-g0-2026-09-19.md). The complete MR-18 adversarial/cross-surface matrix remains. |
 | 4. MR-01–18 | Existing foundations below | Finish each proposal's acceptance gates and integration dependencies. None is certified complete by the language migration. |
+
+## Post-merge execution
+
+Completion of all MR-01–18 implementation and acceptance work is the active goal.
+The [frozen acceptance inventory](../../../tests/eval/memory_reliability_acceptance.json)
+pins 123 acceptance clauses from the merged proposal revision and the measured
+Go performance baseline. It is an inventory, not a claim that those gates pass.
+The requirement text remains bound to that source revision while implementation
+and validation evidence are added here.
+
+Delivery follows the program’s dependency order: eligibility/mutations and final
+payload budgets first, then evidence/receipts/coverage, views and indexing,
+followed by task contracts, outcomes, governed actions and disposable state.
+MR-18 conformance and matched performance measurements accompany each wave.
+Optional fitted policies retain the proposals’ observe/canary gates.
+
+The first MR-01 follow-up closes direct-ID read gaps: current reads now apply
+normalized valid-time and suppression rules already used by search. Legacy
+`as_of` inspection permits retained superseded/archived/retired versions but
+withholds deleted/rejected/revoked/quarantined/unknown states and suppressed
+active content. It preserves legacy `valid_at` labeling; it is not yet the full
+historical/belief-time contract. Mutation scope lookup remains independent of
+serving eligibility, so an admitted retirement can still target an expired or
+suppressed active row. Restricted-role replay covers those positive/negative
+cases, malformed governed timestamps and hidden IDs.
 
 ## Supporting indexed-lookup repair
 

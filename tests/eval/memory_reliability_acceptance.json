@@ -1,0 +1,648 @@
+{
+  "schema_version": 1,
+  "source_revision": "7aea4e522134b756ce5fae72419cd4d037bbd4e1",
+  "purpose": "Frozen acceptance inventory for the approved 18-proposal implementation goal. Requirements are not passing test claims; execution receipts and proposal completion remain separate.",
+  "baseline": {
+    "memory_implementation_revision": "bddab521be1194bb200701d9949ebb0abaeb5b82",
+    "paired_receipt": "docs/validation/memory-performance-2026-09-20/paired-retrieval.json",
+    "paired_receipt_sha256": "9a7d6197d3e6e98d088a41f158a23c57a7a10fff86f7e456c078934dc5f52659"
+  },
+  "proposals": [
+    {
+      "id": "MR-01",
+      "title": "MR-01: Unified retrieval eligibility and validity",
+      "source_path": "docs/proposals/pending/memory-reliability-01-unified-eligibility-and-validity.md",
+      "source_sha256": "95d9444f3dcac82effa6c263082a904d6dad49c32ef17b367ecc4dcc68a28576",
+      "acceptance": [
+        {
+          "id": "MR-01/A1",
+          "requirement": "One fixture includes current, future, expired, suppressed, superseded, archived, quarantined, deleted, revoked and cross-scope records. All advertised endpoints return the expected eligible set."
+        },
+        {
+          "id": "MR-01/A2",
+          "requirement": "Historical recall returns an authorized old version at the requested time while excluding erased and unauthorized content."
+        },
+        {
+          "id": "MR-01/A3",
+          "requirement": "Graph traversal cannot expose a permitted target through an unauthorized intermediate node or reveal that node's identity."
+        },
+        {
+          "id": "MR-01/A4",
+          "requirement": "Concurrent pooled requests cannot inherit each other's transaction scope. Owner/superuser tests cannot substitute for the non-owner runtime test."
+        },
+        {
+          "id": "MR-01/A5",
+          "requirement": "An edit or revocation after candidate retrieval invalidates release or forces a new decision; the earlier decision is retained as history."
+        },
+        {
+          "id": "MR-01/A6",
+          "requirement": "Pure lexical, dense-only and graph-only candidates receive the same hard gates."
+        },
+        {
+          "id": "MR-01/A7",
+          "requirement": "Actual Server and KB memory processes return equivalent domain decisions for equivalent authorized fixtures. A disconnected module cannot activate a C eligibility fallback; boundary checks cover migrated typed adapters."
+        }
+      ]
+    },
+    {
+      "id": "MR-02",
+      "title": "MR-02: Authority-preserving memory mutations",
+      "source_path": "docs/proposals/pending/memory-reliability-02-authority-preserving-mutations.md",
+      "source_sha256": "8fc91e703b970f68628ed1dad6ce2e23422e3a10f80c8a5281f6d8968b5188e9",
+      "acceptance": [
+        {
+          "id": "MR-02/A1",
+          "requirement": "User assertion → model upsert and user assertion → model edit cannot silently become active model-authored truth bearing user provenance."
+        },
+        {
+          "id": "MR-02/A2",
+          "requirement": "Episode and policy protections hold for insert conflicts, updates, bulk import and maintenance writers."
+        },
+        {
+          "id": "MR-02/A3",
+          "requirement": "Concurrent corrections yield one admitted expected-version transition; the losing caller receives an actionable conflict."
+        },
+        {
+          "id": "MR-02/A4",
+          "requirement": "A crash cannot leave the old version retired with no valid replacement or duplicate a correction on retry."
+        },
+        {
+          "id": "MR-02/A5",
+          "requirement": "A crash after mutation commit but before publication still delivers the invalidation after restart. Duplicate or reordered delivery cannot mark an obsolete derivative fresh."
+        },
+        {
+          "id": "MR-02/A6",
+          "requirement": "Consumer restart and retention gaps preserve or rebuild replay progress; a lagging consumer cannot release revoked content using its old local generation."
+        },
+        {
+          "id": "MR-02/A7",
+          "requirement": "Rejected content, changed idempotency payloads and forged actor metadata fail consistently."
+        },
+        {
+          "id": "MR-02/A8",
+          "requirement": "Audit records identify previous/new versions, author/reviewer, effective time and the exact approved content."
+        }
+      ]
+    },
+    {
+      "id": "MR-03",
+      "title": "MR-03: Final-payload context budgets and protected projections",
+      "source_path": "docs/proposals/pending/memory-reliability-03-final-payload-context-budgets.md",
+      "source_sha256": "f2cd60b5bf2f055c28509fb2fa6653606163f9cdf908ca06a6522583223c279f",
+      "acceptance": [
+        {
+          "id": "MR-03/A1",
+          "requirement": "Long metadata cannot be admitted at the cost of its short summary. JSON escapes, Unicode, channel wrappers, reminders, directives and empty-channel overhead are counted."
+        },
+        {
+          "id": "MR-03/A2",
+          "requirement": "Final request bytes/tokens obey declared hard limits; item count is not accepted as a substitute."
+        },
+        {
+          "id": "MR-03/A3",
+          "requirement": "A small required constraint survives a large optional item. Required evidence dropped by packing makes sufficiency partial."
+        },
+        {
+          "id": "MR-03/A4",
+          "requirement": "The model-visible procedure is present once and carries the correct trust classification."
+        },
+        {
+          "id": "MR-03/A5",
+          "requirement": "A transform that breaks negation, a numerical limit or a protected prefix is rejected; a fallback that exceeds capacity is not sent."
+        },
+        {
+          "id": "MR-03/A6",
+          "requirement": "Repeated assembly over identical inputs and versions yields identical projection bytes, selection and digest."
+        }
+      ]
+    },
+    {
+      "id": "MR-04",
+      "title": "MR-04: Evidence lineage, independent corroboration and retraction",
+      "source_path": "docs/proposals/pending/memory-reliability-04-evidence-lineage-and-independent-support.md",
+      "source_sha256": "a56e71b508b88fb72522dd9e17fac6a36e0515bbf8ef3726334ddf55786804ef",
+      "acceptance": [
+        {
+          "id": "MR-04/A1",
+          "requirement": "Thirty copies and their summaries do not increase independent corroboration beyond their established origin."
+        },
+        {
+          "id": "MR-04/A2",
+          "requirement": "A composite derived from A+B does not become a third independent witness. Unknown sources stay unknown."
+        },
+        {
+          "id": "MR-04/A3",
+          "requirement": "Missing, cyclic or truncated lineage is observable and cannot silently become fully supported."
+        },
+        {
+          "id": "MR-04/A4",
+          "requirement": "Revoking an input suppresses release of a derivative that requires it, including cached task context."
+        },
+        {
+          "id": "MR-04/A5",
+          "requirement": "Producer/consumer crashes and duplicate delivery preserve invalidation progress. An offline owner prevents a claim of complete erasure until its retained copies are verified removed."
+        },
+        {
+          "id": "MR-04/A6",
+          "requirement": "A newly inserted contradiction invalidates an earlier empty query-derived view without requiring a change to any previously selected parent."
+        },
+        {
+          "id": "MR-04/A7",
+          "requirement": "Cross-scope lineage queries reveal neither text nor hidden parent IDs/counts."
+        },
+        {
+          "id": "MR-04/A8",
+          "requirement": "Restoring an old content snapshot cannot resurrect a record whose surviving deletion intent prohibits serving."
+        }
+      ]
+    },
+    {
+      "id": "MR-05",
+      "title": "MR-05: Requirement-based context sufficiency and bounded recovery",
+      "source_path": "docs/proposals/pending/memory-reliability-05-context-sufficiency-and-bounded-recovery.md",
+      "source_sha256": "f3e957729a76a941d587565acb024c85b64aad54891fb5697e3ea439f7e614a2",
+      "acceptance": [
+        {
+          "id": "MR-05/A1",
+          "requirement": "One high-confidence unrelated item never satisfies a multi-evidence task."
+        },
+        {
+          "id": "MR-05/A2",
+          "requirement": "Retrieving a required update and then dropping it during packing produces `budget_dropped`, not complete."
+        },
+        {
+          "id": "MR-05/A3",
+          "requirement": "Historical and current evidence cannot be joined into a false timeline through an unrelated episode."
+        },
+        {
+          "id": "MR-05/A4",
+          "requirement": "A revoked or unavailable source is not counted through an old cached projection."
+        },
+        {
+          "id": "MR-05/A5",
+          "requirement": "Independent-support requirements cannot be satisfied by copies of the same origin."
+        },
+        {
+          "id": "MR-05/A6",
+          "requirement": "Recovery terminates at its work/latency/token cap and records duplicate attempts."
+        },
+        {
+          "id": "MR-05/A7",
+          "requirement": "False-complete rate and answer quality are measured separately; all intentionally incomplete frozen fixtures must avoid complete status."
+        }
+      ]
+    },
+    {
+      "id": "MR-06",
+      "title": "MR-06: Actual ranking traces, context receipts and evidence states",
+      "source_path": "docs/proposals/pending/memory-reliability-06-ranking-traces-and-context-receipts.md",
+      "source_sha256": "99138b6693210e3ebd60bcb5fa4ab13e53ab38ed13eaf03c89efa68ba78e95bf",
+      "acceptance": [
+        {
+          "id": "MR-06/A1",
+          "requirement": "A tiny envelope distinguishes retrieved-but-omitted items from delivered items across every channel."
+        },
+        {
+          "id": "MR-06/A2",
+          "requirement": "Dense-only and graph-promoted results show the actual contribution that affected ordering."
+        },
+        {
+          "id": "MR-06/A3",
+          "requirement": "Concurrent/nested calls cannot contaminate trace IDs or candidate lists."
+        },
+        {
+          "id": "MR-06/A4",
+          "requirement": "Crash after preparation but before durable dispatch admission yields prepared-without-dispatch once dispatch ownership is resolved, never a successful invocation."
+        },
+        {
+          "id": "MR-06/A5",
+          "requirement": "Crash after admission but before handoff, after send but before dispatch logging, or after response receipt but before acknowledgement persistence preserves uncertainty unless independent evidence resolves it. Absence of a log record never proves non-dispatch after admission."
+        },
+        {
+          "id": "MR-06/A6",
+          "requirement": "Timeout after send records uncertainty and does not invent a provider acknowledgement."
+        },
+        {
+          "id": "MR-06/A7",
+          "requirement": "A changed request body, source version, renderer or policy cannot verify against the prior binding."
+        },
+        {
+          "id": "MR-06/A8",
+          "requirement": "Commitment-only receipts cannot claim replay; deletion of replay inputs does not erase the distinction between replay and inclusion."
+        }
+      ]
+    },
+    {
+      "id": "MR-07",
+      "title": "MR-07: Task-bound exploration contracts with starvation recovery",
+      "source_path": "docs/proposals/pending/memory-reliability-07-task-exploration-contracts.md",
+      "source_sha256": "8619cec9f7001ff892f6d8c9b123c9bbf23b20a8f663badeeb6923194b30cb26",
+      "acceptance": [
+        {
+          "id": "MR-07/A1",
+          "requirement": "Literal zero scans and legacy disabled-zero configuration remain distinguishable."
+        },
+        {
+          "id": "MR-07/A2",
+          "requirement": "Malformed, expired and forged contracts cannot widen operator permission or transfer limits to another task."
+        },
+        {
+          "id": "MR-07/A3",
+          "requirement": "Concurrent substeps cannot overspend a shared allowance; retrying a tool dispatch cannot double-charge the same admitted attempt."
+        },
+        {
+          "id": "MR-07/A4",
+          "requirement": "Deliberately wrong “high-confidence” context leads to bounded indexed recovery/contract expansion without deadlock."
+        },
+        {
+          "id": "MR-07/A5",
+          "requirement": "Disallowed files and actions remain disallowed after starvation relaxation."
+        },
+        {
+          "id": "MR-07/A6",
+          "requirement": "Edits and unrelated safe operations are unaffected by a discovery-only cap."
+        },
+        {
+          "id": "MR-07/A7",
+          "requirement": "Paired tasks show fewer redundant raw scans and no unacceptable loss of completion, correctness or latency under predeclared [MR-18](memory-reliability-18-evaluation-parity-and-release-gates.md) gates. Report false-restriction and expansion rates."
+        }
+      ]
+    },
+    {
+      "id": "MR-08",
+      "title": "MR-08: Retrieval health telemetry with defined metrics",
+      "source_path": "docs/proposals/pending/memory-reliability-08-retrieval-health-telemetry.md",
+      "source_sha256": "bc2435fb187f84959161ac17af637a1dc8d2b9b95a17bda5d0827b055d578cd8",
+      "acceptance": [
+        {
+          "id": "MR-08/A1",
+          "requirement": "Hand-calculated populations pin top-k/HHI/entropy, empty/single-record behavior, repeats and sample handling. Historical recalls do not trigger stale-current alerts. Retries do not inflate exposure. Unauthorized users cannot discover record/family IDs through health queries. An event overflow produces visible loss rather than a reassuring zero. Measure overhead and retention growth before widening collection; rollback disables optional collection without dropping required receipts."
+        },
+        {
+          "id": "MR-08/A2",
+          "requirement": "[Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)"
+        }
+      ]
+    },
+    {
+      "id": "MR-09",
+      "title": "MR-09: Fair hybrid candidates, bounded priors and exposure-aware selection",
+      "source_path": "docs/proposals/pending/memory-reliability-09-fair-hybrid-ranking-and-exposure.md",
+      "source_sha256": "9055a68da49074ac58faa777d65987e047d19ea802874f63a9340e5248120128",
+      "acceptance": [
+        {
+          "id": "MR-09/A1",
+          "requirement": "A full lexical pool cannot exclude a semantic-only candidate from fusion; duplicate-heavy and graph-only cases also compete."
+        },
+        {
+          "id": "MR-09/A2",
+          "requirement": "Unsupported/unavailable arms report explicit state and bounded fallback."
+        },
+        {
+          "id": "MR-09/A3",
+          "requirement": "Each prior and their combination obey the declared maximum overturn; stable ties are deterministic."
+        },
+        {
+          "id": "MR-09/A4",
+          "requirement": "Thirty copies cannot displace required independent evidence; frequent authoritative corrections and constraints survive exposure controls."
+        },
+        {
+          "id": "MR-09/A5",
+          "requirement": "Floors cannot exceed hard item, byte or token limits. Missing requirements remain visible."
+        },
+        {
+          "id": "MR-09/A6",
+          "requirement": "A disabled experiment returns the baseline selection policy while retaining eligibility, truthful traces and fair admission."
+        }
+      ]
+    },
+    {
+      "id": "MR-10",
+      "title": "MR-10: Deterministic utility horizons for transient memory",
+      "source_path": "docs/proposals/pending/memory-reliability-10-deterministic-utility-horizons.md",
+      "source_sha256": "b93a66cc396d34dc0dda384a6577e30fd5a3b2cc889b7ee81b39f9011c933230",
+      "acceptance": [
+        {
+          "id": "MR-10/A1",
+          "requirement": "An expired transient state does not enter ordinary context through lexical, dense, graph, bundle or cache paths."
+        },
+        {
+          "id": "MR-10/A2",
+          "requirement": "Authorized historical recall still returns the applicable version; deleted/revoked content remains withheld."
+        },
+        {
+          "id": "MR-10/A3",
+          "requirement": "Repeated serving cannot renew a horizon. Only the declared confirmation/update operation can change its anchor."
+        },
+        {
+          "id": "MR-10/A4",
+          "requirement": "Exact boundary, missing anchor, clock skew, policy revision and override precedence have deterministic results."
+        },
+        {
+          "id": "MR-10/A5",
+          "requirement": "Durable constraints/decisions do not disappear due to an unconfigured catch-all duration."
+        }
+      ]
+    },
+    {
+      "id": "MR-11",
+      "title": "MR-11: Versioned embedding generations and bounded index freshness",
+      "source_path": "docs/proposals/pending/memory-reliability-11-embedding-generations-and-index-freshness.md",
+      "source_sha256": "6cd7823e69ea2be4b03270d9828f04912fa9bee892b8afdac1580f4c96d8a60a",
+      "acceptance": [
+        {
+          "id": "MR-11/A1",
+          "requirement": "A same-dimension model/pooling/prefix change creates a new generation and cannot mix with the old one."
+        },
+        {
+          "id": "MR-11/A2",
+          "requirement": "Crash/resume does not duplicate current vectors or lose the change watermark."
+        },
+        {
+          "id": "MR-11/A3",
+          "requirement": "Edit, delete and revoke during backfill cannot become stale authorized vectors at cutover."
+        },
+        {
+          "id": "MR-11/A4",
+          "requirement": "Rebuild and cutover preserve semantic recall of an authorized historical version while ordinary current recall excludes it."
+        },
+        {
+          "id": "MR-11/A5",
+          "requirement": "A future-valid record becomes semantically retrievable at its boundary without another content write; a deferred activation job reports lag until indexed."
+        },
+        {
+          "id": "MR-11/A6",
+          "requirement": "Utility-horizon expiry changes ordinary serving without silently removing advertised historical coverage. Erased/revoked versions remain excluded in every mode."
+        },
+        {
+          "id": "MR-11/A7",
+          "requirement": "Query-time model identity is checked against the generation it searches."
+        },
+        {
+          "id": "MR-11/A8",
+          "requirement": "A large indexing backlog cannot consume the entire recall deadline; fallback reports its limitations."
+        },
+        {
+          "id": "MR-11/A9",
+          "requirement": "Rollback honors all intervening deletions/revocations and retains provenance."
+        }
+      ]
+    },
+    {
+      "id": "MR-12",
+      "title": "MR-12: Named served-memory views and inspectable claim cards",
+      "source_path": "docs/proposals/pending/memory-reliability-12-served-memory-views-and-claim-cards.md",
+      "source_sha256": "755eba5a8fd24750995e3f86ce94bc40d652efc40ebba8464444f8f0958c16c7",
+      "acceptance": [
+        {
+          "id": "MR-12/A1",
+          "requirement": "All adapters produce equivalent authorized view contents under the same policy/input versions."
+        },
+        {
+          "id": "MR-12/A2",
+          "requirement": "A briefing includes required constraints/current corrections before discretionary similar episodes."
+        },
+        {
+          "id": "MR-12/A3",
+          "requirement": "Historical data is never relabeled current, and a contradiction view never leaks a hidden side."
+        },
+        {
+          "id": "MR-12/A4",
+          "requirement": "Correcting a canonical fact invalidates dependent views/cards; stale caches cannot bypass release checks."
+        },
+        {
+          "id": "MR-12/A5",
+          "requirement": "Inserting a constraint after a cached briefing, or a contradiction after an empty contradiction view, forces recomputation even when all prior input versions remain unchanged."
+        },
+        {
+          "id": "MR-12/A6",
+          "requirement": "Different task queries, views, valid/belief times and effective budgets cannot reuse an incompatible cached selection. A clock-only applicability transition refreshes current views."
+        },
+        {
+          "id": "MR-12/A7",
+          "requirement": "An offline or lagging invalidation consumer cannot certify a stale cache as current from its local watermark alone."
+        },
+        {
+          "id": "MR-12/A8",
+          "requirement": "Claim cards show unknown lineage/calibration honestly and cannot be edited into a second authoritative store."
+        },
+        {
+          "id": "MR-12/A9",
+          "requirement": "Final budgets and exact retained evidence agree with the view receipt."
+        }
+      ]
+    },
+    {
+      "id": "MR-13",
+      "title": "MR-13: Disposable task projections with explicit promotion",
+      "source_path": "docs/proposals/pending/memory-reliability-13-disposable-task-projections.md",
+      "source_sha256": "0dae47f1bf7ca7300fb95adbccee92feda56e072b95e67fd645fc109e4066037",
+      "acceptance": [
+        {
+          "id": "MR-13/A1",
+          "requirement": "A task hypothesis cannot appear as a current canonical fact without an admitted promotion."
+        },
+        {
+          "id": "MR-13/A2",
+          "requirement": "Task A's projection is not visible to task B without explicit scope-compatible transfer; different-user/project access stays denied."
+        },
+        {
+          "id": "MR-13/A3",
+          "requirement": "Parallel revisions either merge under declared rules or conflict; no silent lost update."
+        },
+        {
+          "id": "MR-13/A4",
+          "requirement": "Revoking a parent blocks dependent release even if the projection text has already been cached."
+        },
+        {
+          "id": "MR-13/A5",
+          "requirement": "Summarizing a projection does not upgrade its authority or add independent support."
+        },
+        {
+          "id": "MR-13/A6",
+          "requirement": "Expiry/discard removes only the derived task state and records resulting replay availability accurately."
+        },
+        {
+          "id": "MR-13/A7",
+          "requirement": "Promotion checks source versions, authority and scope at commit time and rejects stale previews."
+        }
+      ]
+    },
+    {
+      "id": "MR-14",
+      "title": "MR-14: Proposal-only memory hygiene and bounded maintenance",
+      "source_path": "docs/proposals/pending/memory-reliability-14-proposal-only-memory-hygiene.md",
+      "source_sha256": "d260b6a6d65eb1decad5cc4ed26c3e66db6ebc5bd9d0a49a1d7c16f2e4e572b2",
+      "acceptance": [
+        {
+          "id": "MR-14/A1",
+          "requirement": "Malicious model output cannot directly mutate canonical memory or expand scope."
+        },
+        {
+          "id": "MR-14/A2",
+          "requirement": "Rejected/expired hygiene proposals leave canonical state unchanged."
+        },
+        {
+          "id": "MR-14/A3",
+          "requirement": "Identical retries do not duplicate proposals; concurrent canonical changes invalidate stale previews."
+        },
+        {
+          "id": "MR-14/A4",
+          "requirement": "Expired projection cleanup leaves source records and action receipts intact and respects active leases/retention."
+        },
+        {
+          "id": "MR-14/A5",
+          "requirement": "A partial run exposes what was not scanned; it does not report zero problems for unvisited data."
+        },
+        {
+          "id": "MR-14/A6",
+          "requirement": "Scoped runs and reports cannot discover unauthorized records through cluster counts or samples."
+        }
+      ]
+    },
+    {
+      "id": "MR-15",
+      "title": "MR-15: Procedure experience, delayed outcomes and total task cost",
+      "source_path": "docs/proposals/pending/memory-reliability-15-procedure-outcomes-and-task-cost.md",
+      "source_sha256": "781573548da36d9db326e402e196152d3e7ba19c440116c3d1edf62b6964e1b6",
+      "acceptance": [
+        {
+          "id": "MR-15/A1",
+          "requirement": "One irrelevant hit cannot earn a correctness/sufficiency success merely by being nonempty."
+        },
+        {
+          "id": "MR-15/A2",
+          "requirement": "A retrieved-but-omitted or unused procedure does not acquire a successful application."
+        },
+        {
+          "id": "MR-15/A3",
+          "requirement": "Duplicate events and retries produce the defined counts; conflicting outcome evidence is explicit."
+        },
+        {
+          "id": "MR-15/A4",
+          "requirement": "Changing a procedure version starts the appropriate version cohort without erasing prior history."
+        },
+        {
+          "id": "MR-15/A5",
+          "requirement": "Unknown/unpriced usage is visible; total reported cost includes all declared stages and retries."
+        },
+        {
+          "id": "MR-15/A6",
+          "requirement": "Claimed savings require the specified quality gate and paired baseline; exact-cost admission cannot fall back to character estimates."
+        }
+      ]
+    },
+    {
+      "id": "MR-16",
+      "title": "MR-16: Evidence-bound actions, idempotent receipts and composition policy",
+      "source_path": "docs/proposals/pending/memory-reliability-16-evidence-bound-actions-and-composition.md",
+      "source_sha256": "0d08daf694e28e8063b32c845615e3d4972aa82fafd6c44c8a4e0b1028051800",
+      "acceptance": [
+        {
+          "id": "MR-16/A1",
+          "requirement": "Revocation/correction before admission blocks stale evidence use; concurrent ordering is reproducible in audit events."
+        },
+        {
+          "id": "MR-16/A2",
+          "requirement": "Old permits, changed payloads, changed destinations and forged tool classes cannot authorize execution."
+        },
+        {
+          "id": "MR-16/A3",
+          "requirement": "Concurrent duplicate submissions create at most the effect allowed by the provider/host idempotency contract."
+        },
+        {
+          "id": "MR-16/A4",
+          "requirement": "Unknown irreversible outcomes are not silently retried or reported as success."
+        },
+        {
+          "id": "MR-16/A5",
+          "requirement": "Splitting a prohibited sequence across turns, delegates or retries cannot bypass composition/spend rules."
+        },
+        {
+          "id": "MR-16/A6",
+          "requirement": "Failed external-effect verification cannot be presented as confirmed completion."
+        }
+      ]
+    },
+    {
+      "id": "MR-17",
+      "title": "MR-17: Clean retry context with preserved real-world state",
+      "source_path": "docs/proposals/pending/memory-reliability-17-clean-retry-context.md",
+      "source_sha256": "bb5c66c0558c6a05ce5810e119b9fed00abe0a1fb641418cf30399cc6079faa6",
+      "acceptance": [
+        {
+          "id": "MR-17/A1",
+          "requirement": "Failed speculation is absent from the next attempt except for a bounded, labeled failure summary."
+        },
+        {
+          "id": "MR-17/A2",
+          "requirement": "Actual writes/effects survive in the action journal and cannot be accidentally replayed as if they never happened."
+        },
+        {
+          "id": "MR-17/A3",
+          "requirement": "Revoked evidence and replaced user constraints are not resurrected from a snapshot."
+        },
+        {
+          "id": "MR-17/A4",
+          "requirement": "Corrupt or unavailable snapshot inputs produce an explicit reconstruction failure and safe fresh-plan path."
+        },
+        {
+          "id": "MR-17/A5",
+          "requirement": "Repeated attempts cannot exceed the shared task ceiling, even across restarts/delegates."
+        },
+        {
+          "id": "MR-17/A6",
+          "requirement": "A failed branch does not erase host-verified successful work or claim a filesystem restore that was not executed."
+        }
+      ]
+    },
+    {
+      "id": "MR-18",
+      "title": "MR-18: Frozen evaluation, migration parity and release gates",
+      "source_path": "docs/proposals/pending/memory-reliability-18-evaluation-parity-and-release-gates.md",
+      "source_sha256": "fa4ba0ef65e353d329f4f4fed3b03eceb78a9bbf6e23bd44e09c8257492d124c",
+      "acceptance": [
+        {
+          "id": "MR-18/A1",
+          "requirement": "Hard deterministic gates require zero violations in their frozen cases: unauthorized release, forbidden current-state re-entry, authority laundering, canonical mutation from an unapproved task/hygiene proposal, receipt mismatch, silent embedding-identity mixing and independent-support inflation. Zero fixture violations is not a claim of zero production risk."
+        },
+        {
+          "id": "MR-18/A2",
+          "requirement": "Performance/quality policies are frozen before each experiment. Proposed initial canary defaults are: a one-percentage-point noninferiority margin for task success with a paired 95% interval; p95 latency no greater than 1.10 times matched baseline; and no increase in matched total task cost for a change marketed as an efficiency improvement. Exploration-contract promotion additionally targets at least 20% fewer redundant raw discovery calls. These are reviewable release targets, not measured benefits. If the sample is too small to support the decision, keep the feature in observe/canary mode. A tradeoff that misses a threshold requires an explicit revised product decision and a new evaluation, not post-hoc relabeling of the run."
+        },
+        {
+          "id": "MR-18/A3",
+          "requirement": "Run ablations in dependency order: eligibility, mutation, packing, fair candidates, sufficiency, independence, priors/diversity, recovery and exploration contracts. Then measure interactions. Tune on train/dev cases, freeze held-out evaluation and check reader/judge sensitivity for model-graded tasks."
+        },
+        {
+          "id": "MR-18/A4",
+          "requirement": "Expand the [initial serving-surface inventory](memory-reliability-00-program.md#initial-serving-surface-inventory) into a checked-in matrix for CLI, MCP, HTTP, event bus, ingress, provider dispatch, scheduled maintenance and compatibility APIs. Columns include owner/store namespace, supported query modes, authenticated scope, dense/graph capability, index state, activation/workspace parameters, final budget and receipt stage. Intentionally unsupported behavior is explicit; ignored advertised parameters fail conformance. Pin source revision and distinguish source inspection from exercised guarantees."
+        },
+        {
+          "id": "MR-18/A5",
+          "requirement": "Exercise a real non-owner PostgreSQL role and the current C/Go processes in integration CI. Capture the final provider-shaped request with a controlled fake transport; verify exact selected IDs, protected bytes and receipt binding without requiring a paid model call. Keep separate small live-model quality runs where they materially test reading behavior."
+        },
+        {
+          "id": "MR-18/A6",
+          "requirement": "Use deterministic barriers at mutation commit/publication, consumer apply/checkpoint, dispatch admission/handoff and response/acknowledgement persistence. Restart the affected process and assert durable states, current release decisions and replay progress. Missing dispatch evidence after admission must remain unknown; successful publication alone cannot satisfy complete erasure. Advance a controlled clock for future-valid indexing and cache boundaries without modifying source content."
+        },
+        {
+          "id": "MR-18/A7",
+          "requirement": "Apply the [Go memory integration contract](memory-reliability-00-program.md#go-memory-module-integration) and G0 replacement gate to every implementation slice. Run Go domain and caller/handler communication tests, `CGO_ENABLED=0` builds of the memory executable and caller tooling, dependency-closure inspection and real process/placement conformance. Port the C framing fixtures into Go and test the supported entry points after their cutover. Change `scripts/check_memory_c_boundary.py` to reject native sources/headers in the memory trees and descriptor, plus relocated memory behavior and module-side C bus adapters elsewhere. Validate module-bus boundaries, Make/CMake registration and installed headers. Negative fixtures must reject moved C memory policy, native code in the memory dependency closure, forwarding headers, module-side callback shims and cgo wrappers. Positive integration fixtures must exercise Go memory producers and consumers against the existing C bus, including permitted external C transport callers. The C bus is not being converted to Go. Keep the immutable whole-repository native inventory as ownership-review evidence; its historical all-callers criterion is broader than this module boundary. Emptying the module directory or compiling only its Go server cannot certify behavior still implemented in native hosts. Rollback keeps a compatible Go memory implementation and module-side communication path or reports the capability unavailable."
+        },
+        {
+          "id": "MR-18/A8",
+          "requirement": "Extend `benchmarks/common/{result_schema.py,runner.py}`, the memory evaluation fixtures and integration tests. Preserve unanswerable cases in dataset loaders; record every exclusion with its reason. Distinguish turn, claim, chunk, session and document retrieval units."
+        },
+        {
+          "id": "MR-18/A9",
+          "requirement": "Pin implementation, dataset hash and ordered case IDs, input corpus, answerability labels, model/tokenizer/index generations, ingestion/extractor settings, policy/feature flags, reader/judge configuration, seed, requested/effective candidate limits and final payload budgets. Track missing results, invalid runs, timeouts and infrastructure errors. Historical published values are not reused as measurements of changed implementations."
+        },
+        {
+          "id": "MR-18/A10",
+          "requirement": "Use gold labels only in evaluation. No serving planner, source metadata or requirement generator receives expected answer text or gold evidence IDs. Separate a protocol-compatible track from product-optimized ingestion/assembly; keep their scores distinct."
+        }
+      ]
+    }
+  ]
+}
