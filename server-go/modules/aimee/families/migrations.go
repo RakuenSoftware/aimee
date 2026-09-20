@@ -97,6 +97,7 @@ var schemaHistory = []struct {
 	// cosmetic edits and blocker substitution cannot reset the progress budget.
 	{24, "schema_convergence_blocker_sets.sql"},
 	{25, "schema_client_devices.sql"},
+	{26, "schema_personal_memory_changes.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

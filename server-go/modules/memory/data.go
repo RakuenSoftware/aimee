@@ -31,7 +31,8 @@ const (
 )
 
 type DataRequest struct {
-	ReadPolicy     *MemoryReadPolicy `json:"read_policy,omitempty"`
+	Changes        *MemoryChangesRequest `json:"changes,omitempty"`
+	ReadPolicy     *MemoryReadPolicy     `json:"read_policy,omitempty"`
 	pageRankConfig *pageRankConfig
 	requestedLimit int
 	PageRank       *pageRankRequest        `json:"pagerank,omitempty"`
@@ -165,6 +166,7 @@ type Record struct {
 }
 
 type DataResponse struct {
+	Changes            *MemoryChangePage    `json:"changes,omitempty"`
 	Read               *MemoryReadResult    `json:"read,omitempty"`
 	ContextAssembly    *ContextAssembly     `json:"context_assembly,omitempty"`
 	Dimension          int                  `json:"dimension,omitempty"`
@@ -962,6 +964,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 	request, err := decodeDataRequest(body)
 	if err != nil {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if request.Changes != nil && request.Operation != "change-feed" {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	var readResult *MemoryReadResult
@@ -1806,6 +1811,19 @@ set_config('aimee.correlation_id',$9,true)`,
 		allowed := ShouldInject(RelSensitivity(request.Sensitivity), *request.Confidence,
 			request.TurnRequestsSensitive)
 		response.Allowed = &allowed
+	case "change-feed":
+		// The feed carries private record identities. Only the embedding host
+		// may consume it; it is not an advertised model/public diagnostic tool.
+		if invocation.PrincipalRef != 0 || request.Changes == nil || !request.Changes.valid() {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementServer {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var page MemoryChangePage
+		page, err = backend.personalChanges(ctx, *request.Changes)
+		response.Changes = &page
 	case "get":
 		if request.ID <= 0 {
 			return nil, bus.ModuleStatusInvalidRequest

@@ -122,6 +122,29 @@ The baseline policy fingerprint includes this version. This current-state slice
 does not certify all MR-01 surfaces, privileged historical/belief-time access,
 utility horizons or a final release/revocation generation check.
 
+## Personal invalidation producer
+
+Personal storage now records a monotonic `record_revision` and a content-free
+invalidation event atomically with each governed row mutation. A collection row
+serializes event positions in commit order; rollback restores both position and
+event. Deletes retain an invalidation. Runtime roles may read the stream but
+cannot advance or erase its progress. Source IDs are immutable. Counter-only
+updates do not invoke the capture trigger, avoiding content serialization and
+invalidation during ordinary reads.
+
+The host-only data operation `change-feed` accepts `changes` with
+`schema_version: 1`, an optional `after: {owner_id, generation}` cursor and a
+bounded `limit` (default 64, maximum 256). It reads the current head and page in
+one SQL snapshot. A new consumer, changed owner, rewound database or missing
+event requires a new canonical snapshot (`snapshot_required: true`); the feed
+does not supply that snapshot or acknowledge consumer application. Events remain
+retained. Only Server/personal placement currently supports this operation;
+shared-KB and non-host access cannot silently consume a private stream.
+
+This is the producer foundation for MR-02. Personal content history, shared-KB
+collection generations, durable consumer checkpoints and release checks remain
+separate work; the feed cannot certify derivative freshness by itself.
+
 ## Canonical KB mutation admission
 
 KB same-key store, edit, supersede and legacy store/content-edit adapters now use

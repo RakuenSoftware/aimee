@@ -131,6 +131,8 @@ DB1_ONLY_TABLES = {
     "server_management_jwks_cache",
     "session_state",
     "user_memories",
+    "user_memory_collection_generation",
+    "user_memory_invalidation_outbox",
     "session_state_ap_hits",
     "session_state_file_hashes",
     "session_state_read_paths",

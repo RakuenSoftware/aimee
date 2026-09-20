@@ -22,6 +22,16 @@ creating a linked proposal. Personal versioning, explicit expected versions,
 idempotency keys, durable guards/outbox/consumer replay and full retention policy
 remain acceptance work.
 
+The personal-store producer now captures governed row mutations in a durable,
+content-free invalidation outbox with record revisions and a collection generation.
+Generation reservation and publication are in the mutation transaction, in
+commit order; ordinary read counters bypass capture. The Go host-only bounded
+feed pins head/page to one SQL snapshot and requires canonical resynchronization
+on bootstrap, owner change, rewind or retention gap. A non-owner fixture exercises
+actual concurrent writers, rollback, outbox failure, replay and forbidden progress
+mutation. This does not complete personal content versioning, the shared-KB
+producer, consumer application/checkpoints or the release-freshness contract.
+
 Implement one mutation admission operation for create, propose, correct, supersede, reject, retire and explicitly authorized destructive deletion. Route compatibility entry points through it.
 
 ## Existing integration points
