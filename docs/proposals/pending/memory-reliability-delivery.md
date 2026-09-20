@@ -119,6 +119,13 @@ and Chat now produce identical provider bodies for matched inputs. The existing
 Go economizer planners also reject token evidence reused after equal-length edits.
 Full hard-budget, release-binding and durable-dispatch acceptance remains open.
 
+[Typed projection byte limits](../../validation/memory-typed-byte-budgets-2026-09-20.md)
+add explicit exact UTF-8 caps, literal zero handling and digest-bound accounting
+at both Go entry points, with unchanged host forwarding. Cached row serialization
+removes quadratic repacking work while preserving the existing projection format.
+The local stress benchmark is about 34.3 times faster; this is not a whole-request
+P95 result. Final provider caps and release/dispatch acceptance remain open.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

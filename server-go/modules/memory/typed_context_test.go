@@ -61,6 +61,151 @@ func TestTypedProjectionRendersReviewedProcedureOnce(t *testing.T) {
 	}
 }
 
+func TestTypedProjectionExactByteLimits(t *testing.T) {
+	build := func(limit *int) *typedContextResult {
+		cfg := typedTestOptions(t, `{}`)
+		cfg.Flags["working_context"] = true
+		if limit != nil {
+			cfg.ContextLimits = &ContextLimits{SchemaVersion: 1, MaxContextBytes: limit}
+		}
+		r := newTypedContext(DataRequest{TypedContext: cfg})
+		r.add("observations", typedItem{id: "small", text: "small", value: map[string]any{"text": "small 界 constraint"}})
+		r.add("working_context", typedItem{id: "large", text: "x", value: map[string]any{"metadata": strings.Repeat("界\"\\\n", 150)}})
+		if err := r.finish(); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	baseline := build(nil)
+	if len(baseline.Retained) != 2 {
+		t.Fatal(baseline)
+	}
+	for _, limit := range []int{0, 1, 100, 250, baseline.RenderedBytes - 1, baseline.RenderedBytes, baseline.RenderedBytes + 1} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			got := build(&limit)
+			a := got.Accounting
+			if len(got.Rendered) > limit || !utf8.ValidString(got.Rendered) || a.RenderedBytes != len(got.Rendered) || a.MaxContextBytes != limit || a.Boundary != "typed_memory_projection" || a.CountState != "exact" || a.Unit != "utf8_bytes" || a.TokenCountState != "unavailable" || a.Digest != fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(got.Rendered))) {
+				t.Fatal(got)
+			}
+			if limit < baseline.RenderedBytes && strings.Contains(got.Rendered, "metadata") {
+				t.Fatal("oversized metadata charged as its short summary", got.Rendered)
+			}
+			if limit == 0 && (got.Rendered != "" || len(got.Retained) != 0 || got.Sufficiency != "insufficient" || got.RenderedTokens != 0) {
+				t.Fatal(got)
+			}
+			if limit >= baseline.RenderedBytes && (got.Rendered != baseline.Rendered || len(got.Retained) != 2) {
+				t.Fatal("exact-fit projection was removed", got)
+			}
+			if got.Rendered != "" {
+				projection := map[string][]any{}
+				for _, name := range typedChannelOrder {
+					if name != "approved_procedures" && len(got.Channels[name].Items) > 0 {
+						projection[name] = got.Channels[name].Items
+					}
+				}
+				channels, _ := json.Marshal(projection)
+				procedures, _ := json.Marshal(got.Channels["approved_procedures"].Items)
+				expected := `<memory_data trust="untrusted" authorization="none">` + string(channels) + "</memory_data>\n" + `<approved_procedures authority="reviewed" authorization="none">` + string(procedures) + `</approved_procedures>`
+				if got.Rendered != expected {
+					t.Fatal("cached renderer differs from canonical JSON", got.Rendered, expected)
+				}
+			}
+			again := build(&limit)
+			if again.Rendered != got.Rendered || again.ProjectionDigest != got.ProjectionDigest {
+				t.Fatal("nondeterministic packing")
+			}
+			if got.Rendered != "" && len(got.Retained) > 0 && got.Retained[0].ID != "small" {
+				t.Fatal("small earlier evidence displaced", got)
+			}
+		})
+	}
+}
+
+func TestTypedContextRefusesUnsupportedLimitsBeforeRetrieval(t *testing.T) {
+	h := NewHandler(nil, WithDataStore(PlacementKB, nil))
+	for _, tc := range []struct{ raw, kind string }{
+		{`{"schema_version":2}`, "unsupported_version"},
+		{`{"schema_version":1,"max_context_bytes":-1}`, "invalid_argument"},
+		{`{"schema_version":1,"max_context_tokens":0}`, "unsupported_mode"},
+		{`{"schema_version":1,"max_request_tokens":1}`, "unsupported_mode"},
+		{`{"schema_version":1,"reserved_response_tokens":0}`, "unsupported_mode"},
+		{`{"schema_version":1,"reserved_tool_tokens":1}`, "unsupported_mode"},
+	} {
+		var args commandArgs
+		if err := json.Unmarshal([]byte(`{"query":"fixture","context_limits":`+tc.raw+`}`), &args); err != nil {
+			t.Fatal(err)
+		}
+		for _, envelope := range []bool{false, true} {
+			encoded, status := handleTypedContextResult(handlerOptions{placement: PlacementKB}, bus.ModuleInvocation{}, args, envelope)
+			if status != bus.ModuleStatusOK {
+				t.Fatal(tc, status)
+			}
+			raw, err := bus.DecodeCommandResult(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result map[string]any
+			if err = json.Unmarshal(raw, &result); err != nil {
+				t.Fatal(err)
+			}
+			if envelope {
+				if err = json.Unmarshal([]byte(result["json"].(string)), &result); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if result["kind"] != tc.kind {
+				t.Fatal(tc, result)
+			}
+		}
+	}
+	for _, raw := range []string{`null`, `{"schema_version":1,"max_context_byte":0}`, `{"schema_version":1,"max_context_bytes":"1"}`} {
+		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"typed-context","query":"fixture","context_limits":`+raw+`}`))
+		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal(raw, status)
+		}
+	}
+}
+
+type countedTypedItem struct{ calls *int }
+
+func (item countedTypedItem) MarshalJSON() ([]byte, error) {
+	*item.calls++
+	return []byte(`{"text":"escaped \"value\" 界","metadata":{"key":"value"}}`), nil
+}
+func TestTypedProjectionRepackingHasLinearSerializationWork(t *testing.T) {
+	const count = 512
+	calls := 0
+	cfg := typedTestOptions(t, `{}`)
+	cfg.Flags["working_context"] = true
+	cfg.Budgets["total"] = 0
+	r := newTypedContext(DataRequest{TypedContext: cfg})
+	for i := 0; i < count; i++ {
+		r.add("working_context", typedItem{id: fmt.Sprint(i), value: countedTypedItem{&calls}})
+	}
+	if err := r.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if calls != count || len(r.Retained) != 0 {
+		t.Fatalf("packing reserialized candidates: calls=%d candidates=%d retained=%d", calls, count, len(r.Retained))
+	}
+}
+
+func BenchmarkTypedProjectionRepacking(b *testing.B) {
+	cfg := typedOptions(commandArgs{})
+	cfg.Flags["working_context"] = true
+	cfg.Budgets["total"] = 0
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		r := newTypedContext(DataRequest{TypedContext: cfg})
+		for n := 0; n < 128; n++ {
+			r.add("working_context", typedItem{id: fmt.Sprint(n), value: map[string]any{"text": "escaped \"value\" 界", "metadata": strings.Repeat("item", 24)}})
+		}
+		if err := r.finish(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func typedTestOptions(t *testing.T, raw string) *typedContextOptions {
 	t.Helper()
 	var args commandArgs
@@ -181,6 +326,23 @@ func exerciseTypedContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	if got.Watermark.Observations != "2026-01-02" || got.Watermark.Durable == "9999-12-31" {
 		t.Fatal(got.Watermark)
 	}
+	// Explicit byte limits survive the public command and scoped data hop.
+	args["context_limits"] = map[string]any{"schema_version": 1, "max_context_bytes": 0}
+	got, body = call()
+	if got.Rendered != "" || len(got.Retained) != 0 || got.Accounting.MaxContextBytes != 0 || got.Accounting.CountState != "exact" {
+		t.Fatal(body)
+	}
+	args["context_limits"] = map[string]any{"schema_version": 1, "max_context_bytes": 300}
+	got, body = call()
+	if got.RenderedBytes > 300 || got.Accounting.MaxContextBytes != 300 || got.Accounting.Boundary != "typed_memory_projection" {
+		t.Fatal(body)
+	}
+	args["context_limits"] = map[string]any{"schema_version": 1, "max_context_tokens": 1}
+	_, body = call()
+	if !strings.Contains(body, `"kind":"unsupported_mode"`) {
+		t.Fatal(body)
+	}
+	delete(args, "context_limits")
 	// Missing host context admits only the global learning row, not local/private outputs.
 	delete(args, "project")
 	got, body = call()

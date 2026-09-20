@@ -7,6 +7,7 @@ networks and volumes belong to a random project and are removed unless --keep.
 Credentials remain in memory and test output contains verdicts only.
 """
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -107,6 +108,49 @@ def application_metadata_is_private(stack):
     names = [entry.partition('=')[0] for entry in entries]
     forbidden = {'AIMEE_STORE_URL', 'AIMEE_STORE_MIGRATION_URL', 'AIMEE_DB2_URL', 'AIMEE_KB_CONN'}
     return not any(name in forbidden or name.endswith(('_PASSWORD', '_API_KEY', '_TOKEN', '_PRIVATE_KEY')) for name in names)
+
+
+def typed_context_budget_gate(kb, check):
+    """Exact projection bytes through the authenticated KB action and Go owner."""
+    payload = dict(query='typed-budget-fixture', project='typed-budget-' + uuid.uuid4().hex,
+        scope_context=True, enable_semantic_assertions=False, enable_observations=False,
+        enable_approved_procedures=False, enable_working_context=True,
+        recent_turns=['small constraint LIMIT_7', '界"\\\n' * 80])
+    def call(limits=None):
+        body = dict(payload)
+        if limits is not None:
+            body['context_limits'] = limits
+        return kb.kb_request('/v1/actions/memory.assemble_typed_context', body)
+    code, baseline = call()
+    check('Typed projection retains both untrusted caller turns', code == 200 and
+          baseline.get('status') == 'ok' and len(baseline.get('retained_items', [])) == 2)
+    exact = len(baseline['rendered_context'].encode())
+    for limit in (0, 1, 400, exact - 1, exact):
+        code, result = call(dict(schema_version=1, max_context_bytes=limit))
+        rendered = result.get('rendered_context', '').encode()
+        a = result.get('context_accounting', {})
+        check('Typed projection obeys byte limit ' + str(limit), code == 200 and
+              result.get('status') == 'ok' and len(rendered) <= limit and
+              a.get('max_context_bytes') == limit and a.get('rendered_bytes') == len(rendered))
+        check('Typed projection binds exact accounting at limit ' + str(limit),
+              a.get('boundary') == 'typed_memory_projection' and a.get('count_state') == 'exact' and
+              a.get('unit') == 'utf8_bytes' and a.get('token_count_state') == 'unavailable' and
+              a.get('digest') == 'sha256:' + hashlib.sha256(rendered).hexdigest())
+        if limit == 0:
+            check('Zero byte typed projection emits no wrappers or retained IDs',
+                  rendered == b'' and result.get('retained_items') == [] and
+                  result.get('context_sufficiency') == 'insufficient')
+        if limit == 400:
+            check('Typed byte packing preserves the earlier small item',
+                  [r['stable_id'] for r in result['retained_items']] == ['turn:0'] and
+                  b'LIMIT_7' in rendered)
+        if limit == exact:
+            check('Typed projection retains exact-fit serialized bytes',
+                  result['rendered_context'] == baseline['rendered_context'])
+    for field in ('max_context_tokens', 'max_request_tokens', 'reserved_response_tokens', 'reserved_tool_tokens'):
+        code, result = call(dict(schema_version=1, **{field:0}))
+        check('Typed projection refuses unavailable ' + field,
+              code == 200 and result.get('kind') == 'unsupported_mode')
 
 
 def correction_review_gate(kb, server, placement, output):
@@ -291,6 +335,7 @@ def main():
             check('KB ranked search uses its local embedding service', code == 200 and isinstance(body.get('hits'), list))
             code, body = kb.kb_request('/v1/actions/memory.find_facts', dict(query='shared deployment fixture', limit=3, graph_code_fusion_state='on'))
             check('KB graph and memory retrieval survives the deepest worker path', code == 200 and isinstance(body.get('facts'), list))
+            typed_context_budget_gate(kb, check)
         if args.topology in ('T2', 'T3'):
             server = Stack('server', env, args.output)
             stacks.append(server)

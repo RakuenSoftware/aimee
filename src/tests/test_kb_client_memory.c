@@ -245,6 +245,8 @@ static int explicit_scope_post_handler(const char *url, const char *auth_header,
    return 200;
 }
 
+static int typed_context_expect_limits;
+
 static int typed_context_post_handler(const char *url, const char *auth_header, const char *body,
                                       char **response_buf, int timeout_ms,
                                       const char *extra_headers)
@@ -257,6 +259,17 @@ static int typed_context_post_handler(const char *url, const char *auth_header, 
    assert(strstr(body, "\"query\":\"recover deployment\"") != NULL);
    assert(strstr(body, "enable_semantic_assertions") == NULL);
    assert(strstr(body, "enable_observations") == NULL);
+   cJSON *request = cJSON_Parse(body);
+   const cJSON *limits = cJSON_GetObjectItemCaseSensitive(request, "context_limits");
+   if (typed_context_expect_limits)
+   {
+      assert(cJSON_IsObject(limits));
+      assert(cJSON_GetObjectItemCaseSensitive(limits, "schema_version")->valueint == 1);
+      assert(cJSON_GetObjectItemCaseSensitive(limits, "max_context_bytes")->valueint == 0);
+   }
+   else
+      assert(!limits);
+   cJSON_Delete(request);
    if (response_buf)
       *response_buf =
           strdup("{\"status\":\"ok\",\"used_tokens\":4,\"rendered_context\":\"temporal\"}");
@@ -484,6 +497,14 @@ static void test_typed_context_uses_server_defaults(void)
    char *context = kb_client_memory_assemble_typed_context("recover deployment");
    assert(context && strcmp(context, "temporal") == 0);
    free(context);
+   typed_context_expect_limits = 1;
+   cJSON *limits = cJSON_Parse("{\"schema_version\":1,\"max_context_bytes\":0}");
+   context = kb_client_memory_assemble_typed_context_with_limits("recover deployment", limits);
+   assert(context && strcmp(context, "temporal") == 0);
+   assert(cJSON_GetObjectItemCaseSensitive(limits, "max_context_bytes")->valueint == 0);
+   free(context);
+   cJSON_Delete(limits);
+   typed_context_expect_limits = 0;
    mock_agent_http_reset();
    printf("  PASS: test_typed_context_uses_server_defaults\n");
 }

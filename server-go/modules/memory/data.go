@@ -1332,6 +1332,14 @@ set_config('aimee.correlation_id',$9,true)`,
 				return nil, bus.ModuleStatusInvalidRequest
 			}
 		}
+		if _, budgetErr := request.TypedContext.ContextLimits.byteLimit(maxDataBody); budgetErr != nil {
+			var refusal *contextBudgetError
+			if !errors.As(budgetErr, &refusal) {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			response.Payload, err = json.Marshal(commandError(refusal.kind, refusal.message))
+			break
+		}
 		if explicitScope {
 			request.Scope = scope
 		}

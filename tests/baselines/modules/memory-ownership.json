@@ -1924,6 +1924,7 @@
       "symbols": [
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_audit_hook_fn",
         "kb_client_memory_audit_note",
         "kb_client_memory_benchmark_json",
@@ -1945,7 +1946,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "e082bca050fc187928d2c02d15d2e431719f84af763c18b59bf4270992ab33e2"
+      "sha256": "7a040fd760c3361be286b5b07d56a596fb6f08e54400b9e7eb62cfda74882ef8"
     },
     "src/modules/kb_client/kb_client_agent.c": {
       "disposition": "kb-client",
@@ -1971,6 +1972,7 @@
       "symbols": [
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_benchmark_json",
         "kb_client_memory_compact_windows",
         "kb_client_memory_get",
@@ -1984,7 +1986,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "5f18e47d490c35f94fc6d4134eb1af3f75a4df76c08ad6d3196fec4c09ddfc09"
+      "sha256": "1104fe5c2bb808502a5a7856360a74c6d54fcfc9cf57ebaa3ef5f44942205e5b"
     },
     "src/modules/kb_client/kb_client_memory_audit.c": {
       "disposition": "kb-client",
@@ -2074,12 +2076,12 @@
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
       "symbols": [
-        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "ad0eee4f374cecdeee929924deec7f56aa55732139eb1b6630d4af78e41e00b6"
+      "sha256": "0ebc9658a1c2c1881ec6dd18ff01b0af603b8e223cee465a9d86ecbbd8af713c"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2333,22 +2335,22 @@
     "src/tests/test_ingress_preinject.c": {
       "disposition": "host-fixture",
       "symbols": [
-        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "50c2a4c2100019cdbfe1498dc19ccc4452d02595909bfe5599c9b8bbf4267d54"
+      "sha256": "2360bdb338c987aea02bc0bd6834fefe36b04813f332fe36f0a9d74adadcd964"
     },
     "src/tests/test_ir_module_plan.c": {
       "disposition": "host-fixture",
       "symbols": [
-        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "af3d8e6aaa8ae9841689b0b87efa0d15ce71fa243c1beac544aa113c51dc3903"
+      "sha256": "9ad3fe6819a8a9c2104d7932df4648086e1d9cab22a28fc1c6a8682529f76f99"
     },
     "src/tests/test_kb.c": {
       "disposition": "host-fixture",
@@ -2362,6 +2364,7 @@
       "symbols": [
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_benchmark_json",
         "kb_client_memory_find_id_by_key_kind",
         "kb_client_memory_get",
@@ -2374,7 +2377,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "e3fdf020e66057362ec3994f4d6c60d51f5dc03d936b7be095fbc83172eddb06"
+      "sha256": "e2b3d5e820606145392b34b10e11ecb04b31ce5d3926e052f52c567fc1030064"
     },
     "src/tests/test_kb_memory_facts_connection.c": {
       "disposition": "host-fixture",

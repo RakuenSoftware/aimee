@@ -341,12 +341,25 @@ char *kb_client_memory_assemble_context(const char *task_hint)
 
 char *kb_client_memory_assemble_typed_context(const char *query)
 {
+   return kb_client_memory_assemble_typed_context_with_limits(query, NULL);
+}
+
+char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
+                                                          const cJSON *context_limits)
+{
    if (!query || !query[0])
       return NULL;
 
    cJSON *req = cJSON_CreateObject();
    kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
+   cJSON *limits = context_limits ? cJSON_Duplicate(context_limits, 1) : NULL;
+   if (context_limits && (!limits || !cJSON_AddItemToObject(req, "context_limits", limits)))
+   {
+      cJSON_Delete(limits);
+      cJSON_Delete(req);
+      return NULL;
+   }
    char *json = kb_v1_action_request("memory.assemble_typed_context", req);
    if (!json)
       return NULL;

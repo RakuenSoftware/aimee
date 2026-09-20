@@ -2,23 +2,25 @@ package memory
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
 type typedContextOptions struct {
-	Enabled bool            `json:"enabled"`
-	Flags   map[string]bool `json:"flags"`
-	Budgets map[string]int  `json:"budgets"`
-	Turns   []string        `json:"turns"`
-	Latest  string          `json:"latest"`
+	ContextLimits *ContextLimits  `json:"context_limits,omitempty"`
+	Enabled       bool            `json:"enabled"`
+	Flags         map[string]bool `json:"flags"`
+	Budgets       map[string]int  `json:"budgets"`
+	Turns         []string        `json:"turns"`
+	Latest        string          `json:"latest"`
 }
 
 var typedChannelOrder = []string{"current_assertions", "historical_assertions", "episodes", "summaries", "observations", "approved_procedures", "working_context"}
@@ -54,6 +56,7 @@ type typedWatermark struct {
 	Reason       string `json:"reason,omitempty"`
 }
 type typedContextResult struct {
+	Accounting        ContextAccounting        `json:"context_accounting"`
 	ProjectionVersion int                      `json:"projection_schema_version"`
 	ProjectionDigest  string                   `json:"projection_digest"`
 	RenderedBytes     int                      `json:"rendered_bytes"`
@@ -76,6 +79,7 @@ type typedContextResult struct {
 	ErrorType         string                   `json:"error_type,omitempty"`
 	Message           string                   `json:"message,omitempty"`
 	degraded          bool
+	limits            *ContextLimits
 }
 
 type typedProjectionRef struct {
@@ -130,6 +134,22 @@ func handleTypedContextResult(options handlerOptions, invocation bus.ModuleInvoc
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	cfg := typedOptions(args)
+	if raw, present := args["context_limits"]; present {
+		if json.Unmarshal(raw, &cfg.ContextLimits) != nil || cfg.ContextLimits == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+	}
+	if _, err := cfg.ContextLimits.byteLimit(maxDataBody); err != nil {
+		var refusal *contextBudgetError
+		if errors.As(err, &refusal) {
+			encoded, status := commandResult(commandError(refusal.kind, refusal.message))
+			if envelope {
+				return runtimeJSONText(encoded, status)
+			}
+			return encoded, status
+		}
+		return nil, bus.ModuleStatusInvalidRequest
+	}
 	request := DataRequest{Operation: "typed-context", Query: query, Limit: 32, TypedContext: cfg, Assertions: &assertionSearchRequest{ValidAt: args.stringOr("valid_at", ""), BelievedAt: args.stringOr("believed_at", ""), Historical: cfg.Flags["historical_assertions"], Hops: min(2, max(0, args.integer("max_hops", 0)))}, Project: args.stringOr("project", ""), Workspace: args.stringOr("workspace", ""), IncludeAll: args.boolean("include_all")}
 	if raw, ok := args["scope"]; ok && json.Unmarshal(raw, &request.Scope) != nil {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -152,7 +172,7 @@ func handleTypedContextResult(options handlerOptions, invocation bus.ModuleInvoc
 }
 func newTypedContext(request DataRequest) *typedContextResult {
 	cfg := request.TypedContext
-	result := &typedContextResult{Status: "ok", Enabled: cfg.Enabled, Budget: cfg.Budgets["total"], Channels: map[string]*typedChannel{}, Trace: []typedPackTrace{}, MissingContext: request.Project == "" && request.Workspace == ""}
+	result := &typedContextResult{Status: "ok", Enabled: cfg.Enabled, Budget: cfg.Budgets["total"], Channels: map[string]*typedChannel{}, Trace: []typedPackTrace{}, MissingContext: request.Project == "" && request.Workspace == "", limits: cfg.ContextLimits}
 	for _, name := range typedChannelOrder {
 		status := "disabled"
 		if cfg.Flags[name] {
@@ -189,38 +209,115 @@ func (r *typedContextResult) fail(name, reason string) {
 	r.Channels[name].Status = "degraded"
 	r.Channels[name].Reason = reason
 }
-func (r *typedContextResult) render() (string, error) {
-	// Model-facing bytes contain evidence only. Budgets, status and packing
-	// diagnostics stay in the response. Reviewed procedures have one dedicated
-	// envelope instead of also appearing as untrusted channel evidence.
-	projection := make(map[string][]any)
-	for _, name := range typedChannelOrder {
-		if name != "approved_procedures" && len(r.Channels[name].Items) > 0 {
-			projection[name] = r.Channels[name].Items
+
+const typedDataOpen = `<memory_data trust="untrusted" authorization="none">`
+const typedDataClose = "</memory_data>\n"
+const typedProceduresOpen = `<approved_procedures authority="reviewed" authorization="none">`
+const typedProceduresClose = `</approved_procedures>`
+
+type typedSerializedChannel struct {
+	key    string
+	rows   [][]byte
+	prefix []int
+}
+type typedProjectionCache struct {
+	names    []string
+	channels map[string]typedSerializedChannel
+}
+
+// Encode each candidate once. Prefix lengths let tail removal recount complete
+// JSON framing in constant work per channel instead of re-encoding all rows.
+func cacheTypedProjection(r *typedContextResult) (typedProjectionCache, error) {
+	cache := typedProjectionCache{names: append([]string(nil), typedChannelOrder...), channels: map[string]typedSerializedChannel{}}
+	sort.Strings(cache.names) // encoding/json's existing map-key order
+	for _, name := range cache.names {
+		key, _ := json.Marshal(name)
+		items := r.Channels[name].Items
+		c := typedSerializedChannel{key: string(key), rows: make([][]byte, 0, len(items)), prefix: make([]int, 1, len(items)+1)}
+		for _, item := range items {
+			raw, err := json.Marshal(item)
+			if err != nil {
+				return typedProjectionCache{}, err
+			}
+			c.rows = append(c.rows, raw)
+			c.prefix = append(c.prefix, c.prefix[len(c.prefix)-1]+len(raw))
+		}
+		cache.channels[name] = c
+	}
+	return cache, nil
+}
+func (cache typedProjectionCache) bytes(r *typedContextResult) int {
+	size := len(typedDataOpen) + len(typedDataClose) + len(typedProceduresOpen) + len(typedProceduresClose) + 4 // {} and []
+	fields := 0
+	for _, name := range cache.names {
+		n := len(r.Channels[name].Items)
+		if n == 0 {
+			continue
+		}
+		c := cache.channels[name]
+		size += c.prefix[n] + n - 1 // complete serialized items and array commas
+		if name != "approved_procedures" {
+			size += len(c.key) + 3 // key, colon, brackets
+			if fields > 0 {
+				size++
+			}
+			fields++
 		}
 	}
-	channels, err := json.Marshal(projection)
-	if err != nil {
-		return "", err
+	return size
+}
+func (cache typedProjectionCache) render(r *typedContextResult, size int) string {
+	var out strings.Builder
+	out.Grow(size)
+	out.WriteString(typedDataOpen)
+	out.WriteByte('{')
+	writeRows := func(name string) {
+		out.WriteByte('[')
+		for i, raw := range cache.channels[name].rows[:len(r.Channels[name].Items)] {
+			if i > 0 {
+				out.WriteByte(',')
+			}
+			out.Write(raw)
+		}
+		out.WriteByte(']')
 	}
-	procedures, err := json.Marshal(r.Channels["approved_procedures"].Items)
-	if err != nil {
-		return "", err
+	fields := 0
+	for _, name := range cache.names {
+		if name == "approved_procedures" || len(r.Channels[name].Items) == 0 {
+			continue
+		}
+		if fields > 0 {
+			out.WriteByte(',')
+		}
+		out.WriteString(cache.channels[name].key)
+		out.WriteByte(':')
+		writeRows(name)
+		fields++
 	}
-	return `<memory_data trust="untrusted" authorization="none">` + string(channels) + "</memory_data>\n" + `<approved_procedures authority="reviewed" authorization="none">` + string(procedures) + `</approved_procedures>`, nil
+	out.WriteByte('}')
+	out.WriteString(typedDataClose)
+	out.WriteString(typedProceduresOpen)
+	writeRows("approved_procedures")
+	out.WriteString(typedProceduresClose)
+	return out.String()
 }
 func (r *typedContextResult) finish() error {
+	byteLimit, err := r.limits.byteLimit(maxDataBody)
+	if err != nil {
+		return err
+	}
+	cache, err := cacheTypedProjection(r)
+	if err != nil {
+		return err
+	}
+	renderedBytes, omitEmpty := 0, false
 	// The legacy per-channel estimates remain visible in used_tokens. Also bound
 	// the complete rendered context, including JSON and both trust envelopes.
 	// Drop whole rows in reverse packing order; never truncate structured evidence.
 	for {
-		rendered, err := r.render()
-		if err != nil {
-			return err
-		}
-		r.Rendered = rendered
-		r.RenderedTokens = typedEstimate(rendered)
-		if r.RenderedTokens <= r.Budget {
+		renderedBytes = cache.bytes(r)
+		r.RenderedTokens = renderedBytes/4 + 1
+		if r.RenderedTokens <= r.Budget && renderedBytes <= byteLimit {
 			break
 		}
 		removed := false
@@ -236,19 +333,43 @@ func (r *typedContextResult) finish() error {
 			c.selected = c.selected[:n-1]
 			c.Used -= item.tokens
 			r.Used -= item.tokens
-			r.trace(name, item.id, item.tokens, false, "complete rendered context exceeds total budget")
+			reason := "complete rendered context exceeds total budget"
+			if renderedBytes > byteLimit {
+				reason = "complete rendered context exceeds exact byte limit"
+			}
+			r.trace(name, item.id, item.tokens, false, reason)
 			removed = true
 			break
 		}
 		if !removed {
-			r.EnvelopeExcess = r.RenderedTokens - r.Budget
+			if renderedBytes > byteLimit {
+				// No evidence remains. Empty trust wrappers are optional too;
+				// a literal zero limit must not emit an oversized empty shell.
+				omitEmpty = true
+				r.RenderedTokens = 0
+			} else {
+				r.EnvelopeExcess = r.RenderedTokens - r.Budget
+			}
 			break
 		}
 	}
+	if omitEmpty {
+		r.Rendered = ""
+	} else {
+		r.Rendered = cache.render(r, renderedBytes)
+		if len(r.Rendered) != renderedBytes {
+			return fmt.Errorf("memory: typed projection byte accounting mismatch")
+		}
+	}
 	count := 0
+	r.Accounting, err = accountMemoryEnvelope(r.Rendered, byteLimit)
+	if err != nil {
+		return err
+	}
+	r.Accounting.Boundary = "typed_memory_projection"
 	r.ProjectionVersion = 1
-	r.RenderedBytes = len(r.Rendered)
-	r.ProjectionDigest = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(r.Rendered)))
+	r.RenderedBytes = r.Accounting.RenderedBytes
+	r.ProjectionDigest = r.Accounting.Digest
 	// The legacy bytes/4 estimate is not a defensible hard token bound. Keep
 	// it for compatibility without claiming exact or conservative tokenization.
 	r.TokenCountState = "unavailable"

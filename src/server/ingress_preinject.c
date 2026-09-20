@@ -405,7 +405,10 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       free(raw);
       cJSON_AddItemToObject(assembly, "facts_response", response ? response : cJSON_CreateNull());
    }
-   char *temporal = temporal_on ? kb_client_memory_assemble_typed_context(query) : NULL;
+   char *temporal = temporal_on
+                        ? kb_client_memory_assemble_typed_context_with_limits(
+                              query, cJSON_GetObjectItemCaseSensitive(assembly, "context_limits"))
+                        : NULL;
    cJSON_AddStringToObject(assembly, "temporal", temporal ? temporal : "");
    free(temporal);
 
