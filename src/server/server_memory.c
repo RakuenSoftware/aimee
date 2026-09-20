@@ -120,7 +120,7 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
    static const char *fields[] = {"key",        "content",    "tier",        "kind",
                                   "confidence", "session_id", "use_cases",   "epistemic_kind",
                                   "limit",      "old_id",     "new_content", "keywords",
-                                  "id",         "as_of",      NULL};
+                                  "id",         "as_of",      "read_policy", NULL};
    for (int i = 0; fields[i]; i++)
    {
       const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);

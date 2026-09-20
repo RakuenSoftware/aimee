@@ -105,6 +105,9 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if json.Unmarshal(body, &args) != nil || args == nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if _, exists := args["read_policy"]; exists && verb != "get" && verb != "runtime" {
+		return commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get"))
+	}
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
@@ -163,6 +166,12 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 	switch verb {
 	case "get", "delete":
 		var ok bool
+		if verb == "get" {
+			request.ReadPolicy, ok = commandReadPolicy(args)
+			if !ok {
+				return invalid("read_policy must be a versioned object with recognized fields")
+			}
+		}
 		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("memory." + verb + " requires a positive integer id")
@@ -244,6 +253,9 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
+	if response.Read != nil && response.Read.ErrorCode != "" {
+		return commandResult(commandError(response.Read.ErrorCode, response.Read.Message))
+	}
 	result := map[string]any{"status": "ok", "store": "user"}
 	switch verb {
 	case "store", "get", "supersede":
@@ -259,6 +271,9 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			result["id"] = record.ID
 		case "get":
 			result["memory"] = record
+			if response.Read != nil {
+				result["read"] = response.Read
+			}
 		case "supersede":
 			if args.stringOr("view", "") == "mcp" {
 				return commandResult(map[string]any{"status": "ok", "store": "user", "records": response.Records})

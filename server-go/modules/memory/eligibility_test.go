@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -107,6 +108,7 @@ SET LOCAL ROLE aimee_store_runtime`)
 			}
 		}
 	}
+	exerciseReadPolicyReplay(t, ctx, tx, client, ids)
 	// Serving suppression must not make an otherwise admitted retirement
 	// impossible. The mutation path owns its own author and scope checks.
 	if changed, err := bound.Delete(ctx, Scope{Type: ScopeProject, Value: "eligibility-local"}, ids["suppressed"]); err != nil || !changed {
@@ -130,4 +132,59 @@ SET LOCAL ROLE aimee_store_runtime`)
 	}
 	exec(`UPDATE memories SET valid_from=NULL WHERE key='eligibility-open'`)
 	check("search", map[string]any{"view": "server", "keywords": []string{"eligibilityneedle"}, "project": "eligibility-local", "scope_context": true, "limit": 32})
+}
+
+func exerciseReadPolicyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, client *Client, ids map[string]int64) {
+	t.Helper()
+	var now time.Time
+	if err := tx.QueryRow(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"current", "historical"} {
+		for key, id := range ids {
+			policy := MemoryReadPolicy{SchemaVersion: 1, Mode: mode}
+			allowed := key == "open" || key == "utc-boundary" || key == "offset-boundary"
+			if mode == "historical" {
+				// The session timezone is Tokyo; send another explicit offset.
+				policy.ValidAt = now.In(time.FixedZone("fixture", -7*60*60)).Format(time.RFC3339Nano)
+				allowed = allowed || key == "superseded" || key == "archived" || key == "retired"
+			}
+			raw, _ := json.Marshal(map[string]any{"id": id, "scope_context": true, "project": "eligibility-local", "read_policy": policy})
+			got := runPublicCommand(t, client, "get", string(raw))
+			if !allowed {
+				if got["kind"] != "not_found" || got["memory"] != nil || got["read"] != nil {
+					t.Fatalf("versioned %s leaked %s: %v", mode, key, got)
+				}
+				continue
+			}
+			if got["status"] != "ok" || got["memory"] == nil || got["read"] == nil {
+				t.Fatalf("versioned %s excluded %s: %v", mode, key, got)
+			}
+			decision := got["read"].(map[string]any)
+			if decision["mode"] != mode || decision["schema_version"] != float64(1) || decision["policy_version"] != currentEligibilityPolicy {
+				t.Fatal("wrong applied policy", decision)
+			}
+			if mode == "historical" && decision["valid_at"] != now.UTC().Format(time.RFC3339Nano) {
+				t.Fatal("historical clock not normalized", decision)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		key     string
+		offset  time.Duration
+		allowed bool
+	}{
+		{"expired", -time.Microsecond, true}, {"expired", 0, false},
+		{"utc-boundary", -time.Microsecond, false}, {"utc-boundary", 0, true},
+		{"future", time.Second - time.Microsecond, false}, {"future", time.Second, true},
+		{"revoked", -time.Hour, false}, {"quarantined", -time.Hour, false}, {"private", -time.Hour, false},
+	} {
+		raw, _ := json.Marshal(map[string]any{"id": ids[tc.key], "scope_context": true, "project": "eligibility-local", "read_policy": MemoryReadPolicy{
+			SchemaVersion: 1, Mode: "historical", ValidAt: now.Add(tc.offset).UTC().Format(time.RFC3339Nano),
+		}})
+		got := runPublicCommand(t, client, "get", string(raw))
+		if (got["status"] == "ok") != tc.allowed || (!tc.allowed && (got["kind"] != "not_found" || got["memory"] != nil)) {
+			t.Fatalf("historical boundary %s offset=%s: %v", tc.key, tc.offset, got)
+		}
+	}
 }

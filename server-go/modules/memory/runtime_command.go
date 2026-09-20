@@ -15,6 +15,9 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	operation := args.stringOr("operation", "")
+	if _, exists := args["read_policy"]; exists && operation != "user-get" {
+		return runtimeJSONText(commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get")))
+	}
 	switch operation {
 	case "user-mcp-supersede":
 		args["old_id"], args["new_content"] = args["id"], args["content"]

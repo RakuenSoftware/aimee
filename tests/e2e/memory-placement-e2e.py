@@ -319,6 +319,35 @@ class Gate:
             self.check('historical KB get preserves content and validity ' + as_of,
                 got.get('memory', {}).get('content') == long_shared and
                 got.get('as_of') == as_of and got.get('valid_at') is expected_valid)
+        for valid_at, expected_valid in [('2026-01-01T00:00:00Z', True),
+                                         ('2026-03-01T00:00:00Z', True),
+                                         ('2026-06-01T00:00:00Z', False),
+                                         ('2025-12-31T23:59:59Z', False)]:
+            code, got = self.call('get', dict(store='kb', id=row['id'], read_policy=dict(
+                schema_version=1, mode='historical', valid_at=valid_at)))
+            if expected_valid:
+                self.check('versioned historical HTTP read ' + valid_at,
+                    code == 200 and got.get('memory', {}).get('content') == long_shared and
+                    got.get('read', {}).get('valid_at') == valid_at, [code, got.get('read')])
+            else:
+                self.check('versioned historical HTTP excludes ' + valid_at,
+                    code == 404 and got.get('kind') == 'not_found' and 'memory' not in got, [code, got])
+        for store in ('user', 'kb'):
+            for policy, kind in [
+                    (dict(schema_version=2, mode='current'), 'unsupported_version'),
+                    (dict(schema_version=1, mode='current', believed_at='2026-01-01'), 'unsupported_mode')]:
+                code, got = self.call('get', dict(store=store, id=mid, read_policy=policy))
+                self.check('explicit HTTP read refusal ' + store + ' ' + kind,
+                    code == 400 and got.get('kind') == kind and 'memory' not in got, [code, got])
+        current = self.good('versioned personal current fixture', self.call('store', dict(
+            store='user', key=self.prefix + '-current-policy', content='personal current policy fixture')))
+        got = self.good('versioned personal current HTTP read', self.call('get', dict(
+            store='user', id=current['id'], read_policy=dict(schema_version=1, mode='current'))))
+        self.check('personal current HTTP reports applied policy', got.get('read', {}).get('mode') == 'current')
+        code, got = self.call('get', dict(store='user', id=current['id'], read_policy=dict(
+            schema_version=1, mode='historical', valid_at='2026-03-01')))
+        self.check('personal historical HTTP refuses unsupported reconstruction',
+            code == 400 and got.get('kind') == 'unsupported_mode' and 'memory' not in got, [code, got])
         if self.args.upgrade_fixture:
             rows = json.loads(Path(self.args.upgrade_fixture).read_text())
             for row in rows:

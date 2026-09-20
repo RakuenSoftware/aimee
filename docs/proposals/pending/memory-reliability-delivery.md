@@ -45,6 +45,20 @@ serving eligibility, so an admitted retirement can still target an expired or
 suppressed active row. Restricted-role replay covers those positive/negative
 cases, malformed governed timestamps and hidden IDs.
 
+The next MR-01 slice adds version-one `read_policy` for exact-ID reads. Current
+mode keeps the captured storage clock; historical KB mode filters by the supplied
+half-open valid interval and returns `not_found` outside it. Unsupported belief
+time, personal history, schemas and operations fail explicitly. Public/HTTP
+forwarding preserves the object; its response describes the applied temporal
+policy without claiming a final release receipt. The host's existing C forwarding
+adapter only copies the new JSON field; all interpretation remains in Go and the
+C bus is unchanged. Restricted-role replay covers both modes and exact endpoints.
+PRs [#2988](https://github.com/RakuenSoftware/aimee/pull/2988) and
+[#2989](https://github.com/RakuenSoftware/aimee/pull/2989) carry these slices.
+[Fresh `.253` validation](../../validation/memory-read-policy-2026-09-20.md)
+records 224 passing topology/placement/identity verdicts, including the new HTTP
+contract. These results do not close the remaining MR-01 acceptance gates.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

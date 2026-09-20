@@ -47,6 +47,13 @@ revoked, quarantined and unknown lifecycle states, plus suppressed active rows.
 This preserves diagnostic `valid_at` labeling rather than claiming a new
 historical reconstruction contract. Mutation admission stays separate from
 serving eligibility so excluded active rows can still be retired when authorized.
+Version-one `read_policy` now provides strict exact-ID current/historical reads
+through data, public command and HTTP forwarding. Historical reads apply the
+requested interval in the same SQL query as lifecycle/scope checks, and report
+the normalized applied time. Unsupported record belief-time reconstruction,
+personal historical reads, schema/mode versions and use on other operations fail
+explicitly. Legacy `as_of` remains separate inspection. These temporal results
+do not claim evidence assessment or release-generation verification.
 The public anchor format remains
 second-precision UTC. Current typed-fact blocks share assertion time checks and
 require every memory parent to remain current/visible before limits. Late entity

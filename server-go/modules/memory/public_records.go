@@ -135,6 +135,10 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 		}
 	case "get":
 		var ok bool
+		request.ReadPolicy, ok = commandReadPolicy(args)
+		if !ok {
+			return invalid("read_policy must be a versioned object with recognized fields")
+		}
 		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("memory.get requires a positive integer id")
@@ -205,6 +209,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
+	if response.Read != nil && response.Read.ErrorCode != "" {
+		return commandResult(commandError(response.Read.ErrorCode, response.Read.Message))
+	}
 	if args.stringOr("view", "") == "session" {
 		return sessionMemoryView(options, invocation, args, request, response.PublicRecords)
 	}
@@ -263,6 +270,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			return commandResult(commandError("not_found", "memory not found"))
 		}
 		result["memory"] = response.PublicRecords[0]
+		if response.Read != nil {
+			result["read"] = response.Read
+		}
 		if request.AsOf != "" {
 			result["as_of"] = request.AsOf
 			result["valid_at"] = "unknown"
