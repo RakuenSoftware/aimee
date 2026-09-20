@@ -151,13 +151,16 @@ class Gate:
                     'mutate', dict(args, verb=verb))
                 self.check('MCP ' + verb + ' requires review before canonical audit',
                     refused.get('kind') == 'review_required' and 'mutation_receipt' not in refused)
-                code, failure = self.call(verb, args)
-                self.check('HTTP ' + verb + ' admitted correction reaches blocked audit',
-                    code >= 500 and failure.get('kind') == 'unavailable')
+                # Server HTTP exposes supersede; update is an MCP/KB action.
+                if verb == 'supersede':
+                    code, failure = self.call(verb, args)
+                    self.check('HTTP supersede admitted correction reaches blocked audit',
+                        code >= 500 and failure.get('kind') == 'unavailable')
                 args['expected_version'] = dict(version, record_revision='9223372036854775807')
-                code, stale = self.call(verb, args)
-                self.check('HTTP ' + verb + ' rejects stale version before canonical audit',
-                    code == 409 and stale.get('reason') == 'expected_version_conflict')
+                stale = self.mcp_document('MCP ' + verb + ' stale admission before audit',
+                    'mutate', dict(args, verb=verb))
+                self.check('MCP ' + verb + ' rejects stale version before canonical audit',
+                    stale.get('reason') == 'expected_version_conflict')
         finally:
             self.sql('ALTER TABLE fact_graph_commits DROP CONSTRAINT e2e_admission_audit_failure')
         self.check('refused corrections preserve original revision and invalidations',
