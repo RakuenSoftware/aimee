@@ -38,7 +38,12 @@ microbenchmark takes 2.216–2.229 microseconds, 2072 B and 34 allocations per c
 on the local i7-14700K; it excludes host hashing and bus latency and is not a
 whole-request P95 claim.
 
-Fresh deployment validation is pending. The provider boundary harness adds exact-
+Fresh deployment validation found that the optional economizer process was
+packaged but omitted from the Server composition. The exact-fit request safely
+failed with `request_budget_unavailable` and zero provider dispatches. The
+process is now started by default, independently of the existing reduction-mode
+settings; a packaging regression checks the actual generated Server composition
+and stage grant. Corrected fresh deployment validation is pending. The provider boundary harness adds exact-
 fit byte identity, overflow, zero, malformed/token refusal and streaming refusal
 checks against the actual host and Go process. The completion endpoint alone is
 a fixture; provider captures must remain empty for every refused request.

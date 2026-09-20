@@ -362,6 +362,23 @@ class CProcessBuildTests(unittest.TestCase):
         self.assertIn("OpenSSL::Crypto", cmake)
         self.assertIn("OpenSSL::SSL", cmake)
 
+    def test_final_request_admission_is_started_and_granted(self) -> None:
+        # Exercise the shipping descriptors, rather than merely proving the
+        # multicall binary knows a stage that no deployed process will serve.
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "bundle"
+            exporter.export_runtime_bundle(bundle)
+            row = "economizer\t/usr/local/libexec/aimee-modules/aimee-module-economizer"
+            self.assertIn(row, (bundle / "server.modules").read_text().splitlines())
+            self.assertNotIn(row, (bundle / "kb.modules").read_text().splitlines())
+            grant = (bundle / "grants/server/economizer.grant").read_text()
+            serve = next(line.removeprefix("serve=") for line in grant.splitlines()
+                         if line.startswith("serve="))
+            self.assertIn("11016", serve.split(","))
+            lock = json.loads(exporter.LOCK.read_text())
+            pin = next(module for module in lock["modules"] if module["id"] == "economizer")
+            self.assertEqual(pin["serve"], [int(kind) for kind in serve.split(",")])
+
     def test_runtime_bundle_emits_an_exhaustive_non_amalgamated_c_build(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "repo"
