@@ -138,6 +138,52 @@ This closes the tested shared-supersede retry cases, not all MR-02 acceptance.
 Other verbs/personal placement, review proposals, durable consumer application,
 restore-owner policy and final-release freshness remain outstanding.
 
+## Versioned update and MCP parity
+
+Implementation `e1f1101130e4b68c0247ab107618d5ee8006a069` extends shared `update` with the same expected-version
+and durable retry contract as `supersede`. Update now obtains its inherited
+confidence from the canonical locked row read, removing the separate confidence
+query/lock. The new path preserves confidence caps and authority checks; no
+whole-request P95 claim is made from this query reduction.
+
+The full memory race suite with required PostgreSQL fixtures and restricted-role
+replay passes (53.198 seconds). Both verbs have actual concurrent-connection tests
+for commit/response loss and uncommitted disconnection. Update tests cover
+inherited confidence, hidden IDs, authority refusal, stale versions, all public
+views, changed payloads, cross-verb key reuse and obsolete results. A frozen
+schema-one supersede digest verifies compatibility with previously committed
+receipts. No schema migration is needed for the additional verb.
+
+The shipping MCP adapter had been dropping expected versions and retry keys and
+reducing successful owner responses to plain text. It now forwards those fields
+and preserves keyed receipts. Tool discovery advertises the fields, versioned
+get and decimal-string IDs. Go omits the native host's audit request on a replay,
+so a successful retry is not counted as another mutation. Legacy unkeyed output
+retains its existing text format. Native forwarding tests preserve exact version
+strings beyond 2^53, long text, error responses and the complete keyed receipt;
+tool-schema tests, generated-document checks and memory/C-bus ownership gates pass.
+
+A fresh T2 deployment on owned `.253` CT 9498 built that exact implementation
+and harness as
+`sha256:91233bef315cdb3228359c3ea1ce354828957f039aff7a760c40f577cb23049c`,
+using the same pinned PostgreSQL and embedding images listed above. Its
+[sanitized receipt](memory-shared-reliability-2026-09-20/fresh-t2-e1f1101130.json)
+records **281 passing verdicts**: 61 private, 197 shared, six identity and 17
+topology. The new real MCP workflow stores model-authored content, reads its
+version using a decimal-string ID, applies a keyed update and retries it. It
+verifies unchanged confidence/model authorship, the same canonical receipt,
+no repeated host audit request, changed-payload and stale-version conflicts,
+retired-result refusal and exactly two retained versions. Personal placement
+explicitly refuses the shared preconditions. Existing HTTP supersede, restart,
+scope-isolation and deliberate outage/recovery checks also pass.
+
+Raw evidence is retained under
+`/opt/aimee-memory-proposals-evidence/t2-e1f1101130` inside CT 9498. The disposable
+application/embedding/database containers were stopped after validation; their
+volumes and evidence remain. All further work remains on the single continuing
+branch. Store/delete idempotency, review proposals, personal content versioning,
+consumer progress and the rest of the MR-01–18 acceptance requirements remain open.
+
 ## Local correctness and performance scope
 
 Restricted-role replay exercises the shipping schema, RLS, transactional scope
