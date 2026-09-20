@@ -264,6 +264,22 @@ func TestSharedMemoryChangeJournal(t *testing.T) {
 		t.Fatal("changed upsert emitted discarded identity", page)
 	}
 	cursor = page.Next
+	// Background derived indexing materializes the canonical primary scope.
+	// This compatibility projection changes neither audience nor collected tags:
+	// it must not stale a proposal/version captured before the job or restart.
+	exec(`INSERT INTO memory_scopes VALUES(1,'project','alpha');
+	 UPDATE memory_scopes SET scope_value=scope_value WHERE memory_id=1;
+	 SAVEPOINT primary_projection;
+	 UPDATE memory_scopes SET scope_value='secondary' WHERE memory_id=1;
+	 UPDATE memory_scopes SET scope_value='alpha' WHERE memory_id=1`)
+	if changed := read("alpha", &cursor, 4); len(changed.Events) != 2 || changed.Events[1].RecordRevision != 4 {
+		t.Fatal("primary/secondary tag transitions failed to invalidate", changed)
+	}
+	exec(`ROLLBACK TO primary_projection;
+	 DELETE FROM memory_scopes WHERE memory_id=1 AND scope_type='project' AND scope_value='alpha'`)
+	if unchanged := read("alpha", &cursor, 4); unchanged.Head != cursor || len(unchanged.Events) != 0 {
+		t.Fatal("redundant primary scope projection advanced governed progress", unchanged)
+	}
 	exec(`SELECT set_config('aimee.memory_scope_all','1',true);
 	 INSERT INTO memory_scopes VALUES(1,'project','beta'),(1,'workspace','team'),(1,'workspace','other')`)
 	page = read("alpha", &cursor, 4)

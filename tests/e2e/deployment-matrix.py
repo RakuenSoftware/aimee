@@ -174,6 +174,8 @@ with tempfile.TemporaryDirectory() as directory:
         replay = gate.mcp_document('MCP draft retry after KB restart', 'mutate', correction)
         check('draft retry survives owner restart', replay.get('proposal', {}).get('proposal_id') == pid and
             replay['proposal'].get('replayed') is True)
+        check('restart and derived primary scope preserve target version',
+            action('get', dict(id=old_id, include_version=True))['memory']['version'] == version)
         review = dict(proposal_id=pid, payload_digest=digest, expected_version=version, action='approve')
         check('direct service bearer cannot claim human review authority', kb.kb_request(
             '/v1/actions/memory.review_correction', dict(review, project=scope, authority='user'))[1].get('kind') == 'forbidden')

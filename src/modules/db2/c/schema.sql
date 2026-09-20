@@ -17860,11 +17860,17 @@ BEGIN
   -- the function's SET scope restores the caller's path on return.
   PERFORM set_config('search_path',format('pg_catalog,%I,pg_temp',TG_TABLE_SCHEMA),true);
   changed:=CASE TG_OP
-    WHEN 'INSERT' THEN 'SELECT DISTINCT memory_id FROM new_memory_scope_rows ORDER BY memory_id'
-    WHEN 'DELETE' THEN 'SELECT DISTINCT memory_id FROM old_memory_scope_rows ORDER BY memory_id'
-    ELSE 'SELECT memory_id FROM (SELECT * FROM new_memory_scope_rows EXCEPT SELECT * FROM old_memory_scope_rows) n
-          UNION SELECT memory_id FROM (SELECT * FROM old_memory_scope_rows EXCEPT SELECT * FROM new_memory_scope_rows) o
-          ORDER BY memory_id' END;
+    WHEN 'INSERT' THEN 'SELECT * FROM new_memory_scope_rows'
+    WHEN 'DELETE' THEN 'SELECT * FROM old_memory_scope_rows'
+    ELSE '(SELECT * FROM new_memory_scope_rows EXCEPT SELECT * FROM old_memory_scope_rows)
+          UNION (SELECT * FROM old_memory_scope_rows EXCEPT SELECT * FROM new_memory_scope_rows)' END;
+  -- The primary scope is already canonical on memories. Derived indexing may
+  -- materialize that same tag later; it adds no scope and must not invalidate
+  -- a pending correction or retry receipt. Compare both sides of real tag
+  -- updates so replacing a secondary tag with the primary still invalidates.
+  changed:=format('SELECT DISTINCT r.memory_id FROM (%s) r JOIN %I.memories m ON m.id=r.memory_id
+    WHERE (r.scope_type,r.scope_value) IS DISTINCT FROM (m.scope_type,m.scope_value)
+    ORDER BY r.memory_id',changed,TG_TABLE_SCHEMA);
   FOR target IN EXECUTE changed
   LOOP
     -- Batch tags by parent: copying many tags must not repeatedly rewrite and
@@ -18162,5 +18168,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '25')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '26')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
