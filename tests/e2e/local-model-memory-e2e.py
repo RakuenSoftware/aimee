@@ -59,10 +59,16 @@ def main():
         body = gate.wait('recall', dict(query=query), predicate=contains, timeout=90)[1]
         gate.check('semantic recall recovers when local embedder returns', contains(body))
         # Expiry is a database constraint shared by background and explicit recall.
-        sql(f"UPDATE user_memories SET valid_until=now()-interval '1 second' WHERE id={mid}")
+        # This administrator-only fixture changes the temporal boundary; ordinary
+        # SQL writers cannot silently rewrite a user-authored assertion.
+        def set_expiry(expression):
+            sql("BEGIN; SELECT set_config('aimee.private_authority','user',true),"
+                "set_config('aimee.private_principal','fixture:temporal-controller',true); "
+                f"UPDATE user_memories SET valid_until={expression} WHERE id={int(mid)}; COMMIT")
+        set_expiry("now()-interval '1 second'")
         body = gate.good('recall after expiry', gate.call('recall', dict(query=query)))
         gate.check('expired vector cannot resurrect personal memory', not contains(body))
-        sql(f'UPDATE user_memories SET valid_until=NULL WHERE id={mid}')
+        set_expiry('NULL')
         gate.good('retire personal fixture', gate.call('delete', dict(id=mid)))
         body = gate.good('recall after retirement', gate.call('recall', dict(query=query)))
         gate.check('retired vector cannot resurrect personal memory', not contains(body))

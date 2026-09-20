@@ -25,7 +25,7 @@ supplied authority text still cannot replace authoritative content. A review
 refusal maps to HTTP 409 rather than an upstream-failure status.
 
 Shared model corrections now create linked review proposals and support exact-draft
-approval or rejection as described below. Personal author/reviewer admission, expected versions on remaining mutation verbs,
+approval or rejection as described below. Personal reviewer/proposal parity, expected versions on remaining mutation verbs,
 idempotency on remaining verbs, further durable guards/consumer replay and full retention policy
 remain acceptance work.
 
@@ -40,10 +40,29 @@ mutation. Shared records and secondary scope tags now have a primary-scope
 producer too: collection-bound cursors, old/new scope invalidation, independent
 collection commit ordering and parent-visible tag access. Restricted-role replay
 covers version replacement and rollback after a failed tag copy. This does not
-complete personal author/reviewer admission, further governed child/dependency coverage,
+complete personal reviewer/proposal parity, further governed child/dependency coverage,
 consumer application/checkpoints or the release-freshness contract.
 
 Implement one mutation admission operation for create, propose, correct, supersede, reject, retire and explicitly authorized destructive deletion. Route compatibility entry points through it.
+
+### Verified private mutation admission
+
+Migration 29 preserves unknown authorship for existing personal records and
+captures verified caller identity for new records and corrections. Store,
+supersede, conditional correction and retirement now use Go authority admission
+under the same transaction as retained history and invalidation. A model call
+cannot replace or retire user-authored or unknown-origin content; caller-supplied
+authority fields cannot change this. Model writes retain model provenance and the
+0.8 confidence ceiling (0.5 for L5). Protected epistemic kinds require annotation
+or revocation, and exact retries preserve the original author.
+
+Versioned and retained private reads expose that authorship. Ordinary runtime
+roles cannot bypass retirement with physical deletion or truncation. Background
+maintenance changes only eligible model-authored records, leaving protected or
+unknown authorship for review. The host transport and C bus remain unchanged by
+this admission implementation. Private correction drafts, reviewer decisions and
+durable retry receipts remain separate acceptance work. See the
+[validation record](../../validation/memory-private-authority-2026-09-20.md).
 
 ### Expected-version shared corrections
 
@@ -115,7 +134,7 @@ mutation events. Legacy unkeyed MCP responses retain their existing text format.
 
 This contract currently covers shared corrections only. Other verbs and personal
 placement explicitly refuse the field. Remaining create/delete idempotency,
-personal authority/review parity, retention/restore policy and consumer progress remain open.
+personal review parity, retention/restore policy and consumer progress remain open.
 
 ### Linked model correction proposals
 
