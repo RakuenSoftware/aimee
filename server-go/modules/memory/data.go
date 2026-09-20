@@ -31,7 +31,9 @@ const (
 )
 
 type DataRequest struct {
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	CorrectionReview *correctionReviewRequest `json:"correction_review,omitempty"`
+	ProposalID       string                   `json:"proposal_id,omitempty"`
+	IdempotencyKey   string                   `json:"idempotency_key,omitempty"`
 
 	IncludeVersion  bool                 `json:"include_version,omitempty"`
 	ExpectedVersion *MemoryRecordVersion `json:"expected_version,omitempty"`
@@ -173,6 +175,7 @@ type Record struct {
 }
 
 type DataResponse struct {
+	Proposal        *correctionProposal    `json:"proposal,omitempty"`
 	MutationReceipt *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
 
 	Changes            *MemoryChangePage    `json:"changes,omitempty"`
@@ -1538,6 +1541,40 @@ set_config('aimee.correlation_id',$9,true)`,
 		if err == nil {
 			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "candidates": candidates})
 		}
+	case "correction-proposals", "correction-review":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || invocation.PrincipalRef != 0 || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var result any
+		if request.Operation == "correction-proposals" {
+			if request.ProposalID != "" && !validProposalID(request.ProposalID) {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			var proposals []correctionProposal
+			proposals, err = backend.listCorrectionProposals(ctx, request.ProposalID, request.Limit)
+			result = map[string]any{"status": "ok", "proposals": proposals}
+		} else {
+			caller := options.commandContext
+			if !verifiedRetryCaller(caller) || !caller.UserAuthority || !request.CorrectionReview.valid() {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			var proposal correctionProposal
+			proposal, err = backend.reviewKBCorrection(ctx, *request.CorrectionReview, caller)
+			rollbackOnly = err != nil
+			result = map[string]any{"status": "ok", "proposal": proposal}
+			if errors.Is(err, ErrMemoryNotFound) || errors.Is(err, errCorrectionReviewConflict) {
+				kind := "conflict"
+				if errors.Is(err, ErrMemoryNotFound) {
+					kind = "not_found"
+				}
+				result = commandError(kind, "correction review refused: hidden, missing, mismatched or already decided")
+				err = nil
+			}
+		}
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+		}
 	case "fact-review":
 		backend, ok := options.data.(*postgresDataStore)
 		caller := options.commandContext
@@ -2603,7 +2640,13 @@ set_config('aimee.correlation_id',$9,true)`,
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if code := mutationRefusal(err); code != 0 {
-		response = DataResponse{Code: &code}
+		proposal := proposedCorrection(err)
+		response = DataResponse{Code: &code, Proposal: proposal}
+		// Canonical admission has not written a version. The linked draft and
+		// its audit/retry reference are the successful outcome of this request.
+		if proposal != nil {
+			rollbackOnly = false
+		}
 		err = nil
 	}
 

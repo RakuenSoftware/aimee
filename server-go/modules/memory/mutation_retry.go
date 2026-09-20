@@ -69,7 +69,8 @@ func correctionDigest(r DataRequest, authority int) (string, error) {
 }
 
 // The caller must roll back its transaction on ANY error, including a normal
-// refusal: the open audit commit, mutation, extraction job and receipt are atomic.
+// failure: the audit commit, mutation, extraction job and receipt are atomic.
+// A correctionProposedError is a committed proposal outcome, not a failed write.
 // Only keyed corrections pay for the additional lock and receipt queries.
 func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *bus.CommandContext, correlation string) (record Record, receipt *MemoryMutationReceipt, err error) {
 	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.validFor(r.ID) || !versionedCorrectionOperation(r.Operation) || (r.Operation == "supersede" && r.Confidence == nil) || (r.Operation == "update-as" && r.Confidence != nil) {
@@ -92,13 +93,28 @@ func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataReque
 		return Record{}, nil, err
 	}
 	receipt = &MemoryMutationReceipt{SchemaVersion: 1, Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner}}
-	var storedDigest string
+	var storedDigest, proposalID string
 	var id, revision int64
-	err = s.db.QueryRow(ctx, `SELECT request_hash,commit_id,result_id,result_revision FROM memory_mutation_receipts
- WHERE owner_id=$1::uuid AND actor_principal=$2 AND key_hash=$3`, owner, caller.Principal, keyHash).Scan(&storedDigest, &receipt.CommitID, &id, &revision)
+	err = s.db.QueryRow(ctx, `SELECT request_hash,commit_id,result_id,result_revision,COALESCE(proposal_id::text,'') FROM memory_mutation_receipts
+ WHERE owner_id=$1::uuid AND actor_principal=$2 AND key_hash=$3`, owner, caller.Principal, keyHash).Scan(&storedDigest, &receipt.CommitID, &id, &revision, &proposalID)
 	if err == nil {
 		if storedDigest != digest {
 			return Record{}, nil, errIdempotencyConflict
+		}
+
+		if proposalID != "" {
+			p, err := scanCorrectionProposal(s.db.QueryRow(ctx, `SELECT `+correctionProposalReferenceColumns+` FROM memory_correction_proposals WHERE proposal_id=$1::uuid`, proposalID), false)
+			if errors.Is(err, ErrMemoryNotFound) {
+				return Record{}, nil, errReplayUnavailable
+			}
+			if err != nil {
+				return Record{}, nil, err
+			}
+			if err = s.checkCorrectionResult(ctx, p); err != nil {
+				return Record{}, nil, err
+			}
+			p.Draft, p.Replayed = nil, true
+			return Record{}, nil, &correctionProposedError{Proposal: p}
 		}
 		// Never requeue extraction or return stored content. The ordinary exact read
 		// applies current RLS, expiry, lifecycle and suppression gates.
@@ -138,6 +154,18 @@ func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataReque
 	}()
 	correction, err := s.prepareKBCorrection(ctx, r.ID, r.Content, r.Confidence, r.SessionID, authority, nil, r.ExpectedVersion)
 	if err != nil {
+		if proposal := proposedCorrection(err); proposal != nil {
+			// A draft is a durable outcome too. Bind the same retry namespace
+			// to its content-free reference, retaining it after parent erasure.
+			var commit string
+			if auditErr := s.db.QueryRow(ctx, `SELECT commit_id FROM fact_graph_changes WHERE object_kind='review' AND object_key=$1 AND action='insert' ORDER BY id LIMIT 1`, proposal.ID).Scan(&commit); auditErr != nil {
+				return Record{}, nil, auditErr
+			}
+			if _, receiptErr := s.db.Exec(ctx, `INSERT INTO memory_mutation_receipts(owner_id,actor_principal,key_hash,request_hash,commit_id,result_id,result_revision,proposal_id)
+ VALUES($1::uuid,$2,$3,$4,$5,$6::bigint,0,$7::uuid)`, owner, caller.Principal, keyHash, digest, commit, proposal.Target.RecordID, proposal.ID); receiptErr != nil {
+				return Record{}, nil, receiptErr
+			}
+		}
 		return Record{}, nil, err
 	}
 	var previous string

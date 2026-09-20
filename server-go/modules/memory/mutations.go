@@ -126,6 +126,9 @@ func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content stri
 		return -1, 0, err
 	}
 	if code := mutationRefusal(err); code != 0 {
+		if proposedCorrection(err) != nil {
+			return code, id, err
+		}
 		return code, id, nil
 	}
 	return MutationOK, record.ID, err
@@ -236,6 +239,7 @@ type preparedKBCorrection struct {
 	confidence      float64
 	session         string
 	provenance      string
+	epistemic       string
 	ceiling         float64
 	tier, useCases  string
 	replaceMetadata bool
@@ -308,9 +312,15 @@ func (s *postgresDataStore) prepareKBCorrection(ctx context.Context, id int64, c
 		return preparedKBCorrection{unchanged: &previous}, nil
 	}
 	if err := admitMemoryReplacement(epistemic, origin, authority); err != nil {
+		if authority == AuthorityModel && errors.Is(err, errMutationReviewRequired) {
+			err = s.proposeKBCorrection(ctx, id, content, confidence, session, epistemic, previous.Tier, oldUseCases, metadata)
+		}
 		return preparedKBCorrection{}, err
 	}
 	if metadata != nil && metadata.EpistemicKind != "" && metadata.EpistemicKind != epistemic {
+		if authority == AuthorityModel {
+			return preparedKBCorrection{}, s.proposeKBCorrection(ctx, id, content, confidence, session, epistemic, previous.Tier, oldUseCases, metadata)
+		}
 		return preparedKBCorrection{}, errMutationReviewRequired
 	}
 	provenance, ceiling := "agent_message", 0.8
@@ -345,13 +355,13 @@ func (s *postgresDataStore) applyKBCorrection(ctx context.Context, correction pr
 ), fresh AS (
  INSERT INTO memories(tier,kind,epistemic_kind,key,content,use_cases,confidence,confidence_ceiling,
  source_session,provenance_category,scope_type,scope_value,lifecycle_state,valid_from,owner_principal,sensitivity)
- SELECT CASE WHEN $9 THEN $7 ELSE tier END,kind,epistemic_kind,key,$2,CASE WHEN $9 THEN $8 ELSE use_cases END,
+ SELECT CASE WHEN $9 THEN $7 ELSE tier END,kind,CASE WHEN $10='' THEN epistemic_kind ELSE $10 END,key,$2,CASE WHEN $9 THEN $8 ELSE use_cases END,
  LEAST($3,$6,CASE WHEN (CASE WHEN $9 THEN $7 ELSE tier END)='L5' THEN 0.5 ELSE 1.0 END),
  LEAST($6,CASE WHEN (CASE WHEN $9 THEN $7 ELSE tier END)='L5' THEN 0.5 ELSE 1.0 END),
  CASE WHEN $4='' THEN source_session ELSE $4 END,$5,scope_type,scope_value,'active',boundary,owner_principal,sensitivity
  FROM closed RETURNING id,scope_type,scope_value,tier,kind,key,content,confidence
 )
-SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM fresh`, correction.id, correction.content, correction.confidence, correction.session, correction.provenance, correction.ceiling, correction.tier, correction.useCases, correction.replaceMetadata).
+SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM fresh`, correction.id, correction.content, correction.confidence, correction.session, correction.provenance, correction.ceiling, correction.tier, correction.useCases, correction.replaceMetadata, correction.epistemic).
 		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound

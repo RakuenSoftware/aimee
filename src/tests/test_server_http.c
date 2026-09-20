@@ -1734,6 +1734,8 @@ int main(void)
        * read-prefix default it used to fall through to. */
       assert(server_capability_for_method("memory.update") == CAP_MEMORY_WRITE);
       assert(server_capability_for_method("memory.update") != CAP_MEMORY_READ);
+      assert(server_capability_for_method("memory.correction_proposals") == CAP_MEMORY_READ);
+      assert(server_capability_for_method("memory.review_correction") == CAP_MEMORY_WRITE);
       /* Mirrors the rules split this is modelled on. */
       assert(server_capability_for_method("rules.delete") == CAP_RULES_ADMIN);
       /* memory:admin must not leak into the read-only set, and must stay inside

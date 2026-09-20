@@ -104,6 +104,7 @@ func exerciseMutationRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 			t.Fatal("refused edit reached audit writer", verb, out)
 		}
 		attempt["authority"] = "user"
+		attempt["idempotency_key"] = "admission-user-" + verb
 		if out := invoke(verb, attempt); out["kind"] != "unavailable" {
 			t.Fatal("admitted edit did not reach audit writer", verb, out)
 		}
@@ -113,6 +114,7 @@ func exerciseMutationRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 		}
 		stale["record_revision"] = "9223372036854775807"
 		attempt["expected_version"] = stale
+		attempt["idempotency_key"] = "admission-stale-" + verb
 		if out := invoke(verb, attempt); out["reason"] != "expected_version_conflict" {
 			t.Fatal("stale edit reached audit writer", verb, out)
 		}
@@ -124,18 +126,19 @@ func exerciseMutationRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 	if n := scalar(`SELECT count(*) FROM memories WHERE id=$1 AND lifecycle_state='active' AND content='original'`, id); n != 1 {
 		t.Fatal("admission failure consumed original")
 	}
-	if n := scalar(`SELECT count(*) FROM memory_mutation_receipts WHERE actor_principal='user:retry-fixture'`); n != 0 {
-		t.Fatal("admission failure reserved retry key", n)
+	if n := scalar(`SELECT count(*) FROM memory_mutation_receipts WHERE actor_principal='user:retry-fixture' AND proposal_id IS NOT NULL`); n != 2 {
+		t.Fatal("draft outcomes lack retry references", n)
 	}
-	// An ordinary refusal must not leave an open commit or reserve the key.
+	// A review refusal commits its draft outcome but no open canonical commit.
 	args["authority"] = "model"
 	if out := invoke("supersede", args); out["kind"] != "review_required" {
 		t.Fatal(out)
 	}
-	if n := scalar(`SELECT count(*) FROM fact_graph_commits`); n != before {
-		t.Fatal("refusal left an open commit", n, before)
+	if n := scalar(`SELECT count(*) FROM fact_graph_commits WHERE status='open'`); n != 0 {
+		t.Fatal("refusal left an open commit", n)
 	}
 	args["authority"] = "user"
+	args["idempotency_key"] = "retry-fixture-key-user"
 	accepted := invoke("supersede", args)
 	if accepted["status"] != "ok" {
 		t.Fatal(accepted)
@@ -408,10 +411,12 @@ func exerciseUpdateRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, han
 	version := read["memory"].(map[string]any)["version"]
 	args := map[string]any{"id": id, "content": "corrected", "authority": "user", "expected_version": version, "idempotency_key": "update-retry-key-01", "project": "update-retry", "scope_context": true}
 	args["authority"] = "model"
+	args["idempotency_key"] = "update-proposal-key"
 	if out := invoke("update", args); out["kind"] != "review_required" {
 		t.Fatal("precondition granted authority", out)
 	}
 	args["authority"] = "user"
+	args["idempotency_key"] = "update-retry-key-01"
 	args["project"] = "hidden"
 	if out := invoke("update", args); out["kind"] != "not_found" {
 		t.Fatal(out)

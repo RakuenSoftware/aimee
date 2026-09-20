@@ -111,8 +111,8 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if _, exists := args["idempotency_key"]; exists && ((verb != "supersede" && verb != "update") || options.placement != PlacementKB) {
 		return commandResult(commandError("unsupported_mode", "idempotency_key is supported only for shared memory update and supersede"))
 	}
-	if _, exists := args["expected_version"]; exists && ((verb != "supersede" && verb != "update") || options.placement != PlacementKB) {
-		return commandResult(commandError("unsupported_mode", "expected_version is supported only for shared memory update and supersede"))
+	if _, exists := args["expected_version"]; exists && ((verb != "supersede" && verb != "update" && verb != "review_correction") || options.placement != PlacementKB) {
+		return commandResult(commandError("unsupported_mode", "expected_version is supported only for shared memory update, supersede and correction review"))
 	}
 	if _, exists := args["include_version"]; exists && (verb != "get" || options.placement != PlacementKB) {
 		return commandResult(commandError("unsupported_mode", "include_version is supported only for shared exact-ID get"))

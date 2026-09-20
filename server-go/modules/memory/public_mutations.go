@@ -7,7 +7,7 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 )
 
-func commandMutationRefusal(code *int) map[string]any {
+func commandMutationRefusal(code *int, proposals ...*correctionProposal) map[string]any {
 	if code == nil {
 		return nil
 	}
@@ -29,7 +29,11 @@ func commandMutationRefusal(code *int) map[string]any {
 	case MutationRequiresReplacement:
 		return commandError("conflict", errRequiresRevocation.Error())
 	case MutationReviewRequired:
-		return commandError("review_required", errMutationReviewRequired.Error())
+		result := commandError("review_required", errMutationReviewRequired.Error())
+		if len(proposals) > 0 && proposals[0] != nil {
+			result["proposal"] = proposals[0]
+		}
+		return result
 	}
 	return nil
 }
@@ -109,7 +113,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
-	if refusal := commandMutationRefusal(response.Code); refusal != nil {
+	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
 		return commandResult(refusal)
 	}
 	result := map[string]any{"status": "ok"}

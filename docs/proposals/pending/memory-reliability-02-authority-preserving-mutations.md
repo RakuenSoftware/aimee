@@ -24,8 +24,8 @@ and refused corrections to a user's own stored facts. Model calls and caller
 supplied authority text still cannot replace authoritative content. A review
 refusal maps to HTTP 409 rather than an upstream-failure status.
 
-This is a foundation slice. Review-required writes currently refuse without
-creating a linked proposal. Personal versioning, expected versions on remaining mutation verbs,
+Shared model corrections now create linked review proposals and support exact-draft
+approval or rejection as described below. Personal versioning, expected versions on remaining mutation verbs,
 idempotency on remaining verbs, further durable guards/consumer replay and full retention policy
 remain acceptance work.
 
@@ -103,9 +103,8 @@ and supersede; existing schema-one supersede digests remain compatible.
 The owner locks and admits the correction before opening its canonical audit
 commit, then applies the admitted change under that same transaction and row
 lock. A review or version refusal does not depend on the canonical audit writer
-being available. This removes four database calls from those refused keyed
-requests without adding queries to accepted edits or changing retry receipts.
-Linked proposals and review decisions remain a separate unfinished step.
+being available. Proposal creation is a distinct audited outcome; it does not open a canonical
+correction commit or change the original serving revision.
 
 MCP `memory_get` advertises the version field, and `mutate` forwards and advertises
 the precondition and retry key for shared update/supersede. Keyed responses retain
@@ -115,7 +114,58 @@ mutation events. Legacy unkeyed MCP responses retain their existing text format.
 
 This contract currently covers shared corrections only. Other verbs and personal
 placement explicitly refuse the field. Remaining create/delete idempotency,
-retention/restore policy, review proposals and consumer progress remain open.
+personal content versioning, retention/restore policy and consumer progress remain open.
+
+### Linked model correction proposals
+
+Schema 25 adds `memory_correction_proposals` outside the serving memory tables.
+Model edits, supersede calls, same-key upserts and legacy content edits that need
+review retain the original and return `review_required` with a `proposal`
+reference. The reference binds the storage owner, target ID/revision and SHA-256
+digest of the screened content and requested metadata. The draft is model-authored;
+confidence is recomputed under the model ceiling (0.8, or 0.5 for L5). Background
+convention, cognification and trace writers retain proposal outcomes without
+extracting or counting those drafts as active facts.
+
+The existing KB action API exposes `memory.correction_proposals` and
+`memory.review_correction`. Lists return bounded references, without fetching
+payload text. Supplying `proposal_id` inspects one draft. All reads use parent
+visibility and the current owner identity; drafts never participate in recall.
+Creation and retry replies also avoid loading the stored payload. Indexed exact
+lookup, a recent-order index and a parent index support review and erasure.
+
+A review requires verified authenticated user authority, `proposal_id`,
+`payload_digest`, the proposal's `expected_version`, and `action` (`approve` or
+`reject`). Body claims cannot grant user authority. Approval locks the parent
+before the proposal, compares the current target version, and creates a new
+canonical version through the same Go writer. It preserves model provenance
+(`reviewed_model`), confidence ceilings and the model extraction actor. The
+reviewer and exact draft digest are recorded separately in
+`knowledge_review_decisions`, with the existing changeset/WORM audit. Requested
+tier, use cases and mutable epistemic-kind changes are part of the reviewed
+digest; episode/experience and instruction/policy transitions retain their
+existing protection. If current screening would alter the reviewed text,
+approval refuses instead of silently substituting another payload.
+
+Proposal payloads and terminal decisions are immutable. Repeating the same
+owner/target/revision/draft returns the same proposal, including across proposers
+and after rejection; it cannot reopen a rejected draft. A changed target blocks
+approval, while a still-visible stale draft can be explicitly rejected. Repeating
+an approval returns the existing commit only while its result remains visible,
+eligible and at the committed revision. Competing approvals create one successor;
+a competing rejection cannot undo an already committed approval.
+
+Keyed proposals use the existing actor-isolated mutation receipt namespace. The
+receipt contains a proposal reference instead of canonical result content. Its
+reserved zero result revision cannot match a canonical record, so older receipt
+readers refuse it instead of falsely reporting a completed correction. A
+changed request or authority under the same key conflicts. A proposal response
+remains `review_required`; its retry reference does not imply an approved edit.
+Parent erasure cascades to draft payloads, while content-free audit and retry
+references prevent erased proposals from being recreated through old keys.
+Late failures roll back the whole proposal or approval transaction, including
+canonical versions, extraction work, decisions and invalidation. This workflow
+is a shared-memory foundation, not completion of every MR-02 acceptance gate.
 
 ## Existing integration points
 

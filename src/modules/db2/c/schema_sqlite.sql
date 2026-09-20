@@ -911,6 +911,19 @@ CREATE TABLE IF NOT EXISTS memory_mutation_receipts (
  key_hash TEXT NOT NULL, request_hash TEXT NOT NULL,
  commit_id TEXT NOT NULL REFERENCES fact_graph_commits(commit_id),
  result_id INTEGER NOT NULL, result_revision INTEGER NOT NULL,
+ proposal_id TEXT,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  PRIMARY KEY(owner_id,actor_principal,key_hash)
+);
+
+CREATE TABLE IF NOT EXISTS memory_correction_proposals (
+ proposal_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
+ target_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+ target_revision INTEGER NOT NULL, actor_principal TEXT NOT NULL,
+ payload TEXT NOT NULL, payload_digest TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
+ reviewer_principal TEXT NOT NULL DEFAULT '', decision_id TEXT NOT NULL DEFAULT '',
+ review_commit_id TEXT REFERENCES fact_graph_commits(commit_id),
+ result_id INTEGER NOT NULL DEFAULT 0, result_revision INTEGER NOT NULL DEFAULT 0,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(owner_id,target_id,target_revision,payload_digest)
 );

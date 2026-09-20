@@ -150,13 +150,15 @@ class Gate:
                 refused = self.mcp_document('MCP ' + verb + ' admission before audit',
                     'mutate', dict(args, verb=verb))
                 self.check('MCP ' + verb + ' requires review before canonical audit',
-                    refused.get('kind') == 'review_required' and 'mutation_receipt' not in refused)
+                    refused.get('kind') == 'review_required' and 'mutation_receipt' not in refused and
+                    refused.get('proposal', {}).get('state') == 'pending')
                 # Server HTTP exposes supersede; update is an MCP/KB action.
                 if verb == 'supersede':
-                    code, failure = self.call(verb, args)
+                    code, failure = self.call(verb, dict(args, idempotency_key=key + '-canonical'))
                     self.check('HTTP supersede admitted correction reaches blocked audit',
                         code >= 500 and failure.get('kind') == 'unavailable')
                 args['expected_version'] = dict(version, record_revision='9223372036854775807')
+                args['idempotency_key'] = key + '-stale'
                 stale = self.mcp_document('MCP ' + verb + ' stale admission before audit',
                     'mutate', dict(args, verb=verb))
                 self.check('MCP ' + verb + ' rejects stale version before canonical audit',
@@ -166,8 +168,8 @@ class Gate:
         self.check('refused corrections preserve original revision and invalidations',
             self.shared_changes(old_id) == before)
         hashes = ','.join("'" + key + "'" for key in keys)
-        self.check('refused corrections do not reserve retry keys', self.sql(
-            f"SELECT count(*) FROM memory_mutation_receipts WHERE key_hash IN ({hashes})") == '0')
+        self.check('draft outcomes retain their retry references', self.sql(
+            f"SELECT count(*) FROM memory_mutation_receipts WHERE key_hash IN ({hashes}) AND proposal_id IS NOT NULL") == '2')
 
     def shared_journal(self):
         key = self.prefix + '-journal'

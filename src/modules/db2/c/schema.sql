@@ -16198,7 +16198,12 @@ LANGUAGE sql IMMUTABLE AS $$
    'governance_promoted',j->>'governance_promoted','support_status',j->>'support_status',
    'reverify_needed',j->>'reverify_needed','actor_principal',j->>'actor_principal',
    'review_needed',j->>'review_needed','review_reason',j->>'review_reason',
-   'archive_reason',j->>'archive_reason','is_current',j->>'is_current'))
+   'archive_reason',j->>'archive_reason','is_current',j->>'is_current',
+   'provenance_category',j->>'provenance_category','confidence_ceiling',j->>'confidence_ceiling',
+   'payload_digest',j->>'payload_digest','owner_id',j->>'owner_id',
+   'target_id',j->>'target_id','target_revision',j->>'target_revision',
+   'reviewer_principal',j->>'reviewer_principal','decision_id',j->>'decision_id',
+   'result_id',j->>'result_id','result_revision',j->>'result_revision'))
 $$;
 
 CREATE OR REPLACE FUNCTION memory_mutation_worm_append(
@@ -17928,6 +17933,13 @@ CREATE TABLE IF NOT EXISTS memory_mutation_receipts (
  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
  PRIMARY KEY(owner_id,actor_principal,key_hash)
 );
+ALTER TABLE memory_mutation_receipts ADD COLUMN IF NOT EXISTS proposal_id UUID;
+-- Zero is deliberately impossible for a canonical record revision. A schema-24
+-- reader which does not know proposal_id therefore refuses this receipt instead
+-- of reporting the unchanged target as a completed correction.
+ALTER TABLE memory_mutation_receipts DROP CONSTRAINT IF EXISTS memory_mutation_receipts_result_revision_check;
+ALTER TABLE memory_mutation_receipts ADD CONSTRAINT memory_mutation_receipts_result_revision_check
+ CHECK((proposal_id IS NULL AND result_revision>0) OR (proposal_id IS NOT NULL AND result_revision=0));
 ALTER TABLE memory_mutation_receipts ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS memory_mutation_receipt_actor ON memory_mutation_receipts;
 CREATE POLICY memory_mutation_receipt_actor ON memory_mutation_receipts
@@ -17952,6 +17964,92 @@ BEGIN
 END
 $memory_receipt_grants$;
 -- END memory mutation receipts
+
+-- BEGIN memory correction proposals
+-- Draft text never enters memories, its indexes, or extraction queues. Parent
+-- erasure cascades to drafts; the existing audit retains only typed references.
+CREATE TABLE IF NOT EXISTS memory_correction_proposals (
+ proposal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ owner_id UUID NOT NULL,
+ target_id BIGINT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+ target_revision BIGINT NOT NULL CHECK(target_revision>0),
+ actor_principal TEXT NOT NULL CHECK(length(actor_principal) BETWEEN 1 AND 1024),
+ payload TEXT NOT NULL CHECK(length(payload)>0),
+ payload_digest TEXT NOT NULL CHECK(payload_digest ~ '^[0-9a-f]{64}$'),
+ state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','approved','rejected')),
+ reviewer_principal TEXT NOT NULL DEFAULT '',
+ decision_id TEXT NOT NULL DEFAULT '',
+ review_commit_id TEXT REFERENCES fact_graph_commits(commit_id),
+ result_id BIGINT NOT NULL DEFAULT 0,
+ result_revision BIGINT NOT NULL DEFAULT 0,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(owner_id,target_id,target_revision,payload_digest),
+ CHECK((state='pending' AND reviewer_principal='' AND decision_id='' AND review_commit_id IS NULL AND result_id=0 AND result_revision=0)
+    OR (state='rejected' AND reviewer_principal<>'' AND decision_id<>'' AND review_commit_id IS NOT NULL AND result_id=0 AND result_revision=0)
+    OR (state='approved' AND reviewer_principal<>'' AND decision_id<>'' AND review_commit_id IS NOT NULL AND result_id>0 AND result_revision>0))
+);
+CREATE INDEX IF NOT EXISTS memory_correction_proposals_pending
+ ON memory_correction_proposals(target_id,created_at,proposal_id) WHERE state='pending';
+CREATE INDEX IF NOT EXISTS memory_correction_proposals_parent ON memory_correction_proposals(target_id);
+CREATE INDEX IF NOT EXISTS memory_correction_proposals_recent ON memory_correction_proposals(created_at DESC,proposal_id);
+ALTER TABLE memory_correction_proposals ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_correction_parent ON memory_correction_proposals;
+CREATE POLICY memory_correction_parent ON memory_correction_proposals
+ USING(owner_id=(SELECT owner_id FROM memory_collection_owner WHERE id=1)
+   AND EXISTS(SELECT 1 FROM memories m WHERE m.id=target_id))
+ WITH CHECK(owner_id=(SELECT owner_id FROM memory_collection_owner WHERE id=1)
+   AND EXISTS(SELECT 1 FROM memories m WHERE m.id=target_id));
+CREATE OR REPLACE FUNCTION memory_correction_proposal_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$ BEGIN
+ IF TG_OP='INSERT' THEN
+   IF NEW.state<>'pending' OR NEW.actor_principal<>COALESCE(NULLIF(current_setting('aimee.principal',true),''),'system:model-inference')
+      OR NOT EXISTS(SELECT 1 FROM memories WHERE id=NEW.target_id AND record_revision=NEW.target_revision AND lifecycle_state='active')
+      OR NEW.payload_digest<>encode(sha256(convert_to(NEW.payload,'UTF8')),'hex') THEN
+     RAISE EXCEPTION 'invalid memory correction proposal';
+   END IF;
+ ELSIF ROW(NEW.proposal_id,NEW.owner_id,NEW.target_id,NEW.target_revision,NEW.actor_principal,NEW.payload,NEW.payload_digest,NEW.created_at)
+     IS DISTINCT FROM ROW(OLD.proposal_id,OLD.owner_id,OLD.target_id,OLD.target_revision,OLD.actor_principal,OLD.payload,OLD.payload_digest,OLD.created_at)
+     OR OLD.state<>'pending' OR NEW.state NOT IN ('approved','rejected')
+     OR COALESCE(current_setting('aimee.authority',true),'') NOT IN ('user','operator')
+     OR NEW.reviewer_principal<>COALESCE(current_setting('aimee.principal',true),'') THEN
+   RAISE EXCEPTION 'memory correction payload and decisions are immutable';
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_correction_proposal_guard ON memory_correction_proposals;
+CREATE TRIGGER memory_correction_proposal_guard BEFORE INSERT OR UPDATE ON memory_correction_proposals
+ FOR EACH ROW EXECUTE FUNCTION memory_correction_proposal_guard();
+DROP TRIGGER IF EXISTS evidence_memory_correction ON memory_correction_proposals;
+CREATE TRIGGER evidence_memory_correction AFTER INSERT OR UPDATE OR DELETE ON memory_correction_proposals
+ FOR EACH ROW EXECUTE FUNCTION evidence_object_mutation('review','proposal_id');
+DROP TRIGGER IF EXISTS evidence_guard_memory_correction ON memory_correction_proposals;
+CREATE TRIGGER evidence_guard_memory_correction BEFORE INSERT OR UPDATE OR DELETE ON memory_correction_proposals
+ FOR EACH ROW EXECUTE FUNCTION evidence_emitter_guard('evidence_memory_correction');
+ALTER TABLE knowledge_review_decisions DROP CONSTRAINT IF EXISTS knowledge_review_decisions_decision_check;
+ALTER TABLE knowledge_review_decisions ADD CONSTRAINT knowledge_review_decisions_decision_check
+ CHECK(decision IN ('accept','reject','correct','retire','restore','promote','invalidate_source','purge',
+ 'request_evidence','annotate','revoke','resolve'));
+REVOKE ALL ON memory_correction_proposals FROM PUBLIC;
+DO $memory_proposal_grants$
+DECLARE recipient RECORD; role_name TEXT;
+BEGIN
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class AS relation,
+ LATERAL aclexplode(relation.relacl) AS acl
+ WHERE relation.oid='memory_correction_proposals'::regclass AND acl.grantee<>relation.relowner LOOP
+   role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+   EXECUTE format('REVOKE ALL ON TABLE memory_correction_proposals FROM %s',role_name);
+ END LOOP;
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+   GRANT SELECT,INSERT ON memory_correction_proposals TO aimee_store_runtime;
+   GRANT UPDATE(state,reviewer_principal,decision_id,review_commit_id,result_id,result_revision)
+     ON memory_correction_proposals TO aimee_store_runtime;
+   GRANT INSERT(decision_id,item_id,source_queue,decision,authenticated_actor,requested_value,
+     evidence_snapshot,resulting_authority,changeset_id,preview_token,head_at_decision,created_at)
+     ON knowledge_review_decisions TO aimee_store_runtime;
+ END IF;
+END
+$memory_proposal_grants$;
+-- END memory correction proposals
 
 -- The embedded Go store has a separate, non-owner runtime role. The KB owner
 -- creates these objects, so the Go migrator's default privileges do not cover
@@ -18028,6 +18126,12 @@ BEGIN
   GRANT SELECT ON memory_collection_owner, memory_collection_generations, memory_invalidation_outbox TO aimee_store_runtime;
   REVOKE ALL ON memory_mutation_receipts FROM aimee_store_runtime;
   GRANT SELECT,INSERT ON memory_mutation_receipts TO aimee_store_runtime;
+  GRANT SELECT,INSERT ON memory_correction_proposals TO aimee_store_runtime;
+  GRANT UPDATE(state,reviewer_principal,decision_id,review_commit_id,result_id,result_revision)
+    ON memory_correction_proposals TO aimee_store_runtime;
+  GRANT INSERT(decision_id,item_id,source_queue,decision,authenticated_actor,requested_value,
+    evidence_snapshot,resulting_authority,changeset_id,preview_token,head_at_decision,created_at)
+    ON knowledge_review_decisions TO aimee_store_runtime;
   GRANT SELECT ON bandit_promotions, tasks, fact_evidence, docs, evidence_lifecycle_settings,
     memory_active_embedder, kb_embeddings, kb_documents,
     document_versions, derivation_policy_versions TO aimee_store_runtime;
@@ -18058,5 +18162,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '24')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '25')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

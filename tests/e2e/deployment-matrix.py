@@ -109,6 +109,90 @@ def application_metadata_is_private(stack):
     return not any(name in forbidden or name.endswith(('_PASSWORD', '_API_KEY', '_TOKEN', '_PRIVATE_KEY')) for name in names)
 
 
+def correction_review_gate(kb, server, placement, output):
+    """Exercise the shipping KB actions and model MCP adapter on fresh stores."""
+    from types import SimpleNamespace
+    gate = placement.Gate(SimpleNamespace(server=server.application, kb=kb.application,
+        kb_store_db=kb.postgres, store_db=server.postgres))
+    scope = 'review-e2e-' + uuid.uuid4().hex
+    def check(name, passed):
+        gate.check(name, passed)
+        if not passed:
+            raise RuntimeError(name)
+    def action(verb, values):
+        payload = dict(project=scope, scope_context=True)
+        payload.update(values)
+        return kb.kb_request('/v1/actions/memory.' + verb, payload)[1]
+    try:
+        created = action('store', dict(key='review-original', content='verified original',
+            authority='user', tier='L2', confidence=0.95))
+        check('review fixture has verified user authorship', created.get('status') == 'ok' and
+            created.get('memory', {}).get('provenance_category') == 'user_stated')
+        old_id = created['id']
+        version = action('get', dict(id=old_id, include_version=True))['memory']['version']
+        correction = dict(verb='update', store='kb', project=scope, id=str(old_id),
+            content='reviewed model correction', authority='user', expected_version=version,
+            idempotency_key=scope + '-retry')
+        proposed = gate.mcp_document('MCP creates linked correction draft', 'mutate', correction)
+        check('model draft preserves authoritative current memory', proposed.get('kind') == 'review_required' and
+            proposed.get('proposal', {}).get('state') == 'pending' and
+            action('get', dict(id=old_id))['memory']['content'] == 'verified original')
+        proposal = proposed['proposal']
+        pid, digest = proposal['proposal_id'], proposal['payload_digest']
+        inspected = action('correction_proposals', dict(proposal_id=pid))['proposals']
+        check('draft inspection preserves model authority and cap', len(inspected) == 1 and
+            inspected[0]['origin_authority'] == 'model' and inspected[0]['draft']['confidence'] == 0.8)
+        check('draft inspection obeys parent scope', action('correction_proposals',
+            dict(proposal_id=pid, project='other-' + scope)).get('proposals') == [])
+        command('docker', 'restart', kb.application)
+        kb.start()
+        replay = gate.mcp_document('MCP draft retry after KB restart', 'mutate', correction)
+        check('draft retry survives owner restart', replay.get('proposal', {}).get('proposal_id') == pid and
+            replay['proposal'].get('replayed') is True)
+        review = dict(proposal_id=pid, payload_digest=digest, expected_version=version, action='approve')
+        check('review binds exact draft digest', action('review_correction',
+            dict(review, payload_digest='0' * 64)).get('kind') == 'conflict')
+        accepted = action('review_correction', review)
+        check('verified KB review approves the draft', accepted.get('status') == 'ok' and
+            accepted.get('proposal', {}).get('state') == 'approved')
+        approved = accepted['proposal']
+        new_id = approved['result_version']['record_id']
+        check('approval separates model authorship from reviewer', approved['origin_authority'] == 'model' and
+            approved['revision_authority'] == 'model' and approved['review_authority'] == 'user' and
+            bool(approved.get('reviewer')) and bool(approved.get('decision_id')))
+        current = action('get', dict(id=new_id))['memory']
+        check('approved model version keeps recomputed confidence', current['content'] == 'reviewed model correction' and
+            current['confidence'] == 0.8 and current['provenance_category'] == 'reviewed_model')
+        check('approved extraction remains model authored', gate.sql(
+            f"SELECT (actor_role='model' AND authority_rank=10 AND authenticated=0)::text FROM memory_fact_actors WHERE memory_id={int(new_id)}") == 'true')
+        repeated = action('review_correction', review).get('proposal', {})
+        check('review replay keeps one canonical commit', repeated.get('replayed') is True and
+            repeated.get('review_commit_id') == approved['review_commit_id'])
+        followup = dict(verb='update', store='kb', project=scope, id=new_id, content='rejected model follow-up')
+        pending = gate.mcp_document('MCP reviewed content requires another review', 'mutate', followup)
+        check('reviewed model text cannot be silently overwritten', pending.get('kind') == 'review_required' and
+            pending.get('proposal', {}).get('state') == 'pending')
+        reject = pending['proposal']
+        rejected = action('review_correction', dict(proposal_id=reject['proposal_id'],
+            payload_digest=reject['payload_digest'], expected_version=reject['target_version'], action='reject'))
+        check('verified reviewer rejects the exact follow-up', rejected.get('status') == 'ok' and
+            rejected.get('proposal', {}).get('state') == 'rejected')
+        duplicate = gate.mcp_document('MCP repeats rejected draft', 'mutate', followup)
+        check('rejected draft cannot reopen through another model call',
+            duplicate.get('proposal', {}).get('proposal_id') == reject['proposal_id'] and
+            duplicate['proposal'].get('state') == 'rejected')
+        check('review workflow retains exactly old and approved versions', gate.sql(
+            f"SELECT count(*) FROM memories WHERE scope_type='project' AND scope_value='{scope}'") == '2')
+        check('rejected draft never enters recall storage', gate.sql(
+            f"SELECT count(*) FROM memories WHERE scope_value='{scope}' AND content='rejected model follow-up'") == '0')
+        check('explicit erasure removes original proposal parent', action('delete', dict(id=old_id, authority='user')).get('status') == 'ok')
+        check('parent erasure removes draft payload', action('correction_proposals', dict(proposal_id=pid)).get('proposals') == [])
+        erased = gate.mcp_document('MCP erased proposal retry', 'mutate', correction)
+        check('erasure does not free a committed proposal retry key', erased.get('reason') == 'idempotent_result_unavailable')
+    finally:
+        (output / 'correction-review.json').write_text(json.dumps(gate.checks, indent=2) + '\n')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--topology', choices=('T1', 'T2', 'T3'), required=True)
@@ -196,6 +280,8 @@ def main():
                 command('python3', str(gate_script), *common, '--kb', kb.application,
                     '--kb-store-db', kb.postgres, '--output', str(args.output / 'shared-memory.json'), timeout=900)
                 check('Enrolled optional KB, scope isolation, restart and outage regressions', True)
+                correction_review_gate(kb, server, placement, args.output)
+                check('Linked model correction drafts and authenticated decisions', True)
                 command('python3', str(ROOT / 'tests/e2e/instance-identity-e2e.py'),
                     '--server', server.application, '--kb', kb.application,
                     '--image', env['AIMEE_APPLICATION_IMAGE'], '--output', str(args.output / 'identity.json'))
