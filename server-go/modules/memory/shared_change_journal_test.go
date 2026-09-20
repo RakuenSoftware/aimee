@@ -55,11 +55,14 @@ func TestSharedMemoryCollectionCommitOrder(t *testing.T) {
 		}
 	}()
 	if _, err := owner.Exec(ctx, "SET search_path="+ident+`,public;
- CREATE TABLE memories(id BIGINT PRIMARY KEY,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,content TEXT);
+ CREATE TABLE memories(id BIGINT PRIMARY KEY,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,content TEXT,
+ use_count BIGINT NOT NULL DEFAULT 0,content_search TEXT GENERATED ALWAYS AS (upper(content)) STORED);
+ CREATE FUNCTION fixture_before_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
+ CREATE TRIGGER fixture_before_write BEFORE UPDATE ON memories FOR EACH ROW EXECUTE FUNCTION fixture_before_write();
  CREATE TABLE memory_scopes(memory_id BIGINT REFERENCES memories(id),scope_type TEXT,scope_value TEXT);
  CREATE FUNCTION memory_row_scope_visible(TEXT,TEXT) RETURNS BOOLEAN LANGUAGE sql AS $$ SELECT true $$;
  `+sharedChangeMigration(t)+`
- INSERT INTO memories VALUES(1,'project','alpha','one',1,0),(2,'project','alpha','two',1,0),(3,'project','beta','three',1,0);`); err != nil {
+ INSERT INTO memories(id,scope_type,scope_value,content) VALUES(1,'project','alpha','one'),(2,'project','alpha','two'),(3,'project','beta','three');`); err != nil {
 		t.Fatal(err)
 	}
 	connect := func() *pgx.Conn {
@@ -133,6 +136,24 @@ func TestSharedMemoryCollectionCommitOrder(t *testing.T) {
 	if err := owner.QueryRow(ctx, `SELECT array_agg(memory_id ORDER BY generation)
  FROM memory_invalidation_outbox WHERE scope_value='alpha' AND generation>2`).Scan(&order); err != nil || len(order) != 2 || order[0] != 1 || order[1] != 2 {
 		t.Fatal("collection positions differ from commit order", order, err)
+	}
+	// Read accounting for different records in one collection must not acquire
+	// the collection generation lock. Keep the first counter write uncommitted
+	// while the second commits, with generated columns and a BEFORE trigger.
+	if _, err := first.Exec(ctx, `BEGIN; UPDATE memories SET use_count=use_count+1 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	counterContext, stopCounter := context.WithTimeout(ctx, 5*time.Second)
+	_, err = second.Exec(counterContext, `UPDATE memories SET use_count=use_count+1 WHERE id=2`)
+	stopCounter()
+	if err != nil {
+		t.Fatal("counter writes serialized on the collection", err)
+	}
+	if _, err := first.Exec(ctx, "COMMIT"); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.QueryRow(ctx, `SELECT generation FROM memory_collection_generations WHERE scope_value='alpha'`).Scan(&alpha); err != nil || alpha != 4 {
+		t.Fatal("counter writes invalidated the collection", alpha, err)
 	}
 }
 
