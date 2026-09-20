@@ -143,6 +143,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			}
 		}
 		var ok bool
+		if request.IncludeVersion && (args.stringOr("view", "") == "session" || (args.stringOr("view", "") == "console" && args.stringOr("format", "json") != "json")) {
+			return commandResult(commandError("unsupported_mode", "include_version requires a JSON record view"))
+		}
 		request.ReadPolicy, ok = commandReadPolicy(args)
 		if !ok {
 			return invalid("read_policy must be a versioned object with recognized fields")
@@ -316,12 +319,16 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 // Preserve the native console's record schema while keeping its contents and
 // integer IDs in the owner. The host transports the rendered output as a string.
 func consoleMemoryRecord(r publicMemoryRecord) map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"id": r.ID, "tier": r.Tier, "kind": r.Kind, "key": r.Key, "content": r.Content,
 		"confidence": r.Confidence, "use_count": r.UseCount, "last_used_at": r.LastUsedAt,
 		"created_at": r.CreatedAt, "updated_at": r.UpdatedAt, "source_session": r.SourceSession,
 		"provenance_category": r.ProvenanceCategory,
 	}
+	if r.Version != nil {
+		result["version"] = r.Version
+	}
+	return result
 }
 
 func historyInspection(records []publicMemoryRecord, args commandArgs) ([]byte, bus.ModuleStatus) {

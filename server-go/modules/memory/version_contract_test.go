@@ -39,9 +39,18 @@ func TestExpectedVersionValidation(t *testing.T) {
 	if r := runPublicCommand(t, personal, "get", `{"id":1,"include_version":true}`); r["kind"] != "unsupported_mode" {
 		t.Fatal(r)
 	}
+	for _, args := range []string{`{"id":1,"include_version":true,"view":"session"}`, `{"id":1,"include_version":true,"view":"console","format":"text"}`} {
+		if r := runPublicCommand(t, client, "get", args); r["kind"] != "unsupported_mode" {
+			t.Fatal(args, r)
+		}
+	}
 	var version MemoryRecordVersion
 	if json.Unmarshal([]byte(valid), &version) != nil || !version.validFor(9007199254740993) {
 		t.Fatal(version)
+	}
+	projected, err := json.Marshal(consoleMemoryRecord(publicMemoryRecord{ID: 9007199254740993, Version: &version}))
+	if err != nil || !strings.Contains(string(projected), `"version":`+valid) {
+		t.Fatal("console discarded exact mutation precondition", string(projected), err)
 	}
 }
 
