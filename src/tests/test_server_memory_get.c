@@ -29,6 +29,7 @@ int send_and_free(server_conn_t *conn, cJSON *response)
 static int calls, clears, result;
 static kb_valid_at_t answer;
 static const char *expected_time;
+static const char *expected_read_policy;
 
 int workspace_repo_identity(const char *cwd, char *project, size_t project_cap, char *workspace,
                             size_t workspace_cap)
@@ -185,6 +186,15 @@ char *kb_v1_action_request(const char *method, cJSON *request)
       assert(cJSON_GetObjectItemCaseSensitive(request, "id")->valuedouble == 42);
       const char *as_of = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "as_of"));
       assert(!strcmp(as_of ? as_of : "", expected_time));
+      const cJSON *policy = cJSON_GetObjectItemCaseSensitive(request, "read_policy");
+      if (expected_read_policy)
+      {
+         char *encoded = cJSON_PrintUnformatted(policy);
+         assert(encoded && !strcmp(encoded, expected_read_policy));
+         free(encoded);
+      }
+      else
+         assert(!policy);
       cJSON_Delete(request);
       if (result)
          return strdup(result < 0 ? "{\"status\":\"error\",\"kind\":\"unavailable\"}"
@@ -716,6 +726,15 @@ int main(void)
    }
    assert(calls == 6 && clears == calls);
    cJSON_Delete(request);
+   result = 0;
+   expected_read_policy = "{\"schema_version\":1,\"mode\":\"historical\",\"valid_at\":\"2026-01-01T00:00:00Z\"}";
+   request = cJSON_Parse("{\"store\":\"kb\",\"id\":42}");
+   cJSON_AddItemToObject(request, "read_policy", cJSON_Parse(expected_read_policy));
+   response = materialize_reply(memory_get_command(request));
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(response, "memory")));
+   cJSON_Delete(response);
+   cJSON_Delete(request);
+   expected_read_policy = NULL;
    test_store_confidence();
    test_review_transport();
    test_store_owner_envelope();

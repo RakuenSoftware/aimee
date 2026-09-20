@@ -34,6 +34,8 @@ func TestRPCFaultStatusParity(t *testing.T) {
 		want uint32
 	}{
 		{"invalid_argument", 400},
+		{"unsupported_mode", 400},
+		{"unsupported_version", 400},
 		{"not_found", 404},
 		{"conflict", 409},
 		{"permission_denied", 403},

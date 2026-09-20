@@ -89,6 +89,20 @@ unknown states and suppressed active rows. Scope checks still apply. Mutation
 admission reads the scoped identity independently of serving eligibility so an
 authorized caller can retire an excluded active row.
 
+Exact-ID `get` also accepts a versioned `read_policy` object through the data
+stage, public command and HTTP endpoints. With `schema_version: 1`, `mode:
+"current"` uses the storage transaction clock; `mode: "historical"` requires an
+absolute `valid_at` and returns only a retained KB version whose half-open
+interval contains that instant. The response's `read` object reports the applied
+policy and normalized historical time. Unlike legacy `as_of` inspection, an
+out-of-interval version returns `not_found`. Revocation, quarantine, suppression
+and scope rules still apply. The object cannot grant principal or scope authority.
+`believed_at`, unsupported modes/versions, personal historical reconstruction and
+use on other operations explicitly fail; legacy `as_of` cannot be combined with
+the new contract. HTTP classifies unsupported modes/versions as caller errors.
+Historical selection adds no SQL round trip. This is a temporal read contract,
+not yet the complete evidence decision, validity CLI or release-generation receipt.
+
 Directive/reminder matching, recall fallback and briefing views share the same
 normalized expiry gate. Sweeps expire a row at the exact upper boundary; serving
 does not wait for a sweep. Operator lists/dashboard counts retain stored lifecycle

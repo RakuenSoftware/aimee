@@ -119,6 +119,22 @@ INSERT INTO user_memories(id,key,content,lifecycle_state,valid_until) VALUES
 	if len(bundle.ActiveContext) != 1 || bundle.ActiveContext[0].ID != 42 || !bundle.SessionStart {
 		t.Fatalf("session recall exposed expired or retired rows: %+v", bundle)
 	}
+	for _, id := range []int64{42, 90, 91} {
+		result, status := call(PlacementServer, DataRequest{Operation: "get", ID: id, ReadPolicy: &MemoryReadPolicy{SchemaVersion: 1, Mode: "current"}})
+		if status != bus.ModuleStatusOK || result.Read == nil || result.Read.ErrorCode != "" || result.Read.Mode != "current" || (len(result.Records) == 1) != (id == 42) {
+			t.Fatalf("versioned personal get with KB absent: id=%d status=%v result=%+v", id, status, result)
+		}
+	}
+	personal, err := NewPostgresDataStore(evalQueryer{tx}, PlacementServer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer := runHostRuntime(t, NewHandler(nil, WithDataStore(PlacementServer, personal)), `{"operation":"user-get","id":42,"read_policy":{"schema_version":1,"mode":"current"}}`)
+	var inner map[string]any
+	innerJSON, ok := outer["json"].(string)
+	if !ok || json.Unmarshal([]byte(innerJSON), &inner) != nil || inner["status"] != "ok" || inner["read"] == nil || inner["memory"] == nil {
+		t.Fatalf("private host read policy lost at runtime boundary: %v", outer)
+	}
 	if _, err := tx.Exec(ctx, `ALTER TABLE unavailable_shared_store RENAME TO memories;
 DELETE FROM user_memories WHERE id IN (90,91);`); err != nil {
 		t.Fatal(err)

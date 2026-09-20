@@ -31,6 +31,7 @@ const (
 )
 
 type DataRequest struct {
+	ReadPolicy     *MemoryReadPolicy `json:"read_policy,omitempty"`
 	pageRankConfig *pageRankConfig
 	requestedLimit int
 	PageRank       *pageRankRequest        `json:"pagerank,omitempty"`
@@ -164,6 +165,7 @@ type Record struct {
 }
 
 type DataResponse struct {
+	Read               *MemoryReadResult    `json:"read,omitempty"`
 	ContextAssembly    *ContextAssembly     `json:"context_assembly,omitempty"`
 	Dimension          int                  `json:"dimension,omitempty"`
 	Embedding          *EmbedResponse       `json:"embedding,omitempty"`
@@ -480,6 +482,13 @@ func (s *postgresDataStore) Get(ctx context.Context, scope Scope, id int64) (Rec
 }
 
 func (s *postgresDataStore) get(ctx context.Context, scope Scope, id int64, historical bool) (Record, error) {
+	return s.getAt(ctx, scope, id, historical, "")
+}
+
+// A nonempty validAt is already normalized by the versioned read contract.
+// Historical interval selection stays in the same query as scope/lifecycle
+// admission, avoiding a second metadata round trip and a time-of-check gap.
+func (s *postgresDataStore) getAt(ctx context.Context, scope Scope, id int64, historical bool, validAt string) (Record, error) {
 	var r Record
 	if s.placement == PlacementServer {
 		r.Scope = scope
@@ -497,9 +506,14 @@ WHERE id = $1 AND lifecycle_state = 'active'
 	if historical {
 		predicate = historicalMemoryInspectionSQL("")
 	}
+	parameters := []any{id}
+	if validAt != "" {
+		predicate += " AND " + memoryValidityAtSQL("", "$2::timestamptz")
+		parameters = append(parameters, validAt)
+	}
 	err := s.db.QueryRow(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
 FROM memories
-WHERE id = $1 AND `+predicate, id).
+WHERE id = $1 AND `+predicate, parameters...).
 		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
@@ -950,6 +964,17 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	var readResult *MemoryReadResult
+	if request.ReadPolicy != nil {
+		readResult = request.ReadPolicy.validate(options.placement, request.Operation, request.AsOf)
+		if readResult.ErrorCode != "" {
+			encoded, encodeErr := json.Marshal(DataResponse{Read: readResult, Records: []Record{}})
+			if encodeErr != nil {
+				return nil, bus.ModuleStatusInternal
+			}
+			return encoded, bus.ModuleStatusOK
+		}
+	}
 	explicitScope := request.Scope.Type != "" || request.Scope.Value != ""
 	if options.placement == PlacementKB && !explicitScope {
 		if request.Project != "" {
@@ -1140,7 +1165,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return encoded, bus.ModuleStatusOK
 	}
 
-	response := DataResponse{}
+	response := DataResponse{Read: readResult}
 	// Pin policy to one lazy snapshot per request, including its error. A
 	// request must not mix settings from successive configuration generations;
 	// the next request still observes changes immediately.
@@ -1787,7 +1812,7 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 		var record Record
 		var getErr error
-		if request.AsOf != "" {
+		if request.AsOf != "" || (request.ReadPolicy != nil && request.ReadPolicy.Mode == "historical") {
 			if options.placement != PlacementKB {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
@@ -1795,7 +1820,11 @@ set_config('aimee.correlation_id',$9,true)`,
 			if !ok {
 				return nil, bus.ModuleStatusCapabilityAbsent
 			}
-			record, getErr = backend.get(ctx, scope, request.ID, true)
+			when := ""
+			if readResult != nil {
+				when = readResult.ValidAt
+			}
+			record, getErr = backend.getAt(ctx, scope, request.ID, true, when)
 		} else {
 			record, getErr = options.data.Get(ctx, scope, request.ID)
 		}
