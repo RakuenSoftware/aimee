@@ -83,6 +83,61 @@ The `.253` raw fixture evidence is retained under
 application containers were stopped after validation. No production instance was
 used for these mutations.
 
+## Durable correction retry validation
+
+Implementation `93d235a353a2010e116830e153a8263c444657f8` adds
+optional authenticated idempotency keys to shared corrections with an expected
+version. Schema 24 stores immutable, actor-isolated, content-free retry references
+to the existing canonical audit commit. The same transaction includes version
+replacement, scope copies, extraction provenance/job, WORM sealing and invalidation.
+
+The full memory race suite with required PostgreSQL fixtures and restricted-role
+replay passes on the published implementation (66.777 seconds). Real concurrent connections verify that a second
+request waits for the first transaction's outcome: after commit it replays the
+same result, and after disconnection before commit it admits one replacement.
+Another connection can replay the durable result without in-process state. A
+forced failure at receipt insertion rolls back all prior work; an ordinary
+admission refusal leaves neither an open audit commit nor a reserved key.
+
+Restricted-role cases cover different payloads under one key, actor isolation,
+connection/view changes, counter-only reads, moved/changed/erased results and
+receipt permissions. Replays do not add canonical commits, invalidations or
+extraction generations. Mutation telemetry excludes successful replays from new
+mutation counts; refusal telemetry remains available without flushing rolled-back
+success actions. Targeted audit/contract race tests pass (1.021 seconds).
+
+The native HTTP forwarding regression and schema/Go-ownership gates pass. Only
+the external host's JSON field forwarding changes; the C bus remains C. The
+staged change passes the scoped secret scan. No new P95 improvement is asserted:
+ordinary requests retain their existing path, while keyed writes pay for their
+durable lock/receipt and use one grouped canonical audit commit.
+
+The fresh application image is
+`sha256:16baa48c5e82299d372edb64bc0b52662e465670d62c047cf743dde9a2ccca9e`,
+built from `93d235a353`. The final harness is `43a1a18e7dfb683e16dbaf3aa234d6cea336ab56`;
+its only change is the history-count assertion described below. Another fresh T2
+stack on owned `.253` CT 9498 uses the same pinned PostgreSQL/embedder images as
+above. The [sanitized receipt](memory-shared-reliability-2026-09-20/fresh-t2-43a1a18e7d.json)
+records **264 passing verdicts**: 61 private, 180 shared, six identity and 17
+topology. HTTP replay returns the same canonical commit/result while eligible;
+changed payloads return 409, committed receipts survive KB restart, and retired
+results return 409 without cached content or another correction. The existing
+scope-isolation, outage/recovery, history, authorship and rollback gates pass.
+
+The first fresh run passed 179 of 180 shared verdicts. Its duplicate-result
+assertion incorrectly counted only the unsuffixed key: canonical supersession
+retains the old row under `#v…`. The corrected assertion counts the complete key
+family and still requires exactly two versions. The original failed evidence is
+retained in `/opt/aimee-memory-proposals-evidence/t2-93d235a353`; the independently
+created successful environment is recorded in
+`/opt/aimee-memory-proposals-evidence/t2-43a1a18e7d`. Both runs' containers were
+stopped; their evidence and volumes remain. Application code did not change
+between the two runs.
+
+This closes the tested shared-supersede retry cases, not all MR-02 acceptance.
+Other verbs/personal placement, review proposals, durable consumer application,
+restore-owner policy and final-release freshness remain outstanding.
+
 ## Local correctness and performance scope
 
 Restricted-role replay exercises the shipping schema, RLS, transactional scope

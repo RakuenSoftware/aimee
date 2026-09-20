@@ -62,13 +62,14 @@ records 224 passing topology/placement/identity verdicts, including the new HTTP
 contract. These results do not close the remaining MR-01 acceptance gates.
 
 [Fresh shared reliability validation](../../validation/memory-shared-reliability-2026-09-20.md)
-records 257 passing T2 verdicts for `5541025ba3`, including owner/revision-bound
-HTTP corrections, stale/repeated conflict responses, transactional scope-copy
-rollback and durable journal history across restart. Counter-only writes no longer
-acquire the collection-generation lock through generated search columns; a
-concurrent-write regression verifies independent read accounting. The native
-HTTP status contract accepts the Go classifier's 409 response. Remaining work
-continues in the single PR described above.
+now records 264 passing T2 verdicts for implementation `93d235a353` and harness
+`43a1a18e7d`. This includes owner/revision-bound HTTP corrections, durable keyed
+retries and payload conflicts, scope-copy rollback, retired-result refusal and
+journal/receipt persistence across restart. Actual concurrent connections cover
+both committed-response loss and an uncommitted writer disconnect. Counter-only
+writes retain collection-lock independence, and native HTTP forwarding preserves
+the Go contract. Remaining work continues on the single branch described above;
+these foundations do not certify all MR-01–18 acceptance gates.
 
 ## Supporting indexed-lookup repair
 
