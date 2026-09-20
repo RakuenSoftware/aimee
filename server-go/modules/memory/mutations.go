@@ -271,17 +271,24 @@ func (s *postgresDataStore) replaceKBAs(ctx context.Context, id int64, content s
  LEAST($6,CASE WHEN (CASE WHEN $9 THEN $7 ELSE tier END)='L5' THEN 0.5 ELSE 1.0 END),
  CASE WHEN $4='' THEN source_session ELSE $4 END,$5,scope_type,scope_value,'active',boundary,owner_principal,sensitivity
  FROM closed RETURNING id,scope_type,scope_value,tier,kind,key,content,confidence
-), scopes AS (
- INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
- SELECT fresh.id,s.scope_type,s.scope_value FROM fresh CROSS JOIN memory_scopes s WHERE s.memory_id=$1
- ON CONFLICT DO NOTHING
-), links AS (
- INSERT INTO memory_links(source_id,target_id,relation) SELECT id,$1,'supersedes' FROM fresh
 )
 SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM fresh`, id, content, confidence, session, provenance, ceiling, tier, useCases, metadata != nil).
 		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
 	}
+	if err != nil {
+		return Record{}, err
+	}
+	// A sibling data-modifying CTE cannot see the new parent through the
+	// secondary-scope RLS check. Copy metadata in the next statement of this
+	// required transaction, after the parent is visible. Any copy/audit failure
+	// still rolls back retirement, replacement, links and invalidations together.
+	_, err = s.db.Exec(ctx, `WITH scopes AS (
+ INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
+ SELECT $2,scope_type,scope_value FROM memory_scopes WHERE memory_id=$1
+ ON CONFLICT DO NOTHING
+)
+INSERT INTO memory_links(source_id,target_id,relation) VALUES($2,$1,'supersedes')`, id, r.ID)
 	return r, err
 }

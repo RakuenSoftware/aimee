@@ -8,6 +8,7 @@ import (
 
 type MemoryChangeCursor struct {
 	OwnerID    string `json:"owner_id"`
+	Collection string `json:"collection,omitempty"`
 	Generation int64  `json:"generation"`
 }
 
@@ -38,7 +39,7 @@ type MemoryChangePage struct {
 
 func (r MemoryChangesRequest) valid() bool {
 	return r.SchemaVersion == 1 && r.Limit >= 0 && r.Limit <= 256 &&
-		(r.After == nil || (r.After.OwnerID != "" && len(r.After.OwnerID) <= 64 && r.After.Generation >= 0))
+		(r.After == nil || (r.After.OwnerID != "" && len(r.After.OwnerID) <= 64 && len(r.After.Collection) <= 1040 && r.After.Generation >= 0))
 }
 
 func (s *postgresDataStore) personalChanges(ctx context.Context, request MemoryChangesRequest) (MemoryChangePage, error) {
@@ -71,13 +72,23 @@ SELECT jsonb_build_object('head',to_jsonb(h),'events',
 	if err != nil {
 		return MemoryChangePage{}, err
 	}
+	return finishMemoryChangePage(raw, request, limit, "")
+}
+
+func finishMemoryChangePage(raw string, request MemoryChangesRequest, limit int, collection string) (MemoryChangePage, error) {
 	var page MemoryChangePage
 	if err := json.Unmarshal([]byte(raw), &page); err != nil {
 		return MemoryChangePage{}, err
 	}
 	page.SchemaVersion = 1
-	page.Next = MemoryChangeCursor{OwnerID: page.Head.OwnerID, Generation: after}
-	page.SnapshotRequired = request.After == nil || owner != page.Head.OwnerID || after > page.Head.Generation
+	page.Head.Collection = collection
+	page.Next = page.Head
+	page.Next.Generation = 0
+	if request.After != nil {
+		page.Next.Generation = request.After.Generation
+	}
+	page.SnapshotRequired = request.After == nil || request.After.OwnerID != page.Head.OwnerID ||
+		request.After.Collection != collection || request.After.Generation > page.Head.Generation
 	if !page.SnapshotRequired {
 		for _, event := range page.Events {
 			if event.Generation != page.Next.Generation+1 {

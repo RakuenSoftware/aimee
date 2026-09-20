@@ -64,6 +64,52 @@ class Gate:
                FROM user_memory_invalidation_outbox e WHERE e.memory_id=m.id))
             FROM user_memory_collection_generation g,user_memories m WHERE g.id=1 AND m.id={int(mid)}"""))
 
+    def shared_changes(self, mid):
+        return json.loads(self.sql(f"""SELECT json_build_object(
+            'owner_id',o.owner_id,'revision',m.record_revision,
+            'events',(SELECT json_agg(json_build_object('generation',e.generation,
+              'scope_type',e.scope_type,'scope_value',e.scope_value,
+              'revision',e.record_revision,'operation',e.operation)
+              ORDER BY e.scope_type,e.scope_value,e.generation)
+              FROM memory_invalidation_outbox e WHERE e.memory_id=m.id))
+            FROM memory_collection_owner o,memories m WHERE o.id=1 AND m.id={int(mid)}"""))
+
+    def shared_journal(self):
+        key = self.prefix + '-journal'
+        original = 'shared journal original'
+        stored = self.good('shared journal HTTP store', self.call('store', dict(store='kb', key=key, content=original)))
+        old_id = int(stored['id'])
+        before = self.shared_changes(old_id)
+        self.check('shared HTTP store commits invalidation', bool(before['events']) and
+                   before['events'][0]['operation'] == 'insert' and before['events'][-1]['revision'] == before['revision'])
+        retry = self.good('shared journal identical retry', self.call('store', dict(store='kb', key=key, content=original)))
+        self.check('shared retry preserves identity and journal', retry['id'] == old_id and self.shared_changes(old_id) == before)
+        self.sql(f"INSERT INTO memory_scopes(memory_id,scope_type,scope_value) VALUES ({old_id},'workspace','journal-one'),({old_id},'workspace','journal-two')")
+        tagged = self.shared_changes(old_id)
+        self.check('shared tag batch invalidates its parent once', tagged['revision'] == before['revision'] + 1 and
+                   len(tagged['events']) == len(before['events']) + 1)
+        self.sql(f"ALTER TABLE memory_scopes ADD CONSTRAINT e2e_scope_copy_failure CHECK(memory_id={old_id} OR scope_value<>'journal-one') NOT VALID")
+        try:
+            code, failure = self.call('update', dict(store='kb', id=old_id, content='must roll back'))
+            self.check('shared HTTP replacement refuses failed tag copy', code >= 500 and failure.get('status') == 'error')
+            retained = self.good('shared original after failed copy', self.call('get', dict(store='kb', id=old_id)))
+            self.check('failed tag copy preserves original and invalidation',
+                       retained.get('memory', {}).get('content') == original and self.shared_changes(old_id) == tagged)
+        finally:
+            self.sql('ALTER TABLE memory_scopes DROP CONSTRAINT e2e_scope_copy_failure')
+        updated = self.good('shared HTTP version replacement', self.call('update', dict(store='kb', id=old_id, content='shared journal corrected')))
+        new_id = int(updated['id'])
+        self.check('shared replacement creates a new identity', new_id != old_id)
+        copies = int(self.sql(f"SELECT count(*) FROM memory_scopes WHERE memory_id={new_id} AND scope_value IN ('journal-one','journal-two')"))
+        self.check('shared replacement preserves visible tags', copies == 2)
+        after = self.shared_changes(new_id)
+        self.check('shared replacement and copied tags have durable revisions',
+                   after['revision'] >= 2 and after['events'][0]['operation'] == 'insert' and
+                   after['events'][-1]['revision'] == after['revision'])
+        self.good('shared replacement get', self.call('get', dict(store='kb', id=new_id)))
+        self.check('shared direct read leaves invalidations unchanged', self.shared_changes(new_id) == after)
+        return new_id, after
+
     def assert_no_personal_canary(self):
         tables = self.sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename").splitlines()
         queries = []
@@ -344,6 +390,10 @@ class Gate:
         code, body = self.call('get', dict(id=mid))
         self.check('retired local ID never resolves to KB collision', code >= 400 and body.get('kind') == 'not_found', [code, body])
         self.check('local retirement leaves KB content unchanged', json.loads(self.sql(f'SELECT to_json(content) FROM memories WHERE id={mid}')) == shared)
+        journal_id, journal = self.shared_journal()
+        self.docker('restart', self.args.kb)
+        self.good('shared replacement survives KB restart', self.wait('get', dict(store='kb', id=journal_id)))
+        self.check('shared journal owner and events survive KB restart', self.shared_changes(journal_id) == journal)
         long_shared = 'shared release fixture ' + 'αβ🦊 ' * 1000
         row = self.good('explicit long KB store', self.call('store', dict(store='kb', key=self.prefix + '-long', content=long_shared)))
         got = self.good('explicit long KB get', self.call('get', dict(store='kb', id=row['id'])))

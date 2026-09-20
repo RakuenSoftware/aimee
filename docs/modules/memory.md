@@ -122,7 +122,7 @@ The baseline policy fingerprint includes this version. This current-state slice
 does not certify all MR-01 surfaces, privileged historical/belief-time access,
 utility horizons or a final release/revocation generation check.
 
-## Personal invalidation producer
+## Memory invalidation producers
 
 Personal storage now records a monotonic `record_revision` and a content-free
 invalidation event atomically with each governed row mutation. A collection row
@@ -138,11 +138,21 @@ bounded `limit` (default 64, maximum 256). It reads the current head and page in
 one SQL snapshot. A new consumer, changed owner, cursor beyond the current head or missing
 event requires a new canonical snapshot (`snapshot_required: true`); the feed
 does not supply that snapshot or acknowledge consumer application. Events remain
-retained. Only Server/personal placement currently supports this operation;
-shared-KB and non-host access cannot silently consume a private stream.
+retained. Server/personal placement uses the instance-local collection. Shared
+KB placement uses the request's explicit primary scope and includes `collection`
+in its cursor. A cursor from another collection requires resynchronization.
+All-scope feed requests and non-host access are refused.
 
-This is the producer foundation for MR-02. Personal content history, shared-KB
-collection generations, durable consumer checkpoints and release checks remain
+Shared record mutations advance separate counters for affected primary scopes;
+a scope move advances both the old and new collections. Unrelated scopes can
+commit independently. Secondary tag changes advance the parent record's revision
+and primary collection, and secondary tags inherit parent visibility through RLS.
+The journal never exposes a hidden parent's identity through a secondary tag.
+Empty collections retain owner identity with generation zero without a read-side
+write. Existing KB audit envelopes also record the new row revision.
+
+This is the producer foundation for MR-02. Personal content history, further
+governed child/dependency coverage, durable consumer checkpoints and release checks remain
 separate work; the feed cannot certify derivative freshness by itself. Backup
 restoration must rotate the producer identity before replay resumes; automatic
 restore identity rotation and restore-resistant erasure intent are not implemented

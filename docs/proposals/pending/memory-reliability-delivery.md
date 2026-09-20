@@ -23,6 +23,8 @@ or replace the C bus.
 ## Post-merge execution
 
 Completion of all MR-01–18 implementation and acceptance work is the active goal.
+After the existing #2988–#2990 stack merges, all remaining proposal implementation
+and evidence will accumulate in one continuing PR. Do not open separate slice PRs.
 The [frozen acceptance inventory](../../../tests/eval/memory_reliability_acceptance.json)
 pins 123 acceptance clauses from the merged proposal revision and the measured
 Go performance baseline. It is an inventory, not a claim that those gates pass.
@@ -87,7 +89,7 @@ worktree without `--project` against the existing remote service.
 | Proposal | Implemented foundation | Work still required for full acceptance |
 |---|---|---|
 | MR-01 eligibility | Scoped transactions, placement separation, current-hash filters and Go current-validity predicates before lexical/semantic/unit/graph/window/bundle/activation/briefing limits; shared directive/reminder expiry; normalized assertion world/belief-time intervals and current typed-fact evidence closure | Unified temporal/utility policy on every surface, release recheck and race tests |
-| MR-02 mutations | Shared KB admission across same-key/edit/legacy verbs, user/model versions, original-author preservation, identity locking, tombstones and atomic extraction actor/job writes; personal revisions and transactional invalidation producer with bounded host replay | Linked review proposals, personal content versioning, expected-version/idempotency contracts, shared-KB collection generations/outbox, durable consumer application/checkpoints and release checks |
+| MR-02 mutations | Shared KB admission across same-key/edit/legacy verbs, user/model versions, original-author preservation, identity locking, tombstones and atomic extraction actor/job writes; personal and primary-scope shared revisions/generations/outboxes with bounded host replay; tag changes invalidate their visible parent | Linked review proposals, personal content versioning, expected-version/idempotency contracts, further governed child/dependency coverage, durable consumer application/checkpoints and release checks |
 | MR-03 budgets | Go typed-context assembly, final personal/shared recall rebudgeting and existing packing limits | Final serialized provider byte/token caps and protected-projection accounting |
 | MR-04 lineage | Fact lineage/review and invalidation paths | Independent-family accounting, full derivative closure and restore-resistant erasure |
 | MR-05 sufficiency | Typed context and answer abstention | Requirement/coherence coverage of retained evidence and bounded recovery |

@@ -899,3 +899,8 @@ CREATE TABLE IF NOT EXISTS recall_trace_results (
   rejected INTEGER NOT NULL DEFAULT 0, rejection_gate TEXT NOT NULL DEFAULT '',
   UNIQUE(trace_id,subject_kind,subject_id,lane,rejected)
 );
+
+-- Shape parity only: durable memory invalidation runs in PostgreSQL.
+CREATE TABLE IF NOT EXISTS memory_collection_owner (id INTEGER PRIMARY KEY,owner_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS memory_collection_generations (scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,generation INTEGER NOT NULL,PRIMARY KEY(scope_type,scope_value));
+CREATE TABLE IF NOT EXISTS memory_invalidation_outbox (scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,generation INTEGER NOT NULL,memory_id INTEGER NOT NULL,record_revision INTEGER NOT NULL,operation TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(scope_type,scope_value,generation));

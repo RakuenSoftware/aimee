@@ -274,6 +274,32 @@ WHERE c.object_kind='memory' AND c.object_key=$1 AND g.actor_principal=$2 AND g.
 	if _, err := tx.Exec(ctx, `INSERT INTO memory_scopes(memory_id,scope_type,scope_value) VALUES ($1,'workspace','runtime-team')`, oldID); err != nil {
 		t.Fatal(err)
 	}
+	// Scope copies run after the new parent becomes visible to child RLS, but
+	// remain in the same request transaction. A late copy failure must restore
+	// the original active row and every collection position.
+	var generationBefore, generationAfter int64
+	if err := tx.QueryRow(ctx, `SELECT generation FROM memory_collection_generations WHERE scope_type='project' AND scope_value='runtime-project-a'`).Scan(&generationBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`RESET ROLE;
+ALTER TABLE memory_scopes ADD CONSTRAINT runtime_scope_copy_failure CHECK(memory_id=%d OR scope_value<>'runtime-team') NOT VALID;
+SET LOCAL ROLE aimee_store_runtime`, oldID)); err != nil {
+		t.Fatal(err)
+	}
+	failedCopy, _ := invokeContextCommand(t, handler, 0, caller, "update", fmt.Sprintf(`{"id":%d,"content":"must roll back","scope_context":true,"project":"runtime-project-a"}`, oldID))
+	if failedCopy["status"] == "ok" {
+		t.Fatal("scope copy failure accepted replacement", failedCopy)
+	}
+	var originalStillActive bool
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state='active' AND content='original' FROM memories WHERE id=$1`, oldID).Scan(&originalStillActive); err != nil || !originalStillActive {
+		t.Fatal("scope copy failure retired the original", originalStillActive, err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT generation FROM memory_collection_generations WHERE scope_type='project' AND scope_value='runtime-project-a'`).Scan(&generationAfter); err != nil || generationAfter != generationBefore {
+		t.Fatal("failed replacement published invalidation", generationBefore, generationAfter, err)
+	}
+	if _, err := tx.Exec(ctx, `RESET ROLE; ALTER TABLE memory_scopes DROP CONSTRAINT runtime_scope_copy_failure; SET LOCAL ROLE aimee_store_runtime`); err != nil {
+		t.Fatal(err)
+	}
 	updated := command("update", fmt.Sprintf(`{"id":%d,"content":"model replacement","scope_context":true,"project":"runtime-project-a"}`, oldID), true)
 	newID := int64(updated["id"].(float64))
 	if newID == oldID || updated["superseded"] != true {

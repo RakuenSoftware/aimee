@@ -29,8 +29,12 @@ commit order; ordinary read counters bypass capture. The Go host-only bounded
 feed pins head/page to one SQL snapshot and requires canonical resynchronization
 on bootstrap, owner change, a cursor beyond the head or retention gap. A non-owner fixture exercises
 actual concurrent writers, rollback, outbox failure, replay and forbidden progress
-mutation. This does not complete personal content versioning, the shared-KB
-producer, consumer application/checkpoints or the release-freshness contract.
+mutation. Shared records and secondary scope tags now have a primary-scope
+producer too: collection-bound cursors, old/new scope invalidation, independent
+collection commit ordering and parent-visible tag access. Restricted-role replay
+covers version replacement and rollback after a failed tag copy. This does not
+complete personal content versioning, further governed child/dependency coverage,
+consumer application/checkpoints or the release-freshness contract.
 
 Implement one mutation admission operation for create, propose, correct, supersede, reject, retire and explicitly authorized destructive deletion. Route compatibility entry points through it.
 

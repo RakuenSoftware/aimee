@@ -16190,6 +16190,7 @@ LANGUAGE sql IMMUTABLE AS $$
    'lifecycle_state',j->>'lifecycle_state','state',j->>'state','status',j->>'status',
    'authority_rank',j->>'authority_rank','confidence',j->>'confidence',
    'confidence_class',j->>'confidence_class','version',j->>'version',
+   'record_revision',j->>'record_revision',
    'lifecycle_version',j->>'lifecycle_version','version_no',j->>'version_no',
    'valid_from',j->>'valid_from','valid_until',j->>'valid_until',
    'superseded_at',j->>'superseded_at','invalidated_at',j->>'invalidated_at',
@@ -16225,10 +16226,12 @@ BEGIN
   IF oid='' THEN RAISE EXCEPTION 'evidence object id is required for %.%',TG_TABLE_NAME,TG_OP; END IF;
   old_state := COALESCE(oldj->>'lifecycle_state',oldj->>'state',oldj->>'status','');
   new_state := COALESCE(newj->>'lifecycle_state',newj->>'state',newj->>'status','');
-  old_version := COALESCE(NULLIF(oldj->>'version','')::BIGINT,
+  old_version := COALESCE(NULLIF(oldj->>'record_revision','')::BIGINT,
+                          NULLIF(oldj->>'version','')::BIGINT,
                           NULLIF(oldj->>'lifecycle_version','')::BIGINT,
                           NULLIF(oldj->>'version_no','')::BIGINT,0);
-  new_version := COALESCE(NULLIF(newj->>'version','')::BIGINT,
+  new_version := COALESCE(NULLIF(newj->>'record_revision','')::BIGINT,
+                          NULLIF(newj->>'version','')::BIGINT,
                           NULLIF(newj->>'lifecycle_version','')::BIGINT,
                           NULLIF(newj->>'version_no','')::BIGINT,0);
   IF TG_OP='INSERT' THEN action:='insert'; op:='assert';
@@ -17736,6 +17739,175 @@ CREATE POLICY memory_embedding_versions_parent ON memory_embedding_versions
  WITH CHECK(EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id));
 
 
+-- BEGIN memory change journal
+-- Durable storage guards for the Go memory owner. No content is copied here.
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1
+  CHECK (record_revision > 0);
+ALTER TABLE memories ADD COLUMN IF NOT EXISTS dependency_revision BIGINT NOT NULL DEFAULT 0
+  CHECK (dependency_revision >= 0);
+CREATE TABLE IF NOT EXISTS memory_collection_owner (
+  id INTEGER PRIMARY KEY CHECK (id=1),
+  owner_id UUID NOT NULL DEFAULT gen_random_uuid()
+);
+INSERT INTO memory_collection_owner(id) VALUES(1) ON CONFLICT(id) DO NOTHING;
+CREATE TABLE IF NOT EXISTS memory_collection_generations (
+  scope_type TEXT NOT NULL, scope_value TEXT NOT NULL,
+  generation BIGINT NOT NULL CHECK (generation > 0),
+  PRIMARY KEY(scope_type,scope_value)
+);
+CREATE TABLE IF NOT EXISTS memory_invalidation_outbox (
+  scope_type TEXT NOT NULL, scope_value TEXT NOT NULL,
+  generation BIGINT NOT NULL CHECK (generation > 0),
+  memory_id BIGINT NOT NULL, record_revision BIGINT NOT NULL CHECK (record_revision > 0),
+  operation TEXT NOT NULL CHECK (operation IN ('insert','update','delete')),
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(scope_type,scope_value,generation)
+);
+ALTER TABLE memory_collection_generations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_collection_scope ON memory_collection_generations;
+CREATE POLICY memory_collection_scope ON memory_collection_generations
+  USING (memory_row_scope_visible(scope_type,scope_value));
+ALTER TABLE memory_invalidation_outbox ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_invalidation_scope ON memory_invalidation_outbox;
+CREATE POLICY memory_invalidation_scope ON memory_invalidation_outbox
+  USING (memory_row_scope_visible(scope_type,scope_value));
+
+CREATE OR REPLACE FUNCTION memory_assign_record_revision() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+BEGIN
+  IF TG_OP='INSERT' THEN
+    NEW.record_revision:=1;
+  ELSE
+    IF NEW.id<>OLD.id THEN RAISE EXCEPTION 'memory identity is immutable'; END IF;
+    IF (to_jsonb(OLD)-ARRAY['record_revision','use_count','last_used_at','updated_at'])
+       IS NOT DISTINCT FROM
+       (to_jsonb(NEW)-ARRAY['record_revision','use_count','last_used_at','updated_at']) THEN
+      NEW.record_revision:=OLD.record_revision;
+    ELSE
+      NEW.record_revision:=OLD.record_revision+1;
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE OR REPLACE FUNCTION memory_capture_record_change() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE old_type TEXT; old_value TEXT; new_type TEXT; new_value TEXT;
+        affected RECORD; position BIGINT; target BIGINT; revision BIGINT;
+BEGIN
+  IF TG_OP='UPDATE' AND NEW.record_revision=OLD.record_revision THEN RETURN NEW; END IF;
+  IF TG_OP<>'INSERT' THEN old_type:=OLD.scope_type; old_value:=OLD.scope_value; END IF;
+  IF TG_OP<>'DELETE' THEN new_type:=NEW.scope_type; new_value:=NEW.scope_value; END IF;
+  target:=CASE WHEN TG_OP='DELETE' THEN OLD.id ELSE NEW.id END;
+  revision:=CASE WHEN TG_OP='DELETE' THEN OLD.record_revision+1 ELSE NEW.record_revision END;
+  -- Scope moves invalidate both collections. Lock in a stable order; unrelated
+  -- collections have separate counters and do not contend on a global row.
+  FOR affected IN SELECT DISTINCT t,v FROM (VALUES(old_type,old_value),(new_type,new_value)) AS scopes(t,v)
+    WHERE t IS NOT NULL ORDER BY t,v
+  LOOP
+    EXECUTE format('INSERT INTO %I.memory_collection_generations(scope_type,scope_value,generation)
+      VALUES($1,$2,1) ON CONFLICT(scope_type,scope_value) DO UPDATE
+      SET generation=memory_collection_generations.generation+1 RETURNING generation',TG_TABLE_SCHEMA)
+      INTO STRICT position USING affected.t,affected.v;
+    EXECUTE format('INSERT INTO %I.memory_invalidation_outbox
+      (scope_type,scope_value,generation,memory_id,record_revision,operation) VALUES($1,$2,$3,$4,$5,$6)',TG_TABLE_SCHEMA)
+      USING affected.t,affected.v,position,target,revision,lower(TG_OP);
+  END LOOP;
+  RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END $$;
+
+-- Generate attribute-specific triggers after all memory columns are installed.
+-- Counter-only reads avoid both content serialization and generation locking.
+DO $memory_change_triggers$
+DECLARE attributes TEXT;
+BEGIN
+  SELECT string_agg(quote_ident(attname),',' ORDER BY attnum) INTO attributes
+    FROM pg_attribute WHERE attrelid='memories'::regclass AND attnum>0 AND NOT attisdropped
+      AND attname NOT IN ('use_count','last_used_at','updated_at');
+  DROP TRIGGER IF EXISTS memory_assign_record_revision ON memories;
+  DROP TRIGGER IF EXISTS memory_capture_record_change ON memories;
+  EXECUTE format('CREATE TRIGGER memory_assign_record_revision BEFORE INSERT OR UPDATE OF %s ON memories
+    FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision()',attributes);
+  EXECUTE format('CREATE TRIGGER memory_capture_record_change AFTER INSERT OR DELETE OR UPDATE OF %s ON memories
+    FOR EACH ROW EXECUTE FUNCTION memory_capture_record_change()',attributes);
+END
+$memory_change_triggers$;
+
+-- Secondary scope tags affect ranking under the primary row's audience. A tag
+-- cannot grant visibility to a hidden parent or expose its identity in another
+-- scope's journal. Tag changes advance the primary row's governed revision.
+ALTER TABLE memory_scopes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_scopes_parent_visible ON memory_scopes;
+CREATE POLICY memory_scopes_parent_visible ON memory_scopes
+  USING (EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id))
+  WITH CHECK (EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id));
+CREATE OR REPLACE FUNCTION memory_capture_scope_change() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+DECLARE target BIGINT; changed TEXT;
+BEGIN
+  -- The parent update invokes the existing audit triggers, whose relations
+  -- live in this same owner schema. Pin their lookup ahead of temporary tables;
+  -- the function's SET scope restores the caller's path on return.
+  PERFORM set_config('search_path',format('pg_catalog,%I,pg_temp',TG_TABLE_SCHEMA),true);
+  changed:=CASE TG_OP
+    WHEN 'INSERT' THEN 'SELECT DISTINCT memory_id FROM new_memory_scope_rows ORDER BY memory_id'
+    WHEN 'DELETE' THEN 'SELECT DISTINCT memory_id FROM old_memory_scope_rows ORDER BY memory_id'
+    ELSE 'SELECT memory_id FROM (SELECT * FROM new_memory_scope_rows EXCEPT SELECT * FROM old_memory_scope_rows) n
+          UNION SELECT memory_id FROM (SELECT * FROM old_memory_scope_rows EXCEPT SELECT * FROM new_memory_scope_rows) o
+          ORDER BY memory_id' END;
+  FOR target IN EXECUTE changed
+  LOOP
+    -- Batch tags by parent: copying many tags must not repeatedly rewrite and
+    -- audit the same parent. Invoker privileges preserve parent RLS. A cascade
+    -- has no parent left to touch; its DELETE event already invalidated it.
+    EXECUTE format('UPDATE %I.memories SET dependency_revision=dependency_revision+1 WHERE id=$1',TG_TABLE_SCHEMA)
+      USING target;
+  END LOOP;
+  RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS memory_capture_scope_insert ON memory_scopes;
+CREATE TRIGGER memory_capture_scope_insert AFTER INSERT ON memory_scopes
+  REFERENCING NEW TABLE AS new_memory_scope_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_scope_change();
+DROP TRIGGER IF EXISTS memory_capture_scope_update ON memory_scopes;
+CREATE TRIGGER memory_capture_scope_update AFTER UPDATE ON memory_scopes
+  REFERENCING OLD TABLE AS old_memory_scope_rows NEW TABLE AS new_memory_scope_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_scope_change();
+DROP TRIGGER IF EXISTS memory_capture_scope_delete ON memory_scopes;
+CREATE TRIGGER memory_capture_scope_delete AFTER DELETE ON memory_scopes
+  REFERENCING OLD TABLE AS old_memory_scope_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_scope_change();
+
+-- Reconcile default grants as well as PUBLIC. Runtime callers can read the
+-- journal through scope RLS, but cannot forge progress or attach owner functions.
+DO $memory_change_acl$
+DECLARE recipient RECORD; target RECORD; role_name TEXT;
+BEGIN
+  FOR recipient IN SELECT DISTINCT acl.grantee,routine.proname FROM pg_proc AS routine,
+    LATERAL aclexplode(COALESCE(routine.proacl,acldefault('f',routine.proowner))) AS acl
+    WHERE routine.oid IN ('memory_assign_record_revision()'::regprocedure,
+                          'memory_capture_record_change()'::regprocedure,
+                          'memory_capture_scope_change()'::regprocedure)
+      AND acl.grantee<>routine.proowner
+  LOOP
+    role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+    EXECUTE format('REVOKE ALL ON FUNCTION %I() FROM %s',recipient.proname,role_name);
+  END LOOP;
+  FOR target IN SELECT oid,relname,relowner FROM pg_class WHERE oid IN
+    ('memory_collection_owner'::regclass,'memory_collection_generations'::regclass,'memory_invalidation_outbox'::regclass)
+  LOOP
+    FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class AS relation,
+      LATERAL aclexplode(relation.relacl) AS acl
+      WHERE relation.oid=target.oid AND acl.grantee<>target.relowner
+    LOOP
+      role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+      EXECUTE format('REVOKE ALL ON TABLE %I FROM %s',target.relname,role_name);
+      IF recipient.grantee<>0 THEN EXECUTE format('GRANT SELECT ON TABLE %I TO %s',target.relname,role_name); END IF;
+    END LOOP;
+  END LOOP;
+END
+$memory_change_acl$;
+-- END memory change journal
+
 -- The embedded Go store has a separate, non-owner runtime role. The KB owner
 -- creates these objects, so the Go migrator's default privileges do not cover
 -- them. Grant only the memory domain's relations, never the Vault/control or
@@ -17808,6 +17980,7 @@ BEGIN
   GRANT SELECT(outcome_id) ON work_outcomes TO aimee_store_runtime;
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id,last_accessed_at) ON artifacts TO aimee_store_runtime;
+  GRANT SELECT ON memory_collection_owner, memory_collection_generations, memory_invalidation_outbox TO aimee_store_runtime;
   GRANT SELECT ON bandit_promotions, tasks, fact_evidence, docs, evidence_lifecycle_settings,
     memory_active_embedder, kb_embeddings, kb_documents,
     document_versions, derivation_policy_versions TO aimee_store_runtime;
@@ -17838,5 +18011,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '21')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '22')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

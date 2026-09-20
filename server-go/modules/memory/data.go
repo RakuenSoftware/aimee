@@ -1818,11 +1818,18 @@ set_config('aimee.correlation_id',$9,true)`,
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		backend, ok := options.data.(*postgresDataStore)
-		if !ok || options.placement != PlacementServer {
+		if !ok {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
 		var page MemoryChangePage
-		page, err = backend.personalChanges(ctx, *request.Changes)
+		if options.placement == PlacementKB {
+			if request.IncludeAll {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			page, err = backend.sharedChanges(ctx, scope, *request.Changes)
+		} else {
+			page, err = backend.personalChanges(ctx, *request.Changes)
+		}
 		response.Changes = &page
 	case "get":
 		if request.ID <= 0 {
