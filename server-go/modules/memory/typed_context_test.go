@@ -121,6 +121,52 @@ func TestTypedProjectionExactByteLimits(t *testing.T) {
 	}
 }
 
+// Compare every channel combination against the independent standard-library
+// object/array encoder, including reviewed procedures outside the data object.
+func TestTypedProjectionCachedEncodingMatchesCanonicalChannels(t *testing.T) {
+	for mask := 0; mask < 1<<len(typedChannelOrder); mask++ {
+		for _, limit := range []int{0, 200, 500, 2000} {
+			cfg := typedTestOptions(t, `{}`)
+			cfg.ContextLimits = &ContextLimits{SchemaVersion: 1, MaxContextBytes: &limit}
+			for _, name := range typedChannelOrder {
+				cfg.Flags[name] = true
+			}
+			r := newTypedContext(DataRequest{TypedContext: cfg})
+			for i, name := range typedChannelOrder {
+				if mask&(1<<i) == 0 {
+					continue
+				}
+				for j := 0; j < 3; j++ {
+					r.add(name, typedItem{id: fmt.Sprintf("%s:%d", name, j), value: map[string]any{
+						"text": "<untrusted> 界 \"quoted\"\n", "index": j,
+					}})
+				}
+			}
+			if err := r.finish(); err != nil {
+				t.Fatalf("channels=%d limit=%d: %v", mask, limit, err)
+			}
+			projection := map[string][]any{}
+			count := 0
+			for _, name := range typedChannelOrder {
+				rows := r.Channels[name].Items
+				count += len(rows)
+				if name != "approved_procedures" && len(rows) > 0 {
+					projection[name] = rows
+				}
+			}
+			data, _ := json.Marshal(projection)
+			procedures, _ := json.Marshal(r.Channels["approved_procedures"].Items)
+			expected := `<memory_data trust="untrusted" authorization="none">` + string(data) + "</memory_data>\n" + `<approved_procedures authority="reviewed" authorization="none">` + string(procedures) + `</approved_procedures>`
+			if len(expected) > limit && count == 0 {
+				expected = ""
+			}
+			if r.Rendered != expected || len(r.Rendered) > limit || count != len(r.Retained) {
+				t.Fatalf("channels=%d limit=%d: canonical projection or retained identities differ", mask, limit)
+			}
+		}
+	}
+}
+
 func TestTypedContextRefusesUnsupportedLimitsBeforeRetrieval(t *testing.T) {
 	h := NewHandler(nil, WithDataStore(PlacementKB, nil))
 	for _, tc := range []struct{ raw, kind string }{

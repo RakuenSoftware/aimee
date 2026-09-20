@@ -1,0 +1,9 @@
+goos: linux
+goarch: amd64
+pkg: github.com/JBailes/aimee/server-go/modules/memory
+cpu: Intel(R) Core(TM) i7-14700K
+BenchmarkTypedProjectionRepacking-8   	    6652	     93315 ns/op	  166122 B/op	    1470 allocs/op
+BenchmarkTypedProjectionRepacking-8   	    6382	     93227 ns/op	  166130 B/op	    1470 allocs/op
+BenchmarkTypedProjectionRepacking-8   	    6168	     90211 ns/op	  166127 B/op	    1470 allocs/op
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	2.277s
