@@ -32,11 +32,46 @@ def strings(value):
             yield from strings(child)
 
 
+def admission_idle_cpu():
+    """Measure the owned economizer process while this fixture sends no work."""
+    matches = []
+    for process in Path('/proc').iterdir():
+        if not process.name.isdigit():
+            continue
+        try:
+            if (process / 'exe').resolve(strict=True).name == 'aimee-module-economizer':
+                matches.append(process)
+        except OSError:
+            continue
+    if len(matches) != 1:
+        raise RuntimeError('idle admission measurement needs exactly one economizer process')
+    process = matches[0]
+
+    def sample():
+        # Fields after comm begin with state (field 3); CPU is fields 14/15.
+        fields = (process / 'stat').read_text().rpartition(')')[2].split()
+        return int(fields[19]), int(fields[11]) + int(fields[12])
+
+    identity, before = sample()
+    start = time.perf_counter()
+    time.sleep(10)
+    elapsed = time.perf_counter() - start
+    after_identity, after = sample()
+    if identity != after_identity or after < before:
+        raise RuntimeError('economizer restarted during idle CPU measurement')
+    ticks = os.sysconf('SC_CLK_TCK')
+    cpu_seconds = (after - before) / ticks
+    return dict(module='economizer', source='Linux proc stat process user+system ticks',
+                elapsed_seconds=elapsed, cpu_seconds=cpu_seconds,
+                one_core_percent=100 * cpu_seconds / elapsed, clock_ticks_per_second=ticks)
+
+
 def inside(output, budget_benchmark=False):
     if os.environ.get('AIMEE_MEMORY_PROVIDER_BOUNDARY_FIXTURE') != '1':
         raise RuntimeError('requires the disposable-container launcher')
     captures, checks, accounting = [], [], []
     timings = []
+    idle_cpu = None
     responses_ids = {}
     lock = threading.Lock()
 
@@ -269,6 +304,8 @@ def inside(output, budget_benchmark=False):
                   calls[0].get('name') == tool['name'] and calls[0].get('call_id') == 'memory-boundary-call')
             check(name + ' preserves returned call arguments',
                   json.loads(calls[0].get('arguments', 'null')) == dict(record_id='synthetic'))
+        if budget_benchmark:
+            idle_cpu = admission_idle_cpu()
     finally:
         try:
             if memory_id is not None:
@@ -282,7 +319,7 @@ def inside(output, budget_benchmark=False):
             provider.shutdown()
             provider.server_close()
             Path(output).write_text(json.dumps(dict(checks=checks, accounting=accounting,
-                **(dict(timings=timings) if budget_benchmark else {})), indent=2) + '\n')
+                **(dict(timings=timings, idle_cpu=idle_cpu) if budget_benchmark else {})), indent=2) + '\n')
     return 0
 
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
@@ -52,6 +53,13 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 			config.PrincipalRef != test.principal || len(config.Stages) != len(test.events) ||
 			config.Handler == nil {
 			t.Fatalf("%s config = %#v, ok=%v", test.name, config, ok)
+		}
+		wantIdle := time.Duration(0)
+		if test.name == "economizer" {
+			wantIdle = time.Millisecond
+		}
+		if config.MaxIdlePollInterval != wantIdle {
+			t.Fatalf("%s idle poll ceiling = %v, want %v", test.name, config.MaxIdlePollInterval, wantIdle)
 		}
 		// The stage id is derived from the event kind rather than the position:
 		// a module may declare a non-contiguous set when one of its stages is

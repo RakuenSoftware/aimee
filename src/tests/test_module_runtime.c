@@ -33,6 +33,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <limits.h>
+#include <openssl/sha.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sys/prctl.h>
@@ -302,7 +303,10 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       served[2] = AIMEE_ECONOMIZER_EVENT_TOOL_RECALL;
       served[3] = AIMEE_ECONOMIZER_EVENT_TOOL_STATS;
       served[4] = AIMEE_ECONOMIZER_EVENT_RECORD_BUILD;
-      *serve_count = 5;
+      served[5] = AIMEE_ECONOMIZER_EVENT_POST_STATUS;
+      served[6] = AIMEE_ECONOMIZER_EVENT_STATS;
+      served[7] = AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET;
+      *serve_count = 8;
       return 0;
    }
    /* These four were missing, and the omission was invisible because the only
@@ -707,6 +711,29 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(strstr((const char *)response, "src/server/session_compact.c") != NULL);
       assert(strstr((const char *)response, "decisions_made") != NULL);
       assert(strstr((const char *)response, "[done] changed") != NULL);
+
+      /* Real C host and shipped Go handler: preserve the metadata commitment
+       * and distinguish exact-fit admission from one-byte overflow. */
+      const char limits[] = "{\"schema_version\":1,\"max_request_bytes\":3}";
+      uint8_t budget[256] = {'B', 'D', 'G', 'T', 1, 0, 1, 0};
+      budget[48] = sizeof(limits) - 1;
+      memcpy(budget + 52, limits, sizeof(limits) - 1);
+      assert(SHA256((const unsigned char *)"abc", 3, budget + 16));
+      for (unsigned size = 3; size <= 4; size++)
+      {
+         budget[8] = size;
+         uint8_t commitment[SHA256_DIGEST_LENGTH];
+         assert(SHA256(budget, 52 + sizeof(limits) - 1, commitment));
+         assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET,
+                                         AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET, 2024 + size, 0,
+                                         budget, 52 + sizeof(limits) - 1, response,
+                                         sizeof(response), &response_len, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+         assert(response_len == 44 && memcmp(response, "BDGT\1\0", 6) == 0);
+         assert(response[6] == (size == 3 ? 0 : 2) && response[7] == 0);
+         assert(response[8] == 32 && response[9] == 0 && response[10] == 0 && response[11] == 0);
+         assert(memcmp(response + 12, commitment, sizeof(commitment)) == 0);
+      }
    }
    else if (strcmp(name, "postgres") == 0)
    {
