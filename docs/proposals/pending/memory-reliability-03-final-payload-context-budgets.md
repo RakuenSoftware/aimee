@@ -42,6 +42,21 @@ schemas at the actual HTTP provider boundary. This validates preservation and
 exact request byte accounting in the fixture; production hard caps and tokenizer
 integration remain required.
 
+Responses decoding now defers memory and guidance stages until final provider
+assembly. Previously both the intermediate conversion and final builder ran them,
+duplicating lookup and standing guidance while contaminating the second recall
+query with persona text. Native regressions verify one context/tool-plan call and
+the pristine query across OpenAI, Anthropic and Responses providers; final-wire
+[fresh final-wire coverage](../../validation/memory-provider-stage-once-2026-09-20.md)
+additionally checks buffered and streaming Responses guidance counts. Go uses
+host insertion facts to reuse persona-provided guidance without trusting
+lookalike caller text.
+
+[Token-evidence binding](../../validation/memory-token-evidence-2026-09-20.md)
+now requires a request digest in the existing Go economizer planners. Equal-length
+content edits cannot reuse old token evidence. This closes a prerequisite for
+provider-bound accounting without claiming a production tokenizer exists.
+
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
 Use a single model-facing projection and verify the final request budget after every provider-affecting transformation. Keep explanation metadata outside the prompt unless a small field is explicitly useful to the model.
