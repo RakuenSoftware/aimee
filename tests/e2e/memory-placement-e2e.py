@@ -332,6 +332,67 @@ class Gate:
         if lock.returncode:
             raise RuntimeError('database contention fixture failed')
 
+    def personal_versions(self):
+        key = self.prefix + '-history'
+        created = self.good('personal history fixture', self.call('store',
+            dict(key=key, content='private original revision')))
+        mid = created['id']
+        observed = self.good('personal HTTP versioned get', self.call('get',
+            dict(id=mid, include_version=True)))['memory']
+        version = observed['version']
+        self.check('personal version uses owner and exact decimal identifiers',
+            version['schema_version'] == 1 and version['record_id'] == str(mid) and
+            version['record_revision'] == '1' and len(version['owner_id']) == 36)
+        self.good('personal same-key correction', self.call('store',
+            dict(key=key, content='private second revision')))
+        history = self.good('personal explicit historical get', self.call('get',
+            dict(id=mid, at_version=version)))['memory']
+        self.check('same-key correction retains labelled original revision',
+            history['content'] == 'private original revision' and history.get('historical') is True and
+            history.get('version') == version)
+        code, stale = self.call('supersede', dict(old_id=mid, new_content='stale edit', expected_version=version))
+        self.check('personal HTTP correction rejects stale version', code == 409 and
+            stale.get('reason') == 'expected_version_conflict')
+        current = self.mcp_document('personal MCP versioned get', 'memory_get',
+            dict(id=str(mid), include_version=True))['memory']
+        correction = dict(verb='update', id=str(mid), content='private third revision',
+            expected_version=current['version'])
+        changed = self.mcp_document('personal MCP versioned correction', 'mutate', correction)
+        self.check('personal MCP correction returns committed revision', changed.get('status') == 'ok' and
+            changed.get('records', [{}])[0].get('version', {}).get('record_revision') == '3')
+        stale = self.mcp_document('personal MCP stale retry', 'mutate', correction)
+        self.check('personal MCP rejects stale correction retry', stale.get('reason') == 'expected_version_conflict')
+        historical = self.mcp_document('personal MCP historical get', 'memory_get',
+            dict(id=str(mid), at_version=current['version']))['memory']
+        self.check('MCP history preserves exact second revision', historical['content'] == 'private second revision' and
+            historical.get('historical') is True and historical.get('version') == current['version'])
+        wrong = dict(version, owner_id='00000000-0000-0000-0000-000000000001')
+        code, unavailable = self.call('get', dict(id=mid, at_version=wrong))
+        self.check('personal history rejects another owner', code == 404 and unavailable.get('kind') == 'not_found')
+        self.check('private runtime cannot rewrite retained history', self.personal_sql(
+            "SELECT (NOT has_table_privilege('aimee_store_runtime','user_memory_versions','INSERT') "
+            "AND NOT has_table_privilege('aimee_store_runtime','user_memory_versions','UPDATE') "
+            "AND NOT has_table_privilege('aimee_store_runtime','user_memory_versions','DELETE'))::text") == 'true')
+        self.docker('restart', self.args.server)
+        current = self.good('personal versions survive restart', self.wait('get', dict(id=mid, include_version=True)))['memory']
+        history = self.good('retained private history survives restart', self.call('get', dict(id=mid, at_version=version)))['memory']
+        self.check('restart retains current and original private versions', current['content'] == 'private third revision' and
+            current['version']['record_revision'] == '3' and history['content'] == 'private original revision')
+        before = self.personal_changes(mid)
+        self.personal_sql(f'ALTER TABLE user_memory_versions ADD CONSTRAINT e2e_history_failure CHECK(memory_id<>{int(mid)}) NOT VALID')
+        try:
+            code, failure = self.call('supersede', dict(old_id=mid, new_content='failed history edit', expected_version=current['version']))
+            self.check('history persistence failure refuses correction', code >= 500 and failure.get('status') == 'error')
+        finally:
+            self.personal_sql('ALTER TABLE user_memory_versions DROP CONSTRAINT e2e_history_failure')
+        got = self.good('personal version after history failure', self.call('get', dict(id=mid, include_version=True)))['memory']
+        self.check('history failure rolls back content version and invalidation', got == current and self.personal_changes(mid) == before)
+        self.personal_sql(f'DELETE FROM user_memories WHERE id={int(mid)}')
+        self.check('parent erasure removes private history payloads', self.personal_sql(
+            f'SELECT count(*) FROM user_memory_versions WHERE memory_id={int(mid)}') == '0')
+        code, erased = self.call('get', dict(id=mid, at_version=version))
+        self.check('erased private revision cannot be retrieved', code == 404 and erased.get('kind') == 'not_found')
+
     def run_local(self):
         """First-boot regression on a composition containing only Server and its store."""
         content = 'Personal local-only fixture person@local.invalid 🦊'
@@ -396,6 +457,7 @@ class Gate:
             r.get('memory_id') != mid and r.get('handle') != 'user:memory:' + str(mid)
             for r in bundle.get('recall', {}).get('active_context', [])))
         self.confidence_contract(('user',))
+        self.personal_versions()
         return all(c['passed'] for c in self.checks)
 
     def run(self):

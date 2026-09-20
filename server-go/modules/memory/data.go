@@ -37,6 +37,7 @@ type DataRequest struct {
 
 	IncludeVersion  bool                 `json:"include_version,omitempty"`
 	ExpectedVersion *MemoryRecordVersion `json:"expected_version,omitempty"`
+	AtVersion       *MemoryRecordVersion `json:"at_version,omitempty"`
 
 	Changes        *MemoryChangesRequest `json:"changes,omitempty"`
 	ReadPolicy     *MemoryReadPolicy     `json:"read_policy,omitempty"`
@@ -157,7 +158,8 @@ type DataRequest struct {
 }
 
 type Record struct {
-	Version *MemoryRecordVersion `json:"version,omitempty"`
+	Version    *MemoryRecordVersion `json:"version,omitempty"`
+	Historical bool                 `json:"historical,omitempty"`
 
 	retrievalScore  float64
 	retrievalBase   float64
@@ -509,11 +511,18 @@ func (s *postgresDataStore) getAtVersioned(ctx context.Context, scope Scope, id 
 	var r Record
 	if s.placement == PlacementServer {
 		r.Scope = scope
-		err := s.db.QueryRow(ctx, `SELECT id, tier, kind, key, content, confidence
+		columns := "id,tier,kind,key,content,confidence"
+		destinations := []any{&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence}
+		if includeVersion {
+			r.Version = &MemoryRecordVersion{SchemaVersion: 1, RecordID: strconv.FormatInt(id, 10)}
+			columns += ",(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),record_revision::text"
+			destinations = append(destinations, &r.Version.OwnerID, &r.Version.RecordRevision)
+		}
+		err := s.db.QueryRow(ctx, `SELECT `+columns+`
 FROM user_memories
 WHERE id = $1 AND lifecycle_state = 'active'
   AND (valid_until IS NULL OR valid_until > now())`, id).
-			Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
+			Scan(destinations...)
 		if store.IsNoRows(err) {
 			return Record{}, ErrMemoryNotFound
 		}
@@ -604,8 +613,8 @@ func (s *postgresDataStore) Supersede(ctx context.Context, scope Scope, id int64
 		return Record{}, screenErr
 	}
 	if s.placement == PlacementServer {
-		// Personal memory has one row per (kind,key). Replace atomically: a
-		// failed write must not retire the only copy or touch the KB namespace.
+		// The history trigger retains the previous revision in this same
+		// statement's transaction. Private identity stays stable across edits.
 		r := Record{Scope: scope}
 		err := s.db.QueryRow(ctx, `UPDATE user_memories
 SET content=$2, confidence=$3, updated_at=now()
@@ -988,10 +997,14 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if request.Changes != nil && request.Operation != "change-feed" {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if request.IncludeVersion && (options.placement != PlacementKB || request.Operation != "get") {
+	if request.IncludeVersion && request.Operation != "get" {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if request.ExpectedVersion != nil && (options.placement != PlacementKB || !versionedCorrectionOperation(request.Operation) || !request.ExpectedVersion.validFor(request.ID)) {
+	if request.AtVersion != nil && (options.placement != PlacementServer || request.Operation != "get" || !request.AtVersion.validFor(request.ID) || request.ReadPolicy != nil || request.AsOf != "") {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	versionedCorrection := (options.placement == PlacementKB && versionedCorrectionOperation(request.Operation)) || (options.placement == PlacementServer && request.Operation == "supersede")
+	if request.ExpectedVersion != nil && (!versionedCorrection || !request.ExpectedVersion.validFor(request.ID)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if request.IdempotencyKey != "" && (options.placement != PlacementKB || !versionedCorrectionOperation(request.Operation) || request.ExpectedVersion == nil || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
@@ -1927,7 +1940,13 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 		var record Record
 		var getErr error
-		if request.AsOf != "" || (request.ReadPolicy != nil && request.ReadPolicy.Mode == "historical") {
+		if request.AtVersion != nil {
+			backend, ok := options.data.(*postgresDataStore)
+			if !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			record, getErr = backend.personalVersion(ctx, scope, *request.AtVersion)
+		} else if request.AsOf != "" || (request.ReadPolicy != nil && request.ReadPolicy.Mode == "historical") {
 			if options.placement != PlacementKB {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
@@ -2073,6 +2092,8 @@ set_config('aimee.correlation_id',$9,true)`,
 					err = backend.captureStoredFactActor(ctx, record.ID, authority, options.commandContext)
 				}
 			}
+		} else if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementServer && request.ExpectedVersion != nil {
+			record, err = backend.correctPersonalVersion(ctx, scope, request.ID, request.Content, *request.Confidence, *request.ExpectedVersion)
 		} else {
 			record, err = advanced.Supersede(ctx, scope, request.ID, request.Content, *request.Confidence)
 		}

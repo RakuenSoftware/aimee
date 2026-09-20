@@ -133,6 +133,7 @@ DB1_ONLY_TABLES = {
     "user_memories",
     "user_memory_collection_generation",
     "user_memory_invalidation_outbox",
+    "user_memory_versions",
     "session_state_ap_hits",
     "session_state_file_hashes",
     "session_state_read_paths",

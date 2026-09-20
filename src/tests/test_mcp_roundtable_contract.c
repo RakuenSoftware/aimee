@@ -121,6 +121,9 @@ int main(void)
    assert(props != NULL);
    assert(cJSON_GetObjectItemCaseSensitive(props, "as_of") != NULL);
    assert(cJSON_GetObjectItemCaseSensitive(props, "include_version") != NULL);
+   const cJSON *at_version = cJSON_GetObjectItemCaseSensitive(props, "at_version");
+   assert(at_version != NULL);
+   assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(at_version, "required")) == 4);
    assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(
               cJSON_GetObjectItemCaseSensitive(props, "id"), "oneOf")) == 2);
    assert(cJSON_GetObjectItemCaseSensitive(props, "id") != NULL);     /* additive */

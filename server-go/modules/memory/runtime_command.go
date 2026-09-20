@@ -15,6 +15,16 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	operation := args.stringOr("operation", "")
+	for _, field := range []string{"at_version", "include_version", "expected_version"} {
+		_, exists := args[field]
+		allowed := operation == "user-get" && field != "expected_version"
+		if field == "expected_version" {
+			allowed = operation == "user-supersede" || operation == "user-mcp-supersede"
+		}
+		if exists && !allowed {
+			return runtimeJSONText(commandResult(commandError("unsupported_mode", field+" is unsupported for this operation")))
+		}
+	}
 	if _, exists := args["read_policy"]; exists && operation != "user-get" {
 		return runtimeJSONText(commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get")))
 	}

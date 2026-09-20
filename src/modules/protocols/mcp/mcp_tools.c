@@ -268,7 +268,18 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(version, "type", "boolean");
       cJSON_AddStringToObject(
           version, "description",
-          "For store=kb, include the owner/record/revision precondition for update or supersede.");
+          "Include the owner/record/revision precondition for corrections in the selected store.");
+      cJSON_AddItemToObject(
+          p, "at_version",
+          cJSON_Parse(
+              "{\"type\":\"object\",\"additionalProperties\":false,"
+              "\"description\":\"For store=user, inspect an exact retained revision. "
+              "Historical content is labelled and still requires a permitted parent.\","
+              "\"properties\":{\"schema_version\":{\"type\":\"integer\",\"const\":1},"
+              "\"owner_id\":{\"type\":\"string\",\"format\":\"uuid\"},"
+              "\"record_id\":{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"},"
+              "\"record_revision\":{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"}},"
+              "\"required\":[\"schema_version\",\"owner_id\",\"record_id\",\"record_revision\"]}"));
       cJSON *h = cJSON_AddObjectToObject(p, "handle");
       cJSON_AddStringToObject(h, "type", "string");
       cJSON_AddStringToObject(h, "description", "Handle emitted in previews, e.g. memory:123");
@@ -1966,7 +1977,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                "\"confidence\":{\"type\":\"number\","
                "\"description\":\"Confidence 0.0-1.0 (store/supersede, default 1.0)\"},"
                "\"expected_version\":{\"type\":\"object\","
-               "\"description\":\"Exact version from memory_get for KB update/supersede.\","
+               "\"description\":\"Exact version from memory_get for update/supersede.\","
                "\"additionalProperties\":false,\"properties\":{"
                "\"schema_version\":{\"type\":\"integer\",\"const\":1},"
                "\"owner_id\":{\"type\":\"string\",\"format\":\"uuid\"},"

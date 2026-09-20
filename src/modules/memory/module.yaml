@@ -163,7 +163,8 @@
     "server-go/modules/memory/version_contract.go",
     "server-go/modules/memory/mutation_retry.go",
     "server-go/modules/memory/correction_proposals.go",
-    "server-go/modules/memory/public_correction_proposals.go"
+    "server-go/modules/memory/public_correction_proposals.go",
+    "server-go/modules/memory/personal_versions.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -289,7 +290,8 @@
     "server-go/modules/memory/shared_change_journal_test.go",
     "server-go/modules/memory/version_contract_test.go",
     "server-go/modules/memory/mutation_retry_test.go",
-    "server-go/modules/memory/correction_proposals_test.go"
+    "server-go/modules/memory/correction_proposals_test.go",
+    "server-go/modules/memory/personal_versions_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

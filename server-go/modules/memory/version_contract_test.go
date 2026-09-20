@@ -39,8 +39,21 @@ func TestExpectedVersionValidation(t *testing.T) {
 		}
 	}
 	personal := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementServer, nil)))
-	if r := runPublicCommand(t, personal, "get", `{"id":1,"include_version":true}`); r["kind"] != "unsupported_mode" {
+	if r := runPublicCommand(t, personal, "delete", `{"id":1,"include_version":true}`); r["kind"] != "unsupported_mode" {
 		t.Fatal(r)
+	}
+	for _, version := range []string{"null", `{}`, strings.Replace(valid, `"record_id":"9007199254740993"`, `"record_id":"1"`, 1)} {
+		if r := runPublicCommand(t, personal, "get", `{"id":"9007199254740993","at_version":`+version+`}`); r["kind"] != "invalid_argument" {
+			t.Fatal("personal history accepted malformed version", version, r)
+		}
+	}
+	for _, args := range []string{`{"id":"9007199254740993","include_version":null}`, `{"id":"9007199254740993","at_version":` + valid + `,"read_policy":{"schema_version":1,"mode":"current"}}`} {
+		if r := runPublicCommand(t, personal, "get", args); r["kind"] != "invalid_argument" {
+			t.Fatal("ambiguous personal version request", r)
+		}
+	}
+	if r := runPublicCommand(t, client, "get", `{"id":"9007199254740993","at_version":`+valid+`}`); r["kind"] != "unsupported_mode" {
+		t.Fatal("KB silently ignored private version", r)
 	}
 	for _, args := range []string{`{"id":1,"include_version":true,"view":"session"}`, `{"id":1,"include_version":true,"view":"console","format":"text"}`} {
 		if r := runPublicCommand(t, client, "get", args); r["kind"] != "unsupported_mode" {

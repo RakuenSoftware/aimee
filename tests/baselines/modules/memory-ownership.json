@@ -2030,7 +2030,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "71900b279230ba158518d394425f4c59ccb23d6c4c580496030f7ef3947bd998"
+      "sha256": "f78f32ff52d14c31bea3e33b5e592920917443bf6a15c2da1be56218115b907e"
     },
     "src/modules/protocols/mcp/mcp_tools_extended.c": {
       "disposition": "protocol-catalog",
@@ -2181,7 +2181,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "04484638543c91f53139a27aa01de8d2299fdfa48aa0fd53d59311a39c484d76"
+      "sha256": "c57f3cc824bc332c639068d83d3bb6aebd5b562da54f5bc87a1c41a85bc0a134"
     },
     "src/server/server_memory_benchmark.c": {
       "disposition": "host-transport",
@@ -2406,7 +2406,7 @@
       "symbols": [
         "memory_get"
       ],
-      "sha256": "f6c7c0af22f2acc5ee5ba199da88adcd9637e3b8a6c9024d0c9837356748ebb4"
+      "sha256": "d5701cf5caf3b4f058d0d3a3ec06078ebbc5d28bfc314698640e00c17a380986"
     },
     "src/tests/test_memory_advanced.c": {
       "disposition": "legacy-fixture",

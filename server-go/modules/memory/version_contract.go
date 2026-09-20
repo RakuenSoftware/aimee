@@ -51,7 +51,11 @@ func (v *MemoryRecordVersion) validFor(id int64) bool {
 var errMutationVersionConflict = errors.New("memory: expected version is no longer current; read the current record before correcting it")
 
 func commandExpectedVersion(args commandArgs, id int64) (*MemoryRecordVersion, bool) {
-	raw, exists := args["expected_version"]
+	return commandRecordVersion(args, "expected_version", id)
+}
+
+func commandRecordVersion(args commandArgs, name string, id int64) (*MemoryRecordVersion, bool) {
+	raw, exists := args[name]
 	if !exists {
 		return nil, true
 	}

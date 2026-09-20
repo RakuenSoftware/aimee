@@ -111,11 +111,15 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if _, exists := args["idempotency_key"]; exists && ((verb != "supersede" && verb != "update") || options.placement != PlacementKB) {
 		return commandResult(commandError("unsupported_mode", "idempotency_key is supported only for shared memory update and supersede"))
 	}
-	if _, exists := args["expected_version"]; exists && ((verb != "supersede" && verb != "update" && verb != "review_correction") || options.placement != PlacementKB) {
-		return commandResult(commandError("unsupported_mode", "expected_version is supported only for shared memory update, supersede and correction review"))
+	versionedCorrection := (options.placement == PlacementKB && (verb == "supersede" || verb == "update" || verb == "review_correction")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "runtime"))
+	if _, exists := args["expected_version"]; exists && !versionedCorrection {
+		return commandResult(commandError("unsupported_mode", "expected_version is supported for supersede, shared update and correction review"))
 	}
-	if _, exists := args["include_version"]; exists && (verb != "get" || options.placement != PlacementKB) {
-		return commandResult(commandError("unsupported_mode", "include_version is supported only for shared exact-ID get"))
+	if _, exists := args["include_version"]; exists && verb != "get" && !(verb == "runtime" && options.placement == PlacementServer) {
+		return commandResult(commandError("unsupported_mode", "include_version is supported only for exact-ID get"))
+	}
+	if _, exists := args["at_version"]; exists && (options.placement != PlacementServer || (verb != "get" && verb != "runtime")) {
+		return commandResult(commandError("unsupported_mode", "at_version is supported only for personal exact-ID get"))
 	}
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
@@ -171,6 +175,9 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		return invalid("local memory commands require store=user")
 	}
 	request := DataRequest{Operation: verb, Scope: Scope{Type: ScopeUser}}
+	if _, exists := args["idempotency_key"]; exists {
+		return commandResult(commandError("unsupported_mode", "personal idempotency keys are not yet supported"))
+	}
 	confidence := 1.0
 	switch verb {
 	case "get", "delete":
@@ -184,6 +191,15 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("memory." + verb + " requires a positive integer id")
+		}
+		if verb == "get" {
+			if raw, exists := args["include_version"]; exists && (string(raw) == "null" || json.Unmarshal(raw, &request.IncludeVersion) != nil) {
+				return invalid("include_version must be boolean")
+			}
+			request.AtVersion, ok = commandRecordVersion(args, "at_version", request.ID)
+			if !ok || (request.AtVersion != nil && request.ReadPolicy != nil) {
+				return invalid("at_version requires a valid record version and cannot be combined with read_policy")
+			}
 		}
 		if _, exists := args["as_of"]; verb == "get" && exists {
 			return invalid("historical reads require store=kb")
@@ -213,6 +229,10 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			request.ID, ok = args.decimalID("old_id")
 			if !ok {
 				return invalid("memory.supersede requires a positive integer old_id")
+			}
+			request.ExpectedVersion, ok = commandExpectedVersion(args, request.ID)
+			if !ok {
+				return invalid("invalid expected_version")
 			}
 			request.Content = args.stringOr("new_content", "")
 			if request.Content == "" {
@@ -264,6 +284,9 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 	}
 	if response.Read != nil && response.Read.ErrorCode != "" {
 		return commandResult(commandError(response.Read.ErrorCode, response.Read.Message))
+	}
+	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
+		return commandResult(refusal)
 	}
 	result := map[string]any{"status": "ok", "store": "user"}
 	switch verb {
