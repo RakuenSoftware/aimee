@@ -74,6 +74,10 @@ int main(void)
 {
    server_error_kind_register_http_status_provider(runtime_web_provider);
    expect_status(SERVER_ERR_INVALID_ARGUMENT, 400);
+   expect_status("unsupported_mode", 400);
+   expect_status("unsupported_version", 400);
+   expect_status("conflict", 409);
+   expect_status("review_required", 409);
    expect_status(SERVER_ERR_NOT_FOUND, 404);
    expect_status(SERVER_ERR_PERMISSION_DENIED, 403);
    expect_status(SERVER_ERR_UNAVAILABLE, 503);

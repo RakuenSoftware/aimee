@@ -32,6 +32,42 @@ This image predates the expected-version correction contract and the subsequent
 generated-column trigger fix. Those changes require their own tested-revision
 receipt; this run does not validate them.
 
+## Expected-version correction validation
+
+Implementation `1b4ffee6975a61e5924bf2dc65baee137a018a32` adds opt-in shared
+get/supersede preconditions, bound to owner UUID, exact record ID and governed
+revision. Restricted-role replay covers changed owners, changed scope tags,
+hidden IDs, counter-only updates, authority refusal, admitted correction and
+replayed stale correction. A committed two-connection test observes the losing
+writer blocked on the actual row lock; after the winner commits, the loser gets
+an expected-version conflict and creates no second replacement.
+
+This test exposed a generated-column trigger defect: generated search outputs
+could trigger and differ in BEFORE rows even for counter-only updates. Schema 23
+excludes generated outputs from trigger targets and comparison, retaining their
+canonical inputs. The shared journal fixture now includes generated columns and
+another BEFORE trigger. It verifies unchanged content and counters emit no event.
+The separate concurrency regression holds one record's counter update open while
+another record in the same collection commits; collection generation is unchanged.
+Governed same-collection writes still serialize in commit order.
+
+The full memory race suite with PostgreSQL fixtures and restricted-role replay
+passes (55.049 seconds). The native HTTP adapter test, schema synchronization and
+memory ownership checks pass; the C bus remains C. Follow-up `f0938f7106` preserves
+the token in JSON console inspection and explicitly refuses projections that
+cannot return it. Its targeted contract test passes. `156fcb7f0b` keeps benchmark
+unknown-coverage outcomes separate; 32 schema tests and the existing 12 temporal
+fixture checks pass. These fixture checks do not certify complete MR-05/MR-18.
+
+The fresh `1b4ffee697` image correctly refused stale corrections, but its HTTP
+checks caught another transport defect: the Go fault classifier emitted 409 while
+the native status decoder's whitelist rejected 409, causing a generic 502. The
+runtime-web wire contract now admits 409; the native alternative classifier and
+process smoke tests also cover conflict/review-required and unsupported-mode
+parity. This changes HTTP transport classification, not memory policy or C bus
+implementation. A fresh image must validate this correction before HTTP status
+parity is claimed.
+
 ## Local correctness and performance scope
 
 Restricted-role replay exercises the shipping schema, RLS, transactional scope

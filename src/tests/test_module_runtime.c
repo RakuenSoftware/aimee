@@ -578,14 +578,20 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    }
    else if (strcmp(name, "runtime-web") == 0)
    {
-      uint32_t status = 0;
-      assert(aimee_runtime_web_request_encode("permission_denied", request, sizeof(request)) == 0);
-      request_len = AIMEE_RUNTIME_WEB_REQUEST_LEN;
-      assert(aimee_module_client_call(client, kind, AIMEE_RUNTIME_WEB_STAGE_CLASSIFY, 2013, 0,
-                                      request, request_len, response, sizeof(response),
-                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
-      assert(aimee_runtime_web_response_decode(response, response_len, &status) == 0);
-      assert(status == 403u);
+      const char *kinds[] = {"permission_denied", "conflict", "review_required",
+                             "unsupported_mode"};
+      const uint32_t statuses[] = {403u, 409u, 409u, 400u};
+      for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++)
+      {
+         uint32_t status = 0;
+         assert(aimee_runtime_web_request_encode(kinds[i], request, sizeof(request)) == 0);
+         request_len = AIMEE_RUNTIME_WEB_REQUEST_LEN;
+         assert(aimee_module_client_call(client, kind, AIMEE_RUNTIME_WEB_STAGE_CLASSIFY, 2013 + i,
+                                         0, request, request_len, response, sizeof(response),
+                                         &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+         assert(aimee_runtime_web_response_decode(response, response_len, &status) == 0);
+         assert(status == statuses[i]);
+      }
    }
    else if (strcmp(name, "control-web") == 0)
    {
