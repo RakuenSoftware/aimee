@@ -1,6 +1,6 @@
 # MR-06: Actual ranking traces, context receipts and evidence states
 
-- **State:** Proposed
+- **State:** In progress; legacy ingress assembly evidence corrected
 - **Priority:** P0 for receipt correctness; P1 for complete diagnostics
 - **Owner:** Go memory traces, with host/provider dispatch and audit receipts
 - **Depends on:** [MR-03](memory-reliability-03-final-payload-context-budgets.md); joins [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) and [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) outputs
@@ -9,6 +9,13 @@
 ## Problem and intended result
 
 Post-hoc diagnostic scores need not explain actual SQL/dense/graph ordering. A retrieval event emitted before final packing can include records the model never received. A digest proves correspondence when bytes are available; it cannot reconstruct missing content by itself.
+
+Legacy automatic ingress now records only Go-retained ordinary memory/code items
+after host integrity acceptance. Outcome feedback receives the exact clipped
+memory preview. Failed assembly and rejected/empty envelopes emit no such evidence.
+[Validation](../../validation/memory-ingress-evidence-2026-09-20.md) covers these
+boundaries; complete channel coverage, durable stage receipts, dispatch observation
+and crash recovery remain open.
 
 Record distinct retrieval, selection, assembly, preparation, dispatch and acknowledgement stages. Connect them to the existing audit/WORM infrastructure with bounded metadata and truthful evidence states.
 

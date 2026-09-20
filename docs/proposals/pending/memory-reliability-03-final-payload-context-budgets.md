@@ -16,8 +16,8 @@ specific proposal ID. The legacy bytes/4 estimate remains visible for compatibil
 but explicitly has unavailable token-count provenance. A fixed two-item regression
 renders the same evidence in 280 bytes instead of 1,044 bytes; this is a projection
 size result, not a provider token or latency measurement. Full provider-request
-accounting, source-version binding, protected packing and host-retained feedback
-remain acceptance work.
+accounting, source-version binding, protected packing and complete channel/host
+feedback remain acceptance work.
 
 The shipping Go ingress plan also supplies version-one `context_limits` with
 `max_context_bytes`. The assembler verifies the final memory envelope's UTF-8
@@ -26,6 +26,13 @@ literal zero separately from the legacy inherited budget. Unknown limit fields,
 unsupported schemas and token caps/reserves without provider counting are
 refused. This boundary covers the memory envelope; subsequent provider formatting,
 full-request token accounting and protected content still require integration.
+
+Automatic legacy ingress now reports retained code indices and exact clipped
+memory previews from Go packing. The host emits this assembly evidence only after
+integrity acceptance, preventing omitted or rejected candidates from receiving
+exposure feedback. [Boundary validation](../../validation/memory-ingress-evidence-2026-09-20.md)
+distinguishes this completed correction from remaining provider dispatch and
+all-channel accounting work.
 
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
