@@ -891,6 +891,35 @@ static void test_exact_mutation_identity(void)
    mock_agent_http_reset();
 }
 
+static int exact_evidence_post(const char *url, const char *auth, const char *body, char **reply,
+                               int timeout, const char *headers)
+{
+   (void)auth;
+   (void)timeout;
+   (void)headers;
+   assert(strstr(url, "evidence.emit_retrieval_event"));
+   cJSON *request = cJSON_Parse(body);
+   cJSON *ids = cJSON_GetObjectItemCaseSensitive(request, "surfaced_ids");
+   assert(cJSON_GetArraySize(ids) == 3);
+   assert(cJSON_GetArrayItem(ids, 0)->valuedouble == 42);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(ids, 1)), "9007199254740993"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(ids, 2)), "9223372036854775807"));
+   cJSON_Delete(request);
+   *reply = strdup("{\"status\":\"ok\",\"retrieval_event_id\":\"exact-event\"}");
+   return 200;
+}
+static void test_exact_evidence_transport(void)
+{
+   kb_client_dependency_reset_for_tests();
+   mock_agent_http_set_post_handler(exact_evidence_post);
+   int64_t ids[] = {42, INT64_C(9007199254740993), INT64_MAX};
+   char event_id[64];
+   assert(kb_client_evidence_emit_retrieval_event_ex("turn", "Recall", "fp", ids, 3, event_id,
+                                                     sizeof(event_id)) == 0);
+   assert(!strcmp(event_id, "exact-event"));
+   mock_agent_http_reset();
+}
+
 int main(void)
 {
    test_screen_failures();
@@ -899,6 +928,7 @@ int main(void)
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
    assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
+   test_exact_evidence_transport();
    test_exact_mutation_identity();
    test_benchmark_file_transport();
    test_generic_action_preserves_budget_auth_and_refusal();

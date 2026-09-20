@@ -144,6 +144,13 @@ path. Fresh application/harness `440144e437` passes **835/835** checks
 (545 T2, 290 T3), including 11 authenticated evidence writer/reader checks.
 Source versions, full channel coverage and durable dispatch remain open.
 
+[Exact evidence source identity](../../validation/memory-exact-evidence-ids-2026-09-20.md)
+repairs large-ID transport in the external event, attribution and provenance
+adapters. Safe numeric IDs remain compatible; larger IDs use decimal strings,
+while ambiguous legacy IDs are refused without inventing a source. Native codec,
+merge, storage and consumer regressions pass. Fresh deployment evidence is pending.
+This does not close source-version binding or durable dispatch acceptance.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

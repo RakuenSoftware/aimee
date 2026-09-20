@@ -211,6 +211,47 @@ def typed_context_budget_gate(kb, check):
           replay.get('retrieval_event_id') == large['retrieval_event_id'])
 
 
+def evidence_exact_identity_gate(kb, check):
+    """Exact identity through authenticated evidence writers and public readers."""
+    turn = 'exact-evidence-' + uuid.uuid4().hex
+    expected = [42, '9007199254740992', '9007199254740993', '9223372036854775807']
+    def action(name, payload):
+        return kb.kb_request('/v1/actions/' + name, payload)
+    code, written = action('evidence.emit_retrieval_event',
+        dict(turn_id=turn, role='Recall', surfaced_ids=expected))
+    check('Evidence writer accepts exact int64 source identities',
+          code == 200 and written.get('status') == 'ok' and bool(written.get('retrieval_event_id')))
+    code, trace = action('evidence.trace_retrieval_event', dict(turn_id=turn))
+    event = trace.get('event', {})
+    check('Evidence trace preserves adjacent large IDs and int64 maximum', code == 200 and
+          event.get('surfaced_ids') == expected and
+          [r.get('id') for r in event.get('surfaced_refs', [])] == expected and
+          [r.get('id') for r in event.get('surfaced_items', [])] == expected)
+    code, provenance = action('evidence.provenance_retrieval_event', dict(turn_id=turn))
+    check('Evidence provenance retains exact source identity on lookup', code == 200 and
+          [r.get('id') for r in provenance.get('sources', [])] == expected)
+    code, outcome = action('memory.record_retrieval_outcome', dict(
+        retrieval_event_id=written['retrieval_event_id'], rows=[
+            dict(id=value, verdict='accepted', weight=0.8) for value in expected]))
+    check('Memory outcome writer accepts exact source IDs', code == 200 and outcome.get('written') == 4)
+    code, outcome = action('memory.record_retrieval_outcome', dict(
+        retrieval_event_id=written['retrieval_event_id'], surfaced_row_id='9223372036854775807', verdict='accepted'))
+    check('Single memory outcome accepts int64 maximum', code == 200 and outcome.get('written') == 1)
+    invalid = [9007199254740992, 9007199254740993, 1.5, '9223372036854775808',
+               '01', '9007199254740993\x00suffix']
+    for i, value in enumerate(invalid):
+        failed_turn = turn + '-invalid-' + str(i)
+        code, result = action('evidence.emit_retrieval_event',
+            dict(turn_id=failed_turn, role='Recall', surfaced_ids=[42, value]))
+        check('Evidence rejects ambiguous or malformed ID case ' + str(i), result.get('status') == 'error')
+        code, result = action('evidence.trace_retrieval_event', dict(turn_id=failed_turn))
+        check('Invalid identity creates no partial event case ' + str(i), code == 200 and
+              result.get('trace_status') == 'evidence_unavailable')
+    code, outcome = action('memory.record_retrieval_outcome', dict(
+        retrieval_event_id=written['retrieval_event_id'], surfaced_row_id=9007199254740993, verdict='accepted'))
+    check('Outcome writer never attributes a rounded numeric ID', code == 200 and outcome.get('written') == 0)
+
+
 def correction_review_gate(kb, server, placement, output):
     """Exercise the shipping KB actions and model MCP adapter on fresh stores."""
     from types import SimpleNamespace
@@ -394,6 +435,7 @@ def main():
             code, body = kb.kb_request('/v1/actions/memory.find_facts', dict(query='shared deployment fixture', limit=3, graph_code_fusion_state='on'))
             check('KB graph and memory retrieval survives the deepest worker path', code == 200 and isinstance(body.get('facts'), list))
             typed_context_budget_gate(kb, check)
+            evidence_exact_identity_gate(kb, check)
         if args.topology in ('T2', 'T3'):
             server = Stack('server', env, args.output)
             stacks.append(server)

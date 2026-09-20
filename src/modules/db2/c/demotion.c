@@ -1,3 +1,4 @@
+#include "json_fluent.h"
 /* db2/demotion.c: retrieval attribution evidence transport (scoring lives in Go).
  * See docs/proposals/done/outcome-driven-demotion-and-poison-resilience.md */
 
@@ -39,10 +40,10 @@ static cJSON *make_memory_ref(int64_t id)
    if (!r)
       return NULL;
    cJSON_AddStringToObject(r, "type", "memory");
-   cJSON_AddNumberToObject(r, "id", (double)id);
+   cJSON_AddItemToObject(r, "id", jo_i64_value_exact(id));
    cJSON *args = cJSON_CreateObject(), *reply = NULL;
    cJSON_AddStringToObject(args, "operation", "record");
-   cJSON_AddNumberToObject(args, "id", (double)id);
+   cJSON_AddItemToObject(args, "id", jo_i64_value_exact(id));
    if (aimee_module_commands_dispatch_internal &&
        aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) == 1)
    {
@@ -83,11 +84,13 @@ static void project_memory_refs(cJSON *p)
       cJSON *r = cJSON_GetArrayItem(refs, i);
       cJSON *t = cJSON_GetObjectItemCaseSensitive(r, "type");
       cJSON *idj = cJSON_GetObjectItemCaseSensitive(r, "id");
-      if (!cJSON_IsString(t) || strcmp(t->valuestring, "memory") != 0 || !cJSON_IsNumber(idj))
+      int64_t id;
+      if (!cJSON_IsString(t) || strcmp(t->valuestring, "memory") != 0 ||
+          !jo_read_i64_exact(idj, &id))
          continue;
-      cJSON_AddItemToArray(ids, cJSON_CreateNumber(idj->valuedouble));
+      cJSON_AddItemToArray(ids, jo_i64_value_exact(id));
       cJSON *it = cJSON_CreateObject();
-      cJSON_AddNumberToObject(it, "id", idj->valuedouble);
+      cJSON_AddItemToObject(it, "id", jo_i64_value_exact(id));
       cJSON *v = cJSON_GetObjectItemCaseSensitive(r, "v");
       if (cJSON_IsString(v) && v->valuestring)
          cJSON_AddStringToObject(it, "v", v->valuestring);
@@ -106,7 +109,18 @@ static cJSON *ensure_surfaced_refs(cJSON *p)
 {
    cJSON *refs = cJSON_GetObjectItemCaseSensitive(p, "surfaced_refs");
    if (cJSON_IsArray(refs))
+   {
+      const cJSON *row;
+      cJSON_ArrayForEach(row, refs)
+      {
+         int64_t id;
+         const cJSON *type = cJSON_GetObjectItemCaseSensitive(row, "type");
+         if (cJSON_IsString(type) && !strcmp(type->valuestring, "memory") &&
+             !jo_read_i64_exact(cJSON_GetObjectItemCaseSensitive(row, "id"), &id))
+            return NULL; /* Cannot recover a previously rounded source identity. */
+      }
       return refs;
+   }
    refs = cJSON_AddArrayToObject(p, "surfaced_refs");
    if (!refs)
       return NULL;
@@ -116,14 +130,14 @@ static cJSON *ensure_surfaced_refs(cJSON *p)
    for (int i = 0; i < n; i++)
    {
       cJSON *e = cJSON_GetArrayItem(ids, i);
-      if (!cJSON_IsNumber(e))
-         continue;
-      int64_t id = (int64_t)e->valuedouble;
+      int64_t id;
+      if (!jo_read_i64_exact(e, &id))
+         return NULL;
       cJSON *r = cJSON_CreateObject();
       if (!r)
          continue;
       cJSON_AddStringToObject(r, "type", "memory");
-      cJSON_AddNumberToObject(r, "id", (double)id);
+      cJSON_AddItemToObject(r, "id", jo_i64_value_exact(id));
       if (cJSON_IsArray(items)) /* preserve the legacy point-in-time v */
       {
          int m = cJSON_GetArraySize(items);
@@ -131,7 +145,8 @@ static cJSON *ensure_surfaced_refs(cJSON *p)
          {
             cJSON *it = cJSON_GetArrayItem(items, j);
             cJSON *iid = it ? cJSON_GetObjectItemCaseSensitive(it, "id") : NULL;
-            if (cJSON_IsNumber(iid) && (int64_t)iid->valuedouble == id)
+            int64_t item_id;
+            if (jo_read_i64_exact(iid, &item_id) && item_id == id)
             {
                cJSON *v = cJSON_GetObjectItemCaseSensitive(it, "v");
                if (cJSON_IsString(v) && v->valuestring)
@@ -411,8 +426,9 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
             cJSON *r = cJSON_GetArrayItem(refs, j);
             cJSON *t = cJSON_GetObjectItemCaseSensitive(r, "type");
             cJSON *idj = cJSON_GetObjectItemCaseSensitive(r, "id");
-            if (cJSON_IsString(t) && strcmp(t->valuestring, "memory") == 0 && cJSON_IsNumber(idj) &&
-                (int64_t)idj->valuedouble == id)
+            int64_t existing_id;
+            if (cJSON_IsString(t) && strcmp(t->valuestring, "memory") == 0 &&
+                jo_read_i64_exact(idj, &existing_id) && existing_id == id)
             {
                present = 1;
                break;
@@ -659,14 +675,20 @@ int db2_demotion_retrieval_attribution_write(const char *retrieval_event_id,
    char scope_id_buf[32];
    snprintf(scope_id_buf, sizeof(scope_id_buf), "%lld", (long long)surfaced_row_id);
 
-   char payload[512];
-   snprintf(payload, sizeof(payload),
-            "{\"retrieval_event_id\":\"%s\",\"surfaced_row_id\":%lld,\"verdict\":\"%s\","
-            "\"weight\":%.6f}",
-            retrieval_event_id, (long long)surfaced_row_id, verdict, weight);
-
+   cJSON *record = cJSON_CreateObject();
+   if (!record)
+      return -1;
+   cJSON_AddStringToObject(record, "retrieval_event_id", retrieval_event_id);
+   cJSON_AddItemToObject(record, "surfaced_row_id", jo_i64_value_exact(surfaced_row_id));
+   cJSON_AddStringToObject(record, "verdict", verdict);
+   cJSON_AddNumberToObject(record, "weight", weight);
+   char *payload = cJSON_PrintUnformatted(record);
+   cJSON_Delete(record);
+   if (!payload)
+      return -1;
    int rc = db2_artifact_write(id, "retrieval_attribution", "proposed", "memory", scope_id_buf, "",
                                1.0, payload);
+   free(payload);
    if (rc != 0)
       return -1;
 

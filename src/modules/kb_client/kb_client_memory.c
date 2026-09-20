@@ -1,3 +1,4 @@
+#include "json_fluent.h"
 /* kb_client_memory.c: kb_client wrappers for the memory.* RPC family
  * (find_facts, list, get, insert, briefing, context_block, ask,
  * entity_profile, entity_edges, search_graph, get_episode).  Split
@@ -595,7 +596,7 @@ int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *
       cJSON_AddStringToObject(req, "query_fingerprint", query_fingerprint);
    cJSON *arr = cJSON_AddArrayToObject(req, "surfaced_ids");
    for (int i = 0; arr && ids && i < n_ids; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateNumber((double)ids[i]));
+      cJSON_AddItemToArray(arr, jo_i64_value_exact(ids[i]));
 
    char *json = kb_v1_action_request("evidence.emit_retrieval_event", req);
    if (!json)

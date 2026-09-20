@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "demotion.h"
+#include "json_fluent.h"
 #include "modules/db2/c/db2_test_shim.h"
 #include "support/json_canonical.h"
 #include "modules/db2/c/db2_internal.h"
@@ -176,6 +177,72 @@ static void test_retrieval_event_merge_turn(void)
    printf("  retrieval_event_merge_turn: ok\n");
 }
 
+static void test_exact_source_ids(void)
+{
+   open_db();
+   const int64_t ids[] = {42, INT64_C(9007199254740992), INT64_C(9007199254740993), INT64_MAX};
+   assert(db2_demotion_retrieval_event_merge_turn("exact-ids", "fp", "Recall", ids, 2, NULL, 0) ==
+          0);
+   assert(db2_demotion_retrieval_event_merge_turn("exact-ids", "fp", "Recall", ids + 1, 3, NULL,
+                                                  0) == 0);
+   assert(db2_demotion_retrieval_event_merge_turn("exact-ids", "fp", "Recall", ids, 4, NULL, 0) ==
+          0);
+   char payload[8192], event_id[64];
+   assert(db2_demotion_retrieval_event_by_turn("exact-ids", event_id, sizeof(event_id), payload,
+                                               sizeof(payload)) == 1);
+   cJSON *event = cJSON_Parse(payload);
+   const char *fields[] = {"surfaced_ids", "surfaced_refs", "surfaced_items"};
+   for (int f = 0; f < 3; f++)
+   {
+      cJSON *array = cJSON_GetObjectItemCaseSensitive(event, fields[f]);
+      assert(cJSON_GetArraySize(array) == 4);
+      for (int i = 0; i < 4; i++)
+      {
+         cJSON *value = cJSON_GetArrayItem(array, i);
+         if (f)
+            value = cJSON_GetObjectItemCaseSensitive(value, "id");
+         int64_t decoded = 0;
+         assert(jo_read_i64_exact(value, &decoded) && decoded == ids[i]);
+         assert(i ? cJSON_IsString(value) : cJSON_IsNumber(value));
+      }
+   }
+   cJSON_Delete(event);
+   assert(db2_demotion_retrieval_attribution_write(event_id, ids[2], "accepted", 0.8) == 0);
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT payload FROM artifacts WHERE kind='retrieval_attribution' AND "
+                        "scope_id='9007199254740993'",
+                        err, sizeof(err));
+   assert(st && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   event = cJSON_Parse(aimee_pg_column_text(st, 0));
+   assert(!strcmp(jo_cstr(event, "surfaced_row_id"), "9007199254740993"));
+   cJSON_Delete(event);
+   aimee_pg_finalize(st);
+
+   /* Never backfill already ambiguous numeric IDs into a plausible identity. */
+   assert(aimee_pg_exec(db2_conn(),
+                        "INSERT INTO artifacts(id,kind,turn_id,payload) VALUES "
+                        "('unsafe-legacy','retrieval_event','unsafe-legacy','{\"surfaced_ids\":["
+                        "9007199254740993]}'), "
+                        "('unsafe-ref','retrieval_event','unsafe-ref','{\"surfaced_refs\":[{"
+                        "\"type\":\"memory\",\"id\":9007199254740993}]}')",
+                        err, sizeof(err)) == 0);
+   const char *turns[] = {"unsafe-legacy", "unsafe-ref"};
+   for (int i = 0; i < 2; i++)
+   {
+      char before[8192];
+      assert(db2_demotion_retrieval_event_by_turn(turns[i], NULL, 0, before, sizeof(before)) == 1);
+      assert(db2_demotion_retrieval_event_merge_turn(turns[i], "fp", "Recall", ids, 1, NULL, 0) ==
+             -1);
+      assert(db2_demotion_retrieval_event_by_turn(turns[i], NULL, 0, payload, sizeof(payload)) ==
+             1);
+      assert(!strcmp(before, payload));
+   }
+   close_db();
+   printf("  exact_source_ids: ok\n");
+}
+
 static int count_occurrences(const char *hay, const char *needle)
 {
    int n = 0;
@@ -301,6 +368,7 @@ int main(void)
 {
    printf("demotion:\n");
 
+   test_exact_source_ids();
    test_retrieval_event_write();
    test_retrieval_event_turn();
    test_retrieval_event_merge_turn();

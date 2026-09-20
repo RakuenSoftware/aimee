@@ -1869,7 +1869,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "e0406a9b12f758870d423edbd76001cccf3573052e47a3a06621c1e3486cd074"
+      "sha256": "1378e4b1b5c58cae19ebf9d471c7dff9056c240d2ea3a204ed6366e95e40a240"
     },
     "src/modules/benchmarks/agent_eval_memory_transport.c": {
       "disposition": "benchmark-transport",
@@ -1988,7 +1988,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "248e238cd7648622efdc6a14c3bd3d1ae18112c5ea06d84889535a731969d70e"
+      "sha256": "4596a682cafc9776e97827edceae612699d7a7e93804a46f02280892471919bb"
     },
     "src/modules/kb_client/kb_client_memory_audit.c": {
       "disposition": "kb-client",
@@ -2380,7 +2380,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "500a6fc3ae9d48fa51c8f04c73264b3d25d45a385fd49ce0e49e257c8d09dddf"
+      "sha256": "590493e353e04bae82fe93e94d7b381ccc4181144ab2dd68ca99d79af8bb3c7b"
     },
     "src/tests/test_kb_memory_facts_connection.c": {
       "disposition": "host-fixture",

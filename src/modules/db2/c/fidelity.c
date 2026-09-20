@@ -1,3 +1,4 @@
+#include "json_fluent.h"
 /* db2/fidelity.c: answer-level fidelity reports + per-chunk attributions
  * (auditable-correctness P3 storage substrate). These are NON-SCORED artifact
  * kinds, structurally invisible to Go memory demotion scoring (which reads only
@@ -181,7 +182,7 @@ int db2_fidelity_attribution_write(const char *turn_id, int64_t surfaced_id, con
    cJSON *p = cJSON_CreateObject();
    if (!p)
       return -1;
-   cJSON_AddNumberToObject(p, "surfaced_id", (double)surfaced_id);
+   cJSON_AddItemToObject(p, "surfaced_id", jo_i64_value_exact(surfaced_id));
    cJSON_AddStringToObject(p, "verdict", verdict);
    char *payload = cJSON_PrintUnformatted(p);
    cJSON_Delete(p);

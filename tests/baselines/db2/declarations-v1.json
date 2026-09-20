@@ -1749,8 +1749,10 @@
         "src/tests/test_corpus_structural.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
+        "src/tests/test_demotion.c",
         "src/tests/test_entity_registry.c",
         "src/tests/test_features.c",
+        "src/tests/test_fidelity.c",
         "src/tests/test_index.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_maintenance.c",
@@ -1953,6 +1955,7 @@
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
+        "src/tests/test_demotion.c",
         "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
@@ -2152,6 +2155,7 @@
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
+        "src/tests/test_demotion.c",
         "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
@@ -2330,6 +2334,7 @@
         "src/tests/test_curiosity.c",
         "src/tests/test_db2.c",
         "src/tests/test_db2_code_audit.c",
+        "src/tests/test_demotion.c",
         "src/tests/test_entity_registry.c",
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
@@ -6400,7 +6405,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/demotion.h",
-          "line": 102
+          "line": 103
         }
       ],
       "signature": "int db2_demotion_retrieval_attribution_write ( const char * retrieval_event_id , int64_t surfaced_row_id , const char * verdict , double weight )",
@@ -6416,7 +6421,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/demotion.h",
-          "line": 59
+          "line": 60
         }
       ],
       "signature": "int db2_demotion_retrieval_event_by_turn ( const char * turn_id , char * id_out , int id_out_len , char * payload_out , int payload_out_len )",
@@ -6432,7 +6437,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/demotion.h",
-          "line": 89
+          "line": 90
         }
       ],
       "signature": "int db2_demotion_retrieval_event_merge_refs_turn ( const char * turn_id , const char * query_fingerprint , const char * role , const char * const * types , const char * const * refs , const char * const * versions , int n_refs , char * id_out , int id_out_len )",
@@ -6447,7 +6452,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/demotion.h",
-          "line": 75
+          "line": 76
         }
       ],
       "signature": "int db2_demotion_retrieval_event_merge_turn ( const char * turn_id , const char * query_fingerprint , const char * role , const int64_t * surfaced_ids , int n_surfaced , char * id_out , int id_out_len )",
@@ -19929,7 +19934,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "fb3b4739cff3511366e826157d593fcfabf99a1b4083b7c62fc1e66cdaf99aa0",
+  "fingerprint": "2dad996ca82c5676d8fe66a42c125d4fb95b3dd2d3ed9336e949a9ad254b42c6",
   "module": "db2",
   "schema_version": 1,
   "summary": {
