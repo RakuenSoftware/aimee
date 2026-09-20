@@ -22,6 +22,12 @@ static int g_test_memory_enabled;
 static int g_test_context_calls;
 static int g_test_tools_calls;
 static char g_test_query[1024];
+static int g_test_guidance_provided;
+
+int ir_seam_test_guidance_provided(void)
+{
+   return g_test_guidance_provided;
+}
 
 void ir_seam_test_memory(int enabled)
 {
@@ -64,6 +70,8 @@ int aimee_ir_stage_module_plan(aimee_request_t *ir, void *ud)
    if (strcmp(plan->phase, "context") == 0)
    {
       g_test_context_calls++;
+      g_test_guidance_provided =
+          plan->provided_resources && strcmp(plan->provided_resources[0], "guidance") == 0;
       snprintf(g_test_query, sizeof g_test_query, "%s",
                plan->provided_query ? plan->provided_query : "");
    }

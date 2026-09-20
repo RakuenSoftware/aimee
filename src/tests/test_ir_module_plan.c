@@ -41,6 +41,7 @@ static const char *fixture_remove_tools = "[]";
 static int fixture_transport_result = 1;
 static const char *fixture_gate;
 static int fixture_audits;
+static const char *const *fixture_provided_resources;
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
                                                     int timeout_ms, cJSON **result)
 {
@@ -56,6 +57,14 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    assert(strcmp(operation, "gateway-plan") == 0);
    const char *phase = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "phase"));
    assert(phase);
+   const cJSON *provided = cJSON_GetObjectItemCaseSensitive(request, "provided_resources");
+   if (fixture_provided_resources)
+   {
+      assert(cJSON_GetArraySize(provided) == 1);
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(provided, 0)), "guidance") == 0);
+   }
+   else
+      assert(!provided);
    if (strcmp(phase, "text") != 0)
    {
       const cJSON *roles = cJSON_GetObjectItemCaseSensitive(request, "roles");
@@ -123,6 +132,7 @@ static int apply_plan(aimee_request_t *ir, const char *query, const char *phase)
                                     .operation = "gateway-plan",
                                     .phase = phase,
                                     .provided_query = query,
+                                    .provided_resources = fixture_provided_resources,
                                     .bindings = server_ir_plan_bindings,
                                     .resources = server_ir_plan_resources};
    return aimee_ir_stage_module_plan(ir, &config);
@@ -710,6 +720,10 @@ int main(void)
    test_gate_reply_and_audit();
    test_disabled_noop();
    test_ir_stage_appends_system_block();
+   const char *const provided[] = {"guidance", NULL};
+   fixture_provided_resources = provided;
+   test_ir_stage_appends_system_block();
+   fixture_provided_resources = NULL;
    test_ir_stage_prefers_supplied_query();
    test_ir_stage_no_recall_midsession_noop();
    test_ir_stage_session_start_guidance_without_recall();

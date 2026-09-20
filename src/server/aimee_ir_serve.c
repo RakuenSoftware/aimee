@@ -230,10 +230,15 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
    int persona_delivered = persona_inserted || ir_persona_delivery_already_satisfied(ir);
    if (persona_first > 0)
       session_persona_delivery_finish(sid, persona_delivered);
+   /* The host-composed persona includes the standing guidance. Tell the module
+    * only when this assembly actually inserted it; caller text is not proof. */
+   const char *const persona_resources[] = {"guidance", NULL};
    aimee_ir_module_plan_t context_plan = {.method = "memory.runtime",
                                           .operation = "gateway-plan",
                                           .phase = "context",
                                           .provided_query = pristine_query,
+                                          .provided_resources =
+                                              persona_inserted ? persona_resources : NULL,
                                           .bindings = server_ir_plan_bindings,
                                           .resources = server_ir_plan_resources};
    aimee_ir_module_plan_t tools_plan = context_plan;

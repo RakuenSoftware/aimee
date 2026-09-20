@@ -28,6 +28,7 @@ void ir_seam_test_persona(const char *instructions);
 void ir_seam_test_memory(int enabled);
 int ir_seam_test_plan_calls(const char *phase);
 const char *ir_seam_test_query(void);
+int ir_seam_test_guidance_provided(void);
 
 int main(void)
 {
@@ -140,6 +141,7 @@ int main(void)
       assert(ir_seam_test_plan_calls("context") == 1);
       assert(ir_seam_test_plan_calls("tools") == 1);
       assert(strcmp(ir_seam_test_query(), "hi") == 0);
+      assert(ir_seam_test_guidance_provided() == 1);
       char *wire = cJSON_PrintUnformatted(provider_body);
       assert(wire && strstr(wire, "be helpful"));
       const char *persona = strstr(wire, "PERSONA_BOUNDARY_FIXTURE");

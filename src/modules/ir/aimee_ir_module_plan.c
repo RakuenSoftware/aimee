@@ -140,6 +140,15 @@ static cJSON *request_plan(const aimee_request_t *ir, const aimee_ir_module_plan
    if (config->provided_query &&
        !cJSON_AddStringToObject(args, "provided_query", config->provided_query))
       goto done;
+   if (config->provided_resources)
+   {
+      cJSON *provided = cJSON_AddArrayToObject(args, "provided_resources");
+      if (!provided)
+         goto done;
+      for (const char *const *name = config->provided_resources; *name; name++)
+         if (!cJSON_AddItemToArray(provided, cJSON_CreateString(*name)))
+            goto done;
+   }
    if (ir)
    {
       cJSON *roles = cJSON_AddArrayToObject(args, "roles"),

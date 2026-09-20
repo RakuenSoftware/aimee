@@ -218,19 +218,6 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       return 400;
    }
 
-   /* Build the pre-injection envelope up front: it is part of the model input,
-    * so the §4 dedup key must hash it (a stale reply must not be replayed after
-    * the injected memory/context changes). On a cache miss it is reused for the
-    * provider call below; on a hit it is freed unused. */
-   int first_turn = !chat || !openai_request_has_assistant(body);
-   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt);
-   char *persona_txt = legacy_persona_text(prompt, !first_turn);
-   if (persona_txt)
-   {
-      free(prompt);
-      prompt = persona_txt;
-   }
-
    /* Resolve the backend BEFORE dedup so the key carries the resolved
     * provider/model — two requests resolving to a different backend must not
     * collide even with an identical body. Honour the requested model: "aimee"
@@ -241,7 +228,6 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    agent_t *ag = agent_registry_resolve_ingress_model(model, &agbuf) == 0 ? &agbuf : NULL;
    if (!ag)
    {
-      free(pi_env);
       free(prompt);
       if (model[0] && strcmp(model, "aimee") != 0)
       {
@@ -273,13 +259,17 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       {
          parsed_response_t parsed;
          char upstream_error[512];
+         char *legacy_context =
+             !aimee_ir_path_enabled() && !instructions
+                 ? server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt)
+                 : NULL;
          int trc = agent_execute_messages(
-             ag, messages, tools, instructions ? instructions : pi_env,
+             ag, messages, tools, instructions ? instructions : legacy_context,
              openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768),
              openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed,
              upstream_error, sizeof(upstream_error));
          free(instructions);
-         free(pi_env);
+         free(legacy_context);
          free(prompt);
 
          if (trc != 0)
@@ -331,6 +321,21 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       free(instructions);
       cJSON_Delete(messages);
       cJSON_Delete(tools);
+   }
+
+   /* Plain-text serving owns this envelope; the structured tool path above
+    * runs memory/persona stages during final provider assembly instead.
+    * Build it before dedup: it is part of the model input,
+    * so the §4 dedup key must hash it (a stale reply must not be replayed after
+    * the injected memory/context changes). On a cache miss it is reused for the
+    * provider call below; on a hit it is freed unused. */
+   int first_turn = !chat || !openai_request_has_assistant(body);
+   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt);
+   char *persona_txt = legacy_persona_text(prompt, !first_turn);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
    }
 
    /* §4 short-window dedup: serve a re-sent identical request (same account/source
