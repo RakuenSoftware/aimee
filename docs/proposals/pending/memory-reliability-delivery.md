@@ -23,8 +23,10 @@ or replace the C bus.
 ## Post-merge execution
 
 Completion of all MR-01–18 implementation and acceptance work is the active goal.
-After the existing #2988–#2990 stack merges, all remaining proposal implementation
-and evidence will accumulate in one continuing PR. Do not open separate slice PRs.
+PRs #2988 and #2989 have merged. All remaining proposal implementation and
+evidence now accumulate in [PR #2990](https://github.com/RakuenSoftware/aimee/pull/2990),
+retargeted to `testing`. Push the continuing work to its existing
+`agent/memory-mr02-change-journal` head; do not open separate slice PRs.
 The [frozen acceptance inventory](../../../tests/eval/memory_reliability_acceptance.json)
 pins 123 acceptance clauses from the merged proposal revision and the measured
 Go performance baseline. It is an inventory, not a claim that those gates pass.
@@ -50,7 +52,8 @@ cases, malformed governed timestamps and hidden IDs.
 The next MR-01 slice adds version-one `read_policy` for exact-ID reads. Current
 mode keeps the captured storage clock; historical KB mode filters by the supplied
 half-open valid interval and returns `not_found` outside it. Unsupported belief
-time, personal history, schemas and operations fail explicitly. Public/HTTP
+time, personal temporal history, schemas and operations fail explicitly. Personal
+exact-revision inspection now has a separate `at_version` contract. Public/HTTP
 forwarding preserves the object; its response describes the applied temporal
 policy without claiming a final release receipt. The host's existing C forwarding
 adapter only copies the new JSON field; all interpretation remains in Go and the
@@ -106,7 +109,7 @@ worktree without `--project` against the existing remote service.
 | Proposal | Implemented foundation | Work still required for full acceptance |
 |---|---|---|
 | MR-01 eligibility | Scoped transactions, placement separation, current-hash filters and Go current-validity predicates before lexical/semantic/unit/graph/window/bundle/activation/briefing limits; shared directive/reminder expiry; normalized assertion world/belief-time intervals and current typed-fact evidence closure | Unified temporal/utility policy on every surface, release recheck and race tests |
-| MR-02 mutations | Shared KB admission across same-key/edit/legacy verbs, user/model versions, original-author preservation, identity locking, tombstones and atomic extraction actor/job writes; personal and primary-scope shared revisions/generations/outboxes with bounded host replay; tag changes invalidate their visible parent; owner/ID/revision-bound shared corrections reject stale versions under the row lock; authenticated keyed update/supersede corrections commit immutable actor-isolated retry references with the existing audit and recheck result eligibility/version on replay; MCP forwards preconditions and preserves receipts; update reuses the locked confidence read; linked model drafts preserve authoritative parents and durably deduplicate rejected proposals; authenticated exact-draft reviews atomically record the reviewer while preserving model authorship/confidence, with rollback and concurrent decision tests | Personal content versioning, expected versions and idempotency on remaining verbs, further governed child/dependency coverage, durable consumer application/checkpoints and release checks |
+| MR-02 mutations | Shared KB admission across same-key/edit/legacy verbs, user/model versions, original-author preservation, identity locking, tombstones and atomic extraction actor/job writes; personal and primary-scope shared revisions/generations/outboxes with bounded host replay; tag changes invalidate their visible parent; owner/ID/revision-bound shared corrections reject stale versions under the row lock; authenticated keyed update/supersede corrections commit immutable actor-isolated retry references with the existing audit and recheck result eligibility/version on replay; MCP forwards preconditions and preserves receipts; update reuses the locked confidence read; linked model drafts preserve authoritative parents and durably deduplicate rejected proposals; authenticated exact-draft reviews atomically record the reviewer while preserving model authorship/confidence, with rollback and concurrent decision tests; private updates retain owner-bound revisions, support exact-version history and conditional supersede, and atomically publish invalidation | Personal author/reviewer admission and proposal parity, expected versions and idempotency on remaining verbs, further governed child/dependency coverage, durable consumer application/checkpoints and release checks |
 | MR-03 budgets | Go typed-context assembly, final personal/shared recall rebudgeting and existing packing limits; minimal typed projection with one reviewed-procedure rendering, exact byte count/digest and retained IDs | Final serialized provider byte/token caps, source-version binding and protected-projection accounting |
 | MR-04 lineage | Fact lineage/review and invalidation paths | Independent-family accounting, full derivative closure and restore-resistant erasure |
 | MR-05 sufficiency | Typed context and answer abstention; retrieval availability separated from unknown task coverage rather than nonempty-to-complete inference | Requirement/coherence coverage of retained evidence and bounded recovery |

@@ -595,8 +595,9 @@ static void test_osv_offline_cache_miss_allows(void)
    "{command,correction_text,description,evidence_refs,limit,polarity,signal_type,sink,state,"     \
    "target_key,target_memory_id,title,workflow_project,workflow_signal_type} req:command\n"        \
    "list_curiosity_items {limit,state} req:\n" MCP_LSP_GOLDEN "memory "                            \
-   "{as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,"       \
-   "project,query,reason,scope,store,tier,verb,workspace} req:command\n"                           \
+   "{as_of,at_version,command,confidence,content,cwd,dry_run,expected_version,force,handle,id,"    \
+   "idempotency_key,include_version,key,kind,memory_id,modes,project,query,reason,scope,store,"    \
+   "tier,verb,workspace} req:command\n"                                                            \
    "memory_recall {cwd,limit_tokens,project,scope,session_start,store,task_hint,workspace} req:\n" \
    "note {command,content,limit,query,tag,tags,title} req:command\n"                               \
    "payload_rewrite_status {} req:\n"                                                              \

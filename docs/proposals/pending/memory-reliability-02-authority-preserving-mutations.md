@@ -25,7 +25,7 @@ supplied authority text still cannot replace authoritative content. A review
 refusal maps to HTTP 409 rather than an upstream-failure status.
 
 Shared model corrections now create linked review proposals and support exact-draft
-approval or rejection as described below. Personal versioning, expected versions on remaining mutation verbs,
+approval or rejection as described below. Personal author/reviewer admission, expected versions on remaining mutation verbs,
 idempotency on remaining verbs, further durable guards/consumer replay and full retention policy
 remain acceptance work.
 
@@ -40,7 +40,7 @@ mutation. Shared records and secondary scope tags now have a primary-scope
 producer too: collection-bound cursors, old/new scope invalidation, independent
 collection commit ordering and parent-visible tag access. Restricted-role replay
 covers version replacement and rollback after a failed tag copy. This does not
-complete personal content versioning, further governed child/dependency coverage,
+complete personal author/reviewer admission, further governed child/dependency coverage,
 consumer application/checkpoints or the release-freshness contract.
 
 Implement one mutation admission operation for create, propose, correct, supersede, reject, retire and explicitly authorized destructive deletion. Route compatibility entry points through it.
@@ -63,8 +63,9 @@ counter updates, and the generated values are not available in NEW yet. The
 regression uses generated columns plus a second BEFORE trigger, as in the shipping
 schema; counter-only reads and unchanged governed writes retain their revision.
 
-This opt-in contract currently supports shared exact-ID get, update and supersede.
-Other operations and personal placement refuse the fields explicitly. It does
+The shared contract supports exact-ID get, update and supersede. Personal get
+and supersede now use the same version object as described below. Other
+operations refuse the fields explicitly. It does
 not supply automatic restore-owner rotation, historical
 belief reconstruction, or final-release freshness proofs.
 
@@ -114,7 +115,7 @@ mutation events. Legacy unkeyed MCP responses retain their existing text format.
 
 This contract currently covers shared corrections only. Other verbs and personal
 placement explicitly refuse the field. Remaining create/delete idempotency,
-personal content versioning, retention/restore policy and consumer progress remain open.
+personal authority/review parity, retention/restore policy and consumer progress remain open.
 
 ### Linked model correction proposals
 
@@ -170,6 +171,40 @@ references prevent erased proposals from being recreated through old keys.
 Late failures roll back the whole proposal or approval transaction, including
 canonical versions, extraction work, decisions and invalidation. This workflow
 is a shared-memory foundation, not completion of every MR-02 acceptance gate.
+
+### Retained private revisions
+
+Private-store migration 27 adds `user_memory_versions` beside the existing
+personal owner identity and invalidation journal. It retains the previous
+record revision atomically on a governed update, including same-key upserts,
+legacy writers and retirement. Unchanged writes and read counters allocate no
+history. Existing record IDs stay stable; the version is the owner/ID/revision
+triple. The migration does not reconstruct unavailable old content or invent
+legacy authorship.
+
+Personal `get` accepts `include_version: true`. Personal `supersede` and the MCP
+`update`/`supersede` adapter accept that object as `expected_version`. One SQL
+statement locks, compares and writes, with history and invalidation in the same
+transaction. A stale revision or changed owner returns `expected_version_conflict`;
+an unavailable current target remains `not_found`. The successful conditional
+correction returns its new version.
+
+Personal `get` also accepts `at_version` for exact revision inspection. Its
+record is labelled `historical: true`; it does not become a recall candidate.
+The owner and surviving parent's lifecycle are checked in the same query.
+Active and retired parents allow explicit inspection; rejected, revoked,
+deleted, quarantined and unknown parent states withhold it. A hard parent
+erasure cascades to retained payloads. Runtime roles may read but cannot insert,
+rewrite, truncate or delete history directly. Privileged trigger writes qualify
+the parent schema to prevent temporary-table substitution. Migration 28 repairs
+ACLs weakened by older PostgreSQL restart reconciliation; corrected store
+provisioning preserves migration-owned permissions on subsequent restarts.
+
+This is exact-version history, not valid-time or belief-time reconstruction;
+`at_version` cannot be combined with `read_policy` or `as_of`. Personal
+idempotency keys, trusted author/reviewer admission and proposal parity remain
+open. The snapshot mechanism preserves available metadata but does not infer
+human authorship from the placement or request body.
 
 ## Existing integration points
 

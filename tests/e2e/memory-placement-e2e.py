@@ -373,6 +373,13 @@ class Gate:
             "SELECT (NOT has_table_privilege('aimee_store_runtime','user_memory_versions','INSERT') "
             "AND NOT has_table_privilege('aimee_store_runtime','user_memory_versions','UPDATE') "
             "AND NOT has_table_privilege('aimee_store_runtime','user_memory_versions','DELETE'))::text") == 'true')
+        self.check('private runtime cannot rewrite invalidation progress', self.personal_sql(
+            "SELECT (NOT has_table_privilege('aimee_store_runtime','user_memory_collection_generation','INSERT,UPDATE,DELETE,TRUNCATE') "
+            "AND NOT has_table_privilege('aimee_store_runtime','user_memory_invalidation_outbox','INSERT,UPDATE,DELETE,TRUNCATE'))::text") == 'true')
+        self.check('private runtime cannot invoke protected trigger helpers', self.personal_sql(
+            "SELECT (NOT has_function_privilege('aimee_store_runtime','user_memory_retain_version()','EXECUTE') "
+            "AND NOT has_function_privilege('aimee_store_runtime','user_memory_capture_change()','EXECUTE') "
+            "AND NOT has_function_privilege('aimee_store_runtime','user_memory_assign_revision()','EXECUTE'))::text") == 'true')
         self.docker('restart', self.args.server)
         current = self.good('personal versions survive restart', self.wait('get', dict(id=mid, include_version=True)))['memory']
         history = self.good('retained private history survives restart', self.call('get', dict(id=mid, at_version=version)))['memory']

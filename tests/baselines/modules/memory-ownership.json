@@ -2388,7 +2388,7 @@
       "symbols": [
         "memory_recall"
       ],
-      "sha256": "e35d836a7c290bdd6ff3f2e0c2a07d0c849a884d6d51a23620e4e4db036ceca5"
+      "sha256": "cbace789f30dfb9b030e7acf16bc081cdd1f16a06d8395024f969f051cb7a119"
     },
     "src/tests/test_mcp_memory_answer.c": {
       "disposition": "host-fixture",

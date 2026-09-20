@@ -1,9 +1,10 @@
 # Shared memory reliability foundations
 
-All post-stack implementation is on the single continuing
-`agent/memory-reliability-proposals` branch. The existing #2988–#2990 PRs remain
-separate pending their authorized merge; both available GitHub credentials refused
-merge/readiness operations. No additional slice PR was opened.
+All continuing implementation is consolidated into
+[PR #2990](https://github.com/RakuenSoftware/aimee/pull/2990), using its existing
+`agent/memory-mr02-change-journal` head and `testing` base. PRs #2988 and #2989
+have merged. The local `agent/memory-reliability-proposals` checkout pushes to
+that same PR head; no additional slice PR was opened.
 
 ## Fresh shared/private deployment
 

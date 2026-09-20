@@ -62,6 +62,10 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	exec(base[a:b] + read("../aimee/families/schema_personal_memory_changes.sql"))
 	exec(`INSERT INTO user_memories(id,key,content,confidence,source_session) VALUES(42,'private','original',.9,'original-session')`)
 	exec(read("../aimee/families/schema_personal_memory_versions.sql"))
+	// Older PostgreSQL restart reconciliation restored blanket grants after
+	// migrations. The repair migration must remove them from existing stores.
+	exec("GRANT ALL ON ALL TABLES IN SCHEMA " + ident + " TO " + role + "; GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA " + ident + " TO " + role)
+	exec(read("../aimee/families/schema_personal_memory_acl.sql"))
 	scalar := func(sql string) int64 {
 		t.Helper()
 		var n int64
