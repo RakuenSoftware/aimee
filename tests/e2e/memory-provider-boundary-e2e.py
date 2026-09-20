@@ -17,6 +17,7 @@ from pathlib import Path
 import socket
 import subprocess
 import threading
+import time
 import uuid
 
 
@@ -31,10 +32,11 @@ def strings(value):
             yield from strings(child)
 
 
-def inside(output):
+def inside(output, budget_benchmark=False):
     if os.environ.get('AIMEE_MEMORY_PROVIDER_BOUNDARY_FIXTURE') != '1':
         raise RuntimeError('requires the disposable-container launcher')
     captures, checks, accounting = [], [], []
+    timings = []
     responses_ids = {}
     lock = threading.Lock()
 
@@ -217,6 +219,23 @@ def inside(output):
                           not any(e.get('type') in ('message_stop', 'response.completed')
                                   for e in refused.get('events', [])))
                     check(name + ' streaming zero cap sends no provider request', len(captures) == before_budget)
+                if budget_benchmark and frontend == 'chat':
+                    plain_ms, capped_ms = [], []
+                    # Alternate order to balance warming and temporal effects.
+                    for pair in range(32):
+                        for limited in ([False, True] if pair % 2 == 0 else [True, False]):
+                            before_measurement = len(captures)
+                            begin = time.perf_counter_ns()
+                            measured_status, measured_response = api(path, body, exact_limit if limited else None)
+                            elapsed_ms = (time.perf_counter_ns() - begin) / 1e6
+                            if (measured_status != 200 or len(captures) != before_measurement + 1 or
+                                    captures[-1][1] != raw or
+                                    not any('MEMORY_BOUNDARY_OK' in text for text in strings(measured_response))):
+                                raise RuntimeError('paired byte-admission benchmark changed the provider result')
+                            (capped_ms if limited else plain_ms).append(elapsed_ms)
+                    timings.append(dict(frontend=frontend, provider=protocol, pairs=32,
+                        fixture='loopback provider; real host, Go owner and bus; no external model latency',
+                        no_limit_ms=plain_ms, declared_limit_ms=capped_ms))
                 accounting.append(dict(frontend=frontend, provider=protocol, endpoint=endpoint,
                     boundary='provider_http_body', count_state='exact', unit='utf8_bytes',
                     request_bytes=len(raw), memory_projection_bytes=len(context.encode()),
@@ -262,18 +281,21 @@ def inside(output):
                 roster.write_bytes(previous)
             provider.shutdown()
             provider.server_close()
-            Path(output).write_text(json.dumps(dict(checks=checks, accounting=accounting), indent=2) + '\n')
+            Path(output).write_text(json.dumps(dict(checks=checks, accounting=accounting,
+                **(dict(timings=timings) if budget_benchmark else {})), indent=2) + '\n')
     return 0
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--server')
+    parser.add_argument('--budget-benchmark', action='store_true',
+                        help='measure 32 alternating capped/uncapped pairs per provider')
     parser.add_argument('--output', required=True)
     parser.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.inside:
-        return inside(args.output)
+        return inside(args.output, args.budget_benchmark)
     if not args.server or not args.server.startswith('aimee-e2e-server-') or not args.server.endswith('-aimee-server-1'):
         parser.error('requires a disposable deployment-matrix Server')
     inspected = json.loads(subprocess.check_output(['docker', 'inspect', args.server], text=True))[0]
@@ -285,7 +307,8 @@ def main():
     try:
         subprocess.run(['docker', 'cp', str(Path(__file__).resolve()), args.server + ':' + remote], check=True)
         run = subprocess.run(['docker', 'exec', '-u', '1000', '-e', 'AIMEE_MEMORY_PROVIDER_BOUNDARY_FIXTURE=1',
-            args.server, 'python3', remote, '--inside', '--output', result], timeout=600)
+            args.server, 'python3', remote, '--inside', '--output', result,
+            *(['--budget-benchmark'] if args.budget_benchmark else [])], timeout=600)
         subprocess.run(['docker', 'cp', args.server + ':' + result, args.output], check=True)
         return run.returncode
     finally:

@@ -66,6 +66,14 @@ and both source/final identities. This addresses whole-block loss at that
 boundary; final provider accounting, source-version release checks and protected
 content remain required.
 
+[Final request byte admission](../../validation/memory-final-request-budgets-2026-09-20.md)
+adds an explicit HTTP header contract at the common provider serialization fence.
+Go checks complete final byte counts and returns a commitment bound to route,
+body digest, byte length and limits. Refusal prevents dispatch even with optional
+reduction disabled; unsupported token limits fail explicitly. The Server starts
+the admission process independently of reduction settings. Full provider token
+counting, inherited limits and protected optional repacking remain open.
+
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
 Use a single model-facing projection and verify the final request budget after every provider-affecting transformation. Keep explanation metadata outside the prompt unless a small field is explicitly useful to the model.

@@ -43,10 +43,47 @@ packaged but omitted from the Server composition. The exact-fit request safely
 failed with `request_budget_unavailable` and zero provider dispatches. The
 process is now started by default, independently of the existing reduction-mode
 settings; a packaging regression checks the actual generated Server composition
-and stage grant. Corrected fresh deployment validation is pending. The provider boundary harness adds exact-
-fit byte identity, overflow, zero, malformed/token refusal and streaming refusal
-checks against the actual host and Go process. The completion endpoint alone is
-a fixture; provider captures must remain empty for every refused request.
+and stage grant. Corrected application and matrix harness `140a546a15` pass
+**1,093/1,093** checks on fresh `.253` CT 9498 deployments: **683 T2** and
+**410 T3**. Each placement passes 200 provider-boundary checks, including 120
+new admission checks. Exact-fit requests preserve all provider bytes; overflow,
+zero, malformed limits and unavailable token counts produce explicit refusals
+without any provider dispatch. Streaming Chat, Responses and Messages refusals
+are exercised. Existing memory, semantic, isolation, review, concurrency,
+restart, rollback and outage/recovery checks pass.
+
+[Named T2 verdicts](memory-shared-reliability-2026-09-20/fresh-t2-140a546a15.json),
+[named T3 verdicts](memory-shared-reliability-2026-09-20/fresh-t3-140a546a15.json),
+[provider accounting](memory-shared-reliability-2026-09-20/provider-accounting-140a546a15.json)
+and [all nine image identities](memory-shared-reliability-2026-09-20/image-identities-140a546a15.json)
+contain bounded verdict/count/digest evidence. Application image:
+`sha256:9194b1dc94a091cc7fcf42ec0f1f202b073bd72e1ee2f775a12bb89287dd38ad`.
+PostgreSQL and embedder images match the prior validated run. Raw receipts remain
+under `/opt/aimee-memory-proposals-evidence/t2-140a546a15` and
+`t3-140a546a15`. All nine test containers are stopped; volumes and evidence remain.
+The initial `edc602833c` run is retained as failure evidence, not counted as a
+passing deployment. The benchmark below is additional to the 1,093 matrix checks.
+
+The opt-in `--budget-benchmark` mode of
+`tests/e2e/memory-provider-boundary-e2e.py` records 32 alternating capped/uncapped
+pairs per provider on the fresh T3 application. All 200 correctness checks pass;
+every timed request dispatches once, returns the expected result, and preserves
+the exact baseline body. [Raw bounded timing samples](memory-shared-reliability-2026-09-20/final-budget-timings-140a546a15.json)
+include the harness hash and application revision, with no prompt bodies.
+
+| Provider format | Uncapped median / P95 | Capped median / P95 |
+|---|---:|---:|
+| OpenAI Chat | 74.14 / 97.11 ms | 78.44 / 99.20 ms |
+| Anthropic Messages | 70.97 / 88.23 ms | 77.68 / 101.88 ms |
+
+P95 is the nearest-rank statistic. The loopback completion fixture excludes
+external model latency; T2 was running on the same host. These small samples
+measure admission overhead, not the matched retrieval performance release gate.
+In particular, the Anthropic-format fixture's P95 increase exceeds 10%; it is
+not evidence of MR-18 performance acceptance. Go handler execution is only about
+2.2 microseconds, so optimizing its parser alone cannot resolve the observed
+millisecond overhead. The extra bus call and surrounding scheduling need further
+measurement before broad default hard-budget enforcement.
 
 This is not full MR-03 acceptance. Provider-bound token counters, inherited
 operator/task limits, protected optional repacking, canonical source versions,
