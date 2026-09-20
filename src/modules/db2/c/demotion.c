@@ -1,4 +1,4 @@
-#include "json_fluent.h"
+#include "json_int64.h"
 /* db2/demotion.c: retrieval attribution evidence transport (scoring lives in Go).
  * See docs/proposals/done/outcome-driven-demotion-and-poison-resilience.md */
 

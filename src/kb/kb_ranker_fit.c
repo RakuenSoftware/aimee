@@ -1,3 +1,4 @@
+#include "json_int64.h"
 /* kb_ranker_fit.c: the Calibrate half of the KB-hybrid ranking substrate.
  * Reads the joined feature/outcome training view, runs the fitter sidecar
  * (scripts/rank-fit.py), benchmark-gates the result, and promotes a
@@ -5,7 +6,6 @@
  * See docs/proposals/done/learning-to-rank-weight-fitting.md */
 
 #include "kb_ranker_fit.h"
-#include "json_fluent.h"
 #include "kb_ranker.h"
 #include "kb_features.h" /* KB_FEATURE_SET_VERSION */
 #include "modules/db2/c/artifacts.h"

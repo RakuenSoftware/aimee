@@ -1,3 +1,4 @@
+#include "json_int64.h"
 /* test_demotion.c — unit tests for the demotion DB2 module.
  *
  * Tests:

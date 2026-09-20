@@ -1,3 +1,4 @@
+#include "json_int64.h"
 /* kb_service_memory.c: aimee-kb dispatch handlers for the memory.*
  * RPC family (find_facts, list, get, briefing, context_block,
  * entity_profile, entity_edges, search_graph, get_episode, ask,

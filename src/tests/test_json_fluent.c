@@ -1,3 +1,4 @@
+#include "json_int64.h"
 /* test_json_fluent.c: unit tests for the json_fluent helpers */
 #include "json_fluent.h"
 #include "json_wire.h"
@@ -132,6 +133,8 @@ static int test_exact_integer_wire(void)
    cJSON_Delete(doc);
    doc = json_wire_parse_exact_integers("9007199254740993");
    CHECK(cJSON_IsRaw(doc) && !strcmp(doc->valuestring, "9007199254740993"));
+   int64_t exact_id = 0;
+   CHECK(jo_read_i64_exact(doc, &exact_id) && exact_id == INT64_C(9007199254740993));
    cJSON_Delete(doc);
    CHECK(!json_wire_parse_exact_integers("{\"id\":1} trailing"));
    CHECK(!json_wire_parse_exact_integers("{\"id\":9223372036854775807"));

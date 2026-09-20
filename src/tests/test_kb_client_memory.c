@@ -557,6 +557,15 @@ static void test_as_of_reaches_the_kb_and_its_verdict_comes_back(void)
    assert(strstr(last_request_body, "2026-06-12 00:00:00") != NULL);
    assert(verdict == KB_VALID_AT_NO);
 
+   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9007199254740993,\"key\":\"k\"}}";
+   assert(kb_client_memory_get(INT64_C(9007199254740993), &m) == 0);
+   assert(m.id == INT64_C(9007199254740993));
+   assert(strstr(last_request_body, "\"id\":\"9007199254740993\""));
+   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9223372036854775807,\"key\":\"k\"}}";
+   assert(kb_client_memory_get(INT64_MAX, &m) == 0 && m.id == INT64_MAX);
+   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9223372036854775808}}";
+   assert(kb_client_memory_get(INT64_MAX, &m) < 0 && m.id == 0);
+
    /* "unknown" must survive as a third answer. Folding it into NO would report
     * "not in force" for a row the service could not judge. */
    as_of_reply = "{\"status\":\"ok\",\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":\"unknown\","
@@ -897,15 +906,27 @@ static int exact_evidence_post(const char *url, const char *auth, const char *bo
    (void)auth;
    (void)timeout;
    (void)headers;
-   assert(strstr(url, "evidence.emit_retrieval_event"));
+   int outcomes =
+       strstr(url, "record_outcome") != NULL || strstr(url, "record_retrieval_outcome") != NULL;
+   const char *key = outcomes                           ? "rows"
+                     : strstr(url, "ranker.emit_event") ? "doc_ids"
+                                                        : "surfaced_ids";
    cJSON *request = cJSON_Parse(body);
-   cJSON *ids = cJSON_GetObjectItemCaseSensitive(request, "surfaced_ids");
+   cJSON *ids = cJSON_GetObjectItemCaseSensitive(request, key);
    assert(cJSON_GetArraySize(ids) == 3);
-   assert(cJSON_GetArrayItem(ids, 0)->valuedouble == 42);
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(ids, 1)), "9007199254740993"));
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(ids, 2)), "9223372036854775807"));
+   const char *expected[] = {NULL, "9007199254740993", "9223372036854775807"};
+   for (int i = 0; i < 3; i++)
+   {
+      cJSON *id = cJSON_GetArrayItem(ids, i);
+      if (outcomes)
+         id = cJSON_GetObjectItemCaseSensitive(id, "id");
+      if (i == 0)
+         assert(cJSON_IsNumber(id) && id->valuedouble == 42);
+      else
+         assert(cJSON_IsString(id) && !strcmp(cJSON_GetStringValue(id), expected[i]));
+   }
    cJSON_Delete(request);
-   *reply = strdup("{\"status\":\"ok\",\"retrieval_event_id\":\"exact-event\"}");
+   *reply = strdup("{\"status\":\"ok\",\"retrieval_event_id\":\"exact-event\",\"written\":3}");
    return 200;
 }
 static void test_exact_evidence_transport(void)
@@ -917,6 +938,10 @@ static void test_exact_evidence_transport(void)
    assert(kb_client_evidence_emit_retrieval_event_ex("turn", "Recall", "fp", ids, 3, event_id,
                                                      sizeof(event_id)) == 0);
    assert(!strcmp(event_id, "exact-event"));
+   assert(kb_client_ranker_emit_event(ids, 3, "fp", event_id, sizeof(event_id)) == 0);
+   assert(!strcmp(event_id, "exact-event"));
+   assert(kb_client_record_retrieval_outcome("memory", event_id, ids, 3, "accepted") == 0);
+   assert(kb_client_record_retrieval_outcome("ranker", event_id, ids, 3, "accepted") == 0);
    mock_agent_http_reset();
 }
 

@@ -1,4 +1,4 @@
-#include "json_fluent.h"
+#include "json_int64.h"
 /* db2/fidelity.c: answer-level fidelity reports + per-chunk attributions
  * (auditable-correctness P3 storage substrate). These are NON-SCORED artifact
  * kinds, structurally invisible to Go memory demotion scoring (which reads only

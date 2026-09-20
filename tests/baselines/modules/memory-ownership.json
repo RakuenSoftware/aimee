@@ -1988,7 +1988,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "4596a682cafc9776e97827edceae612699d7a7e93804a46f02280892471919bb"
+      "sha256": "1c3127ec7aea1eb08a55c51a2965c342014934570beea20bdadb28d5c10fa588"
     },
     "src/modules/kb_client/kb_client_memory_audit.c": {
       "disposition": "kb-client",
@@ -2380,7 +2380,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "590493e353e04bae82fe93e94d7b381ccc4181144ab2dd68ca99d79af8bb3c7b"
+      "sha256": "fa77b0a16432618d2235b06cde30299b7b4725af0c75e60be9c953bb208b0619"
     },
     "src/tests/test_kb_memory_facts_connection.c": {
       "disposition": "host-fixture",

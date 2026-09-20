@@ -1,4 +1,5 @@
-#include "json_fluent.h"
+#include "json_int64.h"
+#include "json_wire.h"
 /* kb_client_memory.c: kb_client wrappers for the memory.* RPC family
  * (find_facts, list, get, insert, briefing, context_block, ask,
  * entity_profile, entity_edges, search_graph, get_episode).  Split
@@ -245,17 +246,13 @@ int64_t kbc_memory_response_id(const cJSON *object)
       int64_t id = 0;
       return kbc_memory_activation_integer(raw, &end, &id) && end && !*end ? id : 0;
    }
-   const cJSON *id = cJSON_GetObjectItemCaseSensitive(object, "id");
-   return cJSON_IsNumber(id) && isfinite(id->valuedouble) && id->valuedouble > 0 &&
-                  id->valuedouble <= 9007199254740991.0 && floor(id->valuedouble) == id->valuedouble
-              ? (int64_t)id->valuedouble
-              : 0;
+   int64_t id = 0;
+   return jo_read_i64_exact(cJSON_GetObjectItemCaseSensitive(object, "id"), &id) && id > 0 ? id : 0;
 }
 
 void kbc_memory_row_from_json(cJSON *f, memory_t *m)
 {
    memset(m, 0, sizeof(*m));
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(f, "id");
    cJSON *tier_j = cJSON_GetObjectItemCaseSensitive(f, "tier");
    cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(f, "kind");
    cJSON *key_j = cJSON_GetObjectItemCaseSensitive(f, "key");
@@ -268,8 +265,7 @@ void kbc_memory_row_from_json(cJSON *f, memory_t *m)
    cJSON *created_j = cJSON_GetObjectItemCaseSensitive(f, "created_at");
    cJSON *updated_j = cJSON_GetObjectItemCaseSensitive(f, "updated_at");
    cJSON *src_j = cJSON_GetObjectItemCaseSensitive(f, "source_session");
-   if (cJSON_IsNumber(id_j))
-      m->id = (int64_t)id_j->valuedouble;
+   m->id = kbc_memory_response_id(f);
    if (cJSON_IsString(tier_j))
       snprintf(m->tier, sizeof(m->tier), "%s", tier_j->valuestring);
    if (cJSON_IsString(kind_j))
@@ -521,7 +517,7 @@ int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
 
    cJSON *req = cJSON_CreateObject();
    kb_client_memory_scope_context_apply(req);
-   cJSON_AddNumberToObject(req, "id", (double)id);
+   cJSON_AddItemToObject(req, "id", jo_i64_value_exact(id));
    /* Only sent when asked. aimee-kb emits as_of/valid_at exactly when it
     * receives a non-empty as_of, so an empty one here would be indistinguishable
     * from not asking -- and this omission is what left `memory get --as-of`
@@ -532,7 +528,7 @@ int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
    if (!json)
       return -1;
 
-   cJSON *resp = cJSON_Parse(json);
+   cJSON *resp = json_wire_parse_exact_integers(json);
    free(json);
    if (!resp)
       return -1;
@@ -576,7 +572,7 @@ int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_
       return rc;
    kbc_memory_row_from_json(mem_j, out);
    cJSON_Delete(mem_j);
-   return 0;
+   return out->id > 0 ? 0 : -1;
 }
 
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
@@ -644,7 +640,7 @@ int kb_client_record_retrieval_outcome(const char *surface, const char *event_id
    for (int i = 0; rows && i < n; i++)
    {
       cJSON *row = cJSON_CreateObject();
-      cJSON_AddNumberToObject(row, "id", (double)ids[i]);
+      cJSON_AddItemToObject(row, "id", jo_i64_value_exact(ids[i]));
       cJSON_AddStringToObject(row, "verdict", verdict);
       cJSON_AddItemToArray(rows, row);
    }
@@ -673,7 +669,7 @@ int kb_client_ranker_emit_event(const int64_t *doc_ids, int n, const char *query
       cJSON_AddStringToObject(req, "query_fingerprint", query_fingerprint);
    cJSON *arr = cJSON_AddArrayToObject(req, "doc_ids");
    for (int i = 0; arr && i < n; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateNumber((double)doc_ids[i]));
+      cJSON_AddItemToArray(arr, jo_i64_value_exact(doc_ids[i]));
    char *json = kb_v1_action_request("ranker.emit_event", req);
    if (!json)
       return -1;

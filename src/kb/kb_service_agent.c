@@ -1,4 +1,4 @@
-#include "json_fluent.h"
+#include "json_int64.h"
 /* kb_service_agent.c: aimee-kb dispatch handlers for the rules,
  * collab_rules, agent, maintenance, decision_log, and anti_pattern
  * RPC families.  Split out of kb_service.c so the file stays under
