@@ -438,7 +438,7 @@ class Gate:
                     replay.get('mutation_receipt', {}).get('commit_id') == receipt['commit_id']) or
                    (code == 409 and replay.get('reason') == 'idempotent_result_unavailable'))
         self.check('shared restarted correction never duplicates result',
-                   self.sql(f"SELECT count(*) FROM memories WHERE key='{self.prefix}-journal'") == '2')
+                   self.sql(f"SELECT count(*) FROM memories WHERE key='{self.prefix}-journal' OR key LIKE '{self.prefix}-journal#v%'") == '2')
         self.sql(f"UPDATE memories SET lifecycle_state='retired' WHERE id={journal_id}")
         code, unavailable = self.call('supersede', correction)
         self.check('shared HTTP retry refuses retired result without cached content', code == 409 and
