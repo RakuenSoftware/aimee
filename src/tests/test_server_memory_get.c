@@ -99,6 +99,13 @@ const char *server_request_account(void)
    return request_account;
 }
 
+static const char *request_principal = "";
+static cJSON *observed_private_context;
+const char *request_context_principal(void)
+{
+   return request_principal;
+}
+
 /* Go validates and shapes these commands. This native test only verifies the
  * explicit user/KB routing boundary and propagation of complete module replies. */
 cJSON *server_invoke_module_operation(const char *method, const char *operation,
@@ -733,6 +740,67 @@ static void test_personal_recall_owner_envelope(void)
    assert(server_user_memory_recall_json("private query", 8192, 1) == NULL);
 }
 
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
+{
+   assert(timeout_ms == 60000);
+   cJSON_Delete(observed_private_context);
+   observed_private_context = cJSON_Duplicate(context, 1);
+   const char *operation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation"));
+   *result =
+       server_invoke_module_operation(method, operation, args, "user memory module unavailable");
+   return *result ? 1 : -1;
+}
+
+static void test_private_verified_context(void)
+{
+   cJSON *request = cJSON_Parse("{\"key\":\"actor\",\"content\":\"content\",\"authority\":\"user\","
+                                "\"principal\":\"forged\",\"operation\":\"forged\"}");
+   private_command_operation = "user-store";
+   private_command_reply = "{\"status\":\"ok\",\"store\":\"user\",\"id\":42}";
+   for (int authenticated = 0; authenticated < 2; ++authenticated)
+      for (int user = 0; user < 2; ++user)
+      {
+         request_account = authenticated ? "user" : "";
+         request_principal = authenticated ? "verified-device" : "";
+         cJSON *reply =
+             memory_store_command(request, user ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL);
+         assert(reply);
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(observed_private_context,
+                                                              "authenticated")) == authenticated);
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+                    observed_private_context, "user_authority")) == (authenticated && user));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            observed_private_context, "principal")),
+                        authenticated ? "user" : ""));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            observed_private_context, "transport_identity")),
+                        request_principal));
+         cJSON_Delete(reply);
+      }
+   request_account = "user";
+   request_principal = "verified-device";
+   private_command_operation = "user-mcp-supersede";
+   private_command_reply =
+       "{\"status\":\"ok\",\"store\":\"user\",\"records\":[{\"id\":9007199254740993}]}";
+   cJSON *reply = memory_user_mcp_supersede_command(request);
+   assert(
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(observed_private_context, "authenticated")));
+   assert(
+       cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(observed_private_context, "user_authority")));
+   char *wire = cJSON_PrintUnformatted(reply);
+   assert(wire && strstr(wire, "9007199254740993"));
+   free(wire);
+   cJSON_Delete(reply);
+   cJSON_Delete(observed_private_context);
+   observed_private_context = NULL;
+   private_command_operation = private_command_reply = NULL;
+   request_account = request_principal = "";
+   cJSON_Delete(request);
+}
+
 int main(void)
 {
    test_user_namespace();
@@ -792,5 +860,6 @@ int main(void)
    test_personal_recall_owner_envelope();
    test_private_command_envelopes();
    test_shared_supersede_authority();
+   test_private_verified_context();
    return 0;
 }

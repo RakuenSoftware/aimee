@@ -34,6 +34,11 @@ cJSON *memory_store_command(cJSON *args, memory_authority_t authority)
    (void)authority;
    abort();
 }
+cJSON *memory_user_mcp_supersede_command(const cJSON *args)
+{
+   (void)args;
+   abort();
+}
 cJSON *memory_delete_command(cJSON *args, const char *account)
 {
    (void)args;

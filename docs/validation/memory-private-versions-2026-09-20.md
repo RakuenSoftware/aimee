@@ -70,6 +70,40 @@ and Linux/macOS semantic-context source validation pass on the corrected commit.
 The entire CI workflow was still running when this evidence was recorded; this
 fresh deployment receipt does not claim completion of that workflow.
 
+## Enrolled restart readiness
+
+CI on `f5c3a6f2c2` failed on the first MCP proposal retry after KB restart,
+although the independent fresh deployment passed. The review gate waited for
+KB container health but omitted the enrolled Server's reconnect readiness used
+by the other placement restart tests. Harness `1d37efd79d` adds that end-to-end
+read check, requires the exact same target version, and retains the strict
+proposal/replay assertions. Content-free failure categories aid diagnosis if
+the retry still fails; mutations are not retried until a passing result appears.
+
+A second independently created fresh T2 environment passed **348/348 checks**:
+87 private, 208 shared, 29 correction-review, six identity and 18 topology.
+Its [receipt](memory-shared-reliability-2026-09-20/fresh-t2-1d37efd79d.json)
+uses the same corrected application/PostgreSQL/embedder images above. Raw evidence
+is retained under `/opt/aimee-memory-proposals-evidence/t2-1d37efd79d` in owned
+CT 9498. The disposable containers are stopped; volumes and evidence remain.
+
+## Private caller-context transport
+
+The private host-only command adapter previously dropped the authenticated
+request context before reaching Go. It now carries the verified principal,
+transport identity and user-authority flag separately from command arguments,
+using the existing command wire format. Internal commands remain absent from
+public discovery and public dispatch; plugin calls cannot use this route.
+HTTP store/supersede/retire and MCP mutations use the same private adapter.
+Authenticated MCP activity retains model authority, and body-supplied actor,
+authority and operation fields cannot replace host-selected context or routing.
+
+Native module-command, HTTP memory adapter and MCP adapter tests pass, including
+context isolation and exact large integer tokens. This prepares private mutation
+admission; it does not itself persist private authorship or supply review parity.
+The 348-check receipt predates this transport addition; a new image must validate
+its shipping HTTP/MCP integration. The C event bus implementation is unchanged.
+
 ## Remaining scope
 
 Exact-version inspection is labelled historical and does not feed ordinary

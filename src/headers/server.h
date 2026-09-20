@@ -455,6 +455,7 @@ int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
  * (memory.h). handle_memory_store derives it from the connection's attestation. */
 char *server_user_memory_recall_json(const char *hint, int limit_tokens, int session_start);
 cJSON *memory_store_command(const cJSON *req, memory_authority_t authority);
+cJSON *memory_user_mcp_supersede_command(const cJSON *req);
 cJSON *memory_list_command(const cJSON *req);
 cJSON *memory_get_command(cJSON *req);
 /* Takes the request's authenticated ACCOUNT because only a person's delete

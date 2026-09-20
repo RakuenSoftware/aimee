@@ -8,6 +8,7 @@
 #include "json_fluent.h"
 #include "log.h"
 #include "integrity.h"
+#include "request_context.h"
 #include <aimee/workspace/workspace.h>
 #include <math.h>
 #include <errno.h>
@@ -175,12 +176,54 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
 
 /* The runtime envelope quotes the owner's JSON so cJSON never rewrites its
  * integer tokens. Only the Go owner shapes private command results. */
-static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
+static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *req,
+                                           memory_authority_t authority)
 {
-   cJSON *transport = server_invoke_module_operation("memory.runtime", operation, req,
-                                                     "user memory module unavailable");
+   const char *account = server_request_account();
+   const char *principal = request_context_principal();
+   if (!account)
+      account = "";
+   cJSON *context = cJSON_CreateObject();
+   if (!context || !cJSON_AddBoolToObject(context, "authenticated", account[0] || principal[0]) ||
+       !cJSON_AddBoolToObject(context, "user_authority",
+                              account[0] && authority == MEMORY_AUTHORITY_USER) ||
+       !cJSON_AddStringToObject(context, "principal", account[0] ? account : principal) ||
+       !cJSON_AddStringToObject(context, "transport_identity", principal))
+   {
+      cJSON_Delete(context);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                    "user memory caller context unavailable", NULL);
+   }
+   cJSON *request = req ? cJSON_Duplicate(req, 1) : cJSON_CreateObject();
+   cJSON *transport = NULL;
+   int dispatched = -1;
+   if (cJSON_IsObject(request))
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "operation");
+      if (cJSON_AddStringToObject(request, "operation", operation))
+         dispatched = aimee_module_commands_dispatch_internal_context_timeout(
+             "memory.runtime", request, context, 60000, &transport);
+   }
+   cJSON_Delete(request);
+   cJSON_Delete(context);
+   if (dispatched <= 0)
+   {
+      cJSON_Delete(transport);
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "user memory module unavailable", NULL);
+   }
    if (transport && !strcmp(jo_cstr(transport, "status"), "error"))
+   {
+      char *kind = strdup(jo_cstr(transport, "kind"));
+      if (!kind)
+      {
+         cJSON_Delete(transport);
+         return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "user memory module unavailable",
+                                       NULL);
+      }
+      server_error_kind_apply(transport, kind);
+      free(kind);
       return transport;
+   }
    const char *raw = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(transport, "json"));
    cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)
@@ -201,6 +244,16 @@ static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
    return reply ? reply
                 : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
                                          "user memory owner unavailable or invalid response", NULL);
+}
+
+static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
+{
+   return user_memory_owner_command_as(operation, req, MEMORY_AUTHORITY_MODEL);
+}
+
+cJSON *memory_user_mcp_supersede_command(const cJSON *req)
+{
+   return user_memory_owner_command_as("user-mcp-supersede", req, MEMORY_AUTHORITY_MODEL);
 }
 
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -229,15 +282,14 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
    if (selection)
       return kb_memory_store_command(req, authority);
 
-   return user_memory_owner_command("user-store", req);
+   return user_memory_owner_command_as("user-store", req, authority);
 }
 
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   /* The module's server placement is per-appliance-user. The legacy authority
-    * argument remains in the command ABI, but cannot widen the module's user
-    * scope and is not persisted as KB provenance. */
+   /* Carry verified caller identity separately from the request body. Go owns
+    * mutation admission; the host only identifies this authenticated channel. */
    return send_and_free(
        conn, memory_store_command(req, server_account_memory_authority(server_request_account())));
 }
@@ -339,7 +391,9 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (selection < 0)
       return send_and_free(conn, memory_bad_store());
    if (!selection)
-      return send_and_free(conn, user_memory_owner_command("user-supersede", req));
+      return send_and_free(conn, user_memory_owner_command_as(
+                                     "user-supersede", req,
+                                     server_account_memory_authority(server_request_account())));
 
    return send_and_free(
        conn, kb_memory_owner_command("memory.supersede", req,
@@ -362,7 +416,8 @@ cJSON *memory_delete_command(cJSON *req, const char *account)
       return memory_bad_store();
    if (selection)
       return kb_memory_delete_command(req, account);
-   return user_memory_owner_command("user-delete", req);
+   return user_memory_owner_command_as("user-delete", req,
+                                       server_account_memory_authority(account));
 }
 
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

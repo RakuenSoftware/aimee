@@ -390,14 +390,7 @@ cJSON *tool_memory_mutate(cJSON *args)
          return json_result_content(memory_delete_command(args, ""));
       if (strcmp(verb, "update") != 0 && strcmp(verb, "supersede") != 0)
          return text_content("error: this mutation requires store=kb");
-      cJSON *reply = server_invoke_module_operation("memory.runtime", "user-mcp-supersede", args,
-                                                    "user memory unavailable");
-      const char *raw = jo_str(reply, "json", NULL);
-      if (!raw)
-         return json_result_content(reply);
-      cJSON *content = text_content(raw);
-      cJSON_Delete(reply);
-      return content;
+      return json_result_content(memory_user_mcp_supersede_command(args));
    }
 
    const char *method = NULL;

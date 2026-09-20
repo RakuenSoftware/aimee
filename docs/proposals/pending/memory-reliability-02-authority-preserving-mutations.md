@@ -202,12 +202,18 @@ provisioning preserves migration-owned permissions on subsequent restarts.
 
 This is exact-version history, not valid-time or belief-time reconstruction;
 `at_version` cannot be combined with `read_policy` or `as_of`. Personal
-idempotency keys, trusted author/reviewer admission and proposal parity remain
+idempotency keys, durable trusted author/reviewer admission and proposal parity remain
 open. The snapshot mechanism preserves available metadata but does not infer
 human authorship from the placement or request body.
 
 [Fresh validation](../../validation/memory-private-versions-2026-09-20.md) records
 346 passing topology/placement/review checks with the corrected store image.
+
+The private adapter now forwards verified host caller context separately from
+request arguments, preserving model authority for MCP calls. This is the ingress
+prerequisite for private admission; persistence, authority guards and proposal
+parity remain open. Native transport tests cover forged actor/operation fields
+and authenticated model calls without promoting them to user authorship.
 
 ## Existing integration points
 
