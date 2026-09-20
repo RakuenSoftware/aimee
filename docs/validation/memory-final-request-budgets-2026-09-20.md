@@ -85,6 +85,11 @@ not evidence of MR-18 performance acceptance. Go handler execution is only about
 millisecond overhead. The extra bus call and surrounding scheduling need further
 measurement before broad default hard-budget enforcement.
 
+The subsequent [Go consumer latency follow-up](memory-admission-latency-2026-09-20.md)
+reduces measured paired admission overhead while explicitly recording increased
+idle CPU cost. Its fresh 1,093-check deployment and matched timing samples are
+separate from the initial measurements above.
+
 This is not full MR-03 acceptance. Provider-bound token counters, inherited
 operator/task limits, protected optional repacking, canonical source versions,
 release evidence and the full transport matrix remain open. The header restricts

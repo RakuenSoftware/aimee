@@ -165,6 +165,15 @@ Server composition. A paired fixture benchmark records admission overhead; it
 does not certify the MR-18 P95 gate. Provider token counts,
 inherited limits, source versions and durable release/dispatch remain open.
 
+[Admission latency validation](../../validation/memory-admission-latency-2026-09-20.md)
+records **1,093/1,093** fresh checks on `f110e9b873` and real C-host/Go-process
+conformance. Only the Go economizer consumer's scheduled idle ceiling changes
+from 10ms to 1ms; the C bus is unchanged. Paired median admission overhead falls
+from 7.67 to 2.19ms for OpenAI format and 9.83 to 2.70ms for Anthropic format.
+Idle CPU rises from 0.30% to 1.60% of one core. These are bounded fixture results,
+not full MR-18 certification. The independently exported process now builds and
+uses the same owner-defined polling setting as the bundled process.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from
