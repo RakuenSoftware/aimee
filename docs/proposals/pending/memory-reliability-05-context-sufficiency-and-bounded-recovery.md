@@ -13,6 +13,9 @@ results report unknown sufficiency until versioned requirements are evaluated;
 an unavailable channel is distinct from a successful empty retrieval. This removes
 the previous nonempty-to-complete shortcut but does not implement requirement
 planning, final-host packing feedback, source-chain coherence or bounded recovery.
+The benchmark result schema and temporal fixture validator accept `UNKNOWN`;
+report buckets keep unassessed coverage separate from assessed missing evidence
+for both correct and incorrect answers.
 
 A nonempty result is not necessarily sufficient. A temporal question may require an old state and its correction; a comparison needs evidence for both sides; a current-state claim may require the latest applicable record. A maximum confidence value across retrieved records does not measure support for the combined answer.
 

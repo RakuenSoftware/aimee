@@ -133,7 +133,7 @@ RETRIEVAL_ASSESSMENT_FIELDS: dict[str, Any] = {
     "channel_metrics": dict,
 }
 
-_VALID_CONTEXT_SUFFICIENCY = {"COMPLETE", "PARTIAL", "INSUFFICIENT"}
+_VALID_CONTEXT_SUFFICIENCY = {"COMPLETE", "PARTIAL", "INSUFFICIENT", "UNKNOWN"}
 
 _VALID_ENVIRONMENTS = {"container", "native"}
 _VALID_JUDGE_PROFILES = {"open70b", "frontier", "small"}
@@ -202,14 +202,19 @@ def validate_retrieval_assessment(row: dict[str, Any]) -> None:
 
 
 def retrieval_outcome_bucket(row: dict[str, Any]) -> str:
-    """Return one of the four sufficiency x answer-correctness report buckets."""
+    """Keep unassessed coverage separate from assessed missing evidence."""
     validate_retrieval_assessment(row)
     _ensure("context_sufficiency" in row, "missing retrieval assessment")
     _ensure(row.get("verdict") in {"CORRECT", "WRONG"}, "invalid verdict")
-    sufficient = row["context_sufficiency"] == "COMPLETE"
+    coverage = {
+        "COMPLETE": "complete",
+        "PARTIAL": "partial_or_insufficient",
+        "INSUFFICIENT": "partial_or_insufficient",
+        "UNKNOWN": "unknown",
+    }[row["context_sufficiency"]]
     correct = row["verdict"] == "CORRECT"
     return (
-        f"{'complete' if sufficient else 'partial_or_insufficient'}_context__"
+        f"{coverage}_context__"
         f"{'correct' if correct else 'wrong'}_answer"
     )
 
