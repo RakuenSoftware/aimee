@@ -217,6 +217,26 @@ func TestPersonalMutationRetry(t *testing.T) {
 	refusal(call(model, changed), MutationIdempotencyConflict)
 	exec(`DELETE FROM user_memories WHERE id=$1`, protected.ID)
 	refusal(call(model, proposed), MutationReplayUnavailable)
+	// Approval changes the proposal outcome, but never repeats the keyed draft.
+	approvedParent := create("approved-retry-proposal")
+	approvedRequest := proposed
+	approvedRequest.ID = approvedParent.ID
+	approvedRequest.ExpectedVersion = one(call(nil, DataRequest{Operation: "get", ID: approvedParent.ID, IncludeVersion: true})).Version
+	approvedRequest.IdempotencyKey = "private-approved-proposal"
+	approvedDraft := call(model, approvedRequest).Proposal
+	if approvedDraft == nil {
+		t.Fatal("missing approved retry draft")
+	}
+	approval := correctionReviewRequest{ProposalID: approvedDraft.ID, Digest: approvedDraft.Digest, Expected: approvedDraft.Target, Action: "approve"}
+	call(human, DataRequest{Operation: "correction-review", CorrectionReview: &approval})
+	approvedGeneration := scalar(`SELECT generation FROM user_memory_collection_generation`)
+	approvedReplay := call(model, approvedRequest)
+	if approvedReplay.Proposal == nil || !approvedReplay.Proposal.Replayed || approvedReplay.Proposal.State != "approved" || approvedReplay.Proposal.Result == nil || approvedReplay.Proposal.Draft != nil || scalar(`SELECT generation FROM user_memory_collection_generation`) != approvedGeneration {
+		t.Fatal("approved draft retry lost decision or repeated effect", approvedReplay)
+	}
+	call(human, DataRequest{Operation: "delete", Authority: AuthorityUser, ID: approvedParent.ID})
+	refusal(call(model, approvedRequest), MutationReplayUnavailable)
+	exec(`DELETE FROM user_memories WHERE id=$1`, approvedParent.ID)
 	// A failed receipt insert cannot leave even a proposal committed on its own.
 	protected = create("retry-proposal-rollback")
 	proposed.ID = protected.ID

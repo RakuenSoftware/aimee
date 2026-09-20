@@ -99,6 +99,9 @@ shared review, semantic and exploratory gates continue to pass. This adds privat
 review decisions. Private conditional-correction keys are now implemented as
 described in the [retry validation](../../validation/memory-private-retries-2026-09-20.md);
 create/delete keys and the remaining acceptance clauses are still open.
+Its [fresh retry evidence](../../validation/memory-private-retries-2026-09-20.md)
+records **638/638** checks on `88ebfc8460` (429 T2, 209 T3), including
+33 additional private retry checks in each topology.
 
 ## Supporting indexed-lookup repair
 
