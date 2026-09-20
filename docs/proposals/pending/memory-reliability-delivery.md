@@ -53,6 +53,11 @@ forwarding preserves the object; its response describes the applied temporal
 policy without claiming a final release receipt. The host's existing C forwarding
 adapter only copies the new JSON field; all interpretation remains in Go and the
 C bus is unchanged. Restricted-role replay covers both modes and exact endpoints.
+PRs [#2988](https://github.com/RakuenSoftware/aimee/pull/2988) and
+[#2989](https://github.com/RakuenSoftware/aimee/pull/2989) carry these slices.
+[Fresh `.253` validation](../../validation/memory-read-policy-2026-09-20.md)
+records 224 passing topology/placement/identity verdicts, including the new HTTP
+contract. These results do not close the remaining MR-01 acceptance gates.
 
 ## Supporting indexed-lookup repair
 
