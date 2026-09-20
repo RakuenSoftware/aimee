@@ -171,9 +171,27 @@ with tempfile.TemporaryDirectory() as directory:
             dict(proposal_id=pid, project='other-' + scope)).get('proposals') == [])
         command('docker', 'restart', kb.application)
         kb.start()
+        # Container health checks KB locally. The enrolled Server also needs
+        # to reconnect to the restarted owner before exercising a mutation.
+        # Use the same end-to-end readiness check as the placement restart
+        # gates; never retry a conflicting mutation until it appears to pass.
+        restored = gate.good('enrolled Server reaches restarted memory owner', gate.wait(
+            'get', dict(store='kb', id=old_id, project=scope, include_version=True)))['memory']
+        check('Server observes the exact target version after KB restart', restored.get('version') == version)
         replay = gate.mcp_document('MCP draft retry after KB restart', 'mutate', correction)
-        check('draft retry survives owner restart', replay.get('proposal', {}).get('proposal_id') == pid and
+        retry_ok = (replay.get('proposal', {}).get('proposal_id') == pid and
             replay['proposal'].get('replayed') is True)
+        if not retry_ok:
+            # Fixed categories only: do not expose draft text, IDs or tokens.
+            print('Review retry diagnostic: ' + json.dumps(dict(
+                proposal_present=isinstance(replay.get('proposal'), dict),
+                same_proposal=replay.get('proposal', {}).get('proposal_id') == pid,
+                replayed=replay.get('proposal', {}).get('replayed') is True,
+                conflict=replay.get('kind') == 'conflict',
+                forbidden=replay.get('kind') == 'forbidden',
+                unavailable=replay.get('kind') in ('unavailable', 'upstream_error', 'capability_absent'),
+                review_required=replay.get('kind') == 'review_required')), flush=True)
+        check('draft retry survives owner restart', retry_ok)
         check('restart and derived primary scope preserve target version',
             action('get', dict(id=old_id, include_version=True))['memory']['version'] == version)
         review = dict(proposal_id=pid, payload_digest=digest, expected_version=version, action='approve')
