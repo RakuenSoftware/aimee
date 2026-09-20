@@ -1482,7 +1482,7 @@ if [ "$DB1_SESSIONS_AVAILABLE" -eq 1 ]; then
     check_output "private memory user correction through Go" 'private corrected value' echo "$RESP"
     RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"mutate","arguments":{"store":"user","verb":"store","key":"integ-private-model","content":"private model value"}}}') || true
     PRIVATE_MODEL_ID=$(printf '%s' "$RESP" | python3 -c "import sys,json; print(json.loads(json.load(sys.stdin)['result']['content'][0]['text'])['id'])" 2>/dev/null) || true
-    check_output "private memory MCP creates a model record" '^[0-9][0-9]*$' echo "${PRIVATE_MODEL_ID:-missing}"
+    check_output "private memory MCP creates a model record" 'true' python3 -c 'import sys; value=sys.argv[1]; print("true" if value.isdigit() and int(value)>0 else "false")' "${PRIVATE_MODEL_ID:-missing}"
     RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"store\":\"user\",\"verb\":\"update\",\"id\":\"${PRIVATE_MODEL_ID:-missing}\",\"content\":\"private corrected model value\"}}}") || true
     check_output "private memory MCP corrects model content through Go" 'private corrected model value' echo "$RESP"
     RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"user\",\"id\":\"${PRIVATE_MODEL_ID:-missing}\"}") || true
