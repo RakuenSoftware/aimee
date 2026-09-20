@@ -4,11 +4,14 @@
 #include "request_context.h"
 #include "modules/economizer/economizer_module_client.h"
 
-/* Lean clients without HTTP context retain their existing unbounded contract.
- * A present limit must never bypass admission because the module is absent. */
+/* Lean clients may have no HTTP context. Deployment limits still apply, and a
+ * present limit must never bypass admission because the module is absent. */
 extern const request_context_t *request_context_get(void) __attribute__((weak));
 extern econ_request_budget_result_t econ_module_request_budget(unsigned, const void *, size_t,
                                                                const char *) __attribute__((weak));
+extern econ_request_budget_result_t
+econ_module_request_budget_with_policy(unsigned, const void *, size_t, const char *, const char *)
+    __attribute__((weak));
 static _Thread_local const char *last_error;
 const char *wire_fence_last_error(void)
 {
@@ -22,7 +25,8 @@ int wire_fence_error_http_status(const char *error)
       return 413;
    if (!strcmp(error, "request_budget_invalid") || !strcmp(error, "token_count_unavailable"))
       return 400;
-   if (!strcmp(error, "request_budget_unavailable"))
+   if (!strcmp(error, "request_budget_unavailable") ||
+       !strcmp(error, "request_budget_policy_invalid"))
       return 503;
    return 502;
 }
@@ -96,20 +100,32 @@ int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pri
    selected->data = NULL;
    selected->len = 0;
    const request_context_t *context = request_context_get ? request_context_get() : NULL;
-   if (context && context->request_budget_present)
+   /* Deployment-owned metadata is forwarded unchanged. Go owns validation and
+    * intersection with the caller's limit. Empty/unset means no operator cap;
+    * literal zero is expressed in the versioned JSON object. */
+   const char *policy = getenv("AIMEE_PROVIDER_CONTEXT_LIMITS");
+   if (policy && !*policy)
+      policy = NULL;
+   if (policy || (context && context->request_budget_present))
    {
+      const char *limits =
+          context && context->request_budget_present > 0 ? context->request_budget_limits : NULL;
       econ_request_budget_result_t result =
-          context->request_budget_present < 0 ? ECON_REQUEST_BUDGET_INVALID
+          context && context->request_budget_present < 0 ? ECON_REQUEST_BUDGET_INVALID
+          : policy                                       ? (econ_module_request_budget_with_policy
+                                                                ? econ_module_request_budget_with_policy((unsigned)route, pristine,
+                                                                                                         pristine_len, limits, policy)
+                                                                : ECON_REQUEST_BUDGET_UNAVAILABLE)
           : econ_module_request_budget
-              ? econ_module_request_budget((unsigned)route, pristine, pristine_len,
-                                           context->request_budget_limits)
+              ? econ_module_request_budget((unsigned)route, pristine, pristine_len, limits)
               : ECON_REQUEST_BUDGET_UNAVAILABLE;
       if (result != ECON_REQUEST_BUDGET_ADMITTED)
       {
-         last_error = result == ECON_REQUEST_BUDGET_INVALID    ? "request_budget_invalid"
-                      : result == ECON_REQUEST_BUDGET_OVERFLOW ? "request_budget_exceeded"
-                      : result == ECON_REQUEST_BUDGET_TOKENS_UNAVAILABLE
-                          ? "token_count_unavailable"
+         last_error = result == ECON_REQUEST_BUDGET_INVALID              ? "request_budget_invalid"
+                      : result == ECON_REQUEST_BUDGET_OVERFLOW           ? "request_budget_exceeded"
+                      : result == ECON_REQUEST_BUDGET_TOKENS_UNAVAILABLE ? "token_count_unavailable"
+                      : result == ECON_REQUEST_BUDGET_POLICY_INVALID
+                          ? "request_budget_policy_invalid"
                           : "request_budget_unavailable";
          return -1;
       }

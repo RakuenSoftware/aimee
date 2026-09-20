@@ -80,6 +80,14 @@ def inside(output, budget_benchmark=False):
         if not passed:
             raise RuntimeError(name)
 
+    operator_bytes = None
+    if configured := os.environ.get('AIMEE_PROVIDER_CONTEXT_LIMITS'):
+        operator_policy = json.loads(configured)
+        operator_bytes = operator_policy.get('max_request_bytes')
+        check('Fixture has a bounded deployment-owned provider byte ceiling',
+              operator_policy.get('schema_version') == 1 and
+              type(operator_bytes) is int and 16384 <= operator_bytes <= 65536)
+
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
@@ -254,6 +262,27 @@ def inside(output, budget_benchmark=False):
                           not any(e.get('type') in ('message_stop', 'response.completed')
                                   for e in refused.get('events', [])))
                     check(name + ' streaming zero cap sends no provider request', len(captures) == before_budget)
+                if operator_bytes is not None:
+                    for streaming in ([False, True] if frontend in ('chat', 'messages') else [body['stream']]):
+                        oversized = json.loads(json.dumps(body))
+                        oversized['stream'] = streaming
+                        turns = oversized['input'] if frontend.startswith('responses') else oversized['messages']
+                        turns[-1]['content'] += ' OPERATOR_OVERFLOW ' + 'x' * operator_bytes
+                        for label, limits in (
+                            ('absent caller cap', None),
+                            ('inherited caller cap', json.dumps(dict(schema_version=1))),
+                            ('raised caller cap', json.dumps(dict(schema_version=1, max_request_bytes=operator_bytes*4))),
+                        ):
+                            before_operator = len(captures)
+                            refused_status, refused = api(path, oversized, limits)
+                            scope = name + (' streaming' if streaming else ' buffered') + ' ' + label
+                            check(scope + ' cannot bypass deployment ceiling',
+                                  refused_status == (200 if streaming else 413) and
+                                  'request_budget_exceeded' in list(strings(refused)) and
+                                  not any('MEMORY_BOUNDARY_OK' in text for text in strings(refused)) and
+                                  not any(e.get('type') in ('message_stop', 'response.completed')
+                                          for e in refused.get('events', [])))
+                            check(scope + ' sends no provider request', len(captures) == before_operator)
                 if budget_benchmark and frontend == 'chat':
                     plain_ms, capped_ms = [], []
                     # Alternate order to balance warming and temporal effects.

@@ -104,6 +104,30 @@ than a model name, so the pricing table stays with whoever owns it.
   not a runtime flag, because flipping one mid-conversation would strand reducer state
   that the caller is still persisting across turns.
 
+`AIMEE_PROVIDER_CONTEXT_LIMITS` supplies an optional deployment-owned final
+provider byte ceiling, for example
+`{"schema_version":1,"max_request_bytes":65536}`. The shipped Server/KB Compose
+configuration forwards this nonsecret value. Set it before starting the host;
+changes require recreating the container or restarting a native host with the
+new environment. Empty or unset means no deployment ceiling. A JSON byte cap of
+zero is literal zero.
+
+The host forwards this value unchanged to Go admission. Requests without
+`X-Aimee-Context-Limits` inherit it; a caller's explicit byte cap can only tighten
+it. With a deployment cap, `{"schema_version":1}` in the request header explicitly
+inherits it. Oversized requests fail with `request_budget_exceeded` and never
+reach the provider, including streaming and native host calls without HTTP
+context. Invalid deployment policy (including unsupported token caps/reserves)
+fails with `request_budget_policy_invalid` / HTTP 503. Invalid caller limits keep
+their HTTP 400 contract. Reduction settings cannot disable this admission.
+
+Stage 8 metadata version 2 carries independent caller/operator lengths followed
+by their opaque JSON values; an absent caller has length zero. The response
+commitment binds both policy layers to the final body length, digest and route.
+Version 1 caller-only metadata remains supported. Requests with neither policy
+layer avoid the admission RPC. Task-composition inheritance, exact provider token
+counting and protected repacking remain separate acceptance work.
+
 ## Surfaces
 
 There is no direct HTTP surface, MCP tool or CLI verb. The only in-process surface is the C client header

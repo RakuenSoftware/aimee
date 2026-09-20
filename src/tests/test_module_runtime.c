@@ -734,6 +734,32 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
          assert(response[8] == 32 && response[9] == 0 && response[10] == 0 && response[11] == 0);
          assert(memcmp(response + 12, commitment, sizeof(commitment)) == 0);
       }
+      /* Policy metadata v2: absent or more permissive caller limits cannot
+       * raise the operator cap. The response binds both independent layers. */
+      const char permissive[] = "{\"schema_version\":1,\"max_request_bytes\":999}";
+      for (unsigned caller = 0; caller <= 1; caller++)
+         for (unsigned size = 3; size <= 4; size++)
+         {
+            memset(budget, 0, sizeof(budget));
+            memcpy(budget, "BDGT\2\0\1\0", 8);
+            budget[8] = size;
+            assert(SHA256((const unsigned char *)"abc", 3, budget + 16));
+            unsigned caller_len = caller ? sizeof(permissive) - 1 : 0;
+            budget[48] = caller_len;
+            budget[52] = sizeof(limits) - 1;
+            memcpy(budget + 56, permissive, caller_len);
+            memcpy(budget + 56 + caller_len, limits, sizeof(limits) - 1);
+            unsigned length = 56 + caller_len + sizeof(limits) - 1;
+            uint8_t commitment[SHA256_DIGEST_LENGTH];
+            assert(SHA256(budget, length, commitment));
+            assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET,
+                                            AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET, 2030 + size, 0,
+                                            budget, length, response, sizeof(response),
+                                            &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+            assert(response_len == 44 && memcmp(response, "BDGT\1\0", 6) == 0);
+            assert(response[6] == (size == 3 ? 0 : 2) && response[7] == 0);
+            assert(memcmp(response + 12, commitment, sizeof(commitment)) == 0);
+         }
    }
    else if (strcmp(name, "postgres") == 0)
    {

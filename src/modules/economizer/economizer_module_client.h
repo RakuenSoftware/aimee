@@ -48,13 +48,17 @@ extern "C"
       ECON_REQUEST_BUDGET_INVALID = 1,
       ECON_REQUEST_BUDGET_OVERFLOW = 2,
       ECON_REQUEST_BUDGET_TOKENS_UNAVAILABLE = 3,
-      ECON_REQUEST_BUDGET_UNAVAILABLE = 4
+      ECON_REQUEST_BUDGET_UNAVAILABLE = 4,
+      ECON_REQUEST_BUDGET_POLICY_INVALID = 5
    } econ_request_budget_result_t;
 
    /* Hard-limit admission fails closed, independently of optional reduction.
     * Only length, digest, route and limits cross the bus; never prompt bytes. */
    econ_request_budget_result_t econ_module_request_budget(unsigned route, const void *body,
                                                            size_t body_len, const char *limits);
+   econ_request_budget_result_t
+   econ_module_request_budget_with_policy(unsigned route, const void *body, size_t body_len,
+                                          const char *limits, const char *policy);
 
 #define ECON_MODULE_JSON_MAX_INPUT  (16u * 1024u * 1024u)
 #define ECON_MODULE_TOOL_OUTPUT_MAX (2u * 1024u * 1024u)

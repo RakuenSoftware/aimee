@@ -10,9 +10,10 @@
 static request_context_t context;
 static econ_request_budget_result_t admission;
 static int admission_calls;
+static int have_context = 1;
 const request_context_t *request_context_get(void)
 {
-   return &context;
+   return have_context ? &context : NULL;
 }
 econ_request_budget_result_t econ_module_request_budget(unsigned route, const void *body,
                                                         size_t length, const char *limits)
@@ -24,16 +25,43 @@ econ_request_budget_result_t econ_module_request_budget(unsigned route, const vo
    return admission;
 }
 
+econ_request_budget_result_t econ_module_request_budget_with_policy(unsigned route,
+                                                                    const void *body, size_t length,
+                                                                    const char *limits,
+                                                                    const char *policy)
+{
+   assert(route >= 1 && route <= 3);
+   assert(length == 3 && memcmp(body, "abc", 3) == 0);
+   assert(strcmp(policy, "opaque operator policy") == 0);
+   assert(limits == NULL || strcmp(limits, "limits") == 0);
+   admission_calls++;
+   return admission;
+}
+
+static void operator_policy(const char *value)
+{
+#ifdef _WIN32
+   assert(_putenv_s("AIMEE_PROVIDER_CONTEXT_LIMITS", value ? value : "") == 0);
+#else
+   assert((value ? setenv("AIMEE_PROVIDER_CONTEXT_LIMITS", value, 1)
+                 : unsetenv("AIMEE_PROVIDER_CONTEXT_LIMITS")) == 0);
+#endif
+}
+
 static void test_hard_budget_refuses_without_selected_bytes(void)
 {
-   const char *errors[] = {NULL, "request_budget_invalid", "request_budget_exceeded",
-                           "token_count_unavailable", "request_budget_unavailable"};
-   const int statuses[] = {0, 400, 413, 400, 503};
+   const char *errors[] = {NULL,
+                           "request_budget_invalid",
+                           "request_budget_exceeded",
+                           "token_count_unavailable",
+                           "request_budget_unavailable",
+                           "request_budget_policy_invalid"};
+   const int statuses[] = {0, 400, 413, 400, 503, 503};
    context.request_budget_present = 1;
    strcpy(context.request_budget_limits, "limits");
    for (int gated = 0; gated <= 1; gated++)
       for (unsigned route = 1; route <= 3; route++)
-         for (int result = 0; result <= 4; result++)
+         for (int result = 0; result <= 5; result++)
          {
             admission = (econ_request_budget_result_t)result;
             wire_fence_t *snapshot = NULL;
@@ -53,16 +81,40 @@ static void test_hard_budget_refuses_without_selected_bytes(void)
                assert(strcmp(wire_fence_error_type(wire_fence_last_error()), errors[result]) == 0);
             }
          }
-   assert(admission_calls == 30);
+   assert(admission_calls == 36);
    context.request_budget_present = -1;
    wire_fence_t *snapshot = NULL;
    wire_fence_bytes_t selected = {0};
    assert(wire_fence_select(0, WIRE_FENCE_OPENAI_CHAT, "abc", 3, &snapshot, &selected) == -1);
-   assert(admission_calls == 30);
+   assert(admission_calls == 36);
    assert(strcmp(wire_fence_last_error(), "request_budget_invalid") == 0);
    memset(&context, 0, sizeof(context));
    assert(wire_fence_select(0, WIRE_FENCE_OPENAI_CHAT, "abc", 3, &snapshot, &selected) == 0);
-   assert(admission_calls == 30);
+   assert(admission_calls == 36);
+}
+
+static void test_operator_policy_reaches_admission_without_request_header(void)
+{
+   operator_policy("opaque operator policy");
+   for (have_context = 0; have_context <= 1; have_context++)
+      for (int caller = 0; caller <= 1; caller++)
+         for (int gated = 0; gated <= 1; gated++)
+            for (unsigned route = 1; route <= 3; route++)
+            {
+               context.request_budget_present = caller;
+               strcpy(context.request_budget_limits, "limits");
+               wire_fence_t *snapshot = NULL;
+               wire_fence_bytes_t selected = {0};
+               int before = admission_calls;
+               admission = ECON_REQUEST_BUDGET_OVERFLOW;
+               assert(wire_fence_select(gated, (wire_fence_route_t)route, "abc", 3, &snapshot,
+                                        &selected) == -1);
+               assert(admission_calls == before + 1 && snapshot == NULL && selected.data == NULL);
+               assert(strcmp(wire_fence_last_error(), "request_budget_exceeded") == 0);
+            }
+   have_context = 1;
+   memset(&context, 0, sizeof(context));
+   operator_policy(NULL);
 }
 
 static void test_pristine_copy_is_immutable(void)
@@ -134,7 +186,9 @@ static void test_proof_gated_empty_registry_is_byte_identical_on_every_route(voi
 
 int main(void)
 {
+   operator_policy(NULL);
    test_hard_budget_refuses_without_selected_bytes();
+   test_operator_policy_reaches_admission_without_request_header();
    test_pristine_copy_is_immutable();
    test_explicit_length_preserves_embedded_nul();
    test_invalid_inputs_fail_without_snapshot();
