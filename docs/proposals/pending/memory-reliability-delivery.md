@@ -91,6 +91,14 @@ restoring forbidden journal/history grants. It uses corrected application and
 PostgreSQL images; migration 28 repairs already weakened private ACLs. Both
 legacy database upgrade paths and real C-host/Go-process conformance pass.
 
+[Private correction review validation](../../validation/memory-private-review-2026-09-20.md)
+records **572/572** fresh checks on `d66c9bb860`: 396 in enrolled T2 and 176 in
+standalone T3. Both placements exercise private model drafts, exact human review,
+atomic rollback, retained authorship, restart-safe decisions and erasure. Existing
+shared review, semantic and exploratory gates continue to pass. This adds private
+review decisions; ordinary private mutation keys and the remaining acceptance
+clauses are still open.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

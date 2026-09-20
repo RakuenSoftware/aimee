@@ -44,7 +44,46 @@ C-boundary, schema synchronization, Server API conformance, route coverage,
 CLI transport routing and dispatch capability checks pass. The latest pushed
 predecessor `62fab510ea` completed full CI successfully (run 35525951584).
 
-Fresh deployment evidence and CI for this implementation are still pending.
+## Fresh deployment evidence
+
+Application and harness `d66c9bb860` passed **572/572** checks in new owned
+deployments on `.253`, CT 9498:
+
+- T2: **396/396** (135 private, 208 shared, 29 shared correction-review,
+  six identity and 18 topology checks).
+- T3: **176/176** (135 private, 15 real-model semantic, 21 exploratory and
+  five topology checks).
+
+The sanitized [T2 receipt](memory-shared-reliability-2026-09-20/fresh-t2-d66c9bb860.json)
+and [T3 receipt](memory-shared-reliability-2026-09-20/fresh-t3-d66c9bb860.json)
+contain only check names and booleans. Each private run adds 32 review checks:
+linked MCP drafts, unchanged canonical state, deduplication, exact inspection,
+wrong-digest refusal, rollback on a late decision-write failure, preserved model
+origin and human reviewer, retained human history, replay without another effect,
+rejected-draft suppression, Server restart, retirement and physical erasure.
+The existing semantic outage/expiry and exploratory concurrent Unicode writes,
+exact int64 transport, Go-owner suspension/termination and supervised recovery
+checks pass too. These runs do not establish a new whole-request P95 claim.
+
+All nine containers were independently checked against the intended image IDs:
+
+- Application: `sha256:fb1f71f1fb9c106bc427ba5831e2ad3fd498fc8a88cdbb5252a1d005340f9fac`.
+- PostgreSQL: `sha256:b6209cde68c9a7a65c562b8a4ca45682f138b4a2de5b5dbcfe7ca04ec48e962f`.
+- Embedder: `sha256:f1286af7de10cf058a9bec14c45326d64de73e3878db19c732db86cda1f9d979`.
+
+Raw evidence is retained under `/opt/aimee-memory-proposals-evidence/` in
+`t2-d66c9bb860-fresh` and `t3-d66c9bb860-fresh`. Containers are stopped; volumes
+and evidence remain. An earlier T2 attempt failed during second-stack creation
+because retained fixture networks exhausted Docker's default address pools.
+Removing the recent owned stopped fixtures' containers/networks restored capacity;
+the successful runs used new projects and stores with unchanged application code.
+
+Full [CI run 35527251440](https://github.com/RakuenSoftware/aimee/actions/runs/35527251440)
+passed on `d66c9bb860`, including native sanitizers, packaged Go/PostgreSQL replay
+and every deployment topology, including encrypted storage and upgrade/rollback.
+Benchmark Smoke, Release policy and C repository pin checks passed on the same
+head. The evidence/documentation follow-up does not change the tested code.
+
 The MR-01–MR-18 acceptance matrix remains open; this change does not claim
 completion of MR-02's remaining mutation verbs, private keyed retries, consumer
 checkpointing, retention/restore or full freshness requirements.

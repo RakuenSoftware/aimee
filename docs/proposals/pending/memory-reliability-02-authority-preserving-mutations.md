@@ -1,6 +1,6 @@
 # MR-02: Authority-preserving memory mutations
 
-- **State:** In progress; initial KB admission/versioning slice implemented
+- **State:** In progress; shared/private admission, versions and correction reviews implemented
 - **Priority:** P0: durable correctness
 - **Owner:** Go memory mutation admission, with PostgreSQL durable guards
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) for shared authorization vocabulary; admission fixes can begin immediately
@@ -59,8 +59,9 @@ or revocation, and exact retries preserve the original author.
 Versioned and retained private reads expose that authorship. Ordinary runtime
 roles cannot bypass retirement with physical deletion or truncation. Background
 maintenance changes only eligible model-authored records, leaving protected or
-unknown authorship for review. The host transport and C bus remain unchanged by
-this admission implementation. Migration 30 adds private correction drafts and exact-draft reviewer decisions.
+unknown authorship for review. The C bus remains unchanged; the host adapters
+forward verified context to Go. Migration 30 adds private correction drafts and
+exact-draft reviewer decisions.
 Model replacements that need review now return a linked draft, outside recall;
 repeating a rejected suggestion cannot reopen it. Approval preserves model
 origin/confidence and records the reviewer separately. The canonical private ID
@@ -211,8 +212,8 @@ triple. The migration does not reconstruct unavailable old content or invent
 legacy authorship.
 
 Personal `get` accepts `include_version: true`. Personal `supersede` and the MCP
-`update`/`supersede` adapter accept that object as `expected_version`. One SQL
-statement locks, compares and writes, with history and invalidation in the same
+`update`/`supersede` adapter accept that object as `expected_version`. The owner
+locks, compares and writes, with history and invalidation in the same
 transaction. A stale revision or changed owner returns `expected_version_conflict`;
 an unavailable current target remains `not_found`. The successful conditional
 correction returns its new version.
@@ -229,19 +230,19 @@ ACLs weakened by older PostgreSQL restart reconciliation; corrected store
 provisioning preserves migration-owned permissions on subsequent restarts.
 
 This is exact-version history, not valid-time or belief-time reconstruction;
-`at_version` cannot be combined with `read_policy` or `as_of`. Personal
-idempotency keys, durable trusted author/reviewer admission and proposal parity remain
-open. The snapshot mechanism preserves available metadata but does not infer
-human authorship from the placement or request body.
+`at_version` cannot be combined with `read_policy` or `as_of`. Personal mutation
+idempotency keys remain open. Migrations 29 and 30 add the trusted authorship,
+proposal and reviewer admission described above; retained revisions include that
+metadata without inferring human authorship from placement or request bodies.
 
 [Fresh validation](../../validation/memory-private-versions-2026-09-20.md) records
 348 passing topology/placement/review checks with the corrected store image
 and verified private caller-context transport.
 
 The private adapter now forwards verified host caller context separately from
-request arguments, preserving model authority for MCP calls. This is the ingress
-prerequisite for private admission; persistence, authority guards and proposal
-parity remain open. Native transport tests cover forged actor/operation fields
+request arguments, preserving model authority for MCP calls. The Go owner uses
+that verified context for private admission, persistence and review decisions.
+Native transport tests cover forged actor/operation fields
 and authenticated model calls without promoting them to user authorship.
 
 ## Existing integration points
