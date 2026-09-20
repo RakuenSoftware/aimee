@@ -174,6 +174,16 @@ Idle CPU rises from 0.30% to 1.60% of one core. These are bounded fixture result
 not full MR-18 certification. The independently exported process now builds and
 uses the same owner-defined polling setting as the bundled process.
 
+[Inherited context-limit validation](../../validation/memory-inherited-context-limits-2026-09-20.md)
+records **1,100/1,100** fresh checks on `f2340b1d4b` (690 T2, 410 T3).
+The Go memory planner and assembler now prevent explicit byte limits from raising
+the inherited host allocation. Strict decoding refuses duplicate/aliased fields
+and null limits, including through the authenticated native KB HTTP adapter.
+The startup descriptor policy separately recognizes default-enabled admission
+without allowing live toggling; all 46 descriptor regressions pass. Full-request
+operator/task inheritance, provider token counting and protected packing remain
+open. This evidence does not certify any proposal complete.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

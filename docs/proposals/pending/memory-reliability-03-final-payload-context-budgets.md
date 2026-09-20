@@ -74,6 +74,15 @@ reduction disabled; unsupported token limits fail explicitly. The Server starts
 the admission process independently of reduction settings. Full provider token
 counting, inherited limits and protected optional repacking remain open.
 
+[Inherited memory context limits](../../validation/memory-inherited-context-limits-2026-09-20.md)
+now treat the host's assembly allocation as a ceiling. Explicit limits can lower
+it but cannot increase it, and absence inherits it. Go rejects duplicate limit
+fields, case aliases, null values and invalid integers. Authenticated HTTP tests
+preserve raw duplicate JSON through the native adapter and verify refusal without
+serving context. Fresh T2/T3 deployments pass 1,100 checks. This closes the memory
+envelope inheritance gap; inherited limits on the complete provider request and
+task composition, provider token counting and protected packing remain open.
+
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
 Use a single model-facing projection and verify the final request budget after every provider-affecting transformation. Keep explanation metadata outside the prompt unless a small field is explicitly useful to the model.
