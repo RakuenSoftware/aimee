@@ -157,3 +157,6 @@ f83fab2a4c2537345cefebdfece489755ff26f30:tests/baselines/modules/memory-ownershi
 # Reviewed private-review OpenAPI input SHA-256, verified against the source file
 # and enforced by check_memory_ownership; not an API credential.
 be38ccd6811c7b0d74a20559c07240350d02c112:tests/baselines/modules/memory-ownership.json:generic-api-key:2583
+
+# Reviewed private-retry OpenAPI input SHA-256; checked against its source.
+ec21e213c06cccbe9c59555b9f5d66f36b0288a0:tests/baselines/modules/memory-ownership.json:generic-api-key:2583
