@@ -722,13 +722,26 @@ static void responses_store_turn(const char *id, const char *full, const char *r
 }
 
 /* POST /v1/responses: the OpenAI Responses API (non-streaming). Runs inference
- * on the flattened `input` like chat/completions and shapes a `response`
+ * on structured `input`, instructions and tools and shapes a `response`
  * object. When `previous_response_id` names a prior turn (held in the
  * in-process responses store), its accumulated transcript is prepended so the
  * model continues the conversation; the new turn (prior transcript + this input
  * + the assistant reply) is stored under the freshly minted response id so a
  * follow-up can chain off it in turn. The store is in-process only (not durable
  * across restarts), matching this surface's local single-owner posture. */
+/* Buffered Responses uses the same governed tool-result shape as SSE. */
+static void responses_buffered_tool_result(void *ctx, const char *event, const char *data)
+{
+   if (strcmp(event, "response.completed") != 0)
+      return;
+   cJSON **result = ctx;
+   cJSON *root = cJSON_Parse(data);
+   cJSON *response = cJSON_DetachItemFromObjectCaseSensitive(root, "response");
+   cJSON_Delete(root);
+   cJSON_Delete(*result);
+   *result = response;
+}
+
 static int responses_handler(const char *body, char *resp, int cap)
 {
    char model[64] = "";
@@ -778,59 +791,112 @@ static int responses_handler(const char *body, char *resp, int cap)
    {
       size_t need = strlen(prev) + 1 + strlen(prompt) + 1;
       combined = malloc(need);
-      if (combined)
+      if (!combined)
       {
-         snprintf(combined, need, "%s\n%s", prev, prompt);
-         full = combined;
+         free(prompt);
+         openai_format_error(resp, cap, "server_error", "could not retain Responses history");
+         return 500;
       }
+      snprintf(combined, need, "%s\n%s", prev, prompt);
+      full = combined;
    }
 
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
-    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
-   int first_turn = !prev_id[0] && !openai_request_has_assistant(body);
-   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", full);
-   /* `full` aliases `prompt` or `combined`, both freed on the exit paths below,
-    * so it must NOT be freed here. Pass the persona-prefixed copy when there is
-    * one and free only that. */
-   char *persona_txt = legacy_persona_text(full, !first_turn);
-   int erc =
-       agent_dispatch_one(ag, NULL, NULL, pi_env, persona_txt ? persona_txt : full, max_tokens,
-                          temperature, 0 /* use_tools: plain chat completion */, &result);
-   free(pi_env);
-   free(persona_txt);
-
-   if (erc != 0 || !result.response)
+   /* Preserve instructions, roles and tool schemas through the same provider
+    * assembly path as streaming Responses. Flattening is only for the legacy
+    * local continuation transcript, never for the current provider request. */
+   char parsed_model[64], *instructions = NULL;
+   cJSON *messages = NULL, *tools = NULL;
+   int parsed_stream = 0;
+   int parsed_ok =
+       aimee_ir_path_enabled() &&
+       aimee_ir_responses_to_chat(body, parsed_model, sizeof(parsed_model), &instructions,
+                                  &messages, &tools, &parsed_stream) == 0;
+   if (!parsed_ok)
+      parsed_ok =
+          openai_parse_responses_to_chat(body, parsed_model, sizeof(parsed_model), &instructions,
+                                         &messages, &tools, &parsed_stream) == 0;
+   if (!parsed_ok)
    {
-      openai_format_error(resp, cap, "upstream_error",
-                          result.error[0] ? result.error : "response failed");
-      free(result.response);
+      free(prompt);
+      free(combined);
+      free(instructions);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
+      openai_format_error(resp, cap, "invalid_request_error", "invalid structured Responses input");
+      return 400;
+   }
+   if (combined)
+   {
+      cJSON *history = cJSON_CreateObject();
+      if (!history || !cJSON_AddStringToObject(history, "role", "user") ||
+          !cJSON_AddStringToObject(history, "content", prev) ||
+          !cJSON_InsertItemInArray(messages, 0, history))
+      {
+         cJSON_Delete(history);
+         free(prompt);
+         free(combined);
+         free(instructions);
+         cJSON_Delete(messages);
+         cJSON_Delete(tools);
+         openai_format_error(resp, cap, "server_error", "could not retain Responses history");
+         return 500;
+      }
+   }
+   message_history_repair(messages);
+   parsed_response_t result;
+   char upstream_error[512];
+   int erc = agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
+                                    &result, upstream_error, sizeof(upstream_error));
+   free(instructions);
+   if (erc != 0)
+   {
+      openai_format_error(resp, cap, "upstream_error", upstream_error);
+      agent_free_parsed_response(&result);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
       free(prompt);
       free(combined);
       return 502;
    }
-
-   /* Cost accounting: buffered /v1/responses runs the provider call directly. */
-   snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
    if (agent_ingress_accounting_enabled())
-      agent_record_token_audit(&result, "", "openai-ingress");
+      agent_ingress_record_cost(ag->name, ag->model, model, result.stop_reason,
+                                result.prompt_tokens, result.completion_tokens,
+                                result.cache_write_tokens, result.cache_read_tokens,
+                                "openai-ingress", NULL);
+   if (gw_response_run_completion(&result, messages, tools, "tool_calls"))
+      LOG_INFO("completion.gate", "continued incomplete buffered OpenAI Responses repair");
+   if (result.is_tool_call && result.call_count > 0)
+      (void)gw_response_run_governance(&result, openai_governance_enabled(),
+                                       gateway_prevent_subagents_enabled());
+   cJSON_Delete(messages);
+   cJSON_Delete(tools);
 
    long created = (long)time(NULL);
    char id[64];
    responses_mint_id(created, id, sizeof(id));
-   responses_store_turn(id, full, result.response);
+   responses_store_turn(id, full, result.content ? result.content : "");
    free(prompt);
    free(combined);
-
-   int len = openai_format_response(id, model, result.response, created, result.prompt_tokens,
-                                    result.completion_tokens, result.cache_read_tokens, resp, cap);
-   free(result.response);
+   int len;
+   if (result.is_tool_call && result.call_count > 0)
+   {
+      cJSON *response = NULL;
+      openai_responses_emit_policed(&result, id, model, created, responses_buffered_tool_result,
+                                    &response);
+      len = response && cJSON_PrintPreallocated(response, resp, cap, 0) ? (int)strlen(resp) : -1;
+      cJSON_Delete(response);
+   }
+   else
+      len = openai_format_response(id, model, result.content ? result.content : "", created,
+                                   result.prompt_tokens, result.completion_tokens,
+                                   result.cache_read_tokens, resp, cap);
+   agent_free_parsed_response(&result);
    if (len < 0)
    {
       openai_format_error(resp, cap, "server_error", "response did not fit the buffer");
       return 500;
    }
+
    return 200;
 }
 

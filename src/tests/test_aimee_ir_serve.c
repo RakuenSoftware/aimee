@@ -161,6 +161,29 @@ int main(void)
    assert(cJSON_GetObjectItem(fc, "instructions"));         /* system -> instructions */
    assert(cJSON_GetArraySize(cJSON_GetObjectItem(fc, "input")) >= 1);
    cJSON_Delete(fc);
+
+   /* Chat/Responses ingress targeting Anthropic must retain policy in its
+    * separate system field and translate tool schemas to the selected wire. */
+   const char *policy = "Do not exceed LIMIT_7; preserve αβ🦊 and identifiers.";
+   fc = aimee_ir_build_from_chat("fixture-anthropic", cm, ct, policy, "anthropic", 32, 0.2);
+   assert(fc);
+   const cJSON *system = cJSON_GetObjectItemCaseSensitive(fc, "system");
+   assert(cJSON_IsArray(system));
+   const cJSON *first_system = cJSON_GetArrayItem(system, 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first_system, "text")),
+                 policy) == 0);
+   const cJSON *wire_messages = cJSON_GetObjectItemCaseSensitive(fc, "messages");
+   assert(cJSON_GetArraySize(wire_messages) == 1);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                     cJSON_GetArrayItem(wire_messages, 0), "role")),
+                 "user") == 0);
+   const cJSON *wire_tool = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(fc, "tools"), 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(wire_tool, "name")),
+                 "Read") == 0);
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(wire_tool, "input_schema")));
+   assert(!cJSON_GetObjectItemCaseSensitive(wire_tool, "function"));
+   assert(cJSON_GetObjectItemCaseSensitive(fc, "max_tokens")->valueint == 32);
+   cJSON_Delete(fc);
    cJSON_Delete(cm);
    cJSON_Delete(ct);
 

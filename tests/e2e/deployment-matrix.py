@@ -342,6 +342,9 @@ def main():
                 command('python3', str(ROOT / 'tests/e2e/memory-exploratory-e2e.py'), *common,
                     '--output', str(args.output / 'exploratory-memory.json'), timeout=300)
                 check('Concurrent memory, exact IDs and supervised owner recovery gate', True)
+            command('python3', str(ROOT / 'tests/e2e/memory-provider-boundary-e2e.py'),
+                '--server', server.application, '--output', str(args.output / 'provider-boundary.json'), timeout=600)
+            check('Provider-bound memory, constraints, tools and continuation gate', True)
     except (RuntimeError, subprocess.SubprocessError, ValueError, OSError) as error:
         checks.append(dict(name='topology completed', passed=False, error=str(error)))
         print('FAIL ' + str(error), flush=True)

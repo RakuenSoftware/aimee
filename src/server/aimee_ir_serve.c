@@ -487,9 +487,13 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
    aimee_ir_apply_request_stages(
        &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
 
-   cJSON *prov = is_responses_wire ? responses_backend_build(&ir) : openai_backend_build(&ir);
+   int is_anthropic_wire = driver_name && strcmp(driver_name, "anthropic") == 0;
+   cJSON *prov = is_responses_wire   ? responses_backend_build(&ir)
+                 : is_anthropic_wire ? anthropic_backend_build(&ir)
+                                     : openai_backend_build(&ir);
    aimee_request_free(&ir);
-   filter_openai_chat_tools(prov, is_responses_wire);
+   if (!is_anthropic_wire)
+      filter_openai_chat_tools(prov, is_responses_wire);
    if (!prov)
       aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_OPENAI_CHAT);
    else
