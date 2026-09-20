@@ -75,6 +75,10 @@ is a future proposal TODO. It includes non-memory consumers, storage/data
 migration, permissions, upgrade/rollback and deletion of DB2 builds, descriptors,
 providers and compatibility layers. It does not block this memory-only cutover.
 
+The [performance follow-up](../../validation/memory-performance-2026-09-20.md)
+records reduced request overhead, fresh paired latency and unchanged rankings,
+with separate concurrency and idle-cost measurements.
+
 G0 does not certify historical ranking/performance parity, the complete
 adversarial release matrix, or MR-01–18. Those retain their acceptance criteria in
 the [delivery tracker](memory-reliability-delivery.md) and
