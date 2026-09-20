@@ -90,14 +90,14 @@ class Gate:
                    len(tagged['events']) == len(before['events']) + 1)
         self.sql(f"ALTER TABLE memory_scopes ADD CONSTRAINT e2e_scope_copy_failure CHECK(memory_id={old_id} OR scope_value<>'journal-one') NOT VALID")
         try:
-            code, failure = self.call('update', dict(store='kb', id=old_id, content='must roll back'))
+            code, failure = self.call('supersede', dict(store='kb', old_id=old_id, new_content='must roll back'))
             self.check('shared HTTP replacement refuses failed tag copy', code >= 500 and failure.get('status') == 'error')
             retained = self.good('shared original after failed copy', self.call('get', dict(store='kb', id=old_id)))
             self.check('failed tag copy preserves original and invalidation',
                        retained.get('memory', {}).get('content') == original and self.shared_changes(old_id) == tagged)
         finally:
             self.sql('ALTER TABLE memory_scopes DROP CONSTRAINT e2e_scope_copy_failure')
-        updated = self.good('shared HTTP version replacement', self.call('update', dict(store='kb', id=old_id, content='shared journal corrected')))
+        updated = self.good('shared HTTP version replacement', self.call('supersede', dict(store='kb', old_id=old_id, new_content='shared journal corrected')))
         new_id = int(updated['id'])
         self.check('shared replacement creates a new identity', new_id != old_id)
         copies = int(self.sql(f"SELECT count(*) FROM memory_scopes WHERE memory_id={new_id} AND scope_value IN ('journal-one','journal-two')"))
