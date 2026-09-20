@@ -484,6 +484,8 @@ int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_entities_unmerge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_correction_proposals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_review_correction(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

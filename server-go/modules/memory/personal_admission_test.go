@@ -53,7 +53,7 @@ func TestPersonalMemoryAuthority(t *testing.T) {
 	base := read("schema_conversation.sql")
 	exec(base[strings.Index(base, "CREATE TABLE IF NOT EXISTS user_memories ("):strings.Index(base, "CREATE INDEX IF NOT EXISTS user_memories_recall")])
 	exec(`INSERT INTO user_memories(id,key,content) VALUES(42,'legacy','unknown author')`)
-	for _, name := range []string{"schema_personal_memory_changes.sql", "schema_personal_memory_versions.sql", "schema_personal_memory_acl.sql", "schema_personal_memory_authority.sql"} {
+	for _, name := range []string{"schema_personal_memory_changes.sql", "schema_personal_memory_versions.sql", "schema_personal_memory_acl.sql", "schema_personal_memory_authority.sql", "schema_personal_memory_proposals.sql"} {
 		exec(read(name))
 	}
 	user := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:human", TransportIdentity: "fixture:http"}

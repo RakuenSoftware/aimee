@@ -801,6 +801,40 @@ static void test_private_verified_context(void)
    cJSON_Delete(request);
 }
 
+static void test_private_correction_review_transport(void)
+{
+   cJSON *request = cJSON_Parse("{\"store\":\"user\",\"proposal_id\":\"fixture\","
+                                "\"action\":\"approve\",\"principal\":\"forged\","
+                                "\"authority\":\"user\"}");
+   for (int review = 0; review < 2; ++review)
+      for (int authenticated = 0; authenticated < 2; ++authenticated)
+      {
+         request_account = authenticated ? "verified-user" : "";
+         request_principal = authenticated ? "verified-device" : "";
+         private_command_operation =
+             review ? "user-correction-review" : "user-correction-proposals";
+         private_command_reply = review
+                                     ? "{\"status\":\"ok\",\"store\":\"user\",\"proposal\":{"
+                                       "\"target_version\":{\"record_id\":\"9007199254740993\"}}}"
+                                     : "{\"status\":\"ok\",\"store\":\"user\",\"proposals\":[]}";
+         if (review)
+            handle_memory_review_correction(NULL, NULL, request);
+         else
+            handle_memory_correction_proposals(NULL, NULL, request);
+         assert(search_wire_reply && !strcmp(search_wire_reply, private_command_reply));
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+                    observed_private_context, "user_authority")) == (review && authenticated));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            observed_private_context, "principal")),
+                        authenticated ? "verified-user" : ""));
+      }
+   cJSON_Delete(observed_private_context);
+   observed_private_context = NULL;
+   private_command_operation = private_command_reply = NULL;
+   request_account = request_principal = "";
+   cJSON_Delete(request);
+}
+
 int main(void)
 {
    test_user_namespace();
@@ -861,5 +895,6 @@ int main(void)
    test_private_command_envelopes();
    test_shared_supersede_authority();
    test_private_verified_context();
+   test_private_correction_review_transport();
    return 0;
 }

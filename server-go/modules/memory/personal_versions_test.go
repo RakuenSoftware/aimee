@@ -67,6 +67,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	exec("GRANT ALL ON ALL TABLES IN SCHEMA " + ident + " TO " + role + "; GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA " + ident + " TO " + role)
 	exec(read("../aimee/families/schema_personal_memory_acl.sql"))
 	exec(read("../aimee/families/schema_personal_memory_authority.sql"))
+	exec(read("../aimee/families/schema_personal_memory_proposals.sql"))
 	scalar := func(sql string) int64 {
 		t.Helper()
 		var n int64

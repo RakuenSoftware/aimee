@@ -1690,6 +1690,10 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/memory/get", NULL, RM_EXACT, "memory.get", 0, rh_dispatch_op},
     {"POST", "/v1/memory/delete", NULL, RM_EXACT, "memory.delete", 0, rh_dispatch_op},
     {"POST", "/v1/memory/supersede", NULL, RM_EXACT, "memory.supersede", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/correction_proposals", NULL, RM_EXACT, "memory.correction_proposals", 0,
+     rh_dispatch_op},
+    {"POST", "/v1/memory/review_correction", NULL, RM_EXACT, "memory.review_correction", 0,
+     rh_dispatch_op},
     {"GET", "/v1/memory/read", NULL, RM_EXACT, "memory.read", 0, rh_dispatch_op},
 
     /* Write families (hub-migration P1), dispatch-backed data-plane writes:

@@ -33,7 +33,14 @@ func handleCorrectionProposalCommand(options handlerOptions, invocation bus.Modu
 			request.Limit = int(n)
 		}
 	}
-	commandScope(args, &request)
+	if options.placement == PlacementServer {
+		if _, exists := args["store"]; exists && args.stringOr("store", "") != "user" {
+			return commandResult(commandError("invalid_argument", "private correction review requires store=user"))
+		}
+		request.Scope = Scope{Type: ScopeUser}
+	} else {
+		commandScope(args, &request)
+	}
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return nil, bus.ModuleStatusInternal

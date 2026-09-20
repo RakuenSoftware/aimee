@@ -433,6 +433,76 @@ class Gate:
         code, erased = self.call('get', dict(id=mid, at_version=version))
         self.check('erased private revision cannot be retrieved', code == 404 and erased.get('kind') == 'not_found')
 
+    def personal_correction_review(self):
+        key = self.prefix + '-private-review'
+        created = self.good('private review parent', self.call('store', dict(key=key, content='private human assertion')))
+        mid = created['id']
+        original = self.good('private review original version', self.call('get', dict(id=mid, include_version=True)))['memory']
+        before = self.personal_changes(mid)
+        correction = dict(verb='update', store='user', id=str(mid), content='private model draft', expected_version=original['version'])
+        proposed = self.mcp_document('private MCP correction draft', 'mutate', correction)
+        proposal = proposed['proposal']
+        self.check('private refusal links a non-serving model draft', proposed.get('kind') == 'review_required' and
+            proposal['state'] == 'pending' and proposal.get('origin_authority') == 'model' and 'draft' not in proposal)
+        current = self.good('private parent after draft', self.call('get', dict(id=mid, include_version=True)))['memory']
+        self.check('private draft leaves serving version and journal unchanged', current == original and self.personal_changes(mid) == before)
+        retry = self.mcp_document('private repeated draft', 'mutate', correction)['proposal']
+        self.check('private proposal retry preserves original draft identity', retry['proposal_id'] == proposal['proposal_id'])
+        inspected = self.good('private exact draft inspection', self.call('correction_proposals',
+            dict(store='user', proposal_id=proposal['proposal_id'])))['proposals']
+        self.check('private inspection returns screened model payload', len(inspected) == 1 and
+            inspected[0]['draft']['content'] == correction['content'] and inspected[0]['draft']['confidence'] == 0.8)
+        review = dict(store='user', proposal_id=proposal['proposal_id'], payload_digest=proposal['payload_digest'],
+            expected_version=proposal['target_version'], action='approve')
+        code, refused = self.call('review_correction', dict(review, payload_digest='0'*64))
+        self.check('private review refuses a different draft digest', code == 409 and refused.get('kind') == 'conflict')
+        self.personal_sql("ALTER TABLE user_memory_correction_proposals ADD CONSTRAINT e2e_private_review_failure "
+            f"CHECK(proposal_id<>'{proposal['proposal_id']}'::uuid OR state='pending') NOT VALID")
+        try:
+            code, failure = self.call('review_correction', review)
+            self.check('private review refuses late decision persistence failure', code >= 500 and failure.get('status') == 'error')
+            current = self.good('private parent after failed review', self.call('get', dict(id=mid, include_version=True)))['memory']
+            self.check('failed private review rolls back content history and journal', current == original and self.personal_changes(mid) == before and
+                self.personal_sql(f'SELECT count(*) FROM user_memory_versions WHERE memory_id={int(mid)}') == '0')
+        finally:
+            self.personal_sql('ALTER TABLE user_memory_correction_proposals DROP CONSTRAINT e2e_private_review_failure')
+        approved = self.good('private exact draft approval', self.call('review_correction', review))['proposal']
+        current = self.good('private reviewed memory', self.call('get', dict(id=mid, include_version=True)))['memory']
+        self.check('private approval preserves model origin and records the reviewer', approved['state'] == 'approved' and
+            current['version'] == approved['result_version'] and current['content'] == correction['content'] and
+            current['confidence'] == 0.8 and current['authorship']['category'] == 'reviewed_model' and
+            current['authorship']['principal'] == proposal['proposer'] and
+            current['authorship']['reviewer'] == approved['reviewer'] and current['authorship']['proposal_id'] == proposal['proposal_id'])
+        history = self.good('private history after reviewed correction', self.call('get', dict(id=mid, at_version=original['version'])))['memory']
+        self.check('reviewed private correction retains human source revision', history['content'] == original['content'] and
+            history['authorship'] == original['authorship'])
+        committed = self.personal_changes(mid)
+        replay = self.good('private approved decision retry', self.call('review_correction', review))['proposal']
+        self.check('private decision retry has no second canonical effect', replay.get('replayed') is True and
+            replay['decision_id'] == approved['decision_id'] and self.personal_changes(mid) == committed)
+        another = self.mcp_document('private reviewed content still requires review', 'mutate',
+            dict(correction, content='private rejected draft', expected_version=current['version']))['proposal']
+        rejection = dict(store='user', proposal_id=another['proposal_id'], payload_digest=another['payload_digest'],
+            expected_version=another['target_version'], action='reject')
+        rejected = self.good('private correction rejection', self.call('review_correction', rejection))['proposal']
+        again = self.mcp_document('private rejected suggestion retry', 'mutate',
+            dict(correction, content='private rejected draft', expected_version=current['version']))['proposal']
+        self.check('private rejected draft cannot reopen or alter recall', rejected['state'] == 'rejected' and
+            again['proposal_id'] == another['proposal_id'] and again['state'] == 'rejected' and self.personal_changes(mid) == committed)
+        self.docker('restart', self.args.server)
+        recovered = self.good('private review recovery after restart', self.wait('get', dict(id=mid, include_version=True)))['memory']
+        replay = self.good('private decision survives restart', self.call('review_correction', review))['proposal']
+        self.check('restart preserves reviewed version author and decision', recovered == current and
+            replay.get('replayed') is True and replay['decision_id'] == approved['decision_id'])
+        self.good('private reviewed memory retirement', self.call('delete', dict(id=mid)))
+        code, unavailable = self.call('review_correction', review)
+        self.check('private review retry cannot release a retired result', code == 409 and unavailable.get('reason') == 'idempotent_result_unavailable')
+        self.personal_sql(f'DELETE FROM user_memories WHERE id={int(mid)}')
+        self.check('private parent erasure removes correction drafts', self.personal_sql(
+            f'SELECT count(*) FROM user_memory_correction_proposals WHERE target_id={int(mid)}') == '0')
+        code, unavailable = self.call('review_correction', review)
+        self.check('private erased proposal cannot be reviewed again', code == 404 and unavailable.get('kind') == 'not_found')
+
     def run_local(self):
         """First-boot regression on a composition containing only Server and its store."""
         content = 'Personal local-only fixture person@local.invalid 🦊'
@@ -498,6 +568,7 @@ class Gate:
             for r in bundle.get('recall', {}).get('active_context', [])))
         self.confidence_contract(('user',))
         self.personal_versions()
+        self.personal_correction_review()
         return all(c['passed'] for c in self.checks)
 
     def run(self):

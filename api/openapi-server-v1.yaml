@@ -3676,6 +3676,56 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/correction_proposals:
+    post:
+      summary: Inspect correction drafts outside recall
+      description: Select store=user for private drafts or store=kb for scoped shared drafts. The default is kb.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                store: { type: string, enum: [user, kb], default: kb }
+                proposal_id: { type: string, format: uuid }
+                limit: { type: integer, minimum: 1, maximum: 100, default: 50 }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+      responses:
+        "200":
+          description: Draft references; an exact proposal_id also includes its screened payload
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/review_correction:
+    post:
+      summary: Approve or reject an exact correction draft
+      description: Requires authenticated user authority, an exact target version and payload digest. Approval preserves model authorship and confidence; retries reuse the durable decision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [proposal_id, payload_digest, expected_version, action]
+              properties:
+                store: { type: string, enum: [user, kb], default: kb }
+                proposal_id: { type: string, format: uuid }
+                payload_digest: { type: string, pattern: '^[0-9a-f]{64}$' }
+                expected_version: { type: object }
+                action: { type: string, enum: [approve, reject] }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+      responses:
+        "200":
+          description: Durable review decision and resulting version when approved
+          content:
+            application/json:
+              schema: { type: object }
+        "409":
+          description: Draft, target version or prior decision no longer matches
   /memory/reject:
     post:
       summary: Reject a memory and create a durable exact-value tombstone

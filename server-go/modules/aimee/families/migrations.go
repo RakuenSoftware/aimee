@@ -101,6 +101,7 @@ var schemaHistory = []struct {
 	{27, "schema_personal_memory_versions.sql"},
 	{28, "schema_personal_memory_acl.sql"},
 	{29, "schema_personal_memory_authority.sql"},
+	{30, "schema_personal_memory_proposals.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

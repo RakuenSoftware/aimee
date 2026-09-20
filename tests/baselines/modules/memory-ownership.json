@@ -2126,7 +2126,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "35b7399e72a62d9616b06520af5363156809b3780857ab2abf9b505c676d2460"
+      "sha256": "3eea587e381db78aa38a0a04bad788e50ebd22d78c3ebca85fbf4b62d5999a45"
     },
     "src/server/server_facts.c": {
       "disposition": "host-transport",
@@ -2147,7 +2147,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "fb7dcf36e45c32454e6ff77eeedf7d734fde85e42eb38716d2f1e14d9b387dd7"
+      "sha256": "650b5927bd83fa7bebd4890b980fb73ae7ab31cf237d6b6469e7e0e35a3d230a"
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2181,7 +2181,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "b080afbd558a416801c0692d9fc3c2b97a520433b5e06296097d991e97f70e11"
+      "sha256": "b5b09b1b3b32625ebd5131c47a22b9601c8c1d69c4600e5cb7c28711e64a93e7"
     },
     "src/server/server_memory_benchmark.c": {
       "disposition": "host-transport",
@@ -2470,7 +2470,7 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "a95e671fb426956b20144f9b3e2aa2c6f58b29676c28d2a39bc7891b010035ee"
+      "sha256": "c108f0c3d79646d0e64e737b9ce425ce423de699bd37a9a3a4f8e2f068adb530"
     },
     "src/tests/test_server_facts_transport.c": {
       "disposition": "host-fixture",
@@ -2505,7 +2505,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "48ef9a08a0c7f9ec7d33e52e05df786bea6e3f42f5a130a6afea21b95cd9320d"
+      "sha256": "ca759cedb2604ba95ef4a2a1bd9209d89b9cf6dec8fc42d12fe45882004903f1"
     },
     "src/tests/test_server_prospective.c": {
       "disposition": "host-fixture",
@@ -2577,10 +2577,10 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "eb744127583db29d8f320c9ca05b68569e4e2779012e35d667fbda386d0f8517",
+      "sha256": "0af74de7f0bb02118dcd106b101556882e398a06aeae1c658c63b48537124f3b",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "2c0f7706ad2a88ee6ed785c32e9fa8b96a1f67801091a0da15c831fd1f1a3f1c"
+        "api/openapi-server-v1.yaml": "93408340b3c93f87aa24547df30813e71a635ab1574e6a61eb196b7a889fe38c"
       }
     }
   }

@@ -23,9 +23,9 @@ func (s *postgresDataStore) personalVersion(ctx context.Context, scope Scope, ve
  WHERE v.record_revision=$3::bigint AND v.record_revision<p.record_revision
 )
 SELECT $1::bigint,record->>'tier',record->>'kind',record->>'key',record->>'content',
- (record->>'confidence')::double precision,COALESCE(record->>'provenance_category','unknown'),COALESCE(record->>'author_principal',''),COALESCE(record->>'author_transport','') FROM revisions
+ (record->>'confidence')::double precision,COALESCE(record->>'provenance_category','unknown'),COALESCE(record->>'author_principal',''),COALESCE(record->>'author_transport',''),COALESCE(record->>'reviewer_principal',''),COALESCE(record->>'reviewer_transport',''),COALESCE(record->>'review_proposal_id','') FROM revisions
  WHERE record->>'lifecycle_state' IN ('active','retired')`, id, version.OwnerID, version.RecordRevision).
-		Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.Authorship.Category, &r.Authorship.Principal, &r.Authorship.Transport)
+		Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.Authorship.Category, &r.Authorship.Principal, &r.Authorship.Transport, &r.Authorship.Reviewer, &r.Authorship.ReviewTransport, &r.Authorship.ProposalID)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
 	}

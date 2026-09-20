@@ -320,7 +320,7 @@ func TestPersonalMemoryChangeJournal(t *testing.T) {
 		t.Fatal("retention gap skipped without resynchronization", page)
 	}
 
-	for _, name := range []string{"schema_personal_memory_versions.sql", "schema_personal_memory_acl.sql", "schema_personal_memory_authority.sql"} {
+	for _, name := range []string{"schema_personal_memory_versions.sql", "schema_personal_memory_acl.sql", "schema_personal_memory_authority.sql", "schema_personal_memory_proposals.sql"} {
 		migration, err := os.ReadFile("../aimee/families/" + name)
 		if err != nil {
 			t.Fatal(err)

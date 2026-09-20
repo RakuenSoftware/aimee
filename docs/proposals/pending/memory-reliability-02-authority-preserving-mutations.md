@@ -25,7 +25,7 @@ supplied authority text still cannot replace authoritative content. A review
 refusal maps to HTTP 409 rather than an upstream-failure status.
 
 Shared model corrections now create linked review proposals and support exact-draft
-approval or rejection as described below. Personal reviewer/proposal parity, expected versions on remaining mutation verbs,
+approval or rejection as described below. Expected versions on remaining mutation verbs,
 idempotency on remaining verbs, further durable guards/consumer replay and full retention policy
 remain acceptance work.
 
@@ -40,7 +40,7 @@ mutation. Shared records and secondary scope tags now have a primary-scope
 producer too: collection-bound cursors, old/new scope invalidation, independent
 collection commit ordering and parent-visible tag access. Restricted-role replay
 covers version replacement and rollback after a failed tag copy. This does not
-complete personal reviewer/proposal parity, further governed child/dependency coverage,
+complete further governed child/dependency coverage,
 consumer application/checkpoints or the release-freshness contract.
 
 Implement one mutation admission operation for create, propose, correct, supersede, reject, retire and explicitly authorized destructive deletion. Route compatibility entry points through it.
@@ -60,9 +60,18 @@ Versioned and retained private reads expose that authorship. Ordinary runtime
 roles cannot bypass retirement with physical deletion or truncation. Background
 maintenance changes only eligible model-authored records, leaving protected or
 unknown authorship for review. The host transport and C bus remain unchanged by
-this admission implementation. Private correction drafts, reviewer decisions and
-durable retry receipts remain separate acceptance work. See the
-[validation record](../../validation/memory-private-authority-2026-09-20.md).
+this admission implementation. Migration 30 adds private correction drafts and exact-draft reviewer decisions.
+Model replacements that need review now return a linked draft, outside recall;
+repeating a rejected suggestion cannot reopen it. Approval preserves model
+origin/confidence and records the reviewer separately. The canonical private ID
+stays stable and history, invalidation and the durable decision commit together.
+Review retries recheck result eligibility and revision before returning the
+original decision. Explicit `store=user` is available on the Server's
+`/v1/memory/correction_proposals` and `/v1/memory/review_correction` endpoints;
+the default remains shared `kb`. See the
+[authority validation](../../validation/memory-private-authority-2026-09-20.md) and
+[review validation](../../validation/memory-private-review-2026-09-20.md).
+Private keyed mutation retries and other remaining verbs are still acceptance work.
 
 ### Expected-version shared corrections
 
@@ -134,7 +143,7 @@ mutation events. Legacy unkeyed MCP responses retain their existing text format.
 
 This contract currently covers shared corrections only. Other verbs and personal
 placement explicitly refuse the field. Remaining create/delete idempotency,
-personal review parity, retention/restore policy and consumer progress remain open.
+retention/restore policy and consumer progress remain open.
 
 ### Linked model correction proposals
 

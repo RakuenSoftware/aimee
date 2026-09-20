@@ -55,7 +55,7 @@ func TestRecallCompositionPostgres(t *testing.T) {
  (44,'L2','fact','identity:archived','archived secret')`, full)
 	exec(`UPDATE user_memories SET valid_until=now() WHERE id=43;
  UPDATE user_memories SET lifecycle_state='archived' WHERE id=44`)
-	for _, name := range []string{"schema_personal_memory_changes.sql", "schema_personal_memory_versions.sql", "schema_personal_memory_acl.sql", "schema_personal_memory_authority.sql"} {
+	for _, name := range []string{"schema_personal_memory_changes.sql", "schema_personal_memory_versions.sql", "schema_personal_memory_acl.sql", "schema_personal_memory_authority.sql", "schema_personal_memory_proposals.sql"} {
 		migration, err := os.ReadFile("../aimee/families/" + name)
 		if err != nil {
 			t.Fatal(err)

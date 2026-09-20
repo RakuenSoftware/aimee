@@ -19,7 +19,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		_, exists := args[field]
 		allowed := operation == "user-get" && field != "expected_version"
 		if field == "expected_version" {
-			allowed = operation == "user-supersede" || operation == "user-mcp-supersede"
+			allowed = operation == "user-supersede" || operation == "user-mcp-supersede" || operation == "user-correction-review"
 		}
 		if exists && !allowed {
 			return runtimeJSONText(commandResult(commandError("unsupported_mode", field+" is unsupported for this operation")))
@@ -29,6 +29,15 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return runtimeJSONText(commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get")))
 	}
 	switch operation {
+	case "user-correction-proposals", "user-correction-review":
+		if options.placement != PlacementServer {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		verb := "correction_proposals"
+		if operation == "user-correction-review" {
+			verb = "review_correction"
+		}
+		return runtimeJSONText(handleCorrectionProposalCommand(options, invocation, verb, args))
 	case "user-mcp-supersede":
 		args["old_id"], args["new_content"] = args["id"], args["content"]
 		args["view"] = json.RawMessage(`"mcp"`)

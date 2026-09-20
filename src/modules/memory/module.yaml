@@ -165,6 +165,7 @@
     "server-go/modules/memory/correction_proposals.go",
     "server-go/modules/memory/public_correction_proposals.go",
     "server-go/modules/memory/personal_admission.go",
+    "server-go/modules/memory/personal_proposals.go",
     "server-go/modules/memory/personal_versions.go"
   ],
   "go_tests": [
@@ -293,6 +294,7 @@
     "server-go/modules/memory/mutation_retry_test.go",
     "server-go/modules/memory/correction_proposals_test.go",
     "server-go/modules/memory/personal_admission_test.go",
+    "server-go/modules/memory/personal_proposals_test.go",
     "server-go/modules/memory/personal_versions_test.go"
   ],
   "public_headers": [],

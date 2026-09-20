@@ -520,8 +520,8 @@ func (s *postgresDataStore) getAtVersioned(ctx context.Context, scope Scope, id 
 			columns += ",(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),record_revision::text"
 			destinations = append(destinations, &r.Version.OwnerID, &r.Version.RecordRevision)
 			r.Authorship = &PersonalAuthorship{}
-			columns += ",provenance_category,author_principal,author_transport"
-			destinations = append(destinations, &r.Authorship.Category, &r.Authorship.Principal, &r.Authorship.Transport)
+			columns += ",provenance_category,author_principal,author_transport,reviewer_principal,reviewer_transport,review_proposal_id"
+			destinations = append(destinations, &r.Authorship.Category, &r.Authorship.Principal, &r.Authorship.Transport, &r.Authorship.Reviewer, &r.Authorship.ReviewTransport, &r.Authorship.ProposalID)
 		}
 		err := s.db.QueryRow(ctx, `SELECT `+columns+`
 FROM user_memories
@@ -1565,7 +1565,7 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 	case "correction-proposals", "correction-review":
 		backend, ok := options.data.(*postgresDataStore)
-		if !ok || options.placement != PlacementKB || invocation.PrincipalRef != 0 || transaction == nil {
+		if !ok || invocation.PrincipalRef != 0 || (options.placement == PlacementKB && transaction == nil) {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		var result any
@@ -1574,7 +1574,11 @@ set_config('aimee.correlation_id',$9,true)`,
 				return nil, bus.ModuleStatusInvalidRequest
 			}
 			var proposals []correctionProposal
-			proposals, err = backend.listCorrectionProposals(ctx, request.ProposalID, request.Limit)
+			if options.placement == PlacementServer {
+				proposals, err = backend.listPersonalCorrectionProposals(ctx, request.ProposalID, request.Limit)
+			} else {
+				proposals, err = backend.listCorrectionProposals(ctx, request.ProposalID, request.Limit)
+			}
 			result = map[string]any{"status": "ok", "proposals": proposals}
 		} else {
 			caller := options.commandContext
@@ -1582,7 +1586,11 @@ set_config('aimee.correlation_id',$9,true)`,
 				return nil, bus.ModuleStatusInvalidRequest
 			}
 			var proposal correctionProposal
-			proposal, err = backend.reviewKBCorrection(ctx, *request.CorrectionReview, caller)
+			if options.placement == PlacementServer {
+				proposal, err = backend.reviewPersonalCorrection(ctx, *request.CorrectionReview, caller)
+			} else {
+				proposal, err = backend.reviewKBCorrection(ctx, *request.CorrectionReview, caller)
+			}
 			rollbackOnly = err != nil
 			result = map[string]any{"status": "ok", "proposal": proposal}
 			if errors.Is(err, ErrMemoryNotFound) || errors.Is(err, errCorrectionReviewConflict) {
@@ -1595,6 +1603,11 @@ set_config('aimee.correlation_id',$9,true)`,
 			}
 		}
 		if err == nil {
+			if options.placement == PlacementServer {
+				if envelope, ok := result.(map[string]any); ok && envelope["status"] == "ok" {
+					envelope["store"] = "user"
+				}
+			}
 			response.Payload, err = json.Marshal(result)
 		}
 	case "fact-review":

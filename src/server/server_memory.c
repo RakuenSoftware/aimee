@@ -137,6 +137,9 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
                                   "at_version",
                                   "expected_version",
                                   "idempotency_key",
+                                  "proposal_id",
+                                  "payload_digest",
+                                  "action",
                                   NULL};
    for (int i = 0; fields[i]; i++)
    {
@@ -254,6 +257,36 @@ static cJSON *user_memory_owner_command(const char *operation, const cJSON *req)
 cJSON *memory_user_mcp_supersede_command(const cJSON *req)
 {
    return user_memory_owner_command_as("user-mcp-supersede", req, MEMORY_AUTHORITY_MODEL);
+}
+
+/* Explicit placement keeps the existing shared command default. The host only
+ * forwards the review envelope and authenticated context; Go admits decisions. */
+static cJSON *memory_correction_command(cJSON *req, int review)
+{
+   int selection = cJSON_HasObjectItem(req, "store") ? server_memory_store_selection(req) : 1;
+   if (selection == 0)
+      return user_memory_owner_command_as(
+          review ? "user-correction-review" : "user-correction-proposals", req,
+          review ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL);
+   if (selection != 1)
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT, "memory store must be user or kb",
+                                    NULL);
+   return kb_memory_owner_command(
+       review ? "memory.review_correction" : "memory.correction_proposals", req,
+       review ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL, review ? "proposal" : "proposals",
+       review ? cJSON_Object : cJSON_Array);
+}
+
+int handle_memory_correction_proposals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_correction_command(req, 0));
+}
+
+int handle_memory_review_correction(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_correction_command(req, 1));
 }
 
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
