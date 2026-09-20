@@ -71,7 +71,7 @@ func correctionDigest(r DataRequest, authority int) (string, error) {
 // The caller must roll back its transaction on ANY error, including a normal
 // refusal: the open audit commit, mutation, extraction job and receipt are atomic.
 // Only keyed corrections pay for the additional lock and receipt queries.
-func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *bus.CommandContext, correlation string) (Record, *MemoryMutationReceipt, error) {
+func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *bus.CommandContext, correlation string) (record Record, receipt *MemoryMutationReceipt, err error) {
 	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.validFor(r.ID) || !versionedCorrectionOperation(r.Operation) || (r.Operation == "supersede" && r.Confidence == nil) || (r.Operation == "update-as" && r.Confidence != nil) {
 		return Record{}, nil, errors.New("memory: invalid idempotent correction")
 	}
@@ -91,7 +91,7 @@ func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataReque
 	if _, err = s.db.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,5748))`, string(identity)); err != nil {
 		return Record{}, nil, err
 	}
-	receipt := &MemoryMutationReceipt{SchemaVersion: 1, Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner}}
+	receipt = &MemoryMutationReceipt{SchemaVersion: 1, Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner}}
 	var storedDigest string
 	var id, revision int64
 	err = s.db.QueryRow(ctx, `SELECT request_hash,commit_id,result_id,result_revision FROM memory_mutation_receipts
@@ -131,6 +131,15 @@ func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataReque
 	if actor.TransportIdentity == "" {
 		actor.TransportIdentity = actor.Principal
 	}
+	// Keep the row locked from admission through the canonical write. In
+	// particular, a model edit requiring review must not open a write commit.
+	defer func() {
+		s.recordMutation(DataRequest{Operation: "supersede", ID: r.ID, SessionID: r.SessionID, Authority: authority}, DataResponse{Records: []Record{record}}, err, "")
+	}()
+	correction, err := s.prepareKBCorrection(ctx, r.ID, r.Content, r.Confidence, r.SessionID, authority, nil, r.ExpectedVersion)
+	if err != nil {
+		return Record{}, nil, err
+	}
 	var previous string
 	if err = s.db.QueryRow(ctx, `SELECT COALESCE(current_setting('aimee.changeset_id',true),'')`).Scan(&previous); err != nil {
 		return Record{}, nil, err
@@ -147,7 +156,7 @@ func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataReque
 	if _, err = s.db.Exec(ctx, `SELECT set_config('aimee.changeset_id',$1,true)`, receipt.CommitID); err != nil {
 		return Record{}, nil, err
 	}
-	record, err := s.replaceKBCorrection(ctx, r.ID, r.Content, r.Confidence, r.SessionID, authority, nil, r.ExpectedVersion)
+	record, err = s.applyKBCorrection(ctx, correction)
 	if err != nil {
 		return Record{}, nil, err
 	}

@@ -100,6 +100,13 @@ inherits confidence from that row read, removing its previous separate confidenc
 lookup/lock. The digest binds the verb, so one key cannot switch between update
 and supersede; existing schema-one supersede digests remain compatible.
 
+The owner locks and admits the correction before opening its canonical audit
+commit, then applies the admitted change under that same transaction and row
+lock. A review or version refusal does not depend on the canonical audit writer
+being available. This removes four database calls from those refused keyed
+requests without adding queries to accepted edits or changing retry receipts.
+Linked proposals and review decisions remain a separate unfinished step.
+
 MCP `memory_get` advertises the version field, and `mutate` forwards and advertises
 the precondition and retry key for shared update/supersede. Keyed responses retain
 the complete owner receipt instead of dropping it into a plain success string.
@@ -107,7 +114,7 @@ The Go owner omits the host audit request on replay, preventing duplicate host
 mutation events. Legacy unkeyed MCP responses retain their existing text format.
 
 This contract currently covers shared corrections only. Other verbs and personal
-placement explicitly refuse the field. Broader create/update/delete idempotency,
+placement explicitly refuse the field. Remaining create/delete idempotency,
 retention/restore policy, review proposals and consumer progress remain open.
 
 ## Existing integration points

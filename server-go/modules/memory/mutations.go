@@ -220,26 +220,49 @@ func (s *postgresDataStore) replaceKBCorrection(ctx context.Context, id int64, c
 	defer func() {
 		s.recordMutation(DataRequest{Operation: "supersede", ID: id, SessionID: session, Authority: authority}, DataResponse{Records: []Record{r}}, err, "")
 	}()
-	if err := s.requireKBDomain(); err != nil {
+	correction, err := s.prepareKBCorrection(ctx, id, content, requestedConfidence, session, authority, metadata, condition)
+	if err != nil {
 		return Record{}, err
 	}
+	return s.applyKBCorrection(ctx, correction)
+}
+
+// This value is private to the Go owner and valid only while the preparing
+// transaction holds the target's row lock. Admission performs no durable writes;
+// keyed callers can reject an edit before opening its canonical audit commit.
+type preparedKBCorrection struct {
+	id              int64
+	content         string
+	confidence      float64
+	session         string
+	provenance      string
+	ceiling         float64
+	tier, useCases  string
+	replaceMetadata bool
+	unchanged       *Record
+}
+
+func (s *postgresDataStore) prepareKBCorrection(ctx context.Context, id int64, content string, requestedConfidence *float64, session string, authority int, metadata *DataRequest, condition *MemoryRecordVersion) (preparedKBCorrection, error) {
+	if err := s.requireKBDomain(); err != nil {
+		return preparedKBCorrection{}, err
+	}
 	if _, ok := s.db.(store.Tx); !ok {
-		return Record{}, errors.New("memory: replacement requires a transaction")
+		return preparedKBCorrection{}, errors.New("memory: replacement requires a transaction")
 	}
 	if authority != AuthorityModel && authority != AuthorityUser {
-		return Record{}, errors.New("memory: invalid authority")
+		return preparedKBCorrection{}, errors.New("memory: invalid authority")
 	}
 	confidence := 0.0
 	if requestedConfidence != nil {
 		confidence = *requestedConfidence
 		if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
-			return Record{}, errors.New("memory: invalid confidence")
+			return preparedKBCorrection{}, errors.New("memory: invalid confidence")
 		}
 	}
 	var screenErr error
 	content, screenErr = screenMemoryText(content)
 	if screenErr != nil {
-		return Record{}, screenErr
+		return preparedKBCorrection{}, screenErr
 	}
 	var epistemic, origin, oldUseCases string
 	var previous Record
@@ -249,7 +272,7 @@ func (s *postgresDataStore) replaceKBCorrection(ctx context.Context, id int64, c
 	var owner, revision, lifecycle string
 	if condition != nil {
 		if !condition.validFor(id) {
-			return Record{}, errors.New("memory: invalid expected version")
+			return preparedKBCorrection{}, errors.New("memory: invalid expected version")
 		}
 		// Lock the visible row even when already superseded, so a concurrent loser
 		// receives a conflict. Hidden and missing identities remain indistinguishable.
@@ -259,18 +282,18 @@ func (s *postgresDataStore) replaceKBCorrection(ctx context.Context, id int64, c
 	}
 	if err := s.db.QueryRow(ctx, "SELECT "+columns+" FROM memories WHERE "+predicate+" FOR UPDATE", id).Scan(destinations...); err != nil {
 		if store.IsNoRows(err) {
-			return Record{}, ErrMemoryNotFound
+			return preparedKBCorrection{}, ErrMemoryNotFound
 		}
-		return Record{}, err
+		return preparedKBCorrection{}, err
 	}
 	if condition != nil && (owner != condition.OwnerID || revision != condition.RecordRevision || lifecycle != "active") {
-		return Record{}, errMutationVersionConflict
+		return preparedKBCorrection{}, errMutationVersionConflict
 	}
 
 	if requestedConfidence == nil {
 		confidence = previous.Confidence
 		if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
-			return Record{}, errors.New("memory: invalid confidence")
+			return preparedKBCorrection{}, errors.New("memory: invalid confidence")
 		}
 	}
 
@@ -282,13 +305,13 @@ func (s *postgresDataStore) replaceKBCorrection(ctx context.Context, id int64, c
 	}
 	if metadata != nil && origin == expectedOrigin && previous.Content == content && previous.Tier == metadata.Tier && previous.Kind == metadata.Kind && oldUseCases == metadata.UseCases && previous.Confidence == confidence && (metadata.EpistemicKind == "" || metadata.EpistemicKind == epistemic) {
 		previous.ID = id
-		return previous, nil
+		return preparedKBCorrection{unchanged: &previous}, nil
 	}
 	if err := admitMemoryReplacement(epistemic, origin, authority); err != nil {
-		return Record{}, err
+		return preparedKBCorrection{}, err
 	}
 	if metadata != nil && metadata.EpistemicKind != "" && metadata.EpistemicKind != epistemic {
-		return Record{}, errMutationReviewRequired
+		return preparedKBCorrection{}, errMutationReviewRequired
 	}
 	provenance, ceiling := "agent_message", 0.8
 	if authority == AuthorityUser {
@@ -298,6 +321,19 @@ func (s *postgresDataStore) replaceKBCorrection(ctx context.Context, id int64, c
 	if metadata != nil {
 		tier, useCases = metadata.Tier, metadata.UseCases
 	}
+	return preparedKBCorrection{id: id, content: content, confidence: confidence, session: session,
+		provenance: provenance, ceiling: ceiling, tier: tier, useCases: useCases,
+		replaceMetadata: metadata != nil}, nil
+}
+
+// All compatibility and keyed writers apply the same admitted correction. The
+// caller must retain the preparing transaction through apply and roll back any
+// error, including scope-copy, extraction, audit or receipt failure.
+func (s *postgresDataStore) applyKBCorrection(ctx context.Context, correction preparedKBCorrection) (r Record, err error) {
+	if correction.unchanged != nil {
+		return *correction.unchanged, nil
+	}
+
 	err = s.db.QueryRow(ctx, `WITH candidate AS MATERIALIZED (
  SELECT *,pg_now_text() AS boundary FROM memories WHERE id=$1 AND lifecycle_state='active'
  AND NOT EXISTS (SELECT 1 FROM memory_rejection_tombstones t WHERE t.object_kind='memory' AND t.active=1
@@ -315,7 +351,7 @@ func (s *postgresDataStore) replaceKBCorrection(ctx context.Context, id int64, c
  CASE WHEN $4='' THEN source_session ELSE $4 END,$5,scope_type,scope_value,'active',boundary,owner_principal,sensitivity
  FROM closed RETURNING id,scope_type,scope_value,tier,kind,key,content,confidence
 )
-SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM fresh`, id, content, confidence, session, provenance, ceiling, tier, useCases, metadata != nil).
+SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM fresh`, correction.id, correction.content, correction.confidence, correction.session, correction.provenance, correction.ceiling, correction.tier, correction.useCases, correction.replaceMetadata).
 		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
@@ -332,6 +368,6 @@ SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM fresh`, i
  SELECT $2,scope_type,scope_value FROM memory_scopes WHERE memory_id=$1
  ON CONFLICT DO NOTHING
 )
-INSERT INTO memory_links(source_id,target_id,relation) VALUES($2,$1,'supersedes')`, id, r.ID)
+INSERT INTO memory_links(source_id,target_id,relation) VALUES($2,$1,'supersedes')`, correction.id, r.ID)
 	return r, err
 }

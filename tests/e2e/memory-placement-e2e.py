@@ -136,6 +136,36 @@ class Gate:
         self.check('MCP retries retain exactly one replacement', self.sql(
             f"SELECT count(*) FROM memories WHERE key='{key}' OR key LIKE '{key}#v%'") == '2')
 
+    def shared_correction_admission(self, old_id, version):
+        before = self.shared_changes(old_id)
+        keys = []
+        self.sql("ALTER TABLE fact_graph_commits ADD CONSTRAINT e2e_admission_audit_failure CHECK(operation NOT IN ('memory.supersede','memory.update')) NOT VALID")
+        try:
+            for verb in ('update', 'supersede'):
+                key = self.prefix + '-admission-' + verb
+                keys.append(hashlib.sha256(key.encode()).hexdigest())
+                args = dict(store='kb', id=str(old_id), old_id=str(old_id),
+                    content='refused model edit', new_content='refused model edit',
+                    authority='user', expected_version=version, idempotency_key=key)
+                refused = self.mcp_document('MCP ' + verb + ' admission before audit',
+                    'mutate', dict(args, verb=verb))
+                self.check('MCP ' + verb + ' requires review before canonical audit',
+                    refused.get('kind') == 'review_required' and 'mutation_receipt' not in refused)
+                code, failure = self.call(verb, args)
+                self.check('HTTP ' + verb + ' admitted correction reaches blocked audit',
+                    code >= 500 and failure.get('kind') == 'unavailable')
+                args['expected_version'] = dict(version, record_revision='9223372036854775807')
+                code, stale = self.call(verb, args)
+                self.check('HTTP ' + verb + ' rejects stale version before canonical audit',
+                    code == 409 and stale.get('reason') == 'expected_version_conflict')
+        finally:
+            self.sql('ALTER TABLE fact_graph_commits DROP CONSTRAINT e2e_admission_audit_failure')
+        self.check('refused corrections preserve original revision and invalidations',
+            self.shared_changes(old_id) == before)
+        hashes = ','.join("'" + key + "'" for key in keys)
+        self.check('refused corrections do not reserve retry keys', self.sql(
+            f"SELECT count(*) FROM memory_mutation_receipts WHERE key_hash IN ({hashes})") == '0')
+
     def shared_journal(self):
         key = self.prefix + '-journal'
         original = 'shared journal original'
@@ -152,6 +182,7 @@ class Gate:
                    before['events'][0]['operation'] == 'insert' and before['events'][-1]['revision'] == before['revision'])
         retry = self.good('shared journal identical retry', self.call('store', dict(store='kb', key=key, content=original)))
         self.check('shared retry preserves identity and journal', retry['id'] == old_id and self.shared_changes(old_id) == before)
+        self.shared_correction_admission(old_id, version)
         self.sql(f"INSERT INTO memory_scopes(memory_id,scope_type,scope_value) VALUES ({old_id},'workspace','journal-one'),({old_id},'workspace','journal-two')")
         tagged = self.shared_changes(old_id)
         self.check('shared tag batch invalidates its parent once', tagged['revision'] == before['revision'] + 1 and

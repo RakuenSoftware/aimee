@@ -94,6 +94,39 @@ func exerciseMutationRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 		t.Fatal("failed receipt consumed original")
 	}
 	exec(`RESET ROLE; ALTER TABLE memory_mutation_receipts DROP CONSTRAINT retry_fixture_fail; SET LOCAL ROLE aimee_store_runtime`)
+	// Admission must not depend on the audit writer being available. Block
+	// canonical audit inserts: refused edits still return the policy/version
+	// decision, whereas an admitted edit reaches the constraint and rolls back.
+	exec(`RESET ROLE; ALTER TABLE fact_graph_commits ADD CONSTRAINT retry_fixture_admission CHECK(operation NOT IN ('memory.supersede','memory.update')) NOT VALID; SET LOCAL ROLE aimee_store_runtime`)
+	for _, verb := range []string{"supersede", "update"} {
+		attempt := map[string]any{"old_id": id, "new_content": "corrected", "id": id, "content": "corrected", "authority": "model", "project": "retry-scope", "scope_context": true, "expected_version": version, "idempotency_key": "admission-first-" + verb}
+		if out := invoke(verb, attempt); out["kind"] != "review_required" {
+			t.Fatal("refused edit reached audit writer", verb, out)
+		}
+		attempt["authority"] = "user"
+		if out := invoke(verb, attempt); out["kind"] != "unavailable" {
+			t.Fatal("admitted edit did not reach audit writer", verb, out)
+		}
+		stale := map[string]any{}
+		for k, v := range version.(map[string]any) {
+			stale[k] = v
+		}
+		stale["record_revision"] = "9223372036854775807"
+		attempt["expected_version"] = stale
+		if out := invoke(verb, attempt); out["reason"] != "expected_version_conflict" {
+			t.Fatal("stale edit reached audit writer", verb, out)
+		}
+	}
+	exec(`RESET ROLE; ALTER TABLE fact_graph_commits DROP CONSTRAINT retry_fixture_admission; SET LOCAL ROLE aimee_store_runtime`)
+	if n := scalar(`SELECT generation FROM memory_collection_generations WHERE scope_type='project' AND scope_value='retry-scope'`); n != generation {
+		t.Fatal("admission failure published invalidation", n, generation)
+	}
+	if n := scalar(`SELECT count(*) FROM memories WHERE id=$1 AND lifecycle_state='active' AND content='original'`, id); n != 1 {
+		t.Fatal("admission failure consumed original")
+	}
+	if n := scalar(`SELECT count(*) FROM memory_mutation_receipts WHERE actor_principal='user:retry-fixture'`); n != 0 {
+		t.Fatal("admission failure reserved retry key", n)
+	}
 	// An ordinary refusal must not leave an open commit or reserve the key.
 	args["authority"] = "model"
 	if out := invoke("supersede", args); out["kind"] != "review_required" {
