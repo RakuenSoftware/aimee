@@ -103,6 +103,13 @@ Its [fresh retry evidence](../../validation/memory-private-retries-2026-09-20.md
 records **638/638** checks on `88ebfc8460` (429 T2, 209 T3), including
 33 additional private retry checks in each topology.
 
+[Fresh provider-bound validation](../../validation/memory-provider-boundary-2026-09-20.md)
+records **760/760** checks on `1f25b57f67` (490 T2, 270 T3). Final HTTP captures
+cover three client APIs and two provider formats, including separate constraints,
+tools, Unicode, continuation and tool-call relay. They exposed and verified fixes
+for dropped buffered Responses instructions/tools and incorrect Anthropic wire
+serialization. Hard provider token caps and durable dispatch receipts remain open.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from
@@ -132,7 +139,7 @@ worktree without `--project` against the existing remote service.
 |---|---|---|
 | MR-01 eligibility | Scoped transactions, placement separation, current-hash filters and Go current-validity predicates before lexical/semantic/unit/graph/window/bundle/activation/briefing limits; shared directive/reminder expiry; normalized assertion world/belief-time intervals and current typed-fact evidence closure | Unified temporal/utility policy on every surface, release recheck and race tests |
 | MR-02 mutations | Shared KB admission across same-key/edit/legacy verbs, user/model versions, original-author preservation, identity locking, tombstones and atomic extraction actor/job writes; personal and primary-scope shared revisions/generations/outboxes with bounded host replay; tag changes invalidate their visible parent; owner/ID/revision-bound shared corrections reject stale versions under the row lock; authenticated keyed update/supersede corrections commit immutable actor-isolated retry references with the existing audit and recheck result eligibility/version on replay; MCP forwards preconditions and preserves receipts; update reuses the locked confidence read; linked model drafts preserve authoritative parents and durably deduplicate rejected proposals; authenticated exact-draft reviews atomically record the reviewer while preserving model authorship/confidence, with rollback and concurrent decision tests; private updates retain owner-bound revisions, support exact-version history and conditional supersede, and atomically publish invalidation; verified private author capture and replacement admission protect user/unknown records, cap model confidence, and retain historical authorship; private drafts and exact-draft reviews preserve model authorship and atomically record decisions with canonical history/invalidation; private keyed corrections atomically retain actor-isolated receipts, reject changed payloads and recheck current results on replay | expected versions and idempotency on remaining verbs, further governed child/dependency coverage, durable consumer application/checkpoints and release checks |
-| MR-03 budgets | Go typed-context assembly, final personal/shared recall rebudgeting and existing packing limits; minimal typed projection with one reviewed-procedure rendering, exact byte count/digest and retained IDs; automatic ingress evidence uses only Go-retained items after host integrity acceptance | Final serialized provider byte/token caps, source-version binding and protected-projection accounting |
+| MR-03 budgets | Go typed-context assembly, final personal/shared recall rebudgeting and existing packing limits; minimal typed projection with one reviewed-procedure rendering, exact byte count/digest and retained IDs; automatic ingress evidence uses only Go-retained items after host integrity acceptance; buffered Responses retains instructions/tools and Anthropic targets use the correct final serializer | Final serialized provider byte/token caps, source-version binding and protected-projection accounting |
 | MR-04 lineage | Fact lineage/review and invalidation paths | Independent-family accounting, full derivative closure and restore-resistant erasure |
 | MR-05 sufficiency | Typed context and answer abstention; retrieval availability separated from unknown task coverage rather than nonempty-to-complete inference | Requirement/coherence coverage of retained evidence and bounded recovery |
 | MR-06 receipts | Owner diagnostic parts and postcommit observations; ingress assembly evidence excludes omitted/rejected context and feedback uses the rendered preview | Durable pre-inference receipts, dispatched/acknowledged stages and crash uncertainty |
@@ -147,7 +154,7 @@ worktree without `--project` against the existing remote service.
 | MR-15 outcomes | Existing feedback/workflow and learning paths | Verified application versus exposure, delayed outcomes and complete task cost |
 | MR-16 actions | Existing host authorization boundaries | Exact action evidence reauthorization, idempotent effects and composition budgets |
 | MR-17 retries | No release claim | Clean reasoning context with retained real-action journal and replay prevention |
-| MR-18 release gates | Go owner tests, live C bus with process restart, isolated evaluators, frozen corpus and manifest-bound per-case baselines | Complete adversarial manifests, temporal reproducibility and full surface/restart/failure gates beyond the recorded initial paired run and fresh-environment matrix; owner/evaluator PostgreSQL replay is now wired into required CI |
+| MR-18 release gates | Go owner tests, live C bus with process restart, isolated evaluators, frozen corpus and manifest-bound per-case baselines | Complete adversarial manifests, temporal reproducibility and full surface/restart/failure gates beyond the recorded initial paired run and fresh-environment matrix; owner/evaluator PostgreSQL replay is now wired into required CI; final-wire memory/constraint/tool captures cover three client APIs into two provider formats |
 
 Historical notes are preserved in the [program migration history](memory-reliability-migration-history.md)
 and [module migration history](../../modules/memory-migration-history.md). Their

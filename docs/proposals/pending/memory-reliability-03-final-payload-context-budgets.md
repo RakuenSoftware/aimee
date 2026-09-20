@@ -34,6 +34,14 @@ exposure feedback. [Boundary validation](../../validation/memory-ingress-evidenc
 distinguishes this completed correction from remaining provider dispatch and
 all-channel accounting work.
 
+[Provider-bound capture](../../validation/memory-provider-boundary-2026-09-20.md)
+found and corrected dropped instructions/tools in buffered Responses and wrong
+wire serialization for Chat/Responses targeting Anthropic. The deployment matrix
+now checks the complete Go-recalled memory projection, user constraints and tool
+schemas at the actual HTTP provider boundary. This validates preservation and
+exact request byte accounting in the fixture; production hard caps and tokenizer
+integration remain required.
+
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
 Use a single model-facing projection and verify the final request budget after every provider-affecting transformation. Keep explanation metadata outside the prompt unless a small field is explicitly useful to the model.
