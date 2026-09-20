@@ -409,16 +409,44 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    cJSON_AddStringToObject(assembly, "temporal", temporal ? temporal : "");
    free(temporal);
 
-   /* Auditable-correctness P1: emit a single-writer, turn-keyed retrieval_event
-    * recording the memory rows surfaced into this turn's context. Default-off
-    * (kb_evidence_emit_enabled). Observation-only — the envelope and the answer
-    * are byte-identical whether or not this fires; the only added work is one
-    * synchronous KB write. The id is the one the HTTP layer minted (and surfaced
-    * to the client as X-Aimee-Retrieval-Event); if none was set (e.g. a direct
-    * build call) we mint one here so the event is still reconstructible. This is
-    * the dedicated single-writer foundation; P1.5 folds the emit into the
-    * retrieval handlers with the idempotent two-writer upsert. */
-   if (config_kb_evidence_emit_enabled() && (mem_n > 0 || n > 0))
+   char *audit = legacy_preview_on ? ingress_preinject_read_audit_context() : NULL;
+   cJSON_AddStringToObject(assembly, "audit", audit ? audit : "");
+   free(audit);
+
+   cJSON *response = ingress_command(assembly);
+   const char *envelope =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "envelope"));
+   if (!envelope)
+   {
+      kb_client_memory_scope_context_clear();
+      cJSON_Delete(response);
+      LOG_WARN("memory", "Go ingress assembly unavailable; omitting pre-injection envelope");
+      return NULL;
+   }
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "facts_unavailable")))
+      LOG_WARN("ingress-memory",
+               "typed-fact recall unavailable or invalid; continuing without facts");
+   const cJSON *folded = cJSON_GetObjectItemCaseSensitive(response, "folded_count");
+   const cJSON *saved = cJSON_GetObjectItemCaseSensitive(response, "folded_saved");
+   if (cJSON_IsNumber(folded) && folded->valueint > 0 && cJSON_IsNumber(saved))
+      LOG_DEBUG("ingress-compress", "folded %d code %s, dropped ~%.0f snippet bytes",
+                folded->valueint, folded->valueint == 1 ? "hit" : "hits", saved->valuedouble);
+   char *result = NULL;
+   if (envelope[0])
+   {
+      integrity_result_t gate;
+      if (integrity_ingress_decide(envelope, INTEGRITY_SOURCE_DOCUMENT, "retrieval", 1, &gate))
+         LOG_WARN("integrity", "automatic retrieval parked (%s): %s",
+                  integrity_verdict_name(gate.verdict), gate.match_category);
+      else
+         result = strdup(envelope);
+   }
+   /* Assembly evidence is emitted only after packing and integrity acceptance.
+    * It does not assert provider admission, dispatch, or acknowledgement. */
+   const cJSON *retained_memories = cJSON_GetObjectItemCaseSensitive(response, "retained_memories");
+   const cJSON *retained_code = cJSON_GetObjectItemCaseSensitive(response, "retained_code_indices");
+   if (result && config_kb_evidence_emit_enabled() &&
+       (cJSON_GetArraySize(retained_memories) > 0 || cJSON_GetArraySize(retained_code) > 0))
    {
       const char *tid = ingress_preinject_turn_id();
       char minted[40];
@@ -426,7 +454,8 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       {
          if (ingress_preinject_mint_turn_id(minted, sizeof(minted)) != 0)
          {
-            cJSON_Delete(assembly);
+            free(result);
+            cJSON_Delete(response);
             kb_client_memory_scope_context_clear();
             return NULL;
          }
@@ -435,15 +464,15 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       char fp[32];
       ingress_query_fingerprint(query, fp, sizeof(fp));
 
-      /* Memory surface (single-writer, P1): the owner returns the full set of memory
-       * previews surfaced into this turn (mem_n <= the diagnose cap of 5), so
-       * recording all of them is the complete memory evidence, not a truncation. */
+      /* Copy only previews retained by the Go packer. */
       int64_t ids[5];
       const char *snips[5];
       int n_ids = 0;
-      for (int i = 0; i < mem_n && n_ids < (int)(sizeof(ids) / sizeof(ids[0])); i++)
+      for (int i = 0;
+           i < cJSON_GetArraySize(retained_memories) && n_ids < (int)(sizeof(ids) / sizeof(ids[0]));
+           i++)
       {
-         const cJSON *row = cJSON_GetArrayItem(memories, i);
+         const cJSON *row = cJSON_GetArrayItem(retained_memories, i);
          const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "id"));
          const char *preview =
              cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "preview"));
@@ -473,13 +502,20 @@ char *ingress_preinject_build(const char *query, int request_disabled)
        * Runs after the memory emit: when memory also surfaced it JOINS that event
        * (idempotent two-writer); on a code-only turn the merge is the first writer
        * and creates the event itself. */
-      if (n > 0)
+      if (cJSON_GetArraySize(retained_code) > 0)
       {
          char refbuf[6][MAX_PATH_LEN + 160];
          const char *types[6], *refs[6], *versions[6];
          int cn = 0;
-         for (int i = 0; i < n && cn < (int)(sizeof(types) / sizeof(types[0])); i++)
+         for (int j = 0;
+              j < cJSON_GetArraySize(retained_code) && cn < (int)(sizeof(types) / sizeof(types[0]));
+              j++)
          {
+            const cJSON *index = cJSON_GetArrayItem(retained_code, j);
+            if (!cJSON_IsNumber(index) || index->valuedouble != index->valueint ||
+                index->valueint < 0 || index->valueint >= n)
+               continue;
+            int i = index->valueint;
             if (!hits[i].project[0] || !hits[i].file_path[0])
                continue;
             snprintf(refbuf[cn], sizeof(refbuf[cn]), "code:%s:%s", hits[i].project,
@@ -495,38 +531,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       }
    }
 
-   char *audit = legacy_preview_on ? ingress_preinject_read_audit_context() : NULL;
-   cJSON_AddStringToObject(assembly, "audit", audit ? audit : "");
-   free(audit);
    kb_client_memory_scope_context_clear();
-
-   cJSON *response = ingress_command(assembly);
-   const char *envelope =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "envelope"));
-   if (!envelope)
-   {
-      cJSON_Delete(response);
-      LOG_WARN("memory", "Go ingress assembly unavailable; omitting pre-injection envelope");
-      return NULL;
-   }
-   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "facts_unavailable")))
-      LOG_WARN("ingress-memory",
-               "typed-fact recall unavailable or invalid; continuing without facts");
-   const cJSON *folded = cJSON_GetObjectItemCaseSensitive(response, "folded_count");
-   const cJSON *saved = cJSON_GetObjectItemCaseSensitive(response, "folded_saved");
-   if (cJSON_IsNumber(folded) && folded->valueint > 0 && cJSON_IsNumber(saved))
-      LOG_DEBUG("ingress-compress", "folded %d code %s, dropped ~%.0f snippet bytes",
-                folded->valueint, folded->valueint == 1 ? "hit" : "hits", saved->valuedouble);
-   char *result = NULL;
-   if (envelope[0])
-   {
-      integrity_result_t gate;
-      if (integrity_ingress_decide(envelope, INTEGRITY_SOURCE_DOCUMENT, "retrieval", 1, &gate))
-         LOG_WARN("integrity", "automatic retrieval parked (%s): %s",
-                  integrity_verdict_name(gate.verdict), gate.match_category);
-      else
-         result = strdup(envelope);
-   }
    cJSON_Delete(response);
    return result;
 }

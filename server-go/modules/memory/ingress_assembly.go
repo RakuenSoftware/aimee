@@ -96,6 +96,12 @@ type ingressMemoryPreview struct {
 	Score    float64 `json:"score"`
 }
 
+// Evidence at the assembled-envelope boundary, not a provider dispatch receipt.
+type ingressRetainedMemory struct {
+	ID      string `json:"id"`
+	Preview string `json:"preview"`
+}
+
 type ingressAssemblyRequest struct {
 	ContextLimits  *ContextLimits         `json:"context_limits,omitempty"`
 	Budget         int                    `json:"budget"`
@@ -127,7 +133,8 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		request.CompressMin = 80
 	}
 	entries := make([]ingressEntry, 0, 15)
-	memoryEntries := make(map[int]string, len(request.Memories))
+	memoryEntries := make(map[int]ingressRetainedMemory, len(request.Memories))
+	codeEntries := make(map[int]int, len(request.Code))
 	score, missing, folded, saved := 0.0, 0, 0, 0
 	if request.TaskBlock != "" {
 		entries = append(entries, ingressEntry{"code", "", request.TaskBlock})
@@ -137,7 +144,7 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 	if request.Compress {
 		header = "recommended (code — expand via code_span_get):\n"
 	}
-	for _, hit := range request.Code {
+	for index, hit := range request.Code {
 		body := "  - " + hit.FilePath + "\n"
 		if request.Compress && hit.Line > 0 && len(hit.Snippet) > request.CompressMin {
 			body = fmt.Sprintf("  - %s:%d\n", hit.FilePath, hit.Line)
@@ -146,6 +153,7 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		} else if hit.Snippet != "" {
 			body += "    > " + ingressSingleLine(hit.Snippet, 150) + "\n"
 		}
+		codeEntries[len(entries)] = index
 		entries = append(entries, ingressEntry{"code", header, body})
 	}
 	score = max(score, float64(len(request.Code))/6)
@@ -174,10 +182,11 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 			kind = "memory"
 		}
 		body += fmt.Sprintf(" [%s/%s score=%.3f headline_missing=%t]\n", tier, kind, row.Score, headlineMissing)
+		preview = ingressSingleLine(preview, 220)
 		if preview != "" {
-			body += "    > " + ingressSingleLine(preview, 220) + "\n"
+			body += "    > " + preview + "\n"
 		}
-		memoryEntries[len(entries)] = row.ID
+		memoryEntries[len(entries)] = ingressRetainedMemory{ID: row.ID, Preview: preview}
 		entries = append(entries, ingressEntry{"memory", "recommended (memory previews):\n", body})
 	}
 	if n := len(request.Memories); n > 0 {
@@ -213,13 +222,20 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		return nil, err
 	}
 	retained := []string{}
+	retainedMemories := []ingressRetainedMemory{}
+	retainedCode := []int{}
 	for _, index := range selected {
-		if id, ok := memoryEntries[index]; ok {
-			retained = append(retained, id)
+		if memory, ok := memoryEntries[index]; ok {
+			retained = append(retained, memory.ID)
+			retainedMemories = append(retainedMemories, memory)
+		}
+		if codeIndex, ok := codeEntries[index]; ok {
+			retainedCode = append(retainedCode, codeIndex)
 		}
 	}
 	return map[string]any{"status": "ok", "block": block, "envelope": envelope,
 		"context_accounting": accounting, "retained_memory_ids": retained,
+		"retained_memories": retainedMemories, "retained_code_indices": retainedCode,
 		"omitted_count": omitted, "headline_missing_count": missing, "folded_count": folded,
 		"folded_saved": saved, "facts_unavailable": factsUnavailable}, nil
 }

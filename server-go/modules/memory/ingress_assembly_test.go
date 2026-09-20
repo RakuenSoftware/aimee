@@ -176,3 +176,28 @@ func TestVersionedIngressByteBudget(t *testing.T) {
 		}
 	}
 }
+
+func TestIngressRetainedEvidenceMatchesRenderedSelection(t *testing.T) {
+	request := ingressAssemblyRequest{Budget: 1100, TaskBlock: "task\n",
+		Code:     []ingressCodeHit{{FilePath: strings.Repeat("x", 2000)}, {FilePath: "retained.go", Snippet: "actual code"}},
+		Memories: []ingressMemoryPreview{{ID: "9223372036854775807", Headline: strings.Repeat("界", 100) + "OMITTED_SENTINEL"}},
+	}
+	r, err := ingressAssemble(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := r["retained_code_indices"].([]int)
+	memories := r["retained_memories"].([]ingressRetainedMemory)
+	if len(code) != 1 || code[0] != 1 || len(memories) != 1 || memories[0].ID != "9223372036854775807" {
+		t.Fatal("selected entry offsets confused with source indices", r)
+	}
+	preview := memories[0].Preview
+	if preview != ingressSingleLine(request.Memories[0].Headline, 220) || strings.Contains(preview, "OMITTED_SENTINEL") || !strings.Contains(r["envelope"].(string), preview) {
+		t.Fatal("evidence differs from rendered preview", r)
+	}
+	request.Budget = 384
+	r, err = ingressAssemble(request)
+	if err != nil || r["envelope"] != "" || len(r["retained_memories"].([]ingressRetainedMemory)) != 0 || len(r["retained_code_indices"].([]int)) != 0 {
+		t.Fatal("empty envelope emitted evidence", r, err)
+	}
+}
