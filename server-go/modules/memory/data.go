@@ -1011,7 +1011,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if request.ExpectedVersion != nil && (!versionedCorrection || !request.ExpectedVersion.validFor(request.ID)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if request.IdempotencyKey != "" && (options.placement != PlacementKB || !versionedCorrectionOperation(request.Operation) || request.ExpectedVersion == nil || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
+	if request.IdempotencyKey != "" && (!versionedCorrection || request.ExpectedVersion == nil || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementServer {
@@ -2115,7 +2115,13 @@ set_config('aimee.correlation_id',$9,true)`,
 				}
 			}
 		} else if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementServer && request.ExpectedVersion != nil {
-			record, err = backend.correctPersonalVersion(ctx, scope, request.ID, request.Content, *request.Confidence, *request.ExpectedVersion)
+			if request.IdempotencyKey != "" {
+				request.Scope = scope
+				record, response.MutationReceipt, err = backend.correctPersonalIdempotent(ctx, request, options.commandContext)
+				rollbackOnly = err != nil
+			} else {
+				record, err = backend.correctPersonalVersion(ctx, scope, request.ID, request.Content, *request.Confidence, *request.ExpectedVersion)
+			}
 		} else {
 			record, err = advanced.Supersede(ctx, scope, request.ID, request.Content, *request.Confidence)
 		}

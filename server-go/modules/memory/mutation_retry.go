@@ -15,8 +15,9 @@ import (
 var errIdempotencyConflict = errors.New("memory: idempotency key was already used for a different correction")
 var errReplayUnavailable = errors.New("memory: correction was already committed but its result is no longer available at the committed version; the correction was not repeated")
 
-// MemoryMutationReceipt identifies the existing canonical audit commit, never a
-// cached content response. A replay must pass current visibility and revision checks.
+// MemoryMutationReceipt identifies the committed correction (a KB audit commit
+// or private transaction receipt), never a cached content response. A replay must
+// pass current visibility and revision checks.
 type MemoryMutationReceipt struct {
 	SchemaVersion int                 `json:"schema_version"`
 	CommitID      string              `json:"commit_id"`

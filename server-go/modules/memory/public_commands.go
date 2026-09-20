@@ -108,8 +108,8 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if _, exists := args["read_policy"]; exists && verb != "get" && verb != "runtime" {
 		return commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get"))
 	}
-	if _, exists := args["idempotency_key"]; exists && ((verb != "supersede" && verb != "update") || options.placement != PlacementKB) {
-		return commandResult(commandError("unsupported_mode", "idempotency_key is supported only for shared memory update and supersede"))
+	if _, exists := args["idempotency_key"]; exists && !((options.placement == PlacementKB && (verb == "supersede" || verb == "update")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "runtime"))) {
+		return commandResult(commandError("unsupported_mode", "idempotency_key is supported only for conditional corrections"))
 	}
 	versionedCorrection := (options.placement == PlacementKB && (verb == "supersede" || verb == "update" || verb == "review_correction")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "runtime"))
 	if _, exists := args["expected_version"]; exists && !versionedCorrection {
@@ -179,8 +179,8 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		request.Authority = AuthorityUser
 	}
 
-	if _, exists := args["idempotency_key"]; exists {
-		return commandResult(commandError("unsupported_mode", "personal idempotency keys are not yet supported"))
+	if _, exists := args["idempotency_key"]; exists && verb != "supersede" {
+		return commandResult(commandError("unsupported_mode", "private idempotency keys require conditional supersede"))
 	}
 	confidence := 1.0
 	switch verb {
@@ -234,9 +234,10 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			if !ok {
 				return invalid("memory.supersede requires a positive integer old_id")
 			}
-			request.ExpectedVersion, ok = commandExpectedVersion(args, request.ID)
-			if !ok {
-				return invalid("invalid expected_version")
+			var refusal map[string]any
+			request.ExpectedVersion, request.IdempotencyKey, refusal = commandCorrectionOptions(args, request.ID, options.commandContext)
+			if refusal != nil {
+				return commandResult(refusal)
 			}
 			request.Content = args.stringOr("new_content", "")
 			if request.Content == "" {
@@ -247,6 +248,7 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 				if string(raw) == "null" || json.Unmarshal(raw, &session) != nil {
 					return invalid("memory.supersede session_id must be a string")
 				}
+				request.SessionID = session
 			}
 		}
 	case "list":
@@ -312,14 +314,19 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			}
 		case "supersede":
 			if args.stringOr("view", "") == "mcp" {
-				return commandResult(map[string]any{"status": "ok", "store": "user", "records": response.Records})
+				result["records"] = response.Records
+				if response.MutationReceipt != nil {
+					result["mutation_receipt"] = response.MutationReceipt
+				}
+				return commandResult(result)
 			}
 			// Supersede's established envelope contains the record at the root.
 			return commandResult(struct {
 				Record
-				Status string `json:"status"`
-				Store  string `json:"store"`
-			}{record, "ok", "user"})
+				Status          string                 `json:"status"`
+				Store           string                 `json:"store"`
+				MutationReceipt *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
+			}{record, "ok", "user", response.MutationReceipt})
 		}
 	case "delete":
 		if !response.Deleted {

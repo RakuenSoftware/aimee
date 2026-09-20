@@ -15,6 +15,9 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	operation := args.stringOr("operation", "")
+	if _, exists := args["idempotency_key"]; exists && operation != "user-supersede" && operation != "user-mcp-supersede" {
+		return runtimeJSONText(commandResult(commandError("unsupported_mode", "idempotency_key requires a private correction")))
+	}
 	for _, field := range []string{"at_version", "include_version", "expected_version"} {
 		_, exists := args[field]
 		allowed := operation == "user-get" && field != "expected_version"

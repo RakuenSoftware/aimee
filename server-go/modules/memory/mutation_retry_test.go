@@ -34,7 +34,7 @@ func TestIdempotencyContractValidation(t *testing.T) {
 		t.Fatal(r)
 	}
 	personal := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementServer, nil)))
-	if r := runPublicCommand(t, personal, "supersede", `{"idempotency_key":"fixture-retry-key"}`); r["kind"] != "unsupported_mode" {
+	if r := runPublicCommand(t, personal, "supersede", `{"idempotency_key":"fixture-retry-key"}`); r["kind"] != "invalid_argument" {
 		t.Fatal(r)
 	}
 }

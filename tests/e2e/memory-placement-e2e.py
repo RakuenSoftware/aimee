@@ -106,9 +106,9 @@ class Gate:
         version = observed['memory']['version']
         self.check('MCP versioned get preserves exact target', version['record_id'] == str(old_id))
         private = self.mcp_document('MCP private correction precondition', 'mutate',
-            dict(verb='update', store='user', id=str(old_id), content='unsupported private correction',
+            dict(verb='update', store='user', id=str(old_id), content='wrong-owner private correction',
                  expected_version=version, idempotency_key=self.prefix + '-private-retry'))
-        self.check('MCP private placement refuses unsupported correction preconditions', private.get('kind') == 'unsupported_mode')
+        self.check('MCP private placement refuses a shared owner version', private.get('reason') == 'expected_version_conflict')
         correction = dict(verb='update', store='kb', project=project, id=str(old_id),
             content='corrected model fixture', authority='user', expected_version=version,
             idempotency_key=self.prefix + '-mcp-retry')
@@ -503,6 +503,73 @@ class Gate:
         code, unavailable = self.call('review_correction', review)
         self.check('private erased proposal cannot be reviewed again', code == 404 and unavailable.get('kind') == 'not_found')
 
+    def personal_keyed_corrections(self):
+        key = self.prefix + '-private-keyed'
+        created = self.good('private keyed correction parent', self.call('store', dict(key=key, content='private original')))
+        mid = created['id']
+        original = self.good('private keyed original version', self.call('get', dict(id=mid, include_version=True)))['memory']
+        correction = dict(old_id=mid, new_content='private corrected', expected_version=original['version'],
+            idempotency_key=key + '-retry')
+        before = self.personal_changes(mid)
+        self.personal_sql('ALTER TABLE user_memory_mutation_receipts ADD CONSTRAINT e2e_private_retry_failure CHECK(false) NOT VALID')
+        try:
+            code, failed = self.call('supersede', correction)
+            self.check('private keyed correction refuses receipt failure', code >= 500 and failed.get('status') == 'error')
+            current = self.good('private keyed parent after failure', self.call('get', dict(id=mid, include_version=True)))['memory']
+            self.check('private receipt failure rolls back content and journal', current == original and self.personal_changes(mid) == before)
+        finally:
+            self.personal_sql('ALTER TABLE user_memory_mutation_receipts DROP CONSTRAINT e2e_private_retry_failure')
+        first = self.good('private keyed correction commits', self.call('supersede', correction))
+        receipt = first['mutation_receipt']
+        self.check('private receipt binds stable ID and new version', receipt['replayed'] is False and
+            receipt['version']['record_id'] == str(mid) and receipt['version'] == first['version'] and
+            first['version'] != original['version'])
+        committed = self.personal_changes(mid)
+        replay = self.good('private keyed HTTP retry', self.call('supersede', correction))
+        self.check('private HTTP retry preserves one commit and canonical effect', replay['mutation_receipt']['replayed'] is True and
+            replay['mutation_receipt']['commit_id'] == receipt['commit_id'] and self.personal_changes(mid) == committed)
+        code, conflict = self.call('supersede', dict(correction, new_content='different private correction'))
+        self.check('private HTTP retry rejects changed payload', code == 409 and conflict.get('reason') == 'idempotency_conflict')
+        self.docker('restart', self.args.server)
+        self.good('private keyed result after restart', self.wait('get', dict(id=mid)))
+        replay = self.good('private keyed retry after restart', self.call('supersede', correction))
+        self.check('private retry receipt survives Server restart', replay['mutation_receipt']['replayed'] is True and
+            replay['mutation_receipt']['commit_id'] == receipt['commit_id'] and self.personal_changes(mid) == committed)
+        self.good('private keyed result retirement', self.call('delete', dict(id=mid)))
+        code, hidden = self.call('supersede', correction)
+        self.check('private retry cannot release retired content', code == 409 and hidden.get('reason') == 'idempotent_result_unavailable' and 'mutation_receipt' not in hidden)
+        self.personal_sql(f'DELETE FROM user_memories WHERE id={int(mid)}')
+        code, hidden = self.call('supersede', correction)
+        self.check('private erasure does not free a committed retry key', code == 409 and hidden.get('reason') == 'idempotent_result_unavailable' and
+            self.personal_sql(f'SELECT count(*) FROM user_memory_mutation_receipts WHERE target_id={int(mid)}') == '1')
+        model = self.mcp_document('private keyed model fixture', 'mutate', dict(verb='store', key=key + '-model', content='model original'))
+        model_id = model['id']
+        version = self.good('private model retry version', self.call('get', dict(id=model_id, include_version=True)))['memory']['version']
+        args = dict(verb='update', store='user', id=str(model_id), content='model corrected', expected_version=version, idempotency_key=key + '-model-retry')
+        first = self.mcp_document('private keyed MCP correction', 'mutate', args)
+        replay = self.mcp_document('private keyed MCP retry', 'mutate', args)
+        self.check('private MCP preserves durable receipt and capped model authority', first['mutation_receipt']['replayed'] is False and
+            replay['mutation_receipt']['replayed'] is True and first['mutation_receipt']['commit_id'] == replay['mutation_receipt']['commit_id'] and
+            replay['records'][0]['authorship']['category'] == 'agent_message' and replay['records'][0]['confidence'] == 0.8)
+        human = self.good('private keyed proposal parent', self.call('store', dict(key=key + '-human', content='human assertion')))
+        human_id = human['id']
+        version = self.good('private keyed proposal version', self.call('get', dict(id=human_id, include_version=True)))['memory']['version']
+        args = dict(verb='update', store='user', id=str(human_id), content='keyed model proposal', expected_version=version, idempotency_key=key + '-proposal')
+        first = self.mcp_document('private keyed model proposal', 'mutate', args)
+        replay = self.mcp_document('private keyed model proposal retry', 'mutate', args)
+        self.check('private proposal retry retains non-serving identity', first.get('kind') == 'review_required' and
+            replay['proposal']['replayed'] is True and replay['proposal']['proposal_id'] == first['proposal']['proposal_id'] and 'draft' not in replay['proposal'])
+        conflict = self.mcp_document('private keyed changed draft', 'mutate', dict(args, content='different keyed model proposal'))
+        self.check('private proposal retry rejects changed draft', conflict.get('reason') == 'idempotency_conflict')
+        p = first['proposal']
+        self.good('private keyed proposal rejection', self.call('review_correction', dict(store='user', proposal_id=p['proposal_id'],
+            payload_digest=p['payload_digest'], expected_version=p['target_version'], action='reject')))
+        replay = self.mcp_document('private keyed rejected proposal retry', 'mutate', args)
+        self.check('private keyed rejected proposal cannot reopen', replay['proposal']['state'] == 'rejected' and replay['proposal']['replayed'] is True)
+        self.personal_sql(f'DELETE FROM user_memories WHERE id={int(human_id)}')
+        replay = self.mcp_document('private keyed erased proposal retry', 'mutate', args)
+        self.check('private erased proposal key cannot repeat a mutation', replay.get('reason') == 'idempotent_result_unavailable' and 'proposal' not in replay)
+
     def run_local(self):
         """First-boot regression on a composition containing only Server and its store."""
         content = 'Personal local-only fixture person@local.invalid 🦊'
@@ -569,6 +636,7 @@ class Gate:
         self.confidence_contract(('user',))
         self.personal_versions()
         self.personal_correction_review()
+        self.personal_keyed_corrections()
         return all(c['passed'] for c in self.checks)
 
     def run(self):

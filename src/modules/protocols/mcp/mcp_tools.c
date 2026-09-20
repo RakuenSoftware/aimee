@@ -1985,7 +1985,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                "\"record_revision\":{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"}},"
                "\"required\":[\"schema_version\",\"owner_id\",\"record_id\",\"record_revision\"]},"
                "\"idempotency_key\":{\"type\":\"string\",\"minLength\":16,\"maxLength\":128,"
-               "\"pattern\":\"^[!-~]+$\",\"description\":\"For KB update/supersede with "
+               "\"pattern\":\"^[!-~]+$\",\"description\":\"For user or KB update/supersede with "
                "expected_version, reuse the key for the same correction. Returns a durable "
                "commit receipt without repeating the mutation.\"},"
                "\"reason\":{\"type\":\"string\","

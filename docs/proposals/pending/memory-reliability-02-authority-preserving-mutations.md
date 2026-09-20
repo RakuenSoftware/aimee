@@ -72,7 +72,19 @@ original decision. Explicit `store=user` is available on the Server's
 the default remains shared `kb`. See the
 [authority validation](../../validation/memory-private-authority-2026-09-20.md) and
 [review validation](../../validation/memory-private-review-2026-09-20.md).
-Private keyed mutation retries and other remaining verbs are still acceptance work.
+Migration 31 adds private conditional-correction retry receipts. Authenticated
+HTTP supersede and MCP update/supersede accept `idempotency_key` with the exact
+`expected_version`. Owner and verified principal namespace the hashed key; a
+request digest binds the payload and effective authority. The receipt, canonical
+change, history and invalidation commit together. Review-required drafts are
+also durable keyed outcomes. Retries return the original content-free receipt or
+proposal reference only after current eligibility/version checks. Changed
+payloads conflict, and erasure cannot free a committed key. Private receipt IDs
+identify transactions; they do not claim shared WORM-audit or consumer freshness
+parity. Unkeyed calls incur no retry lookup or key lock. See
+[retry validation](../../validation/memory-private-retries-2026-09-20.md).
+Create/delete keyed retries, remaining mutation preconditions and full durable
+consumer/retention semantics are still acceptance work.
 
 ### Expected-version shared corrections
 
@@ -142,9 +154,10 @@ the complete owner receipt instead of dropping it into a plain success string.
 The Go owner omits the host audit request on replay, preventing duplicate host
 mutation events. Legacy unkeyed MCP responses retain their existing text format.
 
-This contract currently covers shared corrections only. Other verbs and personal
-placement explicitly refuse the field. Remaining create/delete idempotency,
-retention/restore policy and consumer progress remain open.
+This shared contract covers update and supersede. Private conditional corrections
+now have the corresponding receipt contract described above. Other mutation
+verbs still refuse retry keys; create/delete idempotency, retention/restore policy
+and consumer progress remain open.
 
 ### Linked model correction proposals
 
@@ -230,8 +243,8 @@ ACLs weakened by older PostgreSQL restart reconciliation; corrected store
 provisioning preserves migration-owned permissions on subsequent restarts.
 
 This is exact-version history, not valid-time or belief-time reconstruction;
-`at_version` cannot be combined with `read_policy` or `as_of`. Personal mutation
-idempotency keys remain open. Migrations 29 and 30 add the trusted authorship,
+`at_version` cannot be combined with `read_policy` or `as_of`. Migration 31 adds
+private conditional-correction retry keys. Migrations 29 and 30 add the trusted authorship,
 proposal and reviewer admission described above; retained revisions include that
 metadata without inferring human authorship from placement or request bodies.
 
