@@ -2,23 +2,25 @@ package memory
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
 
 type ingressBeginRequest struct {
-	Query            string `json:"query"`
-	Session          string `json:"session"`
-	Project          string `json:"project"`
-	ActiveScope      bool   `json:"active_scope"`
-	Disabled         bool   `json:"disabled"`
-	PreviewEnabled   bool   `json:"preview_enabled"`
-	Mode             string `json:"mode"`
-	Budget           int    `json:"budget"`
-	Compress         bool   `json:"compress"`
-	CompressDisabled bool   `json:"compress_disabled"`
-	CompressMin      int    `json:"compress_min"`
+	ContextLimits    *ContextLimits `json:"context_limits,omitempty"`
+	Query            string         `json:"query"`
+	Session          string         `json:"session"`
+	Project          string         `json:"project"`
+	ActiveScope      bool           `json:"active_scope"`
+	Disabled         bool           `json:"disabled"`
+	PreviewEnabled   bool           `json:"preview_enabled"`
+	Mode             string         `json:"mode"`
+	Budget           int            `json:"budget"`
+	Compress         bool           `json:"compress"`
+	CompressDisabled bool           `json:"compress_disabled"`
+	CompressMin      int            `json:"compress_min"`
 }
 
 func ingressBegin(state *gatewayState, request ingressBeginRequest) map[string]any {
@@ -40,6 +42,17 @@ func ingressBegin(state *gatewayState, request ingressBeginRequest) map[string]a
 	budget := request.Budget
 	if budget <= 0 {
 		budget = 6144
+	}
+	budget, err := request.ContextLimits.byteLimit(budget)
+	if err != nil {
+		kind := "invalid_argument"
+		var refusal *contextBudgetError
+		if errors.As(err, &refusal) {
+			kind = refusal.kind
+		}
+		result = commandError(kind, err.Error())
+		result["active"] = false
+		return result
 	}
 	// Do not consume a first-task claim or retrieve data for an unusable budget.
 	if budget <= 384 {

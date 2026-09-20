@@ -68,6 +68,24 @@ func TestIngressPlanBudgetDoesNotConsumeTaskClaim(t *testing.T) {
 	}
 }
 
+func TestIngressVersionedBudgetBeforeTaskClaim(t *testing.T) {
+	state := &gatewayState{}
+	zero := 0
+	r := ingressBeginRequest{Query: "fix local resolver", Session: "s", Project: "p", ActiveScope: true,
+		PreviewEnabled: true, Mode: "on", Budget: 1200, ContextLimits: &ContextLimits{SchemaVersion: 1, MaxContextBytes: &zero}}
+	if plan := ingressBegin(state, r); plan["active"] != false {
+		t.Fatal("explicit zero inherited the legacy budget", plan)
+	}
+	r.ContextLimits = &ContextLimits{SchemaVersion: 1, MaxContextTokens: &zero}
+	if plan := ingressBegin(state, r); plan["active"] != false || plan["kind"] != "unsupported_mode" {
+		t.Fatal("unsupported token counting consumed retrieval work", plan)
+	}
+	r.ContextLimits = nil
+	if plan := ingressBegin(state, r); plan["task"] != true {
+		t.Fatal("refused limits consumed the first task claim", plan)
+	}
+}
+
 func TestIngressTaskResultVisibilityLatencyAndRecovery(t *testing.T) {
 	state := &gatewayState{}
 	request := ingressTaskResultRequest{Session: "s", Project: "active-project", Mode: "on", HTTPStatus: 200, ElapsedMS: 2000, Packet: json.RawMessage(ingressPacketFixture)}
