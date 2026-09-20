@@ -155,6 +155,40 @@ func TestSharedMemoryCollectionCommitOrder(t *testing.T) {
 	if err := owner.QueryRow(ctx, `SELECT generation FROM memory_collection_generations WHERE scope_value='alpha'`).Scan(&alpha); err != nil || alpha != 4 {
 		t.Fatal("counter writes invalidated the collection", alpha, err)
 	}
+	// The old primary tag becomes secondary when a concurrent scope move
+	// commits. Classifying against the unlocked snapshot would lose its event.
+	if _, err := first.Exec(ctx, `BEGIN; UPDATE memories SET scope_value='moved' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, err := second.Exec(ctx, `INSERT INTO memory_scopes VALUES(1,'project','alpha')`)
+		written <- err
+	}()
+	for {
+		if err := owner.QueryRow(ctx, `SELECT $1=ANY(pg_blocking_pids($2))`, first.PgConn().PID(), second.PgConn().PID()).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			break
+		}
+		select {
+		case err := <-written:
+			t.Fatal("scope projection did not lock its changing parent", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if _, err := first.Exec(ctx, "COMMIT"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-written; err != nil {
+		t.Fatal(err)
+	}
+	var revision, dependencies int64
+	if err := owner.QueryRow(ctx, `SELECT record_revision,dependency_revision FROM memories WHERE id=1`).Scan(&revision, &dependencies); err != nil || revision != 4 || dependencies != 1 {
+		t.Fatal("concurrent primary move lost secondary tag invalidation", revision, dependencies, err)
+	}
 }
 
 func TestSharedMemoryChangeJournal(t *testing.T) {

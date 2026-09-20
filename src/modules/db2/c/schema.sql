@@ -17868,15 +17868,20 @@ BEGIN
   -- materialize that same tag later; it adds no scope and must not invalidate
   -- a pending correction or retry receipt. Compare both sides of real tag
   -- updates so replacing a secondary tag with the primary still invalidates.
-  changed:=format('SELECT DISTINCT r.memory_id FROM (%s) r JOIN %I.memories m ON m.id=r.memory_id
-    WHERE (r.scope_type,r.scope_value) IS DISTINCT FROM (m.scope_type,m.scope_value)
-    ORDER BY r.memory_id',changed,TG_TABLE_SCHEMA);
-  FOR target IN EXECUTE changed
+  FOR target IN EXECUTE format('SELECT DISTINCT memory_id FROM (%s) r ORDER BY memory_id',changed)
   LOOP
     -- Batch tags by parent: copying many tags must not repeatedly rewrite and
     -- audit the same parent. Invoker privileges preserve parent RLS. A cascade
     -- has no parent left to touch; its DELETE event already invalidated it.
-    EXECUTE format('UPDATE %I.memories SET dependency_revision=dependency_revision+1 WHERE id=$1',TG_TABLE_SCHEMA)
+    -- Lock before classifying redundancy: a concurrent primary-scope move
+    -- may turn an apparently redundant old tag into a secondary tag.
+    EXECUTE format('WITH locked AS MATERIALIZED (
+      SELECT id,scope_type,scope_value FROM %I.memories WHERE id=$1 FOR NO KEY UPDATE
+    ) UPDATE %I.memories m SET dependency_revision=m.dependency_revision+1
+      FROM locked WHERE m.id=locked.id AND EXISTS (
+        SELECT 1 FROM (%s) r WHERE r.memory_id=locked.id
+          AND (r.scope_type,r.scope_value) IS DISTINCT FROM (locked.scope_type,locked.scope_value)
+      )',TG_TABLE_SCHEMA,TG_TABLE_SCHEMA,changed)
       USING target;
   END LOOP;
   RETURN NULL;
