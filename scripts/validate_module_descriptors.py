@@ -39,7 +39,11 @@ OWNERSHIP_FIELDS = (
     "sources", "private_headers", "public_headers", "contracts", "tests", "docs", "go_sources",
     "go_tests",
 )
-DEFAULT_ON = {"runtime-web", "control-web", "sandbox"}
+# Startup selection and live toggling are independent policies. Economizer must
+# start for final request admission even when optional reduction is disabled;
+# stopping it mid-conversation would also strand caller-held reducer state.
+DEFAULT_ON = {"runtime-web", "control-web", "sandbox", "economizer"}
+RUNTIME_TOGGLE = {"runtime-web", "control-web", "sandbox"}
 ROLE_EXTENSIONS = {
     "sources": {".c", ".cpp", ".S", ".s"},
     "private_headers": {".h", ".hpp"},
@@ -880,7 +884,7 @@ def validate_roots(repo: Path, roots: list[Path],
                 expected_toggle = False
             else:
                 expected_default = identifier in DEFAULT_ON
-                expected_toggle = identifier in DEFAULT_ON
+                expected_toggle = identifier in RUNTIME_TOGGLE
             if identifier in optional and value["enabled_by_default"] is not expected_default:
                 fail("production-default", f"{identifier} enabled_by_default must be "
                      f"{str(expected_default).lower()}", "/enabled_by_default")

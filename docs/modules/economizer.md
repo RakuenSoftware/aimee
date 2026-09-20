@@ -39,6 +39,9 @@ policy; they let C callers marshal bytes onto the event bus instead of keeping d
 | `economizer-tool-recall` | 11011 | bounded spill-directory/ref wire | result header plus recalled raw bytes |
 | `economizer-tool-stats` | 11012 | empty | fixed process-counter snapshot |
 | `economizer-record-build` | 11013 | session messages and range | record-derived files/errors/decisions plus Coordinate Closet |
+| `economizer-post-status` | 11014 | session, provider status and mutation/stream facts | restore/resend decision and breaker result |
+| `economizer-stats` | 11015 | snapshot operation | reduction telemetry |
+| `economizer-request-budget` | 11016 | final body length/digest, route and explicit limits | admission decision bound to the complete metadata |
 
 The kind is fixed by the process contract at `4096 + ordinal*256 + stage`; economizer is
 ordinal 27, so it is not a free choice.
@@ -78,22 +81,25 @@ unattached module are therefore not presented as genuine zero activity.
 
 ## Providers and readiness
 
-The module serves five bus stages and calls no provider itself, so it has no upstream to be
+The module serves eight bus stages and calls no provider itself, so it has no upstream to be
 ready for. Readiness is binary and observed at the call site: `obs_bus_module_available`
 reports whether an `aimee-module-economizer` process is attached to the bus.
 
-When it is not attached, `econ_module_reduce` returns non-zero immediately and the caller
-dispatches its original prompt. That is the designed steady state for any deployment that
-has not enabled the module. A missing economizer costs tokens, never correctness.
+When it is not attached, optional `econ_module_reduce` returns non-zero immediately
+and the caller retains its original prompt. Final request admission has a different
+contract: a request declaring a hard context limit fails closed if the process is
+unavailable, without dispatching to the provider.
 
 ## Configuration and activation
 
-Every lever is default-off and resolved by the caller from `econ_preset`, so the module
+Every reduction lever is default-off and resolved by the caller from `econ_preset`, so the module
 reads no ambient config. The request carries the resolved values; the module applies them.
 
 That includes the freeze cost guardrail, which takes the three provider **rates** rather
 than a model name, so the pricing table stays with whoever owns it.
 
+- `enabled_by_default`: `true`. Server starts the process so declared final request
+  limits can be enforced even when optional reduction is off.
 - `runtime_toggle.supported`: `false`. Activation is the presence of the module process,
   not a runtime flag, because flipping one mid-conversation would strand reducer state
   that the caller is still persisting across turns.
