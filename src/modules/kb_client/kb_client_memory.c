@@ -344,8 +344,7 @@ char *kb_client_memory_assemble_typed_context(const char *query)
    return kb_client_memory_assemble_typed_context_with_limits(query, NULL);
 }
 
-char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
-                                                          const cJSON *context_limits)
+char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSON *context_limits)
 {
    if (!query || !query[0])
       return NULL;
@@ -360,7 +359,13 @@ char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
       cJSON_Delete(req);
       return NULL;
    }
-   char *json = kb_v1_action_request("memory.assemble_typed_context", req);
+   return kb_v1_action_request("memory.assemble_typed_context", req);
+}
+
+char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
+                                                          const cJSON *context_limits)
+{
+   char *json = kb_client_memory_assemble_typed_context_json(query, context_limits);
    if (!json)
       return NULL;
    cJSON *resp = cJSON_Parse(json);

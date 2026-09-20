@@ -552,6 +552,8 @@ char *kb_client_memory_assemble_context(const char *task_hint);
 /* Assemble the default temporal-learning context (current semantic assertions,
  * active observations, and reviewed procedures) via aimee-kb. Returns the
  * trust-labelled rendered context, or NULL when unavailable or empty. */
+/* Owned raw owner response; preserve item numbers and projection identity. */
+char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSON *context_limits);
 char *kb_client_memory_assemble_typed_context(const char *query);
 /* Forward the Go owner's budget contract unchanged. The JSON is borrowed. */
 char *kb_client_memory_assemble_typed_context_with_limits(const char *query,

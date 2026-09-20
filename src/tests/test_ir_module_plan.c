@@ -191,8 +191,7 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    cJSON_Delete(request);
    return strdup("{\"status\":\"ok\",\"facts\":\"\"}");
 }
-char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
-                                                          const cJSON *context_limits)
+char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSON *context_limits)
 {
    assert(cJSON_IsObject(context_limits));
    assert(cJSON_GetObjectItemCaseSensitive(context_limits, "schema_version")->valueint == 1);

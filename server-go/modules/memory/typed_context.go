@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,6 +59,7 @@ type typedWatermark struct {
 type typedContextResult struct {
 	Accounting        ContextAccounting        `json:"context_accounting"`
 	ProjectionVersion int                      `json:"projection_schema_version"`
+	SelectionDigest   string                   `json:"selection_digest"`
 	ProjectionDigest  string                   `json:"projection_digest"`
 	RenderedBytes     int                      `json:"rendered_bytes"`
 	TokenCountState   string                   `json:"token_count_state"`
@@ -381,6 +383,7 @@ func (r *typedContextResult) finish() error {
 			r.Retained = append(r.Retained, typedProjectionRef{Channel: name, ID: item.id})
 		}
 	}
+	r.SelectionDigest = typedSelectionDigest(r.ProjectionDigest, r.Retained)
 	switch {
 	case r.degraded:
 		r.Availability = "degraded"
@@ -397,6 +400,115 @@ func (r *typedContextResult) finish() error {
 	}
 	return nil
 }
+
+func typedSelectionDigest(projection string, retained []typedProjectionRef) string {
+	value := struct {
+		Version    int                  `json:"schema_version"`
+		Projection string               `json:"projection_digest"`
+		Retained   []typedProjectionRef `json:"retained_items"`
+	}{1, projection, retained}
+	raw, _ := json.Marshal(value)
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(raw))
+}
+
+func (r *typedContextResult) fitProjectionBytes(limit int) error {
+	r.limits = &ContextLimits{SchemaVersion: 1, MaxContextBytes: &limit}
+	if err := r.finish(); err != nil {
+		return err
+	}
+	if len(r.Retained) == 0 {
+		// Empty wrappers do not constitute a retained evidence channel.
+		r.Rendered, r.RenderedBytes, r.RenderedTokens = "", 0, 0
+		r.Accounting, _ = accountMemoryEnvelope("", limit)
+		r.Accounting.Boundary = "typed_memory_projection"
+		r.ProjectionDigest = r.Accounting.Digest
+		r.SelectionDigest = typedSelectionDigest(r.ProjectionDigest, r.Retained)
+	}
+	return nil
+}
+
+// decodeTypedProjection imports an owner response across the C host without
+// decoding item numbers through cJSON doubles. These commitments prove assembly
+// consistency, not current authorization or provider dispatch.
+func decodeTypedProjection(raw string) (*typedContextResult, error) {
+	var input struct {
+		SelectionDigest string               `json:"selection_digest"`
+		Availability    string               `json:"retrieval_availability"`
+		Status          string               `json:"status"`
+		Version         int                  `json:"projection_schema_version"`
+		Digest          string               `json:"projection_digest"`
+		Bytes           int                  `json:"rendered_bytes"`
+		Rendered        string               `json:"rendered_context"`
+		Budget          int                  `json:"total_budget_tokens"`
+		Accounting      ContextAccounting    `json:"context_accounting"`
+		Retained        []typedProjectionRef `json:"retained_items"`
+		Channels        map[string]struct {
+			Items []json.RawMessage `json:"items"`
+		} `json:"channels"`
+	}
+	invalid := func() (*typedContextResult, error) {
+		return nil, &contextBudgetError{"invalid_projection", "typed projection identity or serialized evidence mismatch"}
+	}
+	if len(raw) > maxDataBody || json.Unmarshal([]byte(raw), &input) != nil || input.Status != "ok" || input.Version != 1 || input.Budget < 0 || input.Budget > 4096 {
+		return invalid()
+	}
+	if input.Accounting.MaxContextBytes < 0 || input.Accounting.MaxContextBytes > maxDataBody {
+		return invalid()
+	}
+	accounting, err := accountMemoryEnvelope(input.Rendered, input.Accounting.MaxContextBytes)
+	if err != nil {
+		return invalid()
+	}
+	accounting.Boundary = "typed_memory_projection"
+	if input.Accounting != accounting || input.Digest != accounting.Digest || input.Bytes != len(input.Rendered) {
+		return invalid()
+	}
+	cfg := typedOptions(commandArgs{})
+	cfg.Budgets["total"] = input.Budget
+	for _, name := range typedChannelOrder {
+		cfg.Flags[name] = true
+	}
+	r := newTypedContext(DataRequest{TypedContext: cfg})
+	for name := range input.Channels {
+		if r.Channels[name] == nil {
+			return invalid()
+		}
+	}
+	seen := map[typedProjectionRef]bool{}
+	n := 0
+	for _, name := range typedChannelOrder {
+		for _, value := range input.Channels[name].Items {
+			if n >= len(input.Retained) {
+				return invalid()
+			}
+			ref := input.Retained[n]
+			if ref.Channel != name || ref.ID == "" || seen[ref] {
+				return invalid()
+			}
+			seen[ref] = true
+			r.Channels[name].Items = append(r.Channels[name].Items, value)
+			r.Channels[name].selected = append(r.Channels[name].selected, typedItem{value: value, id: ref.ID})
+			n++
+		}
+	}
+	if n != len(input.Retained) || input.SelectionDigest != typedSelectionDigest(input.Digest, input.Retained) {
+		return invalid()
+	}
+	cache, err := cacheTypedProjection(r)
+	if err != nil {
+		return invalid()
+	}
+	if input.Rendered != "" || n != 0 {
+		if cache.render(r, cache.bytes(r)) != input.Rendered {
+			return invalid()
+		}
+	}
+	r.Rendered, r.ProjectionDigest, r.Retained = input.Rendered, input.Digest, input.Retained
+	r.degraded = input.Availability == "degraded"
+	r.SelectionDigest = input.SelectionDigest
+	return r, nil
+}
+
 func (s *postgresDataStore) typedRead(ctx context.Context, run func() error) error {
 	if _, err := s.db.Exec(ctx, `SAVEPOINT typed_context_channel`); err != nil {
 		return err

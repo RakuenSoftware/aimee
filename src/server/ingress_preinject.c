@@ -406,10 +406,10 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       cJSON_AddItemToObject(assembly, "facts_response", response ? response : cJSON_CreateNull());
    }
    char *temporal = temporal_on
-                        ? kb_client_memory_assemble_typed_context_with_limits(
+                        ? kb_client_memory_assemble_typed_context_json(
                               query, cJSON_GetObjectItemCaseSensitive(assembly, "context_limits"))
                         : NULL;
-   cJSON_AddStringToObject(assembly, "temporal", temporal ? temporal : "");
+   cJSON_AddStringToObject(assembly, "typed_context_json", temporal ? temporal : "");
    free(temporal);
 
    char *audit = legacy_preview_on ? ingress_preinject_read_audit_context() : NULL;

@@ -126,18 +126,35 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    return strdup("{\"status\":\"ok\",\"facts\":\"- global preference: never substitute for project "
                  "evidence\\n\"}");
 }
-char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
-                                                          const cJSON *context_limits)
+char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSON *context_limits)
 {
    assert(cJSON_IsObject(context_limits));
    assert(cJSON_GetObjectItemCaseSensitive(context_limits, "schema_version")->valueint == 1);
    assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(context_limits, "max_context_bytes")));
    (void)query;
    g_temporal_calls++;
-   return g_temporal_enabled ? strdup("<memory_data trust=\"untrusted\">assertion</memory_data>\n"
-                                      "<approved_procedures authority=\"reviewed\">procedure"
-                                      "</approved_procedures>")
-                             : NULL;
+   return g_temporal_enabled
+              ? strdup(
+                    "{\"selection_digest\":\"sha256:"
+                    "5f0228ee73342058e7e67e3226045f98b1f5959e997c43fd836005452fcc758b\",\"status\":"
+                    "\"ok\",\"projection_schema_version\":1,\"projection_digest\":"
+                    "\"sha256:6edaf91eabe5a5ce54081c642fcc267c52c2f2755cd9234e500c5208d7cc8891\","
+                    "\"rendered_bytes\":213,\"rendered_context\":\"<memory_data "
+                    "trust=\\\"untrusted\\\" "
+                    "authorization=\\\"none\\\">{\\\"observations\\\":[{\\\"text\\\":"
+                    "\\\"assertion\\\"}]}</memory_data>\\n<approved_procedures "
+                    "authority=\\\"reviewed\\\" "
+                    "authorization=\\\"none\\\">[{\\\"text\\\":\\\"procedure\\\"}]</"
+                    "approved_procedures>\",\"total_budget_tokens\":2400,\"channels\":{"
+                    "\"observations\":{\"items\":[{\"text\":\"assertion\"}]},\"approved_"
+                    "procedures\":{\"items\":[{\"text\":\"procedure\"}]}},\"retained_items\":[{"
+                    "\"channel\":\"observations\",\"stable_id\":\"obs:1\"},{\"channel\":\"approved_"
+                    "procedures\",\"stable_id\":\"proc:1\"}],\"context_accounting\":{\"schema_"
+                    "version\":1,\"boundary\":\"typed_memory_projection\",\"unit\":\"utf8_bytes\","
+                    "\"count_state\":\"exact\",\"token_count_state\":\"unavailable\",\"max_context_"
+                    "bytes\":6144,\"rendered_bytes\":213,\"digest\":\"sha256:"
+                    "6edaf91eabe5a5ce54081c642fcc267c52c2f2755cd9234e500c5208d7cc8891\"}}")
+              : NULL;
 }
 
 /* There is no typed-facts gate to stub any more: the layer is unconditional, so
@@ -622,10 +639,26 @@ static void test_default_temporal_context_injection(void)
    char *env = ingress_preinject_build("recover the deployment", 0);
    assert(env != NULL);
    assert(strstr(env, "recommended (temporal learning):") != NULL);
-   assert(strstr(env, "<memory_data trust=\"untrusted\">assertion</memory_data>") != NULL);
-   assert(strstr(env, "<approved_procedures authority=\"reviewed\">") != NULL);
+   assert(
+       strstr(
+           env,
+           "<memory_data trust=\"untrusted\" "
+           "authorization=\"none\">{\"observations\":[{\"text\":\"assertion\"}]}</memory_data>") !=
+       NULL);
+   assert(strstr(env, "<approved_procedures authority=\"reviewed\" "
+                      "authorization=\"none\">[{\"text\":\"procedure\"}]") != NULL);
    assert(g_temporal_calls == 1);
    free(env);
+
+   /* Go may retain a small row when the complete typed response no longer fits. */
+   g_assembly_budget = 1040;
+   env = ingress_preinject_build("recover the deployment", 0);
+   assert(env && strlen(env) <= 1040);
+   assert(strstr(env, "\"text\":\"assertion\"") != NULL);
+   assert(strstr(env, "\"text\":\"procedure\"") == NULL);
+   free(env);
+   g_assembly_budget = 1200;
+   g_temporal_calls = 1;
 
    /* The repository default is strict code-context mode. Temporal learning is
     * an independently labelled and scope-filtered channel, so strict mode must

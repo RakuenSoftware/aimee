@@ -128,6 +128,12 @@ P95 result. Fresh application/harness `c9d4a9a9ec` passes **818/818** checks
 (528 T2, 290 T3), including 18 authenticated typed-budget checks. Final provider
 caps and release/dispatch acceptance remain open.
 
+[Typed outer packing](../../validation/memory-typed-outer-packing-2026-09-20.md)
+keeps the owner response opaque through the C host, verifies projection/selection
+commitments in Go, and repacks rows to the actual remaining envelope allocation.
+The assembly result retains exact IDs and source/final digests; this does not yet
+constitute a provider release or durable dispatch receipt.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

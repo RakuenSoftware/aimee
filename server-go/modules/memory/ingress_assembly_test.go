@@ -2,6 +2,8 @@ package memory
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -199,5 +201,136 @@ func TestIngressRetainedEvidenceMatchesRenderedSelection(t *testing.T) {
 	r, err = ingressAssemble(request)
 	if err != nil || r["envelope"] != "" || len(r["retained_memories"].([]ingressRetainedMemory)) != 0 || len(r["retained_code_indices"].([]int)) != 0 {
 		t.Fatal("empty envelope emitted evidence", r, err)
+	}
+}
+
+func typedIngressFixture(t *testing.T) *typedContextResult {
+	t.Helper()
+	cfg := typedTestOptions(t, `{}`)
+	cfg.Flags["working_context"] = true
+	r := newTypedContext(DataRequest{TypedContext: cfg})
+	r.add("observations", typedItem{id: "9223372036854775807", text: "limit 7", value: json.RawMessage(`{"revision":9223372036854775807,"text":"limit 7 界"}`)})
+	r.add("working_context", typedItem{id: "turn:1", text: "large", value: map[string]any{"text": strings.Repeat("LARGE_ROW", 90)}})
+	if err := r.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Retained) != 2 {
+		t.Fatal(r)
+	}
+	return r
+}
+
+func TestIngressTypedProjectionRepackingAndIdentity(t *testing.T) {
+	source := typedIngressFixture(t)
+	raw, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, budget := range []int{0, 384, 700, 1100, 4096} {
+		t.Run(fmt.Sprint(budget), func(t *testing.T) {
+			request := ingressAssemblyRequest{TypedContextJSON: string(raw), ContextLimits: &ContextLimits{SchemaVersion: 1, MaxContextBytes: &budget},
+				Code: []ingressCodeHit{{FilePath: "retained.go", Snippet: "small code"}}}
+			result, err := ingressAssemble(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			envelope := result["envelope"].(string)
+			typed := result["typed_projection"].(map[string]any)
+			refs := typed["retained_items"].([]typedProjectionRef)
+			if len(envelope) > budget || typed["source_projection_digest"] != source.ProjectionDigest || typed["source_selection_digest"] != source.SelectionDigest || typed["omitted_count"] != 2-len(refs) {
+				t.Fatal(result)
+			}
+			if budget <= 384 && (len(refs) != 0 || typed["rendered_bytes"] != 0 || envelope != "") {
+				t.Fatal(result)
+			}
+			if budget == 700 || budget == 1100 {
+				if len(refs) != 1 || refs[0].ID != "9223372036854775807" || !strings.Contains(envelope, `"revision":9223372036854775807`) || strings.Contains(envelope, "LARGE_ROW") || !strings.Contains(envelope, "small code") {
+					t.Fatal("outer repacking lost small evidence or numeric identity", result)
+				}
+			}
+			if budget == 4096 && (len(refs) != 2 || typed["selection_digest"] != source.SelectionDigest || !strings.Contains(envelope, source.Rendered)) {
+				t.Fatal(result)
+			}
+			accounting := typed["context_accounting"].(ContextAccounting)
+			if accounting.Digest != typed["projection_digest"] || accounting.RenderedBytes != typed["rendered_bytes"] || typed["selection_digest"] != typedSelectionDigest(accounting.Digest, refs) {
+				t.Fatal("final identity does not bind final selection", result)
+			}
+			// Exercise JSON transport on both supported host placements too.
+			args := map[string]any{"operation": "ingress-assemble", "typed_context_json": string(raw), "context_limits": request.ContextLimits, "code": request.Code}
+			wire, _ := json.Marshal(args)
+			for _, placement := range []Placement{PlacementKB, PlacementServer} {
+				got := runHostRuntime(t, NewHandler(nil, WithDataStore(placement, nil)), string(wire))
+				if got["envelope"] != envelope {
+					t.Fatal("host runtime changed projection", got)
+				}
+			}
+		})
+	}
+}
+
+func TestIngressRejectsMismatchedTypedProjection(t *testing.T) {
+	for _, mutation := range []string{"rendered", "selection", "digest", "version", "channels", "accounting", "rows", "references"} {
+		t.Run(mutation, func(t *testing.T) {
+			source := typedIngressFixture(t)
+			switch mutation {
+			case "rendered":
+				source.Rendered = strings.Replace(source.Rendered, "limit 7", "limit 9", 1)
+			case "selection":
+				source.Retained[0].ID = "other"
+			case "digest":
+				source.ProjectionDigest = "sha256:wrong"
+			case "version":
+				source.ProjectionVersion = 2
+			case "channels":
+				source.Channels["invented"] = &typedChannel{}
+			case "accounting":
+				source.Accounting.RenderedBytes++
+			case "rows":
+				source.Channels["observations"].Items[0] = json.RawMessage(`{"revision":9223372036854775806,"text":"limit 7 界"}`)
+			case "references":
+				source.Retained = source.Retained[:1]
+			}
+			raw, _ := json.Marshal(source)
+			result, err := ingressAssemble(ingressAssemblyRequest{Budget: 4096, TypedContextJSON: string(raw)})
+			var refusal *contextBudgetError
+			if result != nil || !errors.As(err, &refusal) || refusal.kind != "invalid_projection" {
+				t.Fatal(result, err)
+			}
+		})
+	}
+}
+
+func TestIngressTypedProjectionEmptyDegradedAndUnavailable(t *testing.T) {
+	source := typedIngressFixture(t)
+	source.degraded = true
+	if err := source.fitProjectionBytes(0); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(source)
+	code := []ingressCodeHit{{FilePath: "available.go"}}
+	result, err := ingressAssemble(ingressAssemblyRequest{Budget: 1000, Code: code, TypedContextJSON: string(raw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	typed := result["typed_projection"].(map[string]any)
+	if len(typed["retained_items"].([]typedProjectionRef)) != 0 || typed["context_sufficiency"] != "unknown" || strings.Contains(result["envelope"].(string), "temporal learning") || result["omitted_count"] != 0 {
+		t.Fatal(result)
+	}
+	for _, failure := range []string{"", `{"status":"error","kind":"unavailable"}`} {
+		result, err = ingressAssemble(ingressAssemblyRequest{Budget: 1000, Code: code, TypedRequested: true, TypedContextJSON: failure})
+		if err != nil || result["typed_unavailable"] != true || !strings.Contains(result["envelope"].(string), "available.go") || result["typed_projection"] != nil {
+			t.Fatal(result, err)
+		}
+	}
+}
+
+func TestIngressRejectsAmbiguousTypedInputs(t *testing.T) {
+	source := typedIngressFixture(t)
+	raw, _ := json.Marshal(source)
+	for _, value := range []string{string(raw), `{"status":"error"}`} {
+		result, err := ingressAssemble(ingressAssemblyRequest{TypedContextJSON: value, Temporal: "unbound legacy text"})
+		if err == nil || result != nil {
+			t.Fatal("conflicting typed inputs accepted", result, err)
+		}
 	}
 }

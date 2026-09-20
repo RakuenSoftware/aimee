@@ -17,11 +17,11 @@ type ingressEntry struct {
 // Keep the deployed grouping and footer contract while the remaining retrieval
 // transports migrate. Limits count UTF-8 bytes, not characters or token guesses.
 func ingressRenderBlock(entries []ingressEntry, budget, missing int) (string, int) {
-	block, omitted, _ := ingressRenderBlockSelected(entries, budget, missing)
+	block, omitted, _, _ := ingressRenderBlockSelected(entries, budget, missing, nil)
 	return block, omitted
 }
 
-func ingressRenderBlockSelected(entries []ingressEntry, budget, missing int) (string, int, []int) {
+func ingressRenderBlockSelected(entries []ingressEntry, budget, missing int, projections map[int]*typedContextResult) (string, int, []int, error) {
 	available := max(0, budget-384)
 	var block strings.Builder
 	selected := []int{}
@@ -34,6 +34,21 @@ func ingressRenderBlockSelected(entries []ingressEntry, budget, missing int) (st
 			first, previous = true, entry.kind
 		}
 		candidate := entry.preview
+		if projection := projections[i]; projection != nil {
+			remaining := available - block.Len()
+			if first {
+				remaining -= len(entry.header)
+			}
+			remaining = max(0, remaining)
+			if err := projection.fitProjectionBytes(remaining); err != nil {
+				return "", 0, nil, err
+			}
+			if len(projection.Retained) == 0 {
+				omitted++
+				continue
+			}
+			candidate = projection.Rendered
+		}
 		if first {
 			candidate = entry.header + candidate
 		}
@@ -60,7 +75,7 @@ func ingressRenderBlockSelected(entries []ingressEntry, budget, missing int) (st
 			}
 		}
 	}
-	return block.String(), omitted, selected
+	return block.String(), omitted, selected, nil
 }
 
 func ingressEnvelope(block string, score float64) string {
@@ -103,18 +118,20 @@ type ingressRetainedMemory struct {
 }
 
 type ingressAssemblyRequest struct {
-	ContextLimits  *ContextLimits         `json:"context_limits,omitempty"`
-	Budget         int                    `json:"budget"`
-	Compress       bool                   `json:"compress"`
-	CompressMin    int                    `json:"compress_min"`
-	TaskBlock      string                 `json:"task_block"`
-	TaskConfidence float64                `json:"task_confidence"`
-	Code           []ingressCodeHit       `json:"code"`
-	Memories       []ingressMemoryPreview `json:"memories"`
-	FactsRequested bool                   `json:"facts_requested"`
-	FactsResponse  json.RawMessage        `json:"facts_response"`
-	Temporal       string                 `json:"temporal"`
-	Audit          string                 `json:"audit"`
+	TypedRequested   bool                   `json:"typed_requested"`
+	TypedContextJSON string                 `json:"typed_context_json"`
+	ContextLimits    *ContextLimits         `json:"context_limits,omitempty"`
+	Budget           int                    `json:"budget"`
+	Compress         bool                   `json:"compress"`
+	CompressMin      int                    `json:"compress_min"`
+	TaskBlock        string                 `json:"task_block"`
+	TaskConfidence   float64                `json:"task_confidence"`
+	Code             []ingressCodeHit       `json:"code"`
+	Memories         []ingressMemoryPreview `json:"memories"`
+	FactsRequested   bool                   `json:"facts_requested"`
+	FactsResponse    json.RawMessage        `json:"facts_response"`
+	Temporal         string                 `json:"temporal"`
+	Audit            string                 `json:"audit"`
 }
 
 func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
@@ -207,7 +224,36 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		entries = append(entries, ingressEntry{"facts", "", "## Known facts\n" + ingressTerminated(*facts.Facts)})
 		score = max(score, .5)
 	}
-	if request.Temporal != "" {
+	projections := map[int]*typedContextResult{}
+	var typed *typedContextResult
+	sourceDigest, sourceSelection, sourceCount := "", "", 0
+	typedUnavailable := request.TypedRequested && request.TypedContextJSON == ""
+	if request.TypedContextJSON != "" {
+		if request.Temporal != "" {
+			return nil, fmt.Errorf("ambiguous typed projection inputs")
+		}
+		var outcome struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal([]byte(request.TypedContextJSON), &outcome) == nil && outcome.Status == "error" {
+			typedUnavailable = true
+			request.TypedContextJSON = ""
+		}
+	}
+	if request.TypedContextJSON != "" {
+		typed, err = decodeTypedProjection(request.TypedContextJSON)
+		if err != nil {
+			return nil, err
+		}
+		sourceDigest, sourceSelection, sourceCount = typed.ProjectionDigest, typed.SelectionDigest, len(typed.Retained)
+		if sourceCount > 0 {
+			projections[len(entries)] = typed
+			entries = append(entries, ingressEntry{"temporal", "recommended (temporal learning):\n", typed.Rendered})
+			score = max(score, .6)
+		} else if err = typed.fitProjectionBytes(0); err != nil {
+			return nil, err
+		}
+	} else if request.Temporal != "" {
 		entries = append(entries, ingressEntry{"temporal", "recommended (temporal learning):\n", request.Temporal})
 		score = max(score, .6)
 	}
@@ -215,7 +261,10 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		entries = append(entries, ingressEntry{"audit", "", "recommended (audit context):\n" + ingressTerminated(request.Audit)})
 		score = max(score, .4)
 	}
-	block, omitted, selected := ingressRenderBlockSelected(entries, request.Budget, missing)
+	block, omitted, selected, err := ingressRenderBlockSelected(entries, request.Budget, missing, projections)
+	if err != nil {
+		return nil, err
+	}
 	envelope := ingressEnvelope(block, score)
 	accounting, err := accountMemoryEnvelope(envelope, request.Budget)
 	if err != nil {
@@ -233,11 +282,22 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 			retainedCode = append(retainedCode, codeIndex)
 		}
 	}
-	return map[string]any{"status": "ok", "block": block, "envelope": envelope,
+	result := map[string]any{"status": "ok", "block": block, "envelope": envelope,
 		"context_accounting": accounting, "retained_memory_ids": retained,
 		"retained_memories": retainedMemories, "retained_code_indices": retainedCode,
 		"omitted_count": omitted, "headline_missing_count": missing, "folded_count": folded,
-		"folded_saved": saved, "facts_unavailable": factsUnavailable}, nil
+		"folded_saved": saved, "facts_unavailable": factsUnavailable, "typed_unavailable": typedUnavailable}
+	if typed != nil {
+		result["typed_projection"] = map[string]any{
+			"schema_version": 1, "boundary": "ingress_envelope", "source_projection_digest": sourceDigest,
+			"projection_digest": typed.ProjectionDigest, "rendered_bytes": typed.RenderedBytes,
+			"source_selection_digest": sourceSelection, "selection_digest": typed.SelectionDigest,
+			"retained_items": typed.Retained, "omitted_count": sourceCount - len(typed.Retained),
+			"context_accounting":  typed.Accounting,
+			"context_sufficiency": typed.Sufficiency,
+		}
+	}
+	return result, nil
 }
 
 func handleIngressAssembly(args commandArgs) ([]byte, bus.ModuleStatus) {

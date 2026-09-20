@@ -124,6 +124,12 @@ def typed_context_budget_gate(kb, check):
     code, baseline = call()
     check('Typed projection retains both untrusted caller turns', code == 200 and
           baseline.get('status') == 'ok' and len(baseline.get('retained_items', [])) == 2)
+    def selection_matches(result):
+        identity = dict(schema_version=1, projection_digest=result.get('projection_digest'),
+                        retained_items=result.get('retained_items'))
+        encoded = json.dumps(identity, ensure_ascii=False, separators=(',', ':')).encode()
+        return result.get('selection_digest') == 'sha256:' + hashlib.sha256(encoded).hexdigest()
+    check('Typed projection identity binds rendered bytes and retained IDs', selection_matches(baseline))
     exact = len(baseline['rendered_context'].encode())
     for limit in (0, 1, 400, exact - 1, exact):
         code, result = call(dict(schema_version=1, max_context_bytes=limit))
@@ -136,6 +142,7 @@ def typed_context_budget_gate(kb, check):
               a.get('boundary') == 'typed_memory_projection' and a.get('count_state') == 'exact' and
               a.get('unit') == 'utf8_bytes' and a.get('token_count_state') == 'unavailable' and
               a.get('digest') == 'sha256:' + hashlib.sha256(rendered).hexdigest())
+        check('Typed projection binds retained IDs at limit ' + str(limit), selection_matches(result))
         if limit == 0:
             check('Zero byte typed projection emits no wrappers or retained IDs',
                   rendered == b'' and result.get('retained_items') == [] and

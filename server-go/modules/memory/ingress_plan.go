@@ -69,7 +69,7 @@ func ingressBegin(state *gatewayState, request ingressBeginRequest) map[string]a
 	result["assembly"] = map[string]any{"operation": "ingress-assemble", "budget": budget,
 		"context_limits": ContextLimits{SchemaVersion: 1, MaxContextBytes: &budget},
 		"compress":       request.Compress && !request.CompressDisabled, "compress_min": request.CompressMin,
-		"facts_requested": facts}
+		"facts_requested": facts, "typed_requested": request.PreviewEnabled}
 	return result
 }
 

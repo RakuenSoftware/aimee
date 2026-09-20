@@ -271,8 +271,8 @@ static int typed_context_post_handler(const char *url, const char *auth_header, 
       assert(!limits);
    cJSON_Delete(request);
    if (response_buf)
-      *response_buf =
-          strdup("{\"status\":\"ok\",\"used_tokens\":4,\"rendered_context\":\"temporal\"}");
+      *response_buf = strdup("{\"status\":\"ok\",\"revision\":9223372036854775807,\"used_tokens\":"
+                             "4,\"rendered_context\":\"temporal\"}");
    return 200;
 }
 
@@ -502,6 +502,10 @@ static void test_typed_context_uses_server_defaults(void)
    context = kb_client_memory_assemble_typed_context_with_limits("recover deployment", limits);
    assert(context && strcmp(context, "temporal") == 0);
    assert(cJSON_GetObjectItemCaseSensitive(limits, "max_context_bytes")->valueint == 0);
+   free(context);
+   context = kb_client_memory_assemble_typed_context_json("recover deployment", limits);
+   assert(context && strcmp(context, "{\"status\":\"ok\",\"revision\":9223372036854775807,\"used_"
+                                     "tokens\":4,\"rendered_context\":\"temporal\"}") == 0);
    free(context);
    cJSON_Delete(limits);
    typed_context_expect_limits = 0;
