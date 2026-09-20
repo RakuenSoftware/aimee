@@ -95,7 +95,7 @@ class Stack:
 a=json.load(sys.stdin); c=http.client.HTTPConnection('127.0.0.1',8741,timeout=70)
 h={'Content-Type':'application/json'}
 if a['token']: h['Authorization']='Bearer '+a['token']
-c.request('GET' if a['body'] is None else 'POST',a['path'],None if a['body'] is None else json.dumps(a['body']),h)
+c.request('GET' if a['body'] is None else 'POST',a['path'],None if a['body'] is None else (a['body'] if isinstance(a['body'],str) else json.dumps(a['body'])),h)
 r=c.getresponse(); print(json.dumps([r.status,json.loads(r.read())]))
 '''
         return json.loads(command('docker', 'exec', '-i', self.application, 'python3', '-c', code,
@@ -159,6 +159,27 @@ def typed_context_budget_gate(kb, check):
         code, result = call(dict(schema_version=1, **{field:0}))
         check('Typed projection refuses unavailable ' + field,
               code == 200 and result.get('kind') == 'unsupported_mode')
+
+    malformed = {
+        'null limits': 'null',
+        'null byte cap': '{"schema_version":1,"max_context_bytes":null}',
+        'null token cap': '{"schema_version":1,"max_context_tokens":null}',
+        'duplicate byte cap': '{"schema_version":1,"max_context_bytes":0,"max_context_bytes":700}',
+        'escaped duplicate cap': r'{"schema_version":1,"max_context_bytes":0,"max_context_byt\u0065s":700}',
+        'case alias': '{"schema_version":1,"MAX_CONTEXT_BYTES":0}',
+    }
+    for name, limits in malformed.items():
+        # Raw JSON preserves duplicates across the actual native HTTP adapter.
+        raw = json.dumps(payload)[:-1] + ',"context_limits":' + limits + '}'
+        code, result = kb.kb_request('/v1/actions/memory.assemble_typed_context', raw)
+        check('Typed projection rejects ' + name + ' without serving context',
+              (code >= 400 or result.get('status') == 'error') and
+              not result.get('rendered_context') and not result.get('retained_items'))
+    code, after = call()
+    check('Typed projection remains usable after malformed limit refusals',
+          code == 200 and after.get('status') == 'ok' and
+          after.get('rendered_context') == baseline['rendered_context'] and
+          after.get('selection_digest') == baseline['selection_digest'])
 
 
     # The native C-host/Go test covers actual integrity-gated emission. Here the

@@ -133,6 +133,12 @@ neither the complete provider request nor source freshness. Typed context keeps
 packing diagnostics outside the prompt, renders reviewed procedures once, and
 reports unknown task coverage until requirements are evaluated.
 
+The host's assembly allocation is an inherited ceiling: an explicit byte cap may
+reduce it but cannot increase it. An absent cap inherits that ceiling. Versioned
+limits reject duplicate fields (including escaped aliases), case aliases, null
+values, unknown fields and invalid integers. Explicit null limit objects are
+rejected at the ingress and typed-context command boundaries.
+
 ## Memory invalidation producers
 
 Personal storage now records a monotonic `record_revision` and a content-free

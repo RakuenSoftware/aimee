@@ -114,7 +114,8 @@ func handleIngressPlan(state *gatewayState, args commandArgs) ([]byte, bus.Modul
 	switch args.stringOr("operation", "") {
 	case "ingress-begin":
 		var request ingressBeginRequest
-		if json.Unmarshal(raw, &request) != nil {
+		_, limitsPresent := args["context_limits"]
+		if json.Unmarshal(raw, &request) != nil || (limitsPresent && request.ContextLimits == nil) {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		return commandResult(ingressBegin(state, request))

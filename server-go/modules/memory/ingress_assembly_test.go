@@ -179,6 +179,88 @@ func TestVersionedIngressByteBudget(t *testing.T) {
 	}
 }
 
+func TestIngressLimitsCannotRaiseHostAllocation(t *testing.T) {
+	for _, tc := range []struct {
+		name, limits string
+		want         int
+	}{
+		{"absent", "", 700},
+		{"inherited", `,"context_limits":{"schema_version":1}`, 700},
+		{"larger", `,"context_limits":{"schema_version":1,"max_context_bytes":4000}`, 700},
+		{"equal", `,"context_limits":{"schema_version":1,"max_context_bytes":700}`, 700},
+		{"smaller", `,"context_limits":{"schema_version":1,"max_context_bytes":500}`, 500},
+		{"zero", `,"context_limits":{"schema_version":1,"max_context_bytes":0}`, 0},
+	} {
+		for _, placement := range []Placement{PlacementKB, PlacementServer} {
+			t.Run(fmt.Sprintf("%s/%s", tc.name, placement), func(t *testing.T) {
+				handler := NewHandler(nil, WithDataStore(placement, nil))
+				// The long optional fact fits only if the request improperly raises
+				// the operator's allocation. A small memory should still survive.
+				facts, _ := json.Marshal(strings.Repeat("optional 界 ", 120))
+				args := `{"operation":"ingress-assemble","budget":700,"memories":[{"id":"42","content":"retain this"}],"facts_requested":true,"facts_response":{"status":"ok","facts":` + string(facts) + `}` + tc.limits + `}`
+				result := runHostRuntime(t, handler, args)
+				accounting := result["context_accounting"].(map[string]any)
+				envelope := result["envelope"].(string)
+				if accounting["max_context_bytes"] != float64(tc.want) || len(envelope) > tc.want || strings.Contains(envelope, "optional") {
+					t.Fatal("request escaped host allocation", result)
+				}
+				if tc.want == 700 && (!strings.Contains(envelope, "retain this") || len(result["retained_memory_ids"].([]any)) != 1) {
+					t.Fatal("small retained evidence was lost", result)
+				}
+				plan := runHostRuntime(t, handler, `{"operation":"ingress-begin","query":"repair resolver","project":"p","session":"s","active_scope":true,"preview_enabled":true,"mode":"on","budget":700`+tc.limits+`}`)
+				if tc.want == 0 {
+					if plan["active"] != false {
+						t.Fatal("zero allocated retrieval work", plan)
+					}
+				} else if plan["assembly"].(map[string]any)["budget"] != float64(tc.want) {
+					t.Fatal("planner raised host allocation", plan)
+				}
+			})
+		}
+	}
+}
+
+func TestMemoryLimitsRejectAmbiguousWireValues(t *testing.T) {
+	malformed := []string{
+		`null`, `[]`, `{"schema_version":1,"MAX_CONTEXT_BYTES":0}`,
+		`{"schema_version":1,"max_context_bytes":0,"Max_Context_Bytes":700}`,
+		`{"schema_version":1,"max_context_bytes":0,"max_context_byt\u0065s":700}`,
+		`{"schema_version":1,"max_context_bytes":1.5}`,
+		`{"schema_version":1,"max_context_bytes":"700"}`,
+		`{"schema_version":1,"max_context_bytes":9223372036854775808}`,
+	}
+	for _, field := range []string{"schema_version", "max_context_bytes", "max_context_tokens", "max_request_tokens", "reserved_response_tokens", "reserved_tool_tokens"} {
+		prefix := `{"schema_version":1,`
+		if field == "schema_version" {
+			prefix = `{`
+		}
+		malformed = append(malformed, prefix+`"`+field+`":null}`, prefix+`"`+field+`":0,"`+field+`":1}`)
+	}
+	for _, placement := range []Placement{PlacementKB, PlacementServer} {
+		handler := NewHandler(nil, WithDataStore(placement, nil))
+		operations := []string{"ingress-begin", "ingress-assemble"}
+		if placement == PlacementKB {
+			operations = append(operations, "typed-context")
+		}
+		for _, operation := range operations {
+			for _, raw := range malformed {
+				frame, err := bus.EncodeCommand("runtime", []byte(`{"operation":"`+operation+`","query":"fixture","project":"p","active_scope":true,"preview_enabled":true,"context_limits":`+raw+`}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+					t.Fatalf("%s/%s accepted ambiguous limit %s: %v", placement, operation, raw, status)
+				}
+			}
+		}
+	}
+	// Direct decoding must also reject bytes that encoding/json would repair.
+	var limits ContextLimits
+	if json.Unmarshal([]byte("{\"schema_version\":1,\"\xff\":0}"), &limits) == nil {
+		t.Fatal("invalid UTF-8 accepted")
+	}
+}
+
 func TestIngressRetainedEvidenceMatchesRenderedSelection(t *testing.T) {
 	request := ingressAssemblyRequest{Budget: 1100, TaskBlock: "task\n",
 		Code:     []ingressCodeHit{{FilePath: strings.Repeat("x", 2000)}, {FilePath: "retained.go", Snippet: "actual code"}},

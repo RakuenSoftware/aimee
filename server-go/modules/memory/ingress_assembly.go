@@ -318,7 +318,8 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 func handleIngressAssembly(args commandArgs) ([]byte, bus.ModuleStatus) {
 	raw, err := json.Marshal(args)
 	var request ingressAssemblyRequest
-	if err != nil || json.Unmarshal(raw, &request) != nil {
+	_, limitsPresent := args["context_limits"]
+	if err != nil || json.Unmarshal(raw, &request) != nil || (limitsPresent && request.ContextLimits == nil) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	result, err := ingressAssemble(request)
