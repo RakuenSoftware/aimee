@@ -43,7 +43,10 @@ class Stack:
         self.role = role
         self.project = 'aimee-e2e-' + role + '-' + uuid.uuid4().hex[:10]
         self.env = dict(env)
-        self.env['AIMEE_KB_API_BEARER_TOKEN'] = 'scope:service:aimee-server:' + secrets.token_hex(32)
+        # Local operator actions use the install owner credential. The separate
+        # service identity below authenticates Server-to-KB traffic; a service
+        # bearer alone must not manufacture a human reviewer on direct HTTP.
+        self.env['AIMEE_KB_API_BEARER_TOKEN'] = secrets.token_hex(32)
         self.service_identity = 'scope:service:aimee-server:' + secrets.token_hex(32)
         self.env['AIMEE_KB_HOST'] = 'aimee-kb'
         for kind in ('ADMIN', 'MIGRATOR', 'RUNTIME'):
@@ -150,6 +153,8 @@ def correction_review_gate(kb, server, placement, output):
         check('draft retry survives owner restart', replay.get('proposal', {}).get('proposal_id') == pid and
             replay['proposal'].get('replayed') is True)
         review = dict(proposal_id=pid, payload_digest=digest, expected_version=version, action='approve')
+        check('unauthenticated HTTP cannot review a draft', kb.kb_request(
+            '/v1/actions/memory.review_correction', dict(review, project=scope), authenticated=False)[0] == 401)
         check('review binds exact draft digest', action('review_correction',
             dict(review, payload_digest='0' * 64)).get('kind') == 'conflict')
         accepted = action('review_correction', review)
