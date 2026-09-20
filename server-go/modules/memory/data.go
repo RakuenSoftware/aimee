@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -1131,6 +1132,14 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 
 	response := DataResponse{}
+	// Pin policy to one lazy snapshot per request, including its error. A
+	// request must not mix settings from successive configuration generations;
+	// the next request still observes changes immediately.
+	if backend, ok := options.data.(*postgresDataStore); ok && backend.settings != nil {
+		bound := *backend
+		bound.settings = sync.OnceValues(backend.settings)
+		options.data = &bound
+	}
 	if backend, ok := options.data.(*postgresDataStore); ok && backend.auditAction != nil {
 		bound := *backend
 		bound.auditBatch = &mutationAuditBatch{}

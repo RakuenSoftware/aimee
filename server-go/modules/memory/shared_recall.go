@@ -31,19 +31,30 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 	if _, ok := s.db.(store.Tx); !ok {
 		return unavailable()
 	}
-	if _, err := s.db.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, vectorRebuildLock); err != nil {
+	var present bool
+	if err := s.db.QueryRow(ctx, `WITH locked AS MATERIALIZED (
+ SELECT pg_advisory_xact_lock_shared($1)
+) SELECT to_regclass('memory_embedder_versions') IS NOT NULL FROM locked`, vectorRebuildLock).Scan(&present); err != nil {
 		return nil, err
 	}
-	version, command, dimension, err := s.activeEmbeddingVersion(ctx)
+	if !present {
+		return unavailable()
+	}
+	// Read the catalog in a new statement after acquiring the lock: a cutover
+	// that held the exclusive lock must be visible in this statement's snapshot.
+	var version, command, identity string
+	var dimension int
+	err := s.db.QueryRow(ctx, `SELECT v.version,v.command,v.dimension,v.serving_id
+ FROM memory_active_embedder a JOIN memory_embedder_versions v ON v.version=a.version
+ WHERE a.id=1`).Scan(&version, &command, &dimension, &identity)
+	if store.IsNoRows(err) {
+		return unavailable()
+	}
 	if err != nil {
 		return nil, err
 	}
 	if version == "" || command == "" || (EmbedIsHTTP(command) && s.recallExecutor == nil) {
 		return unavailable()
-	}
-	var identity string
-	if err := s.db.QueryRow(ctx, `SELECT serving_id FROM memory_embedder_versions WHERE version=$1`, version).Scan(&identity); err != nil {
-		return nil, err
 	}
 	if identity == "" {
 		return unavailable()

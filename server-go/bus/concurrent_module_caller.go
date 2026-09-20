@@ -25,6 +25,7 @@ type ConcurrentModuleCaller struct {
 	assemblies map[uint64]concurrentAssembly
 	isClosed   bool
 	closed     chan struct{}
+	wake       chan struct{}
 	// stopped is closed by the poll goroutine as it returns, so a caller can
 	// wait for it to be gone before unmapping what it reads.
 	stopped      chan struct{}
@@ -54,7 +55,7 @@ func NewConcurrentModuleCaller(ctx context.Context, client *Client) (*Concurrent
 
 func newConcurrentModuleCaller(ctx context.Context, client callerBus) *ConcurrentModuleCaller {
 	c := &ConcurrentModuleCaller{client: client, pending: make(map[uint64]concurrentPending),
-		assemblies: make(map[uint64]concurrentAssembly), closed: make(chan struct{}),
+		assemblies: make(map[uint64]concurrentAssembly), closed: make(chan struct{}), wake: make(chan struct{}, 1),
 		stopped: make(chan struct{}), pollInterval: 200 * time.Microsecond}
 	go c.poll(ctx)
 	return c
@@ -77,6 +78,8 @@ func (c *ConcurrentModuleCaller) finish(err error) {
 func (c *ConcurrentModuleCaller) poll(ctx context.Context) {
 	defer close(c.stopped)
 	idleDelay := c.pollInterval
+	timer := time.NewTimer(idleDelay)
+	defer timer.Stop()
 	for {
 		// Stop when asked, not only when the context ends or a read fails.
 		// Without this the loop cannot be shut down at all, so a caller that
@@ -96,9 +99,25 @@ func (c *ConcurrentModuleCaller) poll(ctx context.Context) {
 			return
 		}
 		if !ok {
-			time.Sleep(idleDelay)
-			if idleDelay < 10*time.Millisecond {
-				idleDelay *= 2
+			c.mu.Lock()
+			active := len(c.pending) != 0
+			c.mu.Unlock()
+			// Retain idle backoff, but do not apply an idle connection's
+			// multi-millisecond sleep to a request awaiting its response.
+			if active {
+				idleDelay = min(idleDelay, time.Millisecond)
+			}
+			timer.Reset(idleDelay)
+			select {
+			case <-c.wake:
+				idleDelay = c.pollInterval
+			case <-timer.C:
+				idleDelay = min(idleDelay*2, 10*time.Millisecond)
+			case <-ctx.Done():
+				c.finish(errors.Join(ErrModuleCallCancelled, ctx.Err()))
+				return
+			case <-c.closed:
+				return
 			}
 			continue
 		}
@@ -192,6 +211,10 @@ func (c *ConcurrentModuleCaller) Call(ctx context.Context, eventKind, stageID ui
 	c.sendMu.Lock()
 	err := (&ModuleCaller{client: c.client}).send(eventKind, stageID, traceID, id, deadlineNS, request)
 	c.sendMu.Unlock()
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
 	if err != nil {
 		c.deliver(id, callerReply{err: errors.Join(ErrModuleCallNotDispatched, err)})
 	}

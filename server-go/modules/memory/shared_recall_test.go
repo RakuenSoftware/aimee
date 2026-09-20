@@ -126,6 +126,24 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
 		t.Fatal("semantic-only recall failed or leaked hidden/stale rows", got, status)
 	}
+	// Multiple retrieval lanes share one request policy generation. The next
+	// request must still observe a changed policy rather than a process cache.
+	originalSettings := backend.settings
+	settingsReads, floorScale := 0, 1.0
+	backend.settings = func() (map[string]any, error) {
+		settingsReads++
+		return map[string]any{"memory_semantic_floor_scale": floorScale}, nil
+	}
+	got, status = call()
+	if status != bus.ModuleStatusOK || len(got.Records) != 1 || settingsReads != 1 {
+		t.Fatal("retrieval did not share one policy snapshot", got, status, settingsReads)
+	}
+	floorScale = 2
+	got, status = call()
+	backend.settings = originalSettings
+	if status != bus.ModuleStatusOK || len(got.Records) != 0 || settingsReads != 2 {
+		t.Fatal("next request did not observe the changed policy", got, status, settingsReads)
+	}
 	request.Limit = 1
 	got, status = call()
 	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
