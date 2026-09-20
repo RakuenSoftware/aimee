@@ -62,13 +62,17 @@ records 224 passing topology/placement/identity verdicts, including the new HTTP
 contract. These results do not close the remaining MR-01 acceptance gates.
 
 [Fresh shared reliability validation](../../validation/memory-shared-reliability-2026-09-20.md)
-now records 281 passing T2 verdicts for implementation and harness `e1f1101130`.
+now records 292 passing T2 verdicts for implementation `1c64e40ee5` and harness
+`5771e230e8`.
 This includes expected-version and durable keyed update/supersede corrections,
 real MCP version/read/correction receipts, payload conflicts, scope-copy rollback,
 retired-result refusal and persistence across restart. Actual concurrent
 connections cover committed-response loss and uncommitted disconnection for both
-verbs. Update no longer performs a separate confidence lookup/lock. The original
-HTTP/private isolation and outage checks continue to pass. Remaining work stays
+verbs. Update no longer performs a separate confidence lookup/lock. Canonical
+admission now precedes the audit commit under the same row lock: review/version
+refusals avoid four audit database calls. Injected audit failure tests preserve
+those refusals through MCP and verify admitted HTTP supersede rollback. The
+original HTTP/private isolation and outage checks continue to pass. Remaining work stays
 on the single branch described above; these foundations do not certify all
 MR-01–18 acceptance gates.
 

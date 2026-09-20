@@ -184,6 +184,56 @@ volumes and evidence remain. All further work remains on the single continuing
 branch. Store/delete idempotency, review proposals, personal content versioning,
 consumer progress and the rest of the MR-01–18 acceptance requirements remain open.
 
+## Correction admission before audit
+
+Implementation `1c64e40ee5333879090cdd1a61b600ca38c0e5d5` separates the shared
+correction's locked admission from its canonical write. Keyed update/supersede
+now check authority, epistemic policy and the expected version before opening an
+audit commit. Accepted edits use the same replacement/scope-copy transaction;
+the row lock is held throughout. Existing compatibility writers use the same
+preparation and apply functions, including same-author no-op upserts.
+
+The full memory race suite with both required PostgreSQL fixtures passes
+(60.370 seconds), including concurrent retries, uncommitted disconnection and
+late receipt rollback. A restricted-role regression temporarily prevents
+canonical correction audit inserts: model edits still return `review_required`,
+stale edits still return `expected_version_conflict`, and admitted edits reach
+the injected audit failure and roll back. The original, collection generation
+and retry-key availability remain unchanged. Schema, generated-document and
+Go-memory/C-bus ownership checks pass; no schema migration is needed.
+
+Refused keyed requests that fail this locked admission avoid the prior four
+database calls for reading audit context, setting actor context, inserting the
+audit commit and binding it to the transaction. Accepted corrections gain no extra
+queries. This is not a whole-request latency measurement or a completed review
+proposal workflow; linked drafts and authenticated decisions remain open.
+
+The first fresh deployment exposed two incorrect harness assertions against
+`/v1/memory/update`, which is not a server HTTP route (205/207 shared checks
+passed). Harness `5771e230e8904824e767568d7ed24ae041e05ec7` checks both verbs through
+MCP and the admitted audit failure through the supported HTTP supersede route.
+The application implementation is unchanged. The failed run is retained at
+`/opt/aimee-memory-proposals-evidence/t2-1c64e40ee5`; its disposed containers and
+networks were removed, with volumes and evidence preserved.
+
+The corrected harness ran against a second fresh T2 deployment using application
+image `sha256:9fc2caf30e0512d7b7848f92ea6404b18787f00f85f9969afc37da6b0e6b0ac9`
+built from implementation `1c64e40ee5`. Both application containers' actual image
+IDs were verified. The [sanitized receipt](memory-shared-reliability-2026-09-20/fresh-t2-5771e230e8.json)
+records **292/292 passing checks**: 61 private, 208 shared, six identity and 17
+topology. Both MCP correction verbs preserve policy/version refusals while
+canonical audit writes are blocked. An admitted HTTP supersede reaches that
+injected failure and rolls back. Original revisions, invalidations and retry-key
+availability remain intact. Existing correction receipts, restart persistence,
+isolation, confidence, retrieval and outage/recovery checks also pass.
+
+Raw evidence is retained in owned `.253` CT 9498 under
+`/opt/aimee-memory-proposals-evidence/t2-5771e230e8`; the application build log is
+`/opt/aimee-memory-proposals-evidence/build-1c64e40ee5.log`. The six disposable
+containers in projects `aimee-e2e-kb-299b0c4e3c` and
+`aimee-e2e-server-327059924c` were stopped after validation, retaining volumes
+and evidence. No additional PR was opened.
+
 ## Local correctness and performance scope
 
 Restricted-role replay exercises the shipping schema, RLS, transactional scope
