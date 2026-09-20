@@ -71,7 +71,7 @@ int main(void)
       aimee_pg_stmt_t *st =
           aimee_pg_prepare(conn,
                            "SELECT payload FROM artifacts WHERE kind='fidelity_attribution' AND "
-                           "payload LIKE '%9007199254740993%'",
+                           "CAST(payload AS TEXT) LIKE '%9007199254740993%'",
                            e, sizeof(e));
       assert(st && aimee_pg_step(st, e, sizeof(e)) == AIMEE_PG_ROW);
       cJSON *record = cJSON_Parse(aimee_pg_column_text(st, 0));

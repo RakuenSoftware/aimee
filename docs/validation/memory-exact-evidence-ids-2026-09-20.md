@@ -38,9 +38,36 @@ instead of returning a fabricated ID. The native client regression covers all
 four evidence/outcome requests and exact-ID reads through int64 maximum.
 The Go/PostgreSQL memory and Aimee-family race suites pass (52.661s/1.445s).
 The 17 semantic-context harness tests also pass.
+CI then caught a PostgreSQL-only test query: `LIKE` required an explicit cast
+from `jsonb` to text. The test now uses the portable cast; fidelity, demotion and
+ranker-fit all pass against fresh PostgreSQL clones of an owned template. This
+follow-up changes the test query and evidence only, not the tested application.
+The codec packaging CI job and lint pass on `7bb36b1551`; full CI remains pending
+the corrected test commit.
 
-Fresh deployment results will be recorded after the new application image runs
-through both owned T2/T3 environments on `.253`. These identity fixes do not
-complete MR-06: canonical source-version binding, all-channel durable receipts,
-and dispatch/crash uncertainty remain open. No new whole-request P95 claim is
-made.
+Application/harness `7bb36b1551` passes **853/853** fresh checks on `.253` CT 9498:
+**563/563** in enrolled T2 and **290/290** in standalone T3. The 18 new authenticated
+checks cover exact IDs in all event projections, provenance and outcome requests,
+malformed/overflow/unsafe numeric rejection, embedded-NUL rejection, and absence
+of partial events after refusal. Existing review, revision, erasure, concurrency,
+restart, rollback, outage, semantic and provider-boundary checks continue to pass.
+
+[Named T2 verdicts](memory-shared-reliability-2026-09-20/fresh-t2-7bb36b1551.json),
+[named T3 verdicts](memory-shared-reliability-2026-09-20/fresh-t3-7bb36b1551.json),
+[provider accounting](memory-shared-reliability-2026-09-20/provider-accounting-7bb36b1551.json)
+and [all nine image identities](memory-shared-reliability-2026-09-20/image-identities-7bb36b1551.json)
+contain only named verdicts, image identities and count/digest provenance.
+Application image:
+`sha256:06504a0d32da12f39c27171a8fff590394713e23f689d12a0de7cfc8868205fd`.
+PostgreSQL and embedder identities match the preceding validated run. Raw receipts
+remain under `/opt/aimee-memory-proposals-evidence/t2-7bb36b1551` and
+`t3-7bb36b1551`. All nine tested containers are stopped; their volumes and
+evidence are retained. The first intermediate image `41428a7a13` also passed both
+fresh deployments before the final caller and packaging fixes.
+
+These fixtures prove identity transport; high-ID provenance targets need not
+exist and do not certify canonical source-version binding. The native client
+regression separately exercises automatic evidence/outcome request serialization.
+The codec does not reconstruct identities already lost in legacy floating-point
+storage. Complete MR-06 all-channel durable receipts and dispatch/crash uncertainty
+remain open. No new whole-request P95 improvement is claimed.

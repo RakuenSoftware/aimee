@@ -148,7 +148,10 @@ Source versions, full channel coverage and durable dispatch remain open.
 repairs large-ID transport in the external event, attribution and provenance
 adapters. Safe numeric IDs remain compatible; larger IDs use decimal strings,
 while ambiguous legacy IDs are refused without inventing a source. Native codec,
-merge, storage and consumer regressions pass. Fresh deployment evidence is pending.
+merge, storage and consumer regressions pass. Application/harness `7bb36b1551`
+passes **853/853** fresh checks (563 T2, 290 T3), including 18 authenticated
+identity and refusal checks. The matching automatic clients and exact-ID read
+wrapper preserve source identities, and the isolated DB2 export builds.
 This does not close source-version binding or durable dispatch acceptance.
 
 ## Supporting indexed-lookup repair

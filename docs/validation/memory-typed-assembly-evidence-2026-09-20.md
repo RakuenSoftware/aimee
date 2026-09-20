@@ -48,9 +48,9 @@ consumer suites also pass against the repaired reader.
 This optional legacy event path records accepted assembly, not final release or
 a durable preparation/dispatch state machine. Canonical source-version binding,
 all-channel coverage (including the legacy plain-text facts block), mandatory
-receipt persistence and crash uncertainty remain open. The legacy ordinary-memory
-writer also still uses numeric JSON for source IDs; full int64 precision through
-that separate storage path needs validation/repair before complete MR-06 acceptance.
+receipt persistence and crash uncertainty remain open. The ordinary-memory ID precision gap identified in this run is repaired in the
+[exact evidence identity follow-up](memory-exact-evidence-ids-2026-09-20.md),
+including the matching attribution and provenance consumers.
 
 ## Fresh deployment results
 
