@@ -83,8 +83,51 @@ static void test_clear_and_null_set(void)
    PASS("context: clear + set(NULL)");
 }
 
+static void test_budget_header(void)
+{
+   request_context_t ctx = {0};
+   request_context_capture_budget_header(
+       &ctx, "POST /v1/responses HTTP/1.1\r\nx-aimee-context-limits: "
+             "\t{\"schema_version\":1,\"max_request_bytes\":0}\r\n\r\n{}");
+   assert(ctx.request_budget_present == 1);
+   assert(strcmp(ctx.request_budget_limits, "{\"schema_version\":1,\"max_request_bytes\":0}") == 0);
+   request_context_set(&ctx);
+   memset(&ctx, 0, sizeof(ctx));
+   assert(request_context_get()->request_budget_present == 1);
+   assert(strstr(request_context_get()->request_budget_limits, "max_request_bytes") != NULL);
+   request_context_clear();
+   assert(request_context_get() == NULL);
+   request_context_capture_budget_header(
+       &ctx, "POST / HTTP/1.1\r\nX-Aimee-Context-Limits: {}\r\nX-Aimee-Context-Limits: {}\r\n\r\n");
+   assert(ctx.request_budget_present == -1 && ctx.request_budget_limits[0] == 0);
+   request_context_capture_budget_header(&ctx,
+                                         "POST / HTTP/1.1\r\nX-Aimee-Context-Limits: \t\r\n\r\n");
+   assert(ctx.request_budget_present == -1);
+   request_context_capture_budget_header(&ctx,
+                                         "POST / HTTP/1.1\r\n\r\nX-Aimee-Context-Limits: {}\r\n");
+   assert(ctx.request_budget_present == 0);
+   char request[1200];
+   memset(request, 'x', sizeof(request));
+   const char *prefix = "POST / HTTP/1.1\r\nX-Aimee-Context-Limits: ";
+   memcpy(request, prefix, strlen(prefix));
+   memcpy(request + strlen(prefix) + 1024, "\r\n\r\n", 5);
+   request_context_capture_budget_header(&ctx, request);
+   assert(ctx.request_budget_present == 1 && strlen(ctx.request_budget_limits) == 1024);
+   request[strlen(prefix) + 1024] = 'x';
+   memcpy(request + strlen(prefix) + 1025, "\r\n\r\n", 5);
+   request_context_capture_budget_header(&ctx, request);
+   assert(ctx.request_budget_present == -1 && ctx.request_budget_limits[0] == 0);
+   request_context_capture_budget_header(
+       &ctx, "POST / HTTP/1.1\r\nX-Aimee-Context-Limits: {}\r\n extra\r\n\r\n");
+   assert(ctx.request_budget_present == -1 && ctx.request_budget_limits[0] == 0);
+   request_context_capture_budget_header(&ctx, NULL);
+   assert(ctx.request_budget_present == 0);
+   PASS("context: budget header is bounded, copied, cleared and duplicate-safe");
+}
+
 int main(void)
 {
+   test_budget_header();
    printf("request_context: unit tests\n");
    test_unset_defaults();
    test_set_get_roundtrip();

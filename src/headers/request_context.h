@@ -49,7 +49,11 @@ typedef struct
    int compress_disabled;     /* X-Aimee-Compress: 0 — per-request opt-out of ingress
                                * envelope compression (ingress-compression P1b §1.4/B1).
                                * 0 = honor config; never forces compression on. */
-   int aimee_tool_calls;      /* cumulative calls observed in this API transcript */
+   /* Restrictive per-request host limits, copied intact into async contexts.
+    * 0 absent, 1 present, -1 malformed/duplicate/oversized transport header. */
+   int request_budget_present;
+   char request_budget_limits[1025];
+   int aimee_tool_calls; /* cumulative calls observed in this API transcript */
    int aimee_redundant_tool_calls;
    char aimee_intervention[40];
    char aimee_tool_transport[16];
@@ -58,6 +62,9 @@ typedef struct
 /* Set the active request context for the current thread (shallow copy). Pass
  * NULL to clear. */
 void request_context_set(const request_context_t *ctx);
+
+/* Capture X-Aimee-Context-Limits without truncation or duplicate ambiguity. */
+void request_context_capture_budget_header(request_context_t *ctx, const char *request);
 
 /* Return the current thread's request context, or NULL if none is set. The
  * pointer is valid until the next set/clear on this thread. */

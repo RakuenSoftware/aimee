@@ -553,6 +553,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: economizer.EventRecordBuild, StageID: economizer.StageRecordBuild},
 			{EventKind: economizer.EventPostStatus, StageID: economizer.StagePostStatus},
 			{EventKind: economizer.EventStats, StageID: economizer.StageStats},
+			{EventKind: economizer.EventRequestBudget, StageID: economizer.StageRequestBudget},
 		}
 		// Per-conversation reducer state is the module's own, kept in DB1 over
 		// the bus. An unreachable store is not a failure mode before serving:

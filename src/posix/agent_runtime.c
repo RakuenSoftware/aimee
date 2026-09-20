@@ -1059,7 +1059,7 @@ native_provider_http:
       if (wire_fence_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
                             &wire_body) != 0)
       {
-         snprintf(out->error, sizeof(out->error), "economizer wire fence unavailable");
+         snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
          free(body);
          break;
       }
@@ -1112,8 +1112,7 @@ native_provider_http:
             if (wire_fence_select(economizer_active, wire_route, fb_body, strlen(fb_body),
                                   &fb_snapshot, &fb_wire_body) != 0)
             {
-               snprintf(out->error, sizeof(out->error),
-                        "economizer wire fence unavailable for fallback");
+               snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
                free(fb_body);
                break;
             }

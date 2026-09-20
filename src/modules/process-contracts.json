@@ -847,6 +847,13 @@
           "event_kind": 11015,
           "durability": "capture",
           "durability_reason": "diagnostic economizer statistics"
+        },
+        {
+          "id": 8,
+          "name": "economizer-request-budget",
+          "event_kind": 11016,
+          "durability": "capture",
+          "durability_reason": "final request byte admission; bounded digest and limits only, no prompt body"
         }
       ]
     },

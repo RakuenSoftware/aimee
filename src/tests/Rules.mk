@@ -3096,7 +3096,7 @@ $(TESTPREFIX)/unit-test-economizer-module-client: \
                                         $(OBJDIR)/tests/test_economizer_module_client.o \
                                         $(OBJDIR)/modules/economizer/economizer_module_client.o \
                                         $(OBJDIR)/module_json_call.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
 
 unit-test-economizer-module-client: $(TESTPREFIX)/unit-test-economizer-module-client
 	$<

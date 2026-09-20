@@ -9,6 +9,7 @@
 #include "module_json_call.h"
 
 #include <limits.h>
+#include <openssl/sha.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -511,4 +512,40 @@ cJSON *econ_module_stats_snapshot(void)
    return aimee_module_json_call(AIMEE_ECONOMIZER_EVENT_STATS, AIMEE_ECONOMIZER_STAGE_STATS,
                                  payload, ECON_MODULE_CALL_MAX_BODY, ECON_MODULE_CALL_TIMEOUT_MS,
                                  NULL);
+}
+
+/* The result commitment binds the complete metadata request, including limits.
+ * A stale reply for identical body bytes but a different cap cannot be reused. */
+econ_request_budget_result_t econ_module_request_budget(unsigned route, const void *body,
+                                                        size_t body_len, const char *limits)
+{
+   size_t limits_len = limits ? strlen(limits) : 0;
+   if (route < 1 || route > 3 || !limits_len || limits_len > 1024 || (!body && body_len))
+      return ECON_REQUEST_BUDGET_INVALID;
+   uint8_t request[52 + 1024] = {0};
+   put_u32(request, 0x54474442u);
+   put_u16(request + 4, ECON_AUX_WIRE_VERSION);
+   put_u16(request + 6, (uint16_t)route);
+   for (unsigned i = 0; i < 8; i++)
+      request[8 + i] = (uint8_t)((uint64_t)body_len >> (i * 8));
+   if (!SHA256(body ? body : "", body_len, request + 16))
+      return ECON_REQUEST_BUDGET_UNAVAILABLE;
+   put_u32(request + 48, (uint32_t)limits_len);
+   memcpy(request + 52, limits, limits_len);
+   uint8_t commitment[SHA256_DIGEST_LENGTH];
+   if (!SHA256(request, 52 + limits_len, commitment))
+      return ECON_REQUEST_BUDGET_UNAVAILABLE;
+   uint32_t response_len = 0;
+   uint8_t *response =
+       call_bytes(AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET, AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET,
+                  request, 52 + limits_len, 44, &response_len);
+   uint16_t result = ECON_REQUEST_BUDGET_UNAVAILABLE;
+   const uint8_t *payload = NULL;
+   uint32_t payload_len = 0;
+   if (decode_aux(response, response_len, 0x54474442u, &result, &payload, &payload_len) != 0 ||
+       payload_len != sizeof(commitment) || memcmp(payload, commitment, sizeof(commitment)) ||
+       result > ECON_REQUEST_BUDGET_TOKENS_UNAVAILABLE)
+      result = ECON_REQUEST_BUDGET_UNAVAILABLE;
+   free(response);
+   return (econ_request_budget_result_t)result;
 }

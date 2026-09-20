@@ -277,8 +277,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
             agent_free_parsed_response(&parsed);
             cJSON_Delete(messages);
             cJSON_Delete(tools);
-            openai_format_error(resp, cap, "upstream_error", upstream_error);
-            return 502;
+            openai_format_error(resp, cap, wire_fence_error_type(upstream_error), upstream_error);
+            return wire_fence_error_http_status(upstream_error);
          }
 
          if (agent_ingress_accounting_enabled())
@@ -393,10 +393,10 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
 
    if (erc != 0 || !result.response)
    {
-      openai_format_error(resp, cap, "upstream_error",
+      openai_format_error(resp, cap, wire_fence_error_type(result.error),
                           result.error[0] ? result.error : "completion failed");
       free(result.response);
-      return 502;
+      return wire_fence_error_http_status(result.error);
    }
 
    /* Cost accounting for the OpenAI-compatible ingress: this handler runs the
@@ -855,13 +855,13 @@ static int responses_handler(const char *body, char *resp, int cap)
    free(instructions);
    if (erc != 0)
    {
-      openai_format_error(resp, cap, "upstream_error", upstream_error);
+      openai_format_error(resp, cap, wire_fence_error_type(upstream_error), upstream_error);
       agent_free_parsed_response(&result);
       cJSON_Delete(messages);
       cJSON_Delete(tools);
       free(prompt);
       free(combined);
-      return 502;
+      return wire_fence_error_http_status(upstream_error);
    }
    if (agent_ingress_accounting_enabled())
       agent_ingress_record_cost(ag->name, ag->model, model, result.stop_reason,
@@ -994,7 +994,8 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
          if (trc != 0)
          {
             char error_frame[1024];
-            openai_format_error(error_frame, sizeof(error_frame), "upstream_error", upstream_error);
+            openai_format_error(error_frame, sizeof(error_frame),
+                                wire_fence_error_type(upstream_error), upstream_error);
             emit(ctx, error_frame);
             emit(ctx, "[DONE]");
             agent_free_parsed_response(&parsed);
@@ -1410,6 +1411,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    if (wire_fence_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
                          &wire_body) != 0)
    {
+      snprintf(error, error_cap, "%s", wire_fence_last_error());
       free(body);
       cJSON_Delete(mbox);
       gw_mutate_ctx_free(&gwmc);
@@ -1600,8 +1602,11 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
        * the OpenAI backend would, so Codex applies its typed-error handling
        * (retry/backoff) instead of treating a failed turn as an empty success.
        * Unknown `code` maps to ApiError::Retryable in Codex's parser. */
-      if (openai_format_responses_failed(id, model, created, "server_error", upstream_error, frame,
-                                         sizeof(frame)) > 0)
+      if (openai_format_responses_failed(id, model, created,
+                                         wire_fence_error_http_status(upstream_error) == 502
+                                             ? "server_error"
+                                             : wire_fence_error_type(upstream_error),
+                                         upstream_error, frame, sizeof(frame)) > 0)
          emit(ctx, "response.failed", frame);
       agent_free_parsed_response(&parsed);
       free(instructions);

@@ -3,7 +3,8 @@
 
 The Server, Go memory owner, storage, ingress and provider serializers are real.
 Only the external completion endpoint is a loopback fixture. This records exact
-wire bytes/digests; it does not claim exact tokens, hard caps or durable receipts.
+wire bytes/digests and declared byte-cap refusals; it does not claim exact token
+limits or durable receipts.
 No credentials, prompt bodies or provider headers are written to the result.
 """
 import argparse
@@ -84,11 +85,12 @@ def inside(output):
             self.sock.settimeout(90)
             self.sock.connect('/var/lib/aimee/aimee-http.sock')
 
-    def api(path, body=None):
+    def api(path, body=None, limits=None):
         conn = Local('localhost', timeout=90)
         try:
             conn.request('GET' if body is None else 'POST', path,
-                None if body is None else json.dumps(body), {'Content-Type': 'application/json'})
+                None if body is None else json.dumps(body), {'Content-Type': 'application/json',
+                 **({'X-Aimee-Context-Limits': limits} if limits is not None else {})})
             response = conn.getresponse()
             raw = response.read()
             if response.getheader('Content-Type', '').startswith('text/event-stream'):
@@ -176,6 +178,45 @@ def inside(output):
                 if frontend in ('chat', 'responses', 'responses_stream'):
                     check(name + ' includes standing memory guidance exactly once',
                           sum(text.count('explore-with: aimee answers CODE questions') for text in values) == 1)
+                # Count the actual serialized provider body, including wrappers, tools,
+                # memory and escaped Unicode. Headers never become provider JSON.
+                exact_limit = json.dumps(dict(schema_version=1, max_request_bytes=len(raw)))
+                before_budget = len(captures)
+                capped_status, capped_response = api(path, body, exact_limit)
+                check(name + ' admits an exact final-byte fit', capped_status == 200 and
+                      any('MEMORY_BOUNDARY_OK' in text for text in strings(capped_response)))
+                check(name + ' exact-fit dispatch preserves all provider bytes',
+                      len(captures) == before_budget + 1 and captures[-1][1] == raw)
+                for label, limits, error, expected_status in (
+                    ('one byte under', dict(schema_version=1, max_request_bytes=len(raw)-1),
+                     'request_budget_exceeded', 413),
+                    ('literal zero', dict(schema_version=1, max_request_bytes=0),
+                     'request_budget_exceeded', 413),
+                    ('unavailable tokens', dict(schema_version=1, max_request_bytes=len(raw), max_request_tokens=100000),
+                     'token_count_unavailable', 400),
+                    ('null cap', dict(schema_version=1, max_request_bytes=None), 'request_budget_invalid', 400),
+                    ('unknown field', dict(schema_version=1, max_request_bytes=len(raw), typo=1),
+                     'request_budget_invalid', 400),
+                    ('duplicate cap', '{"schema_version":1,"max_request_bytes":0,"max_request_bytes":999999}',
+                     'request_budget_invalid', 400),
+                ):
+                    before_budget = len(captures)
+                    limits = limits if isinstance(limits, str) else json.dumps(limits)
+                    refused_status, refused = api(path, body, limits)
+                    check(name + ' ' + label + ' reports explicit refusal',
+                          refused_status == (200 if body.get('stream') else expected_status) and
+                          error in list(strings(refused)) and
+                          not any('MEMORY_BOUNDARY_OK' in text for text in strings(refused)))
+                    check(name + ' ' + label + ' sends no provider request', len(captures) == before_budget)
+                if frontend in ('chat', 'messages'):
+                    before_budget = len(captures)
+                    refused_status, refused = api(path, dict(body, stream=True),
+                        '{"schema_version":1,"max_request_bytes":0}')
+                    check(name + ' streaming zero cap emits a failure', refused_status == 200 and
+                          'request_budget_exceeded' in list(strings(refused)) and
+                          not any(e.get('type') in ('message_stop', 'response.completed')
+                                  for e in refused.get('events', [])))
+                    check(name + ' streaming zero cap sends no provider request', len(captures) == before_budget)
                 accounting.append(dict(frontend=frontend, provider=protocol, endpoint=endpoint,
                     boundary='provider_http_body', count_state='exact', unit='utf8_bytes',
                     request_bytes=len(raw), memory_projection_bytes=len(context.encode()),

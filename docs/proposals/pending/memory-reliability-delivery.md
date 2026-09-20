@@ -154,6 +154,13 @@ identity and refusal checks. The matching automatic clients and exact-ID read
 wrapper preserve source identities, and the isolated DB2 export builds.
 This does not close source-version binding or durable dispatch acceptance.
 
+[Final provider byte admission](../../validation/memory-final-request-budgets-2026-09-20.md)
+adds an explicit bounded HTTP limit contract, interpreted by Go at the common
+final-wire boundary. A refusal prevents provider dispatch even when optional
+reduction is off; streaming refusals are explicit failures. Native and Go race
+regressions pass. Fresh deployment validation is pending. Provider token counts,
+inherited limits, source versions and durable release/dispatch remain open.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

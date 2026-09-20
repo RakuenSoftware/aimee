@@ -1,7 +1,35 @@
-#include "wire_fence.h"
-
 #include <stdlib.h>
 #include <string.h>
+#include "wire_fence.h"
+#include "request_context.h"
+#include "modules/economizer/economizer_module_client.h"
+
+/* Lean clients without HTTP context retain their existing unbounded contract.
+ * A present limit must never bypass admission because the module is absent. */
+extern const request_context_t *request_context_get(void) __attribute__((weak));
+extern econ_request_budget_result_t econ_module_request_budget(unsigned, const void *, size_t,
+                                                               const char *) __attribute__((weak));
+static _Thread_local const char *last_error;
+const char *wire_fence_last_error(void)
+{
+   return last_error ? last_error : "request_pipeline_unavailable";
+}
+int wire_fence_error_http_status(const char *error)
+{
+   if (!error)
+      return 502;
+   if (!strcmp(error, "request_budget_exceeded"))
+      return 413;
+   if (!strcmp(error, "request_budget_invalid") || !strcmp(error, "token_count_unavailable"))
+      return 400;
+   if (!strcmp(error, "request_budget_unavailable"))
+      return 503;
+   return 502;
+}
+const char *wire_fence_error_type(const char *error)
+{
+   return wire_fence_error_http_status(error) == 502 ? "upstream_error" : error;
+}
 
 struct wire_fence
 {
@@ -61,11 +89,31 @@ int wire_fence_create(wire_fence_route_t route, const void *pristine, size_t pri
 int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pristine,
                       size_t pristine_len, wire_fence_t **snapshot, wire_fence_bytes_t *selected)
 {
+   last_error = "request_pipeline_unavailable";
    if (!snapshot || !selected || (!pristine && pristine_len != 0) || !route_valid(route))
       return -1;
    *snapshot = NULL;
    selected->data = NULL;
    selected->len = 0;
+   const request_context_t *context = request_context_get ? request_context_get() : NULL;
+   if (context && context->request_budget_present)
+   {
+      econ_request_budget_result_t result =
+          context->request_budget_present < 0 ? ECON_REQUEST_BUDGET_INVALID
+          : econ_module_request_budget
+              ? econ_module_request_budget((unsigned)route, pristine, pristine_len,
+                                           context->request_budget_limits)
+              : ECON_REQUEST_BUDGET_UNAVAILABLE;
+      if (result != ECON_REQUEST_BUDGET_ADMITTED)
+      {
+         last_error = result == ECON_REQUEST_BUDGET_INVALID    ? "request_budget_invalid"
+                      : result == ECON_REQUEST_BUDGET_OVERFLOW ? "request_budget_exceeded"
+                      : result == ECON_REQUEST_BUDGET_TOKENS_UNAVAILABLE
+                          ? "token_count_unavailable"
+                          : "request_budget_unavailable";
+         return -1;
+      }
+   }
    if (!proof_gated)
    {
       selected->data = pristine;

@@ -41,6 +41,11 @@ extern "C"
                          size_t pristine_len, wire_fence_t **snapshot,
                          wire_fence_bytes_t *selected);
 
+   /* Stable failure kind for the current thread's last selection attempt. */
+   const char *wire_fence_last_error(void);
+   int wire_fence_error_http_status(const char *error);
+   const char *wire_fence_error_type(const char *error);
+
    wire_fence_route_t econ_wire_snapshot_route(const wire_fence_t *snapshot);
    wire_fence_bytes_t wire_fence_bytes(const wire_fence_t *snapshot);
    void wire_fence_destroy(wire_fence_t *snapshot);
