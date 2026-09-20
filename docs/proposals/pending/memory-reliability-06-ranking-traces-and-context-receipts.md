@@ -17,6 +17,12 @@ memory preview. Failed assembly and rejected/empty envelopes emit no such eviden
 boundaries; complete channel coverage, durable stage receipts, dispatch observation
 and crash recovery remain open.
 
+The [typed outer assembler](../../validation/memory-typed-outer-packing-2026-09-20.md)
+now returns retained typed IDs and source/final projection and selection digests
+after row-level repacking. This is an assembly response before host integrity
+acceptance. The host's existing exposure events still cover ordinary memory/code;
+connecting typed/fact coverage to durable host/provider receipts remains open.
+
 Record distinct retrieval, selection, assembly, preparation, dispatch and acknowledgement stages. Connect them to the existing audit/WORM infrastructure with bounded metadata and truthful evidence states.
 
 ## Trace contract

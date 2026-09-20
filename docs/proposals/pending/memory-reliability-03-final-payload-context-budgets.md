@@ -57,6 +57,15 @@ now requires a request digest in the existing Go economizer planners. Equal-leng
 content edits cannot reuse old token evidence. This closes a prerequisite for
 provider-bound accounting without claiming a production tokenizer exists.
 
+[Typed byte limits](../../validation/memory-typed-byte-budgets-2026-09-20.md)
+now count complete JSON and trust wrappers with literal zero handling. The
+[outer Go packer](../../validation/memory-typed-outer-packing-2026-09-20.md)
+verifies the owner projection and selection commitments, then repacks complete
+rows into the space left by earlier context. It reports the exact retained IDs
+and both source/final identities. This addresses whole-block loss at that
+boundary; final provider accounting, source-version release checks and protected
+content remain required.
+
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
 Use a single model-facing projection and verify the final request budget after every provider-affecting transformation. Keep explanation metadata outside the prompt unless a small field is explicitly useful to the model.
