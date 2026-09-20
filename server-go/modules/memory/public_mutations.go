@@ -44,7 +44,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	}
 	// Asking for user authority never grants it. Only the host's independently
 	// authenticated context may raise the fail-closed model authority.
-	if args.stringOr("authority", "") == "user" && options.commandContext != nil && options.commandContext.UserAuthority {
+	if args.stringOr("authority", "") == "user" && options.commandContext != nil && options.commandContext.Authenticated && options.commandContext.UserAuthority && options.commandContext.Principal != "" {
 		request.Authority = AuthorityUser
 	}
 	scoped := false
@@ -57,6 +57,11 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 		}
 		request.Operation = map[string]string{"delete": "delete-as", "update": "update-as", "touch": "touch", "reject": "reject", "restore": "restore"}[verb]
 		if verb == "update" {
+			var refusal map[string]any
+			request.ExpectedVersion, request.IdempotencyKey, refusal = commandCorrectionOptions(args, request.ID, options.commandContext)
+			if refusal != nil {
+				return commandResult(refusal)
+			}
 			options.publicWrite = true
 			request.Content = args.stringOr("content", "")
 			if request.Content == "" {
@@ -108,6 +113,9 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 		return commandResult(refusal)
 	}
 	result := map[string]any{"status": "ok"}
+	if response.MutationReceipt != nil {
+		result["mutation_receipt"] = response.MutationReceipt
+	}
 	missing := false
 	switch verb {
 	case "delete":
@@ -159,7 +167,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 		if verb == "update" {
 			newID = response.IDs[0]
 		}
-		return mutationMCPResult(verb, request.ID, newID, "")
+		return mutationMCPResult(verb, request.ID, newID, "", response.MutationReceipt)
 	}
 	return commandResult(result)
 }
@@ -188,6 +196,9 @@ func mutationMCPResult(verb string, id, newID int64, key string, receipts ...*Me
 	result := map[string]any{"status": "ok", "text": text, "audit_id": fmt.Sprint(newID)}
 	if len(receipts) > 0 && receipts[0] != nil {
 		result["mutation_receipt"] = receipts[0]
+		if receipts[0].Replayed {
+			delete(result, "audit_id")
+		}
 	}
 	return commandResult(result)
 }

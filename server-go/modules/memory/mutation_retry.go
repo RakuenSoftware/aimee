@@ -61,7 +61,7 @@ func correctionDigest(r DataRequest, authority int) (string, error) {
 		Workspace, Project string
 		IncludeAll         bool
 		ExpectedVersion    *MemoryRecordVersion
-	}{1, "supersede", r.ID, r.Content, r.Confidence, r.SessionID, authority, r.Scope, r.Workspace, r.Project, r.IncludeAll, r.ExpectedVersion})
+	}{1, r.Operation, r.ID, r.Content, r.Confidence, r.SessionID, authority, r.Scope, r.Workspace, r.Project, r.IncludeAll, r.ExpectedVersion})
 	if err != nil {
 		return "", err
 	}
@@ -72,7 +72,7 @@ func correctionDigest(r DataRequest, authority int) (string, error) {
 // refusal: the open audit commit, mutation, extraction job and receipt are atomic.
 // Only keyed corrections pay for the additional lock and receipt queries.
 func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataRequest, authority int, caller *bus.CommandContext, correlation string) (Record, *MemoryMutationReceipt, error) {
-	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.validFor(r.ID) || r.Confidence == nil {
+	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || !r.ExpectedVersion.validFor(r.ID) || !versionedCorrectionOperation(r.Operation) || (r.Operation == "supersede" && r.Confidence == nil) || (r.Operation == "update-as" && r.Confidence != nil) {
 		return Record{}, nil, errors.New("memory: invalid idempotent correction")
 	}
 	digest, err := correctionDigest(r, authority)
@@ -101,7 +101,7 @@ func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataReque
 			return Record{}, nil, errIdempotencyConflict
 		}
 		// Never requeue extraction or return stored content. The ordinary exact read
-		// applies current RLS, expiry, lifecycle, suppression and rejection policy.
+		// applies current RLS, expiry, lifecycle and suppression gates.
 		record, readErr := s.getAtVersioned(ctx, r.Scope, id, false, "", true)
 		if errors.Is(readErr, ErrMemoryNotFound) {
 			return Record{}, nil, errReplayUnavailable
@@ -136,14 +136,18 @@ func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataReque
 		return Record{}, nil, err
 	}
 	// Join the existing changeset/WORM path, not a second audit service.
-	receipt.CommitID, err = s.openFactCommit(ctx, actor, "memory.supersede", correlation)
+	operation := "memory.supersede"
+	if r.Operation == "update-as" {
+		operation = "memory.update"
+	}
+	receipt.CommitID, err = s.openFactCommit(ctx, actor, operation, correlation)
 	if err != nil {
 		return Record{}, nil, err
 	}
 	if _, err = s.db.Exec(ctx, `SELECT set_config('aimee.changeset_id',$1,true)`, receipt.CommitID); err != nil {
 		return Record{}, nil, err
 	}
-	record, err := s.replaceKBVersion(ctx, r.ID, r.Content, *r.Confidence, r.SessionID, authority, nil, r.ExpectedVersion)
+	record, err := s.replaceKBCorrection(ctx, r.ID, r.Content, r.Confidence, r.SessionID, authority, nil, r.ExpectedVersion)
 	if err != nil {
 		return Record{}, nil, err
 	}
@@ -166,4 +170,25 @@ func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataReque
 	receipt.Version.RecordID = strconv.FormatInt(record.ID, 10)
 	receipt.Version.RecordRevision = strconv.FormatInt(revision, 10)
 	return record, receipt, nil
+}
+
+func versionedCorrectionOperation(operation string) bool {
+	return operation == "supersede" || operation == "update-as"
+}
+
+func commandCorrectionOptions(args commandArgs, id int64, caller *bus.CommandContext) (*MemoryRecordVersion, string, map[string]any) {
+	expected, valid := commandExpectedVersion(args, id)
+	if !valid {
+		return nil, "", commandError("invalid_argument", "expected_version must identify the owner, target and positive revision using schema_version=1")
+	}
+	key := ""
+	if raw, exists := args["idempotency_key"]; exists {
+		if json.Unmarshal(raw, &key) != nil || !validIdempotencyKey(key) || expected == nil {
+			return nil, "", commandError("invalid_argument", "idempotency_key requires 16-128 printable ASCII characters and expected_version")
+		}
+		if !verifiedRetryCaller(caller) {
+			return nil, "", commandError("forbidden", "idempotent corrections require an authenticated principal")
+		}
+	}
+	return expected, key, nil
 }

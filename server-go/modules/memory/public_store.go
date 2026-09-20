@@ -115,18 +115,9 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 			return commandResult(commandError("invalid_argument", "confidence must be between 0 and 1"))
 		}
 	}
-	expected, valid := commandExpectedVersion(args, id)
-	if !valid {
-		return commandResult(commandError("invalid_argument", "expected_version must identify the owner, target and positive revision using schema_version=1"))
-	}
-	key := ""
-	if raw, exists := args["idempotency_key"]; exists {
-		if json.Unmarshal(raw, &key) != nil || !validIdempotencyKey(key) || expected == nil {
-			return commandResult(commandError("invalid_argument", "idempotency_key requires 16-128 printable ASCII characters and expected_version"))
-		}
-		if !verifiedRetryCaller(options.commandContext) {
-			return commandResult(commandError("forbidden", "idempotent corrections require an authenticated principal"))
-		}
+	expected, key, refusal := commandCorrectionOptions(args, id, options.commandContext)
+	if refusal != nil {
+		return commandResult(refusal)
 	}
 	request := DataRequest{IdempotencyKey: key, ExpectedVersion: expected, Operation: "supersede", ID: id, Content: content, Confidence: &confidence, SessionID: args.stringOr("session_id", ""), PublicView: true, IncludeAll: true}
 	if caller := options.commandContext; args.stringOr("authority", "") == "user" && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {

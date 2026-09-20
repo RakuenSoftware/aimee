@@ -988,10 +988,10 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if request.IncludeVersion && (options.placement != PlacementKB || request.Operation != "get") {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if request.ExpectedVersion != nil && (options.placement != PlacementKB || request.Operation != "supersede" || !request.ExpectedVersion.validFor(request.ID)) {
+	if request.ExpectedVersion != nil && (options.placement != PlacementKB || !versionedCorrectionOperation(request.Operation) || !request.ExpectedVersion.validFor(request.ID)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if request.IdempotencyKey != "" && (options.placement != PlacementKB || request.Operation != "supersede" || request.ExpectedVersion == nil || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
+	if request.IdempotencyKey != "" && (options.placement != PlacementKB || !versionedCorrectionOperation(request.Operation) || request.ExpectedVersion == nil || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	var readResult *MemoryReadResult
@@ -1817,10 +1817,33 @@ set_config('aimee.correlation_id',$9,true)`,
 			}
 			var code int
 			var newID int64
-			code, newID, err = mutations.UpdateAs(ctx, request.ID, request.Content, request.Authority)
-			if err == nil && code == MutationOK && options.publicWrite {
-				backend := options.data.(*postgresDataStore)
-				err = backend.captureStoredFactActor(ctx, newID, request.Authority, options.commandContext)
+			if request.ExpectedVersion != nil || request.IdempotencyKey != "" {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok || transaction == nil || !options.publicWrite {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				authority := AuthorityModel
+				if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+					authority = AuthorityUser
+				}
+				var record Record
+				if request.IdempotencyKey != "" {
+					request.Scope = scope
+					record, response.MutationReceipt, err = backend.replaceKBIdempotent(ctx, request, authority, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
+					rollbackOnly = err != nil
+				} else {
+					record, err = backend.replaceKBCorrection(ctx, request.ID, request.Content, nil, "", authority, nil, request.ExpectedVersion)
+					if err == nil {
+						err = backend.captureStoredFactActor(ctx, record.ID, authority, options.commandContext)
+					}
+				}
+				newID = record.ID
+			} else {
+				code, newID, err = mutations.UpdateAs(ctx, request.ID, request.Content, request.Authority)
+				if err == nil && code == MutationOK && options.publicWrite {
+					backend := options.data.(*postgresDataStore)
+					err = backend.captureStoredFactActor(ctx, newID, request.Authority, options.commandContext)
+				}
 			}
 			if errors.Is(err, ErrMemoryNotFound) {
 				code, err = -1, nil

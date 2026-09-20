@@ -22,7 +22,7 @@ func TestIdempotencyContractValidation(t *testing.T) {
 			t.Fatal(key, r)
 		}
 	}
-	for _, verb := range []string{"store", "get", "update", "delete", "runtime"} {
+	for _, verb := range []string{"store", "get", "touch", "delete", "runtime"} {
 		if r := runPublicCommand(t, client, verb, `{"idempotency_key":"fixture-retry-key"}`); r["kind"] != "unsupported_mode" {
 			t.Fatal(verb, r)
 		}
@@ -194,8 +194,14 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set AIMEE_DB2_REPLAY_URL")
 	}
-	for _, commitFirst := range []bool{true, false} {
-		t.Run(fmt.Sprintf("commit=%v", commitFirst), func(t *testing.T) {
+	for _, test := range []struct {
+		operation   string
+		commitFirst bool
+	}{
+		{"supersede", true}, {"supersede", false}, {"update-as", true}, {"update-as", false},
+	} {
+		operation, commitFirst := test.operation, test.commitFirst
+		t.Run(fmt.Sprintf("%s/commit=%v", operation, commitFirst), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			connect := func() *pgx.Conn {
@@ -230,7 +236,8 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 			}
 			defer create.Rollback(context.Background())
 			backend := &postgresDataStore{db: evalQueryer{create}, placement: PlacementKB}
-			old, e := backend.InsertEpistemic(ctx, DataRequest{Scope: scope, Tier: "L2", Kind: "fact", Key: "concurrent", Content: "original", Authority: AuthorityUser})
+			originalConfidence := 0.47
+			old, e := backend.InsertEpistemic(ctx, DataRequest{Confidence: &originalConfidence, Scope: scope, Tier: "L2", Kind: "fact", Key: "concurrent", Content: "original", Authority: AuthorityUser})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -242,7 +249,10 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 				t.Fatal(e)
 			}
 			confidence := 1.0
-			request := DataRequest{Operation: "supersede", Scope: scope, ID: old.ID, Content: "corrected", Confidence: &confidence, Authority: AuthorityUser, ExpectedVersion: observed.Version, IdempotencyKey: "concurrent-fixture-key"}
+			request := DataRequest{Operation: operation, Scope: scope, ID: old.ID, Content: "corrected", Confidence: &confidence, Authority: AuthorityUser, ExpectedVersion: observed.Version, IdempotencyKey: "concurrent-fixture-key"}
+			if operation == "update-as" {
+				request.Confidence = nil
+			}
 			begin := func(c *pgx.Conn) (pgx.Tx, *postgresDataStore) {
 				t.Helper()
 				tx, e := c.Begin(ctx)
@@ -323,6 +333,9 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 			if e != nil || replayed == nil || !replayed.Replayed || replay.ID != result.row.ID || replayed.CommitID != result.receipt.CommitID {
 				t.Fatal(replay, replayed, e)
 			}
+			if operation == "update-as" && replay.Confidence != originalConfidence {
+				t.Fatal("update changed inherited confidence", replay.Confidence)
+			}
 			if e = replayTx.Commit(ctx); e != nil {
 				t.Fatal(e)
 			}
@@ -334,5 +347,112 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 				t.Fatal(rows, receipts, jobs, e)
 			}
 		})
+	}
+}
+
+func exerciseUpdateRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
+	t.Helper()
+	caller := bus.CommandContext{Authenticated: true, Principal: "user:update-retry", UserAuthority: true, TransportIdentity: "cert:fixture"}
+	invoke := func(verb string, args map[string]any) map[string]any {
+		t.Helper()
+		raw, e := json.Marshal(args)
+		if e != nil {
+			t.Fatal(e)
+		}
+		out, status := invokeContextCommand(t, handler, 0, caller, verb, string(raw))
+		if status != bus.ModuleStatusOK {
+			t.Fatal(status, out)
+		}
+		return out
+	}
+	row := invoke("store", map[string]any{"key": "update-retry", "content": "original", "authority": "user", "confidence": 0.37, "project": "update-retry", "scope_context": true})
+	if row["status"] != "ok" {
+		t.Fatal(row)
+	}
+	id := int64(row["id"].(float64))
+	readArgs := map[string]any{"id": id, "include_version": true, "project": "update-retry", "scope_context": true}
+	read := invoke("get", readArgs)
+	version := read["memory"].(map[string]any)["version"]
+	args := map[string]any{"id": id, "content": "corrected", "authority": "user", "expected_version": version, "idempotency_key": "update-retry-key-01", "project": "update-retry", "scope_context": true}
+	args["authority"] = "model"
+	if out := invoke("update", args); out["kind"] != "review_required" {
+		t.Fatal("precondition granted authority", out)
+	}
+	args["authority"] = "user"
+	args["project"] = "hidden"
+	if out := invoke("update", args); out["kind"] != "not_found" {
+		t.Fatal(out)
+	}
+	args["project"] = "update-retry"
+	out := invoke("update", args)
+	if out["status"] != "ok" || out["superseded"] != true {
+		t.Fatal(out)
+	}
+	newID := int64(out["id"].(float64))
+	receipt := out["mutation_receipt"].(map[string]any)
+	readArgs["id"] = newID
+	current := invoke("get", readArgs)
+	if current["memory"].(map[string]any)["confidence"] != 0.37 {
+		t.Fatal("update failed to preserve confidence", current)
+	}
+	var operation string
+	if e := tx.QueryRow(ctx, `SELECT operation FROM fact_graph_commits WHERE commit_id=$1`, receipt["commit_id"]).Scan(&operation); e != nil || operation != "memory.update" {
+		t.Fatal(operation, e)
+	}
+	for _, view := range []string{"", "server", "mcp"} {
+		args["view"] = view
+		replay := invoke("update", args)
+		if replay["status"] != "ok" || replay["mutation_receipt"].(map[string]any)["commit_id"] != receipt["commit_id"] || replay["mutation_receipt"].(map[string]any)["replayed"] != true {
+			t.Fatal(replay)
+		}
+		if view == "mcp" && replay["audit_id"] != nil {
+			t.Fatal("MCP replay requests duplicate host audit", replay)
+		}
+	}
+	delete(args, "view")
+	args["content"] = "different"
+	if out := invoke("update", args); out["reason"] != "idempotency_conflict" {
+		t.Fatal(out)
+	}
+	args["content"] = "corrected"
+	// The verb is bound even where target, content and requested authority match.
+	crossVerb := map[string]any{"old_id": id, "new_content": "corrected", "authority": "user", "expected_version": version, "idempotency_key": "update-retry-key-01", "project": "update-retry", "scope_context": true}
+	if out := invoke("supersede", crossVerb); out["reason"] != "idempotency_conflict" {
+		t.Fatal("key crossed operation boundary", out)
+	}
+	delete(args, "idempotency_key")
+	if out := invoke("update", args); out["reason"] != "expected_version_conflict" {
+		t.Fatal(out)
+	}
+	// Expected-version update without a retry key uses the same locked admission.
+	args["id"] = newID
+	args["expected_version"] = current["memory"].(map[string]any)["version"]
+	args["content"] = "next"
+	next := invoke("update", args)
+	if next["status"] != "ok" || next["id"] == float64(newID) || next["mutation_receipt"] != nil {
+		t.Fatal(next)
+	}
+	args["id"] = id
+	args["expected_version"] = version
+	args["content"] = "corrected"
+	args["idempotency_key"] = "update-retry-key-01"
+	if out := invoke("update", args); out["reason"] != "idempotent_result_unavailable" || out["id"] != nil {
+		t.Fatal("replayed obsolete update result", out)
+	}
+}
+
+// This value was produced by the original schema-one supersede digest. Extending
+// supported verbs must not invalidate receipts already committed by that writer.
+func TestCorrectionDigestCompatibility(t *testing.T) {
+	confidence := 0.7
+	request := DataRequest{Operation: "supersede", ID: 42, Content: "corrected", Confidence: &confidence, SessionID: "session", Scope: Scope{Type: ScopeProject, Value: "app"}, Project: "app", ExpectedVersion: &MemoryRecordVersion{SchemaVersion: 1, OwnerID: "00000000-0000-0000-0000-000000000001", RecordID: "42", RecordRevision: "3"}}
+	got, err := correctionDigest(request, AuthorityUser)
+	if err != nil || got != "d6cbd202c768aa87459f2e921702ae269675e347e750b4f3c5c39937791324ea" {
+		t.Fatal(got, err)
+	}
+	request.Operation = "update-as"
+	other, err := correctionDigest(request, AuthorityUser)
+	if err != nil || got == other {
+		t.Fatal("operation not bound", other, err)
 	}
 }

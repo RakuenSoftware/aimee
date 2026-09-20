@@ -23,7 +23,10 @@ func TestExpectedVersionValidation(t *testing.T) {
 			t.Fatal(version, r)
 		}
 	}
-	for _, verb := range []string{"store", "update", "delete", "runtime"} {
+	if r := runPublicCommand(t, client, "update", `{"id":1,"content":"change","expected_version":null}`); r["kind"] != "invalid_argument" {
+		t.Fatal(r)
+	}
+	for _, verb := range []string{"store", "touch", "delete", "runtime"} {
 		r := runPublicCommand(t, client, verb, `{"expected_version":`+valid+`}`)
 		if r["kind"] != "unsupported_mode" {
 			t.Fatal(verb, r)

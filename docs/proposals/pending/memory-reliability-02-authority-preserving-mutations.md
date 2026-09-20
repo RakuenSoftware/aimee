@@ -50,7 +50,7 @@ Implement one mutation admission operation for create, propose, correct, superse
 Shared exact-ID `get` accepts `include_version: true`. Its `memory.version` object
 contains `schema_version: 1`, the owner UUID, and decimal-string `record_id` and
 `record_revision`, captured with the content in one SQL snapshot. Pass that object
-as `expected_version` to shared `supersede`. The existing row lock protects the
+as `expected_version` to shared `update` or `supersede`. The existing row lock protects the
 comparison and replacement; stale revisions, changed owners and already replaced
 rows return `conflict` with reason `expected_version_conflict`. Hidden and missing
 rows retain `not_found`; knowing a version grants no authority. Ordinary callers
@@ -63,14 +63,14 @@ counter updates, and the generated values are not available in NEW yet. The
 regression uses generated columns plus a second BEFORE trigger, as in the shipping
 schema; counter-only reads and unchanged governed writes retain their revision.
 
-This opt-in contract currently supports shared exact-ID get and supersede only.
+This opt-in contract currently supports shared exact-ID get, update and supersede.
 Other operations and personal placement refuse the fields explicitly. It does
 not supply automatic restore-owner rotation, historical
 belief reconstruction, or final-release freshness proofs.
 
 ### Durable retries for shared corrections
 
-Authenticated shared `supersede` accepts an optional `idempotency_key` (16–128
+Authenticated shared `update` and `supersede` accept an optional `idempotency_key` (16–128
 printable ASCII characters, no spaces) together with `expected_version`. Reuse the
 same key for a retry of the same owner-admitted request. Its digest includes the
 content, confidence, target, expected version, effective authority, session and
@@ -94,6 +94,17 @@ admitted payload returns HTTP 409 / `idempotency_conflict`. An erased, hidden,
 retired, expired or revised result returns HTTP 409 /
 `idempotent_result_unavailable`, without cached content or repeating the write.
 The receipt is a canonical commit reference, not proof that derivatives caught up.
+
+Both correction verbs use the same locked admission and retry mechanism. Update
+inherits confidence from that row read, removing its previous separate confidence
+lookup/lock. The digest binds the verb, so one key cannot switch between update
+and supersede; existing schema-one supersede digests remain compatible.
+
+MCP `memory_get` advertises the version field, and `mutate` forwards and advertises
+the precondition and retry key for shared update/supersede. Keyed responses retain
+the complete owner receipt instead of dropping it into a plain success string.
+The Go owner omits the host audit request on replay, preventing duplicate host
+mutation events. Legacy unkeyed MCP responses retain their existing text format.
 
 This contract currently covers shared corrections only. Other verbs and personal
 placement explicitly refuse the field. Broader create/update/delete idempotency,

@@ -259,8 +259,16 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *p = cJSON_AddObjectToObject(s, "properties");
       mcp_add_memory_store_property(p);
       cJSON *id = cJSON_AddObjectToObject(p, "id");
-      cJSON_AddStringToObject(id, "type", "integer");
-      cJSON_AddStringToObject(id, "description", "Memory row id to fetch");
+      cJSON_AddItemToObject(id, "oneOf",
+                            cJSON_Parse("[{\"type\":\"integer\",\"minimum\":1},{\"type\":"
+                                        "\"string\",\"pattern\":\"^[1-9][0-9]*$\"}]"));
+      cJSON_AddStringToObject(id, "description",
+                              "Memory row id; use a decimal string to preserve large IDs exactly");
+      cJSON *version = cJSON_AddObjectToObject(p, "include_version");
+      cJSON_AddStringToObject(version, "type", "boolean");
+      cJSON_AddStringToObject(
+          version, "description",
+          "For store=kb, include the owner/record/revision precondition for update or supersede.");
       cJSON *h = cJSON_AddObjectToObject(p, "handle");
       cJSON_AddStringToObject(h, "type", "string");
       cJSON_AddStringToObject(h, "description", "Handle emitted in previews, e.g. memory:123");
@@ -1943,7 +1951,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                "\"Personal local memory by default; explicitly select kb for shared knowledge.\"},"
                "\"verb\":{\"type\":\"string\","
                "\"description\":\"Mutation verb: store|update|supersede|forget|affirm|reject\"},"
-               "\"id\":{\"type\":\"integer\","
+               "\"id\":{\"oneOf\":[{\"type\":\"integer\",\"minimum\":1},"
+               "{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"}],"
                "\"description\":\"Memory id (required for "
                "update/supersede/forget/affirm/reject)\"},"
                "\"key\":{\"type\":\"string\","
@@ -1956,6 +1965,18 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                "\"description\":\"Kind: fact|rule|decision|preference|... (store, default fact)\"},"
                "\"confidence\":{\"type\":\"number\","
                "\"description\":\"Confidence 0.0-1.0 (store/supersede, default 1.0)\"},"
+               "\"expected_version\":{\"type\":\"object\","
+               "\"description\":\"Exact version from memory_get for KB update/supersede.\","
+               "\"additionalProperties\":false,\"properties\":{"
+               "\"schema_version\":{\"type\":\"integer\",\"const\":1},"
+               "\"owner_id\":{\"type\":\"string\",\"format\":\"uuid\"},"
+               "\"record_id\":{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"},"
+               "\"record_revision\":{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\"}},"
+               "\"required\":[\"schema_version\",\"owner_id\",\"record_id\",\"record_revision\"]},"
+               "\"idempotency_key\":{\"type\":\"string\",\"minLength\":16,\"maxLength\":128,"
+               "\"pattern\":\"^[!-~]+$\",\"description\":\"For KB update/supersede with "
+               "expected_version, reuse the key for the same correction. Returns a durable "
+               "commit receipt without repeating the mutation.\"},"
                "\"reason\":{\"type\":\"string\","
                "\"description\":\"Reason string (reject)\"}},"
                "\"required\":[\"verb\"]}")));

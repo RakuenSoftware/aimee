@@ -120,6 +120,9 @@ int main(void)
    cJSON *props = cJSON_GetObjectItemCaseSensitive(mg, "properties");
    assert(props != NULL);
    assert(cJSON_GetObjectItemCaseSensitive(props, "as_of") != NULL);
+   assert(cJSON_GetObjectItemCaseSensitive(props, "include_version") != NULL);
+   assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(
+              cJSON_GetObjectItemCaseSensitive(props, "id"), "oneOf")) == 2);
    assert(cJSON_GetObjectItemCaseSensitive(props, "id") != NULL);     /* additive */
    assert(cJSON_GetObjectItemCaseSensitive(props, "handle") != NULL); /* additive */
 
@@ -129,6 +132,16 @@ int main(void)
       cJSON *ms = schema_for(memory_tools[i]);
       assert(ms);
       cJSON *mp = cJSON_GetObjectItemCaseSensitive(ms, "properties");
+      if (!strcmp(memory_tools[i], "mutate"))
+      {
+         cJSON *version = cJSON_GetObjectItemCaseSensitive(mp, "expected_version");
+         cJSON *key = cJSON_GetObjectItemCaseSensitive(mp, "idempotency_key");
+         assert(version && key);
+         assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(
+                    cJSON_GetObjectItemCaseSensitive(mp, "id"), "oneOf")) == 2);
+         assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(version, "required")) == 4);
+         assert(cJSON_GetObjectItemCaseSensitive(key, "minLength")->valueint == 16);
+      }
       cJSON *store = cJSON_GetObjectItemCaseSensitive(mp, "store");
       cJSON *choices = cJSON_GetObjectItemCaseSensitive(store, "enum");
       assert(cJSON_GetArraySize(choices) == 2);

@@ -121,14 +121,10 @@ func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataReq
 // UpdateAs is always a versioned correction. User authority determines the new
 // author; it is not implicit permission to erase the previous version.
 func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content string, authority int) (int, int64, error) {
-	var confidence float64
-	if err := s.db.QueryRow(ctx, `SELECT confidence FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&confidence); err != nil {
-		if store.IsNoRows(err) {
-			return -1, 0, ErrMemoryNotFound
-		}
+	record, err := s.replaceKBCorrection(ctx, id, content, nil, "", authority, nil, nil)
+	if errors.Is(err, ErrMemoryNotFound) {
 		return -1, 0, err
 	}
-	record, err := s.replaceKBAs(ctx, id, content, confidence, "", authority, nil)
 	if code := mutationRefusal(err); code != 0 {
 		return code, id, nil
 	}
@@ -214,7 +210,13 @@ func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content s
 func (s *postgresDataStore) replaceKBAs(ctx context.Context, id int64, content string, confidence float64, session string, authority int, metadata *DataRequest) (Record, error) {
 	return s.replaceKBVersion(ctx, id, content, confidence, session, authority, metadata, nil)
 }
-func (s *postgresDataStore) replaceKBVersion(ctx context.Context, id int64, content string, confidence float64, session string, authority int, metadata *DataRequest, condition *MemoryRecordVersion) (r Record, err error) {
+func (s *postgresDataStore) replaceKBVersion(ctx context.Context, id int64, content string, confidence float64, session string, authority int, metadata *DataRequest, condition *MemoryRecordVersion) (Record, error) {
+	return s.replaceKBCorrection(ctx, id, content, &confidence, session, authority, metadata, condition)
+}
+
+// A nil confidence preserves the locked original's value for update. Capture it
+// in the same row read as admission and version comparison, without a second lock query.
+func (s *postgresDataStore) replaceKBCorrection(ctx context.Context, id int64, content string, requestedConfidence *float64, session string, authority int, metadata *DataRequest, condition *MemoryRecordVersion) (r Record, err error) {
 	defer func() {
 		s.recordMutation(DataRequest{Operation: "supersede", ID: id, SessionID: session, Authority: authority}, DataResponse{Records: []Record{r}}, err, "")
 	}()
@@ -227,8 +229,12 @@ func (s *postgresDataStore) replaceKBVersion(ctx context.Context, id int64, cont
 	if authority != AuthorityModel && authority != AuthorityUser {
 		return Record{}, errors.New("memory: invalid authority")
 	}
-	if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
-		return Record{}, errors.New("memory: invalid confidence")
+	confidence := 0.0
+	if requestedConfidence != nil {
+		confidence = *requestedConfidence
+		if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
+			return Record{}, errors.New("memory: invalid confidence")
+		}
 	}
 	var screenErr error
 	content, screenErr = screenMemoryText(content)
@@ -259,6 +265,13 @@ func (s *postgresDataStore) replaceKBVersion(ctx context.Context, id int64, cont
 	}
 	if condition != nil && (owner != condition.OwnerID || revision != condition.RecordRevision || lifecycle != "active") {
 		return Record{}, errMutationVersionConflict
+	}
+
+	if requestedConfidence == nil {
+		confidence = previous.Confidence
+		if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
+			return Record{}, errors.New("memory: invalid confidence")
+		}
 	}
 
 	// Identical same-author upserts retain identity. They cannot capture another

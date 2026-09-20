@@ -74,6 +74,68 @@ class Gate:
               FROM memory_invalidation_outbox e WHERE e.memory_id=m.id))
             FROM memory_collection_owner o,memories m WHERE o.id=1 AND m.id={int(mid)}"""))
 
+    def mcp_document(self, name, tool, arguments):
+        code, raw = self.mcp(tool, arguments)
+        documents = []
+        def visit(value):
+            if isinstance(value, dict):
+                if value.get('type') == 'text' and isinstance(value.get('text'), str):
+                    try:
+                        documents.append(json.loads(value['text']))
+                    except ValueError:
+                        pass
+                else:
+                    for child in value.values():
+                        visit(child)
+            elif isinstance(value, list):
+                for child in value:
+                    visit(child)
+        visit(json.loads(raw))
+        self.check(name + ' owner envelope', code == 200 and len(documents) == 1 and isinstance(documents[0], dict))
+        return documents[0] if len(documents) == 1 and isinstance(documents[0], dict) else {}
+
+    def shared_mcp_corrections(self):
+        key = self.prefix + '-mcp-correction'
+        project = self.prefix + '-mcp-project'
+        code, stored = self.mcp('mutate', dict(verb='store', store='kb', project=project,
+            key=key, content='original model fixture', confidence=0.43))
+        self.check('MCP creates model-authored shared correction fixture', code == 200 and 'stored memory id=' in stored)
+        old_id = int(self.sql(f"SELECT id FROM memories WHERE key='{key}' AND lifecycle_state='active'"))
+        observed = self.mcp_document('MCP versioned get', 'memory_get',
+            dict(store='kb', project=project, id=str(old_id), include_version=True))
+        version = observed['memory']['version']
+        self.check('MCP versioned get preserves exact target', version['record_id'] == str(old_id))
+        private = self.mcp_document('MCP private correction precondition', 'mutate',
+            dict(verb='update', store='user', id=str(old_id), content='unsupported private correction',
+                 expected_version=version, idempotency_key=self.prefix + '-private-retry'))
+        self.check('MCP private placement refuses unsupported correction preconditions', private.get('kind') == 'unsupported_mode')
+        correction = dict(verb='update', store='kb', project=project, id=str(old_id),
+            content='corrected model fixture', authority='user', expected_version=version,
+            idempotency_key=self.prefix + '-mcp-retry')
+        updated = self.mcp_document('MCP keyed update', 'mutate', correction)
+        receipt = updated['mutation_receipt']
+        new_id = int(receipt['version']['record_id'])
+        self.check('MCP update returns canonical commit receipt', updated.get('status') == 'ok' and
+            receipt['replayed'] is False and new_id != old_id and updated.get('audit_id') == str(new_id))
+        self.check('MCP update preserves confidence and model authority', self.sql(
+            f"SELECT (confidence=0.43 AND provenance_category='agent_message')::text FROM memories WHERE id={new_id}") == 'true')
+        replay = self.mcp_document('MCP keyed update retry', 'mutate', correction)
+        self.check('MCP replay preserves commit without requesting another host audit',
+            replay.get('mutation_receipt', {}).get('commit_id') == receipt['commit_id'] and
+            replay.get('mutation_receipt', {}).get('replayed') is True and 'audit_id' not in replay)
+        conflict = self.mcp_document('MCP changed retry payload', 'mutate', dict(correction, content='different'))
+        self.check('MCP refuses changed idempotency payload', conflict.get('reason') == 'idempotency_conflict')
+        unkeyed = dict(correction)
+        del unkeyed['idempotency_key']
+        stale = self.mcp_document('MCP stale update version', 'mutate', unkeyed)
+        self.check('MCP forwards and enforces expected version', stale.get('reason') == 'expected_version_conflict')
+        self.sql(f"UPDATE memories SET lifecycle_state='retired' WHERE id={new_id}")
+        hidden = self.mcp_document('MCP retired update retry', 'mutate', correction)
+        self.check('MCP retry never releases retired content', hidden.get('reason') == 'idempotent_result_unavailable' and
+            'mutation_receipt' not in hidden and 'memory' not in hidden)
+        self.check('MCP retries retain exactly one replacement', self.sql(
+            f"SELECT count(*) FROM memories WHERE key='{key}' OR key LIKE '{key}#v%'") == '2')
+
     def shared_journal(self):
         key = self.prefix + '-journal'
         original = 'shared journal original'
@@ -416,6 +478,7 @@ class Gate:
         code, body = self.call('get', dict(id=mid))
         self.check('retired local ID never resolves to KB collision', code >= 400 and body.get('kind') == 'not_found', [code, body])
         self.check('local retirement leaves KB content unchanged', json.loads(self.sql(f'SELECT to_json(content) FROM memories WHERE id={mid}')) == shared)
+        self.shared_mcp_corrections()
         journal_id, journal = self.shared_journal()
         self.docker('restart', self.args.kb)
         self.good('shared replacement survives KB restart', self.wait('get', dict(store='kb', id=journal_id)))
