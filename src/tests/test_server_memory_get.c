@@ -727,7 +727,8 @@ int main(void)
    assert(calls == 6 && clears == calls);
    cJSON_Delete(request);
    result = 0;
-   expected_read_policy = "{\"schema_version\":1,\"mode\":\"historical\",\"valid_at\":\"2026-01-01T00:00:00Z\"}";
+   expected_read_policy =
+       "{\"schema_version\":1,\"mode\":\"historical\",\"valid_at\":\"2026-01-01T00:00:00Z\"}";
    request = cJSON_Parse("{\"store\":\"kb\",\"id\":42}");
    cJSON_AddItemToObject(request, "read_policy", cJSON_Parse(expected_read_policy));
    response = materialize_reply(memory_get_command(request));
