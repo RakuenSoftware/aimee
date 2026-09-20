@@ -284,7 +284,7 @@ and unauthenticated requests cannot approve drafts. No application or
 authorization behavior changed. Failed-run evidence is retained at
 `/opt/aimee-memory-proposals-evidence/t2-64b00a092c` and
 `/opt/aimee-memory-proposals-evidence/t2-6cec6b42cb`. The first failed run's
-containers/networks were removed; the second run's containers were stopped.
+containers/networks were removed; the second run's containers/networks were also removed after inspection.
 Their volumes and raw evidence remain available.
 
 ### Redundant scope projection must preserve reviewed versions
@@ -296,7 +296,8 @@ because the target revision changed from 1 to 2 during background indexing.
 The indexer had copied the canonical primary scope into `memory_scopes`; the
 scope trigger incorrectly treated that redundant projection as a governed
 change. The raw run is retained at
-`/opt/aimee-memory-proposals-evidence/t2-5ed5f6786b` and its containers were stopped.
+`/opt/aimee-memory-proposals-evidence/t2-5ed5f6786b`; its containers/networks
+were removed after inspection, preserving volumes and evidence.
 
 Implementation `abfa42e5d4` (schema 26) filters redundant primary tags from the
 parent invalidation trigger. Primary-tag insert/no-op update/delete preserve the
@@ -312,6 +313,36 @@ connections verify that a primary-scope move is locked before classifying a
 new tag, preserving invalidation when the old primary becomes secondary. Schema, generated-document and
 Go-memory/C-bus ownership gates pass. The fresh harness explicitly checks that
 the reviewed target version survives owner restart and derived primary indexing.
+
+### Fresh review workflow and scope-projection validation
+
+The final fresh T2 deployment used implementation and harness `abfa42e5d4`,
+with application image
+`sha256:c81fb3294372b623e48c596ee024b1b6d0c0b9958a72eeabdee41d5269420e01`.
+Both application containers' actual image IDs matched. The
+[sanitized verdict receipt](memory-shared-reliability-2026-09-20/fresh-t2-abfa42e5d4.json)
+records **320/320 passing checks**: 61 private, 208 shared, 27 correction-review,
+six identity and 18 topology.
+
+The shipping MCP and authenticated mTLS action paths cover linked proposal
+creation, scope isolation, owner restart, stable target revisions after derived
+indexing, exact-digest approval, service-only and anonymous refusal, separate
+model authorship/reviewer identity, confidence recomputation, extraction actor
+preservation, approval replay, rejected-draft deduplication and parent erasure
+with retained retry keys. The full shared isolation, keyed correction,
+rollback and outage/recovery suite also passes on the same deployment.
+
+Raw evidence remains in owned `.253` CT 9498 under
+`/opt/aimee-memory-proposals-evidence/t2-abfa42e5d4-r2`; the build log is
+`/opt/aimee-memory-proposals-evidence/build-abfa42e5d4.log`. The first provisioning
+attempt (`t2-abfa42e5d4`) exhausted Docker's default IPv4 address pool before any
+application test. Removing the previously stopped, owned fixture containers and
+networks resolved it; their volumes and evidence were retained. No application
+or harness change was needed for the successful rerun.
+
+The six successful-run containers in `aimee-e2e-kb-9ae30f49e9` and
+`aimee-e2e-server-eafcd4ede7` were stopped after validation, retaining volumes
+and evidence. No additional PR was opened.
 
 ## Local correctness and performance scope
 
