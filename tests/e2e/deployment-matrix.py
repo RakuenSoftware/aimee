@@ -43,10 +43,7 @@ class Stack:
         self.role = role
         self.project = 'aimee-e2e-' + role + '-' + uuid.uuid4().hex[:10]
         self.env = dict(env)
-        # Local operator actions use the install owner credential. The separate
-        # service identity below authenticates Server-to-KB traffic; a service
-        # bearer alone must not manufacture a human reviewer on direct HTTP.
-        self.env['AIMEE_KB_API_BEARER_TOKEN'] = secrets.token_hex(32)
+        self.env['AIMEE_KB_API_BEARER_TOKEN'] = 'scope:service:aimee-server:' + secrets.token_hex(32)
         self.service_identity = 'scope:service:aimee-server:' + secrets.token_hex(32)
         self.env['AIMEE_KB_HOST'] = 'aimee-kb'
         for kind in ('ADMIN', 'MIGRATOR', 'RUNTIME'):
@@ -125,7 +122,32 @@ def correction_review_gate(kb, server, placement, output):
     def action(verb, values):
         payload = dict(project=scope, scope_context=True)
         payload.update(values)
-        return kb.kb_request('/v1/actions/memory.' + verb, payload)[1]
+        # Exercise the existing authenticated host-caller transport. A direct
+        # service bearer intentionally supplies no human actor. The enrolled
+        # Server certificate, rotating bearer and service identity authenticate
+        # the host before it can assert this synthetic operator account.
+        code = '''import http.client,json,os,ssl,sys,tempfile
+a=json.load(sys.stdin)
+i=json.load(open('/var/lib/aimee/kb-client-identity.json'))
+with tempfile.TemporaryDirectory() as directory:
+  for name in ('cert','key'):
+    path=os.path.join(directory,name)
+    with open(path,'w',opener=lambda p,f: os.open(p,f,0o600)) as out: out.write(i[name])
+  context=ssl.create_default_context(cadata=i['ca'])
+  context.load_cert_chain(os.path.join(directory,'cert'),os.path.join(directory,'key'))
+  c=http.client.HTTPSConnection('aimee-kb',8745,context=context,timeout=70)
+  h={'Content-Type':'application/json','Authorization':'Bearer '+a['bearer'],
+     'X-Aimee-Service-Authorization':'Bearer '+a['service'],
+     'X-Aimee-Caller-Subject':'review_operator'}
+  c.request('POST',a['path'],json.dumps(a['body']),h)
+  r=c.getresponse(); print(json.dumps([r.status,json.loads(r.read())]))
+'''
+        status, result = json.loads(command('docker', 'exec', '-i', server.application,
+            'python3', '-c', code, data=json.dumps(dict(path='/v1/actions/memory.' + verb,
+            body=payload, bearer=kb.env['AIMEE_KB_API_BEARER_TOKEN'], service=kb.service_identity))))
+        if status != 200:
+            raise RuntimeError('authenticated review action transport returned HTTP ' + str(status))
+        return result
     try:
         created = action('store', dict(key='review-original', content='verified original',
             authority='user', tier='L2', confidence=0.95))
@@ -153,6 +175,8 @@ def correction_review_gate(kb, server, placement, output):
         check('draft retry survives owner restart', replay.get('proposal', {}).get('proposal_id') == pid and
             replay['proposal'].get('replayed') is True)
         review = dict(proposal_id=pid, payload_digest=digest, expected_version=version, action='approve')
+        check('direct service bearer cannot claim human review authority', kb.kb_request(
+            '/v1/actions/memory.review_correction', dict(review, project=scope, authority='user'))[1].get('kind') == 'forbidden')
         check('unauthenticated HTTP cannot review a draft', kb.kb_request(
             '/v1/actions/memory.review_correction', dict(review, project=scope), authenticated=False)[0] == 401)
         check('review binds exact draft digest', action('review_correction',
@@ -282,11 +306,11 @@ def main():
                         raise RuntimeError('KB credential response was not redacted')
                 command('docker', 'restart', server.application)
                 server.start()
+                correction_review_gate(kb, server, placement, args.output)
+                check('Linked model correction drafts and authenticated decisions', True)
                 command('python3', str(gate_script), *common, '--kb', kb.application,
                     '--kb-store-db', kb.postgres, '--output', str(args.output / 'shared-memory.json'), timeout=900)
                 check('Enrolled optional KB, scope isolation, restart and outage regressions', True)
-                correction_review_gate(kb, server, placement, args.output)
-                check('Linked model correction drafts and authenticated decisions', True)
                 command('python3', str(ROOT / 'tests/e2e/instance-identity-e2e.py'),
                     '--server', server.application, '--kb', kb.application,
                     '--image', env['AIMEE_APPLICATION_IMAGE'], '--output', str(args.output / 'identity.json'))
