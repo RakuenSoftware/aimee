@@ -17,6 +17,7 @@ const (
 	MutationImmutableExperience = -2
 	MutationRequiresReplacement = -3
 	MutationReviewRequired      = -4
+	MutationVersionConflict     = -5
 )
 
 var validEpistemicKinds = map[string]bool{
@@ -134,6 +135,8 @@ func (s *postgresDataStore) UpdateAs(ctx context.Context, id int64, content stri
 
 func mutationRefusal(err error) int {
 	switch {
+	case errors.Is(err, errMutationVersionConflict):
+		return MutationVersionConflict
 	case errors.Is(err, errImmutableExperience):
 		return MutationImmutableExperience
 	case errors.Is(err, errRequiresRevocation):
@@ -202,7 +205,10 @@ func admitMemoryReplacement(epistemic, origin string, authority int) error {
 func (s *postgresDataStore) supersedeKB(ctx context.Context, id int64, content string, confidence float64, session string) (Record, error) {
 	return s.replaceKBAs(ctx, id, content, confidence, session, AuthorityModel, nil)
 }
-func (s *postgresDataStore) replaceKBAs(ctx context.Context, id int64, content string, confidence float64, session string, authority int, metadata *DataRequest) (r Record, err error) {
+func (s *postgresDataStore) replaceKBAs(ctx context.Context, id int64, content string, confidence float64, session string, authority int, metadata *DataRequest) (Record, error) {
+	return s.replaceKBVersion(ctx, id, content, confidence, session, authority, metadata, nil)
+}
+func (s *postgresDataStore) replaceKBVersion(ctx context.Context, id int64, content string, confidence float64, session string, authority int, metadata *DataRequest, condition *MemoryRecordVersion) (r Record, err error) {
 	defer func() {
 		s.recordMutation(DataRequest{Operation: "supersede", ID: id, SessionID: session, Authority: authority}, DataResponse{Records: []Record{r}}, err, "")
 	}()
@@ -225,12 +231,30 @@ func (s *postgresDataStore) replaceKBAs(ctx context.Context, id int64, content s
 	}
 	var epistemic, origin, oldUseCases string
 	var previous Record
-	if err := s.db.QueryRow(ctx, `SELECT epistemic_kind,provenance_category,tier,kind,key,content,use_cases,confidence,scope_type,scope_value FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&epistemic, &origin, &previous.Tier, &previous.Kind, &previous.Key, &previous.Content, &oldUseCases, &previous.Confidence, &previous.Scope.Type, &previous.Scope.Value); err != nil {
+	columns := "epistemic_kind,provenance_category,tier,kind,key,content,use_cases,confidence,scope_type,scope_value"
+	destinations := []any{&epistemic, &origin, &previous.Tier, &previous.Kind, &previous.Key, &previous.Content, &oldUseCases, &previous.Confidence, &previous.Scope.Type, &previous.Scope.Value}
+	predicate := "id=$1 AND lifecycle_state='active'"
+	var owner, revision, lifecycle string
+	if condition != nil {
+		if !condition.validFor(id) {
+			return Record{}, errors.New("memory: invalid expected version")
+		}
+		// Lock the visible row even when already superseded, so a concurrent loser
+		// receives a conflict. Hidden and missing identities remain indistinguishable.
+		predicate = "id=$1"
+		columns += ",(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),record_revision::text,lifecycle_state"
+		destinations = append(destinations, &owner, &revision, &lifecycle)
+	}
+	if err := s.db.QueryRow(ctx, "SELECT "+columns+" FROM memories WHERE "+predicate+" FOR UPDATE", id).Scan(destinations...); err != nil {
 		if store.IsNoRows(err) {
 			return Record{}, ErrMemoryNotFound
 		}
 		return Record{}, err
 	}
+	if condition != nil && (owner != condition.OwnerID || revision != condition.RecordRevision || lifecycle != "active") {
+		return Record{}, errMutationVersionConflict
+	}
+
 	// Identical same-author upserts retain identity. They cannot capture another
 	// author's provenance and never relax an immutable record's content.
 	expectedOrigin := "agent_message"

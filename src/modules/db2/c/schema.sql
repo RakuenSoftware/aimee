@@ -17779,9 +17779,9 @@ BEGIN
     NEW.record_revision:=1;
   ELSE
     IF NEW.id<>OLD.id THEN RAISE EXCEPTION 'memory identity is immutable'; END IF;
-    IF (to_jsonb(OLD)-ARRAY['record_revision','use_count','last_used_at','updated_at'])
+    IF (to_jsonb(OLD)-(ARRAY['record_revision','use_count','last_used_at','updated_at']||TG_ARGV[0]::TEXT[]))
        IS NOT DISTINCT FROM
-       (to_jsonb(NEW)-ARRAY['record_revision','use_count','last_used_at','updated_at']) THEN
+       (to_jsonb(NEW)-(ARRAY['record_revision','use_count','last_used_at','updated_at']||TG_ARGV[0]::TEXT[])) THEN
       NEW.record_revision:=OLD.record_revision;
     ELSE
       NEW.record_revision:=OLD.record_revision+1;
@@ -17818,15 +17818,21 @@ END $$;
 -- Generate attribute-specific triggers after all memory columns are installed.
 -- Counter-only reads avoid both content serialization and generation locking.
 DO $memory_change_triggers$
-DECLARE attributes TEXT;
+DECLARE attributes TEXT; generated TEXT[];
 BEGIN
   SELECT string_agg(quote_ident(attname),',' ORDER BY attnum) INTO attributes
     FROM pg_attribute WHERE attrelid='memories'::regclass AND attnum>0 AND NOT attisdropped
-      AND attname NOT IN ('use_count','last_used_at','updated_at');
+      AND attgenerated='' AND attname NOT IN ('use_count','last_used_at','updated_at');
+  -- Generated values are unset in BEFORE triggers. Listing them as UPDATE OF
+  -- targets can also fire on counter writes when another BEFORE trigger exists.
+  -- Their canonical inputs are already covered; never compare or target outputs.
+  SELECT COALESCE(array_agg(attname::TEXT),ARRAY[]::TEXT[]) INTO generated
+    FROM pg_attribute WHERE attrelid='memories'::regclass AND attnum>0
+      AND NOT attisdropped AND attgenerated<>'';
   DROP TRIGGER IF EXISTS memory_assign_record_revision ON memories;
   DROP TRIGGER IF EXISTS memory_capture_record_change ON memories;
   EXECUTE format('CREATE TRIGGER memory_assign_record_revision BEFORE INSERT OR UPDATE OF %s ON memories
-    FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision()',attributes);
+    FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision(%L)',attributes,generated::TEXT);
   EXECUTE format('CREATE TRIGGER memory_capture_record_change AFTER INSERT OR DELETE OR UPDATE OF %s ON memories
     FOR EACH ROW EXECUTE FUNCTION memory_capture_record_change()',attributes);
 END
@@ -18011,5 +18017,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '22')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '23')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

@@ -30,6 +30,8 @@ static int calls, clears, result;
 static kb_valid_at_t answer;
 static const char *expected_time;
 static const char *expected_read_policy;
+static const char *expected_version;
+static int expect_include_version;
 
 int workspace_repo_identity(const char *cwd, char *project, size_t project_cap, char *workspace,
                             size_t workspace_cap)
@@ -179,6 +181,8 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    if (!strcmp(method, "memory.get"))
    {
       calls++;
+      if (expect_include_version)
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "include_version")));
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
       assert(!cJSON_HasObjectItem(request, "actor") && !cJSON_HasObjectItem(request, "authority"));
       if (get_reply)
@@ -222,6 +226,13 @@ char *kb_v1_action_request(const char *method, cJSON *request)
        !strcmp(method, "memory.supersede"))
    {
       store_calls++;
+      if (expected_version)
+      {
+         char *encoded =
+             cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(request, "expected_version"));
+         assert(encoded && !strcmp(encoded, expected_version));
+         free(encoded);
+      }
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
       assert(!cJSON_HasObjectItem(request, "include_all"));
       assert(!cJSON_HasObjectItem(request, "actor"));
@@ -596,6 +607,9 @@ static void test_shared_supersede_authority(void)
 {
    cJSON *request = cJSON_Parse("{\"store\":\"kb\",\"old_id\":42,\"new_content\":\"corrected\","
                                 "\"authority\":\"user\",\"actor\":\"forged\"}");
+   expected_version = "{\"schema_version\":1,\"owner_id\":\"00000000-0000-0000-0000-000000000001\","
+                      "\"record_id\":\"42\",\"record_revision\":\"9007199254740993\"}";
+   cJSON_AddItemToObject(request, "expected_version", cJSON_Parse(expected_version));
    store_reply = "{\"status\":\"ok\",\"store\":\"kb\",\"id\":9007199254740993}";
    for (expected_store_authority = 0; expected_store_authority < 2; expected_store_authority++)
    {
@@ -604,6 +618,7 @@ static void test_shared_supersede_authority(void)
       assert(search_wire_reply && !strcmp(search_wire_reply, store_reply));
    }
    request_account = NULL;
+   expected_version = NULL;
    expected_store_authority = 0;
    store_reply = NULL;
    cJSON_Delete(request);
@@ -753,11 +768,14 @@ int main(void)
        "{\"schema_version\":1,\"mode\":\"historical\",\"valid_at\":\"2026-01-01T00:00:00Z\"}";
    request = cJSON_Parse("{\"store\":\"kb\",\"id\":42}");
    cJSON_AddItemToObject(request, "read_policy", cJSON_Parse(expected_read_policy));
+   cJSON_AddBoolToObject(request, "include_version", 1);
+   expect_include_version = 1;
    response = materialize_reply(memory_get_command(request));
    assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(response, "memory")));
    cJSON_Delete(response);
    cJSON_Delete(request);
    expected_read_policy = NULL;
+   expect_include_version = 0;
    test_store_confidence();
    test_review_transport();
    test_store_owner_envelope();

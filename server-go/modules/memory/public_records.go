@@ -13,6 +13,8 @@ import (
 // Public records retain the KB response shape, without the former native
 // fixed-size content buffer. Metadata is read inside the same scoped transaction.
 type publicMemoryRecord struct {
+	Version *MemoryRecordVersion `json:"version,omitempty"`
+
 	ID                 int64   `json:"id"`
 	Tier               string  `json:"tier"`
 	Kind               string  `json:"kind"`
@@ -66,6 +68,7 @@ FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 		if !ok {
 			return nil, fmt.Errorf("memory: metadata missing for record %d", record.ID)
 		}
+		r.Version = record.Version
 		r.Tier, r.Kind, r.Key, r.Content, r.Confidence = record.Tier, record.Kind, record.Key, record.Content, record.Confidence
 		result = append(result, r)
 	}
@@ -134,6 +137,11 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			}
 		}
 	case "get":
+		if raw, exists := args["include_version"]; exists {
+			if string(raw) == "null" || json.Unmarshal(raw, &request.IncludeVersion) != nil {
+				return invalid("include_version must be boolean")
+			}
+		}
 		var ok bool
 		request.ReadPolicy, ok = commandReadPolicy(args)
 		if !ok {

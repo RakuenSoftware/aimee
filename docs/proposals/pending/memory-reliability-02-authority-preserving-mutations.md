@@ -25,7 +25,7 @@ supplied authority text still cannot replace authoritative content. A review
 refusal maps to HTTP 409 rather than an upstream-failure status.
 
 This is a foundation slice. Review-required writes currently refuse without
-creating a linked proposal. Personal versioning, explicit expected versions,
+creating a linked proposal. Personal versioning, expected versions on remaining mutation verbs,
 idempotency keys, durable guards/outbox/consumer replay and full retention policy
 remain acceptance work.
 
@@ -44,6 +44,29 @@ complete personal content versioning, further governed child/dependency coverage
 consumer application/checkpoints or the release-freshness contract.
 
 Implement one mutation admission operation for create, propose, correct, supersede, reject, retire and explicitly authorized destructive deletion. Route compatibility entry points through it.
+
+### Expected-version shared corrections
+
+Shared exact-ID `get` accepts `include_version: true`. Its `memory.version` object
+contains `schema_version: 1`, the owner UUID, and decimal-string `record_id` and
+`record_revision`, captured with the content in one SQL snapshot. Pass that object
+as `expected_version` to shared `supersede`. The existing row lock protects the
+comparison and replacement; stale revisions, changed owners and already replaced
+rows return `conflict` with reason `expected_version_conflict`. Hidden and missing
+rows retain `not_found`; knowing a version grants no authority. Ordinary callers
+keep their existing query path. No additional database round trip is needed for
+versioned reads or the locked comparison.
+
+Generated search columns are excluded from both revision-trigger target columns
+and BEFORE-row comparisons. PostgreSQL can otherwise fire those triggers on
+counter updates, and the generated values are not available in NEW yet. The
+regression uses generated columns plus a second BEFORE trigger, as in the shipping
+schema; counter-only reads and unchanged governed writes retain their revision.
+
+This opt-in contract currently supports shared exact-ID get and supersede only.
+Other operations and personal placement refuse the fields explicitly. It does
+not supply idempotent replay results, automatic restore-owner rotation, historical
+belief reconstruction, or final-release freshness proofs.
 
 ## Existing integration points
 

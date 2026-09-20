@@ -12,6 +12,10 @@ func commandMutationRefusal(code *int) map[string]any {
 		return nil
 	}
 	switch *code {
+	case MutationVersionConflict:
+		result := commandError("conflict", errMutationVersionConflict.Error())
+		result["reason"] = "expected_version_conflict"
+		return result
 	case MutationImmutableExperience:
 		return commandError("conflict", errImmutableExperience.Error())
 	case MutationRequiresReplacement:

@@ -108,6 +108,12 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if _, exists := args["read_policy"]; exists && verb != "get" && verb != "runtime" {
 		return commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get"))
 	}
+	if _, exists := args["expected_version"]; exists && (verb != "supersede" || options.placement != PlacementKB) {
+		return commandResult(commandError("unsupported_mode", "expected_version is supported only for shared memory supersede"))
+	}
+	if _, exists := args["include_version"]; exists && (verb != "get" || options.placement != PlacementKB) {
+		return commandResult(commandError("unsupported_mode", "include_version is supported only for shared exact-ID get"))
+	}
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}

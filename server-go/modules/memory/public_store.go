@@ -115,7 +115,11 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 			return commandResult(commandError("invalid_argument", "confidence must be between 0 and 1"))
 		}
 	}
-	request := DataRequest{Operation: "supersede", ID: id, Content: content, Confidence: &confidence, SessionID: args.stringOr("session_id", ""), PublicView: true, IncludeAll: true}
+	expected, valid := commandExpectedVersion(args, id)
+	if !valid {
+		return commandResult(commandError("invalid_argument", "expected_version must identify the owner, target and positive revision using schema_version=1"))
+	}
+	request := DataRequest{ExpectedVersion: expected, Operation: "supersede", ID: id, Content: content, Confidence: &confidence, SessionID: args.stringOr("session_id", ""), PublicView: true, IncludeAll: true}
 	if caller := options.commandContext; args.stringOr("authority", "") == "user" && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
 		request.Authority = AuthorityUser
 	}

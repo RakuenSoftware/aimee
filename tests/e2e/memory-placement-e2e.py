@@ -79,7 +79,13 @@ class Gate:
         original = 'shared journal original'
         stored = self.good('shared journal HTTP store', self.call('store', dict(store='kb', key=key, content=original)))
         old_id = int(stored['id'])
+        observed = self.good('shared versioned HTTP get', self.call('get', dict(store='kb', id=old_id, include_version=True)))
+        version = observed['memory']['version']
+        self.check('shared version binds exact identity and owner', version['schema_version'] == 1 and
+                   version['record_id'] == str(old_id) and isinstance(version['record_revision'], str))
         before = self.shared_changes(old_id)
+        self.check('shared version binds current revision', version['owner_id'] == before['owner_id'] and
+                   version['record_revision'] == str(before['revision']))
         self.check('shared HTTP store commits invalidation', bool(before['events']) and
                    before['events'][0]['operation'] == 'insert' and before['events'][-1]['revision'] == before['revision'])
         retry = self.good('shared journal identical retry', self.call('store', dict(store='kb', key=key, content=original)))
@@ -88,17 +94,23 @@ class Gate:
         tagged = self.shared_changes(old_id)
         self.check('shared tag batch invalidates its parent once', tagged['revision'] == before['revision'] + 1 and
                    len(tagged['events']) == len(before['events']) + 1)
+        code, stale = self.call('supersede', dict(store='kb', old_id=old_id, new_content='stale replacement', expected_version=version))
+        self.check('shared HTTP rejects stale expected version', code == 409 and stale.get('reason') == 'expected_version_conflict')
+        observed = self.good('shared refreshed versioned HTTP get', self.call('get', dict(store='kb', id=old_id, include_version=True)))
+        version = observed['memory']['version']
         self.sql(f"ALTER TABLE memory_scopes ADD CONSTRAINT e2e_scope_copy_failure CHECK(memory_id={old_id} OR scope_value<>'journal-one') NOT VALID")
         try:
-            code, failure = self.call('supersede', dict(store='kb', old_id=old_id, new_content='must roll back'))
+            code, failure = self.call('supersede', dict(store='kb', old_id=old_id, new_content='must roll back', expected_version=version))
             self.check('shared HTTP replacement refuses failed tag copy', code >= 500 and failure.get('kind') == 'unavailable')
             retained = self.good('shared original after failed copy', self.call('get', dict(store='kb', id=old_id)))
             self.check('failed tag copy preserves original and invalidation',
                        retained.get('memory', {}).get('content') == original and self.shared_changes(old_id) == tagged)
         finally:
             self.sql('ALTER TABLE memory_scopes DROP CONSTRAINT e2e_scope_copy_failure')
-        updated = self.good('shared HTTP version replacement', self.call('supersede', dict(store='kb', old_id=old_id, new_content='shared journal corrected')))
+        updated = self.good('shared HTTP version replacement', self.call('supersede', dict(store='kb', old_id=old_id, new_content='shared journal corrected', expected_version=version)))
         new_id = int(updated['id'])
+        code, retry = self.call('supersede', dict(store='kb', old_id=old_id, new_content='shared journal corrected', expected_version=version))
+        self.check('shared HTTP correction retry conflicts without duplicating', code == 409 and retry.get('reason') == 'expected_version_conflict')
         self.check('shared replacement creates a new identity', new_id != old_id)
         self.check('shared HTTP correction retains verified user authorship', self.sql(f"SELECT (m.provenance_category='user_stated' AND a.actor_role='user' AND a.authenticated=1)::text FROM memories m JOIN memory_fact_actors a ON a.memory_id=m.id WHERE m.id={new_id}") == 'true')
         copies = int(self.sql(f"SELECT count(*) FROM memory_scopes WHERE memory_id={new_id} AND scope_value IN ('journal-one','journal-two')"))

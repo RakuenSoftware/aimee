@@ -171,6 +171,9 @@ func TestSharedMemoryChangeJournal(t *testing.T) {
  ALTER DEFAULT PRIVILEGES IN SCHEMA shared_change_journal_test GRANT EXECUTE ON FUNCTIONS TO shared_change_journal_runtime;
  CREATE TABLE memories(id BIGINT PRIMARY KEY,key TEXT UNIQUE,content TEXT,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,
  use_count BIGINT NOT NULL DEFAULT 0,last_used_at TEXT,updated_at TEXT);
+ ALTER TABLE memories ADD COLUMN content_search TEXT GENERATED ALWAYS AS (upper(content)) STORED;
+ CREATE FUNCTION fixture_before_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
+ CREATE TRIGGER fixture_before_write BEFORE UPDATE ON memories FOR EACH ROW EXECUTE FUNCTION fixture_before_write();
  CREATE TABLE memory_scopes(memory_id BIGINT REFERENCES memories(id) ON DELETE CASCADE,
  scope_type TEXT,scope_value TEXT,PRIMARY KEY(memory_id,scope_type,scope_value));
  CREATE FUNCTION memory_row_scope_visible(t TEXT,v TEXT) RETURNS BOOLEAN LANGUAGE sql STABLE AS $$

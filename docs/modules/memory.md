@@ -767,6 +767,18 @@ There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report
 success; a local fallback is forbidden.
 
+## Correction preconditions
+
+Shared `memory.get` with `include_version: true` returns `memory.version` alongside
+its content. Shared `memory.supersede` accepts that object as `expected_version`:
+`{"schema_version":1,"owner_id":"<owner UUID>","record_id":"42","record_revision":"3"}`.
+The Go owner compares all identifiers under the replacement lock. A stale version
+returns `conflict` / `expected_version_conflict`; callers should inspect the current
+record before deciding whether to submit a new correction. The native HTTP host
+only forwards these fields. Other verbs and the personal placement currently
+refuse this optional contract. It grants no additional authority and is not an
+idempotency key or release-freshness receipt.
+
 ## Extension and removal
 
 Add operations to the Go `memory-data` handler with placement-isolation and

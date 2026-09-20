@@ -117,10 +117,24 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
    cJSON *request = cJSON_CreateObject();
    if (!request)
       return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "KB memory request unavailable", NULL);
-   static const char *fields[] = {"key",        "content",    "tier",        "kind",
-                                  "confidence", "session_id", "use_cases",   "epistemic_kind",
-                                  "limit",      "old_id",     "new_content", "keywords",
-                                  "id",         "as_of",      "read_policy", NULL};
+   static const char *fields[] = {"key",
+                                  "content",
+                                  "tier",
+                                  "kind",
+                                  "confidence",
+                                  "session_id",
+                                  "use_cases",
+                                  "epistemic_kind",
+                                  "limit",
+                                  "old_id",
+                                  "new_content",
+                                  "keywords",
+                                  "id",
+                                  "as_of",
+                                  "read_policy",
+                                  "include_version",
+                                  "expected_version",
+                                  NULL};
    for (int i = 0; fields[i]; i++)
    {
       const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);

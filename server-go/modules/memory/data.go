@@ -31,6 +31,9 @@ const (
 )
 
 type DataRequest struct {
+	IncludeVersion  bool                 `json:"include_version,omitempty"`
+	ExpectedVersion *MemoryRecordVersion `json:"expected_version,omitempty"`
+
 	Changes        *MemoryChangesRequest `json:"changes,omitempty"`
 	ReadPolicy     *MemoryReadPolicy     `json:"read_policy,omitempty"`
 	pageRankConfig *pageRankConfig
@@ -150,6 +153,8 @@ type DataRequest struct {
 }
 
 type Record struct {
+	Version *MemoryRecordVersion `json:"version,omitempty"`
+
 	retrievalScore  float64
 	retrievalBase   float64
 	pageRankBonus   float64
@@ -491,6 +496,9 @@ func (s *postgresDataStore) get(ctx context.Context, scope Scope, id int64, hist
 // Historical interval selection stays in the same query as scope/lifecycle
 // admission, avoiding a second metadata round trip and a time-of-check gap.
 func (s *postgresDataStore) getAt(ctx context.Context, scope Scope, id int64, historical bool, validAt string) (Record, error) {
+	return s.getAtVersioned(ctx, scope, id, historical, validAt, false)
+}
+func (s *postgresDataStore) getAtVersioned(ctx context.Context, scope Scope, id int64, historical bool, validAt string, includeVersion bool) (Record, error) {
 	var r Record
 	if s.placement == PlacementServer {
 		r.Scope = scope
@@ -513,10 +521,14 @@ WHERE id = $1 AND lifecycle_state = 'active'
 		predicate += " AND " + memoryValidityAtSQL("", "$2::timestamptz")
 		parameters = append(parameters, validAt)
 	}
-	err := s.db.QueryRow(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
-FROM memories
-WHERE id = $1 AND `+predicate, parameters...).
-		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
+	columns := "id, scope_type, scope_value, tier, kind, key, content, confidence"
+	destinations := []any{&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence}
+	if includeVersion {
+		r.Version = &MemoryRecordVersion{SchemaVersion: 1, RecordID: strconv.FormatInt(id, 10)}
+		columns += ",(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),record_revision::text"
+		destinations = append(destinations, &r.Version.OwnerID, &r.Version.RecordRevision)
+	}
+	err := s.db.QueryRow(ctx, "SELECT "+columns+" FROM memories WHERE id=$1 AND "+predicate, parameters...).Scan(destinations...)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
 	}
@@ -967,6 +979,12 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if request.Changes != nil && request.Operation != "change-feed" {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if request.IncludeVersion && (options.placement != PlacementKB || request.Operation != "get") {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if request.ExpectedVersion != nil && (options.placement != PlacementKB || request.Operation != "supersede" || !request.ExpectedVersion.validFor(request.ID)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	var readResult *MemoryReadResult
@@ -1849,7 +1867,13 @@ set_config('aimee.correlation_id',$9,true)`,
 			if readResult != nil {
 				when = readResult.ValidAt
 			}
-			record, getErr = backend.getAt(ctx, scope, request.ID, true, when)
+			record, getErr = backend.getAtVersioned(ctx, scope, request.ID, true, when, request.IncludeVersion)
+		} else if request.IncludeVersion {
+			backend, ok := options.data.(*postgresDataStore)
+			if !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			record, getErr = backend.getAtVersioned(ctx, scope, request.ID, false, "", true)
 		} else {
 			record, getErr = options.data.Get(ctx, scope, request.ID)
 		}
@@ -1953,13 +1977,18 @@ set_config('aimee.correlation_id',$9,true)`,
 		if options.publicWrite && transaction == nil {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
+		if request.ExpectedVersion != nil {
+			if _, ok := options.data.(*postgresDataStore); !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+		}
 		var record Record
 		if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB {
 			authority := AuthorityModel
 			if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
 				authority = AuthorityUser
 			}
-			record, err = backend.replaceKBAs(ctx, request.ID, request.Content, *request.Confidence, request.SessionID, authority, nil)
+			record, err = backend.replaceKBVersion(ctx, request.ID, request.Content, *request.Confidence, request.SessionID, authority, nil, request.ExpectedVersion)
 			if err == nil && options.publicWrite {
 				err = backend.captureStoredFactActor(ctx, record.ID, authority, options.commandContext)
 			}
