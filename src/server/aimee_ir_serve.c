@@ -375,9 +375,10 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
    if (stream_out)
       *stream_out = ir.stream;
 
-   aimee_ir_apply_request_stages(
-       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
-
+   /* This is an intermediate decode, not provider assembly. Both buffered and
+    * streaming Responses subsequently enter aimee_ir_build_from_chat, which
+    * applies request stages after routing. Applying them here too duplicates Go
+    * recall/guidance and makes the second recall query include the persona. */
    /* build the chat shape, then split leading system messages -> instructions */
    cJSON *chat = openai_backend_build(&ir);
    aimee_request_free(&ir);

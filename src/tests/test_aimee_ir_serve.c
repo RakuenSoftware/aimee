@@ -25,6 +25,9 @@ static const char *REQ =
 
 void ir_seam_test_session(const char *session_id);
 void ir_seam_test_persona(const char *instructions);
+void ir_seam_test_memory(int enabled);
+int ir_seam_test_plan_calls(const char *phase);
+const char *ir_seam_test_query(void);
 
 int main(void)
 {
@@ -113,6 +116,43 @@ int main(void)
    free(instr);
    cJSON_Delete(rmsgs);
    cJSON_Delete(rtls);
+
+   /* Responses decoding must not recall, consume persona delivery or police
+    * tools before routing. The final builder runs those stages once and recalls
+    * the original user query, without persona/guidance contamination. */
+   for (int provider = 0; provider < 3; provider++)
+   {
+      const char *drivers[] = {"openai", "anthropic", "chatgpt"};
+      ir_seam_test_session("responses-stage-once");
+      ir_seam_test_persona("PERSONA_BOUNDARY_FIXTURE");
+      ir_seam_test_memory(1);
+      instr = NULL;
+      rmsgs = rtls = NULL;
+      assert(aimee_ir_responses_to_chat(RBODY, mdl, sizeof mdl, &instr, &rmsgs, &rtls, &strm) == 0);
+      assert(ir_seam_test_plan_calls("context") == 0);
+      assert(ir_seam_test_plan_calls("tools") == 0);
+      assert(strcmp(cJSON_GetStringValue(
+                        cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rmsgs, 0), "content")),
+                    "hi") == 0);
+      cJSON *provider_body =
+          aimee_ir_build_from_chat(mdl, rmsgs, rtls, instr, drivers[provider], 32, 0.2);
+      assert(provider_body);
+      assert(ir_seam_test_plan_calls("context") == 1);
+      assert(ir_seam_test_plan_calls("tools") == 1);
+      assert(strcmp(ir_seam_test_query(), "hi") == 0);
+      char *wire = cJSON_PrintUnformatted(provider_body);
+      assert(wire && strstr(wire, "be helpful"));
+      const char *persona = strstr(wire, "PERSONA_BOUNDARY_FIXTURE");
+      assert(persona && !strstr(persona + 1, "PERSONA_BOUNDARY_FIXTURE"));
+      free(wire);
+      cJSON_Delete(provider_body);
+      free(instr);
+      cJSON_Delete(rmsgs);
+      cJSON_Delete(rtls);
+   }
+   ir_seam_test_memory(0);
+   ir_seam_test_persona(NULL);
+   ir_seam_test_session(NULL);
 
    /* A namespaced tool call in the history survives the CHAT HOP.
     *

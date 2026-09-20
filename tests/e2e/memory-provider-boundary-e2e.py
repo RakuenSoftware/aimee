@@ -90,7 +90,12 @@ def inside(output):
             conn.request('GET' if body is None else 'POST', path,
                 None if body is None else json.dumps(body), {'Content-Type': 'application/json'})
             response = conn.getresponse()
-            return response.status, json.loads(response.read())
+            raw = response.read()
+            if response.getheader('Content-Type', '').startswith('text/event-stream'):
+                events = [json.loads(line[5:].strip()) for line in raw.decode().splitlines()
+                          if line.startswith('data:') and line[5:].strip() != '[DONE]']
+                return response.status, dict(events=events)
+            return response.status, json.loads(raw)
         finally:
             conn.close()
 
@@ -133,6 +138,9 @@ def inside(output):
                 ('responses', '/v1/responses', dict(model=model, stream=False, max_output_tokens=32,
                     instructions=policy, input=[dict(role='user', content=context)],
                     tools=[dict(type='function', **tool)])),
+                ('responses_stream', '/v1/responses', dict(model=model, stream=True, max_output_tokens=32,
+                    instructions=policy, input=[dict(role='user', content=context)],
+                    tools=[dict(type='function', **tool)])),
                 ('messages', '/v1/messages', dict(model=model, stream=False, max_tokens=32,
                     system=policy, messages=[dict(role='user', content=context)],
                     tools=[dict(name=tool['name'], description=tool['description'], input_schema=tool['parameters'])])),
@@ -165,6 +173,9 @@ def inside(output):
                 check(name + ' includes the tool schema in the final request', tool['name'] in values and
                       tool['description'] in values and 'record_id' in json.dumps(sent.get('tools')))
                 check(name + ' captures provider serialization overhead', len(raw) > len(context.encode()) + len(policy.encode()))
+                if frontend in ('chat', 'responses', 'responses_stream'):
+                    check(name + ' includes standing memory guidance exactly once',
+                          sum(text.count('explore-with: aimee answers CODE questions') for text in values) == 1)
                 accounting.append(dict(frontend=frontend, provider=protocol, endpoint=endpoint,
                     boundary='provider_http_body', count_state='exact', unit='utf8_bytes',
                     request_bytes=len(raw), memory_projection_bytes=len(context.encode()),
