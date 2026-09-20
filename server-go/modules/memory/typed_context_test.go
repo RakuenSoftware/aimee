@@ -2,7 +2,9 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -10,6 +12,54 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestTypedProjectionRendersReviewedProcedureOnce(t *testing.T) {
+	build := func() *typedContextResult {
+		r := newTypedContext(DataRequest{TypedContext: typedTestOptions(t, `{}`)})
+		r.add("observations", typedItem{id: "observed-1", text: "reported", value: map[string]any{"summary": "reported"}})
+		r.add("approved_procedures", typedItem{id: "reviewed-1", text: "do not erase 界", value: map[string]any{
+			"proposal_id": "9007199254740993", "state": "committed", "procedure": "do not erase 界",
+		}})
+		if err := r.finish(); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	r := build()
+	boundary := strings.Index(r.Rendered, `<approved_procedures authority="reviewed" authorization="none">`)
+	if boundary < 0 || strings.Count(r.Rendered, "do not erase 界") != 1 || strings.Contains(r.Rendered[:boundary], "9007199254740993") {
+		t.Fatal("reviewed procedure duplicated or lost trust separation", r.Rendered)
+	}
+	for _, diagnostic := range []string{"budget_tokens", "used_tokens", "enabled", "packing_trace"} {
+		if strings.Contains(r.Rendered, diagnostic) {
+			t.Fatal("response diagnostics leaked into prompt projection", diagnostic)
+		}
+	}
+	if r.RenderedBytes != len(r.Rendered) || r.ProjectionDigest != fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(r.Rendered))) || r.TokenCountState != "unavailable" || r.ProjectionVersion != 1 {
+		t.Fatal("projection accounting misrepresents bytes or token certainty", r)
+	}
+	if r.Sufficiency != "unknown" || r.Availability != "available" {
+		t.Fatal("nonempty projection claimed task coverage without requirements", r)
+	}
+	if len(r.Retained) != 2 || r.Retained[0] != (typedProjectionRef{"observations", "observed-1"}) || r.Retained[1] != (typedProjectionRef{"approved_procedures", "reviewed-1"}) {
+		t.Fatal("projection retained identities mismatch", r.Retained)
+	}
+	if again := build(); again.Rendered != r.Rendered || again.ProjectionDigest != r.ProjectionDigest {
+		t.Fatal("projection is not deterministic", r, again)
+	}
+	legacyChannels, _ := json.Marshal(r.Channels)
+	legacyProcedures, _ := json.Marshal(r.Channels["approved_procedures"].Items)
+	legacy := `<memory_data trust="untrusted" authorization="none">` + string(legacyChannels) + "</memory_data>\n" + `<approved_procedures authority="reviewed" authorization="none">` + string(legacyProcedures) + `</approved_procedures>`
+	t.Logf("same evidence: previous projection %d bytes, current projection %d bytes", len(legacy), r.RenderedBytes)
+	if r.RenderedBytes >= len(legacy) {
+		t.Fatal("projection retained diagnostic or duplicate-procedure overhead")
+	}
+	degraded := newTypedContext(DataRequest{TypedContext: typedTestOptions(t, `{}`)})
+	degraded.fail("observations", "owner unavailable")
+	if err := degraded.finish(); err != nil || degraded.Availability != "degraded" || degraded.Sufficiency != "unknown" {
+		t.Fatal("unavailable retrieval was reported as an empty successful result", degraded, err)
+	}
+}
 
 func typedTestOptions(t *testing.T, raw string) *typedContextOptions {
 	t.Helper()
@@ -125,7 +175,7 @@ func exerciseTypedContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 			t.Fatal(name, body)
 		}
 	}
-	if len(got.Channels["observations"].Items) != 2 || strings.Contains(body, "hidden") || strings.Contains(body, "9999-12-31") || !strings.Contains(body, `"proposal_id":9007199254743001`) || !strings.Contains(body, `"stable_id":"9007199254743001"`) || got.RenderedTokens > 4096 || got.Sufficiency != "complete" {
+	if len(got.Channels["observations"].Items) != 2 || strings.Contains(body, "hidden") || strings.Contains(body, "9999-12-31") || !strings.Contains(body, `"proposal_id":9007199254743001`) || !strings.Contains(body, `"stable_id":"9007199254743001"`) || got.RenderedTokens > 4096 || got.Sufficiency != "unknown" || got.Availability != "available" {
 		t.Fatal(body)
 	}
 	if got.Watermark.Observations != "2026-01-02" || got.Watermark.Durable == "9999-12-31" {
@@ -154,13 +204,13 @@ func exerciseTypedContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	// A failed channel rolls back to its savepoint without erasing other channels.
 	exec(`SAVEPOINT typed_denied; RESET ROLE; REVOKE SELECT(action_json) ON learning_proposals FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	got, body = call()
-	if got.Channels["approved_procedures"].Status != "degraded" || got.Sufficiency != "partial" || len(got.Channels["observations"].Items) != 2 || len(got.Channels["episodes"].Items) != 1 {
+	if got.Channels["approved_procedures"].Status != "degraded" || got.Sufficiency != "unknown" || got.Availability != "degraded" || len(got.Channels["observations"].Items) != 2 || len(got.Channels["episodes"].Items) != 1 {
 		t.Fatal(body)
 	}
 	exec(`ROLLBACK TO SAVEPOINT typed_denied; RELEASE SAVEPOINT typed_denied`)
 	exec(`SAVEPOINT typed_watermark_denied; RESET ROLE; REVOKE SELECT(refreshed_at) ON learning_observations FROM aimee_store_runtime; SET LOCAL ROLE aimee_store_runtime`)
 	got, body = call()
-	if got.Watermark.Status != "unavailable" || got.Sufficiency != "partial" {
+	if got.Watermark.Status != "unavailable" || got.Sufficiency != "unknown" || got.Availability != "degraded" {
 		t.Fatal(body)
 	}
 	exec(`ROLLBACK TO SAVEPOINT typed_watermark_denied; RELEASE SAVEPOINT typed_watermark_denied`)

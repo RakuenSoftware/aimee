@@ -1,12 +1,18 @@
 # MR-05: Requirement-based context sufficiency and bounded recovery
 
-- **State:** Proposed
+- **State:** In progress; nonempty typed results no longer claim complete task coverage
 - **Priority:** P0 for honest sufficiency; P1 for recovery
 - **Owner:** Go memory requirements and coverage, with host-governed recovery execution
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md); [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) for independence requirements
 - **Delivery:** Three implementation slices
 
 ## Problem and intended result
+
+Typed context now separates retrieval availability from task coverage. Nonempty
+results report unknown sufficiency until versioned requirements are evaluated;
+an unavailable channel is distinct from a successful empty retrieval. This removes
+the previous nonempty-to-complete shortcut but does not implement requirement
+planning, final-host packing feedback, source-chain coherence or bounded recovery.
 
 A nonempty result is not necessarily sufficient. A temporal question may require an old state and its correction; a comparison needs evidence for both sides; a current-state claim may require the latest applicable record. A maximum confidence value across retrieved records does not measure support for the combined answer.
 

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,22 +54,33 @@ type typedWatermark struct {
 	Reason       string `json:"reason,omitempty"`
 }
 type typedContextResult struct {
-	Status         string                   `json:"status"`
-	Enabled        bool                     `json:"default_injection"`
-	Budget         int                      `json:"total_budget_tokens"`
-	Used           int                      `json:"used_tokens"`
-	RenderedTokens int                      `json:"rendered_tokens"`
-	EnvelopeExcess int                      `json:"envelope_excess_tokens,omitempty"`
-	Channels       map[string]*typedChannel `json:"channels"`
-	Trace          []typedPackTrace         `json:"packing_trace"`
-	Watermark      typedWatermark           `json:"watermark"`
-	Sufficiency    string                   `json:"context_sufficiency"`
-	Reason         string                   `json:"sufficiency_reason"`
-	Rendered       string                   `json:"rendered_context"`
-	MissingContext bool                     `json:"active_context_missing"`
-	ErrorType      string                   `json:"error_type,omitempty"`
-	Message        string                   `json:"message,omitempty"`
-	degraded       bool
+	ProjectionVersion int                      `json:"projection_schema_version"`
+	ProjectionDigest  string                   `json:"projection_digest"`
+	RenderedBytes     int                      `json:"rendered_bytes"`
+	TokenCountState   string                   `json:"token_count_state"`
+	Retained          []typedProjectionRef     `json:"retained_items"`
+	Availability      string                   `json:"retrieval_availability"`
+	Status            string                   `json:"status"`
+	Enabled           bool                     `json:"default_injection"`
+	Budget            int                      `json:"total_budget_tokens"`
+	Used              int                      `json:"used_tokens"`
+	RenderedTokens    int                      `json:"rendered_tokens"`
+	EnvelopeExcess    int                      `json:"envelope_excess_tokens,omitempty"`
+	Channels          map[string]*typedChannel `json:"channels"`
+	Trace             []typedPackTrace         `json:"packing_trace"`
+	Watermark         typedWatermark           `json:"watermark"`
+	Sufficiency       string                   `json:"context_sufficiency"`
+	Reason            string                   `json:"sufficiency_reason"`
+	Rendered          string                   `json:"rendered_context"`
+	MissingContext    bool                     `json:"active_context_missing"`
+	ErrorType         string                   `json:"error_type,omitempty"`
+	Message           string                   `json:"message,omitempty"`
+	degraded          bool
+}
+
+type typedProjectionRef struct {
+	Channel string `json:"channel"`
+	ID      string `json:"stable_id"`
 }
 
 func typedEstimate(text string) int {
@@ -178,7 +190,16 @@ func (r *typedContextResult) fail(name, reason string) {
 	r.Channels[name].Reason = reason
 }
 func (r *typedContextResult) render() (string, error) {
-	channels, err := json.Marshal(r.Channels)
+	// Model-facing bytes contain evidence only. Budgets, status and packing
+	// diagnostics stay in the response. Reviewed procedures have one dedicated
+	// envelope instead of also appearing as untrusted channel evidence.
+	projection := make(map[string][]any)
+	for _, name := range typedChannelOrder {
+		if name != "approved_procedures" && len(r.Channels[name].Items) > 0 {
+			projection[name] = r.Channels[name].Items
+		}
+	}
+	channels, err := json.Marshal(projection)
 	if err != nil {
 		return "", err
 	}
@@ -225,19 +246,33 @@ func (r *typedContextResult) finish() error {
 		}
 	}
 	count := 0
-	for _, c := range r.Channels {
+	r.ProjectionVersion = 1
+	r.RenderedBytes = len(r.Rendered)
+	r.ProjectionDigest = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(r.Rendered)))
+	// The legacy bytes/4 estimate is not a defensible hard token bound. Keep
+	// it for compatibility without claiming exact or conservative tokenization.
+	r.TokenCountState = "unavailable"
+	r.Retained = []typedProjectionRef{}
+	for _, name := range typedChannelOrder {
+		c := r.Channels[name]
 		count += len(c.Items)
+		for _, item := range c.selected {
+			r.Retained = append(r.Retained, typedProjectionRef{Channel: name, ID: item.id})
+		}
 	}
 	switch {
+	case r.degraded:
+		r.Availability = "degraded"
+		r.Sufficiency = "unknown"
+		r.Reason = "a requested channel degraded; task requirements have not been evaluated"
 	case count == 0:
+		r.Availability = "empty"
 		r.Sufficiency = "insufficient"
 		r.Reason = "no authorized evidence fit enabled channels"
-	case r.degraded:
-		r.Sufficiency = "partial"
-		r.Reason = "authorized evidence present but a requested channel degraded"
 	default:
-		r.Sufficiency = "complete"
-		r.Reason = "authorized evidence present in every available requested channel"
+		r.Availability = "available"
+		r.Sufficiency = "unknown"
+		r.Reason = "authorized evidence present; task requirements have not been evaluated"
 	}
 	return nil
 }
@@ -291,7 +326,7 @@ func (s *postgresDataStore) typedProcedures(ctx context.Context, request DataReq
 		if err = rows.Scan(&id, &key, &action); err != nil {
 			return nil, err
 		}
-		items = append(items, typedItem{value: map[string]any{"proposal_id": id, "target_key": key, "state": "committed", "procedure": json.RawMessage(action)}, id: key, text: action})
+		items = append(items, typedItem{value: map[string]any{"proposal_id": id, "target_key": key, "state": "committed", "procedure": json.RawMessage(action)}, id: strconv.FormatInt(id, 10), text: action})
 	}
 	return items, rows.Err()
 }

@@ -1,12 +1,23 @@
 # MR-03: Final-payload context budgets and protected projections
 
-- **State:** Proposed
+- **State:** In progress; minimal typed projection and retained-item receipt implemented
 - **Priority:** P0: context correctness
 - **Owner:** Go memory projection, with host/provider assembly and economizer accounting
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) for eligible candidates
 - **Delivery:** Three implementation slices
 
 ## Problem and intended result
+
+The Go typed-context projection now emits selected evidence without channel
+budget/status diagnostics and renders reviewed procedures only in their dedicated
+envelope. The response records exact rendered bytes, a deterministic SHA-256
+projection digest and retained channel/ID pairs. Procedure identities use the
+specific proposal ID. The legacy bytes/4 estimate remains visible for compatibility
+but explicitly has unavailable token-count provenance. A fixed two-item regression
+renders the same evidence in 280 bytes instead of 1,044 bytes; this is a projection
+size result, not a provider token or latency measurement. Full provider-request
+accounting, source-version binding, protected packing and host-retained feedback
+remain acceptance work.
 
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
