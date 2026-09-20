@@ -1,6 +1,9 @@
 package economizer
 
-import "math"
+import (
+	"crypto/sha256"
+	"math"
+)
 
 // Local-only GPT-5.6 proof planner.
 //
@@ -58,8 +61,11 @@ type TokenEvidence struct {
 	ModelSnapshotID uint64
 	TokenizerID     uint64
 	SerializedSize  int
-	InputTokens     uint64
-	Source          TokenSource
+	// SerializedDigest must be computed by the counter over the same final
+	// provider body as InputTokens. Size alone cannot detect equal-length edits.
+	SerializedDigest [sha256.Size]byte
+	InputTokens      uint64
+	Source           TokenSource
 }
 
 // OpenAIPlanInput is one baseline/candidate pair to cost.
@@ -106,7 +112,7 @@ func evidenceReason(e *TokenEvidence, ctx *OpenAIContext, json string, endpoint 
 	if e == nil || ctx == nil ||
 		e.Provider != ProviderOpenAI || e.EndpointID != uint32(endpoint) ||
 		e.ModelSnapshotID != ctx.ModelSnapshotID || e.TokenizerID != ctx.TokenizerID ||
-		e.SerializedSize != len(json) {
+		!e.matchesSerialized(json) {
 		return ReasonTokenizerNotLocalExact
 	}
 	switch e.Source {
@@ -118,6 +124,10 @@ func evidenceReason(e *TokenEvidence, ctx *OpenAIContext, json string, endpoint 
 		return ReasonNone
 	}
 	return ReasonTokenizerNotLocalExact
+}
+
+func (e *TokenEvidence) matchesSerialized(body string) bool {
+	return e.SerializedSize == len(body) && e.SerializedDigest == sha256.Sum256([]byte(body))
 }
 
 // pricesValid enforces the published GPT-5.6 rate RELATIONSHIPS, not merely

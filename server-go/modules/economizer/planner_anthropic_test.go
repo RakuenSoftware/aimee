@@ -1,7 +1,9 @@
 package economizer
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -30,7 +32,7 @@ func anthroReq(maxTokens int) string {
 func anthroEvidence(js string, tokens uint64) *TokenEvidence {
 	return &TokenEvidence{
 		Provider: ProviderAnthropic, ModelSnapshotID: 11, TokenizerID: 22,
-		SerializedSize: len(js), InputTokens: tokens, Source: TokenSourceLocalExact,
+		SerializedSize: len(js), SerializedDigest: sha256.Sum256([]byte(js)), InputTokens: tokens, Source: TokenSourceLocalExact,
 	}
 }
 
@@ -178,6 +180,16 @@ func TestAnthropicPlanEvidenceAndIdentity(t *testing.T) {
 		t.Errorf("wrong provider: %v", got.Reason)
 	}
 	in = anthroInput(10000, 1000)
+	in.CandidateTokens.SerializedDigest = [sha256.Size]byte{}
+	if got := AnthropicPlanFor(in); got.Reason != ReasonTokenizerNotLocalExact {
+		t.Errorf("missing digest: %v", got.Reason)
+	}
+	in = anthroInput(10000, 1000)
+	in.BaselineTokens.SerializedDigest[0] ^= 1
+	if got := AnthropicPlanFor(in); got.Reason != ReasonTokenizerNotLocalExact {
+		t.Errorf("wrong digest: %v", got.Reason)
+	}
+	in = anthroInput(10000, 1000)
 	in.CandidateTokens.Source = TokenSourceRemoteEstimate
 	if got := AnthropicPlanFor(in); got.Reason != ReasonRemoteTokenCount {
 		t.Errorf("remote estimate: %v", got.Reason)
@@ -193,5 +205,31 @@ func TestAnthropicBaselineExcludesOutputCost(t *testing.T) {
 	}
 	if got.Scenario.BaselineLower != 10000*40 {
 		t.Errorf("baseline = %d, want input-only cost", got.Scenario.BaselineLower)
+	}
+}
+
+// Equal-sized provider bodies can have different content and token counts.
+// Evidence measured before a rewrite must not certify the rewritten request.
+func TestAnthropicPlanRejectsSameLengthRequestSubstitution(t *testing.T) {
+	for _, side := range []string{"baseline", "candidate"} {
+		t.Run(side, func(t *testing.T) {
+			in := anthroInput(10000, 1000)
+			original := strings.TrimSuffix(in.BaselineJSON, "}") + `,"messages":[{"role":"user","content":"limit=7"}]}`
+			in.BaselineJSON, in.CandidateJSON = original, original
+			in.BaselineTokens, in.CandidateTokens = anthroEvidence(original, 10000), anthroEvidence(original, 1000)
+			changed := strings.Replace(original, "limit=7", "limit=9", 1)
+			if len(original) != len(changed) || original == changed {
+				t.Fatal("invalid same-length fixture")
+			}
+			if side == "baseline" {
+				in.BaselineJSON = changed
+			} else {
+				in.CandidateJSON = changed
+			}
+			got := AnthropicPlanFor(in)
+			if got.Reason != ReasonTokenizerNotLocalExact || got.CostVerdict != CostIndeterminate {
+				t.Fatalf("stale token evidence accepted after %s rewrite: %v/%v", side, got.CostVerdict, got.Reason)
+			}
+		})
 	}
 }
