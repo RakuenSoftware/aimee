@@ -61,6 +61,15 @@ PRs [#2988](https://github.com/RakuenSoftware/aimee/pull/2988) and
 records 224 passing topology/placement/identity verdicts, including the new HTTP
 contract. These results do not close the remaining MR-01 acceptance gates.
 
+[Fresh shared reliability validation](../../validation/memory-shared-reliability-2026-09-20.md)
+records 257 passing T2 verdicts for `5541025ba3`, including owner/revision-bound
+HTTP corrections, stale/repeated conflict responses, transactional scope-copy
+rollback and durable journal history across restart. Counter-only writes no longer
+acquire the collection-generation lock through generated search columns; a
+concurrent-write regression verifies independent read accounting. The native
+HTTP status contract accepts the Go classifier's 409 response. Remaining work
+continues in the single PR described above.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

@@ -65,8 +65,23 @@ the native status decoder's whitelist rejected 409, causing a generic 502. The
 runtime-web wire contract now admits 409; the native alternative classifier and
 process smoke tests also cover conflict/review-required and unsupported-mode
 parity. This changes HTTP transport classification, not memory policy or C bus
-implementation. A fresh image must validate this correction before HTTP status
-parity is claimed.
+implementation. The real C-caller/Go-process smoke test verifies 400, 403 and 409
+across that wire boundary.
+
+The final fresh T2 run built implementation and harness
+`5541025ba388d09b04539570e0e2d6e143a8b957` as
+`sha256:c30858587be63a83959bc071ee9adec38387bdfbfcc25bfecdbef830f21f5ac8`,
+with the same pinned PostgreSQL and embedding images above. Its separate
+[sanitized receipt](memory-shared-reliability-2026-09-20/fresh-t2-5541025ba3.json)
+records 257 passing verdicts: 61 private, 173 shared, six identity and 17 topology.
+Both stale-version and repeated-correction requests return HTTP 409 with
+`expected_version_conflict`; fresh corrections succeed and preserve authored
+history and tags. Failed tag copies roll back all state. Shared owner/history
+survive restart, and the existing private/KB isolation and outage gates pass.
+The `.253` raw fixture evidence is retained under
+`/opt/aimee-memory-proposals-evidence/t2-5541025ba3` inside owned CT 9498;
+application containers were stopped after validation. No production instance was
+used for these mutations.
 
 ## Local correctness and performance scope
 
