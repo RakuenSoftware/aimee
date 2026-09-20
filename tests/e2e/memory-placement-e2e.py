@@ -171,6 +171,9 @@ class Gate:
         self.check('HTTP store commits personal invalidation', stored_changes.get('revision') == 1 and
                    stored_changes.get('events', [])[-1:] == [dict(
                        generation=stored_changes['generation'], revision=1, operation='insert')])
+        retry = self.good('personal store retry', self.call('store', dict(key=self.prefix, content=content)))
+        self.check('identical HTTP upsert preserves identity and invalidation progress',
+                   retry['id'] == mid and self.personal_changes(mid) == stored_changes)
         for explicit in ({}, {'store': 'user'}):
             bundle = self.good('KB-free recall ' + str(explicit),
                 self.call('recall', dict(query=self.prefix, **explicit)))

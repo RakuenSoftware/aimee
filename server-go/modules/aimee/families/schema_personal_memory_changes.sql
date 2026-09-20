@@ -19,13 +19,10 @@ CREATE TABLE user_memory_invalidation_outbox (
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Updating the generation row serializes change positions in commit order.
--- A sequence alone would let a later position commit before an earlier one,
--- allowing a consumer to skip the late commit permanently. Rollback restores
--- both the generation and its event. Old content is never copied to the outbox.
-CREATE FUNCTION user_memory_capture_change() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
-DECLARE position BIGINT; revision BIGINT; target BIGINT;
+-- Assign revisions before the write, but publish only rows actually written.
+-- BEFORE INSERT also runs for discarded ON CONFLICT candidates.
+CREATE FUNCTION user_memory_assign_revision() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 BEGIN
   IF TG_OP = 'UPDATE' THEN
     IF NEW.id <> OLD.id THEN
@@ -41,6 +38,21 @@ BEGIN
   ELSIF TG_OP = 'INSERT' THEN
     NEW.record_revision := 1;
   END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION user_memory_assign_revision() FROM PUBLIC;
+
+-- Updating the generation row serializes change positions in commit order.
+-- A sequence alone would let a later position commit before an earlier one,
+-- allowing a consumer to skip the late commit permanently. Rollback restores
+-- both the generation and its event. Old content is never copied to the outbox.
+CREATE FUNCTION user_memory_capture_change() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE position BIGINT; revision BIGINT; target BIGINT;
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.record_revision = OLD.record_revision THEN
+    RETURN NEW;
+  END IF;
 
   target := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;
   revision := CASE WHEN TG_OP = 'DELETE' THEN OLD.record_revision + 1 ELSE NEW.record_revision END;
@@ -55,8 +67,13 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION user_memory_capture_change() FROM PUBLIC;
 
+CREATE TRIGGER user_memory_assign_revision
+  BEFORE INSERT OR UPDATE OF id,kind,tier,key,content,confidence,
+    lifecycle_state,valid_until,source_session,created_at,record_revision ON user_memories
+  FOR EACH ROW EXECUTE FUNCTION user_memory_assign_revision();
+
 CREATE TRIGGER user_memory_capture_change
-  BEFORE INSERT OR DELETE OR UPDATE OF id,kind,tier,key,content,confidence,
+  AFTER INSERT OR DELETE OR UPDATE OF id,kind,tier,key,content,confidence,
     lifecycle_state,valid_until,source_session,created_at,record_revision ON user_memories
   FOR EACH ROW EXECUTE FUNCTION user_memory_capture_change();
 
@@ -70,14 +87,15 @@ CREATE TRIGGER user_memory_capture_change
 DO $personal_change_acl$
 DECLARE recipient record; target record; role_name TEXT;
 BEGIN
-  FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_proc AS routine,
+  FOR recipient IN SELECT DISTINCT acl.grantee,routine.proname FROM pg_proc AS routine,
     LATERAL aclexplode(routine.proacl) AS acl
-    WHERE routine.oid='user_memory_capture_change()'::regprocedure
+    WHERE routine.oid IN ('user_memory_capture_change()'::regprocedure,
+                          'user_memory_assign_revision()'::regprocedure)
       AND acl.grantee<>routine.proowner
   LOOP
     role_name := CASE WHEN recipient.grantee=0 THEN 'PUBLIC'
       ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
-    EXECUTE format('REVOKE ALL ON FUNCTION user_memory_capture_change() FROM %s',role_name);
+    EXECUTE format('REVOKE ALL ON FUNCTION %I() FROM %s',recipient.proname,role_name);
   END LOOP;
   FOR target IN SELECT oid,relname,relowner FROM pg_class
     WHERE oid IN ('user_memory_collection_generation'::regclass,

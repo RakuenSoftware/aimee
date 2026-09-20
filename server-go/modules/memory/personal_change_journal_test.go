@@ -94,15 +94,17 @@ func TestPersonalMemoryChangeJournal(t *testing.T) {
 	check(0, 0)
 	var uncovered int
 	if err := conn.QueryRow(ctx, `SELECT count(*) FROM pg_attribute a
+ CROSS JOIN (VALUES ('user_memory_assign_revision'),('user_memory_capture_change')) AS expected(name)
  WHERE a.attrelid='user_memories'::regclass AND a.attnum>0 AND NOT a.attisdropped
  AND a.attname NOT IN ('use_count','last_used_at','updated_at')
  AND NOT EXISTS(SELECT 1 FROM pg_trigger t WHERE t.tgrelid=a.attrelid
-   AND t.tgname='user_memory_capture_change' AND a.attnum=ANY(t.tgattr::smallint[]))`).Scan(&uncovered); err != nil || uncovered != 0 {
+   AND t.tgname=expected.name AND a.attnum=ANY(t.tgattr::smallint[]))`).Scan(&uncovered); err != nil || uncovered != 0 {
 		t.Fatal("governed columns bypass invalidation", uncovered, err)
 	}
 	exec("SET ROLE " + role)
 	var executable bool
-	if err := conn.QueryRow(ctx, `SELECT has_function_privilege(current_user,'user_memory_capture_change()','EXECUTE')`).Scan(&executable); err != nil || executable {
+	if err := conn.QueryRow(ctx, `SELECT has_function_privilege(current_user,'user_memory_capture_change()','EXECUTE')
+ OR has_function_privilege(current_user,'user_memory_assign_revision()','EXECUTE')`).Scan(&executable); err != nil || executable {
 		t.Fatal("runtime could attach the owner trigger to a caller-owned relation", executable, err)
 	}
 	for _, query := range []string{
@@ -316,5 +318,40 @@ func TestPersonalMemoryChangeJournal(t *testing.T) {
 	cursor.Generation = 2
 	if page := read(&cursor, 2); !page.SnapshotRequired || len(page.Events) != 0 || page.More {
 		t.Fatal("retention gap skipped without resynchronization", page)
+	}
+
+	// INSERT ... ON CONFLICT executes BEFORE INSERT even when no row will be
+	// inserted. Canonical Put retries must not publish those discarded IDs.
+	var before int64
+	if err := readTx.QueryRow(ctx, `SELECT generation FROM user_memory_collection_generation WHERE id=1`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	confidence := 0.8
+	put := func(content string) int64 {
+		t.Helper()
+		body, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+			Operation: "store", Key: "upsert-journal", Kind: "fact", Tier: "L2", Content: content, Confidence: &confidence,
+		}))
+		var response DataResponse
+		if status != bus.ModuleStatusOK || json.Unmarshal(body, &response) != nil || len(response.Records) != 1 {
+			t.Fatalf("canonical upsert status=%v response=%s", status, body)
+		}
+		return response.Records[0].ID
+	}
+	id := put("original fixture")
+	if retry := put("original fixture"); retry != id {
+		t.Fatal("identical upsert changed identity", id, retry)
+	}
+	var after int64
+	if err := readTx.QueryRow(ctx, `SELECT generation FROM user_memory_collection_generation WHERE id=1`).Scan(&after); err != nil || after != before+1 {
+		t.Fatal("upsert retry published a phantom insert", before, after, err)
+	}
+	if updated := put("corrected fixture"); updated != id {
+		t.Fatal("legacy private upsert unexpectedly changed identity", id, updated)
+	}
+	var events, actualIDs int
+	if err := readTx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE memory_id=$1)
+ FROM user_memory_invalidation_outbox WHERE generation>$2`, id, before).Scan(&events, &actualIDs); err != nil || events != 2 || actualIDs != 2 {
+		t.Fatal("upsert captured discarded insert identities", events, actualIDs, err)
 	}
 }
