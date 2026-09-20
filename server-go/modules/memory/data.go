@@ -158,6 +158,7 @@ type DataRequest struct {
 }
 
 type Record struct {
+	Authorship *PersonalAuthorship  `json:"authorship,omitempty"`
 	Version    *MemoryRecordVersion `json:"version,omitempty"`
 	Historical bool                 `json:"historical,omitempty"`
 
@@ -454,6 +455,7 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
+	personalActor   personalActor
 	pageRankSamples *[]pageRankResult
 	recallExecutor  egress.Executor
 	requireSemantic bool // standalone evaluation must not silently fall back to lexical recall
@@ -517,6 +519,9 @@ func (s *postgresDataStore) getAtVersioned(ctx context.Context, scope Scope, id 
 			r.Version = &MemoryRecordVersion{SchemaVersion: 1, RecordID: strconv.FormatInt(id, 10)}
 			columns += ",(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),record_revision::text"
 			destinations = append(destinations, &r.Version.OwnerID, &r.Version.RecordRevision)
+			r.Authorship = &PersonalAuthorship{}
+			columns += ",provenance_category,author_principal,author_transport"
+			destinations = append(destinations, &r.Authorship.Category, &r.Authorship.Principal, &r.Authorship.Transport)
 		}
 		err := s.db.QueryRow(ctx, `SELECT `+columns+`
 FROM user_memories
@@ -613,19 +618,7 @@ func (s *postgresDataStore) Supersede(ctx context.Context, scope Scope, id int64
 		return Record{}, screenErr
 	}
 	if s.placement == PlacementServer {
-		// The history trigger retains the previous revision in this same
-		// statement's transaction. Private identity stays stable across edits.
-		r := Record{Scope: scope}
-		err := s.db.QueryRow(ctx, `UPDATE user_memories
-SET content=$2, confidence=$3, updated_at=now()
-WHERE id=$1 AND lifecycle_state='active'
-  AND (valid_until IS NULL OR valid_until>now())
-RETURNING id,tier,kind,key,content,confidence`, id, content, confidence).
-			Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
-		if store.IsNoRows(err) {
-			return Record{}, ErrMemoryNotFound
-		}
-		return r, err
+		return s.mutatePersonal(ctx, "supersede", Record{Scope: scope, ID: id, Content: content, Confidence: confidence}, nil)
 	}
 	return s.supersedeKB(ctx, id, content, confidence, "")
 }
@@ -663,7 +656,32 @@ func (s *postgresDataStore) Maintenance(ctx context.Context, scope Scope) (int, 
 	stamp := "pg_now_text()"
 	expiryCutoff := "pg_now_text('-90 days')"
 	if s.placement == PlacementServer {
-		table, where, args = "user_memories", "", nil
+		if db, ok := s.db.(store.DB); ok {
+			tx, err := db.Begin(ctx)
+			if err != nil {
+				return 0, 0, 0, err
+			}
+			defer tx.Rollback(context.WithoutCancel(ctx))
+			bound := *s
+			bound.db = tx
+			promoted, demoted, expired, err := bound.Maintenance(ctx, scope)
+			if err != nil {
+				return 0, 0, 0, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return 0, 0, 0, err
+			}
+			return promoted, demoted, expired, nil
+		}
+		if _, ok := s.db.(store.Tx); !ok {
+			return 0, 0, 0, errors.New("memory: private maintenance requires a transaction")
+		}
+		if _, err := s.db.Exec(ctx, `SELECT set_config('aimee.private_authority','model',true),set_config('aimee.private_principal','system:memory-maintenance',true),set_config('aimee.private_transport','internal',true)`); err != nil {
+			return 0, 0, 0, err
+		}
+		// Background hygiene cannot rewrite user/unknown authorship or protected
+		// kinds. Those candidates require the proposal/review workflow.
+		table, where, args = "user_memories", "provenance_category='agent_message' AND kind NOT IN ('episode','experience','instruction','policy') AND lifecycle_state='active' AND ", nil
 		stamp, expiryCutoff = "now()", "now() - interval '90 days'"
 	}
 	promoteSQL := fmt.Sprintf("UPDATE %s SET tier = 'L3', updated_at = %s WHERE %stier = 'L2' AND confidence >= 0.95 AND use_count >= 5", table, stamp, where)
@@ -801,15 +819,7 @@ func (s *postgresDataStore) Put(ctx context.Context, scope Scope, r Record) (out
 	}
 	r.Scope = scope
 	if s.placement == PlacementServer {
-		err := s.db.QueryRow(ctx, `INSERT INTO user_memories
-  (kind, tier, key, content, confidence, updated_at)
-VALUES ($1, $2, $3, $4, $5, now())
-ON CONFLICT (kind, key) DO UPDATE SET
-  tier = EXCLUDED.tier, content = EXCLUDED.content,
-  confidence = EXCLUDED.confidence, lifecycle_state = 'active',
-  valid_until = NULL, updated_at = now()
-RETURNING id`, r.Kind, r.Tier, r.Key, r.Content, r.Confidence).Scan(&r.ID)
-		return r, err
+		return s.mutatePersonal(ctx, "store", r, nil)
 	}
 	return s.InsertEpistemic(ctx, DataRequest{Scope: scope, Tier: r.Tier, Kind: r.Kind, Key: r.Key, Content: r.Content, Confidence: &r.Confidence, Authority: AuthorityModel})
 }
@@ -837,17 +847,11 @@ func (s *postgresDataStore) Delete(ctx context.Context, scope Scope, id int64) (
 	defer func() {
 		s.recordMutation(DataRequest{Operation: "delete", ID: id}, DataResponse{Deleted: changed}, err, "memory.retire")
 	}()
-	var (
-		tag store.Tag
-	)
-	if s.placement == PlacementServer {
-		tag, err = s.db.Exec(ctx, `UPDATE user_memories SET lifecycle_state = 'retired', updated_at = now()
-WHERE id = $1 AND lifecycle_state = 'active'`, id)
+	_, err = s.mutatePersonal(ctx, "delete", Record{Scope: scope, ID: id}, nil)
+	if errors.Is(err, ErrMemoryNotFound) {
+		return false, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	return tag.RowsAffected() > 0, nil
+	return err == nil, err
 }
 
 type handlerOptions struct {
@@ -1009,6 +1013,11 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 	if request.IdempotencyKey != "" && (options.placement != PlacementKB || !versionedCorrectionOperation(request.Operation) || request.ExpectedVersion == nil || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
 		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementServer {
+		bound := *backend
+		bound.personalActor = personalCaller(options.commandContext, request.Authority)
+		options.data = &bound
 	}
 	var readResult *MemoryReadResult
 	if request.ReadPolicy != nil {

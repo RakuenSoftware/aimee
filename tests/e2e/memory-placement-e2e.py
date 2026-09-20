@@ -357,9 +357,40 @@ class Gate:
             dict(id=str(mid), include_version=True))['memory']
         correction = dict(verb='update', id=str(mid), content='private third revision',
             expected_version=current['version'])
-        changed = self.mcp_document('personal MCP versioned correction', 'mutate', correction)
-        self.check('personal MCP correction returns committed revision', changed.get('status') == 'ok' and
-            changed.get('records', [{}])[0].get('version', {}).get('record_revision') == '3')
+        refused = self.mcp_document('personal MCP authoritative correction refusal', 'mutate', correction)
+        self.check('personal MCP cannot replace HTTP-authored content', refused.get('kind') == 'review_required')
+        changed = self.good('personal HTTP authorized versioned correction', self.call('supersede',
+            dict(old_id=mid, new_content='private third revision', expected_version=current['version'])))
+        self.check('personal authorized correction returns committed revision', changed.get('status') == 'ok' and
+            changed.get('version', {}).get('record_revision') == '3')
+        self.check('private HTTP captures verified user authorship',
+            changed.get('authorship', {}).get('category') == 'user_stated' and
+            bool(changed.get('authorship', {}).get('principal')))
+        model = self.mcp_document('personal MCP model fixture', 'mutate', dict(verb='store',
+            key=key+'-model', content='private model original', confidence=1,
+            authority='user', provenance_category='user_stated', author_principal='forged'))
+        model_id = model['id']
+        model_record = self.mcp_document('personal model version', 'memory_get',
+            dict(id=str(model_id), include_version=True))['memory']
+        self.check('private MCP cannot forge user provenance or certainty',
+            model_record.get('authorship', {}).get('category') == 'agent_message' and
+            model_record.get('authorship', {}).get('principal') != 'forged' and model_record['confidence'] == 0.8)
+        model_changed = self.mcp_document('personal MCP model correction', 'mutate', dict(verb='update',
+            id=str(model_id), content='private model corrected', expected_version=model_record['version']))
+        self.check('private MCP can correct model content with version admission',
+            model_changed.get('status') == 'ok' and
+            model_changed.get('records', [{}])[0].get('version', {}).get('record_revision') == '2')
+        model_history = self.mcp_document('personal MCP model history', 'memory_get',
+            dict(id=str(model_id), at_version=model_record['version']))['memory']
+        self.check('private model history retains original authorship',
+            model_history['content'] == 'private model original' and model_history.get('authorship') == model_record.get('authorship'))
+        protected_before = self.personal_changes(mid)
+        for verb, fields in (('store', dict(key=key, content='forged replacement')),
+                             ('forget', dict(id=str(mid)))):
+            refused = self.mcp_document('private MCP authoritative '+verb+' refusal', 'mutate', dict(verb=verb, authority='user', **fields))
+            self.check('private MCP '+verb+' cannot mutate user content', refused.get('kind') == 'review_required')
+        self.check('private authority refusals leave canonical revision unchanged',
+            self.personal_changes(mid) == protected_before)
         stale = self.mcp_document('personal MCP stale retry', 'mutate', correction)
         self.check('personal MCP rejects stale correction retry', stale.get('reason') == 'expected_version_conflict')
         historical = self.mcp_document('personal MCP historical get', 'memory_get',
@@ -373,6 +404,8 @@ class Gate:
             "SELECT (NOT has_table_privilege('aimee_store_runtime','user_memory_versions','INSERT') "
             "AND NOT has_table_privilege('aimee_store_runtime','user_memory_versions','UPDATE') "
             "AND NOT has_table_privilege('aimee_store_runtime','user_memory_versions','DELETE'))::text") == 'true')
+        self.check('private runtime cannot bypass retirement with physical erase', self.personal_sql(
+            "SELECT (NOT has_table_privilege('aimee_store_runtime','user_memories','DELETE,TRUNCATE'))::text") == 'true')
         self.check('private runtime cannot rewrite invalidation progress', self.personal_sql(
             "SELECT (NOT has_table_privilege('aimee_store_runtime','user_memory_collection_generation','INSERT,UPDATE,DELETE,TRUNCATE') "
             "AND NOT has_table_privilege('aimee_store_runtime','user_memory_invalidation_outbox','INSERT,UPDATE,DELETE,TRUNCATE'))::text") == 'true')

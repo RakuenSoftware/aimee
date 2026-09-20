@@ -66,6 +66,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	// migrations. The repair migration must remove them from existing stores.
 	exec("GRANT ALL ON ALL TABLES IN SCHEMA " + ident + " TO " + role + "; GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA " + ident + " TO " + role)
 	exec(read("../aimee/families/schema_personal_memory_acl.sql"))
+	exec(read("../aimee/families/schema_personal_memory_authority.sql"))
 	scalar := func(sql string) int64 {
 		t.Helper()
 		var n int64
@@ -94,7 +95,8 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, status := NewHandler(nil, WithDataStore(PlacementServer, backend))(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
+		req.Authority = AuthorityUser
+		raw, status := handleData(handlerOptions{placement: PlacementServer, data: backend, commandContext: &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:user", TransportIdentity: "fixture:http"}}, bus.ModuleInvocation{StageID: StageData}, dataRequest(t, req))
 		var out DataResponse
 		if status == bus.ModuleStatusOK {
 			if err := json.Unmarshal(raw, &out); err != nil {
@@ -140,7 +142,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	if status != bus.ModuleStatusOK || len(prior.Records) != 1 || prior.Records[0].Content != "original" || !prior.Records[0].Historical || *prior.Records[0].Version != *original.Version {
 		t.Fatal(status, prior)
 	}
-	if scalar(`SELECT count(*) FROM user_memory_versions WHERE record->>'source_session'='original-session' AND NOT(record ? 'provenance_category')`) != 1 {
+	if scalar(`SELECT count(*) FROM user_memory_versions WHERE record->>'source_session'='original-session' AND record->>'provenance_category'='unknown'`) != 1 {
 		t.Fatal("lost private metadata or invented legacy authorship")
 	}
 	wrongOwner := *original.Version
@@ -191,7 +193,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	}
 	// A same-name temporary table cannot intercept the privileged history write.
 	exec(`CREATE TEMP TABLE user_memory_versions(memory_id BIGINT,record_revision BIGINT,record JSONB)`)
-	exec(`UPDATE ` + ident + `.user_memories SET content='legacy writer' WHERE id=42`)
+	exec(`SELECT set_config('aimee.private_authority','user',false),set_config('aimee.private_principal','fixture:admin',false); UPDATE ` + ident + `.user_memories SET content='legacy writer' WHERE id=42`)
 	if scalar(`SELECT count(*) FROM pg_temp.user_memory_versions`) != 0 {
 		t.Fatal("history captured into runtime shadow")
 	}
@@ -260,7 +262,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: original.Version}); status != bus.ModuleStatusOK || len(out.Records) != 0 {
 		t.Fatal("revoked parent released history", status, out)
 	}
-	exec(`UPDATE user_memories SET lifecycle_state='retired' WHERE id=42`)
+	exec(`ALTER TABLE user_memories DISABLE TRIGGER user_memory_00_authority; UPDATE user_memories SET lifecycle_state='retired' WHERE id=42; ALTER TABLE user_memories ENABLE TRIGGER user_memory_00_authority`)
 	if out, status := call(DataRequest{Operation: "get", ID: 42}); status != bus.ModuleStatusOK || len(out.Records) != 0 {
 		t.Fatal("retired current read", status, out)
 	}

@@ -175,6 +175,10 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		return invalid("local memory commands require store=user")
 	}
 	request := DataRequest{Operation: verb, Scope: Scope{Type: ScopeUser}}
+	if caller := options.commandContext; caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+		request.Authority = AuthorityUser
+	}
+
 	if _, exists := args["idempotency_key"]; exists {
 		return commandResult(commandError("unsupported_mode", "personal idempotency keys are not yet supported"))
 	}

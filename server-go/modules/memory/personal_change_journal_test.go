@@ -320,6 +320,15 @@ func TestPersonalMemoryChangeJournal(t *testing.T) {
 		t.Fatal("retention gap skipped without resynchronization", page)
 	}
 
+	for _, name := range []string{"schema_personal_memory_versions.sql", "schema_personal_memory_acl.sql", "schema_personal_memory_authority.sql"} {
+		migration, err := os.ReadFile("../aimee/families/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readTx.Exec(ctx, "RESET ROLE;"+string(migration)+"SET ROLE "+role); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// INSERT ... ON CONFLICT executes BEFORE INSERT even when no row will be
 	// inserted. Canonical Put retries must not publish those discarded IDs.
 	var before int64

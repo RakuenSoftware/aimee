@@ -3,9 +3,11 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
@@ -42,7 +44,9 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	if a < 0 || b <= a {
 		t.Fatal("shipping personal schema missing")
 	}
-	exec(strings.Replace(text[a:b], "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE", 1))
+	fixture := pgx.Identifier{fmt.Sprintf("private_composition_%d", time.Now().UnixNano())}.Sanitize()
+	exec("CREATE SCHEMA " + fixture + "; SET LOCAL search_path=" + fixture + ",public")
+	exec(text[a:b])
 	full := strings.Repeat("個人設定", 600)
 	exec(`INSERT INTO user_memories(id,tier,kind,key,content) VALUES
  (9007199254740993,'L3','fact','identity:name',$1),
@@ -51,6 +55,13 @@ func TestRecallCompositionPostgres(t *testing.T) {
  (44,'L2','fact','identity:archived','archived secret')`, full)
 	exec(`UPDATE user_memories SET valid_until=now() WHERE id=43;
  UPDATE user_memories SET lifecycle_state='archived' WHERE id=44`)
+	for _, name := range []string{"schema_personal_memory_changes.sql", "schema_personal_memory_versions.sql", "schema_personal_memory_acl.sql", "schema_personal_memory_authority.sql"} {
+		migration, err := os.ReadFile("../aimee/families/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		exec(string(migration))
+	}
 	shared := recallBundle{Identity: recallItems([]Record{{ID: 51, Key: "identity:name", Content: "shared name"}, {ID: 52, Key: "identity:name", Content: "duplicate shared name"}, {ID: 42, Key: "identity:team", Content: "shared team"}}), Preferences: recallItems([]Record{{ID: 61, Key: "editor", Content: "shared editor"}}), ActiveContext: []RecallRecord{}, OpenCommitments: []RecallRecord{}, AlwaysOnRules: []recallRule{{ID: 91, Title: "hard policy"}}, Reminders: []recallReminder{}, Directives: []recallDirective{}, Explain: []any{}, LimitTokens: 8192}
 	for i := range shared.Identity {
 		shared.Identity[i].ActivationManaged = true
@@ -188,7 +199,10 @@ func exercisePrivateCommandEnvelopes(t *testing.T, handler bus.ModuleHandler, tx
 	}
 	call := func(args string) string {
 		t.Helper()
-		outer := runHostRuntime(t, handler, args)
+		outer, status := invokeContextCommand(t, handler, 0, bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:user", TransportIdentity: "fixture:http"}, "runtime", args)
+		if status != bus.ModuleStatusOK {
+			t.Fatal(status)
+		}
 		body, ok := outer["json"].(string)
 		if !ok || !json.Valid([]byte(body)) {
 			t.Fatal("private command lost its owner envelope", outer)
