@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -27,6 +28,7 @@ type sourceReleaseState struct {
 type sourceReleaseEntry struct {
 	sources                                      json.RawMessage
 	workspace, project, binding, digest, pending string
+	previous                                     string
 	expires                                      time.Time
 }
 
@@ -94,9 +96,9 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	defer s.mu.Unlock()
 	now := time.Now()
 	s.expire(now)
-	previousBytes := 0
+	var prior *sourceReleaseEntry
 	if previous != "" {
-		prior := s.entries[previous]
+		prior = s.entries[previous]
 		if prior == nil || prior.binding != binding || prior.workspace != workspace || prior.project != project {
 			return "", errors.New("previous source release unavailable")
 		}
@@ -105,7 +107,6 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 			return "", errors.New("invalid previous release")
 		}
 		refs = append(old, refs...)
-		token, previousBytes = previous, len(prior.sources)
 	}
 	unique := make([]typedProjectionRef, 0, len(refs))
 	seen := map[string]bool{}
@@ -124,15 +125,35 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	if err != nil {
 		return "", err
 	}
-	if (previous == "" && len(s.entries) >= sourceReleaseMaxEntries) || s.bytes-previousBytes+len(raw) > sourceReleaseMaxBytes || len(raw) > maxDataBody/2 {
+	if prior != nil && bytes.Equal(raw, prior.sources) {
+		return previous, nil
+	}
+	if len(s.entries) >= sourceReleaseMaxEntries || s.bytes+len(raw) > sourceReleaseMaxBytes || len(raw) > maxDataBody/2 {
 		return "", errors.New("source release capacity")
 	}
 	if s.entries == nil {
 		s.entries = map[string]*sourceReleaseEntry{}
 	}
-	s.entries[token] = &sourceReleaseEntry{sources: raw, workspace: workspace, project: project, binding: binding, digest: releaseDigest(unique), expires: now.Add(sourceReleaseTTL)}
-	s.bytes += len(raw) - previousBytes
+	// Assembly is not integrity acceptance. Keep the old handle immutable until
+	// the host either discards this candidate or uses it at the provider fence.
+	s.entries[token] = &sourceReleaseEntry{sources: raw, workspace: workspace, project: project, binding: binding, digest: releaseDigest(unique), previous: previous, expires: now.Add(sourceReleaseTTL)}
+	s.bytes += len(raw)
 	return token, nil
+}
+
+func (s *sourceReleaseState) drop(token, binding string, ancestors bool) {
+	for token != "" {
+		entry := s.entries[token]
+		if entry == nil || entry.binding != binding {
+			return
+		}
+		delete(s.entries, token)
+		s.bytes -= len(entry.sources)
+		if !ancestors {
+			return
+		}
+		token = entry.previous
+	}
 }
 
 func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.ModuleStatus) {
@@ -141,17 +162,19 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	s.expire(time.Now())
 	ticket := args.stringOr("source_release_ticket", "")
 	entry := s.entries[ticket]
-	if args.stringOr("operation", "") == "source-release-finish" && (entry == nil || entry.binding == releaseBinding(args)) {
-		if entry != nil {
-			delete(s.entries, ticket)
-			s.bytes -= len(entry.sources)
-		}
+	operation := args.stringOr("operation", "")
+	if (operation == "source-release-finish" || operation == "source-release-discard") && (entry == nil || entry.binding == releaseBinding(args)) {
+		s.drop(ticket, releaseBinding(args), operation == "source-release-finish")
 		return commandResult(map[string]any{"status": "ok"})
 	}
 	if entry == nil || entry.binding != releaseBinding(args) {
 		return commandResult(commandError("unavailable", "source release handle unavailable"))
 	}
 	if args.stringOr("operation", "") == "source-release-plan" {
+		// Reaching the fence confirms host integrity acceptance. The cumulative
+		// source set supersedes its earlier handles; a rejected candidate never does.
+		s.drop(entry.previous, entry.binding, true)
+		entry.previous = ""
 		check, err := releaseToken()
 		if err != nil {
 			return commandResult(commandError("unavailable", "source check unavailable"))

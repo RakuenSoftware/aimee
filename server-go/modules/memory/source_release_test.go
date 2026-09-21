@@ -158,6 +158,50 @@ func TestSourceReleaseConcurrentRequests(t *testing.T) {
 	}
 }
 
+func TestSourceReleaseRejectedCandidatePreservesAcceptedSources(t *testing.T) {
+	s := &sourceReleaseState{}
+	args := sourceReleaseArgs(map[string]any{"request_id": "request"})
+	ref := releaseTestRef()
+	assembly := map[string]any{"facts_projection": map[string]any{"retained_items": []typedProjectionRef{ref}}}
+	accepted, err := s.prepare(args, assembly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, priorBytes := string(s.entries[accepted].sources), s.bytes
+	args["source_release_ticket"], _ = json.Marshal(accepted)
+	ref.Source.Version.RecordRevision = "3"
+	candidate, err := s.prepare(args, assembly)
+	if err != nil || candidate == accepted || string(s.entries[accepted].sources) != prior {
+		t.Fatal("candidate changed accepted sources", err)
+	}
+	args["source_release_ticket"], _ = json.Marshal(candidate)
+	args["operation"] = json.RawMessage(`"source-release-discard"`)
+	if result := sourceReleaseCall(t, s, args); result["status"] != "ok" {
+		t.Fatal(result)
+	}
+	if len(s.entries) != 1 || s.bytes != priorBytes || string(s.entries[accepted].sources) != prior {
+		t.Fatal("rejection damaged accepted handle")
+	}
+	args["source_release_ticket"], _ = json.Marshal(accepted)
+	candidate, err = s.prepare(args, assembly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args["source_release_ticket"], _ = json.Marshal(candidate)
+	args["operation"] = json.RawMessage(`"source-release-plan"`)
+	if result := sourceReleaseCall(t, s, args); result["status"] != "ok" {
+		t.Fatal(result)
+	}
+	if len(s.entries) != 1 || s.entries[accepted] != nil {
+		t.Fatal("accepted replacement leaked old handle")
+	}
+	args["operation"] = json.RawMessage(`"source-release-finish"`)
+	sourceReleaseCall(t, s, args)
+	if len(s.entries) != 0 || s.bytes != 0 {
+		t.Fatal("completion leaked source state")
+	}
+}
+
 func exerciseSourceRevalidationReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend *postgresDataStore, refs []typedProjectionRef) {
 	t.Helper()
 	exec := func(query string, args ...any) {

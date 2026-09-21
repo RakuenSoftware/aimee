@@ -22,8 +22,11 @@ retain their stricter all-evidence eligibility contract. No per-source query or
 per-parent module call is added. Exact decimal IDs remain strings across C JSON.
 
 The handle is bound to the originating request/principal/caller and active scope.
-Repeated assembly accumulates prior source bindings in the same handle rather
-than discarding sources from earlier native context. Finishing the HTTP request
+Repeated assembly accumulates prior accepted source bindings rather than
+discarding sources from earlier native context. Unchanged refreshes reuse their
+handle. Changed selections prepare a separate candidate: integrity rejection
+discards only that candidate, preserving the earlier accepted context. Reaching
+the provider fence retires superseded handles. Finishing the HTTP request
 or native run releases its Go-held state. Interrupted requests have a 15-minute
 expiry, 1,024-entry limit and 16 MiB source-payload limit; capacity refusal never
 silently evicts a live handle. These are process-local guards, not durable receipts.
@@ -42,7 +45,8 @@ silently evicts a live handle. These are process-local guards, not durable recei
   all three provider formats with both fence modes. It tests changed sources,
   unavailable KB/Go owners and mismatched replies: refused attempts select zero
   provider bytes. Async context copies retain their handle, repeated attempts
-  revalidate, and completed handles cannot be revived. The fixture supplies KB
+  revalidate, and completed handles cannot be revived. An integrity-rejected
+  refresh with a changed source revision preserves the prior accepted binding. The fixture supplies KB
   answers; this native test alone does not prove live HTTP/SQL race behavior.
 - Native application build, HTTP/request-context/fence unit tests, standalone
   export and 17 S1 checks pass. All 77 lint

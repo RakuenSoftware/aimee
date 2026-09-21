@@ -163,17 +163,38 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    if (g_facts_failure == 3)
       return strdup("{\"status\":\"error\",\"facts\":\"must not inject\"}");
    if (g_fact_projection)
-      return strdup(
-          "{\"status\":\"ok\",\"facts\":\"- global preference: never substitute for proj"
-          "ect evidence\\n\",\"fact_projection\":{\"schema_version\":1,\"projection_dige"
-          "st\":\"sha256:40fa720370de964a9113864fbad1ad1dd4dd5bf6b8ae328c362435a107"
-          "6afa3a\",\"selection_digest\":\"sha256:d46b7f9199b8eaa29e0fa7f60359d2e38ef"
-          "98e4d1dd446d90300980fc0e8965e\",\"rendered_bytes\":59,\"retained_items\":[{"
-          "\"channel\":\"facts\",\"stable_id\":\"9007199254743001\",\"source_version\":{\"re"
-          "cord_kind\":\"semantic_assertion\",\"version\":{\"schema_version\":1,\"owner_i"
-          "d\":\"00000000-0000-0000-0000-000000000001\",\"record_id\":\"900719925474300"
-          "1\",\"record_revision\":\"7\"},\"memory_parent_state\":\"observed\"}}],\"source_"
-          "version_state\":\"record_versions_observed\"}}");
+   {
+      char *raw =
+          strdup("{\"status\":\"ok\",\"facts\":\"- global preference: never substitute for proj"
+                 "ect evidence\\n\",\"fact_projection\":{\"schema_version\":1,\"projection_dige"
+                 "st\":\"sha256:40fa720370de964a9113864fbad1ad1dd4dd5bf6b8ae328c362435a107"
+                 "6afa3a\",\"selection_digest\":\"sha256:d46b7f9199b8eaa29e0fa7f60359d2e38ef"
+                 "98e4d1dd446d90300980fc0e8965e\",\"rendered_bytes\":59,\"retained_items\":[{"
+                 "\"channel\":\"facts\",\"stable_id\":\"9007199254743001\",\"source_version\":{\"re"
+                 "cord_kind\":\"semantic_assertion\",\"version\":{\"schema_version\":1,\"owner_i"
+                 "d\":\"00000000-0000-0000-0000-000000000001\",\"record_id\":\"900719925474300"
+                 "1\",\"record_revision\":\"7\"},\"memory_parent_state\":\"observed\"}}],\"source_"
+                 "version_state\":\"record_versions_observed\"}}");
+      if (g_fact_projection == 2)
+      {
+         cJSON *reply = cJSON_Parse(raw);
+         free(raw);
+         cJSON *projection = cJSON_GetObjectItemCaseSensitive(reply, "fact_projection");
+         cJSON *ref =
+             cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(projection, "retained_items"), 0);
+         cJSON *source = cJSON_GetObjectItemCaseSensitive(ref, "source_version");
+         cJSON *version = cJSON_GetObjectItemCaseSensitive(source, "version");
+         cJSON_ReplaceItemInObjectCaseSensitive(version, "record_revision",
+                                                cJSON_CreateString("8"));
+         cJSON_ReplaceItemInObjectCaseSensitive(
+             projection, "selection_digest",
+             cJSON_CreateString(
+                 "sha256:0ed00b7d81a48963006c0487a6fa0b019f7050db3b1f8ad2813e76a77194759b"));
+         raw = cJSON_PrintUnformatted(reply);
+         cJSON_Delete(reply);
+      }
+      return raw;
+   }
    return strdup("{\"status\":\"ok\",\"facts\":\"- global preference: never substitute for project "
                  "evidence\\n\"}");
 }
@@ -1127,6 +1148,16 @@ static void test_source_revalidation_at_provider_fence(void)
    char *envelope = ingress_preinject_build("deployment matrix", 0);
    assert(envelope && strlen(request_context_get()->memory_source_release) == 32);
    free(envelope);
+   context = *request_context_get();
+   g_fact_projection = 2;
+   g_malicious_preview = 1;
+   assert(!ingress_preinject_build("deployment matrix", 0));
+   assert(!request_context_get()->context_refused);
+   assert(strcmp(context.memory_source_release, request_context_get()->memory_source_release) == 0);
+   g_fact_projection = 1;
+   g_malicious_preview = 0;
+   assert(ingress_preinject_revalidate_sources() ==
+          0);                        /* rejected revision 8 never replaces revision 7 */
    context = *request_context_get(); /* same copy performed by native workers */
    request_context_clear();
    g_source_check_calls = 0;

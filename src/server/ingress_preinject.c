@@ -565,6 +565,20 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          result = NULL;
       }
    }
+   if (!result && rctx)
+   {
+      const char *ticket =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "source_release_ticket"));
+      if (ticket && ticket[0] && strcmp(ticket, rctx->memory_source_release) != 0)
+      {
+         cJSON *discard = cJSON_CreateObject();
+         ingress_release_context(discard, rctx);
+         cJSON_ReplaceItemInObjectCaseSensitive(discard, "source_release_ticket",
+                                                cJSON_CreateString(ticket));
+         cJSON_AddStringToObject(discard, "operation", "source-release-discard");
+         cJSON_Delete(ingress_command(discard, 0));
+      }
+   }
    /* Assembly evidence is emitted only after packing and integrity acceptance.
     * It does not assert provider admission, dispatch, or acknowledgement. */
    const cJSON *retained_memories = cJSON_GetObjectItemCaseSensitive(response, "retained_memories");
