@@ -36,8 +36,10 @@ and validation evidence are added here.
 The [creation retry implementation](../../validation/memory-creation-retries-2026-09-21.md)
 extends both Go placements with durable store keys, preserving replacement,
 unchanged-result and review admission. Local PostgreSQL/race, upgrade, native,
-export and contract checks pass; fresh creation HTTP/MCP/restart evidence is
-pending. These receipts do not certify downstream consumer freshness.
+export and contract checks pass. Fresh creation HTTP/MCP/restart validation at
+`15b756234f` passes **1,529/1,529 checks** (937 T2, 592 T3), with all nine image
+identities and three actual provider caps verified. These receipts do not certify
+downstream consumer freshness.
 
 Delivery follows the program’s dependency order: eligibility/mutations and final
 payload budgets first, then evidence/receipts/coverage, views and indexing,
