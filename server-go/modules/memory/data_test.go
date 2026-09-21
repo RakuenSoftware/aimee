@@ -3,7 +3,10 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -357,5 +360,24 @@ func TestFusionIsInstanceWideAndDefaultsOn(t *testing.T) {
 	t.Setenv("AIMEE_GRAPH_FUSION", "shadow")
 	if _, err := NewPostgresDataStore(evalQueryer{}, PlacementServer); err == nil {
 		t.Fatal("nonboolean fusion configuration accepted")
+	}
+}
+
+func TestMemoryFailureClassDoesNotExposeErrorDetails(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{nil, "internal"},
+		{fmt.Errorf("secret request: %w", context.DeadlineExceeded), "deadline"},
+		{context.Canceled, "cancelled"},
+		{fmt.Errorf("credential-bearing error"), "internal"},
+		{fmt.Errorf("private detail: %w", &pgconn.PgError{Code: "40P01", Message: "secret SQL", Detail: "private row"}), "sqlstate_40P01"},
+		{&pgconn.PgError{Code: "secret"}, "internal"},
+		{&pgconn.PgError{Code: "A\nBCD"}, "internal"},
+	} {
+		if got := memoryFailureClass(tc.err); got != tc.want {
+			t.Fatalf("class=%q want=%q", got, tc.want)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -1218,6 +1219,18 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
+	defer func() {
+		if status != bus.ModuleStatusInternal && status != bus.ModuleStatusCancelled {
+			return
+		}
+		cause := err
+		if cause == nil {
+			cause = ctx.Err()
+		}
+		// Never log the request, SQL, driver message or connection string.
+		log.Printf("memory data failure operation=%q trace=%d status=%d class=%s",
+			request.Operation[:min(len(request.Operation), 64)], invocation.TraceID, status, memoryFailureClass(cause))
+	}()
 	if request.Operation == "code-index" {
 		code, ok := options.data.(*postgresDataStore)
 		if !ok || request.CodeIndex == nil {
@@ -2867,9 +2880,32 @@ set_config('aimee.correlation_id',$9,true)`,
 		return nil, bus.ModuleStatusInternal
 	}
 	if transaction != nil && !rollbackOnly {
-		if err := transaction.Commit(ctx); err != nil {
+		if err = transaction.Commit(ctx); err != nil {
 			return nil, bus.ModuleStatusInternal
 		}
 	}
 	return encoded, bus.ModuleStatusOK
+}
+
+// Only fixed categories and validated SQLSTATEs may cross the diagnostic boundary.
+func memoryFailureClass(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "deadline"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	var sqlError interface{ SQLState() string }
+	if errors.As(err, &sqlError) {
+		code := sqlError.SQLState()
+		if len(code) == 5 {
+			for _, c := range code {
+				if !(c >= '0' && c <= '9' || c >= 'A' && c <= 'Z') {
+					return "internal"
+				}
+			}
+			return "sqlstate_" + code
+		}
+	}
+	return "internal"
 }

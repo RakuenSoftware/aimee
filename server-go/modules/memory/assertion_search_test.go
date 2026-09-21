@@ -229,6 +229,41 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	if len(hits(call())) != 1 {
 		t.Fatal("visible assertion hidden")
 	}
+	parentProjection := func() typedContextResult {
+		t.Helper()
+		envelope := runHostRuntime(t, handler, `{"operation":"typed-context","query":"AssertionAtlas","project":"assertion-local","enable_observations":false,"enable_approved_procedures":false}`)
+		var result typedContextResult
+		if err := json.Unmarshal([]byte(envelope["json"].(string)), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	beforeParent := parentProjection()
+	if len(beforeParent.Retained) != 1 || beforeParent.Retained[0].Source == nil || len(beforeParent.Retained[0].Source.MemoryParents) != 1 || beforeParent.Retained[0].Source.MemoryParentState != "observed" {
+		t.Fatal("typed source omitted memory dependencies", beforeParent)
+	}
+	parentVersion := beforeParent.Retained[0].Source.MemoryParents[0]
+	if parentVersion.OwnerID != owner || parentVersion.RecordID != fmt.Sprint(local) || parentVersion.RecordRevision != "1" {
+		t.Fatal("parent version did not match the selected snapshot", parentVersion)
+	}
+	exec(`UPDATE memories SET content='changed supporting content' WHERE id=$1`, local)
+	afterParent := parentProjection()
+	if len(afterParent.Retained) != 1 || afterParent.Retained[0].Source.MemoryParents[0].RecordRevision != "2" || beforeParent.Rendered != afterParent.Rendered || beforeParent.SelectionDigest == afterParent.SelectionDigest {
+		t.Fatal("changed parent reused a binding for identical assertion bytes", beforeParent, afterParent)
+	}
+	exec(`SAVEPOINT typed_parent_capacity`)
+	exec(`WITH parents AS (INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+ SELECT 'L2','fact','typed-parent-'||n,'source','project','assertion-local' FROM generate_series(1,$1) n RETURNING id)
+ INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance)
+ SELECT $2,'memory','memory:'||id::text,'supports' FROM parents`, maxTypedMemoryParents, current)
+	bounded := parentProjection()
+	if bounded.Availability != "degraded" || len(bounded.Retained) != 0 || bounded.SourceVersionState != "unavailable" {
+		t.Fatal("dependency overflow certified a prefix", bounded)
+	}
+	if len(hits(call())) != 1 {
+		t.Fatal("typed metadata capacity changed ordinary assertion search")
+	}
+	exec(`ROLLBACK TO SAVEPOINT typed_parent_capacity; RELEASE SAVEPOINT typed_parent_capacity`)
 	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id,evidence_hash,stance) VALUES($1,'memory','memory:'||$2::bigint::text,'private','supports')`, current, private)
 	if len(hits(call())) != 0 {
 		t.Fatal("visible source masked hidden evidence")

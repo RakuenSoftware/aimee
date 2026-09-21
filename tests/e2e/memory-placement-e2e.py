@@ -168,9 +168,9 @@ class Gate:
                 self.sql(f'UPDATE memories SET {update} WHERE id={mid}')
                 for tool, args, found, absent in tools:
                     code, body = self.mcp(tool, dict(args, project=key))
-                    self.check('derived parent ' + state + ' ' + tool,
-                        code == 200 and (found in body if visible else absent in body and found not in body),
-                        None if code == 200 else [code, body])
+                    passed = code == 200 and (found in body if visible else absent in body and found not in body)
+                    self.check('derived parent ' + state + ' ' + tool, passed,
+                        None if passed else [code, body])
         finally:
             self.sql(f'DELETE FROM memories WHERE id={mid}')
 

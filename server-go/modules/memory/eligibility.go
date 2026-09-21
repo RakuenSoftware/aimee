@@ -69,7 +69,22 @@ func currentMemoryEvidenceSQL(edgeAlias, scopePredicate string, liveOnly bool) s
 	if liveOnly {
 		evidence = ` AND f.invalidated_at=''`
 	}
-	return `NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN memories m
- ON f.source_id='memory:'||m.id::text AND ` + currentMemorySQL("m.") + ` AND (` + scopePredicate + `)
+	// The primary key permits at most one parent. A bounded lateral lookup keeps
+	// PostgreSQL from replacing these few probes with a scan of all visible
+	// memories under RLS. Eligibility is evaluated inside that identity lookup.
+	return `NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN LATERAL (
+ SELECT m.id FROM memories m WHERE m.id=` + memoryLocatorIDSQL("f.source_id") + ` AND ` + currentMemorySQL("m.") + ` AND (` + scopePredicate + `) LIMIT 1
+ ) m ON TRUE
  WHERE f.assertion_id=` + edgeAlias + `.id AND f.source_kind='memory'` + evidence + ` AND m.id IS NULL)`
+}
+
+// Parse the canonical locator once on the evidence side so the parent primary
+// key remains indexable. Malformed, noncanonical and overflowing locators resolve
+// to NULL, exactly as the previous equality with 'memory:'||m.id::text did.
+// The inner CASE guards bigint conversion; PostgreSQL may reorder AND terms.
+func memoryLocatorIDSQL(column string) string {
+	value := `substring(` + column + ` FROM 8)`
+	return `(CASE WHEN ` + column + ` ~ '^memory:(0|-?[1-9][0-9]{0,18})$'
+ THEN CASE WHEN ` + value + `::numeric BETWEEN -9223372036854775808 AND 9223372036854775807
+ THEN ` + value + `::bigint END END)`
 }

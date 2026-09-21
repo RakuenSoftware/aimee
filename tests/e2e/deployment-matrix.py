@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import subprocess
@@ -126,8 +127,15 @@ def typed_source_version_gate(kb, check):
           after_lifecycle,after_confidence,after_authority_rank,after_version)
         SELECT '{key}',id,'assert',0,1,lifecycle_state,confidence,authority_rank,version
         FROM entity_edges WHERE commit_id='{key}';
+        WITH parent AS (INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+          VALUES('L2','fact','{key}-parent','supporting source','project','{key}') RETURNING id)
+        INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance)
+          SELECT e.id,'memory','memory:'||p.id::text,'supports' FROM entity_edges e,parent p WHERE e.commit_id='{key}';
         SELECT json_build_object('owner_id',(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
-          'record_id',id::text,'record_revision',version::text) FROM entity_edges WHERE commit_id='{key}';
+          'record_id',id::text,'record_revision',version::text,
+          'parent_id',(SELECT id::text FROM memories WHERE key='{key}-parent'),
+          'parent_revision',(SELECT record_revision::text FROM memories WHERE key='{key}-parent'))
+          FROM entity_edges WHERE commit_id='{key}';
         COMMIT"""))
     payload = dict(query=key, project=key, scope_context=True,
                    enable_observations=False, enable_approved_procedures=False)
@@ -143,14 +151,25 @@ def typed_source_version_gate(kb, check):
     try:
         code, before = call()
         source = selected(before).get('source_version', {})
-        expected = dict(schema_version=1, **fixture)
+        expected = dict(schema_version=1, **{k:fixture[k] for k in ('owner_id','record_id','record_revision')})
         check('Typed assertion binds the exact owner record revision', code == 200 and
               source.get('record_kind') == 'semantic_assertion' and source.get('version') == expected and
               before.get('source_version_state') == 'record_versions_observed')
         check('Typed selection digest includes source revision evidence', matches(before))
+        expected_parent = dict(schema_version=1, owner_id=fixture['owner_id'],
+                               record_id=fixture['parent_id'], record_revision=fixture['parent_revision'])
+        check('Typed assertion binds its direct memory parent revision',
+              source.get('memory_parents') == [expected_parent] and source.get('memory_parent_state') == 'observed')
         code, again = call()
         check('Unchanged typed assertion retains its source binding', code == 200 and
               selected(again) == selected(before) and again.get('selection_digest') == before.get('selection_digest'))
+        sql(f"UPDATE memories SET content='changed supporting source' WHERE id={int(fixture['parent_id'])}")
+        code, parent_changed = call()
+        expected_parent['record_revision'] = str(int(fixture['parent_revision'])+1)
+        check('Changed memory parent invalidates binding with identical assertion bytes', code == 200 and
+              selected(parent_changed).get('source_version', {}).get('memory_parents') == [expected_parent] and
+              parent_changed.get('rendered_context') == before.get('rendered_context') and
+              parent_changed.get('selection_digest') != before.get('selection_digest') and matches(parent_changed))
         mid = int(fixture['record_id'])
         sql(f"""BEGIN; UPDATE entity_edges SET version=version+1 WHERE id={mid};
             INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,
@@ -171,7 +190,8 @@ def typed_source_version_gate(kb, check):
             INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,
               before_version,after_version,after_lifecycle,after_confidence,after_authority_rank)
             SELECT '{key}',id,'retire',1,1,version-1,version,lifecycle_state,confidence,authority_rank
-            FROM entity_edges WHERE commit_id='{key}'; COMMIT""")
+            FROM entity_edges WHERE commit_id='{key}';
+            UPDATE memories SET lifecycle_state='retired' WHERE key='{key}-parent'; COMMIT""")
 
 
 def typed_context_budget_gate(kb, check):
@@ -584,6 +604,20 @@ def main():
         print('FAIL ' + str(error), flush=True)
     finally:
         (args.output / 'topology.json').write_text(json.dumps(checks, indent=2) + '\n')
+        # Export only this fixed diagnostic grammar. Full Docker output may
+        # contain bootstrap credentials, request bodies or SQL driver details.
+        failures = []
+        pattern = re.compile(r'memory data failure operation="([a-z-]{1,64})" trace=([0-9]+) status=([0-9]+) class=(internal|deadline|cancelled|sqlstate_[0-9A-Z]{5})(?=\s|$)')
+        for stack in stacks:
+            try:
+                logs = subprocess.run(['docker', 'logs', '--tail', '2000', stack.application],
+                    capture_output=True, text=True, timeout=15)
+                for operation, trace, status, kind in pattern.findall(logs.stdout + logs.stderr):
+                    failures.append(dict(role=stack.role, operation=operation, trace=trace,
+                                         status=int(status), error_class=kind))
+            except (OSError, subprocess.SubprocessError):
+                failures.append(dict(role=stack.role, diagnostics='unavailable'))
+        (args.output / 'memory-failures.json').write_text(json.dumps(failures, indent=2) + '\n')
         if not args.keep:
             for stack in reversed(stacks):
                 stack.compose('down', '--volumes', '--remove-orphans')

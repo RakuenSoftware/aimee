@@ -21,6 +21,16 @@ func exerciseDerivedEligibilityReplay(t *testing.T, ctx context.Context, tx pgx.
 	}
 	exec(`SAVEPOINT derived_eligibility`)
 	defer func() { exec(`ROLLBACK TO SAVEPOINT derived_eligibility; RELEASE SAVEPOINT derived_eligibility`) }()
+	// Preserve exact locator equality, including boundary IDs, while making the
+	// parent primary key usable. Bad locators must neither match nor overflow.
+	for _, locator := range []string{"memory:0", "memory:1", "memory:-1", "memory:9223372036854775807", "memory:-9223372036854775808", "memory:9223372036854775808", "memory:-9223372036854775809", "memory:01", "memory:-0", "memory:+1", "memory:1.0", "memory:1e0", "memory: 1", "memory:1\n", "Memory:1", "memory:", "other:1"} {
+		var same bool
+		if err := tx.QueryRow(ctx, `WITH ids(id) AS (VALUES(0::bigint),(1),(-1),(9223372036854775807),(-9223372036854775808))
+ SELECT (SELECT array_agg(id ORDER BY id) FROM ids WHERE $1='memory:'||id::text)
+ IS NOT DISTINCT FROM (SELECT array_agg(id ORDER BY id) FROM ids WHERE id=`+memoryLocatorIDSQL("$1::text")+`)`, locator).Scan(&same); err != nil || !same {
+			t.Fatalf("canonical locator behavior changed for %q: same=%v err=%v", locator, same, err)
+		}
+	}
 	exec(`RESET ROLE; SELECT set_config('aimee.memory_scope_all','1',true); SET LOCAL TIME ZONE 'Asia/Tokyo'`)
 	const subject = "DerivedValidityFixture"
 	var parent, episode, edge, codeEdge, scene int64

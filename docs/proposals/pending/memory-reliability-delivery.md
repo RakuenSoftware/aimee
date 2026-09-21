@@ -382,3 +382,13 @@ canonical Go admission now refuses it before writing. Explicit context/global
 writes retain their contract. Embedded SQL now has a distinct `go_assets`
 descriptor role; the complete script suite and standalone Go export build pass.
 Creation retries and the remaining MR-02 acceptance clauses are still open.
+
+
+[Direct memory-parent revision binding and lookup optimization](../../validation/memory-parent-version-lookups-2026-09-21.md)
+now commit observed direct memory dependencies into assertion selections, refusing
+parent overflow. Runtime-role tests prove that a changed parent changes selection
+identity despite identical rendered assertion content. The bounded primary-key
+lookup measures 48.3× faster than the prior join in the documented local fixture;
+this is not a whole-request P95 result. Episode/non-memory/transitive dependencies,
+collection generations and final release revalidation remain open. Fresh deployment
+of this implementation is pending; no proposal is certified by this slice.
