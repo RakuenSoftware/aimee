@@ -45,8 +45,28 @@ implementation changed.
 - Native Server build and all 77 lint checks pass. All 767 benchmark tests pass with two existing
   skips, including the exact S1 integration-review checks.
 
-Fresh deployment and remote CI results for this change must be recorded against
-the pushed revision before treating this as deployment acceptance.
+## Fresh deployment evidence
+
+Implementation/harness `2123e9a592c9035a6f214f426dc7ed643fb5653a` was built and
+validated in fresh task-owned Docker projects on `.253`, CT 9498:
+
+- T2: **778/778** checks ([receipt](memory-shared-reliability-2026-09-21/fresh-t2-2123e9a592.json)).
+- T3: **483/483** checks ([receipt](memory-shared-reliability-2026-09-21/fresh-t3-2123e9a592.json)).
+- Total: **1,261/1,261**, including 273 provider-boundary checks per placement.
+- Actual application image: `sha256:e3f4738f0cae5ed1f9000eb4577e0aa5fe1907a19f746d28c383a72b14583813`.
+  [Image identities and verified deployment limits](memory-shared-reliability-2026-09-21/image-identities-2123e9a592.json)
+  preserve the app, PostgreSQL and embedder identities without credentials.
+- [Provider byte accounting](memory-shared-reliability-2026-09-21/provider-accounting-2123e9a592.json)
+  contains byte counts/digests, not prompt bodies or provider headers.
+- All nine task-owned containers are stopped; volumes and receipts are retained.
+
+The native initial/refresh refusal regressions above use controlled module/HTTP
+transport responses; the deployment matrix is broader integration regression
+coverage, not a live native-agent refusal test. Follow-up `b3a2578ae3` adds the
+credential retry/release guards and four retry cases. Its targeted credential
+suite, native build and all 77 lint checks pass locally; the fresh image above
+predates that follow-up. Remote CI for the latest pushed code is pending.
+
 
 ## Remaining acceptance
 

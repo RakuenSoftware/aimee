@@ -213,8 +213,10 @@ now preserves explicit Go recall failures through initial native assembly and
 refresh, stopping before the next provider call and preventing provider fallback.
 MCP also retains quarantine/degraded responses before session guidance. Local
 production-path fixtures cover zero initial dispatches, refusal after five turns
-and successful recovery on the same thread. HTTP ingress omission paths and the
-remaining MR-03 acceptance work remain open; fresh deployment evidence is pending.
+and successful recovery on the same thread. Fresh `2123e9a592` passes
+**1,261/1,261** deployment checks; the separate credential retry/release follow-up
+`b3a2578ae3` passes its targeted tests, native build and all 77 lint checks.
+HTTP ingress omission paths and the remaining MR-03 acceptance work remain open.
 
 ## Supporting indexed-lookup repair
 
