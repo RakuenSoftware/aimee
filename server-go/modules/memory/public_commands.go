@@ -396,6 +396,12 @@ func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation
 	if json.Unmarshal(data, &response) != nil || len(response.Payload) == 0 {
 		return nil, bus.ModuleStatusInternal
 	}
+	var outcome struct {
+		Status string `json:"status"`
+	}
+	if json.Unmarshal(response.Payload, &outcome) == nil && outcome.Status == "error" {
+		return commandResult(response.Payload)
+	}
 	result := map[string]any{"status": "ok", "recall": response.Payload}
 	if options.placement == PlacementServer {
 		result["store"] = "user"

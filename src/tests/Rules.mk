@@ -5668,7 +5668,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/modules/git/forge_credentials.o \
                            $(OBJDIR)/delivery_target.o \
                            $(OBJDIR)/server/openai_shape.o \
-                           $(OBJDIR)/server/openai_runs_store.o $(OBJDIR)/server/server_auth.o \
+                           $(OBJDIR)/server/openai_runs_store.o $(OBJDIR)/server/server_auth.o $(OBJDIR)/server/server_error_kind.o \
                            $(OBJDIR)/server/compute_pool.o \
                            $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/routing/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/provider_cli_adapter_stub.o $(OBJDIR)/tests/support/model_provider_stub.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \

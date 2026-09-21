@@ -2712,6 +2712,13 @@ set_config('aimee.correlation_id',$9,true)`,
 			return nil, bus.ModuleStatusCancelled
 		}
 
+		var budgetRefusal *contextBudgetError
+		if (request.Operation == "recall-bundle" || request.Operation == "compose-recall") && errors.As(err, &budgetRefusal) {
+			payload, _ := json.Marshal(commandError(budgetRefusal.kind, budgetRefusal.message))
+			raw, _ := json.Marshal(DataResponse{Payload: payload})
+			return raw, bus.ModuleStatusOK // transaction rolls back; no surfaced counters
+		}
+
 		if request.Operation == "fact-retract" {
 			reason, message := "", ""
 			switch {

@@ -91,6 +91,17 @@ with a 32 KiB cap pass 1,246 checks, including 273 provider checks per placement
 Task-composition inheritance, provider token counting and protected packing remain
 open, along with the broader all-surface release/receipt gates.
 
+The recall packer now preserves the complete stored hard-rule set or returns
+`protected_context_overflow`, including during private/shared composition. The
+former 8/16-rule caps are replaced by a bound derived from minimum serialized
+rule size, with explicit refusal when the set cannot fit. Optional rows remain
+whole and ordered; bounded prefix search avoids repeated row-by-row serialization.
+The legacy allocation is still bytes/4, not exact provider token accounting.
+HTTP classifies the refusal through the existing status provider, and MCP
+preserves it before optional session guidance. Rule-promotion authority, all-host
+provider refusal, protected user-constraint transformations and final release
+binding remain open; preserving stored hard rules does not certify those gates.
+
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
 Use a single model-facing projection and verify the final request budget after every provider-affecting transformation. Keep explanation metadata outside the prompt unless a small field is explicitly useful to the model.

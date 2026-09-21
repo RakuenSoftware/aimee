@@ -94,6 +94,49 @@ class Gate:
         self.check(name + ' owner envelope', code == 200 and len(documents) == 1 and isinstance(documents[0], dict))
         return documents[0] if len(documents) == 1 and isinstance(documents[0], dict) else {}
 
+    def protected_recall(self):
+        # Seed the existing rules owner directly in this disposable fixture.
+        # This checks packing, not authorization to promote a rule to hard.
+        prefix = self.prefix + '-required-'
+        self.sql(f"""INSERT INTO rules(polarity,title,description,weight,directive_type,created_at,updated_at)
+            SELECT 'negative','{prefix}'||n,'Never exceed 10 EUR before 2026-10-01. Keep identifier '||n,
+            1,'hard',pg_now_text(),pg_now_text() FROM generate_series(1,20) n""")
+        try:
+            for start in (False, True):
+                body = self.good('complete hard-rule HTTP recall ' + str(start),
+                    self.call('recall', dict(store='kb', scope='all', task_hint=self.prefix, limit_tokens=8192, session_start=start)))
+                rules = body.get('recall', {}).get('always_on_rules', [])
+                self.check('HTTP retains beyond former hard-rule cap ' + str(start),
+                    len([r for r in rules if r['title'].startswith(prefix)]) == 20)
+            cli = self.cli('recall', '--query', self.prefix, '--store', 'kb', '--scope', 'all', '--limit-tokens', '8192')
+            self.check('CLI retains the complete hard-rule set', len([
+                r for r in cli.get('recall', {}).get('always_on_rules', []) if r['title'].startswith(prefix)]) == 20)
+            # A small hard rule survives oversized optional evidence at a budget
+            # that fits the complete rule set but cannot fit the optional row.
+            fixture = self.good('optional oversized recall fixture', self.call('store', dict(
+                store='kb', key=self.prefix+'-packing', content='optional evidence ' * 500)))
+            body = self.good('hard rules survive optional trimming', self.call('recall', dict(
+                store='kb', scope='all', task_hint=self.prefix+'-packing', limit_tokens=1600)))
+            bundle = body.get('recall', {})
+            self.check('packing keeps complete rules and omits oversized optional row',
+                len([r for r in bundle.get('always_on_rules', []) if r['title'].startswith(prefix)]) == 20 and
+                all(r.get('id') != fixture['id'] for r in bundle.get('active_context', [])))
+            code, body = self.call('recall', dict(store='kb', scope='all', task_hint=self.prefix, limit_tokens=64))
+            self.check('HTTP exposes protected overflow without partial recall', code == 413 and
+                body.get('kind') == 'protected_context_overflow' and 'recall' not in body, [code, body])
+            for start in (False, True):
+                mcp = self.mcp_document('MCP protected overflow ' + str(start), 'memory_recall',
+                    dict(store='kb', scope='all', task_hint=self.prefix, limit_tokens=64, session_start=start))
+                self.check('MCP preserves protected refusal before guidance ' + str(start),
+                    mcp.get('kind') == 'protected_context_overflow' and 'recall' not in mcp)
+            self.sql(f"UPDATE rules SET description=repeat('界',20000) WHERE title='{prefix}20'")
+            code, body = self.call('recall', dict(store='kb', scope='all', task_hint=self.prefix, limit_tokens=8192))
+            self.check('HTTP refuses oversized last rule instead of truncating', code == 413 and
+                body.get('kind') == 'protected_context_overflow' and 'recall' not in body, [code, body])
+        finally:
+            self.sql(f"DELETE FROM rules WHERE title LIKE '{prefix}%'")
+        self.good('recall recovers after protected overflow', self.call('recall', dict(store='kb', scope='all', task_hint=self.prefix)))
+
     def shared_mcp_corrections(self):
         key = self.prefix + '-mcp-correction'
         project = self.prefix + '-mcp-project'
@@ -837,6 +880,7 @@ class Gate:
             self.check('0.4.1 rows remain discoverable', all(any(r['id'] == old['id'] for r in listing.get('memories', [])) for old in rows))
         self.assert_no_personal_canary()
         self.confidence_contract(('user', 'kb'))
+        self.protected_recall()
         return all(c['passed'] for c in self.checks)
 
 if __name__ == '__main__':

@@ -2176,7 +2176,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "2bcbe9f4c674a2862679f89aeff8d5d4fdb68fc40f62a69b77d71f97ff2aca9b"
+      "sha256": "41b75a41a3591337828fd473e26eaa339a9a40824151a1876d91a52cadc271f9"
     },
     "src/server/server_memory.c": {
       "disposition": "host-transport",

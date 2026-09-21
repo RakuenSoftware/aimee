@@ -582,9 +582,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    }
    else if (strcmp(name, "runtime-web") == 0)
    {
-      const char *kinds[] = {"permission_denied", "conflict", "review_required",
-                             "unsupported_mode"};
-      const uint32_t statuses[] = {403u, 409u, 409u, 400u};
+      const char *kinds[] = {"permission_denied", "conflict", "review_required", "unsupported_mode",
+                             "protected_context_overflow"};
+      const uint32_t statuses[] = {403u, 409u, 409u, 400u, 413u};
       for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++)
       {
          uint32_t status = 0;

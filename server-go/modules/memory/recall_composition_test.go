@@ -121,7 +121,7 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	if got.ApproxTokens != (len(envelope.Recall)+3)/4 || got.UsedTokens != got.ApproxTokens || got.BudgetExceeded {
 		t.Fatal("incorrect composed budget", got.ApproxTokens)
 	}
-	for _, limit := range []int{64, 128, 512} {
+	for _, limit := range []int{128, 512} {
 		raw, status = call(string(sharedJSON), limit)
 		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &envelope) != nil || json.Unmarshal(envelope.Recall, &got) != nil {
 			t.Fatal(status, string(raw))
@@ -130,8 +130,12 @@ func TestRecallCompositionPostgres(t *testing.T) {
 			t.Fatal("final composition budget", limit, string(raw))
 		}
 	}
+	raw, status = call(string(sharedJSON), 64)
+	if status != bus.ModuleStatusOK || !strings.Contains(string(raw), `"kind":"protected_context_overflow"`) || strings.Contains(string(raw), `"recall"`) {
+		t.Fatal("composition dropped required rule", status, string(raw))
+	}
 	// A failed shared read never turns into success using personal content.
-	for _, input := range []string{`{"status":"error","kind":"unavailable"}`, `{"status":"quarantined","recall":{}}`} {
+	for _, input := range []string{`{"status":"error","kind":"protected_context_overflow"}`, `{"status":"error","kind":"unavailable"}`, `{"status":"quarantined","recall":{}}`} {
 		raw, status = call(input, 8192)
 		if status != bus.ModuleStatusOK || string(raw) != input {
 			t.Fatal("shared refusal lost", string(raw), status)

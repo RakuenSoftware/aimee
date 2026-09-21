@@ -1,6 +1,7 @@
 /* test_server_http.c: unit tests for the aimee-server /v1 persona routes and
  * the per-session persona store (no socket I/O). */
 #include "server_http.h"
+#include "server/server_error_kind.h"
 #include "server_http_authz.h"
 #include "server_http_internal.h"
 #include "server_http_identity.h"
@@ -514,12 +515,26 @@ static void test_json_number_serialization_is_exact(void)
    }
 }
 
+static int recall_fault_status(const char *kind, uint32_t *status)
+{
+   if (!kind || strcmp(kind, "protected_context_overflow") != 0)
+      return -1;
+   *status = 413;
+   return 0;
+}
+
 int main(void)
 {
    extern int server_http_declared_status(const char *json);
    assert(server_http_declared_status("{\"status\":\"error\",\"kind\":\"not_found\"}") == 502);
    assert(server_http_declared_status("{\"status\":\"error\",\"http_status\":404}") == 404);
    assert(server_http_declared_status("{\"status\":\"ok\"}") == 200);
+
+   server_error_kind_register_http_status_provider(recall_fault_status);
+   assert(server_http_declared_status(
+              "{\"status\":\"error\",\"kind\":\"protected_context_overflow\"}") == 413);
+   assert(server_http_declared_status("{\"status\":\"error\",\"kind\":\"unrecognized\"}") == 502);
+   server_error_kind_register_http_status_provider(NULL);
 
    test_json_number_serialization_is_exact();
    test_role_template_show_reports_what_the_role_came_to();

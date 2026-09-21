@@ -16,7 +16,7 @@ func HTTPStatusForRPCFault(kind string) int {
 		return http.StatusNotFound
 	case "permission_denied":
 		return http.StatusForbidden
-	case "payload_too_large":
+	case "payload_too_large", "protected_context_overflow":
 		return http.StatusRequestEntityTooLarge
 	case "unavailable":
 		return http.StatusServiceUnavailable
