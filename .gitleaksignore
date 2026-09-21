@@ -166,3 +166,6 @@ ec21e213c06cccbe9c59555b9f5d66f36b0288a0:tests/baselines/modules/memory-ownershi
 
 # Reviewed SHA-256 of the updated OpenAPI source in the memory ownership ledger.
 3e312707af845970ce03018759d775fdc97cfe1b:tests/baselines/modules/memory-ownership.json:generic-api-key:2600
+
+# Reviewed creation-retry OpenAPI source SHA-256, verified against its source.
+bad1844e8da7385c200aabbd6c293ec2437b7a17:tests/baselines/modules/memory-ownership.json:generic-api-key:2600
