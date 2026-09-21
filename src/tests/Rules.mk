@@ -4925,7 +4925,9 @@ $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk: \
 
 $(TESTPREFIX)/unit-test-delegate-credentials: \
                                        $(OBJDIR)/tests/test_delegate_credentials.o \
-                                       $(OBJDIR)/modules/delegates/delegate_credentials.o
+                                       $(OBJDIR)/modules/delegates/delegate_credentials.o \
+                                       $(OBJDIR)/modules/delegates/delegate_credential_retry.o \
+                                       $(OBJDIR)/modules/vault/runtime_secret.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-economics: $(OBJDIR)/tests/test_delegate_economics.o \

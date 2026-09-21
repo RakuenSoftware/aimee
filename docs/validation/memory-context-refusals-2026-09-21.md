@@ -13,7 +13,9 @@ execution stops before authentication/provider dispatch. Refresh stops before th
 next request and runs the normal resource cleanup. The distinct
 `AGENT_RC_CONTEXT_REFUSED` result is terminal in generic routing, configured
 fallback chains and same-tier fallback loops; it does not charge provider health
-with a memory failure. Preview/dry-run consumers report the same diagnostic.
+with a memory failure. Credential-pool retry and final lease release also preserve
+the refusal without rotating or penalizing a credential. Preview/dry-run consumers
+report the same diagnostic.
 Refresh retains the configured role when rebuilding context.
 
 MCP preserves every explicit non-success recall envelope, including quarantine
@@ -36,6 +38,10 @@ implementation changed.
   and both session-start settings (12 combinations).
 - `unit-test-agent-error-retryable` verifies the terminal result even when the
   owner diagnostic contains a retryable-looking HTTP status or quota message.
+- `unit-test-delegate-credentials` drives the production retry wrapper and lease
+  pool with controlled executor outcomes. Initial refusal and refusal after a
+  genuine provider rate limit stop without another rotation or penalty, with
+  tools enabled and disabled (four combinations).
 - Native Server build and all 77 lint checks pass. All 767 benchmark tests pass with two existing
   skips, including the exact S1 integration-review checks.
 

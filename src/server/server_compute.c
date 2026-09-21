@@ -1979,7 +1979,7 @@ void delegate_worker(void *arg)
    if (target_agent && leased_cred_name[0])
    {
       failover_reason_t reason = FAILOVER_NONE;
-      if (!result.success)
+      if (rc != AGENT_RC_CONTEXT_REFUSED && !result.success)
          reason = delegate_credentials_classify_failure(target_agent->provider, result.error);
       if (reason != FAILOVER_NONE)
          delegate_credentials_report_failure(leased_principal, target_agent->name, leased_cred_name,
