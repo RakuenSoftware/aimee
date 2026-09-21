@@ -137,6 +137,43 @@ class Gate:
             self.sql(f"DELETE FROM rules WHERE title LIKE '{prefix}%'")
         self.good('recall recovers after protected overflow', self.call('recall', dict(store='kb', scope='all', task_hint=self.prefix)))
 
+    def derived_parent_eligibility(self):
+        # SQL seeds only this disposable fixture; every observation traverses
+        # authenticated MCP, the C host/bus and the shared Go owner.
+        key = self.prefix + '-derived-validity'
+        text = 'eligible derived episode ' + self.prefix
+        target = 'eligible-derived-target-' + self.prefix
+        mid = int(self.sql(f"""INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+            VALUES('L2','fact','{key}','derived source','project','{key}') RETURNING id""").splitlines()[0])
+        self.sql(f"""INSERT INTO memory_episodes(memory_id,episode_key,episode_text)
+            VALUES({mid},'{key}','{text}');
+            INSERT INTO memory_entities(memory_id,entity) VALUES({mid},'{key}');
+            INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text)
+            VALUES({mid},'{key}','owns','{target}','derived fact')""")
+        tools = [
+            ('get_episode', dict(episode_key=key), text, 'memory episode not found'),
+            ('search_graph', dict(query=key), target, 'No graph relations found'),
+            ('get_entity', dict(entity=key), 'Mentions: 1', 'memory profile not found'),
+            ('get_entity_edges', dict(entity=key), target, 'No edges found'),
+        ]
+        try:
+            for state, update, visible in [
+                ('current', "valid_from='',valid_until=''", True),
+                ('future', "valid_from=(CURRENT_TIMESTAMP+interval '1 day')::text,valid_until=''", False),
+                ('expired', "valid_from='',valid_until=(CURRENT_TIMESTAMP-interval '1 day')::text", False),
+                ('suppressed', "valid_until='',activation_suppressed=1", False),
+                ('retired', "activation_suppressed=0,lifecycle_state='retired'", False),
+                ('restored', "lifecycle_state='active',valid_from='',valid_until=''", True),
+            ]:
+                self.sql(f'UPDATE memories SET {update} WHERE id={mid}')
+                for tool, args, found, absent in tools:
+                    code, body = self.mcp(tool, dict(args, project=key))
+                    self.check('derived parent ' + state + ' ' + tool,
+                        code == 200 and (found in body if visible else absent in body and found not in body),
+                        None if code == 200 else [code, body])
+        finally:
+            self.sql(f'DELETE FROM memories WHERE id={mid}')
+
     def shared_mcp_corrections(self):
         key = self.prefix + '-mcp-correction'
         project = self.prefix + '-mcp-project'
@@ -976,6 +1013,7 @@ class Gate:
         code, body = self.call('get', dict(id=mid))
         self.check('retired local ID never resolves to KB collision', code >= 400 and body.get('kind') == 'not_found', [code, body])
         self.check('local retirement leaves KB content unchanged', json.loads(self.sql(f'SELECT to_json(content) FROM memories WHERE id={mid}')) == shared)
+        self.derived_parent_eligibility()
         self.shared_mcp_corrections()
         journal_id, journal = self.shared_journal()
         self.shared_keyed_deletion()

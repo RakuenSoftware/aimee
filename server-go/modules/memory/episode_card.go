@@ -100,7 +100,7 @@ func (s *postgresDataStore) episodeCognifier() (string, error) {
 
 func (s *postgresDataStore) episodeCards(ctx context.Context, session string, limit int) ([]string, error) {
 	rows, err := s.db.Query(ctx, `SELECT u.unit_text FROM memory_units u JOIN memories m ON m.id=u.memory_id
- WHERE m.source_session=$1 AND m.lifecycle_state='active' AND u.is_episode_card=1
+ WHERE m.source_session=$1 AND `+currentMemorySQL("m.")+` AND u.is_episode_card=1
  ORDER BY u.id DESC LIMIT $2`, session, limit)
 	if err != nil {
 		return nil, err

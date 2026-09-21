@@ -99,11 +99,8 @@ func (s *postgresDataStore) hybridContext(ctx context.Context, request DataReque
  AND (n.node_origin<>'code_projection' OR EXISTS(SELECT 1 FROM code_projection_generations g
  JOIN projects p ON p.name=g.project WHERE g.id=n.last_seen_generation_id AND g.state='visible'
  AND g.project=$2 AND p.lifecycle_state='current'))
- AND (NOT EXISTS(SELECT 1 FROM fact_evidence fe WHERE fe.assertion_id=e.id AND fe.source_kind='memory')
- OR EXISTS(SELECT 1 FROM fact_evidence fe JOIN memories m ON fe.source_id='memory:'||m.id::text
- WHERE fe.assertion_id=e.id AND fe.source_kind='memory' AND m.lifecycle_state='active' AND m.activation_suppressed=0
- AND ($3 OR m.scope_type='global' OR (m.scope_type='workspace' AND m.scope_value='_shared') OR (m.scope_type='project' AND m.scope_value=$2)
- OR (m.scope_type='workspace' AND m.scope_value=$4))))
+ AND `+currentMemoryEvidenceSQL("e", `$3 OR m.scope_type='global' OR (m.scope_type='workspace' AND m.scope_value='_shared') OR (m.scope_type='project' AND m.scope_value=$2)
+ OR (m.scope_type='workspace' AND m.scope_value=$4)`, false)+`
  ) SELECT project,file_path,structural_weight FROM candidates WHERE rank=1
  ORDER BY (structural_weight+weight) DESC,id LIMIT 25`, hybridSymbolKey(request.Project, request.Entity), request.Project, request.IncludeAll, request.Workspace)
 	if err != nil {

@@ -99,6 +99,19 @@ func exerciseHybridReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 	exec(`UPDATE entity_edges SET edge_class='semantic',commit_id='hybrid-replay-seed',ontology_version=1 WHERE id=$1`, edge)
 	edge = add("hybrid:evidence", "hybrid-fixture", "private-evidence.go", "memory_extraction", 0, 100, "", 0)
 	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id) SELECT $1,'memory','memory:'||id::text FROM memories WHERE key='hybrid-replay' AND scope_value='hybrid-private' LIMIT 1`, edge)
+	// A visible second source must not authorize the hidden first source.
+	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id) VALUES($1,'memory','memory:'||$2::bigint::text)`, edge, largeID)
+	var expiredID int64
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,valid_until)
+ VALUES('L2','fact','hybrid-expired-source','expired','project','hybrid-fixture',pg_now_text()) RETURNING id`).Scan(&expiredID); err != nil {
+		t.Fatal(err)
+	}
+	// Ineligible neighbors outnumber the result cap and have higher weights.
+	// They must be excluded before LIMIT even with an additional valid source.
+	for i := 0; i < 30; i++ {
+		edge = add(fmt.Sprintf("hybrid:expired:%d", i), "hybrid-fixture", "expired.go", "memory_extraction", 0, 100, "", 0)
+		exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id) SELECT $1,'memory','memory:'||unnest($2::bigint[])::text`, edge, []int64{expiredID, largeID})
+	}
 	edge = add("hybrid:shared-evidence", "hybrid-fixture", "shared.go", "memory_extraction", 0, 3, "", 0)
 	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id) VALUES($1,'memory','memory:'||$2::bigint::text)`, edge, sharedID)
 	exec(`SET LOCAL ROLE aimee_store_runtime`)

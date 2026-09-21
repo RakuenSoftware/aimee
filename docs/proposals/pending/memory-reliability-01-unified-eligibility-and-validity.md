@@ -18,7 +18,7 @@ Implement the shared eligibility decision in `server-go/modules/memory` and use 
 
 ## Implemented foundation
 
-The Go `current-validity-v6` predicate now applies active lifecycle, explicit
+The Go `current-validity-v7` predicate now applies active lifecycle, explicit
 suppression and half-open valid time before lexical, active-version whole-record
 semantic, unit/temporal semantic, graph/PageRank parent, compatibility-window,
 recall-bundle, activation and briefing limits. Pending commitments use the same
@@ -60,6 +60,15 @@ require every memory parent to remain current/visible before limits. Late entity
 discovery/read errors refuse the complete block. This does not complete the host
 privilege vocabulary, all assertion-parent/cache surfaces, historical/belief-time
 modes, final-release generation checks or the validity command below.
+
+Derived-parent eligibility now also gates episode lists/lookup/cards, relation
+search, entity profiles/edges, direct summaries, scene lists/members, typed
+watermarks, assertion search, CSS conventions and graph feedback. Hybrid file
+selection and profile counts reject mixed visible/ineligible evidence before
+limits. Existing evidence-statement and operator-review semantics are retained.
+The [validation record](../../validation/memory-derived-eligibility-2026-09-21.md)
+tracks runtime-role, public command and fresh placement results. These gates do
+not substitute for final-release version checks or certify full MR-01.
 
 ## Contract
 

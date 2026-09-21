@@ -151,10 +151,7 @@ func handleAssertionSearch(options handlerOptions, invocation bus.ModuleInvocati
 // LEFT JOIN is intentional: RLS-hidden parents must deny the derived assertion,
 // including assertions with a second, visible source. Apply exact scope before
 // the candidate cap, even when the host has include-all authority.
-const assertionVisible = `NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN memories m
- ON f.source_id='memory:'||m.id::text AND m.lifecycle_state='active' AND m.activation_suppressed=0
- WHERE f.assertion_id=e.id AND f.source_kind='memory' AND f.invalidated_at=''
- AND (m.id IS NULL OR ($5<>'' AND (m.scope_type<>$5 OR m.scope_value<>$6))))`
+var assertionVisible = currentMemoryEvidenceSQL("e", `$5='' OR (m.scope_type=$5 AND m.scope_value=$6)`, true)
 
 // Belief time and world-valid time are independent half-open intervals. Do not
 // truncate stored fractions or discard offsets when comparing either axis.

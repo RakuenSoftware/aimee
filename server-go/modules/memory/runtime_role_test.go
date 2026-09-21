@@ -146,6 +146,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseBenchmarkDiagnosticsReplay(t, ctx, tx, handler)
 	exerciseBenchmarkScoreReplay(t, ctx, tx, handler)
 	exerciseAssertionSearchReplay(t, ctx, tx, backend.(*postgresDataStore))
+	exerciseDerivedEligibilityReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseCurrentFactRecallReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseTypedContextReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseCSSConventionsReplay(t, ctx, tx, backend.(*postgresDataStore))

@@ -41,6 +41,12 @@ export and contract checks pass. Fresh creation HTTP/MCP/restart validation at
 identities and three actual provider caps verified. These receipts do not certify
 downstream consumer freshness.
 
+The [derived-parent eligibility repair](../../validation/memory-derived-eligibility-2026-09-21.md)
+extends current-state gates to episodes, relations, summaries, scenes, typed
+metadata and graph feedback. Mixed-source hybrid files and profile counts cannot
+use a visible parent to admit a hidden or expired one. Full Go/PostgreSQL tests
+pass; fresh MCP/image validation is pending. Full MR-01 remains open.
+
 Delivery follows the program’s dependency order: eligibility/mutations and final
 payload budgets first, then evidence/receipts/coverage, views and indexing,
 followed by task contracts, outcomes, governed actions and disposable state.

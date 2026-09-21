@@ -3,7 +3,7 @@ package memory
 // Versioned current-state KB eligibility, evaluated before lane limits. The
 // storage transaction supplies one stable request clock through CURRENT_TIMESTAMP.
 // Scope/RLS and evidence-specific admission remain additional mandatory gates.
-const currentEligibilityPolicy = "current-validity-v6"
+const currentEligibilityPolicy = "current-validity-v7"
 
 // KB timestamps historically mix UTC wall time and RFC3339 offsets. Normalize
 // both at the adapter; invalid nonempty timestamps raise a query error rather
@@ -54,4 +54,22 @@ func memoryValidityAtSQL(prefix, clock string) string {
 // briefing and sweeps use the same half-open boundary as memory records.
 func memoryUnexpiredSQL(prefix string) string {
 	return memoryUnexpiredAtSQL(prefix+"valid_until", "CURRENT_TIMESTAMP")
+}
+
+// A visible source cannot authorize content derived from another hidden or
+// ineligible source. Existing assertion surfaces may select only live evidence;
+// graph surfaces retain their stricter all-evidence boundary. Aliases and scope
+// predicates are fixed owner SQL, never request text. This is serving policy,
+// not review admission.
+func currentMemoryEvidenceSQL(edgeAlias, scopePredicate string, liveOnly bool) string {
+	if scopePredicate == "" {
+		scopePredicate = "TRUE"
+	}
+	evidence := ""
+	if liveOnly {
+		evidence = ` AND f.invalidated_at=''`
+	}
+	return `NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN memories m
+ ON f.source_id='memory:'||m.id::text AND ` + currentMemorySQL("m.") + ` AND (` + scopePredicate + `)
+ WHERE f.assertion_id=` + edgeAlias + `.id AND f.source_kind='memory'` + evidence + ` AND m.id IS NULL)`
 }

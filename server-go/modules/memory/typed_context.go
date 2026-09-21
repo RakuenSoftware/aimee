@@ -567,10 +567,8 @@ func (s *postgresDataStore) typedWatermarks(ctx context.Context, request DataReq
 	result := typedWatermark{Latest: request.TypedContext.Latest, Status: "unknown"}
 	// A hidden parent denies assertion timestamps just as it denies assertion text.
 	err := s.db.QueryRow(ctx, `SELECT COALESCE(max(ts),'') FROM (
- SELECT asserted_at AS ts FROM entity_edges e WHERE edge_class='semantic' AND NOT EXISTS(
- SELECT 1 FROM fact_evidence f LEFT JOIN memories m ON f.source_id='memory:'||m.id::text AND m.lifecycle_state='active' AND m.activation_suppressed=0
- WHERE f.assertion_id=e.id AND f.source_kind='memory' AND f.invalidated_at='' AND (m.id IS NULL OR ($1<>'' AND (m.scope_type<>$1 OR m.scope_value<>$2))))
- UNION ALL SELECT me.created_at FROM memory_episodes me JOIN memories m ON m.id=me.memory_id WHERE m.lifecycle_state='active' AND m.activation_suppressed=0 AND ($1='' OR (m.scope_type=$1 AND m.scope_value=$2))) q`, exact.Type, exact.Value).Scan(&result.Durable)
+ SELECT asserted_at AS ts FROM entity_edges e WHERE edge_class='semantic' AND `+currentMemoryEvidenceSQL("e", `$1='' OR (m.scope_type=$1 AND m.scope_value=$2)`, true)+`
+ UNION ALL SELECT me.created_at FROM memory_episodes me JOIN memories m ON m.id=me.memory_id WHERE `+currentMemorySQL("m.")+` AND ($1='' OR (m.scope_type=$1 AND m.scope_value=$2))) q`, exact.Type, exact.Value).Scan(&result.Durable)
 	if err != nil {
 		return result, err
 	}

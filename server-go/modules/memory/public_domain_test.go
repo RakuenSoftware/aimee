@@ -69,7 +69,7 @@ func TestDomainPublicPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA domain_command_test;
  CREATE FUNCTION domain_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
  SET LOCAL search_path TO pg_temp,domain_command_test,public;
- CREATE TEMP TABLE memories(id bigint PRIMARY KEY,tier text,kind text,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,created_at text DEFAULT pg_now_text(),last_used_at text,use_count int DEFAULT 0,confidence double precision DEFAULT 1,effectiveness double precision DEFAULT 0.2);
+ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,tier text,kind text,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),last_used_at text,use_count int DEFAULT 0,confidence double precision DEFAULT 1,effectiveness double precision DEFAULT 0.2);
  INSERT INTO memories(id,tier,kind,scope_type,scope_value) VALUES (1,'L2','fact','global','_global'),(2,'L1','episode','workspace','repo'),(3,'L2','preference','project','app');
  CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text);
  INSERT INTO memory_scopes VALUES (1,'workspace','repo'),(1,'project','app');
@@ -310,9 +310,9 @@ INSERT INTO entity_edges(id,source,target,edge_class,lifecycle_state,suppressed,
  (5,'typed-only','invalid','semantic','persistent',0,'','2026','',''),
  (6,'typed-only','superseded','semantic','persistent',0,'2026','','',''),
  (7,'typed-only','private','semantic','persistent',0,'','','',''),
- (8,'typed-only','future','semantic','persistent',0,'','','2999',''),
+ (8,'typed-only','future','semantic','persistent',0,'','','2999-01-01T00:00:00Z',''),
  (9,'typed-only','cooccur','cooccurrence','persistent',0,'','','',''),
- (10,'typed-only','expired','semantic','persistent',0,'','','','2000'),
+ (10,'typed-only','expired','semantic','persistent',0,'','','','2000-01-01T00:00:00Z'),
  (11,'typed-only','retired-memory','semantic','persistent',0,'','','','');
 INSERT INTO fact_evidence(assertion_id,source_kind,source_id,invalidated_at,stance) VALUES
  (2,'memory','memory:3','','supports'),(7,'memory','memory:4','','supports'),(11,'memory','memory:5','','supports');
@@ -392,6 +392,18 @@ SET LOCAL ROLE memory_domain_test;`)
 	profile = run("entity_profile", `{"entity":"typed-only","scope_context":true,"project":"app"}`)["profile"].(map[string]any)
 	if profile["mention_count"] != float64(0) || profile["relation_count"] != float64(2) {
 		t.Fatalf("typed-only profile currency/scope: %v", profile)
+	}
+	if _, err := tx.Exec(ctx, `SAVEPOINT profile_mixed_evidence; RESET ROLE;
+ INSERT INTO fact_evidence(assertion_id,source_kind,source_id,invalidated_at,stance)
+ VALUES(2,'memory','memory:4','','supports'); SET LOCAL ROLE memory_domain_test`); err != nil {
+		t.Fatal(err)
+	}
+	profile = run("entity_profile", `{"entity":"typed-only","scope_context":true,"project":"app"}`)["profile"].(map[string]any)
+	if profile["relation_count"] != float64(1) {
+		t.Fatal("visible source admitted hidden profile evidence", profile)
+	}
+	if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT profile_mixed_evidence; RELEASE SAVEPOINT profile_mixed_evidence`); err != nil {
+		t.Fatal(err)
 	}
 	profile = run("entity_profile", `{"entity":"rank-entity","scope_context":true,"project":"app"}`)["profile"].(map[string]any)
 	if profile["summary"] != "local low weight" || profile["relation_count"] != float64(2) {

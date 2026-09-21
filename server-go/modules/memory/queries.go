@@ -261,7 +261,8 @@ updated_at=pg_now_text() WHERE id=$1`, id, kind, ref, hash)
 
 func (s *postgresDataStore) Summaries(ctx context.Context, id int64, limit int) ([]MemorySummary, error) {
 	rows, err := s.db.Query(ctx, `SELECT scope,summary FROM memory_summaries
-WHERE memory_id=$1 ORDER BY id LIMIT $2`, id, limit)
+WHERE memory_id=$1 AND EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id AND `+currentMemorySQL("m.")+`)
+ORDER BY id LIMIT $2`, id, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +280,7 @@ WHERE memory_id=$1 ORDER BY id LIMIT $2`, id, limit)
 
 func (s *postgresDataStore) Scenes(ctx context.Context, limit int) ([]MemoryScene, error) {
 	rows, err := s.db.Query(ctx, `SELECT s.id,s.workspace_id,s.turn_count,s.created_at FROM memory_scenes s
-WHERE EXISTS(SELECT 1 FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=s.id AND m.lifecycle_state='active')
+WHERE EXISTS(SELECT 1 FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=s.id AND `+currentMemorySQL("m.")+`)
 ORDER BY s.created_at DESC,s.id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -298,7 +299,7 @@ ORDER BY s.created_at DESC,s.id DESC LIMIT $1`, limit)
 
 func (s *postgresDataStore) SceneMembers(ctx context.Context, sceneID int64, limit int) ([]SceneMember, error) {
 	rows, err := s.db.Query(ctx, `SELECT sm.memory_id,m.key,sm.membership_strength
-FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=$1 AND m.lifecycle_state='active'
+FROM memory_scene_members sm JOIN memories m ON m.id=sm.memory_id WHERE sm.scene_id=$1 AND `+currentMemorySQL("m.")+`
 ORDER BY sm.membership_strength DESC,sm.memory_id LIMIT $2`, sceneID, limit)
 	if err != nil {
 		return nil, err
