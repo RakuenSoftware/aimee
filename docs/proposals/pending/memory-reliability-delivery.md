@@ -220,8 +220,13 @@ The HTTP follow-up now carries required gateway-plan/assembly failures through
 request-scoped and asynchronous context to final dispatch, including native
 execution inheriting that context. Local tests cover malformed/failed plans and
 assemblies, successful empty plans, thread isolation and zero provider calls.
-Fresh deployment validation of this follow-up and the remaining MR-03 acceptance
-work remain open.
+Fresh application/harness `9deb1efc14` passes **1,311/1,311** checks (803 T2,
+508 T3), including real Go-owner outages, zero dispatch for required-memory paths,
+recovery, and unchanged memory-disabled native Anthropic passthrough. The
+subsequent Go briefing follow-up preserves explicit legacy allocations when a
+promoted style requests more evidence; required database replay verifies six
+allocations. Complete native protected rendering, configured Anthropic opt-in,
+provider tokens and the remaining MR-03 acceptance work remain open.
 
 ## Supporting indexed-lookup repair
 

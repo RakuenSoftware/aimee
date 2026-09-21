@@ -92,8 +92,8 @@ valid empty plans; native inherited refusal with zero provider calls; and actual
 buffered/streaming Anthropic-compatible handlers targeting all three provider
 formats with reduction enabled/disabled and zero provider calls. The full native
 build, all 77 lint checks and 767 benchmark tests (two existing skips) pass. The fresh
-`2123e9a592` deployment receipt above predates this follow-up; a new deployment
-run is required. No additional whole-request latency claim is made.
+`2123e9a592` deployment receipt above predates this follow-up; the corrected
+`9deb1efc14` run below validates it. No additional whole-request latency claim is made.
 
 ## Fresh follow-up findings
 
@@ -112,7 +112,34 @@ passthrough to require memory. Its corrected oracle checks that this path retain
 provider dispatch while the ten memory-dependent frontend/provider/streaming
 combinations refuse with zero provider requests. Owner restart readiness now
 runs in cleanup even after an assertion fails. The initial fresh runs are failed
-receipts, not release evidence; corrected fresh validation is still required.
+receipts, not release evidence; the corrected fresh validation follows.
+
+## Corrected fresh HTTP refusal validation
+
+Application and harness `9deb1efc1460c872ccd6e62030c543afe3dd3ed0` pass
+**1,311/1,311** checks in new task-owned projects on `.253`, CT 9498:
+
+- Enrolled T2: **803/803** ([receipt](memory-shared-reliability-2026-09-21/fresh-t2-9deb1efc14.json)).
+- Standalone T3: **508/508** ([receipt](memory-shared-reliability-2026-09-21/fresh-t3-9deb1efc14.json)).
+- Each placement passes **298 provider-boundary checks**. The harness pauses the
+  real Go memory process. All ten memory-dependent client/provider/streaming
+  combinations return explicit failure with zero provider calls; two native
+  Anthropic memory-disabled passthrough cases retain their existing dispatch.
+  Supervised restart preserves committed memory, and a new request dispatches once.
+- Application image: `sha256:7abf817ab22b0e4a959e261336fa8b25837c3ffac8e73d43affc7d490157d3ff`.
+  [Actual image identities and deployment ceilings](memory-shared-reliability-2026-09-21/image-identities-9deb1efc14.json)
+  verify application, PostgreSQL and embedder images and the 32 KiB operator cap.
+- [Provider byte accounting](memory-shared-reliability-2026-09-21/provider-accounting-9deb1efc14.json)
+  retains counts and digests without prompt bodies or credentials.
+- All nine containers are stopped; volumes, images and receipts are retained.
+
+This fresh run exercises HTTP required-plan outage through real module/bus/host
+boundaries. Initial native-agent recall and refresh refusals still use controlled
+module/HTTP fixtures. Asynchronous request copying is covered by a real thread
+fixture, not a live `/v1/runs` request. Native Anthropic's configured automatic
+memory opt-in still needs its planning path restored; default passthrough is
+intentionally memory-disabled. Complete native hard-rule rendering and final
+provider release accounting remain open.
 
 ## Briefing allocation follow-up
 
