@@ -242,9 +242,15 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		var outcome struct {
 			Status string `json:"status"`
 		}
-		if json.Unmarshal([]byte(request.TypedContextJSON), &outcome) == nil && outcome.Status == "error" {
-			typedUnavailable = true
-			request.TypedContextJSON = ""
+		if json.Unmarshal([]byte(request.TypedContextJSON), &outcome) == nil {
+			// The optional KB transport uses typed non-success statuses as well
+			// as the owner's error envelope. They carry no usable projection.
+			// In particular a standalone Server has no shared KB to query.
+			switch outcome.Status {
+			case "error", "unavailable", "stale", "unauthorized", "empty", "abstained":
+				typedUnavailable = true
+				request.TypedContextJSON = ""
+			}
 		}
 	}
 	if request.TypedContextJSON != "" {

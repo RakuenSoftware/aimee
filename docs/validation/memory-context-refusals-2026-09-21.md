@@ -95,6 +95,25 @@ build, all 77 lint checks and 767 benchmark tests (two existing skips) pass. The
 `2123e9a592` deployment receipt above predates this follow-up; a new deployment
 run is required. No additional whole-request latency claim is made.
 
+## Fresh follow-up findings
+
+The first fresh `fc0108f6a2` run exposed a previously hidden optional-source
+status mismatch: the KB transport reports `status:unavailable` when no shared
+KB is configured, while Go ingress recognized only `status:error`. The new
+required-assembly fence correctly surfaced the resulting `invalid_projection`;
+previous serving silently dropped the entire envelope. Go now recognizes the
+transport's known non-success statuses as unavailable optional evidence, while
+malformed responses and invalid successful projection commitments still refuse.
+Real Go and C-host/Go-process regressions cover both sides; the full Go memory
+suite passes with required PostgreSQL replay/evaluation enabled.
+
+The live outage harness also initially expected memory-disabled native Anthropic
+passthrough to require memory. Its corrected oracle checks that this path retains
+provider dispatch while the ten memory-dependent frontend/provider/streaming
+combinations refuse with zero provider requests. Owner restart readiness now
+runs in cleanup even after an assertion fails. The initial fresh runs are failed
+receipts, not release evidence; corrected fresh validation is still required.
+
 ## Remaining acceptance
 
 This does not complete MR-03. CLI subprocess hosts, native absent/malformed transport replies,

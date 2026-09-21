@@ -407,10 +407,25 @@ func TestIngressTypedProjectionEmptyDegradedAndUnavailable(t *testing.T) {
 	if len(typed["retained_items"].([]typedProjectionRef)) != 0 || typed["context_sufficiency"] != "unknown" || strings.Contains(result["envelope"].(string), "temporal learning") || result["omitted_count"] != 0 {
 		t.Fatal(result)
 	}
-	for _, failure := range []string{"", `{"status":"error","kind":"unavailable"}`} {
+	for _, failure := range []string{
+		"", `{"status":"error","kind":"unavailable"}`,
+		`{"status":"unavailable","dependency":"kb","retryable":true}`,
+		`{"status":"stale","dependency":"kb"}`, `{"status":"unauthorized"}`,
+		`{"status":"empty"}`, `{"status":"abstained"}`,
+	} {
 		result, err = ingressAssemble(ingressAssemblyRequest{Budget: 1000, Code: code, TypedRequested: true, TypedContextJSON: failure})
 		if err != nil || result["typed_unavailable"] != true || !strings.Contains(result["envelope"].(string), "available.go") || result["typed_projection"] != nil {
 			t.Fatal(result, err)
+		}
+	}
+}
+
+func TestIngressRefusesMalformedTypedOutcome(t *testing.T) {
+	for _, raw := range []string{`{`, `{}`, `{"status":"invented"}`, `{"status":"ok"}`} {
+		result, err := ingressAssemble(ingressAssemblyRequest{Budget: 1000, TypedRequested: true, TypedContextJSON: raw})
+		var refusal *contextBudgetError
+		if result != nil || !errors.As(err, &refusal) || refusal.kind != "invalid_projection" {
+			t.Fatal("invalid projection was mistaken for optional unavailability", raw, result, err)
 		}
 	}
 }

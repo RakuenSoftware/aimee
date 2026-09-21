@@ -198,7 +198,8 @@ def inside(output, budget_benchmark=False):
                 name = frontend + ' to ' + protocol
                 for streaming in ([False, True] if frontend in ('chat', 'messages') else [body['stream']]):
                     outage_cases.append((name + (' streaming' if streaming else ' buffered'),
-                                         path, dict(body, stream=streaming)))
+                                         path, dict(body, stream=streaming),
+                                         not (frontend == 'messages' and protocol == 'anthropic')))
                 with lock:
                     before = len(captures)
                 status, response = api(path, body)
@@ -356,9 +357,16 @@ def inside(output, budget_benchmark=False):
         owner_pid = memory_pids[0]
         os.kill(owner_pid, signal.SIGSTOP)
         try:
-            for name, path, body in outage_cases:
+            for name, path, body, requires_memory in outage_cases:
                 before_outage = len(captures)
                 status, response = api(path, body)
+                if not requires_memory:
+                    # Native Anthropic passthrough has automatic memory off by
+                    # default. An outage must not introduce a new dependency
+                    # into a request that did not require memory assembly.
+                    check(name + ' memory-disabled passthrough retains provider dispatch',
+                          status == 200 and len(captures) == before_outage + 1)
+                    continue
                 check(name + ' paused memory owner reports explicit failure',
                       status == (200 if body['stream'] else 503) and
                       'unavailable' in list(strings(response)) and
@@ -370,16 +378,16 @@ def inside(output, budget_benchmark=False):
         finally:
             os.kill(owner_pid, signal.SIGCONT)
             os.kill(owner_pid, signal.SIGTERM)
-        deadline = time.monotonic() + 75
-        while True:
-            status, recovered = api('/v1/memory/get', dict(id=str(memory_id)))
-            if status == 200 and recovered.get('memory', {}).get('content') == content:
-                break
-            if time.monotonic() >= deadline:
-                raise RuntimeError('memory owner failed to recover after provider refusal fixture')
-            time.sleep(0.25)
+            deadline = time.monotonic() + 75
+            while True:
+                status, recovered = api('/v1/memory/get', dict(id=str(memory_id)))
+                if status == 200 and recovered.get('memory', {}).get('content') == content:
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('memory owner failed to recover after provider refusal fixture')
+                time.sleep(0.25)
         check('provider refusal fixture recovers committed memory after owner restart', True)
-        name, path, body = outage_cases[0]
+        name, path, body, _ = outage_cases[0]
         before_recovery = len(captures)
         status, response = api(path, body)
         check('new request after memory owner recovery dispatches exactly once',

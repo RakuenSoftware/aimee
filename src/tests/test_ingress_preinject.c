@@ -24,6 +24,7 @@ static char g_evidence_preview[256];
 static int g_long_code_path;
 static int g_long_preview;
 static int g_assembly_failure;
+static int g_typed_unavailable;
 
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
                                                     int timeout_ms, cJSON **result)
@@ -140,6 +141,8 @@ char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSO
    assert(cJSON_GetObjectItemCaseSensitive(context_limits, "schema_version")->valueint == 1);
    assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(context_limits, "max_context_bytes")));
    (void)query;
+   if (g_typed_unavailable)
+      return strdup("{\"status\":\"unavailable\",\"dependency\":\"kb\",\"retryable\":true}");
    g_temporal_calls++;
    return g_temporal_enabled
               ? strdup(
@@ -1027,6 +1030,13 @@ static void test_required_assembly_refusal_reaches_dispatch(void)
    text = ingress_preinject_build("deployment matrix", 0);
    assert(text && !request_context_get()->context_refused);
    free(text);
+   /* The standalone host's optional KB transport reports unavailable, not
+    * status:error. Real Go assembly must preserve the other available context. */
+   g_typed_unavailable = 1;
+   text = ingress_preinject_build("deployment matrix", 0);
+   assert(text && !request_context_get()->context_refused);
+   free(text);
+   g_typed_unavailable = 0;
    request_context_clear();
    puts("required assembly failure reaches provider fence and clears on new request");
 }
