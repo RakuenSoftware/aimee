@@ -72,7 +72,13 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 	return NewHandler(nil)(invocation, request)
 }
 
-func NewHandler(executor egress.Executor) bus.ModuleHandler {
+func NewHandler(executor egress.Executor, option ...HandlerOption) bus.ModuleHandler {
+	options := handlerOptions{}
+	for _, apply := range option {
+		if apply != nil {
+			apply(&options)
+		}
+	}
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 		switch invocation.StageID {
 		case StageWrite:
@@ -85,9 +91,11 @@ func NewHandler(executor egress.Executor) bus.ModuleHandler {
 		case StageRetrieve:
 			return handleRetrieve(invocation, request)
 		case StageEmbed:
-			return handleEmbed(executor, invocation, request)
+			return handleEmbed(executor, options, invocation, request)
 		case StageDeclareCommands:
 			return handleDeclareCommands(invocation, request)
+		case StageData:
+			return handleData(options, invocation, request)
 		}
 		return handleRerank(invocation, request)
 	}

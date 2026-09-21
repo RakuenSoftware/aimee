@@ -12,10 +12,12 @@
   "ownership_complete": true,
   "sources": [],
   "go_sources": [
-    "server-go/modules/execution-policy/execution_policy.go"
+    "server-go/modules/execution-policy/execution_policy.go",
+    "server-go/modules/execution-policy/memory_release.go"
   ],
   "go_tests": [
-    "server-go/modules/execution-policy/execution_policy_test.go"
+    "server-go/modules/execution-policy/execution_policy_test.go",
+    "server-go/modules/execution-policy/memory_release_test.go"
   ],
   "public_headers": [
     "src/modules/execution-policy/include/aimee/execution-policy/module_api.h"

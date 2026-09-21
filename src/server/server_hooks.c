@@ -1,16 +1,70 @@
 /* server_hooks.c: pre/post-tool hook helpers used by server.c */
 #include "aimee.h"
-#include "db1_client/user_memory.h"
 #include "harness_memory_audit.h"
 #include "harness_memory_common.h"
 #include "harness_memory_scope.h"
 #include "harness_memory_spill.h"
-#include "memory_redirect.h"
+#include "module_stage_adapters.h"
 #include "server.h"
 #include <sys/stat.h>
 
-/* Server-side central agent-memory interception. The split server owns DB1, so
- * it writes the archive row directly; the retired .md is never materialized.
+typedef enum
+{
+   MEMORY_REDIRECT_ALLOW = 0,
+   MEMORY_REDIRECT_STORE = 1,
+   MEMORY_REDIRECT_REJECT = 2
+} memory_redirect_verdict_t;
+
+/* Memory-file policy lives in the Go memory module. This is deliberately only
+ * the C event-bus edge: copy the hook inputs into JSON and decode the verdict. */
+static memory_redirect_verdict_t memory_redirect_bus(const char *operation, const char *client,
+                                                     const char *tool, const char *path,
+                                                     const char *command, const char *home,
+                                                     char *name, size_t name_len, char *reason,
+                                                     size_t reason_len)
+{
+   const hmem_scope_t *surface = hmem_scope_for_client(client);
+   if (!surface)
+      return MEMORY_REDIRECT_ALLOW;
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return MEMORY_REDIRECT_ALLOW;
+   cJSON_AddStringToObject(request, "operation", operation);
+   cJSON_AddStringToObject(request, "client", client);
+   cJSON_AddStringToObject(request, "home", home ? home : "");
+   cJSON_AddStringToObject(request, "projects_root", surface->projects_root);
+   cJSON_AddStringToObject(request, "memory_segment", surface->memory_seg);
+   if (tool)
+      cJSON_AddStringToObject(request, "tool", tool);
+   if (path)
+      cJSON_AddStringToObject(request, "path", path);
+   if (command)
+      cJSON_AddStringToObject(request, "command", command);
+   cJSON *response = server_module_memory_data(request);
+   cJSON_Delete(request);
+   if (!response)
+      return MEMORY_REDIRECT_ALLOW;
+   const char *verdict =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "verdict"));
+   const char *reply_name =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "name"));
+   const char *reply_reason =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "reason"));
+   if (name && name_len)
+      snprintf(name, name_len, "%s", reply_name ? reply_name : "");
+   if (reason && reason_len)
+      snprintf(reason, reason_len, "%s", reply_reason ? reply_reason : "");
+   memory_redirect_verdict_t result = MEMORY_REDIRECT_ALLOW;
+   if (verdict && strcmp(verdict, "redirect") == 0)
+      result = MEMORY_REDIRECT_STORE;
+   else if (verdict && strcmp(verdict, "reject") == 0)
+      result = MEMORY_REDIRECT_REJECT;
+   cJSON_Delete(response);
+   return result;
+}
+
+/* Server-side central agent-memory interception. Classification and storage
+ * both cross the Go memory data stage; the retired .md is never materialized.
  * Returns 2 (deny, with msg) when intercepted/rejected, else 0. */
 int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd, cJSON *req,
                             const char *client, char *msg, size_t msg_len)
@@ -27,7 +81,8 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
       cJSON *jc = cJSON_GetObjectItemCaseSensitive(ti, "command");
       const char *cmd = cJSON_IsString(jc) ? jc->valuestring : NULL;
       int verdict = 0;
-      if (cmd && memory_redirect_bash_targets_memory(client, cmd, home))
+      if (cmd && memory_redirect_bus("redirect-bash", client, tool, NULL, cmd, home, NULL, 0,
+                                     NULL, 0) == MEMORY_REDIRECT_REJECT)
       {
          snprintf(msg, msg_len,
                   "Memory files are managed by aimee — use the Write tool to set "
@@ -50,18 +105,19 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
    }
 
    char name[HMEM_NAME_LEN];
-   const char *reason = NULL;
-   mr_verdict_t verdict =
-       memory_redirect_classify(client, tool, path, home, name, sizeof(name), &reason);
-   if (verdict == MR_ALLOW)
+   char reason[512] = "";
+   memory_redirect_verdict_t verdict = memory_redirect_bus(
+       "redirect-classify", client, tool, path, NULL, home, name, sizeof(name), reason,
+       sizeof(reason));
+   if (verdict == MEMORY_REDIRECT_ALLOW)
    {
       cJSON_Delete(ti);
       return 0;
    }
-   if (verdict == MR_REJECT)
+   if (verdict == MEMORY_REDIRECT_REJECT)
    {
-      snprintf(msg, msg_len, "%s", reason ? reason : "memory write rejected");
-      hmem_audit("reject", NULL, NULL, reason);
+      snprintf(msg, msg_len, "%s", reason[0] ? reason : "memory write rejected");
+      hmem_audit("reject", NULL, NULL, reason[0] ? reason : NULL);
       cJSON_Delete(ti);
       return 2;
    }
@@ -88,13 +144,26 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
 
    char key[HMEM_PROJECT_KEY_MAX + 600];
    snprintf(key, sizeof(key), "archive:%s/%s", project, name);
-   if (db1_user_memory_upsert("archive", "L1", key, content, 1.0, client) != 0)
+   cJSON *store = cJSON_CreateObject();
+   if (store)
+   {
+      cJSON_AddStringToObject(store, "operation", "store");
+      cJSON_AddStringToObject(store, "kind", "archive");
+      cJSON_AddStringToObject(store, "tier", "L1");
+      cJSON_AddStringToObject(store, "key", key);
+      cJSON_AddStringToObject(store, "content", content);
+      cJSON_AddNumberToObject(store, "confidence", 1.0);
+   }
+   cJSON *stored = store ? server_module_memory_data(store) : NULL;
+   cJSON_Delete(store);
+   if (!stored)
    {
       int sp = hmem_spill_write(project, name, "archive", content);
       hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "db1 store unreachable");
       cJSON_Delete(ti);
       return 0;
    }
+   cJSON_Delete(stored);
    hmem_audit("redirect-db1", project, name, NULL);
    snprintf(msg, msg_len,
             "Saved to aimee memory. Memory files are retired — retrieve with "

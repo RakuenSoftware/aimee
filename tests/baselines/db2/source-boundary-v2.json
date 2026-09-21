@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "source_revision": "647ddc02eb87159b08652951496bc5512622706b",
+  "source_revision": "95146b7b7b55126d2926987e0dfaf68aabf54df3",
   "source_boundary": "src/modules/db2/c",
   "summary": {
-    "c_files": 143,
-    "headers": 143,
+    "c_files": 125,
+    "headers": 142,
     "sql_files": 6,
-    "consumer_files": 312,
-    "production_consumers": 158,
+    "consumer_files": 287,
+    "production_consumers": 133,
     "test_consumers": 154,
-    "include_directives": 1071,
-    "outbound_dependency_rows": 177,
-    "outbound_include_directives": 177
+    "include_directives": 880,
+    "outbound_dependency_rows": 167,
+    "outbound_include_directives": 167
   },
   "source_files": {
     "c": [
@@ -102,23 +102,6 @@
       "src/modules/db2/c/management_token_authority.c",
       "src/modules/db2/c/management_token_roots.c",
       "src/modules/db2/c/membership.c",
-      "src/modules/db2/c/memory_briefing.c",
-      "src/modules/db2/c/memory_conflicts.c",
-      "src/modules/db2/c/memory_entity_graph.c",
-      "src/modules/db2/c/memory_export.c",
-      "src/modules/db2/c/memory_health.c",
-      "src/modules/db2/c/memory_lifecycle.c",
-      "src/modules/db2/c/memory_lint.c",
-      "src/modules/db2/c/memory_payload.c",
-      "src/modules/db2/c/memory_promotion.c",
-      "src/modules/db2/c/memory_query.c",
-      "src/modules/db2/c/memory_query_bookkeeping.c",
-      "src/modules/db2/c/memory_relations.c",
-      "src/modules/db2/c/memory_row_mapper_pg.c",
-      "src/modules/db2/c/memory_scenes.c",
-      "src/modules/db2/c/memory_scope_query.c",
-      "src/modules/db2/c/memory_score_fields.c",
-      "src/modules/db2/c/memory_vectors.c",
       "src/modules/db2/c/mining.c",
       "src/modules/db2/c/notes.c",
       "src/modules/db2/c/oidc_jwks.c",
@@ -138,7 +121,6 @@
       "src/modules/db2/c/pgvec_transport.c",
       "src/modules/db2/c/pgvec_verify.c",
       "src/modules/db2/c/project.c",
-      "src/modules/db2/c/prospective_memories.c",
       "src/modules/db2/c/rel_types_store.c",
       "src/modules/db2/c/report_enrichments.c",
       "src/modules/db2/c/rules.c",
@@ -282,7 +264,6 @@
       "src/modules/db2/c/pgvec_scope_query.h",
       "src/modules/db2/c/pgvec_transport.h",
       "src/modules/db2/c/project.h",
-      "src/modules/db2/c/prospective_memories.h",
       "src/modules/db2/c/rel_types_store.h",
       "src/modules/db2/c/report_enrichments.h",
       "src/modules/db2/c/rules.h",
@@ -439,10 +420,6 @@
         {
           "header": "modules/db2/c/memory_query.h",
           "count": 1
-        },
-        {
-          "header": "modules/db2/c/prospective_memories.h",
-          "count": 1
         }
       ]
     },
@@ -589,15 +566,7 @@
           "count": 1
         },
         {
-          "header": "modules/db2/c/lifecycle.h",
-          "count": 1
-        },
-        {
           "header": "modules/db2/c/memory_export.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_lifecycle.h",
           "count": 1
         },
         {
@@ -1613,16 +1582,6 @@
       ]
     },
     {
-      "path": "src/kb/kb_module_stage_adapters.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/support/db2_pii_classifier.h",
-          "count": 1
-        }
-      ]
-    },
-    {
       "path": "src/kb/kb_neardup.c",
       "classification": "kb-generated-client",
       "includes": [
@@ -2563,903 +2522,11 @@
       ]
     },
     {
-      "path": "src/modules/memory/memory_advanced.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/anti_patterns.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/bandit.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/decision_log.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feedback.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_briefing.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/rules.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/tasks.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_assemble.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/anti_patterns.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scope_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_vectors.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/rules.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_conflict.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/memory_conflicts.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_context.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/rules.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_core.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feature_rows.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_runtime_state.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_health.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_promotion.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scenes.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/stopwords.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_verify.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_core_crud.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feature_rows.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_runtime_state.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/lifecycle.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_health.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_promotion.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scenes.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/stopwords.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_verify.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_core_helpers.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feature_rows.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_runtime_state.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_health.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_promotion.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scenes.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/stopwords.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_verify.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_core_helpers_b.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feature_rows.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_runtime_state.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_health.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_promotion.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scenes.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/stopwords.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_verify.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_core_scope_embed.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feature_rows.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_runtime_state.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_health.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_promotion.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scenes.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/stopwords.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_verify.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_core_search.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feature_rows.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_runtime_state.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_health.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_promotion.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scenes.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scope_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/stopwords.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_verify.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_core_search_b.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feature_rows.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_runtime_state.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_health.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_promotion.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scenes.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scope_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/stopwords.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_verify.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_core_search_c.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feature_rows.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_runtime_state.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_health.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_promotion.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scenes.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scope_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/stopwords.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_verify.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_core_tiers.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feature_rows.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_runtime_state.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_health.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_promotion.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scenes.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/stopwords.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_verify.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_directives.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/epistemic_directives.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/failed_queries.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_episodes.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_scenes.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_graph.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_graph_fusion.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db_postgres.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_nodes.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        }
-      ]
-    },
-    {
       "path": "src/modules/memory/memory_graph_fusion.h",
       "classification": "kb-generated-client",
       "includes": [
         {
           "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_health.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/fact_lifecycle.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_health.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/vector_index_ops.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_improve.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/feedback.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_query.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_relations.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_lifecycle.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_lifecycle.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_logic.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/artifacts.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/calibration.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/kind_lifecycle.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_promotion.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_maintenance.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/code_index_ops.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/curiosity.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/memory_payload.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_prospective.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/prospective_memories.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/modules/memory/memory_scan.c",
-      "classification": "kb-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/db2_internal.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/entity_profiles.h",
           "count": 1
         }
       ]
@@ -7160,9 +6227,30 @@
     },
     {
       "source": "src/modules/db2/c/fact_recall.c",
-      "header": "modules/memory/memory_pii_gate.h",
-      "resolved": "src/modules/memory/memory_pii_gate.h",
+      "header": "aimee/core/event_bus/module_protocol.h",
+      "resolved": "src/core/event_bus/include/aimee/core/event_bus/module_protocol.h",
+      "classification": "portable-core-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_recall.c",
+      "header": "aimee/memory/module_api.h",
+      "resolved": "src/modules/memory/include/aimee/memory/module_api.h",
+      "classification": "module-public-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_recall.c",
+      "header": "cJSON.h",
+      "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fact_recall.c",
+      "header": "headers/module_json_call.h",
+      "resolved": "src/headers/module_json_call.h",
+      "classification": "host-api",
       "count": 1
     },
     {
@@ -7390,90 +6478,6 @@
       "count": 1
     },
     {
-      "source": "src/modules/db2/c/memory_conflicts.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_entity_graph.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_export.c",
-      "header": "cJSON.h",
-      "resolved": "src/modules/db2/support/cJSON.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_health.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_lint.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_payload.c",
-      "header": "cJSON.h",
-      "resolved": "src/modules/db2/support/cJSON.h",
-      "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_query.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_query_bookkeeping.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_relations.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_row_mapper_pg.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_scope_query.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/memory_score_fields.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
-      "count": 1
-    },
-    {
       "source": "src/modules/db2/c/oidc_jwks.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
@@ -7541,13 +6545,6 @@
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
       "classification": "module-private-api",
-      "count": 1
-    },
-    {
-      "source": "src/modules/db2/c/prospective_memories.c",
-      "header": "../headers/aimee.h",
-      "resolved": "src/headers/aimee.h",
-      "classification": "host-api",
       "count": 1
     },
     {
@@ -7712,5 +6709,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "ffd57c74edd8d4292bbaa5b5e70b49df37bdf8d9bf62ac8607614d4ef05c8d3e"
+  "fingerprint": "16cc736af7405a78d0b02231235eb62d79d8ebeba72a8ac3ecd9144919d3db1c"
 }

@@ -91,7 +91,7 @@ def main() -> None:
         "server leaf linked into KB",
     )
     failures += expect(
-        ["src/modules/memory/memory_core_search_c.c"],
+        ["src/modules/memory/memory_data_bus.c"],
         set(planner.SERVER | planner.KB),
         "shared server and KB C source",
     )

@@ -119,24 +119,6 @@
       "ctest": false,
       "make": true,
       "module": "db2",
-      "test": "src/tests/test_db2_node_kind_text_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_pii_classifier_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db2_pii_inject_gate_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "db2",
       "test": "src/tests/test_db2_random_support.c"
     },
     {
@@ -594,12 +576,6 @@
       "make": true,
       "module": "memory",
       "test": "src/tests/test_memory_profiles.c"
-    },
-    {
-      "ctest": true,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_provider.c"
     },
     {
       "ctest": false,

@@ -589,18 +589,19 @@ void kb_client_memory_scope_context_clear(void)
 {
    g_memory_scope_clear_calls++;
 }
-/* memory.user_capture invokes db1_user_memory_upsert (db1/user_memory.c), not
- * linked here. Stub it so the dispatch table builds. */
-int db1_user_memory_upsert(const char *kind, const char *tier, const char *key, const char *content,
-                           double confidence, const char *source_session)
+/* User memory now crosses the shared memory data stage. */
+cJSON *server_module_memory_data(const cJSON *request)
 {
+   (void)request;
+   return cJSON_CreateObject();
+}
+int hmem_spill_write(const char *project, const char *name, const char *kind, const char *content)
+{
+   (void)project;
+   (void)name;
    (void)kind;
-   (void)tier;
-   (void)key;
    (void)content;
-   (void)confidence;
-   (void)source_session;
-   return 0;
+   return -1;
 }
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {

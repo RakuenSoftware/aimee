@@ -24,6 +24,7 @@ pkill -f "aimee-module-memory $SOCK" 2>/dev/null
 sleep 1
 cd /root
 AIMEE_HOME=/root/.config/aimee \
+  AIMEE_MODULE_PLACEMENT=kb \
   nohup /usr/local/libexec/aimee-modules/aimee-module-memory "$SOCK" \
   >/root/memory-module.log 2>&1 &
 echo $! > /root/memory-module.pid

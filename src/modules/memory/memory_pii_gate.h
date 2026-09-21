@@ -80,6 +80,9 @@ extern "C"
    typedef int (*memory_pii_sensitivity_batch_fn)(const char *const *rel_types, int count,
                                                   rel_sensitivity_t *out);
 
+   typedef int (*memory_pii_inject_classifier_fn)(int sensitivity, double confidence,
+                                                  int turn_requests_sensitive, int *allowed);
+
    /* Route batch classification through `classifier` (the memory module over the
     * bus). Pass NULL to go back to the local table.
     *
@@ -87,6 +90,9 @@ extern "C"
     * quietly answered from the local table, which would make a broken module
     * look healthy. */
    void memory_pii_register_sensitivity_batch(memory_pii_sensitivity_batch_fn classifier);
+
+   /* Route the final inject decision through the Go memory module. */
+   void memory_pii_register_inject_classifier(memory_pii_inject_classifier_fn classifier);
 
 #ifdef __cplusplus
 }

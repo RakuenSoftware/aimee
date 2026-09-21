@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "module": "db2",
-  "source_revision": "69425e353eb063ea20b884529dced49b4bf617f9",
-  "source_fingerprint": "9dad4ae973e25851cfe2d1cdcde38a2dcd1b04d99fe532bbc99e6d18a292fcb0",
+  "source_revision": "95146b7b7b55126d2926987e0dfaf68aabf54df3",
+  "source_fingerprint": "6749313ba5cc9962d8e59fece9a14832d709b4a5dfff0d0551a1a52da973db0e",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -102,23 +102,6 @@
     "src/modules/db2/c/management_token_authority.c",
     "src/modules/db2/c/management_token_roots.c",
     "src/modules/db2/c/membership.c",
-    "src/modules/db2/c/memory_briefing.c",
-    "src/modules/db2/c/memory_conflicts.c",
-    "src/modules/db2/c/memory_entity_graph.c",
-    "src/modules/db2/c/memory_export.c",
-    "src/modules/db2/c/memory_health.c",
-    "src/modules/db2/c/memory_lifecycle.c",
-    "src/modules/db2/c/memory_lint.c",
-    "src/modules/db2/c/memory_payload.c",
-    "src/modules/db2/c/memory_promotion.c",
-    "src/modules/db2/c/memory_query.c",
-    "src/modules/db2/c/memory_query_bookkeeping.c",
-    "src/modules/db2/c/memory_relations.c",
-    "src/modules/db2/c/memory_row_mapper_pg.c",
-    "src/modules/db2/c/memory_scenes.c",
-    "src/modules/db2/c/memory_scope_query.c",
-    "src/modules/db2/c/memory_score_fields.c",
-    "src/modules/db2/c/memory_vectors.c",
     "src/modules/db2/c/mining.c",
     "src/modules/db2/c/notes.c",
     "src/modules/db2/c/oidc_jwks.c",
@@ -138,7 +121,6 @@
     "src/modules/db2/c/pgvec_transport.c",
     "src/modules/db2/c/pgvec_verify.c",
     "src/modules/db2/c/project.c",
-    "src/modules/db2/c/prospective_memories.c",
     "src/modules/db2/c/rel_types_store.c",
     "src/modules/db2/c/report_enrichments.c",
     "src/modules/db2/c/rules.c",
@@ -351,13 +333,11 @@
           "src/modules/db2/c/collab_rules.c",
           "src/modules/db2/c/demotion.c",
           "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/kb_service_backend_ingest.c",
-          "src/modules/db2/c/memory_payload.c"
+          "src/modules/db2/c/kb_service_backend_ingest.c"
         ],
         "cJSON_AddItemToObject": [
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/memory_payload.c"
+          "src/modules/db2/c/kb_service_backend.c"
         ],
         "cJSON_AddNumberToObject": [
           "src/modules/db2/c/code_audit.c",
@@ -367,8 +347,6 @@
           "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/memory_export.c",
-          "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/rules.c",
           "src/modules/db2/c/vector_status.c"
         ],
@@ -383,8 +361,6 @@
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
           "src/modules/db2/c/kb_service_backend_ingest.c",
-          "src/modules/db2/c/memory_export.c",
-          "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/rules.c",
           "src/modules/db2/c/vector_status.c"
         ],
@@ -392,8 +368,7 @@
           "src/modules/db2/c/code_audit.c",
           "src/modules/db2/c/collab_rules.c",
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/kb_service_backend_ingest.c",
-          "src/modules/db2/c/memory_payload.c"
+          "src/modules/db2/c/kb_service_backend_ingest.c"
         ],
         "cJSON_CreateNumber": [
           "src/modules/db2/c/demotion.c"
@@ -408,14 +383,11 @@
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
           "src/modules/db2/c/kb_service_backend_ingest.c",
-          "src/modules/db2/c/memory_export.c",
-          "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/rules.c",
           "src/modules/db2/c/vector_status.c"
         ],
         "cJSON_CreateString": [
-          "src/modules/db2/c/code_audit.c",
-          "src/modules/db2/c/memory_payload.c"
+          "src/modules/db2/c/code_audit.c"
         ],
         "cJSON_Delete": [
           "src/modules/db2/c/artifacts.c",
@@ -427,8 +399,6 @@
           "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
           "src/modules/db2/c/kb_service_backend.c",
-          "src/modules/db2/c/memory_export.c",
-          "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/org_model_catalog.c",
           "src/modules/db2/c/pgvec_transport.c",
           "src/modules/db2/c/rules.c"
@@ -443,7 +413,6 @@
         ],
         "cJSON_GetArraySize": [
           "src/modules/db2/c/demotion.c",
-          "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/org_model_catalog.c"
         ],
         "cJSON_GetObjectItemCaseSensitive": [
@@ -495,8 +464,6 @@
           "src/modules/db2/c/demotion.c",
           "src/modules/db2/c/fidelity.c",
           "src/modules/db2/c/kb_payload.c",
-          "src/modules/db2/c/memory_export.c",
-          "src/modules/db2/c/memory_payload.c",
           "src/modules/db2/c/rules.c"
         ]
       },
@@ -921,102 +888,6 @@
       },
       "provenance": "The three pure model-catalog admission definitions are promoted from src/kb/http/kb_models_validate.c; all DB2 calls are pinned to org_model_catalog.c.",
       "evidence": "The descriptor owns the exact wire whitelist, printable-name bounds, and HTTP(S) endpoint grammar used by DB2's pre-database storage choke point. Normal and sanitizer parity cover NULL, every non-NUL byte, length boundaries, schemes, and legacy empty-endpoint behavior. Only strcmp, strlen, and strncmp are imported; there is no HTTP, JSON, DB, bus, provider, pgvector, DB3, allocation, configuration, I/O, or logging dependency."
-    },
-    {
-      "path": "src/modules/db2/support/node_kind_text_primitives.c",
-      "source_sha256": "0b733803311e92c8baad98e3a14f8d43eac0819f82f83ab3a08a7b52eaa08116",
-      "header": "src/modules/db2/support/db2_node_kind_text.h",
-      "header_sha256": "890b4eb247c73135cb0df53fc67f520d16d2d032429f397e2665522ce6898668",
-      "defines": [
-        "memory_ontology_node_kind_to_text"
-      ],
-      "resolves": [
-        "memory_ontology_node_kind_to_text"
-      ],
-      "resolution_disposition": "injected-module-contract",
-      "allowed_includes": [
-        "db2_node_kind_text.h"
-      ],
-      "allowed_header_includes": [],
-      "allowed_undefined": [],
-      "base_references": {
-        "memory_ontology_node_kind_to_text": [
-          "src/modules/db2/c/rel_types_store.c"
-        ]
-      },
-      "provenance": "Definition promoted from the DB-free node-kind table in src/modules/memory/memory_episodes.c; the sole DB2 call is pinned to src/modules/db2/c/rel_types_store.c.",
-      "evidence": "A deterministic integer-to-text switch with descriptor-owned numeric ABI and no imports, shared ontology header, allocation, I/O, DB, event-bus, provider, platform, pgvector, DB3, configuration, or logging dependency. Normal and sanitizer parity cover the complete signed 16-bit partition plus int boundaries."
-    },
-    {
-      "path": "src/modules/db2/support/pii_classifier_primitives.c",
-      "source_sha256": "b910e5470f542b43d463b89d172769e47675af228abd419b61a9d5267b1ff9bd",
-      "header": "src/modules/db2/support/db2_pii_classifier.h",
-      "header_sha256": "26bdb1c2abf6e8647a572ea4a49652ebdd373c3d2393afb198f801bd9899c078",
-      "defines": [
-        "memory_pii_register_sensitivity_batch",
-        "memory_pii_register_turn_classifier",
-        "memory_pii_rel_sensitivity",
-        "memory_pii_rel_sensitivity_batch",
-        "memory_pii_turn_requests_sensitive"
-      ],
-      "resolves": [
-        "memory_pii_rel_sensitivity",
-        "memory_pii_rel_sensitivity_batch",
-        "memory_pii_turn_requests_sensitive"
-      ],
-      "resolution_disposition": "injected-module-contract",
-      "allowed_includes": [
-        "db2_pii_classifier.h",
-        "db2_rel_seed.h",
-        "db2_rel_type_helpers.h",
-        "ctype.h",
-        "string.h"
-      ],
-      "allowed_header_includes": [],
-      "allowed_undefined": [
-        "__ctype_tolower_loc",
-        "rel_type_normalize",
-        "rel_types_seed_lookup",
-        "strlen"
-      ],
-      "base_references": {
-        "memory_pii_rel_sensitivity": [
-          "src/modules/db2/c/rel_types_store.c"
-        ],
-        "memory_pii_rel_sensitivity_batch": [
-          "src/modules/db2/c/fact_recall.c"
-        ],
-        "memory_pii_turn_requests_sensitive": [
-          "src/modules/db2/c/fact_ingest.c"
-        ]
-      },
-      "provenance": "The remaining PII turn, relation, and batch classifiers plus both provider registration seams are promoted from src/modules/memory/memory_pii_gate.c; all three DB2 calls are pinned to their sole translation units.",
-      "evidence": "The descriptor owns local cue scanning, unknown sensitive-name heuristics, seed sensitivity lookup, whole-batch classification, and authoritative provider failure semantics. Registered failures remain fail closed and never fall back silently. Normal and sanitizer parity cover NULL, every non-NUL byte, all seed relations, case and length boundaries, local and provider paths, non-Boolean provider values, provider failures after writes, invalid batches, and output canaries. Only the adjacent admitted relationship support, ctype, and strlen are imported; there is no DB, bus transport, provider implementation, pgvector, DB3, allocation, I/O, configuration, or logging edge."
-    },
-    {
-      "path": "src/modules/db2/support/pii_inject_gate_primitives.c",
-      "source_sha256": "41096c30f976075f8f4b97a7a1825bbb53e340f5d112eb704a4a31ff4be1fef6",
-      "header": "src/modules/db2/support/db2_pii_inject_gate.h",
-      "header_sha256": "e1f544b3bd70ed8d4d012f34845f99922f219896bce0329efb9f2b687d1bd9af",
-      "defines": [
-        "memory_pii_should_inject"
-      ],
-      "resolves": [
-        "memory_pii_should_inject"
-      ],
-      "resolution_disposition": "injected-module-contract",
-      "allowed_includes": [
-        "db2_pii_inject_gate.h"
-      ],
-      "allowed_header_includes": [],
-      "allowed_undefined": [],
-      "base_references": {
-        "memory_pii_should_inject": [
-          "src/modules/db2/c/fact_recall.c"
-        ]
-      },
-      "provenance": "The allocation-free recall decision is promoted from src/modules/memory/memory_pii_gate.c; the sole DB2 call is pinned to src/modules/db2/c/fact_recall.c.",
-      "evidence": "The descriptor owns the three-value sensitivity ABI, confidence floor, truth-value handling, and fail-closed treatment of NaN, low confidence, credentials, and unknown sensitivity values. The support object has no imports or memory classifier state and no allocation, I/O, DB, event-bus, provider, platform, pgvector, DB3, configuration, or logging edge. Normal and sanitizer parity cover the complete signed 16-bit sensitivity partition, int boundaries, finite confidence boundaries, infinities, NaN, and full-width turn-request truth values."
     },
     {
       "path": "src/modules/db2/support/random_primitives.c",
@@ -1931,9 +1802,6 @@
         "src/modules/db2/c/db_schema.c",
         "src/modules/db2/c/fact_identity.c",
         "src/modules/db2/c/fact_mutation.c",
-        "src/modules/db2/c/memory_query.c",
-        "src/modules/db2/c/memory_scope_query.c",
-        "src/modules/db2/c/memory_vectors.c",
         "src/modules/db2/c/tool_registry.c",
         "src/modules/db2/support/cjson.c"
       ],
@@ -1953,7 +1821,6 @@
         "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
-        "src/modules/db2/c/prospective_memories.c",
         "src/modules/db2/c/typed_facts.c",
         "src/modules/db2/support/extractor_primitives.c",
         "src/modules/db2/support/rel_type_primitives.c"
@@ -1971,11 +1838,9 @@
         "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/notes.c",
-        "src/modules/db2/c/prospective_memories.c",
         "src/modules/db2/c/typed_facts.c",
         "src/modules/db2/support/cert_serial_primitives.c",
         "src/modules/db2/support/cjson.c",
-        "src/modules/db2/support/pii_classifier_primitives.c",
         "src/modules/db2/support/rel_type_primitives.c"
       ],
       "disposition": "system-link",
@@ -2009,7 +1874,6 @@
     {
       "symbol": "__isoc23_sscanf",
       "references": [
-        "src/modules/db2/c/memory_query.c",
         "src/modules/db2/support/time_primitives.c"
       ],
       "disposition": "system-link",
@@ -2039,8 +1903,6 @@
       "references": [
         "src/modules/db2/c/db2_init.c",
         "src/modules/db2/c/db2_tenant.c",
-        "src/modules/db2/c/memory_scope_query.c",
-        "src/modules/db2/c/memory_vectors.c",
         "src/modules/db2/c/tool_registry.c"
       ],
       "disposition": "system-link",
@@ -2053,6 +1915,14 @@
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "aimee_module_json_call",
+      "references": [
+        "src/modules/db2/c/fact_recall.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
       "symbol": "atoi",
@@ -2108,6 +1978,47 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
+      "symbol": "db2_memory_provenance_by_id",
+      "references": [
+        "src/modules/db2/c/demotion.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "db2_memory_scene_members",
+      "references": [
+        "src/modules/db2/c/kb_service_backend.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "db2_memory_scenes_list_recent",
+      "references": [
+        "src/modules/db2/c/kb_service_backend.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "db2_memory_scope_bind_current",
+      "references": [
+        "src/modules/db2/c/pgvec_transport.c",
+        "src/modules/db2/c/typed_facts.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
+      "symbol": "db2_memory_scope_context_get",
+      "references": [
+        "src/modules/db2/c/pgvec_transport.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
+    },
+    {
       "symbol": "difftime",
       "references": [
         "src/modules/db2/c/curiosity.c",
@@ -2132,7 +2043,6 @@
       "references": [
         "src/modules/db2/c/canonical_index.c",
         "src/modules/db2/c/entity_edges.c",
-        "src/modules/db2/c/memory_export.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/support/random_primitives.c"
       ],
@@ -2160,7 +2070,6 @@
       "references": [
         "src/modules/db2/c/canonical_index.c",
         "src/modules/db2/c/entity_edges.c",
-        "src/modules/db2/c/memory_export.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/support/random_primitives.c"
       ],
@@ -2174,8 +2083,6 @@
         "src/modules/db2/c/db2_init.c",
         "src/modules/db2/c/db2_pool.c",
         "src/modules/db2/c/entity_edges.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_query.c",
         "src/modules/db2/c/rules.c"
       ],
       "disposition": "system-link",
@@ -2226,9 +2133,6 @@
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend.c",
         "src/modules/db2/c/learning.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_query.c",
-        "src/modules/db2/c/memory_relations.c",
         "src/modules/db2/c/org_vault_rewrap.c",
         "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/pgvec_verify.c",
@@ -2264,7 +2168,6 @@
         "src/modules/db2/c/db2_hardening.c",
         "src/modules/db2/c/db2_init.c",
         "src/modules/db2/c/db_postgres.c",
-        "src/modules/db2/c/memory_query.c",
         "src/modules/db2/c/pgvec_transport.c"
       ],
       "disposition": "system-link",
@@ -2296,9 +2199,6 @@
         "src/modules/db2/c/entity_profiles.c",
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/fact_mutation.c",
-        "src/modules/db2/c/memory_conflicts.c",
-        "src/modules/db2/c/memory_health.c",
-        "src/modules/db2/c/memory_relations.c",
         "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/support/time_primitives.c"
       ],
@@ -2332,9 +2232,6 @@
         "src/modules/db2/c/db_schema.c",
         "src/modules/db2/c/demotion.c",
         "src/modules/db2/c/fact_identity.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_relations.c",
-        "src/modules/db2/c/memory_score_fields.c",
         "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/vault_pg.c",
@@ -2382,6 +2279,30 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
+      "symbol": "memory_ontology_node_kind_to_text",
+      "references": [
+        "src/modules/db2/c/rel_types_store.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_pii_rel_sensitivity",
+      "references": [
+        "src/modules/db2/c/rel_types_store.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
+      "symbol": "memory_pii_turn_requests_sensitive",
+      "references": [
+        "src/modules/db2/c/fact_ingest.c"
+      ],
+      "disposition": "injected-module-contract",
+      "evidence": "The symbol belongs to a KB or sibling-module surface; replace the direct call with an injected bounded contract before standalone linking."
+    },
+    {
       "symbol": "mktime",
       "references": [
         "src/modules/db2/c/entity_edges.c"
@@ -2398,6 +2319,14 @@
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
+    },
+    {
+      "symbol": "pgvec_memory_vector_search_record_type",
+      "references": [
+        "src/modules/db2/c/pgvec_kb_service.c"
+      ],
+      "disposition": "portable-core-promotion",
+      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
     },
     {
       "symbol": "poll",
@@ -2566,8 +2495,6 @@
         "src/modules/db2/c/db2_witness_emit.c",
         "src/modules/db2/c/db_postgres.c",
         "src/modules/db2/c/fact_mutation.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_query.c",
         "src/modules/db2/support/cjson.c",
         "src/modules/db2/support/code_audit_graph_primitives.c",
         "src/modules/db2/support/dstr_primitives.c"
@@ -2641,7 +2568,6 @@
         "src/modules/db2/c/evidence_vectors.c",
         "src/modules/db2/c/fact_identity.c",
         "src/modules/db2/c/fact_mutation.c",
-        "src/modules/db2/c/fact_recall.c",
         "src/modules/db2/c/feature_rows.c",
         "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_audit_worm.c",
@@ -2662,22 +2588,6 @@
         "src/modules/db2/c/management_status_runtime.c",
         "src/modules/db2/c/management_token_roots.c",
         "src/modules/db2/c/membership.c",
-        "src/modules/db2/c/memory_briefing.c",
-        "src/modules/db2/c/memory_conflicts.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_health.c",
-        "src/modules/db2/c/memory_lifecycle.c",
-        "src/modules/db2/c/memory_lint.c",
-        "src/modules/db2/c/memory_payload.c",
-        "src/modules/db2/c/memory_promotion.c",
-        "src/modules/db2/c/memory_query.c",
-        "src/modules/db2/c/memory_query_bookkeeping.c",
-        "src/modules/db2/c/memory_relations.c",
-        "src/modules/db2/c/memory_row_mapper_pg.c",
-        "src/modules/db2/c/memory_scenes.c",
-        "src/modules/db2/c/memory_scope_query.c",
-        "src/modules/db2/c/memory_score_fields.c",
-        "src/modules/db2/c/memory_vectors.c",
         "src/modules/db2/c/mining.c",
         "src/modules/db2/c/oidc_jwks.c",
         "src/modules/db2/c/ontology_evolution.c",
@@ -2690,7 +2600,6 @@
         "src/modules/db2/c/org_vault_rotation.c",
         "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/project.c",
-        "src/modules/db2/c/prospective_memories.c",
         "src/modules/db2/c/rel_types_store.c",
         "src/modules/db2/c/report_enrichments.c",
         "src/modules/db2/c/rules.c",
@@ -2738,8 +2647,7 @@
       "references": [
         "src/modules/db2/c/canonical_index.c",
         "src/modules/db2/c/db2_init.c",
-        "src/modules/db2/c/db2_pool.c",
-        "src/modules/db2/c/memory_query.c"
+        "src/modules/db2/c/db2_pool.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -2817,7 +2725,6 @@
         "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/fact_mutation.c",
-        "src/modules/db2/c/fact_recall.c",
         "src/modules/db2/c/feedback.c",
         "src/modules/db2/c/fidelity.c",
         "src/modules/db2/c/kb_payload.c",
@@ -2837,12 +2744,6 @@
         "src/modules/db2/c/management_status_runtime.c",
         "src/modules/db2/c/management_token_authority.c",
         "src/modules/db2/c/management_token_roots.c",
-        "src/modules/db2/c/memory_health.c",
-        "src/modules/db2/c/memory_lifecycle.c",
-        "src/modules/db2/c/memory_query.c",
-        "src/modules/db2/c/memory_query_bookkeeping.c",
-        "src/modules/db2/c/memory_scope_query.c",
-        "src/modules/db2/c/memory_score_fields.c",
         "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/c/org_budget.c",
         "src/modules/db2/c/org_egress.c",
@@ -2850,7 +2751,6 @@
         "src/modules/db2/c/org_telemetry_fmt.c",
         "src/modules/db2/c/org_vault_rewrap.c",
         "src/modules/db2/c/pgvec_transport.c",
-        "src/modules/db2/c/prospective_memories.c",
         "src/modules/db2/c/report_enrichments.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/sketch.c",
@@ -2889,8 +2789,6 @@
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/kb_maintenance.c",
         "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/memory_lint.c",
-        "src/modules/db2/c/memory_query.c",
         "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/pgvec_verify.c",
         "src/modules/db2/c/rules.c",
@@ -2924,7 +2822,6 @@
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/kb_service_backend_ingest.c",
-        "src/modules/db2/c/memory_query.c",
         "src/modules/db2/c/pgvec_verify.c",
         "src/modules/db2/c/rules.c"
       ],
@@ -2941,9 +2838,6 @@
         "src/modules/db2/c/entity_profiles.c",
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/fact_mutation.c",
-        "src/modules/db2/c/memory_conflicts.c",
-        "src/modules/db2/c/memory_health.c",
-        "src/modules/db2/c/memory_relations.c",
         "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/support/time_primitives.c"
       ],
@@ -2987,8 +2881,6 @@
         "src/modules/db2/c/management_status_key.c",
         "src/modules/db2/c/management_status_provision.c",
         "src/modules/db2/c/management_token_roots.c",
-        "src/modules/db2/c/memory_export.c",
-        "src/modules/db2/c/memory_score_fields.c",
         "src/modules/db2/c/org_egress.c",
         "src/modules/db2/c/org_model_catalog.c",
         "src/modules/db2/c/org_telemetry_fmt.c",
@@ -2997,7 +2889,6 @@
         "src/modules/db2/c/org_vault_rotation.c",
         "src/modules/db2/c/pgvec_transport.c",
         "src/modules/db2/c/project.c",
-        "src/modules/db2/c/prospective_memories.c",
         "src/modules/db2/c/rules.c",
         "src/modules/db2/c/server_registry.c",
         "src/modules/db2/c/typed_facts.c",
@@ -3009,8 +2900,7 @@
         "src/modules/db2/support/code_audit_graph_primitives.c",
         "src/modules/db2/support/code_import_primitives.c",
         "src/modules/db2/support/extractor_primitives.c",
-        "src/modules/db2/support/model_validation_primitives.c",
-        "src/modules/db2/support/pii_classifier_primitives.c"
+        "src/modules/db2/support/model_validation_primitives.c"
       ],
       "disposition": "system-link",
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
@@ -3165,7 +3055,6 @@
         "src/modules/db2/c/management_identity_journal.c",
         "src/modules/db2/c/management_read_journal.c",
         "src/modules/db2/c/management_token_authority.c",
-        "src/modules/db2/c/memory_query_bookkeeping.c",
         "src/modules/db2/c/vault_pg.c"
       ],
       "disposition": "system-link",
@@ -3187,9 +3076,6 @@
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/fact_mutation.c",
         "src/modules/db2/c/kb_service_backend.c",
-        "src/modules/db2/c/memory_conflicts.c",
-        "src/modules/db2/c/memory_health.c",
-        "src/modules/db2/c/memory_relations.c",
         "src/modules/db2/c/ontology_evolution.c",
         "src/modules/db2/support/time_primitives.c"
       ],
@@ -3233,17 +3119,17 @@
     }
   ],
   "summary": {
-    "translation_units": 143,
-    "descriptor_support_units": 22,
-    "unresolved_symbols": 140,
+    "translation_units": 125,
+    "descriptor_support_units": 19,
+    "unresolved_symbols": 150,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
-      "injected-module-contract": 0,
-      "portable-core-promotion": 0,
+      "injected-module-contract": 3,
+      "portable-core-promotion": 7,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 140
     }
   },
-  "fingerprint": "bc88c720134efbd3b18a737d5c6bba252a59fcbb1568bbae1ca6bebfae8bfb75"
+  "fingerprint": "a7dcd21bc17fb73214fb01191c7a0015b2e103927898f17fc8cd8e9a2418e21f"
 }

@@ -1,566 +1,244 @@
-/* kb_memory_facts.c: background LLM extraction of typed facts from memories.
- * See kb_memory_facts.h. Mirrors the claim/done/fail job lifecycle of
- * kb_curator_extract.c against kb_async_jobs (kind='memory_facts'). */
+/* kb_memory_facts.c: connection adapter for the Go memory-fact pipeline.
+ *
+ * Job policy, leasing, prompt construction, deterministic extraction, model
+ * response parsing, grounding, relation canonicalisation, endpoint-kind
+ * selection, and retry decisions live in server-go/modules/memory. This file
+ * retains only the connections the C KB process owns: the curator provider,
+ * the memory event bus, and the transactional DB2 fact-commit ABI. */
 #include "kb_memory_facts.h"
-#include "kb_curator_sidecar.h"
+#include "kb_module_stage_adapters.h"
 
-#include "aimee.h"
 #include "cJSON.h"
-#include "config.h"
 #include "kb_curator_llm.h"
 #include "log.h"
-
 #include "modules/db2/c/db2_internal.h"
-#include "modules/db2/c/db_postgres.h"
-#include "modules/db2/c/fact_lifecycle.h"  /* FACT_AUTHORITY_MODEL */
-#include "modules/db2/c/memory_query.h"    /* db2_memory_get */
-#include "modules/db2/c/rel_types_store.h" /* db2_fact_commit */
-#include "modules/db2/c/fact_ingest.h"     /* db2_fact_ingest_text (offline pattern extraction) */
-#include "fact_grounding.h"
-#include "rel_types.h" /* seed ontology: rel_types_seed_* (extractor constraint, §7) */
-#include "memory.h"    /* memory_t */
-#include "modules/memory/memory_ontology.h" /* NODE_* */
+#include "modules/db2/c/rel_types_store.h"
 
-#include <ctype.h>
-#include <stdio.h>
+#include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h> /* strcasecmp */
-#include <time.h>    /* time() — reclaim throttle */
-#include <openssl/sha.h>
 
-#define MF_ERRBUF       256
-#define MF_LLM_OUT_CAP  8192
-#define MF_MAX_ATTEMPTS 3
-/* A job left in 'running' longer than this lease was orphaned (worker crash/
- * restart or a wedged LLM call). Mirrors the curator stages' lease. */
-#define MF_STALE_LEASE "-15 minutes"
-/* Reclaim runs at most this often (throttled; the drain calls it per batch). */
-#define MF_RECLAIM_EVERY_S 60
-/* Auto-injected into every turn (ingress_preinject), so precision matters more
- * than recall: a wrong fact is repeated back forever.
- *
- * This used to be a floor on the model's self-reported confidence (>= 0.6).
- * Measured across 18 extraction models on the Tier-A benchmark, that number
- * carries almost no signal: most models write exactly 0.0 or exactly 0.9 and
- * nothing between, several write 0.0 for every fact including the ones they get
- * right, and for one model the low-confidence facts are MORE accurate than the
- * confident ones. The floor silently discarded everything four models extracted
- * — Qwen3-0.6B commits nothing at 0.6, while 40% of what it extracts is correct.
- *
- * Replaced with a check on the text instead of on the model's opinion of itself:
- * a fact commits only if both of its endpoints can be traced back to the note.
- * That needs no calibration, behaves identically for every provider, and catches
- * the failure that actually matters here — an invented entity. A hallucinated
- * person carries a confidence of 0.9 just as happily as a real one. */
+#define MF_ERRBUF      256
+#define MF_LLM_OUT_CAP 8192
 
-/* The model must return ONLY durable, generalizable subject-relation-object
- * facts -- not transient state, opinions, or one-off events. relation is a short
- * snake_case predicate; object is the value. Conservative by design: an empty
- * list is the right answer when the text asserts no durable fact. */
-/* Extraction prompt template. The `%s` is filled with the canonical relation list
- * from the seed ontology (rel_types.c) at run time — this is the autonomous
- * reconciliation step (proposal §7): the model is bound to relations the write
- * gate already treats as durable, so an extracted fact commits ACTIVE and
- * recallable instead of being stranded as a provisional Class-C edge. When no
- * seed relation fits, the model emits its own concise predicate (never a generic
- * catch-all), which stays a distinguishable provisional candidate for §7.2. */
-#define MF_SYSTEM_PROMPT_TMPL                                                                      \
-   "You extract durable facts from a single remembered note. Return ONLY a JSON "                  \
-   "object: {\"facts\":[{\"subject\":\"\",\"relation\":\"\",\"object\":\"\","                      \
-   "\"confidence\":0.0,\"source_start\":0,\"source_end\":1}]}. source_start and "                  \
-   "source_end are exact zero-based UTF-8 byte offsets into the note, with source_end "            \
-   "exclusive, covering the smallest passage that directly supports that fact. Every fact "        \
-   "is a stable subject-relation-object triple "                                                   \
-   "grounded strictly in the note. For relation, choose the single nearest fit "                   \
-   "from these canonical predicates when one reasonably applies: %s. If NONE fits, "               \
-   "emit a concise snake_case predicate of your own (e.g. drives, founded, "                       \
-   "mentors) — NEVER a generic catch-all such as "                                                 \
-   "\"other\"/\"unknown\"/\"misc\". subject is the entity the fact is about "                      \
-   "(use \"user\" for the note's author when it is first-person). "                                \
-   "confidence is 0..1. Extract only durable, generalizable facts; skip transient "                \
-   "state, feelings, plans, and one-off events. If the note RETRACTS or DENIES "                   \
-   "something (\"no longer\", \"did not\", \"never\", \"is not\", \"has left\", "                  \
-   "\"was removed\"), do NOT emit the negated fact - a retraction asserts a fact "                 \
-   "is FALSE, so there is nothing durable to record. "                                             \
-   "Omit any fact whose exact supporting span cannot be identified. "                              \
-   "If the note asserts no durable fact, return exactly {\"facts\":[]} - the "                     \
-   "wrapper object is ALWAYS required, never a bare []. No prose, no markdown."
-
-/* Build the extraction system prompt, binding the model to the canonical relation
- * set (autonomous reconciliation, §7). Sourced from the seed ontology so it stays
- * in lockstep with the write gate — no second copy of the relation list. */
-static void mf_build_system_prompt(char *buf, size_t cap)
+static const char *json_string(const cJSON *object, const char *name)
 {
-   char rels[768];
-   size_t p = 0;
-   int n = rel_types_seed_count();
-   for (int i = 0; i < n && p < sizeof(rels) - 1; i++)
-   {
-      const rel_type_def_t *d = rel_types_seed_at(i);
-      if (!d || !d->rel_type || !d->rel_type[0])
-         continue;
-      p += (size_t)snprintf(rels + p, sizeof(rels) - p, "%s%s", p ? ", " : "", d->rel_type);
-   }
-   if (!p) /* defensive: an empty seed would leave the model unconstrained */
-      snprintf(rels, sizeof(rels), "works_for, has_role, lives_in, born_in");
-   snprintf(buf, cap, MF_SYSTEM_PROMPT_TMPL, rels);
+   const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+   return cJSON_IsString(item) && item->valuestring ? item->valuestring : NULL;
 }
 
-typedef struct
+static int json_integer(const cJSON *object, const char *name, int *out)
 {
-   int64_t job_id;
-   int64_t memory_id;
-   int attempts;
-} mf_job_t;
-
-static int mf_claim_job(mf_job_t *out)
-{
-   void *conn = db2_conn();
-   if (!conn)
-      return 0;
-
-   static const char *sql = "UPDATE kb_async_jobs"
-                            " SET status = 'running',"
-                            "     claimed_by = 'kb.memory.facts',"
-                            "     claimed_at = pg_now_text(),"
-                            "     attempts   = attempts + 1,"
-                            "     updated_at = pg_now_text()"
-                            " WHERE id = ("
-                            "   SELECT id FROM kb_async_jobs"
-                            "   WHERE kind = 'memory_facts' AND status = 'pending'"
-                            /* Skip jobs still serving their retry backoff. */
-                            "     AND (next_attempt_at = '' OR next_attempt_at <= ?1)"
-                            "   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
-                            " )"
-                            " RETURNING id, document_id, attempts";
-
-   char err[MF_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!st)
-      return 0;
-   char now_text[32];
-   kb_curator_now_text(now_text, sizeof(now_text));
-   aimee_pg_bind_text(st, "?1", now_text);
-
-   int found = 0;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      out->job_id = aimee_pg_column_int64(st, 0);
-      out->memory_id = aimee_pg_column_int64(st, 1);
-      out->attempts = aimee_pg_column_int(st, 2);
-      found = 1;
-   }
-   aimee_pg_finalize(st);
-   return found;
-}
-
-static void mf_mark_done(int64_t job_id)
-{
-   void *conn = db2_conn();
-   if (!conn)
-      return;
-   char err[MF_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "UPDATE kb_async_jobs SET status='done', last_error='', next_attempt_at='',"
-                        " claimed_by='', claimed_at='', updated_at=pg_now_text() WHERE id=?1",
-                        err, sizeof(err));
-   if (!st)
-      return;
-   aimee_pg_bind_int64(st, "?1", job_id);
-   (void)aimee_pg_step(st, err, sizeof(err));
-   aimee_pg_finalize(st);
-}
-
-static void mf_mark_retry_or_fail(int64_t job_id, int attempts, const char *error_msg)
-{
-   void *conn = db2_conn();
-   if (!conn)
-      return;
-   const char *new_status = (attempts >= MF_MAX_ATTEMPTS) ? "failed" : "pending";
-   char err[MF_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "UPDATE kb_async_jobs SET status=?1, last_error=?2, next_attempt_at=?4,"
-                        " updated_at=pg_now_text() WHERE id=?3",
-                        err, sizeof(err));
-   if (!st)
-      return;
-   char next_at[32];
-   kb_curator_next_attempt_at(attempts, next_at, sizeof(next_at));
-   aimee_pg_bind_text(st, "?4", next_at);
-   aimee_pg_bind_text(st, "?1", new_status);
-   aimee_pg_bind_text(st, "?2", error_msg ? error_msg : "");
-   aimee_pg_bind_int64(st, "?3", job_id);
-   (void)aimee_pg_step(st, err, sizeof(err));
-   aimee_pg_finalize(st);
-}
-
-/* Reclaim memory_facts jobs orphaned in 'running'. Identical in shape and
- * rationale to the extract_doc reclaim in kb_curator_extract.c: mf_claim_job
- * only ever selects status='pending', so a job whose worker crashed or whose
- * LLM call wedged stays 'running' forever — never retried, and pinning a db2
- * pool member past its ceiling. Reset rows older than the lease to 'pending',
- * or to 'failed' once attempts are exhausted so a poison job cannot loop.
- * attempts is preserved (incremented at claim time).
- *
- * Scoped to kind='memory_facts' so it cannot disturb the other stages sharing
- * kb_async_jobs. Throttled — the drain calls this once per batch. Unlike the
- * extract_doc reclaim, the throttle needs no lock: kb_memory_facts_drain has a
- * single caller on the drain thread (no worker pool), so this is single-entry. */
-static void mf_reclaim_stale_running(void)
-{
-   static time_t last_run = 0;
-   time_t now = time(NULL);
-   if (last_run != 0 && now - last_run < MF_RECLAIM_EVERY_S)
-      return;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return; /* never ran: leave the throttle unarmed so the next call retries */
-   char err[MF_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "UPDATE kb_async_jobs"
-       " SET status = CASE WHEN attempts >= ?1 THEN 'failed' ELSE 'pending' END,"
-       "     claimed_by = '', claimed_at = '',"
-       /* Preserve an existing diagnostic; see the extract_doc reclaim. */
-       "     last_error = CASE WHEN attempts >= ?1 AND last_error = ''"
-       "                       THEN 'stale running lease reclaimed after max attempts'"
-       "                       ELSE last_error END,"
-       "     updated_at = pg_now_text()"
-       " WHERE kind = 'memory_facts' AND status = 'running'"
-       "   AND claimed_at <> ''"
-       /* Compare the lease by VALUE, not as raw text. pg_now_text() is canonical
-        * ISO, but a row claimed before that became canonical still carries the
-        * space separator, and a text compare decides at character 10 where ' '
-        * (0x20) sorts below 'T' (0x54) -- so a legacy row read as older than any
-        * same-date threshold and its live lease was reclaimed out from under it.
-        * Lease horizons are minutes, so "same date" is the normal case here, not
-        * an edge. */
-       "   AND rtrim(replace(claimed_at,'T',' '),'Z')"
-       "     < rtrim(replace(pg_now_text(?2),'T',' '),'Z')",
-       err, sizeof(err));
-   if (!st)
-   {
-      aimee_log(LOG_WARN, "kb.memory.facts", "stale-lease reclaim could not prepare: %s", err);
-      return;
-   }
-   aimee_pg_bind_int(st, "?1", MF_MAX_ATTEMPTS);
-   aimee_pg_bind_text(st, "?2", MF_STALE_LEASE);
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
-      last_run = now; /* only a completed UPDATE arms the throttle */
-   else
-      aimee_log(LOG_WARN, "kb.memory.facts", "stale-lease reclaim failed: %s", err);
-   aimee_pg_finalize(st);
-}
-
-/* Subject kind: a first-person/user subject or a capitalized name is a person;
- * otherwise NODE_OTHER. The gate only enforces kinds for its seed relations, so
- * an imperfect guess at most costs a skipped seed-relation commit. */
-static memory_node_kind_t mf_subject_kind(const char *subject)
-{
-   if (!subject || !subject[0])
-      return NODE_OTHER;
-   if (strcasecmp(subject, "user") == 0 || strcasecmp(subject, "i") == 0)
-      return NODE_PERSON;
-   return (subject[0] >= 'A' && subject[0] <= 'Z') ? NODE_PERSON : NODE_OTHER;
-}
-
-/* Parse {"facts":[...]} and commit each triple above the confidence floor.
- * Returns the number committed (ACCEPT or NOVEL). */
-int kb_memory_fact_evidence_span(const char *content, int64_t source_start, int64_t source_end,
-                                 char *span_out, size_t span_cap, char *hash_out, size_t hash_cap)
-{
-   if (!content || !span_out || span_cap < 12 || !hash_out || hash_cap < 65 || source_start < 0 ||
-       source_end <= source_start || (uint64_t)source_end > strlen(content))
+   const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+   if (!out || !cJSON_IsNumber(item) || !isfinite(item->valuedouble) ||
+       item->valuedouble != (double)item->valueint)
       return -1;
-   int n = snprintf(span_out, span_cap, "bytes:%lld-%lld", (long long)source_start,
-                    (long long)source_end);
-   if (n < 0 || (size_t)n >= span_cap)
-      return -1;
-   unsigned char digest[SHA256_DIGEST_LENGTH];
-   SHA256((const unsigned char *)content + source_start, (size_t)(source_end - source_start),
-          digest);
-   for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-      snprintf(hash_out + (size_t)i * 2, 3, "%02x", digest[i]);
+   *out = item->valueint;
    return 0;
 }
 
-static int mf_commit_facts(const char *llm_json, const char *source_content,
-                           const fact_evidence_input_t *base_evidence)
+static int json_int64(const cJSON *object, const char *name, int64_t *out)
 {
-   if (!llm_json)
-      return 0;
-   /* Models often wrap the JSON in ```json ... ``` fences or add a sentence of
-    * prose despite instructions. Parse the outermost {...} object so a fenced or
-    * prefixed response still yields facts. */
-   /* A bare "[]" is a CORRECT abstention, not a malformed response. Small models
-    * write it instead of {"facts":[]} on notes that assert no durable fact —
-    * 297 of 1000 notes in the tier-A small-corpus run, of which 184 were notes
-    * whose gold is deliberately empty. Both spellings mean "nothing to commit",
-    * and both return 0 here, so the two are indistinguishable to the caller and
-    * to anyone reading a log. Report the abstention explicitly so a future
-    * "the model emits nothing" investigation can tell refusal from garbage. */
-   const char *p = llm_json;
-   while (*p && isspace((unsigned char)*p))
-      p++;
-   if (p[0] == '[' && p[1] == ']')
-   {
-      aimee_log(LOG_DEBUG, "kb.memory.facts", "note yielded an explicit empty extraction ('[]')");
-      return 0;
-   }
-   const char *start = strchr(llm_json, '{');
-   const char *end = strrchr(llm_json, '}');
-   if (!start || !end || end < start)
-   {
-      aimee_log(LOG_WARN, "kb.memory.facts",
-                "response contained no JSON object - nothing committed");
-      return 0;
-   }
-   size_t span = (size_t)(end - start) + 1;
-   char *obj = malloc(span + 1);
-   if (!obj)
-      return 0;
-   memcpy(obj, start, span);
-   obj[span] = '\0';
-   cJSON *root = cJSON_Parse(obj);
-   free(obj);
-   if (!root)
-      return 0;
-   cJSON *facts = cJSON_GetObjectItemCaseSensitive(root, "facts");
-   if (!cJSON_IsArray(facts))
-   {
-      cJSON_Delete(root);
-      return 0;
-   }
+   const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+   if (!out || !cJSON_IsNumber(item) || !isfinite(item->valuedouble) ||
+       item->valuedouble < (double)INT64_MIN || item->valuedouble > (double)INT64_MAX ||
+       trunc(item->valuedouble) != item->valuedouble)
+      return -1;
+   *out = (int64_t)item->valuedouble;
+   return 0;
+}
 
-   char note_norm[4096];
-   fact_norm_text(source_content, note_norm, sizeof(note_norm));
+static int actor_from_json(const cJSON *object, fact_actor_t *out)
+{
+   const char *principal = json_string(object, "principal");
+   const char *transport = json_string(object, "transport_identity");
+   const char *role = json_string(object, "role");
+   int rank = 0, authenticated = 0;
+   if (!out || !principal || !principal[0] || !role || !role[0] ||
+       json_integer(object, "rank", &rank) != 0 ||
+       json_integer(object, "authenticated", &authenticated) != 0 ||
+       rank < FACT_ACTOR_MODEL || rank > FACT_ACTOR_USER)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   if (strlen(principal) >= sizeof(out->principal) || strlen(role) >= sizeof(out->role) ||
+       (transport && strlen(transport) >= sizeof(out->transport_identity)))
+      return -1;
+   memcpy(out->principal, principal, strlen(principal) + 1);
+   memcpy(out->role, role, strlen(role) + 1);
+   if (transport)
+      memcpy(out->transport_identity, transport, strlen(transport) + 1);
+   else
+      memcpy(out->transport_identity, "internal", sizeof("internal"));
+   out->rank = (fact_actor_rank_t)rank;
+   out->authenticated = authenticated != 0;
+   return 0;
+}
 
+static int commit_candidates(const cJSON *array)
+{
+   if (!array)
+      return 0;
+   if (!cJSON_IsArray(array))
+      return -1;
    int committed = 0;
-   int ungrounded = 0;
-   int malformed = 0;
-   cJSON *f = NULL;
-   cJSON_ArrayForEach(f, facts)
+   const cJSON *item = NULL;
+   cJSON_ArrayForEach(item, array)
    {
-      if (!cJSON_IsObject(f))
-         continue;
-      const cJSON *subj_j = cJSON_GetObjectItemCaseSensitive(f, "subject");
-      const cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(f, "relation");
-      const cJSON *obj_j = cJSON_GetObjectItemCaseSensitive(f, "object");
-      const cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(f, "confidence");
-      const cJSON *start_j = cJSON_GetObjectItemCaseSensitive(f, "source_start");
-      const cJSON *end_j = cJSON_GetObjectItemCaseSensitive(f, "source_end");
-      const char *subject = cJSON_IsString(subj_j) ? subj_j->valuestring : "";
-      const char *raw_relation = cJSON_IsString(rel_j) ? rel_j->valuestring : "";
-      const char *object = cJSON_IsString(obj_j) ? obj_j->valuestring : "";
-      double conf = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 0.0;
+      const char *subject = json_string(item, "subject");
+      const char *relation = json_string(item, "relation");
+      const char *object = json_string(item, "object");
+      const char *assertion_kind = json_string(item, "assertion_kind");
+      const char *valid_from = json_string(item, "valid_from");
+      const char *valid_until = json_string(item, "valid_until");
+      const cJSON *actor_json = cJSON_GetObjectItemCaseSensitive(item, "actor");
+      const cJSON *evidence_json = cJSON_GetObjectItemCaseSensitive(item, "evidence");
+      int subject_kind = 0, object_kind = 0;
+      fact_actor_t actor;
+      if (!subject || !subject[0] || !relation || !relation[0] || !object || !object[0] ||
+          !assertion_kind || !assertion_kind[0] || !cJSON_IsObject(actor_json) ||
+          !cJSON_IsObject(evidence_json) || json_integer(item, "subject_kind", &subject_kind) != 0 ||
+          json_integer(item, "object_kind", &object_kind) != 0 ||
+          actor_from_json(actor_json, &actor) != 0)
+         return -1;
 
-      if (!subject[0] || !raw_relation[0] || !object[0])
-      {
-         malformed++;
-         continue;
-      }
-      /* Both endpoints must be traceable to the note. Counted, not silent: a
-       * drop that commits nothing used to look exactly like "the model cannot
-       * extract". */
-      if (!fact_grounded(subject, note_norm) || !fact_grounded(object, note_norm))
-      {
-         ungrounded++;
-         continue;
-      }
-      (void)conf; /* recorded by the model, not trusted — see the note above */
+      fact_evidence_input_t evidence = {
+          .source_kind = json_string(evidence_json, "source_kind"),
+          .source_id = json_string(evidence_json, "source_id"),
+          .source_span = json_string(evidence_json, "source_span"),
+          .evidence_hash = json_string(evidence_json, "evidence_hash"),
+          .actor_principal = json_string(evidence_json, "actor_principal"),
+          .observed_at = json_string(evidence_json, "observed_at"),
+          .ingest_run_id = json_string(evidence_json, "ingest_run_id"),
+          .stance = json_string(evidence_json, "stance"),
+      };
+      if (!evidence.source_kind || !evidence.source_id || !evidence.source_span ||
+          !evidence.evidence_hash || !evidence.actor_principal || !evidence.observed_at ||
+          !evidence.ingest_run_id || !evidence.stance)
+         return -1;
 
-      /* Fold a known synonym onto its canonical seed relation before anything
-       * downstream sees it: the gate would otherwise return NOVEL for "has_ip"
-       * and stage a provisional rel_type on a Class-C edge, when we already
-       * model exactly that relation as device_has_ip. Entities have had this
-       * (db2_entity_alias_bind); relations have not. Unknown labels pass through
-       * normalized, so a genuinely new predicate still stages for §7.2. */
-      char relation_buf[REL_TYPE_NAME_MAX];
-      rel_type_canonicalize(raw_relation, relation_buf, sizeof(relation_buf));
-      const char *relation = relation_buf[0] ? relation_buf : raw_relation;
-
-      if (!cJSON_IsNumber(start_j) || !cJSON_IsNumber(end_j))
-      {
-         malformed++;
-         continue;
-      }
-      int64_t source_start = (int64_t)start_j->valuedouble;
-      int64_t source_end = (int64_t)end_j->valuedouble;
-      if ((double)source_start != start_j->valuedouble || (double)source_end != end_j->valuedouble)
-      {
-         malformed++;
-         continue;
-      }
-      char exact_span[64], exact_hash[SHA256_DIGEST_LENGTH * 2 + 1];
-      if (kb_memory_fact_evidence_span(source_content, source_start, source_end, exact_span,
-                                       sizeof(exact_span), exact_hash, sizeof(exact_hash)) != 0)
-      {
-         malformed++;
-         continue;
-      }
-      fact_evidence_input_t evidence = base_evidence ? *base_evidence : (fact_evidence_input_t){0};
-      evidence.source_span = exact_span;
-      evidence.evidence_hash = exact_hash;
-
-      /* The extractor supplies no node kinds, so guess: subject via
-       * mf_subject_kind, object OTHER (unknown). But the kind gate REJECTS a
-       * seed relation whose endpoint kind mismatches its ontology def (e.g.
-       * works_for wants tail=ORG) — a wrong guess silently drops every such
-       * fact. For a known seed relation, take the endpoint kinds the relation
-       * itself implies (its def's canonical kinds) whenever the guess is not
-       * already allowed; novel relations keep the guess (not kind-checked). */
-      memory_node_kind_t subj_kind = mf_subject_kind(subject);
-      memory_node_kind_t obj_kind = NODE_OTHER;
-      const rel_type_def_t *sdef = rel_types_seed_lookup(relation);
-      if (sdef)
-      {
-         if (!rel_type_kind_allowed(sdef, 1, subj_kind) && sdef->head_kind_count > 0)
-            subj_kind = sdef->head_kinds[0];
-         if (!rel_type_kind_allowed(sdef, 0, obj_kind) && sdef->tail_kind_count > 0)
-            obj_kind = sdef->tail_kinds[0];
-      }
-      fact_actor_t model_actor;
-      if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &model_actor) != 0)
-         continue;
-      fact_gate_verdict_t v = db2_fact_commit_with_actor(
-          subject, subj_kind, relation, object, obj_kind, &model_actor, 1, &evidence,
-          FACT_KIND_OBSERVATION, evidence.observed_at, NULL);
-      if (v == FACT_GATE_ACCEPT || v == FACT_GATE_NOVEL)
+      fact_gate_verdict_t verdict = db2_fact_commit_with_actor(
+          subject, (memory_node_kind_t)subject_kind, relation, object,
+          (memory_node_kind_t)object_kind, &actor, 1, &evidence, assertion_kind,
+          valid_from ? valid_from : "", valid_until ? valid_until : "");
+      if (verdict == FACT_GATE_ACCEPT || verdict == FACT_GATE_NOVEL)
          committed++;
    }
-   /* A provider whose confidences are uninformative drops every fact here, and
-    * the job still reports success — that combination once looked exactly like
-    * "the model cannot extract". Say so instead of committing silently. */
-   if (ungrounded > 0 || malformed > 0)
-      aimee_log(committed == 0 ? LOG_WARN : LOG_INFO, "kb.memory.facts",
-                "dropped %d ungrounded + %d malformed fact(s), committed %d%s", ungrounded,
-                malformed, committed, committed == 0 ? " - NOTHING committed for this note" : "");
-   cJSON_Delete(root);
    return committed;
 }
 
-static int mf_process_one(const mf_job_t *job)
+static int finish_job(int64_t job_id, int success, const char *reason)
 {
-   memory_t mem;
-   memset(&mem, 0, sizeof(mem));
-   if (db2_memory_get(job->memory_id, &mem) != 0 || !mem.content[0])
-   {
-      /* Memory gone or empty -- nothing to extract; treat as done. */
-      mf_mark_done(job->job_id);
-      return 0;
-   }
-   fact_actor_t source_actor;
-   if (db2_fact_actor_for_memory(job->memory_id, &source_actor) != 0)
-   {
-      /* Upgrade compatibility for jobs queued before memory_fact_actors existed:
-       * never invent user authority when the original identity is unknowable. */
-      if (db2_fact_actor_internal(FACT_ACTOR_MODEL, &source_actor) != 0)
-         return -1;
-   }
-
-   /* Every extracted assertion cites the source memory independently.  The hash
-    * covers the exact note, the span identifies the extraction region, and the
-    * async job id is the ingest-run identity shared by pattern + LLM passes. */
-   unsigned char digest[SHA256_DIGEST_LENGTH];
-   char evidence_hash[SHA256_DIGEST_LENGTH * 2 + 1];
-   SHA256((const unsigned char *)mem.content, strlen(mem.content), digest);
-   for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-      snprintf(evidence_hash + (size_t)i * 2, 3, "%02x", digest[i]);
-   char source_id[64], source_span[64], ingest_run_id[64];
-   snprintf(source_id, sizeof(source_id), "memory:%lld", (long long)job->memory_id);
-   snprintf(source_span, sizeof(source_span), "bytes:0-%zu", strlen(mem.content));
-   snprintf(ingest_run_id, sizeof(ingest_run_id), "memory-facts:%lld", (long long)job->job_id);
-   fact_evidence_input_t evidence = {.source_kind = "memory",
-                                     .source_id = source_id,
-                                     .source_span = source_span,
-                                     .evidence_hash = evidence_hash,
-                                     .actor_principal = source_actor.principal,
-                                     .observed_at = mem.created_at,
-                                     .ingest_run_id = ingest_run_id,
-                                     .stance = "supports"};
-
-   /* Deterministic pattern-first extraction, moved off the synchronous store/turn
-    * path to the drain: high-precision regex triples committed idempotently. Runs
-    * before the LLM pass so obvious facts ("my name is X") still land even if the
-    * LLM sidecar is unavailable or the job later exhausts its retries. */
-   /* A negative result now means the extraction module gave no answer, not just
-    * a bad argument. The drain still goes on to the LLM pass -- the job is not
-    * failed over it -- but it is not silently nothing either: pattern facts are
-    * missing from this memory until it is reprocessed.
-    *
-    * The authority comes from the ROW, not from this worker. A drain has no
-    * caller to authenticate: it runs long after the write, so the only honest
-    * source is the provenance recorded when the note was stored — which the
-    * store path derives from the writer's attested identity and surface. Text
-    * the user actually typed can still yield Class-A facts; text the agent
-    * composed cannot, however confidently it was written (typed-fact §1/§5:
-    * a model-sourced triple never enters at Class A). This used to be a flat
-    * FACT_AUTHORITY_USER, which made every note the model chose to remember a
-    * source of permanent facts outranking the user's own. */
-   if (db2_fact_ingest_text_as_actor(mem.content, &source_actor, 1, &evidence, FACT_KIND_WORLD_FACT,
-                                     mem.created_at, NULL) < 0)
-      aimee_log(LOG_WARN, "kb.memory.facts", "pattern extraction gave no answer for memory %lld",
-                (long long)job->memory_id);
-
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
       return -1;
-   cJSON_AddStringToObject(req, "content", mem.content);
-   char *request_json = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
-   if (!request_json)
-      return -1;
+   cJSON_AddStringToObject(request, "operation", "memory-facts-finish");
+   cJSON_AddNumberToObject(request, "id", (double)job_id);
+   cJSON_AddBoolToObject(request, "success", success != 0);
+   if (reason && reason[0])
+      cJSON_AddStringToObject(request, "reason", reason);
+   cJSON *response = kb_module_memory_data(request);
+   cJSON_Delete(request);
+   const cJSON *updated = response ? cJSON_GetObjectItemCaseSensitive(response, "updated") : NULL;
+   int ok = cJSON_IsTrue(updated);
+   cJSON_Delete(response);
+   return ok ? 0 : -1;
+}
 
-   char sys_prompt[2560];
-   mf_build_system_prompt(sys_prompt, sizeof(sys_prompt));
-
-   /* The job row and source memory are already copied locally. Release the
-    * worker's lazy pool lease before the potentially multi-minute LLM call;
-    * retry/done writes below safely re-acquire it. */
-   db2_lease_release_idle();
-
-   char err[MF_ERRBUF] = "";
-   char *resp = kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, sys_prompt, request_json, NULL,
-                                   "", MF_LLM_OUT_CAP, err, sizeof(err));
-   free(request_json);
-   if (!resp)
-   {
-      mf_mark_retry_or_fail(job->job_id, job->attempts, err[0] ? err : "llm run failed");
-      return -1;
-   }
-
-   int n = mf_commit_facts(resp, mem.content, &evidence);
-   free(resp);
-   mf_mark_done(job->job_id);
-   if (n > 0)
-      aimee_log(LOG_INFO, "kb.memory.facts", "memory %lld -> %d typed fact(s)",
-                (long long)job->memory_id, n);
-   return n;
+static cJSON *parse_response(int64_t job_id, const char *provider_response)
+{
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return NULL;
+   cJSON_AddStringToObject(request, "operation", "memory-facts-parse");
+   cJSON_AddNumberToObject(request, "id", (double)job_id);
+   cJSON_AddStringToObject(request, "content", provider_response ? provider_response : "");
+   cJSON *response = kb_module_memory_data(request);
+   cJSON_Delete(request);
+   return response;
 }
 
 int kb_memory_facts_drain(int batch)
 {
    if (batch <= 0)
       return 0;
-   if (!db2_conn())
-      return 0;
-
-   /* Recover jobs orphaned in 'running' before claiming fresh work, so a crash/
-    * restart or a previously-wedged LLM call cannot permanently strand them. */
-   mf_reclaim_stale_running();
-
    int processed = 0;
    for (int i = 0; i < batch; i++)
    {
-      mf_job_t job;
-      memset(&job, 0, sizeof(job));
-      if (!mf_claim_job(&job))
+      cJSON *claim = cJSON_CreateObject();
+      if (!claim)
          break;
-      (void)mf_process_one(&job);
+      cJSON_AddStringToObject(claim, "operation", "memory-facts-claim");
+      cJSON *claim_response = kb_module_memory_data(claim);
+      cJSON_Delete(claim);
+      const cJSON *work = claim_response
+                              ? cJSON_GetObjectItemCaseSensitive(claim_response, "fact_work")
+                              : NULL;
+      if (!cJSON_IsObject(work))
+      {
+         cJSON_Delete(claim_response);
+         break;
+      }
+
+      int64_t job_id = 0, memory_id = 0;
+      const char *system_prompt = json_string(work, "system_prompt");
+      const char *content = json_string(work, "content");
+      const cJSON *pattern = cJSON_GetObjectItemCaseSensitive(work, "candidates");
+      if (json_int64(work, "job_id", &job_id) != 0 ||
+          json_int64(work, "memory_id", &memory_id) != 0 || job_id <= 0 || memory_id <= 0 ||
+          !system_prompt || !content || commit_candidates(pattern) < 0)
+      {
+         if (job_id > 0)
+            (void)finish_job(job_id, 0, "invalid memory module work item");
+         cJSON_Delete(claim_response);
+         processed++;
+         continue;
+      }
+
+      cJSON *provider_request = cJSON_CreateObject();
+      if (provider_request)
+         cJSON_AddStringToObject(provider_request, "content", content);
+      char *request_json = provider_request ? cJSON_PrintUnformatted(provider_request) : NULL;
+      cJSON_Delete(provider_request);
+      if (!request_json)
+      {
+         (void)finish_job(job_id, 0, "could not encode curator request");
+         cJSON_Delete(claim_response);
+         processed++;
+         continue;
+      }
+
+      db2_lease_release_idle();
+      char err[MF_ERRBUF] = "";
+      char *provider_response = kb_curator_llm_run(
+          KB_CURATOR_STAGE_EXTRACT_DOCS, system_prompt, request_json, NULL, "", MF_LLM_OUT_CAP,
+          err, sizeof(err));
+      free(request_json);
+      if (!provider_response)
+      {
+         (void)finish_job(job_id, 0, err[0] ? err : "llm run failed");
+         cJSON_Delete(claim_response);
+         processed++;
+         continue;
+      }
+
+      cJSON *parsed = parse_response(job_id, provider_response);
+      free(provider_response);
+      const cJSON *model = parsed
+                               ? cJSON_GetObjectItemCaseSensitive(parsed, "fact_candidates")
+                               : NULL;
+      int committed = commit_candidates(model);
+      if (!parsed || committed < 0)
+         (void)finish_job(job_id, 0, "memory module rejected provider response");
+      else
+      {
+         (void)finish_job(job_id, 1, "");
+         if (committed > 0)
+            aimee_log(LOG_INFO, "kb.memory.facts", "memory %lld -> %d typed fact(s)",
+                      (long long)memory_id, committed);
+      }
+      cJSON_Delete(parsed);
+      cJSON_Delete(claim_response);
       processed++;
    }
    return processed;

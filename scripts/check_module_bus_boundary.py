@@ -49,7 +49,6 @@ PENDING_BUS_MIGRATION = {
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_worm.h"),
     ("src/modules/guardrails/guardrails_orchestrator.c", "aimee/skills/skill.h"),
     ("src/modules/memory/gw_stage_memory.h", "aimee/gateway/gateway_pipeline.h"),
-    ("src/modules/memory/memory_assemble.c", "aimee/workspace/workspace.h"),
     ("src/modules/roadmap/roadmap_auto.c", "aimee/delegates/delegate_launch.h"),
     ("src/modules/roundtable/delegate_ensemble.c", "aimee/delegates/delegate_credentials.h"),
     ("src/modules/tools/agent_tools.c", "aimee/protocols/mcp/mcp_client_registry.h"),
@@ -75,7 +74,6 @@ PRIVATE_HEADER_REACH = {
     ("src/modules/guardrails/guardrails_orchestrator.c", "modules/workspace/workspace_provider.h"),
     ("src/modules/guardrails/guardrails_orchestrator.c", "modules/workspace/workspace_turn.h"),
     ("src/modules/guardrails/guardrails_tdd.c", "modules/git/git_verify.h"),
-    ("src/modules/memory/memory_context.c", "modules/learning/learning_evidence.h"),
     ("src/modules/tools/agent_tools.c", "modules/workspace/workspace_provider.h"),
     ("src/modules/tools/agent_tools_anchored.c", "modules/workspace/workspace_provider.h"),
     ("src/modules/tools/agent_tools_dispatch.c", "modules/workspace/workspace_provider.h"),
@@ -112,7 +110,6 @@ CORE_LINKED_REACH = {
     ("src/modules/kb_client/kb_client.c", "vault/runtime_secret.h"),
     ("src/modules/kb_client/kb_client_mtls.c", "vault/runtime_secret.h"),
     ("src/modules/kb_client/kb_client_ws.c", "vault/runtime_secret.h"),
-    ("src/modules/memory/memory_core_helpers_b.c", "vault/runtime_secret.h"),
     ("src/modules/protocols/mcp/mcp_client_registry.c", "vault/runtime_secret.h"),
     ("src/modules/roundtable/delegate_ensemble.c", "vault/runtime_secret.h"),
 }

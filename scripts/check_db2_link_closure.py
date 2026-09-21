@@ -88,10 +88,6 @@ REVIEWED_SOURCE_UPDATES = {
         "src/modules/db2/c/entity_edges.c",
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/learning.c",
-        "src/modules/db2/c/memory_query.c",
-        "src/modules/db2/c/memory_relations.c",
-        "src/modules/db2/c/memory_scope_query.c",
-        "src/modules/db2/c/memory_score_fields.c",
         "src/modules/db2/c/notes.c",
         "src/modules/db2/c/typed_facts.c",
     )
@@ -389,9 +385,14 @@ CJSON_BASE_REFERENCES = {
         "src/modules/db2/c/rules.c",
     ],
 }
+RETIRED_MEMORY_SOURCES = {
+    "src/modules/db2/c/memory_export.c",
+    "src/modules/db2/c/memory_payload.c",
+}
 for _references in CJSON_BASE_REFERENCES.values():
     _references[:] = [
-        path for path in _references if path not in HOST_ADAPTER_REHOMES
+        path for path in _references
+        if path not in HOST_ADAPTER_REHOMES and path not in RETIRED_MEMORY_SOURCES
     ]
 SUPPORT_UNITS: list[dict[str, object]] = [{
     "path": "src/modules/db2/support/cert_serial_primitives.c",
@@ -692,92 +693,6 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "schemes, and legacy empty-endpoint behavior. Only strcmp, strlen, and strncmp "
                 "are imported; there is no HTTP, JSON, DB, bus, provider, pgvector, DB3, "
                 "allocation, configuration, I/O, or logging dependency.",
-}, {
-    "path": "src/modules/db2/support/node_kind_text_primitives.c",
-    "source_sha256": "0b733803311e92c8baad98e3a14f8d43eac0819f82f83ab3a08a7b52eaa08116",
-    "header": "src/modules/db2/support/db2_node_kind_text.h",
-    "header_sha256": "890b4eb247c73135cb0df53fc67f520d16d2d032429f397e2665522ce6898668",
-    "defines": ["memory_ontology_node_kind_to_text"],
-    "resolves": ["memory_ontology_node_kind_to_text"],
-    "resolution_disposition": "injected-module-contract",
-    "allowed_includes": ["db2_node_kind_text.h"],
-    "allowed_header_includes": [],
-    "allowed_undefined": [],
-    "base_references": {
-        "memory_ontology_node_kind_to_text": ["src/modules/db2/c/rel_types_store.c"],
-    },
-    "provenance": "Definition promoted from the DB-free node-kind table in "
-                  "src/modules/memory/memory_episodes.c; the sole DB2 call is pinned to "
-                  "src/modules/db2/c/rel_types_store.c.",
-    "evidence": "A deterministic integer-to-text switch with descriptor-owned numeric ABI and "
-                "no imports, shared ontology header, allocation, I/O, DB, event-bus, provider, "
-                "platform, pgvector, DB3, configuration, or logging dependency. Normal and "
-                "sanitizer parity cover the complete signed 16-bit partition plus int boundaries.",
-}, {
-    "path": "src/modules/db2/support/pii_classifier_primitives.c",
-    "source_sha256": "b910e5470f542b43d463b89d172769e47675af228abd419b61a9d5267b1ff9bd",
-    "header": "src/modules/db2/support/db2_pii_classifier.h",
-    "header_sha256": "26bdb1c2abf6e8647a572ea4a49652ebdd373c3d2393afb198f801bd9899c078",
-    "defines": [
-        "memory_pii_register_sensitivity_batch", "memory_pii_register_turn_classifier",
-        "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
-        "memory_pii_turn_requests_sensitive",
-    ],
-    "resolves": [
-        "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
-        "memory_pii_turn_requests_sensitive",
-    ],
-    "resolution_disposition": "injected-module-contract",
-    "allowed_includes": [
-        "db2_pii_classifier.h", "db2_rel_seed.h", "db2_rel_type_helpers.h", "ctype.h",
-        "string.h",
-    ],
-    "allowed_header_includes": [],
-    "allowed_undefined": [
-        "__ctype_tolower_loc", "rel_type_normalize", "rel_types_seed_lookup", "strlen",
-    ],
-    "base_references": {
-        "memory_pii_rel_sensitivity": ["src/modules/db2/c/rel_types_store.c"],
-        "memory_pii_rel_sensitivity_batch": ["src/modules/db2/c/fact_recall.c"],
-        "memory_pii_turn_requests_sensitive": ["src/modules/db2/c/fact_ingest.c"],
-    },
-    "provenance": "The remaining PII turn, relation, and batch classifiers plus both provider "
-                  "registration seams are promoted from src/modules/memory/memory_pii_gate.c; "
-                  "all three DB2 calls are pinned to their sole translation units.",
-    "evidence": "The descriptor owns local cue scanning, unknown sensitive-name heuristics, "
-                "seed sensitivity lookup, whole-batch classification, and authoritative provider "
-                "failure semantics. Registered failures remain fail closed and never fall back "
-                "silently. Normal and sanitizer parity cover NULL, every non-NUL byte, all seed "
-                "relations, case and length boundaries, local and provider paths, non-Boolean "
-                "provider values, provider failures after writes, invalid batches, and output "
-                "canaries. Only the adjacent admitted relationship support, ctype, and strlen "
-                "are imported; there is no DB, bus transport, provider implementation, pgvector, "
-                "DB3, allocation, I/O, configuration, or logging edge.",
-}, {
-    "path": "src/modules/db2/support/pii_inject_gate_primitives.c",
-    "source_sha256": "41096c30f976075f8f4b97a7a1825bbb53e340f5d112eb704a4a31ff4be1fef6",
-    "header": "src/modules/db2/support/db2_pii_inject_gate.h",
-    "header_sha256": "e1f544b3bd70ed8d4d012f34845f99922f219896bce0329efb9f2b687d1bd9af",
-    "defines": ["memory_pii_should_inject"],
-    "resolves": ["memory_pii_should_inject"],
-    "resolution_disposition": "injected-module-contract",
-    "allowed_includes": ["db2_pii_inject_gate.h"],
-    "allowed_header_includes": [],
-    "allowed_undefined": [],
-    "base_references": {
-        "memory_pii_should_inject": ["src/modules/db2/c/fact_recall.c"],
-    },
-    "provenance": "The allocation-free recall decision is promoted from "
-                  "src/modules/memory/memory_pii_gate.c; the sole DB2 call is pinned to "
-                  "src/modules/db2/c/fact_recall.c.",
-    "evidence": "The descriptor owns the three-value sensitivity ABI, confidence floor, "
-                "truth-value handling, and fail-closed treatment of NaN, low confidence, "
-                "credentials, and unknown sensitivity values. The support object has no "
-                "imports or memory classifier state and no allocation, I/O, DB, event-bus, "
-                "provider, platform, pgvector, DB3, configuration, or logging edge. Normal "
-                "and sanitizer parity cover the complete signed 16-bit sensitivity partition, "
-                "int boundaries, finite confidence boundaries, infinities, NaN, and full-width "
-                "turn-request truth values.",
 }, {
     "path": "src/modules/db2/support/random_primitives.c",
     "source_sha256": "392f9f3f2a3f42fafe3e5277765ed1a8d79201f136089df00b06d90df13c8fc8",

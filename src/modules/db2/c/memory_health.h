@@ -66,7 +66,6 @@ extern "C"
    /* DELETE FROM memories WHERE sensitivity = ? AND created_at < now-days.
     * Returns rows deleted. Idempotent. */
    int db2_memory_health_delete_by_sensitivity(const char *sensitivity, int days);
-   int db2_memory_health_delete_older_than(int days);
 
    /* Stamp a memory's effectiveness column. The _clear variant writes
     * NULL; _set writes the supplied value. Returns 0 on success. */

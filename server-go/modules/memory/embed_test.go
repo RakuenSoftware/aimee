@@ -259,16 +259,14 @@ func TestDelayGrowsAndIsCapped(t *testing.T) {
 	}
 }
 
-func TestNonHTTPEmbedderIsDeclinedWithoutTouchingTheBreaker(t *testing.T) {
+func TestNonHTTPEmbedderRunsAsACommand(t *testing.T) {
 	resetBreaker(t)
-	out := Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: "/usr/local/bin/embed", Text: "t", MaxDim: 4, NowMS: 1000})
-	if out.Error == "" {
-		t.Fatal("a program-based embedder is not served here")
+	out := Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: "printf '[0.25,0.5]'", Text: "t", MaxDim: 4, NowMS: 1000})
+	if out.Error != "" || out.Dim != 2 {
+		t.Fatalf("command embed = %+v", out)
 	}
-	// That path's health is still accounted for in C; touching this breaker
-	// would corrupt an accounting this module does not own.
 	if breaker.failureStreak != 0 || breaker.probeInflight {
-		t.Fatalf("breaker must be untouched: streak=%d probe=%v",
+		t.Fatalf("successful command must close breaker: streak=%d probe=%v",
 			breaker.failureStreak, breaker.probeInflight)
 	}
 	if !EmbedIsHTTP("https://host/x") || EmbedIsHTTP("/usr/bin/x") {

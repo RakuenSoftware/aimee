@@ -148,11 +148,6 @@ scan '\\bparse_sqlite_utc\\b|legacy sqlite-FTS5|SQLite-side|SQLite-backed stores
   "SQLite-named legacy/helper vocabulary outside src/db1"
 scan '\\bdb1_window_fts_(add|search|available)\\b|\\bdb1_window_fts_hit_t\\b' \
   "non-DB1 callers expose DB1 lexical-index implementation names"
-path_scan 'pm_build_fts_match|db2_prospective_list_by_fts|pm_match_clause_to_tsquery|memory_negation_fts|FTS5 prefix matching|FTS5 noise|FTS5 reserved-char|FTS5 indexing|expand_terms_for_fts|pre-built FTS5 MATCH|FTS5 index' \
-  "prospective/negation helpers expose backend-specific lexical index names" \
-  src/modules/memory/memory_prospective.c src/modules/memory/memory_core_search.inc src/headers/config.h \
-  src/headers/util.h src/text.c src/tests/test_text.c \
-  src/modules/db2/c/prospective_memories.h src/modules/db2/c/prospective_memories.c
 path_scan 'memory_collect_fts_via_vector|MEM_SOURCE_FTS|FTS string|FTS query string|FTS/graph|unit/fts|generic FTS path|memory FTS|FTS5 / semantic|pre-DB3 FTS|db2_memory_collect_fts_matches|memory_units_fts MATCH|memory_negation_fts FTS table' \
   "memory recall helpers expose stale FTS collector names" \
   src/modules/memory/memory_core_search.inc src/modules/db2/c/memory_query.h src/modules/db2/c/memory_query.c
@@ -269,7 +264,7 @@ path_scan 'pre-cutover sqlite|sqlite native|sqlite tolerates|sqlite needed|sqlit
   "DB2 module comments expose legacy SQLite migration framing" \
   src/modules/db2/c/memory_query.c src/modules/db2/c/memory_promotion.c src/modules/db2/c/kb_service_backend.c \
   src/modules/db2/c/code_index.c src/modules/db2/c/memory_entity_graph.c src/modules/db2/c/memory_lifecycle.c \
-  src/modules/db2/c/kb_runtime_state.c src/modules/db2/c/prospective_memories.c src/modules/db2/c/memory_relations.c \
+  src/modules/db2/c/kb_runtime_state.c src/src/modules/db2/c/memory_relations.c \
   src/modules/db2/c/memory_row_mapper_pg.c
 path_scan 'runs either SQLite or Postgres|schema/\{sqlite,postgres\}|Translate SQLite|rewrite_sqlite_(upsert|fts)|FTS5|SQLite-flavoured|SQLite positional placeholder|Postgres equivalents|Postgres path|SQLite path|sqlite-backed|real-postgres' \
   "DB2 provider comments expose legacy backend-normalization vocabulary" \

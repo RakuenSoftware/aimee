@@ -8,6 +8,7 @@
 #include "embedder_catalog.h"
 #include "server.h"
 #include "headers/module_commands.h"
+#include "module_stage_adapters.h"
 #include "dashboard.h"
 #include "render.h"                   /* decision_to_json + db2_decision_log_list */
 #include <aimee/audit/audit_ledger.h> /* audit_ledger_read — server-incurred tool-action audit */
@@ -47,6 +48,21 @@ int send_and_free(server_conn_t *conn, cJSON *resp)
 }
 
 /* --- Memory handlers --- */
+
+static cJSON *memory_data_request(const char *operation)
+{
+   cJSON *request = cJSON_CreateObject();
+   if (request)
+      cJSON_AddStringToObject(request, "operation", operation);
+   return request;
+}
+
+static cJSON *memory_data_first_record(cJSON *reply)
+{
+   cJSON *records = cJSON_GetObjectItemCaseSensitive(reply, "records");
+   cJSON *first = cJSON_IsArray(records) ? cJSON_GetArrayItem(records, 0) : NULL;
+   return cJSON_IsObject(first) ? first : NULL;
+}
 
 int server_memory_scope_begin(cJSON *req)
 {
@@ -122,63 +138,34 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       qpos += snprintf(query_buf + qpos, sizeof(query_buf) - qpos, "%s", clusters[i]);
    }
 
-   int active_context_missing = server_memory_scope_begin(req);
-   /* Search stored facts; graph-code fusion is always on for recall. */
-   memory_t facts[32];
-   int fact_count = kb_client_memory_find_facts_ex(query_buf, limit, facts, 32, "on");
-   if (fact_count < 0)
-   {
-      kb_client_memory_scope_context_clear();
-      /* Report the failure that ACTUALLY happened. This used to answer every
-       * cause with "search index unavailable; server-side maintenance is
-       * required", which names the wrong owner: the common case is a caller
-       * whose scope did not resolve (a remote client with no active project),
-       * and the kb is healthy. That message sent three separate investigations
-       * at the kb — restarting it, matching its image, re-checking its mTLS
-       * trust — while nothing was wrong with it. The typed result carries the
-       * real dependency and retryability, and the sibling index route already
-       * reports it this way. */
-      kb_client_result_status_t status = kb_client_last_result_status();
-      const char *detail = active_context_missing
-                               ? "memory search found no active project to scope to; pass a "
-                                 "project or cwd, or ask for scope=all"
-                               : "memory search could not reach the knowledge service";
-      aimee_log(LOG_WARN, "memory.search", "find_facts failed: status=%s scope_missing=%d",
-                kb_client_result_status_name(status), active_context_missing);
-      char *json = kb_client_last_result_json(detail);
-      cJSON *err = json ? cJSON_Parse(json) : NULL;
-      free(json);
-      if (!err)
-         return server_send_error(conn, detail, NULL);
-      server_error_kind_apply(err, active_context_missing ? SERVER_ERR_INVALID_ARGUMENT
-                                                          : SERVER_ERR_UNAVAILABLE);
-      cJSON_AddBoolToObject(err, "active_context_missing", active_context_missing);
-      return send_and_free(conn, err);
-   }
-
-   /* Search conversation windows */
-   search_result_t results[32];
-   int found = kb_client_memory_search(clusters, count, limit, results, 32);
-   kb_client_memory_scope_context_clear();
+   cJSON *request = memory_data_request("search");
+   if (!request)
+      return server_send_error(conn, "out of memory", NULL);
+   cJSON_AddStringToObject(request, "query", query_buf);
+   cJSON_AddNumberToObject(request, "limit", limit);
+   cJSON *module_reply = server_module_memory_data(request);
+   cJSON_Delete(request);
+   if (!module_reply)
+      return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE,
+                                    "user memory module unavailable", NULL);
+   cJSON *records = cJSON_GetObjectItemCaseSensitive(module_reply, "records");
    cJSON *farr = cJSON_CreateArray();
-   for (int i = 0; i < fact_count; i++)
-      cJSON_AddItemToArray(farr, memory_to_json(&facts[i]));
-
-   cJSON *warr = cJSON_CreateArray();
-   for (int i = 0; i < found; i++)
+   if (cJSON_IsArray(records))
    {
-      cJSON *r = cJSON_CreateObject();
-      jo_add_str(r, "session_id", results[i].session_id);
-      jo_add_i64(r, "seq", results[i].seq);
-      jo_add_str(r, "summary", results[i].summary);
-      jo_add_num(r, "score", results[i].score);
-      cJSON_AddItemToArray(warr, r);
+      cJSON *record = NULL;
+      cJSON_ArrayForEach(record, records)
+      {
+         cJSON *copy = cJSON_Duplicate(record, 1);
+         if (copy)
+            cJSON_AddItemToArray(farr, copy);
+      }
    }
-
+   cJSON *warr = cJSON_CreateArray();
+   cJSON_Delete(module_reply);
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "facts", farr);
    cJSON_AddItemToObject(resp, "windows", warr);
-   jo_add_bool(resp, "active_context_missing", active_context_missing);
+   jo_add_bool(resp, "active_context_missing", 0);
    return send_and_free(conn, resp);
 }
 
@@ -195,6 +182,7 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * unchanged. handle_memory_store below is now only the connection write. */
 cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
 {
+   (void)authority;
    const char *key, *content;
    if (jo_need_str((cJSON *)req, "key", &key) < 0 ||
        jo_need_str((cJSON *)req, "content", &content) < 0)
@@ -211,31 +199,39 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.store requires a non-empty key and content", NULL);
 
-   const char *tier = jo_str((cJSON *)req, "tier", TIER_L0);
+   const char *tier = jo_str((cJSON *)req, "tier", TIER_L2);
    const char *kind = jo_str((cJSON *)req, "kind", KIND_FACT);
    double confidence = jo_num((cJSON *)req, "confidence", 1.0);
-   const char *sid = jo_str((cJSON *)req, "session_id", "");
-   memory_t out;
-   server_memory_scope_begin((cJSON *)req);
-   int store_rc =
-       kb_client_memory_insert_as(tier, kind, key, content, "", confidence, sid, authority, &out);
-   kb_client_memory_scope_context_clear();
-   if (store_rc != 0)
-      return jo_err("failed to store memory");
+   cJSON *request = memory_data_request("store");
+   if (!request)
+      return jo_err("out of memory");
+   cJSON_AddStringToObject(request, "key", key);
+   cJSON_AddStringToObject(request, "content", content);
+   cJSON_AddStringToObject(request, "tier", tier);
+   cJSON_AddStringToObject(request, "kind", kind);
+   cJSON_AddNumberToObject(request, "confidence", confidence);
+   cJSON *module_reply = server_module_memory_data(request);
+   cJSON_Delete(request);
+   cJSON *record = module_reply ? memory_data_first_record(module_reply) : NULL;
+   cJSON *id = record ? cJSON_GetObjectItemCaseSensitive(record, "id") : NULL;
+   if (!cJSON_IsNumber(id))
+   {
+      cJSON_Delete(module_reply);
+      return jo_err("user memory module unavailable");
+   }
 
    cJSON *resp = jo_ok();
-   jo_add_i64(resp, "id", out.id);
+   cJSON_AddNumberToObject(resp, "id", id->valuedouble);
+   cJSON_Delete(module_reply);
    return resp;
 }
 
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   /* Whose words these are follows the connection's kernel-attested identity, the
-    * same rule facts.retract uses (server_facts.c) and for the same reason: this
-    * row's provenance decides whether the typed-fact drain may mine Class-A facts
-    * out of it, and a caller must not be able to claim that by asking. A bearer
-    * over TCP/TLS is a service or an agent, not a person. */
+   /* The module's server placement is per-appliance-user. The legacy authority
+    * argument remains in the command ABI, but cannot widen the module's user
+    * scope and is not persisted as KB provenance. */
    return send_and_free(
        conn, memory_store_command(req, server_account_memory_authority(server_request_account())));
 }
@@ -245,21 +241,27 @@ cJSON *memory_list_command(const cJSON *req)
    const char *tier = jo_str((cJSON *)req, "tier", NULL);
    const char *kind = jo_str((cJSON *)req, "kind", NULL);
    int limit = jo_int((cJSON *)req, "limit", 20);
-   int active_context_missing = server_memory_scope_begin((cJSON *)req);
-   memory_t results[64];
-   int count = kb_client_memory_list(tier, kind, limit, results, 64);
-   kb_client_memory_scope_context_clear(); /* cleared on BOTH paths, as before */
-   if (count < 0)
-      return jo_err("knowledge service unavailable; the memory store is unreachable "
-                    "(server-side maintenance is required)");
-
-   cJSON *arr = cJSON_CreateArray();
-   for (int i = 0; i < count; i++)
-      cJSON_AddItemToArray(arr, memory_to_json(&results[i]));
+   cJSON *request = memory_data_request("list");
+   if (!request)
+      return jo_err("out of memory");
+   if (tier)
+      cJSON_AddStringToObject(request, "tier", tier);
+   if (kind)
+      cJSON_AddStringToObject(request, "kind", kind);
+   cJSON_AddNumberToObject(request, "limit", limit);
+   cJSON *module_reply = server_module_memory_data(request);
+   cJSON_Delete(request);
+   if (!module_reply)
+      return jo_err("user memory module unavailable");
+   cJSON *records = cJSON_DetachItemFromObjectCaseSensitive(module_reply, "records");
+   cJSON *arr = cJSON_IsArray(records) ? records : cJSON_CreateArray();
+   if (records && records != arr)
+      cJSON_Delete(records);
+   cJSON_Delete(module_reply);
 
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "memories", arr);
-   jo_add_bool(resp, "active_context_missing", active_context_missing);
+   jo_add_bool(resp, "active_context_missing", 0);
    return resp;
 }
 
@@ -363,29 +365,8 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-/* Remove one memory by id.
- *
- * The knowledge tier has always been able to do this: kb_service.c dispatches
- * "memory.delete" to a handler that calls memory_delete(). Nothing above it ever
- * exposed the capability, so the store was effectively write-once from every
- * interface a user has — a memory stored by mistake (a secret, a typo, a test
- * fixture written against a live deployment) could not be taken back.
- *
- * Gated on CAP_MEMORY_ADMIN — deliberately NOT the CAP_MEMORY_WRITE that
- * memory.store carries. This is the one memory path that destroys rather than
- * versions, so it is graded like rules.delete: holding "may remember" is not
- * holding "may forget". The model-facing MCP `forget` verb has no such authority
- * and retires the memory instead.
- *
- * The capability decides whether the caller MAY delete. It does not decide
- * whether the caller is a person, and only a person's delete destroys: the
- * capability travels with a bearer, and CAP_MEMORY_ADMIN sits inside
- * CAPS_AUTHENTICATED, so a TCP bearer under remote_writes=DATA/FULL clears this
- * gate. Destroying a row and its provenance is irreversible and the audit event
- * carries only the id, so a token that leaked cannot be allowed to spend the
- * user's one non-recoverable verb. An un-attested caller that clears the
- * capability still deletes — it retires the memory, which memory_fact_history
- * can still read — so this narrows the blast radius rather than the feature. */
+/* Retire one user memory by id. Physical deletion and KB provenance are not
+ * part of the server placement's data contract. */
 cJSON *memory_delete_command(cJSON *req, const char *account)
 {
    int64_t id = 0;
@@ -393,13 +374,21 @@ cJSON *memory_delete_command(cJSON *req, const char *account)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.delete requires a positive integer id", NULL);
 
-   memory_authority_t authority = server_account_memory_authority(account);
-   server_memory_scope_begin(req);
-   int delete_rc = kb_client_memory_delete_as(id, authority);
-   kb_client_memory_scope_context_clear();
-   if (delete_rc != 0)
+   (void)account;
+   cJSON *request = memory_data_request("delete");
+   if (!request)
+      return jo_err("out of memory");
+   cJSON_AddNumberToObject(request, "id", (double)id);
+   cJSON *module_reply = server_module_memory_data(request);
+   cJSON_Delete(request);
+   cJSON *deleted = module_reply ? cJSON_GetObjectItemCaseSensitive(module_reply, "deleted") : NULL;
+   if (!cJSON_IsTrue(deleted))
+   {
+      cJSON_Delete(module_reply);
       return server_error_kind_json(SERVER_ERR_NOT_FOUND,
-                                    "no such memory, or the knowledge service refused", NULL);
+                                    "no such user memory, or the memory module refused", NULL);
+   }
+   cJSON_Delete(module_reply);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "id", (double)id);
@@ -407,7 +396,7 @@ cJSON *memory_delete_command(cJSON *req, const char *account)
    /* Say which happened. "deleted" alone would report a retire as a destroy, and
     * a caller correcting a mistake needs to know whether the value is really gone
     * or still readable through memory_fact_history. */
-   cJSON_AddBoolToObject(resp, "destroyed", authority == MEMORY_AUTHORITY_USER);
+   cJSON_AddBoolToObject(resp, "destroyed", 0);
    return resp;
 }
 
@@ -424,64 +413,29 @@ cJSON *memory_get_command(cJSON *req)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.get requires a positive integer id", NULL);
 
-   /* `memory get --as-of <ts>` asks the EVENT-time question, and this handler is
-    * the only thing between the flag and aimee-kb, which owns the interval. It
-    * used to read nothing but the id, so the flag was marshalled, sent, and
-    * silently dropped here: the client printed the row and no verdict, which
-    * reads exactly like "not in force". */
-   cJSON *jas_of = cJSON_GetObjectItemCaseSensitive(req, "as_of");
-   const char *as_of = cJSON_IsString(jas_of) ? jas_of->valuestring : NULL;
-   cJSON *memory_json = NULL;
-   kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
-   server_memory_scope_begin(req);
-   int rc = kb_client_memory_get_json_as_of(id, as_of, &memory_json, &verdict);
-   kb_client_memory_scope_context_clear();
-
-   cJSON *resp;
-   if (rc == 0)
+   cJSON *request = memory_data_request("get");
+   if (!request)
+      return jo_err("out of memory");
+   cJSON_AddNumberToObject(request, "id", (double)id);
+   cJSON *module_reply = server_module_memory_data(request);
+   cJSON_Delete(request);
+   if (!module_reply)
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "user memory module unavailable", NULL);
+   cJSON *record = memory_data_first_record(module_reply);
+   if (!record)
    {
-      resp = jo_ok();
-      /* Echo the question with the answer: the client prints "valid at <ts>:
-       * <verdict>", and a verdict with no timestamp beside it is unreadable.
-       * "unknown" stays a string, distinct from false -- "could not tell" and
-       * "was not in force" are different answers. */
-      if (verdict != KB_VALID_AT_UNASKED && as_of)
-      {
-         cJSON_AddStringToObject(resp, "as_of", as_of);
-         if (verdict == KB_VALID_AT_UNKNOWN)
-            cJSON_AddStringToObject(resp, "valid_at", "unknown");
-         else
-            cJSON_AddBoolToObject(resp, "valid_at", verdict == KB_VALID_AT_YES);
-      }
-      if (memory_json)
-      {
-         /* Merge memory fields into resp */
-         cJSON *child = memory_json->child;
-         while (child)
-         {
-            cJSON *next = child->next;
-            cJSON_DetachItemViaPointer(memory_json, child);
-            cJSON_AddItemToObject(resp, child->string, child);
-            child = next;
-         }
-         cJSON_Delete(memory_json);
-      }
+      cJSON_Delete(module_reply);
+      return server_error_kind_json(SERVER_ERR_NOT_FOUND, "memory not found", NULL);
    }
-   else if (rc > 0)
+   cJSON *resp = jo_ok();
+   cJSON *child = NULL;
+   cJSON_ArrayForEach(child, record)
    {
-      resp = server_error_kind_json(SERVER_ERR_NOT_FOUND, "memory not found", NULL);
+      cJSON *copy = cJSON_Duplicate(child, 1);
+      if (copy)
+         cJSON_AddItemToObject(resp, child->string, copy);
    }
-   else
-   {
-      char *typed = kb_client_last_result_json("memory lookup failed");
-      resp = typed ? cJSON_Parse(typed) : NULL;
-      free(typed);
-      if (resp)
-         server_error_kind_apply(resp, SERVER_ERR_UNAVAILABLE);
-      else
-         resp =
-             server_error_kind_json(SERVER_ERR_UNAVAILABLE, "knowledge service unavailable", NULL);
-   }
+   cJSON_Delete(module_reply);
    return resp;
 }
 
