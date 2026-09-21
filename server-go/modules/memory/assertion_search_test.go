@@ -126,6 +126,22 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	if len(hits(got)) != 1 || hits(got)[0].(map[string]any)["stable_id"] != fmt.Sprint(current) {
 		t.Fatal(got)
 	}
+	envelope := runHostRuntime(t, handler, `{"operation":"typed-context","query":"AssertionAtlas","enable_observations":false,"enable_approved_procedures":false}`)
+	var projection typedContextResult
+	if err := json.Unmarshal([]byte(envelope["json"].(string)), &projection); err != nil {
+		t.Fatal(err)
+	}
+	if len(projection.Retained) != 1 || projection.SourceVersionState != "record_versions_observed" || projection.Retained[0].Source == nil {
+		t.Fatal("typed assertion source observation missing", projection)
+	}
+	source := projection.Retained[0].Source
+	var owner string
+	if err := tx.QueryRow(ctx, `SELECT owner_id::text FROM memory_collection_owner WHERE id=1`).Scan(&owner); err != nil {
+		t.Fatal(err)
+	}
+	if source.Kind != "semantic_assertion" || source.Version.OwnerID != owner || source.Version.RecordID != fmt.Sprint(current) || source.Version.RecordRevision != "1" {
+		t.Fatal("source version disagrees with the selected owner row", projection)
+	}
 	// Stored offsets and subsecond endpoints must compare as instants, even
 	// though this public request contract retains second-precision UTC anchors.
 	exec(`SAVEPOINT assertion_instant; SET LOCAL TIME ZONE 'Asia/Tokyo'`)

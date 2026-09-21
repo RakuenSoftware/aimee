@@ -60,6 +60,7 @@ type assertionHit struct {
 	StableID        string              `json:"stable_id"`
 	Rendered        string              `json:"rendered"`
 	raw, fused      float64
+	ownerID         string
 }
 
 func assertionTimestamp(value string) bool {
@@ -168,7 +169,7 @@ var assertionFilter = `e.edge_class='semantic' AND e.suppressed=0 AND e.lifecycl
  AND ($1='' OR (` + assertionBeliefSQL(memoryTimeSQL("$1::text")) + `))
  AND ($2<>'' OR $3 OR e.assertion_kind<>'world_fact' OR (` + memoryValiditySQL("e.") + `))
  AND ($2='' OR (` + memoryValidityAtSQL("e.", memoryTimeSQL("$2::text")) + `)) AND ` + assertionVisible
-var assertionColumns = `e.id,e.version,e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
+var assertionColumns = `e.id,e.version,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
  e.authority_rank,e.confidence_class,e.confidence,e.valid_from,e.valid_until,e.asserted_at,e.superseded_at,
  NOT ` + assertionCurrent + `,
  (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' AND f.stance='supports'),
@@ -197,7 +198,7 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 	hits := []assertionHit{}
 	for rows.Next() {
 		h := assertionHit{Evidence: []assertionEvidence{}, Retrieval: []assertionTrace{}}
-		if err = rows.Scan(&h.ID, &h.Version, &h.Subject, &h.Relation, &h.Object, &h.Kind, &h.Lifecycle, &h.Authority, &h.ConfidenceClass, &h.Confidence, &h.ValidFrom, &h.ValidUntil, &h.AssertedAt, &h.SupersededAt, &h.Historical, &h.Support, &h.Contradiction, &h.raw); err != nil {
+		if err = rows.Scan(&h.ID, &h.Version, &h.ownerID, &h.Subject, &h.Relation, &h.Object, &h.Kind, &h.Lifecycle, &h.Authority, &h.ConfidenceClass, &h.Confidence, &h.ValidFrom, &h.ValidUntil, &h.AssertedAt, &h.SupersededAt, &h.Historical, &h.Support, &h.Contradiction, &h.raw); err != nil {
 			return nil, err
 		}
 		h.StableID = strconv.FormatInt(h.ID, 10)

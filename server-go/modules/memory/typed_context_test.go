@@ -41,7 +41,7 @@ func TestTypedProjectionRendersReviewedProcedureOnce(t *testing.T) {
 	if r.Sufficiency != "unknown" || r.Availability != "available" {
 		t.Fatal("nonempty projection claimed task coverage without requirements", r)
 	}
-	if len(r.Retained) != 2 || r.Retained[0] != (typedProjectionRef{"observations", "observed-1"}) || r.Retained[1] != (typedProjectionRef{"approved_procedures", "reviewed-1"}) {
+	if len(r.Retained) != 2 || r.Retained[0] != (typedProjectionRef{Channel: "observations", ID: "observed-1"}) || r.Retained[1] != (typedProjectionRef{Channel: "approved_procedures", ID: "reviewed-1"}) {
 		t.Fatal("projection retained identities mismatch", r.Retained)
 	}
 	if again := build(); again.Rendered != r.Rendered || again.ProjectionDigest != r.ProjectionDigest {

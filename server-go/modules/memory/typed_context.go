@@ -38,6 +38,7 @@ type typedItem struct {
 	value    any
 	id, text string
 	tokens   int
+	source   *typedSourceVersion
 }
 type typedChannel struct {
 	Enabled  bool   `json:"enabled"`
@@ -57,36 +58,38 @@ type typedWatermark struct {
 	Reason       string `json:"reason,omitempty"`
 }
 type typedContextResult struct {
-	Accounting        ContextAccounting        `json:"context_accounting"`
-	ProjectionVersion int                      `json:"projection_schema_version"`
-	SelectionDigest   string                   `json:"selection_digest"`
-	ProjectionDigest  string                   `json:"projection_digest"`
-	RenderedBytes     int                      `json:"rendered_bytes"`
-	TokenCountState   string                   `json:"token_count_state"`
-	Retained          []typedProjectionRef     `json:"retained_items"`
-	Availability      string                   `json:"retrieval_availability"`
-	Status            string                   `json:"status"`
-	Enabled           bool                     `json:"default_injection"`
-	Budget            int                      `json:"total_budget_tokens"`
-	Used              int                      `json:"used_tokens"`
-	RenderedTokens    int                      `json:"rendered_tokens"`
-	EnvelopeExcess    int                      `json:"envelope_excess_tokens,omitempty"`
-	Channels          map[string]*typedChannel `json:"channels"`
-	Trace             []typedPackTrace         `json:"packing_trace"`
-	Watermark         typedWatermark           `json:"watermark"`
-	Sufficiency       string                   `json:"context_sufficiency"`
-	Reason            string                   `json:"sufficiency_reason"`
-	Rendered          string                   `json:"rendered_context"`
-	MissingContext    bool                     `json:"active_context_missing"`
-	ErrorType         string                   `json:"error_type,omitempty"`
-	Message           string                   `json:"message,omitempty"`
-	degraded          bool
-	limits            *ContextLimits
+	Accounting         ContextAccounting        `json:"context_accounting"`
+	ProjectionVersion  int                      `json:"projection_schema_version"`
+	SelectionDigest    string                   `json:"selection_digest"`
+	ProjectionDigest   string                   `json:"projection_digest"`
+	RenderedBytes      int                      `json:"rendered_bytes"`
+	TokenCountState    string                   `json:"token_count_state"`
+	Retained           []typedProjectionRef     `json:"retained_items"`
+	SourceVersionState string                   `json:"source_version_state"`
+	Availability       string                   `json:"retrieval_availability"`
+	Status             string                   `json:"status"`
+	Enabled            bool                     `json:"default_injection"`
+	Budget             int                      `json:"total_budget_tokens"`
+	Used               int                      `json:"used_tokens"`
+	RenderedTokens     int                      `json:"rendered_tokens"`
+	EnvelopeExcess     int                      `json:"envelope_excess_tokens,omitempty"`
+	Channels           map[string]*typedChannel `json:"channels"`
+	Trace              []typedPackTrace         `json:"packing_trace"`
+	Watermark          typedWatermark           `json:"watermark"`
+	Sufficiency        string                   `json:"context_sufficiency"`
+	Reason             string                   `json:"sufficiency_reason"`
+	Rendered           string                   `json:"rendered_context"`
+	MissingContext     bool                     `json:"active_context_missing"`
+	ErrorType          string                   `json:"error_type,omitempty"`
+	Message            string                   `json:"message,omitempty"`
+	degraded           bool
+	limits             *ContextLimits
 }
 
 type typedProjectionRef struct {
-	Channel string `json:"channel"`
-	ID      string `json:"stable_id"`
+	Channel string              `json:"channel"`
+	ID      string              `json:"stable_id"`
+	Source  *typedSourceVersion `json:"source_version,omitempty"`
 }
 
 func typedEstimate(text string) int {
@@ -380,10 +383,11 @@ func (r *typedContextResult) finish() error {
 		c := r.Channels[name]
 		count += len(c.Items)
 		for _, item := range c.selected {
-			r.Retained = append(r.Retained, typedProjectionRef{Channel: name, ID: item.id})
+			r.Retained = append(r.Retained, typedProjectionRef{Channel: name, ID: item.id, Source: item.source})
 		}
 	}
 	r.SelectionDigest = typedSelectionDigest(r.ProjectionDigest, r.Retained)
+	r.SourceVersionState = typedSourceVersionState(r.Retained)
 	switch {
 	case r.degraded:
 		r.Availability = "degraded"
@@ -474,7 +478,7 @@ func decodeTypedProjection(raw string) (*typedContextResult, error) {
 			return invalid()
 		}
 	}
-	seen := map[typedProjectionRef]bool{}
+	seen := map[[2]string]bool{}
 	n := 0
 	for _, name := range typedChannelOrder {
 		for _, value := range input.Channels[name].Items {
@@ -482,12 +486,13 @@ func decodeTypedProjection(raw string) (*typedContextResult, error) {
 				return invalid()
 			}
 			ref := input.Retained[n]
-			if ref.Channel != name || ref.ID == "" || seen[ref] {
+			key := [2]string{ref.Channel, ref.ID}
+			if ref.Channel != name || ref.ID == "" || seen[key] || !validTypedSourceItem(ref, value) {
 				return invalid()
 			}
-			seen[ref] = true
+			seen[key] = true
 			r.Channels[name].Items = append(r.Channels[name].Items, value)
-			r.Channels[name].selected = append(r.Channels[name].selected, typedItem{value: value, id: ref.ID})
+			r.Channels[name].selected = append(r.Channels[name].selected, typedItem{value: value, id: ref.ID, source: ref.Source})
 			n++
 		}
 	}
@@ -506,6 +511,7 @@ func decodeTypedProjection(raw string) (*typedContextResult, error) {
 	r.Rendered, r.ProjectionDigest, r.Retained = input.Rendered, input.Digest, input.Retained
 	r.degraded = input.Availability == "degraded"
 	r.SelectionDigest = input.SelectionDigest
+	r.SourceVersionState = typedSourceVersionState(r.Retained)
 	return r, nil
 }
 
@@ -616,7 +622,7 @@ func (s *postgresDataStore) assembleTypedContext(ctx context.Context, trace uint
 					r.trace(name, h.StableID, typedEstimate(h.Rendered), false, "historical channel explicitly disabled")
 					continue
 				}
-				r.add(name, typedItem{value: h, id: h.StableID, text: h.Rendered})
+				r.add(name, typedItem{value: h, id: h.StableID, text: h.Rendered, source: h.sourceVersion()})
 			}
 		}
 	}

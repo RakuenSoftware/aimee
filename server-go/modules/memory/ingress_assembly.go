@@ -314,8 +314,9 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 			"projection_digest": typed.ProjectionDigest, "rendered_bytes": typed.RenderedBytes,
 			"source_selection_digest": sourceSelection, "selection_digest": typed.SelectionDigest,
 			"retained_items": typed.Retained, "omitted_count": sourceCount - len(typed.Retained),
-			"context_accounting":  typed.Accounting,
-			"context_sufficiency": typed.Sufficiency,
+			"source_version_state": typed.SourceVersionState,
+			"context_accounting":   typed.Accounting,
+			"context_sufficiency":  typed.Sufficiency,
 		}
 	}
 	return result, nil

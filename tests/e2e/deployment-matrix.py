@@ -110,6 +110,70 @@ def application_metadata_is_private(stack):
     return not any(name in forbidden or name.endswith(('_PASSWORD', '_API_KEY', '_TOKEN', '_PRIVATE_KEY')) for name in names)
 
 
+def typed_source_version_gate(kb, check):
+    """Observe real assertion versions through the authenticated KB/Go path."""
+    key = 'typed-version-' + uuid.uuid4().hex
+    def sql(query):
+        return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+    fixture = json.loads(sql(f"""BEGIN;
+        INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,authority_rank,status)
+        VALUES('{key}','assert','test:typed-version','system',100,'open');
+        INSERT INTO entity_edges(source,relation,target,edge_class,assertion_kind,lifecycle_state,
+          confidence_class,confidence,authority_rank,commit_id)
+        VALUES('{key}','naming_convention','fixture','semantic','world_fact','persistent','A',.9,80,'{key}');
+        INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,
+          after_lifecycle,after_confidence,after_authority_rank,after_version)
+        SELECT '{key}',id,'assert',0,1,lifecycle_state,confidence,authority_rank,version
+        FROM entity_edges WHERE commit_id='{key}';
+        SELECT json_build_object('owner_id',(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
+          'record_id',id::text,'record_revision',version::text) FROM entity_edges WHERE commit_id='{key}';
+        COMMIT"""))
+    payload = dict(query=key, project=key, scope_context=True,
+                   enable_observations=False, enable_approved_procedures=False)
+    def call(extra=None):
+        return kb.kb_request('/v1/actions/memory.assemble_typed_context', dict(payload, **(extra or {})))
+    def selected(result):
+        return next((r for r in result.get('retained_items', []) if r['stable_id'] == fixture['record_id']), {})
+    def matches(result):
+        identity = dict(schema_version=1, projection_digest=result.get('projection_digest'),
+                        retained_items=result.get('retained_items'))
+        raw = json.dumps(identity, ensure_ascii=False, separators=(',', ':')).encode()
+        return result.get('selection_digest') == 'sha256:' + hashlib.sha256(raw).hexdigest()
+    try:
+        code, before = call()
+        source = selected(before).get('source_version', {})
+        expected = dict(schema_version=1, **fixture)
+        check('Typed assertion binds the exact owner record revision', code == 200 and
+              source.get('record_kind') == 'semantic_assertion' and source.get('version') == expected and
+              before.get('source_version_state') == 'record_versions_observed')
+        check('Typed selection digest includes source revision evidence', matches(before))
+        code, again = call()
+        check('Unchanged typed assertion retains its source binding', code == 200 and
+              selected(again) == selected(before) and again.get('selection_digest') == before.get('selection_digest'))
+        mid = int(fixture['record_id'])
+        sql(f"""BEGIN; UPDATE entity_edges SET version=version+1 WHERE id={mid};
+            INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,
+              before_version,after_version,after_lifecycle,after_confidence,after_authority_rank)
+            SELECT '{key}',id,'revise',1,1,version-1,version,lifecycle_state,confidence,authority_rank
+            FROM entity_edges WHERE id={mid}; COMMIT""")
+        code, changed = call()
+        new_source = selected(changed).get('source_version', {}).get('version', {})
+        check('Changed assertion revision cannot reuse the prior selection binding', code == 200 and
+              new_source.get('record_revision') == str(int(fixture['record_revision'])+1) and
+              new_source.get('owner_id') == fixture['owner_id'] and matches(changed) and
+              changed.get('selection_digest') != before.get('selection_digest'))
+        code, empty = call(dict(context_limits=dict(schema_version=1, max_context_bytes=0)))
+        check('Omitted typed assertion claims no retained source revision', code == 200 and
+              empty.get('retained_items') == [] and empty.get('source_version_state') == 'unavailable')
+    finally:
+        sql(f"""BEGIN; UPDATE entity_edges SET lifecycle_state='invalidated',version=version+1 WHERE commit_id='{key}';
+            INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,
+              before_version,after_version,after_lifecycle,after_confidence,after_authority_rank)
+            SELECT '{key}',id,'retire',1,1,version-1,version,lifecycle_state,confidence,authority_rank
+            FROM entity_edges WHERE commit_id='{key}'; COMMIT""")
+
+
 def typed_context_budget_gate(kb, check):
     """Exact projection bytes through the authenticated KB action and Go owner."""
     payload = dict(query='typed-budget-fixture', project='typed-budget-' + uuid.uuid4().hex,
@@ -456,6 +520,7 @@ def main():
             code, body = kb.kb_request('/v1/actions/memory.find_facts', dict(query='shared deployment fixture', limit=3, graph_code_fusion_state='on'))
             check('KB graph and memory retrieval survives the deepest worker path', code == 200 and isinstance(body.get('facts'), list))
             typed_context_budget_gate(kb, check)
+            typed_source_version_gate(kb, check)
             evidence_exact_identity_gate(kb, check)
         if args.topology in ('T2', 'T3'):
             server = Stack('server', env, args.output)

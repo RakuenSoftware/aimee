@@ -49,6 +49,12 @@ race tests pass. Fresh application/harness `1989160bdf` passes **1,553/1,553 che
 (961 T2, 592 T3), including all 24 new MCP boundary cases. All image identities
 and provider caps were verified. Full MR-01 remains open.
 
+[Typed assertion source-version commitments](../../validation/memory-typed-source-versions-2026-09-21.md)
+now bind exact owner/assertion/revision observations into selection identity and
+preserve them through outer packing. Unversioned channels remain explicit. Local
+PostgreSQL/race checks pass; fresh execution is pending. This does not certify
+supporting-parent versions or owner revalidation at final release.
+
 Delivery follows the program’s dependency order: eligibility/mutations and final
 payload budgets first, then evidence/receipts/coverage, views and indexing,
 followed by task contracts, outcomes, governed actions and disposable state.
