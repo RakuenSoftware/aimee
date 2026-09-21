@@ -25,6 +25,16 @@ func TestStorePublicValidation(t *testing.T) {
 			t.Fatal("confidence refusal changed the public contract", r)
 		}
 	}
+	for _, context := range []string{
+		`"project":"__aimee_scope_missing__","workspace":"__aimee_scope_missing__"`,
+		`"workspace":"__aimee_scope_missing__"`,
+		`"project":"  __aimee_scope_missing__  "`,
+	} {
+		r := runPublicCommand(t, client, "store", `{"key":"x","content":"y","scope_context":true,`+context+`}`)
+		if r["kind"] != "invalid_argument" || r["reason"] != "active_context_missing" || r["active_context_missing"] != true {
+			t.Fatal("missing scope must be refused before accessing storage", r)
+		}
+	}
 	if r := runPublicCommand(t, client, "store", `{"key":"x","content":"y"}`); r["kind"] != "unavailable" {
 		t.Fatal(r)
 	}
@@ -77,6 +87,22 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 			t.Fatal(status)
 		}
 		return r
+	}
+	// Canonical store admission also covers Put, workflows and practice writes.
+	backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+	for _, scope := range []Scope{{Type: ScopeProject, Value: missingScopeValue}, {Type: ScopeWorkspace, Value: missingScopeValue}} {
+		_, err := backend.InsertEpistemic(ctx, DataRequest{Scope: scope, Tier: "L2", Kind: "fact", Key: "missing-context", Content: "must not persist"})
+		if err == nil || !strings.Contains(err.Error(), "active scope context") {
+			t.Fatal("canonical insert accepted missing context", scope, err)
+		}
+		_, err = backend.Put(ctx, scope, Record{Tier: "L2", Kind: "fact", Key: "missing-context", Content: "must not persist"})
+		if err == nil || !strings.Contains(err.Error(), "active scope context") {
+			t.Fatal("Put accepted missing context", scope, err)
+		}
+	}
+	var missingRows int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE key='missing-context'`).Scan(&missingRows); err != nil || missingRows != 0 {
+		t.Fatal(missingRows, err)
 	}
 	r := put(`{"key":"model-note","content":"a useful note","authority":"user","actor":"user:forged","tier":"L2","confidence":1,"session_id":"session","use_cases":"answer questions"}`, false)
 	if r["status"] != "ok" {
@@ -463,6 +489,15 @@ SET LOCAL ROLE memory_store_test;`)
 	editRaw = fmt.Sprintf(`{"old_id":%.0f,"new_content":"password=replacement"}`, redacted["id"])
 	if r := runPublicCommand(t, client, "supersede", editRaw); r["status"] != "ok" || r["memory"].(map[string]any)["content"] != "[REDACTED]" {
 		t.Fatal(r)
+	}
+
+	global := put(`{"key":"explicit-global","content":"global note","scope_context":true,"include_all":true}`, false)
+	if global["status"] != "ok" {
+		t.Fatal("explicit global store must remain available", global)
+	}
+	var globalScope string
+	if err := tx.QueryRow(ctx, `SELECT scope_type||':'||scope_value FROM memories WHERE id=$1`, int64(global["id"].(float64))).Scan(&globalScope); err != nil || globalScope != "global:_global" {
+		t.Fatal(globalScope, err)
 	}
 
 }

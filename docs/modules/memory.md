@@ -22,6 +22,12 @@ This language boundary does not certify all historical behavioral parity or the
 numbered reliability proposals.
 
 
+The host missing-context marker is a read restriction, never a writable project
+or workspace. Shared store refuses that marker with `active_context_missing`;
+MCP callers must provide real context or explicitly request `scope=all` for a
+global write. Unscoped legacy global writes and private writes retain their
+existing behavior. Canonical Go admission also protects internal store callers.
+
 Shared KB get and ID-based mutations also accept canonical positive decimal-string
 IDs, preserving int64 identities through native JSON transports. Unsafe numeric
 IDs, noncanonical strings and overflow remain invalid. Server delete reports

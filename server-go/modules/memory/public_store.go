@@ -63,6 +63,15 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		request.Authority = AuthorityUser
 	}
 	scoped := commandScope(args, &request)
+	writeContext := strings.TrimSpace(request.Project)
+	if writeContext == "" {
+		writeContext = strings.TrimSpace(request.Workspace)
+	}
+	if writeContext == missingScopeValue {
+		result := commandError("invalid_argument", "memory.store requires an active project/workspace or explicit scope=all")
+		result["reason"], result["active_context_missing"] = "active_context_missing", true
+		return commandResult(result)
+	}
 	options.publicWrite = true
 	encoded, err := json.Marshal(request)
 	if err != nil {

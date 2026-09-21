@@ -211,11 +211,17 @@ class Gate:
         self.check('shared destruction key rejects a changed request', code == 409 and conflict.get('reason') == 'idempotency_conflict')
         self.shared_destroy_retry = (request, receipt)
         model_key = key+'-model'
-        code, created = self.mcp('mutate', dict(verb='store', store='kb', key=model_key, content='model retirement fixture'))
+        refused = self.mcp_document('MCP shared store without project context', 'mutate', dict(
+            verb='store', store='kb', key=model_key, content='must not persist without context'))
+        self.check('shared store rejects the missing-context marker before writing',
+            refused.get('kind') == 'invalid_argument' and refused.get('reason') == 'active_context_missing' and
+            self.sql(f"SELECT count(*) FROM memories WHERE key='{model_key}'") == '0')
+        project = self.prefix+'-retirement-project'
+        code, created = self.mcp('mutate', dict(verb='store', store='kb', project=project, key=model_key, content='model retirement fixture'))
         self.check('MCP creates shared retirement parent', code == 200 and 'stored memory id=' in created)
         model_id = int(self.sql(f"SELECT id FROM memories WHERE key='{model_key}' AND lifecycle_state='active'"))
-        version = self.mcp_document('MCP shared retirement expected version', 'memory_get', dict(store='kb', id=str(model_id), include_version=True))['memory']['version']
-        args = dict(verb='forget', store='kb', id=str(model_id), expected_version=version, idempotency_key=key+'-model-retry')
+        version = self.mcp_document('MCP shared retirement expected version', 'memory_get', dict(store='kb', project=project, id=str(model_id), include_version=True))['memory']['version']
+        args = dict(verb='forget', store='kb', project=project, id=str(model_id), expected_version=version, idempotency_key=key+'-model-retry')
         first = self.mcp_document('MCP keyed shared retirement', 'mutate', args)
         receipt = first['mutation_receipt']
         self.check('MCP shared retirement receipt binds both versions', receipt['schema_version'] == 2 and receipt['outcome'] == 'retired' and

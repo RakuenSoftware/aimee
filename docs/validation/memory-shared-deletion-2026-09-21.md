@@ -61,6 +61,20 @@ descriptor tests, all 77 lint gates and all 62 script regression files pass. The
 CMake-only export test is skipped locally because CMake is unavailable; the Go
 export/build regression executes successfully.
 
+The first fresh image (`eec3d6d651`) passed all 573 standalone T3 checks. Enrolled
+T2 passed 130 shared checks, including destructive HTTP commit/retry and failure
+rollback, before its new model-retirement fixture lacked a project. Diagnosis
+found a real admission defect: a contextless MCP store wrote the read-only
+`__aimee_scope_missing__` marker as a project, then ordinary reads could not find
+that row. The Go canonical writer now refuses the marker, including internal Put,
+workflow and practice callers. The public owner reports `active_context_missing`;
+explicit context/global writes retain their contracts. The updated live fixture
+checks refusal leaves no row, then exercises retirement in an explicit project.
+The [diagnostic receipt](memory-shared-deletion-2026-09-21/diagnostic-eec3d6d651.json)
+records counts, image identities and cleanup of the nine owned containers and
+nine empty networks. Images, volumes and raw receipts remain. This failed T2 run
+is diagnostic evidence, not fresh shared-deletion acceptance.
+
 The live fixture adds real HTTP/MCP deletion and retirement, failure injection,
 KB restart, reactivation/erasure and hidden-ID restoration. Fresh-image T2/T3
 acceptance is pending. Creation retries, remaining mutation preconditions,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 
 	store "github.com/JBailes/aimee/server-go/db"
 )
@@ -43,6 +44,9 @@ func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataReq
 	}
 	if err := s.requireKBDomain(); err != nil {
 		return Record{}, err
+	}
+	if strings.TrimSpace(request.Scope.Value) == missingScopeValue {
+		return Record{}, errors.New("memory: cannot store without active scope context")
 	}
 	var screenErr error
 	request.Content, screenErr = screenMemoryWrite(request.Key, request.Content)
