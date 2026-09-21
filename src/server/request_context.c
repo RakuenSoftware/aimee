@@ -40,6 +40,14 @@ int request_context_refuse_assembly(const char *kind)
    return 0;
 }
 
+int request_context_set_source_release(const char *ticket)
+{
+   if (!g_req_ctx_set || !ticket || strlen(ticket) >= sizeof(g_req_ctx.memory_source_release))
+      return -1;
+   snprintf(g_req_ctx.memory_source_release, sizeof(g_req_ctx.memory_source_release), "%s", ticket);
+   return 0;
+}
+
 void request_context_clear(void)
 {
    memset(&g_req_ctx, 0, sizeof(g_req_ctx));

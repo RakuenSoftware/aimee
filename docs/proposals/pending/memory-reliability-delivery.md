@@ -416,3 +416,13 @@ to every event in a changeset, corrupting references and causing mixed purge/upd
 batches to fail. Schema 29 isolates the emitted event, preserves the purge invariant,
 and passes the runtime regression and 28→29→29 preservation check. Its broader
 and fresh validation remain pending; existing history is not retroactively certified.
+
+[Source revalidation at provider handoff](../../validation/memory-source-revalidation-2026-09-21.md)
+now uses retained versioned facts, typed assertions and episodes at the common
+provider fence. Go compares the roots and complete direct-parent sets in one
+scoped statement snapshot; the external C host carries opaque handles and owner
+messages. Historical read policy survives selection. Refused attempts select no
+provider bytes, retries recheck, and request completion releases transient state.
+Fresh validation is pending. This does not close unversioned channels, transitive
+or collection dependencies, the post-check race, or durable dispatch receipts;
+all 18 proposals remain uncertified against the frozen 123 acceptance clauses.

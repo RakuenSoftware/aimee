@@ -222,9 +222,27 @@ static void test_context_refusal_blocks_every_route(void)
    assert(wire_fence_select(0, WIRE_FENCE_OPENAI_CHAT, "abc", 3, &snapshot, &selected) == 0);
    assert(selected.len == 3);
 }
+static void test_source_handle_requires_host_transport(void)
+{
+   memset(&context, 0, sizeof(context));
+   strcpy(context.memory_source_release, "opaque-source-handle");
+   for (int gated = 0; gated < 2; gated++)
+      for (unsigned route = 1; route <= 3; route++)
+      {
+         wire_fence_t *snapshot = NULL;
+         wire_fence_bytes_t selected = {0};
+         assert(wire_fence_select(gated, (wire_fence_route_t)route, "abc", 3, &snapshot,
+                                  &selected) == WIRE_FENCE_CONTEXT_REFUSED);
+         assert(!snapshot && !selected.data && !selected.len);
+         assert(strcmp(wire_fence_last_error(), "unavailable") == 0);
+      }
+   memset(&context, 0, sizeof(context));
+}
+
 int main(void)
 {
    operator_policy(NULL);
+   test_source_handle_requires_host_transport();
    test_context_refusal_blocks_every_route();
    test_hard_budget_refuses_without_selected_bytes();
    test_operator_policy_reaches_admission_without_request_header();

@@ -43,7 +43,8 @@ type DataRequest struct {
 	ExpectedVersion *MemoryRecordVersion `json:"expected_version,omitempty"`
 	AtVersion       *MemoryRecordVersion `json:"at_version,omitempty"`
 
-	CollectFactSources bool `json:"collect_fact_sources,omitempty"`
+	CollectFactSources bool                `json:"collect_fact_sources,omitempty"`
+	Revalidation       *sourceRevalidation `json:"revalidation,omitempty"`
 
 	Changes        *MemoryChangesRequest `json:"changes,omitempty"`
 	ReadPolicy     *MemoryReadPolicy     `json:"read_policy,omitempty"`
@@ -1347,6 +1348,21 @@ set_config('aimee.correlation_id',$9,true)`,
 			if len(response.Payload) > maxDataBody {
 				err = errors.New("memory: CSS conventions exceed response capacity")
 			}
+		}
+	case "source-revalidate":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil || !request.Revalidation.valid() {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		exact := Scope{}
+		if explicitScope {
+			exact = scope
+		}
+		var eligible bool
+		eligible, err = backend.revalidateSources(ctx, request.Revalidation, exact)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "eligible": eligible,
+				"check_id": request.Revalidation.CheckID, "sources_digest": releaseDigest(request.Revalidation.Sources)})
 		}
 	case "typed-context":
 		backend, ok := options.data.(*postgresDataStore)

@@ -62,6 +62,12 @@ Transport handoff and network effects are not atomic with the receipt store. Do 
 
 ## Verification and retention
 
+The [provider handoff source check](../../validation/memory-source-revalidation-2026-09-21.md)
+now revalidates retained assertion/episode and direct-parent versions under the
+authenticated KB scope. Its process-local handles and attempt challenges refuse
+stale or unavailable sources; they are not durable prepared/dispatch receipts and
+do not bind the final body or eliminate mutations after the check's snapshot.
+
 Expose independent evidence dimensions: schema-valid, authenticated producer, source-version available, payload-verifiable, decision-replayed, chain-included, externally-compared and effect-confirmed. Do not collapse them into a single “verified” bit or assume an ordering of strength.
 
 Support two explicit retention modes. `commitment_only` allows verification against separately supplied bytes and may retain source/version references; it does not promise reconstruction. `replayable` requires all inputs needed for deterministic reconstruction or a governed encrypted final payload, with access/retention controls. If a dependency is erased or unavailable, report replay unavailable while preserving any valid chain inclusion result.

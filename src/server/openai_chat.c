@@ -1841,7 +1841,10 @@ static void *run_job_worker(void *arg)
    int erc = agent_run_with_tools(&acfg, "execute", NULL, j->prompt, j->max_tokens, &result);
    agent_set_ingress_source("");
    if (j->has_reqctx)
+   {
+      ingress_preinject_finish_sources();
       request_context_clear();
+   }
    agent_tools_set_tool_event_cb(NULL, NULL);
 
    /* Honor a cancel requested while the (blocking) step ran. */

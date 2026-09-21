@@ -1,0 +1,25 @@
+{
+  "fixture": "36 selected assertions and 36 direct parents under non-owner RLS; one SQL statement per check",
+  "comparison": "initial and optimized local implementation during this change; not a comparison with released whole-request latency",
+  "initial_ns": [
+    2108661,
+    1997207,
+    2023015
+  ],
+  "optimized_ns": [
+    1356592,
+    1363423,
+    1502466
+  ],
+  "initial_bytes": [
+    171224,
+    170832,
+    170530
+  ],
+  "optimized_bytes": [
+    56877,
+    57010,
+    56938
+  ],
+  "optimized_source_sha256": "ac107dbba3246975254beb7d924f97d71b5d62269d82ce97e285fc9612ca1e0b"
+}

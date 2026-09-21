@@ -38,7 +38,14 @@ checks compare ordinary and versioned recall over six byte capacities, including
 a smaller later entity after an overflowing first entity. Existing source-version,
 parent eligibility, public command, packing and exact-ID regressions remain.
 Targeted runtime-role race, native build/routing, real C-host/Go-process ingress,
-standalone export, 17 S1 and documentation/link checks pass. Fresh deployment of
-this batching change remains pending.
+standalone export, 17 S1 and documentation/link checks pass. Fresh application/harness `430cb91fd373395c2235f38b3da2efd9ae60be72` passes
+**1,570/1,570 checks**: [978 T2](memory-fact-query-batching-2026-09-21/fresh-t2-430cb91fd3.json)
+and [592 T3](memory-fact-query-batching-2026-09-21/fresh-t3-430cb91fd3.json).
+The application image is `sha256:c5d15bcd6b153caa2bf135da1342105a794542b5b917c226d86cd94d48205c97`.
+All [nine image identities](memory-fact-query-batching-2026-09-21/image-identities-430cb91fd3.json)
+and three actual 32 KiB provider caps were checked. All nine owned containers
+and nine empty networks were removed, preserving images, volumes and raw receipts.
+CI run 35585859589 reports a failing T1 whole-projection stability assertion;
+this local/fresh result does not claim that CI passed.
 
 The memory owner and module-side bus client remain Go; the C bus is unchanged.

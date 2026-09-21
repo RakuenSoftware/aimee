@@ -353,7 +353,7 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 	return result, nil
 }
 
-func handleIngressAssembly(args commandArgs) ([]byte, bus.ModuleStatus) {
+func handleIngressAssembly(state *gatewayState, args commandArgs) ([]byte, bus.ModuleStatus) {
 	raw, err := json.Marshal(args)
 	var request ingressAssemblyRequest
 	_, limitsPresent := args["context_limits"]
@@ -367,6 +367,13 @@ func handleIngressAssembly(args commandArgs) ([]byte, bus.ModuleStatus) {
 			return commandResult(commandError(refusal.kind, refusal.message))
 		}
 		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if args.boolean("prepare_source_release") {
+		ticket, err := state.releases.prepare(args, result)
+		if err != nil {
+			return commandResult(commandError("unavailable", "source release preparation unavailable"))
+		}
+		result["source_release_ticket"] = ticket
 	}
 	return commandResult(result)
 }

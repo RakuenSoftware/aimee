@@ -622,7 +622,11 @@ func (s *postgresDataStore) assembleTypedContext(ctx context.Context, trace uint
 					r.trace(name, h.StableID, typedEstimate(h.Rendered), false, "historical channel explicitly disabled")
 					continue
 				}
-				r.add(name, typedItem{value: h, id: h.StableID, text: h.Rendered, source: h.sourceVersion()})
+				source := h.sourceVersion()
+				if source != nil {
+					source.ReadPolicy = &sourceReadPolicy{ValidAt: request.Assertions.ValidAt, BelievedAt: request.Assertions.BelievedAt, Historical: request.Assertions.Historical}
+				}
+				r.add(name, typedItem{value: h, id: h.StableID, text: h.Rendered, source: source})
 			}
 		}
 	}

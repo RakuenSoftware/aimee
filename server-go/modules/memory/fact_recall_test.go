@@ -76,10 +76,22 @@ func (q *countedFactQueryer) Query(ctx context.Context, sql string, args ...any)
 	q.queries++
 	return q.evalQueryer.Query(ctx, sql, args...)
 }
+func (q *countedFactQueryer) QueryRow(ctx context.Context, sql string, args ...any) store.Row {
+	q.queries++
+	return q.evalQueryer.QueryRow(ctx, sql, args...)
+}
 
 // Compare the actual versioned recall implementation across revisions. The
 // fixture and RLS role are transaction-owned and do not alter durable records.
 func BenchmarkVersionedFactRecall(b *testing.B) {
+	benchmarkVersionedFacts(b, false)
+}
+
+func BenchmarkSourceRevalidation(b *testing.B) {
+	benchmarkVersionedFacts(b, true)
+}
+
+func benchmarkVersionedFacts(b *testing.B, revalidate bool) {
 	dsn := os.Getenv("AIMEE_MEMORY_EVAL_URL")
 	if dsn == "" {
 		b.Skip("set AIMEE_MEMORY_EVAL_URL")
@@ -110,9 +122,10 @@ func BenchmarkVersionedFactRecall(b *testing.B) {
  INSERT INTO fact_evidence(assertion_id,source_kind,source_id) SELECT id,'memory','memory:'||id::text FROM memories;
  CREATE INDEX ON fact_evidence(assertion_id);
  CREATE TEMP TABLE entity_registry(canonical_id bigint,status text);
+ CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
  CREATE TEMP TABLE entity_aliases(id bigint,canonical_id bigint,name text,name_norm text,suppressed int,is_preferred int);
  CREATE ROLE aimee_fact_benchmark NOINHERIT NOBYPASSRLS;
- GRANT SELECT ON memories,memory_collection_owner,entity_edges,fact_evidence,entity_registry,entity_aliases TO aimee_fact_benchmark;
+ GRANT SELECT ON memories,memory_collection_owner,entity_edges,fact_evidence,entity_registry,entity_aliases,memory_episodes TO aimee_fact_benchmark;
  ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
  CREATE POLICY fact_bench_scope ON memories USING(scope_type='project' AND scope_value=current_setting('aimee.memory_project',true));
  SELECT set_config('aimee.memory_project','fact-bench',true);
@@ -124,16 +137,26 @@ func BenchmarkVersionedFactRecall(b *testing.B) {
 	q := &countedFactQueryer{evalQueryer: evalQueryer{tx}}
 	backend := &postgresDataStore{db: q, placement: PlacementKB}
 	query := "Entity1 Entity2 Entity3 Entity4 Entity5 Entity6 Entity7 Entity8"
+	var sources []typedProjectionRef
 	for range 5 {
 		text, count, p, err := backend.RecallFactProjection(ctx, "", query, false, 2048)
 		if err != nil || count != 36 || !p.valid(text) {
 			b.Fatal(count, p, err)
 		}
+		sources = p.Retained
 	}
+	request := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("a", 32), Sources: sources}
 	q.queries = 0
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		if revalidate {
+			ok, err := backend.revalidateSources(ctx, request, Scope{})
+			if err != nil || !ok {
+				b.Fatal(ok, err)
+			}
+			continue
+		}
 		_, count, p, err := backend.RecallFactProjection(ctx, "", query, false, 2048)
 		if err != nil || count != 36 || len(p.Retained) != 36 {
 			b.Fatal(count, p, err)
@@ -329,6 +352,7 @@ func exerciseCurrentFactRecallReplay(t *testing.T, ctx context.Context, tx pgx.T
 	if err != nil || countBefore != 1 || !projection.valid(blockBefore) || len(projection.Retained) != 1 || projection.Retained[0].ID != fmt.Sprint(good) || projection.Retained[0].Source.MemoryParents[0].RecordID != fmt.Sprint(local) {
 		t.Fatal("fact source projection lost selected assertion or parent", projection, err)
 	}
+	exerciseSourceRevalidationReplay(t, ctx, tx, backend, projection.Retained)
 	public, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementKB, backend)), 0, bus.CommandContext{}, "facts", `{"query":"CurrentFactEntity","project":"current-fact-project","scope_context":true}`)
 	if status != bus.ModuleStatusOK || public["status"] != "ok" {
 		t.Fatal("public fact projection unavailable", public, status)

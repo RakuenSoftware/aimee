@@ -42,6 +42,7 @@ func TestRPCFaultStatusParity(t *testing.T) {
 		{"permission_denied", 403},
 		{"payload_too_large", 413},
 		{"protected_context_overflow", 413},
+		{"stale_context", 409},
 		{"unavailable", 503},
 		{"", 502},
 		{"unknown", 502},

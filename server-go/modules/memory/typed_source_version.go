@@ -13,6 +13,15 @@ type typedSourceVersion struct {
 	Version           MemoryRecordVersion   `json:"version"`
 	MemoryParents     []MemoryRecordVersion `json:"memory_parents,omitempty"`
 	MemoryParentState string                `json:"memory_parent_state,omitempty"`
+	ReadPolicy        *sourceReadPolicy     `json:"read_policy,omitempty"`
+}
+
+// Preserve the selection's temporal contract when checking it again at release.
+// Empty timestamps mean the current clock, not the original selection time.
+type sourceReadPolicy struct {
+	ValidAt    string `json:"valid_at,omitempty"`
+	BelievedAt string `json:"believed_at,omitempty"`
+	Historical bool   `json:"include_historical,omitempty"`
 }
 
 const maxTypedMemoryParents = 64
@@ -35,6 +44,9 @@ func validTypedSource(ref typedProjectionRef) bool {
 		// Older projections and channels without owner version contracts cannot
 		// claim source-version evidence. Their byte commitments still apply.
 		return true
+	}
+	if p := ref.Source.ReadPolicy; p != nil && (ref.Source.Kind != "semantic_assertion" || ref.Channel == "facts" || !assertionTimestamp(p.ValidAt) || !assertionTimestamp(p.BelievedAt)) {
+		return false
 	}
 	switch ref.Source.Kind {
 	case "semantic_assertion":

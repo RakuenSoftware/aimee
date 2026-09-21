@@ -22,6 +22,10 @@
 #include "index.h" /* code_search_hit_t */
 #include <stddef.h>
 
+/* Authenticated transport for Go-owned source revalidation at the wire fence. */
+int ingress_preinject_revalidate_sources(void);
+void ingress_preinject_finish_sources(void);
+
 /* Extract the recall seed query from a parsed chat `messages` array: the text
  * of the last user-role message. Returns a malloc'd string (caller frees) or
  * NULL when there is no usable user text. Pure (no kb). */

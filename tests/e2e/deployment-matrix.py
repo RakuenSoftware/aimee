@@ -143,6 +143,13 @@ def typed_source_version_gate(kb, check):
         return kb.kb_request('/v1/actions/memory.assemble_typed_context', dict(payload, **(extra or {})))
     def selected(result):
         return next((r for r in result.get('retained_items', []) if r['stable_id'] == fixture['record_id']), {})
+    def selected_text(result):
+        return next((r.get('rendered') for r in result.get('channels', {}).get('current_assertions', {}).get('items', [])
+                     if r.get('stable_id') == fixture['record_id']), None)
+    def revalidate(ref, project=key, authenticated=True):
+        request = dict(scope_context=True, project=project, include_all=False,
+                       revalidation=dict(schema_version=1, check_id=uuid.uuid4().hex, sources=[ref]))
+        return kb.kb_request('/v1/actions/memory.revalidate_sources', request, authenticated=authenticated)
     def matches(result):
         identity = dict(schema_version=1, projection_digest=result.get('projection_digest'),
                         retained_items=result.get('retained_items'))
@@ -161,15 +168,29 @@ def typed_source_version_gate(kb, check):
         check('Typed assertion binds its direct memory parent revision',
               source.get('memory_parents') == [expected_parent] and source.get('memory_parent_state') == 'observed')
         code, again = call()
+        # Other visible candidates and their retrieval traces can change while
+        # background indexing progresses. This check concerns the exact fixture
+        # source; whole-projection stability requires identical whole inputs.
         check('Unchanged typed assertion retains its source binding', code == 200 and
-              selected(again) == selected(before) and again.get('selection_digest') == before.get('selection_digest'))
+              selected(again) == selected(before) and matches(again))
+        code, verified = revalidate(selected(before))
+        check('Final source check accepts unchanged assertion and parent', code == 200 and
+              verified.get('status') == 'ok' and verified.get('eligible') is True)
+        code, hidden = revalidate(selected(before), project=key+'-hidden')
+        check('Final source check refuses a newly hidden parent', code == 200 and hidden.get('eligible') is False)
+        code, anonymous = revalidate(selected(before), authenticated=False)
+        check('Final source check requires authenticated transport', code in (401, 403) and anonymous.get('eligible') is not True)
         sql(f"UPDATE memories SET content='changed supporting source' WHERE id={int(fixture['parent_id'])}")
         code, parent_changed = call()
         expected_parent['record_revision'] = str(int(fixture['parent_revision'])+1)
         check('Changed memory parent invalidates binding with identical assertion bytes', code == 200 and
               selected(parent_changed).get('source_version', {}).get('memory_parents') == [expected_parent] and
-              parent_changed.get('rendered_context') == before.get('rendered_context') and
+              selected_text(before) is not None and selected_text(parent_changed) == selected_text(before) and
               parent_changed.get('selection_digest') != before.get('selection_digest') and matches(parent_changed))
+        code, stale = revalidate(selected(before))
+        check('Final source check refuses parent changed after selection', code == 200 and stale.get('eligible') is False)
+        code, current = revalidate(selected(parent_changed))
+        check('Final source check accepts refreshed parent binding', code == 200 and current.get('eligible') is True)
         mid = int(fixture['record_id'])
         sql(f"""BEGIN; UPDATE entity_edges SET version=version+1 WHERE id={mid};
             INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,

@@ -7,6 +7,7 @@
 /* Lean clients may have no HTTP context. Deployment limits still apply, and a
  * present limit must never bypass admission because the module is absent. */
 extern const request_context_t *request_context_get(void) __attribute__((weak));
+extern int ingress_preinject_revalidate_sources(void) __attribute__((weak));
 extern econ_request_budget_result_t econ_module_request_budget(unsigned, const void *, size_t,
                                                                const char *) __attribute__((weak));
 extern econ_request_budget_result_t
@@ -136,6 +137,12 @@ int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pri
                           : "request_budget_unavailable";
          return -1;
       }
+   }
+   if (context && context->memory_source_release[0] &&
+       (!ingress_preinject_revalidate_sources || ingress_preinject_revalidate_sources() != 0))
+   {
+      last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
+      return WIRE_FENCE_CONTEXT_REFUSED;
    }
    if (!proof_gated)
    {

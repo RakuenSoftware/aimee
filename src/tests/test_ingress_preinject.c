@@ -19,6 +19,8 @@ static int g_evidence_enabled;
 static int g_assembly_budget = 1200;
 static int g_evidence_count, g_bridge_count, g_code_count, g_typed_count, g_fact_count;
 static int g_fact_projection;
+static int g_source_check_mode;
+static int g_source_check_calls;
 static char g_typed_first_ref[512];
 static int64_t g_evidence_ids[5];
 static char g_evidence_preview[256];
@@ -115,6 +117,33 @@ void kb_client_memory_scope_context_apply(cJSON *request)
 static char *diagnostic_reply(const cJSON *request);
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
+   if (!strcmp(method, "memory.revalidate_sources"))
+   {
+      g_source_check_calls++;
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
+      assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(request, "include_all")));
+      const cJSON *revalidation = cJSON_GetObjectItemCaseSensitive(request, "revalidation");
+      const cJSON *sources = cJSON_GetObjectItemCaseSensitive(revalidation, "sources");
+      assert(cJSON_GetArraySize(sources) == 1);
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                        cJSON_GetArrayItem(sources, 0), "stable_id")),
+                    "9007199254743001") == 0);
+      cJSON *reply = cJSON_CreateObject();
+      cJSON_AddStringToObject(reply, "status", "ok");
+      cJSON_AddBoolToObject(reply, "eligible", g_source_check_mode != 1);
+      const char *check =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(revalidation, "check_id"));
+      cJSON_AddStringToObject(reply, "check_id", g_source_check_mode == 4 ? "wrong" : check);
+      cJSON_AddStringToObject(
+          reply, "sources_digest",
+          g_source_check_mode == 3
+              ? "wrong"
+              : "06fe9a94ed30e7076d78c8a4725912f68b196f2bd07253056b21be8b8d6a3f43");
+      cJSON_Delete(request);
+      char *raw = g_source_check_mode == 2 ? NULL : cJSON_PrintUnformatted(reply);
+      cJSON_Delete(reply);
+      return raw;
+   }
    if (!strcmp(method, "memory.diagnose_scoped"))
    {
       char *raw = diagnostic_reply(request);
@@ -1088,8 +1117,58 @@ static void test_required_assembly_refusal_reaches_dispatch(void)
    request_context_clear();
    puts("required assembly failure reaches provider fence and clears on new request");
 }
+static void test_source_revalidation_at_provider_fence(void)
+{
+   request_context_t context = {0};
+   strcpy(context.request_id, "source-release-request");
+   strcpy(context.principal, "source-release-user");
+   request_context_set(&context);
+   g_fact_projection = 1;
+   char *envelope = ingress_preinject_build("deployment matrix", 0);
+   assert(envelope && strlen(request_context_get()->memory_source_release) == 32);
+   free(envelope);
+   context = *request_context_get(); /* same copy performed by native workers */
+   request_context_clear();
+   g_source_check_calls = 0;
+   for (int mode = 0; mode <= 5; mode++)
+      for (int gated = 0; gated <= 1; gated++)
+         for (unsigned route = 1; route <= 3; route++)
+         {
+            request_context_set(&context);
+            g_source_check_mode = mode;
+            g_runtime_failure = mode == 5 ? 1 : 0;
+            wire_fence_t *snapshot = NULL;
+            wire_fence_bytes_t selected = {0};
+            int rc =
+                wire_fence_select(gated, (wire_fence_route_t)route, "{}", 2, &snapshot, &selected);
+            if (mode == 0)
+            {
+               assert(rc == 0 && selected.len == 2 && selected.data);
+               assert(!request_context_get()->context_refused);
+               wire_fence_destroy(snapshot);
+            }
+            else
+            {
+               assert(rc == WIRE_FENCE_CONTEXT_REFUSED && !snapshot && !selected.data &&
+                      !selected.len);
+               assert_context_dispatch_refused(mode == 1 ? "stale_context" : "unavailable");
+            }
+         }
+   assert(g_source_check_calls == 30); /* every attempt rechecks; Go outage cannot dispatch */
+   g_runtime_failure = g_source_check_mode = g_fact_projection = 0;
+   request_context_set(&context);
+   ingress_preinject_finish_sources();
+   assert(!request_context_get()->memory_source_release[0]);
+   request_context_set(&context);
+   assert(ingress_preinject_revalidate_sources() != 0);
+   assert_context_dispatch_refused("unavailable"); /* released handles cannot be revived */
+   request_context_clear();
+   puts("source changes and owner failures refuse final provider bytes across all routes");
+}
+
 int main(void)
 {
+   test_source_revalidation_at_provider_fence();
    test_required_assembly_refusal_reaches_dispatch();
    test_fact_evidence_after_integrity_and_packing();
    test_typed_evidence_after_integrity_and_packing();

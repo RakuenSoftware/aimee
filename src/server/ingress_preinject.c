@@ -102,6 +102,61 @@ static cJSON *ingress_command(cJSON *request, int required_context)
    return response;
 }
 
+static void ingress_release_context(cJSON *request, const request_context_t *context)
+{
+   cJSON_AddStringToObject(request, "source_release_ticket", context->memory_source_release);
+   cJSON_AddStringToObject(request, "request_id", context->request_id);
+   cJSON_AddStringToObject(request, "principal", context->principal);
+   cJSON_AddStringToObject(request, "caller_subject", context->caller_subject);
+}
+
+/* The host carries opaque owner requests and responses. Source policy, version
+ * comparison, scope selection and response validation all remain in Go. */
+int ingress_preinject_revalidate_sources(void)
+{
+   const request_context_t *context = request_context_get();
+   if (!context || !context->memory_source_release[0])
+      return 0;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "source-release-plan");
+   ingress_release_context(request, context);
+   cJSON *plan = ingress_command(request, 1);
+   const cJSON *owner_request = cJSON_GetObjectItemCaseSensitive(plan, "request");
+   if (!cJSON_IsObject(owner_request))
+   {
+      (void)request_context_refuse_assembly("unavailable");
+      cJSON_Delete(plan);
+      return -1;
+   }
+   char *raw = kb_v1_action_request("memory.revalidate_sources", cJSON_Duplicate(owner_request, 1));
+   cJSON_Delete(plan);
+   cJSON *owner_response = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "source-release-result");
+   ingress_release_context(request, context);
+   cJSON_AddItemToObject(request, "owner_response",
+                         owner_response ? owner_response : cJSON_CreateNull());
+   cJSON *response = ingress_command(request, 1);
+   int admitted = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "admitted"));
+   cJSON_Delete(response);
+   if (!admitted)
+      (void)request_context_refuse_assembly("unavailable");
+   return admitted ? 0 : -1;
+}
+
+void ingress_preinject_finish_sources(void)
+{
+   const request_context_t *context = request_context_get();
+   if (!context || !context->memory_source_release[0])
+      return;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "source-release-finish");
+   ingress_release_context(request, context);
+   cJSON_Delete(ingress_command(request, 0));
+   (void)request_context_set_source_release("");
+}
+
 void ingress_preinject_set_session_id(const char *session_id)
 {
    if (session_id && session_id[0])
@@ -463,6 +518,13 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    cJSON_AddStringToObject(assembly, "audit", audit ? audit : "");
    free(audit);
 
+   if (rctx)
+   {
+      cJSON_AddBoolToObject(assembly, "prepare_source_release", 1);
+      cJSON_AddStringToObject(assembly, "workspace", active_workspace);
+      cJSON_AddStringToObject(assembly, "project", active_project);
+      ingress_release_context(assembly, rctx);
+   }
    cJSON *response = ingress_command(assembly, 1);
    const char *envelope =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "envelope"));
@@ -491,6 +553,17 @@ char *ingress_preinject_build(const char *query, int request_disabled)
                   integrity_verdict_name(gate.verdict), gate.match_category);
       else
          result = strdup(envelope);
+   }
+   if (result && rctx)
+   {
+      const char *ticket =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "source_release_ticket"));
+      if (request_context_set_source_release(ticket) != 0)
+      {
+         (void)request_context_refuse_assembly("unavailable");
+         free(result);
+         result = NULL;
+      }
    }
    /* Assembly evidence is emitted only after packing and integrity acceptance.
     * It does not assert provider admission, dispatch, or acknowledgement. */

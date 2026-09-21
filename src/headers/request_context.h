@@ -57,6 +57,8 @@ typedef struct
     * refusal is terminal for this request and survives async context copies. */
    int context_refused;
    char context_refusal_kind[96];
+   /* Host-only opaque Go source-release handle, preserved in async copies. */
+   char memory_source_release[33];
    int aimee_tool_calls; /* cumulative calls observed in this API transcript */
    int aimee_redundant_tool_calls;
    char aimee_intervention[40];
@@ -77,6 +79,7 @@ const request_context_t *request_context_get(void);
 /* Retain the first failed required context operation until request clear/set.
  * Returns -1 without an active request; it never creates a detached TLS latch. */
 int request_context_refuse_assembly(const char *kind);
+int request_context_set_source_release(const char *ticket);
 
 /* Clear the current thread's request context. */
 void request_context_clear(void);

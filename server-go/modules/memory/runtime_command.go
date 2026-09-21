@@ -103,7 +103,9 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	case "ingress-begin", "ingress-task-result", "ingress-recall-result", "ingress-metrics":
 		return handleIngressPlan(options.gateway, args)
 	case "ingress-assemble":
-		return handleIngressAssembly(args)
+		return handleIngressAssembly(options.gateway, args)
+	case "source-release-plan", "source-release-result", "source-release-finish":
+		return handleSourceRelease(&options.gateway.releases, args)
 	case "ingress-task-packet":
 		return handleIngressTaskPacket(args)
 	case "ingress-task-claim", "ingress-task-rearm", "ingress-task-reset":
