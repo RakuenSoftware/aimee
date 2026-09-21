@@ -151,6 +151,13 @@
       ],
       "type": "object"
     },
+    "go_assets": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
     "go_sources": {
       "items": {
         "type": "string"

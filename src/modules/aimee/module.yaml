@@ -124,7 +124,7 @@
   "docs": [
     "docs/modules/aimee.md"
   ],
-  "contracts": [
+  "go_assets": [
     "server-go/modules/aimee/families/schema_agent_work.sql",
     "server-go/modules/aimee/families/schema_cell_limits.sql",
     "server-go/modules/aimee/families/schema_checkpoints.sql",

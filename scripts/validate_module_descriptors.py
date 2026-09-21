@@ -37,7 +37,7 @@ BUILD_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$")
 C_DEFINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 OWNERSHIP_FIELDS = (
     "sources", "private_headers", "public_headers", "contracts", "tests", "docs", "go_sources",
-    "go_tests",
+    "go_tests", "go_assets",
 )
 # Startup selection and live toggling are independent policies. Economizer must
 # start for final request admission even when optional reduction is disabled;
@@ -53,6 +53,7 @@ ROLE_EXTENSIONS = {
     "docs": {".md"},
     "go_sources": {".go"},
     "go_tests": {".go"},
+    "go_assets": {".sql"},
 }
 
 
@@ -547,6 +548,7 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
         "docs": PurePosixPath("docs/modules"),
         "go_sources": PurePosixPath("server-go/modules") / identifier,
         "go_tests": PurePosixPath("server-go/modules") / identifier,
+        "go_assets": PurePosixPath("server-go/modules") / identifier,
     }
     prefix = role_prefixes[field]
     try:
@@ -572,6 +574,7 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
         "docs": _resolve_owned(resolved_repo / "docs/modules", pointer),
         "go_sources": _resolve_owned(resolved_repo / "server-go/modules" / identifier, pointer),
         "go_tests": _resolve_owned(resolved_repo / "server-go/modules" / identifier, pointer),
+        "go_assets": _resolve_owned(resolved_repo / "server-go/modules" / identifier, pointer),
     }
     boundary = boundaries[field]
     if not _contained(resolved, boundary):
@@ -658,11 +661,13 @@ def validate_complete_ownership(repo: Path, identifier: str,
              f"missing={missing_contracts}, extra={extra_contracts}",
              "/contracts")
     go_root = repo / "server-go/modules" / identifier
-    for role, is_test in (("go_sources", False), ("go_tests", True)):
+    for role, pattern, is_test in (("go_sources", "*.go", False),
+                                   ("go_tests", "*.go", True),
+                                   ("go_assets", "*.sql", None)):
         actual: set[str] = set()
         if go_root.is_dir():
-            for path in go_root.rglob("*.go"):
-                if path.name.endswith("_test.go") != is_test:
+            for path in go_root.rglob(pattern):
+                if is_test is not None and path.name.endswith("_test.go") != is_test:
                     continue
                 relative = path.relative_to(repo).as_posix()
                 if path.is_symlink() or not path.is_file():
@@ -676,7 +681,7 @@ def validate_complete_ownership(repo: Path, identifier: str,
         extra = sorted(declared - actual)
         if missing or extra:
             fail("ownership-complete",
-                 f"{identifier} {role} mismatch for Go files; missing={missing}, extra={extra}",
+                 f"{identifier} {role} mismatch for {pattern} files; missing={missing}, extra={extra}",
                  f"/{role}")
     implementation_roles = ("sources", "private_headers", "go_sources", "go_tests")
     if not any(found.get(role) for role in implementation_roles) and "external_source" not in value:

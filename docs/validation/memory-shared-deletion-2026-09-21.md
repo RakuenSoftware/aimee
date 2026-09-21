@@ -51,6 +51,16 @@ Local validation passes:
 - Native build and memory-route tests, independent Go memory export/build, all
   77 repository lint checks and all 17 S1 contract checks.
 
+CI exposed an error in the earlier standalone export repair: embedded SQL was
+listed as event contracts. The descriptor now declares its 32 SQL inputs as
+`go_assets`; contracts retain their JSON-only event-directory boundary. Asset
+ownership rejects missing declarations, cross-module paths and symlinks, and the
+export/build checks verify copied bytes and CMake dependencies. The standalone
+Aimee export builds and its startup checks pass with this declaration. All 47
+descriptor tests, all 77 lint gates and all 62 script regression files pass. The
+CMake-only export test is skipped locally because CMake is unavailable; the Go
+export/build regression executes successfully.
+
 The live fixture adds real HTTP/MCP deletion and retirement, failure injection,
 KB restart, reactivation/erasure and hidden-ID restoration. Fresh-image T2/T3
 acceptance is pending. Creation retries, remaining mutation preconditions,

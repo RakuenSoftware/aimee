@@ -72,13 +72,17 @@ def main() -> int:
                     return fail(f"{module_id}: isolated repository is not Go-only at runtime")
                 canonical_bus = exporter.go_bus_sources(module_id)
                 shared_sources = exporter.go_process_shared_sources(module_id)
-                for relative in [*canonical_bus, *shared_sources, *descriptor.get("go_sources", [])]:
+                for relative in [*canonical_bus, *shared_sources, *descriptor.get("go_sources", []),
+                                 *descriptor.get("go_assets", [])]:
                     if (repository / relative).read_bytes() != (ROOT / relative).read_bytes():
                         return fail(f"{module_id}: isolated repository changed {relative}")
                 repository_manifest = exporter.load_json(repository / "SOURCE_MANIFEST.json")
                 if repository_manifest.get("runtime") != "go":
                     return fail(f"{module_id}: isolated manifest is not marked Go")
                 cmake = (repository / "CMakeLists.txt").read_text(encoding="utf-8")
+                for relative in descriptor.get("go_assets", []):
+                    if "${CMAKE_CURRENT_SOURCE_DIR}/" + relative not in cmake:
+                        return fail(f"{module_id}: embedded asset is not a build dependency: {relative}")
                 if "CGO_ENABLED=0" not in cmake or "./runtime" not in cmake:
                     return fail(f"{module_id}: isolated Go build boundary is incomplete")
 

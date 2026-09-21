@@ -234,7 +234,7 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
     """Return descriptor-owned source-tree inputs for the module repository."""
     result = [f"src/modules/{module_id}/module.yaml"]
     for key in ("sources", "private_headers", "public_headers", "contracts", "tests", "docs",
-                "go_sources", "go_tests"):
+                "go_sources", "go_tests", "go_assets"):
         values = descriptor.get(key, [])
         if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
             raise ExportError(f"{module_id}: descriptor field {key} must be a string array")
@@ -978,7 +978,8 @@ require (
             cmake_dependencies = "\n".join(
                 f"        ${{CMAKE_CURRENT_SOURCE_DIR}}/{relative}"
                 for relative in ["runtime/main.go", *go_sources, *bus_sources, *shared_sources,
-                                 *descriptor.get("contracts", []), "go.mod", "go.sum"]
+                                 *descriptor.get("contracts", []), *descriptor.get("go_assets", []),
+                                 "go.mod", "go.sum"]
             )
             write_text(
                 repository / "CMakeLists.txt",
