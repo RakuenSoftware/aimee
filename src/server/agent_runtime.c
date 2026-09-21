@@ -1699,7 +1699,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    const char *skip_kb_env = getenv("AIMEE_CONTEXT_NO_KB");
    const char *kb_mode = config_kb_mode();
    int skip_kb_client = (kb_mode && strcmp(kb_mode, "none") == 0) || skip_kb_context ||
-                        (skip_kb_env && skip_kb_env[0] && strcmp(skip_kb_env, "0") != 0);
+                        (skip_kb_env && skip_kb_env[0] && strcmp(skip_kb_env, "0") != 0) ||
+                        ((!kb_mode || !kb_mode[0]) && !kb_client_connection_configured());
 
    ctx_appendf(buf, cap, &pos, "%s", agent_exec_instructions(task_type));
    ctx_appendf(buf, cap, &pos, "%s", prompt_principles_text(config_current_mode()));

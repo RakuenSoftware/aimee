@@ -98,8 +98,10 @@ static int composition_calls;
 static int native_projection_bytes;
 static int composition_transport = 1;
 static const char *composition_reply;
-int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
+                                                    int timeout_ms, cJSON **result)
 {
+   assert(timeout_ms == 60000);
    assert(strcmp(method, "memory.runtime") == 0);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
                  "compose-recall") == 0);

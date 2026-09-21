@@ -456,7 +456,10 @@ static char *memory_recall_json(const char *task_hint, int limit_tokens, int ses
       cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
       cJSON_AddBoolToObject(request, "session_start", session_start != 0);
       cJSON *reply = NULL;
-      int rc = aimee_module_commands_dispatch_internal("memory.runtime", request, &reply);
+      /* Match the private recall host's bound. The generic command default
+       * is 125 seconds and is intended for long-running module operations. */
+      int rc =
+          aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 60000, &reply);
       cJSON_Delete(request);
       free(j);
       const char *body =

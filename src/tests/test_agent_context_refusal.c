@@ -10,6 +10,7 @@
 #include "http_retry.h"
 #include "request_context.h"
 #include "aimee_sha256.h"
+#include "kb_client.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -227,6 +228,32 @@ int main(void)
       free(invalid_result.response);
    }
    malformed_projection = 0;
+   /* An unconfigured standalone server has an empty mode, not necessarily
+    * the explicit "none" setting. It still requires its private Go owner. */
+   assert(platform_unsetenv("AIMEE_CONTEXT_NO_KB") == 0);
+   assert(platform_unsetenv("AIMEE_KB_API_URL") == 0);
+   assert(config_set_kb_mode("") == 0);
+   assert(!kb_client_connection_configured());
+   text =
+       agent_build_exec_context_checked(&agent, &network, "review", NULL, 0, error, sizeof(error));
+   assert(text && !error[0] && strstr(text, "Go owner retained complete context."));
+   free(text);
+   /* A configured but unavailable KB is different: never silently downgrade
+    * to private recall after losing the shared owner's required constraints. */
+   assert(config_set_kb_mode("remote") == 0);
+   int before_missing_connection = recalls;
+   text =
+       agent_build_exec_context_checked(&agent, &network, "review", NULL, 0, error, sizeof(error));
+   assert(!text && strstr(error, "unavailable") && recalls == before_missing_connection);
+   assert(config_set_kb_mode("") == 0);
+   assert(platform_setenv("AIMEE_KB_API_URL", "http://127.0.0.1:1") == 0);
+   assert(kb_client_connection_configured());
+   int before_shared_refusal = recalls;
+   text =
+       agent_build_exec_context_checked(&agent, &network, "review", NULL, 0, error, sizeof(error));
+   assert(!text && strstr(error, "unavailable") && recalls == before_shared_refusal);
+   assert(platform_unsetenv("AIMEE_KB_API_URL") == 0);
+   assert(platform_setenv("AIMEE_CONTEXT_NO_KB", "1") == 0);
    /* Initial assembly succeeds; a new owner refusal arrives at turn-five
     * refresh. The native loop must not send request six with stale context. */
    recalls = 0;

@@ -133,3 +133,29 @@ It does not invoke the native agent initial/refresh or asynchronous worker paths
 those distinctions remain as described above. The later generic assembly
 `df4380b4fc` and worker initialization `ad4604dfaa` fixes postdate this image and
 have local validation only. No MR-01–MR-18 proposal is fully accepted by this run.
+
+
+## Live asynchronous fixture and first findings
+
+The deployment matrix now includes a real `/v1/runs` fixture with a local provider
+and the actual Go owner. It explicitly enables automatic recall (off in the fresh
+configuration), restores the original setting/model roster, verifies complete
+private identity at the provider, and tests inherited zero-byte refusal,
+owner outage and supervised recovery. Receipts omit prompts and credentials.
+
+The first fresh `550eba14de` runs were diagnostic failures, not release evidence.
+They exposed native standalone detection treating the ordinary empty `kb_mode`
+as a configured shared source. The host now uses private recall when the mode is
+empty and no connection is configured. Explicit remote mode still requires the
+shared owner, even if its connection is missing; configured outages cannot
+silently downgrade to private recall. Native regressions cover both distinctions.
+
+With automatic recall enabled, enrolled execution exposed composition's generic
+125-second RPC timeout. Composition now uses the same explicit 60-second bound
+as personal recall; longer-running module commands keep their existing behavior.
+The local transport fixture asserts this bound. This does not claim a 60-second
+whole-request deadline: upstream transport and other stages have separate bounds.
+
+A diagnostic standalone run with explicit disconnection verified complete Go
+memory, inherited refusal, owner refusal with no provider requests, and recovery.
+Corrected fresh-image validation is still required for these follow-ups.

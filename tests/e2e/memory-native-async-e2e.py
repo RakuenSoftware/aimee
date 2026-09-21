@@ -33,11 +33,12 @@ def strings(value):
 def inside(output):
     if os.environ.get('AIMEE_NATIVE_ASYNC_FIXTURE') != '1':
         raise RuntimeError('requires the disposable-container launcher')
-    checks, captures = [], []
+    checks, captures, runs = [], [], []
     lock = threading.Lock()
     prefix = 'native-memory-' + uuid.uuid4().hex[:10]
     content = 'Complete native Go memory fixture 界🦊; preserve LIMIT_7 and identifier ' + prefix
     owner_pid, memory_id = None, None
+    previous_recall = None
 
     def check(name, passed):
         checks.append(dict(name=name, passed=bool(passed)))
@@ -88,6 +89,7 @@ def inside(output):
             self.wfile.write(data)
 
     def run(name, limits=None):
+        started, before = time.monotonic(), len(captures)
         status, created = api('/v1/runs', dict(model=prefix, input='Read the native memory fixture ' + prefix,
                                               max_output_tokens=32), limits)
         check(name + ' queues a real asynchronous worker', status == 200 and bool(created.get('id')))
@@ -97,6 +99,10 @@ def inside(output):
             status, result = api('/v1/runs/' + run_id)
             if status == 200 and result.get('status') in ('completed', 'failed', 'cancelled'):
                 _, events = api('/v1/runs/' + run_id + '/events')
+                runs.append(dict(name=name, run_id=run_id, status=result['status'],
+                    elapsed_seconds=time.monotonic()-started, provider_requests=len(captures)-before,
+                    refusal_kinds=[kind for kind in ('request_budget_exceeded', 'unavailable')
+                                   if any(kind in text for text in strings(events))]))
                 return result, events
             time.sleep(0.1)
         api('/v1/runs/' + run_id + '/stop', {})
@@ -133,7 +139,16 @@ def inside(output):
     threading.Thread(target=provider.serve_forever, daemon=True).start()
     roster = Path('/var/lib/aimee/models.json')
     previous = roster.read_bytes() if roster.exists() else None
+    def config(*args):
+        env = dict(os.environ, AIMEE_API_ENDPOINT='unix:/var/lib/aimee/aimee-http.sock')
+        return json.loads(subprocess.check_output(['aimee', '--json', 'config', *args], env=env, text=True))
+
     try:
+        # Exercise configured automatic recall without changing product defaults.
+        previous_recall = config('get', 'memory_recall_enabled')['value']
+        config('set', 'memory_recall_enabled', '1')
+        check('native fixture explicitly enables automatic recall',
+              config('get', 'memory_recall_enabled')['value'] == 1)
         # Role routing uses the default delegate; an explicit ingress model alone
         # does not select the worker's route. Isolate every route to this fixture.
         roster.write_text(json.dumps(dict(default_agent=prefix, default_delegate=prefix, fallback_chain=[],
@@ -177,13 +192,15 @@ def inside(output):
                 status, retired = api('/v1/memory/delete', dict(id=str(memory_id)))
                 check('native fixture retires its private identity', status == 200 and retired.get('status') == 'ok')
         finally:
+            if previous_recall is not None:
+                config('set', 'memory_recall_enabled', json.dumps(previous_recall))
             if previous is None:
                 roster.unlink(missing_ok=True)
             else:
                 roster.write_bytes(previous)
             provider.shutdown()
             provider.server_close()
-            Path(output).write_text(json.dumps(dict(checks=checks), indent=2) + '\n')
+            Path(output).write_text(json.dumps(dict(checks=checks, runs=runs), indent=2) + '\n')
     return 0
 
 
