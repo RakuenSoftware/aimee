@@ -14,6 +14,7 @@ from pathlib import Path
 import signal
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -33,12 +34,18 @@ def strings(value):
 def inside(output):
     if os.environ.get('AIMEE_NATIVE_ASYNC_FIXTURE') != '1':
         raise RuntimeError('requires the disposable-container launcher')
-    checks, captures, runs = [], [], []
+    checks, captures, runs, provider_errors = [], [], [], []
     lock = threading.Lock()
     prefix = 'native-memory-' + uuid.uuid4().hex[:10]
     content = 'Complete native Go memory fixture 界🦊; preserve LIMIT_7 and identifier ' + prefix
     owner_pid, memory_id = None, None
+    refresh_id = None
+    refreshed_content = 'New memory committed before turn-six context refresh 界🦊 ' + prefix
+    scenario, scenario_start = 'single', 0
     previous_recall = None
+    fixture_files = tempfile.TemporaryDirectory(prefix=prefix + '-')
+    for turn in range(1, 6):
+        (Path(fixture_files.name) / f'{turn}.txt').write_text(f'Native refresh evidence {turn}: {prefix}\n')
 
     def check(name, passed):
         checks.append(dict(name=name, passed=bool(passed)))
@@ -73,14 +80,37 @@ def inside(output):
             pass
 
         def do_POST(self):
+            nonlocal refresh_id
             raw = self.rfile.read(int(self.headers.get('Content-Length', '0')))
             body = json.loads(raw)
             with lock:
                 captures.append(body)
+                ordinal = len(captures) - scenario_start
             response = dict(id=prefix, object='chat.completion', model=body['model'],
                 choices=[dict(index=0, message=dict(role='assistant', content='NATIVE_MEMORY_OK'),
                               finish_reason='stop')],
                 usage=dict(prompt_tokens=11, completion_tokens=2, total_tokens=13))
+            if scenario != 'single' and ordinal <= 5:
+                # Distinct real reads avoid repeated-call detection. The fifth
+                # reply is withheld until the memory state changes, so refresh
+                # and provider dispatch cannot race the test's intervention.
+                tool = dict(id=f'{prefix}-call-{ordinal}', type='function', function=dict(
+                    name='read_file', arguments=json.dumps(dict(
+                        path=str(Path(fixture_files.name) / f'{ordinal}.txt')))))
+                response['choices'] = [dict(index=0, finish_reason='tool_calls',
+                    message=dict(role='assistant', content=None, tool_calls=[tool]))]
+                if ordinal == 5:
+                    try:
+                        if scenario == 'refresh-update':
+                            status, stored = api('/v1/memory/store', dict(
+                                key='identity:' + prefix + '-refresh', content=refreshed_content))
+                            if status != 200 or stored.get('status') != 'ok':
+                                raise RuntimeError('refresh identity was not committed')
+                            refresh_id = stored['id']
+                        elif scenario == 'refresh-outage':
+                            os.kill(owner_pid, signal.SIGSTOP)
+                    except Exception as exc:
+                        provider_errors.append(type(exc).__name__ + ': ' + str(exc))
             data = json.dumps(response).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -88,8 +118,10 @@ def inside(output):
             self.end_headers()
             self.wfile.write(data)
 
-    def run(name, limits=None):
+    def run(name, limits=None, mode='single'):
+        nonlocal scenario, scenario_start
         started, before = time.monotonic(), len(captures)
+        scenario, scenario_start = mode, before
         status, created = api('/v1/runs', dict(model=prefix, input='Read the native memory fixture ' + prefix,
                                               max_output_tokens=32), limits)
         check(name + ' queues a real asynchronous worker', status == 200 and bool(created.get('id')))
@@ -184,10 +216,41 @@ def inside(output):
         check('new native worker recovers and dispatches once', result.get('status') == 'completed' and
               len(captures) == before + 1)
         check('recovered provider retains complete Go memory', any(content in text for text in strings(captures[-1])))
+        before = len(captures)
+        result, events = run('native context refresh', mode='refresh-update')
+        check('native refresh fixture commits its memory update', not provider_errors and refresh_id is not None)
+        check('native multi-turn run completes after five tool calls', result.get('status') == 'completed' and
+              len(captures) == before + 6)
+        check('native refresh follows five real file reads', all(
+            any(f'Native refresh evidence {turn}: {prefix}' in text for text in strings(captures[-1]))
+            for turn in range(1, 6)))
+        check('initial context predates the new identity',
+              not any(refreshed_content in text for text in strings(captures[before])))
+        check('refreshed provider context contains the new complete identity',
+              any(refreshed_content in text for text in strings(captures[-1])))
+        owner_pid = memory_owner()
+        try:
+            before = len(captures)
+            result, events = run('native refresh owner outage', mode='refresh-outage')
+            check('native refresh intervention succeeds', not provider_errors)
+            check('native refresh reports memory owner refusal', result.get('status') == 'failed' and
+                  any('unavailable' in text for text in strings(events)))
+            check('native refresh refusal prevents a sixth provider request', len(captures) == before + 5)
+        finally:
+            recover()
+        before = len(captures)
+        result, _ = run('recovered native refresh')
+        check('worker recovers after refresh refusal', result.get('status') == 'completed' and
+              len(captures) == before + 1)
+        check('refresh recovery retains both committed identities', all(
+            any(value in text for text in strings(captures[-1])) for value in (content, refreshed_content)))
     finally:
         try:
             if owner_pid is not None:
                 recover()
+            if refresh_id is not None:
+                status, retired = api('/v1/memory/delete', dict(id=str(refresh_id)))
+                check('native fixture retires its refreshed identity', status == 200 and retired.get('status') == 'ok')
             if memory_id is not None:
                 status, retired = api('/v1/memory/delete', dict(id=str(memory_id)))
                 check('native fixture retires its private identity', status == 200 and retired.get('status') == 'ok')
@@ -200,6 +263,7 @@ def inside(output):
                 roster.write_bytes(previous)
             provider.shutdown()
             provider.server_close()
+            fixture_files.cleanup()
             Path(output).write_text(json.dumps(dict(checks=checks, runs=runs), indent=2) + '\n')
     return 0
 
