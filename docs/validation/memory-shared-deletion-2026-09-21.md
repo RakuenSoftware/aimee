@@ -64,7 +64,7 @@ export/build regression executes successfully.
 The first fresh image (`eec3d6d651`) passed all 573 standalone T3 checks. Enrolled
 T2 passed 130 shared checks, including destructive HTTP commit/retry and failure
 rollback, before its new model-retirement fixture lacked a project. Diagnosis
-found a real admission defect: a contextless MCP store wrote the read-only
+found a real admission defect: a contextless MCP store wrote the read-restriction
 `__aimee_scope_missing__` marker as a project, then ordinary reads could not find
 that row. The Go canonical writer now refuses the marker, including internal Put,
 workflow and practice callers. The public owner reports `active_context_missing`;
@@ -75,9 +75,34 @@ records counts, image identities and cleanup of the nine owned containers and
 nine empty networks. Images, volumes and raw receipts remain. This failed T2 run
 is diagnostic evidence, not fresh shared-deletion acceptance.
 
-The live fixture adds real HTTP/MCP deletion and retirement, failure injection,
-KB restart, reactivation/erasure and hidden-ID restoration. Fresh-image T2/T3
-acceptance is pending. Creation retries, remaining mutation preconditions,
+Fresh application/harness `037dc8f8c38e4f737a65d53d8fcadc815d0e3421` passes
+**1,472/1,472 checks**: **899 enrolled T2**, **573 standalone T3**. The 254 shared
+checks include real HTTP/MCP deletion and retirement, failure injection, exact
+receipts, KB restart, reactivation/erasure and hidden-ID restoration. The
+missing-context refusal is checked through MCP before a scoped model retirement.
+Both placements retain all 195 private-memory, 298 provider-boundary and 37
+asynchronous native-worker checks.
+
+- [T2 verdicts and native/provider receipts](memory-shared-deletion-2026-09-21/fresh-t2-037dc8f8c3.json)
+- [T3 verdicts and native/provider receipts](memory-shared-deletion-2026-09-21/fresh-t3-037dc8f8c3.json)
+- [Exact image identities](memory-shared-deletion-2026-09-21/image-identities-037dc8f8c3.json)
+
+Application image: `sha256:362126872d9139ccd53f5670cf39da1ea63c2b5dfbdbe69fab8570975f4ccdc7`.
+The pinned PostgreSQL and embedder images remain unchanged. All nine identities
+and all three application containers' actual 32 KiB provider caps were verified.
+Maximum native request sizes were 26,475 bytes in T2 and 25,980 bytes in T3.
+These are correctness and size checks, not a new latency claim or completion of
+token-budget and durable-dispatch acceptance.
+
+An additional run of `check_module_docs.py` reports existing catalog/layout debt:
+the historical memory checkpoint file is under `docs/modules`, and the memory
+and benchmark guides have extra top-level sections. That catalog check is not
+included in the passing 77 lint gates or deployment counts above.
+
+After collection, all nine owned containers and nine empty owned networks were
+removed. Images, volumes and raw receipts remain available on CT 9498.
+
+Creation retries, remaining mutation preconditions,
 consumer/checkpoint/retention behavior and the full MR-02 acceptance inventory
 remain open. The C bus is unchanged; schema bootstrap remains with the existing
 storage owner. Whole-DB2 retirement stays deferred.

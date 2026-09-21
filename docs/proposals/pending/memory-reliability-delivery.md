@@ -352,5 +352,10 @@ verified-user destructive operation. Schema-two receipts distinguish target and
 result, and omit a current version for destruction. Scope-aware outcome checks
 refuse a restored ID even when RLS hides it. PostgreSQL rollback, concurrency,
 disconnect/reconnect, forged-receipt, authority and full schema-upgrade checks
-pass locally. Fresh T2/T3 acceptance is pending; creation retries and the remaining
-MR-02 acceptance clauses are still open.
+pass locally. Fresh application/harness `037dc8f8c3` passes **1,472/1,472** checks
+(**899 T2**, **573 T3**), including 254 shared checks. Fresh testing exposed a
+contextless MCP store writing the host read-restriction marker as a project;
+canonical Go admission now refuses it before writing. Explicit context/global
+writes retain their contract. Embedded SQL now has a distinct `go_assets`
+descriptor role; the complete script suite and standalone Go export build pass.
+Creation retries and the remaining MR-02 acceptance clauses are still open.

@@ -169,8 +169,8 @@ name the target and outcome without inventing a current version after erasure.
 A scoped replay verifier checks the actual canonical outcome, including restored
 IDs hidden by RLS. Schema 27 preserves existing correction receipts. See the
 [shared deletion validation](../../validation/memory-shared-deletion-2026-09-21.md)
-for local concurrency, rollback, upgrade and authority evidence; fresh-image
-acceptance is pending. Creation retries, further mutation preconditions,
+for local concurrency, rollback, upgrade and authority evidence and **1,472/1,472**
+fresh T2/T3 checks on `037dc8f8c3`. Creation retries, further mutation preconditions,
 retention/restore policy and consumer progress remain open.
 
 ### Linked model correction proposals
