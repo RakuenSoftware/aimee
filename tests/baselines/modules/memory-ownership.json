@@ -2038,7 +2038,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "18c62a52f38cc859729e65c0f32bfd5a0c17e10f3e02d4f97b1e86c18499bbbc"
+      "sha256": "57a1b8ff0649e66f81ef290b0ae0ddf3c2300279890f94b0486f568112a88279"
     },
     "src/modules/protocols/mcp/mcp_tools_extended.c": {
       "disposition": "protocol-catalog",
@@ -2582,10 +2582,10 @@
       "symbols": [
         "db2_memory_find_facts_like"
       ],
-      "sha256": "e20fc88cf15c50b8cbec1bda8b6b3572b65d90c9fd077ac0e17a75f1519f4c6e",
+      "sha256": "f459be2ddf30aaac2fb6f49cf23282e2fd76d40d08c96ddb0bb959d8fdb34afd",
       "inputs": {
         "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "6af2108db061b1ceb4806c327450c0e61f3dd6c862590b4e6b09faa8e5830c95",
+        "src/modules/db2/c/schema.sql": "836df07a4efa7fc6ffe104626e7918d9d96610b18d542b4012d01cb9561a54b6",
         "src/modules/db2/c/schema_sqlite.sql": "70c92bc2ccc2fdbc34bffd6e36783172eaa776d5e31697f96f4021f5612b7751"
       }
     },
@@ -2594,10 +2594,10 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "972ba1f9bd6a633d684c2176be82db2f6f609e6dd83af6721427a64ada1a7e82",
+      "sha256": "dccc48c336f317720a650303a2755d7a0c8ab1b30a0af42eaf041d7f2aa8d6b9",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "77231c8a1c0fadf2981335afe65704c840b9e6feb767c52ee6b43846afd36714"
+        "api/openapi-server-v1.yaml": "f8661d95202267f318ad9d0f2d59fd74530f5678d86be7ee4ef820851b504e5b"
       }
     }
   }

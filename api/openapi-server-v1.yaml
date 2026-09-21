@@ -4232,7 +4232,14 @@ paths:
   /memory/store:
     post:
       summary: Store a memory (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
+      description: >
+        Mutating route; reachable only on the local Unix-domain socket. Shared writes
+        require an active project/workspace or explicit scope=all. Optional authenticated
+        idempotency_key binds the admitted request and authority to one durable outcome;
+        identical retries return that result without repeating extraction or invalidation.
+        Existing same-key replacement and review rules still apply. Changed requests
+        conflict; hidden, expired, superseded or erased results are unavailable.
+        Creation does not accept expected_version.
       requestBody:
         required: true
         content:
@@ -4243,9 +4250,21 @@ paths:
               properties:
                 key: { type: string }
                 content: { type: string }
+                store: { type: string, enum: [user, kb], default: user }
+                tier: { type: string }
+                kind: { type: string }
+                confidence: { type: number, minimum: 0, maximum: 1 }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+                idempotency_key:
+                  type: string
+                  minLength: 16
+                  maxLength: 128
+                  pattern: '^[!-~]+$'
       responses:
         "200":
-          description: Stored memory envelope
+          description: Stored memory envelope; keyed outcomes include schema-2 mutation_receipt with stored/unchanged outcome, commit_id, exact version and replayed flag, or a linked review proposal
           content:
             application/json:
               schema: { type: object }

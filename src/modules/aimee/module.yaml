@@ -146,6 +146,7 @@
     "server-go/modules/aimee/families/schema_personal_memory_acl.sql",
     "server-go/modules/aimee/families/schema_personal_memory_authority.sql",
     "server-go/modules/aimee/families/schema_personal_memory_changes.sql",
+    "server-go/modules/aimee/families/schema_personal_memory_creation_retries.sql",
     "server-go/modules/aimee/families/schema_personal_memory_proposals.sql",
     "server-go/modules/aimee/families/schema_personal_memory_retirement_retries.sql",
     "server-go/modules/aimee/families/schema_personal_memory_retries.sql",

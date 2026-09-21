@@ -741,6 +741,53 @@ class Gate:
         self.check('model retirement cannot claim user authority', refused.get('kind') == 'review_required')
         self.good('private protected retirement cleanup', self.call('delete', dict(id=human_id)))
 
+    def keyed_creation(self, store):
+        key = self.prefix + '-create-' + store
+        context = dict(store=store)
+        if store == 'kb':
+            context['project'] = key
+        request = dict(context, key=key, content='durable creation fixture', idempotency_key=key+'-retry')
+        row = self.good(store+' keyed HTTP creation', self.call('store', request))
+        receipt = row.get('mutation_receipt', {})
+        self.check(store+' creation receipt binds exact result', receipt.get('schema_version') == 2 and
+            receipt.get('outcome') == 'stored' and receipt.get('replayed') is False and
+            receipt.get('version', {}).get('record_id') == str(row['id']) and bool(receipt.get('commit_id')))
+        changes = self.personal_changes if store == 'user' else self.shared_changes
+        before = changes(row['id'])
+        replay = self.good(store+' keyed HTTP creation replay', self.call('store', request))
+        self.check(store+' replay preserves commit and invalidation', replay.get('id') == row['id'] and
+            replay.get('mutation_receipt') == dict(receipt, replayed=True) and changes(row['id']) == before)
+        code, conflict = self.call('store', dict(request, content='changed request'))
+        self.check(store+' changed creation retry conflicts', code >= 400 and conflict.get('reason') == 'idempotency_conflict')
+        self.docker('restart', self.args.server if store == 'user' else self.args.kb)
+        self.good(store+' creation result survives restart', self.wait('get', dict(context, id=row['id'])))
+        replay = self.good(store+' creation replay survives restart', self.call('store', request))
+        self.check(store+' restart preserves creation commit', replay.get('mutation_receipt') == dict(receipt, replayed=True))
+        # MCP is model authority; it must retain the same retry identity without
+        # promoting authorship even when the request carries an authority field.
+        args = dict(context, verb='store', key=key+'-model', content='model creation fixture',
+                    confidence=1.0, authority='user', idempotency_key=key+'-model-retry')
+        model = self.mcp_document(store+' keyed MCP creation', 'mutate', args)
+        model_receipt = model.get('mutation_receipt', {})
+        self.check(store+' MCP creation has a durable receipt', model.get('status') == 'ok' and
+            model_receipt.get('schema_version') == 2 and model_receipt.get('outcome') == 'stored')
+        repeated = self.mcp_document(store+' MCP creation replay', 'mutate', args)
+        self.check(store+' MCP retry identifies original commit', repeated.get('mutation_receipt') == dict(model_receipt, replayed=True))
+        observed = self.good(store+' model creation read', self.call('get', dict(context, id=model['id'])))
+        self.check(store+' keyed MCP creation retains confidence ceiling', observed.get('memory', {}).get('confidence') == 0.8)
+        # Human-created parent still requires a review proposal on model store.
+        args.update(key=key, content='model replacement proposal', idempotency_key=key+'-proposal')
+        proposal = self.mcp_document(store+' creation proposal', 'mutate', args)
+        again = self.mcp_document(store+' creation proposal replay', 'mutate', args)
+        self.check(store+' creation retry preserves review admission', proposal.get('kind') == 'review_required' and
+            bool(proposal.get('proposal', {}).get('proposal_id')) and
+            again.get('proposal', {}).get('proposal_id') == proposal.get('proposal', {}).get('proposal_id') and
+            again.get('proposal', {}).get('replayed') is True)
+        self.good(store+' keyed creation retirement', self.call('delete', dict(context, id=row['id'])))
+        code, unavailable = self.call('store', request)
+        self.check(store+' retired creation cannot be recreated by retry', code >= 400 and
+            unavailable.get('reason') == 'idempotent_result_unavailable' and unavailable.get('mutation_receipt') is None)
+
     def run_local(self):
         """First-boot regression on a composition containing only Server and its store."""
         content = 'Personal local-only fixture person@local.invalid 🦊'
@@ -809,6 +856,7 @@ class Gate:
         self.personal_correction_review()
         self.personal_keyed_corrections()
         self.personal_keyed_retirement()
+        self.keyed_creation('user')
         return all(c['passed'] for c in self.checks)
 
     def run(self):
@@ -930,6 +978,7 @@ class Gate:
         self.shared_mcp_corrections()
         journal_id, journal = self.shared_journal()
         self.shared_keyed_deletion()
+        self.keyed_creation('kb')
         self.docker('restart', self.args.kb)
         self.good('shared replacement survives KB restart', self.wait('get', dict(store='kb', id=journal_id)))
         self.shared_deletion_after_restart()

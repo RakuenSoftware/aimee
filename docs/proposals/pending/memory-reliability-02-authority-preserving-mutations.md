@@ -91,8 +91,12 @@ history, invalidation and receipt commit together. Existing correction receipts
 survive the additive migration. See the [retirement validation](../../validation/memory-private-retirement-2026-09-21.md)
 for implementation and test scope; fresh `e697581ac9` passes 1,441/1,441
 checks across enrolled T2 and standalone T3.
-Private creation retries, remaining mutation
-preconditions and full durable consumer/retention semantics are still acceptance work.
+Shared schema 28 and private migration 33 add authenticated creation retry keys
+without a target precondition. Store retains replacement/review admission; exact
+replays preserve the committed result, and shared unchanged stores produce no
+new evidence. See [creation retry validation](../../validation/memory-creation-retries-2026-09-21.md)
+for local tests and the pending fresh-image gate. Remaining mutation preconditions
+and full durable consumer/retention semantics are still acceptance work.
 
 ### Expected-version shared corrections
 

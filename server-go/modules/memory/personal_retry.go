@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
@@ -13,7 +14,12 @@ import (
 // retain their existing cost. The receipt is a durable transaction identity,
 // not a cached response or a claim that downstream consumers have caught up.
 func (s *postgresDataStore) mutatePersonalIdempotent(ctx context.Context, r DataRequest, caller *bus.CommandContext) (Record, *MemoryMutationReceipt, error) {
-	if s.placement != PlacementServer || (r.Operation != "supersede" && r.Operation != "delete") || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || r.ExpectedVersion == nil || !r.ExpectedVersion.validFor(r.ID) || (r.Operation == "supersede" && r.Confidence == nil) {
+	creating := r.Operation == "store"
+	if s.placement != PlacementServer || (!creating && r.Operation != "supersede" && r.Operation != "delete") ||
+		!verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) ||
+		(!creating && (r.ExpectedVersion == nil || !r.ExpectedVersion.validFor(r.ID))) ||
+		(creating && (r.ExpectedVersion != nil || r.Key == "" || r.Kind == "" || r.Content == "")) ||
+		(r.Operation != "delete" && r.Confidence == nil) {
 		return Record{}, nil, errors.New("memory: invalid private idempotent mutation")
 	}
 	if db, ok := s.db.(store.DB); ok {
@@ -41,11 +47,17 @@ func (s *postgresDataStore) mutatePersonalIdempotent(ctx context.Context, r Data
 	if err := s.db.QueryRow(ctx, `SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1`).Scan(&owner); err != nil {
 		return Record{}, nil, err
 	}
-	if owner != r.ExpectedVersion.OwnerID {
+	if !creating && owner != r.ExpectedVersion.OwnerID {
 		return Record{}, nil, errMutationVersionConflict
 	}
 	actor := personalCaller(caller, r.Authority)
-	digest, err := correctionDigest(r, actor.authority)
+	var digest string
+	var err error
+	if creating {
+		digest, err = creationDigest(r, actor.authority)
+	} else {
+		digest, err = correctionDigest(r, actor.authority)
+	}
 	if err != nil {
 		return Record{}, nil, err
 	}
@@ -54,7 +66,12 @@ func (s *postgresDataStore) mutatePersonalIdempotent(ctx context.Context, r Data
 	if _, err = s.db.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,5751))`, string(identity)); err != nil {
 		return Record{}, nil, err
 	}
-	receipt := &MemoryMutationReceipt{SchemaVersion: 1, Version: *r.ExpectedVersion}
+	receipt := &MemoryMutationReceipt{SchemaVersion: 1, Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner}}
+	if creating {
+		receipt.SchemaVersion, receipt.Outcome = 2, "stored"
+	} else {
+		receipt.Version = *r.ExpectedVersion
+	}
 	var storedDigest, proposalID string
 	err = s.db.QueryRow(ctx, `SELECT request_hash,commit_id::text,target_id::text,result_revision::text,COALESCE(proposal_id::text,'')
  FROM user_memory_mutation_receipts WHERE owner_id=$1::uuid AND actor_principal=$2 AND key_hash=$3`, owner, actor.principal, keyHash).Scan(&storedDigest, &receipt.CommitID, &receipt.Version.RecordID, &receipt.Version.RecordRevision, &proposalID)
@@ -96,7 +113,14 @@ func (s *postgresDataStore) mutatePersonalIdempotent(ctx context.Context, r Data
 			p.Replayed = true
 			return Record{}, nil, &correctionProposedError{Proposal: p}
 		}
-		record, err := s.getAtVersioned(ctx, r.Scope, r.ID, false, "", true)
+		resultID := r.ID
+		if creating {
+			resultID, err = strconv.ParseInt(receipt.Version.RecordID, 10, 64)
+			if err != nil || resultID <= 0 {
+				return Record{}, nil, errReplayUnavailable
+			}
+		}
+		record, err := s.getAtVersioned(ctx, r.Scope, resultID, false, "", true)
 		if errors.Is(err, ErrMemoryNotFound) {
 			return Record{}, nil, errReplayUnavailable
 		}
@@ -116,22 +140,43 @@ func (s *postgresDataStore) mutatePersonalIdempotent(ctx context.Context, r Data
 	bound.personalActor = actor
 	var record Record
 	var outcome error
-	if r.Operation == "delete" {
+	if creating {
+		record, outcome = bound.Put(ctx, r.Scope, Record{Scope: r.Scope, Tier: r.Tier, Kind: r.Kind, Key: r.Key, Content: r.Content, Confidence: *r.Confidence})
+		if outcome == nil {
+			record, outcome = bound.getAtVersioned(ctx, r.Scope, record.ID, false, "", true)
+		}
+	} else if r.Operation == "delete" {
 		record, outcome = bound.retirePersonalVersion(ctx, r.Scope, r.ID, *r.ExpectedVersion)
 	} else {
 		record, outcome = bound.correctPersonalVersion(ctx, r.Scope, r.ID, r.Content, *r.Confidence, *r.ExpectedVersion)
 	}
 	var proposal any
+	var targetID int64
+	var targetRevision string
+	if !creating {
+		targetID, targetRevision = r.ID, r.ExpectedVersion.RecordRevision
+	}
 	if p := proposedCorrection(outcome); p != nil {
 		proposal = p.ID
+		if creating {
+			targetID, err = strconv.ParseInt(p.Target.RecordID, 10, 64)
+			if err != nil || targetID <= 0 {
+				return Record{}, nil, errors.New("memory: invalid creation proposal target")
+			}
+			targetRevision = p.Target.RecordRevision
+			receipt.Version = p.Target
+		}
 		receipt.Version.RecordRevision = "0"
 	} else if outcome != nil {
 		return Record{}, nil, outcome
 	} else {
 		receipt.Version = *record.Version
+		if creating {
+			targetID, targetRevision = record.ID, record.Version.RecordRevision
+		}
 	}
 	err = s.db.QueryRow(ctx, `INSERT INTO user_memory_mutation_receipts(owner_id,actor_principal,key_hash,request_hash,target_id,target_revision,result_revision,proposal_id,operation)
- VALUES($1::uuid,$2,$3,$4,$5,$6::bigint,$7::bigint,$8::uuid,$9) RETURNING commit_id::text`, owner, actor.principal, keyHash, digest, r.ID, r.ExpectedVersion.RecordRevision, receipt.Version.RecordRevision, proposal, r.Operation).Scan(&receipt.CommitID)
+ VALUES($1::uuid,$2,$3,$4,$5,$6::bigint,$7::bigint,$8::uuid,$9) RETURNING commit_id::text`, owner, actor.principal, keyHash, digest, targetID, targetRevision, receipt.Version.RecordRevision, proposal, r.Operation).Scan(&receipt.CommitID)
 	if err != nil {
 		return Record{}, nil, err
 	}

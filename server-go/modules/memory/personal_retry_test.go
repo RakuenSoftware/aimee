@@ -53,7 +53,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 	}
 	base := read("schema_conversation.sql")
 	exec(base[strings.Index(base, "CREATE TABLE IF NOT EXISTS user_memories ("):strings.Index(base, "CREATE INDEX IF NOT EXISTS user_memories_recall")])
-	for _, name := range []string{"changes", "versions", "acl", "authority", "proposals", "retries", "retirement_retries"} {
+	for _, name := range []string{"changes", "versions", "acl", "authority", "proposals", "retries", "retirement_retries", "creation_retries"} {
 		exec(read("schema_personal_memory_" + name + ".sql"))
 	}
 	human := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:human", TransportIdentity: "fixture:http"}
@@ -487,6 +487,159 @@ func TestPersonalMutationRetry(t *testing.T) {
 		t.Fatal("concurrent retirement published more than one transition")
 	}
 
+	// Creation retries preserve admission for inserts, same-key updates and review.
+	for _, actor := range []*bus.CommandContext{human, model} {
+		authority := AuthorityModel
+		if actor.UserAuthority {
+			authority = AuthorityUser
+		}
+		storedRequest := DataRequest{Operation: "store", Authority: authority, Key: "keyed-create-" + actor.Principal, Kind: "fact", Tier: "L2", Content: "created once", Confidence: &certainty, IdempotencyKey: "private-create-" + actor.Principal}
+		start := scalar(`SELECT generation FROM user_memory_collection_generation`)
+		exec(`ALTER TABLE user_memory_mutation_receipts ADD CONSTRAINT create_failure CHECK(operation<>'store') NOT VALID`)
+		failedTx := begin(conn)
+		_, failedStatus := invoke(failedTx, actor, storedRequest)
+		_ = failedTx.Rollback(ctx)
+		if failedStatus != bus.ModuleStatusInternal || scalar(`SELECT generation FROM user_memory_collection_generation`) != start {
+			t.Fatal("creation receipt failure left a mutation", failedStatus)
+		}
+		exec(`ALTER TABLE user_memory_mutation_receipts DROP CONSTRAINT create_failure`)
+		created := call(actor, storedRequest)
+		rec, creationReceipt := one(created), receiptOf(created)
+		if rec.ID <= 0 || rec.Version == nil || creationReceipt.SchemaVersion != 2 || creationReceipt.Outcome != "stored" || creationReceipt.Replayed || creationReceipt.Version != *rec.Version {
+			t.Fatal("invalid creation receipt", created)
+		}
+		if authority == AuthorityModel && rec.Confidence != .8 {
+			t.Fatal("creation retry elevated model confidence", rec)
+		}
+		committedGeneration := scalar(`SELECT generation FROM user_memory_collection_generation`)
+		retry := call(actor, storedRequest)
+		if receiptOf(retry).CommitID != creationReceipt.CommitID || !receiptOf(retry).Replayed || one(retry).ID != rec.ID || scalar(`SELECT generation FROM user_memory_collection_generation`) != committedGeneration {
+			t.Fatal("creation replay repeated a canonical effect", retry)
+		}
+		for _, field := range []string{"key", "content", "tier", "kind", "confidence"} {
+			changed := storedRequest
+			switch field {
+			case "key":
+				changed.Key += "-changed"
+			case "content":
+				changed.Content += " changed"
+			case "tier":
+				changed.Tier = "L1"
+			case "kind":
+				changed.Kind = "preference"
+			case "confidence":
+				n := .4
+				changed.Confidence = &n
+			}
+			refusal(call(actor, changed), MutationIdempotencyConflict)
+		}
+		cross := DataRequest{Operation: "supersede", Authority: authority, ID: rec.ID, Content: "cannot reuse a creation key", Confidence: &certainty, ExpectedVersion: rec.Version, IdempotencyKey: storedRequest.IdempotencyKey}
+		refusal(call(actor, cross), MutationIdempotencyConflict)
+		// The same command survives the server runtime forwarding envelope.
+		runtimeTx := begin(conn)
+		runtimeBackend, _ := NewPostgresDataStore(runtimeRoleDB{evalQueryer{runtimeTx}, t}, PlacementServer)
+		runtimeHandler := NewHandler(nil, WithDataStore(PlacementServer, runtimeBackend))
+		runtimeArgs, _ := json.Marshal(map[string]any{"operation": "user-store", "key": storedRequest.Key, "kind": "fact", "tier": "L2", "content": storedRequest.Content, "idempotency_key": storedRequest.IdempotencyKey})
+		resultBytes, runtimeStatus := invokeContextCommand(t, runtimeHandler, 0, *actor, "runtime", string(runtimeArgs))
+		_ = runtimeTx.Rollback(ctx)
+		if runtimeStatus != bus.ModuleStatusOK || resultBytes["json"] == nil {
+			t.Fatal("runtime store forwarding", resultBytes, runtimeStatus)
+		}
+		var runtimeDoc map[string]any
+		if json.Unmarshal([]byte(resultBytes["json"].(string)), &runtimeDoc) != nil || runtimeDoc["mutation_receipt"] == nil {
+			t.Fatal("runtime dropped creation receipt", resultBytes)
+		}
+		// A new key still applies the existing same-key writer and produces a revision.
+		replacement := storedRequest
+		replacement.IdempotencyKey += "-replacement"
+		replacement.Content = "new version"
+		replaced := call(actor, replacement)
+		if one(replaced).ID != rec.ID || receiptOf(replaced).Version == creationReceipt.Version {
+			t.Fatal("same-key store lost versioning", replaced)
+		}
+		refusal(call(actor, storedRequest), MutationReplayUnavailable)
+		exec(`DELETE FROM user_memories WHERE id=$1`, rec.ID)
+		refusal(call(actor, replacement), MutationReplayUnavailable)
+	}
+
+	// Competing creation requests use database locks, including disconnect before
+	// commit. A fresh connection after the winner commits must replay its identity.
+	for _, commitFirst := range []bool{true, false} {
+		request := DataRequest{Operation: "store", Authority: AuthorityUser, Key: fmt.Sprintf("concurrent-create-%v", commitFirst), Kind: "fact", Tier: "L2", Content: "concurrent creation", Confidence: &certainty, IdempotencyKey: fmt.Sprintf("concurrent-create-key-%v", commitFirst)}
+		a, e := pgx.Connect(ctx, dsn)
+		if e != nil {
+			t.Fatal(e)
+		}
+		b, e := pgx.Connect(ctx, dsn)
+		if e != nil {
+			t.Fatal(e)
+		}
+		firstTx, secondTx := begin(a), begin(b)
+		first, status := invoke(firstTx, human, request)
+		if status != bus.ModuleStatusOK {
+			t.Fatal(status)
+		}
+		type creationResult struct {
+			out    DataResponse
+			status bus.ModuleStatus
+		}
+		done := make(chan creationResult, 1)
+		go func() { out, status := invoke(secondTx, human, request); done <- creationResult{out, status} }()
+		for {
+			var blocked bool
+			if e = conn.QueryRow(ctx, `SELECT $1=ANY(pg_blocking_pids($2))`, a.PgConn().PID(), b.PgConn().PID()).Scan(&blocked); e != nil {
+				t.Fatal(e)
+			}
+			if blocked {
+				break
+			}
+			select {
+			case out := <-done:
+				t.Fatal("creation bypassed retry lock", out)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(time.Millisecond):
+			}
+		}
+		if commitFirst {
+			e = firstTx.Commit(ctx)
+		} else {
+			e = a.Close(ctx)
+		}
+		if e != nil {
+			t.Fatal(e)
+		}
+		out := <-done
+		if out.status != bus.ModuleStatusOK || receiptOf(out.out).Replayed != commitFirst {
+			t.Fatal(out)
+		}
+		if (receiptOf(out.out).CommitID == receiptOf(first).CommitID) != commitFirst {
+			t.Fatal("creation commit identity", out)
+		}
+		if e = secondTx.Commit(ctx); e != nil {
+			t.Fatal(e)
+		}
+		a.Close(ctx)
+		b.Close(ctx)
+		retry := call(human, request)
+		if !receiptOf(retry).Replayed || receiptOf(retry).CommitID != receiptOf(out.out).CommitID {
+			t.Fatal("creation lost durable receipt", retry)
+		}
+	}
+
+	protectedCreation := create("creation-protected")
+	creationProposal := DataRequest{Operation: "store", Authority: AuthorityUser, Key: "creation-protected", Kind: "fact", Tier: "L2", Content: "model draft", Confidence: &certainty, IdempotencyKey: "private-create-proposal"}
+	proposedStore := call(model, creationProposal)
+	if proposedStore.Proposal == nil || proposedStore.Proposal.Replayed || proposedStore.Proposal.Target.RecordID != fmt.Sprint(protectedCreation.ID) {
+		t.Fatal("keyed store bypassed review", proposedStore)
+	}
+	repeatedProposal := call(model, creationProposal)
+	if repeatedProposal.Proposal == nil || !repeatedProposal.Proposal.Replayed || repeatedProposal.Proposal.ID != proposedStore.Proposal.ID {
+		t.Fatal("creation retry duplicated proposal", repeatedProposal)
+	}
+	exec(`DELETE FROM user_memories WHERE id=$1`, protectedCreation.ID)
+	refusal(call(model, creationProposal), MutationReplayUnavailable)
+
 }
 
 // Apply the new guard to an actual schema-31 receipt. ALTER/DEFAULT must not
@@ -561,6 +714,26 @@ func TestPersonalRetirementReceiptUpgrade(t *testing.T) {
 	}
 	if revision != 2 || history != 1 {
 		t.Fatal("migration changed canonical history", revision, history)
+	}
+
+	// A real schema-32 retirement receipt survives schema 33 and reapplication.
+	exec(`INSERT INTO user_memories(kind,tier,key,content,confidence) VALUES('fact','L2','retired-upgrade','retire me',1)`)
+	exec(`UPDATE user_memories SET lifecycle_state='retired' WHERE key='retired-upgrade'`)
+	exec(`INSERT INTO user_memory_mutation_receipts(owner_id,actor_principal,key_hash,request_hash,target_id,target_revision,result_revision,operation)
+ SELECT o.owner_id,'fixture:upgrade',repeat('5',64),repeat('6',64),m.id,1,m.record_revision,'delete'
+ FROM user_memories m,user_memory_collection_generation o WHERE m.key='retired-upgrade' AND o.id=1`)
+	var oldReceipts, newReceipts string
+	if err := conn.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(r) ORDER BY key_hash)::text FROM user_memory_mutation_receipts r`).Scan(&oldReceipts); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		exec(read("schema_personal_memory_creation_retries.sql"))
+		if err := conn.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(r) ORDER BY key_hash)::text FROM user_memory_mutation_receipts r`).Scan(&newReceipts); err != nil {
+			t.Fatal(err)
+		}
+		if newReceipts != oldReceipts {
+			t.Fatal("creation migration rewrote committed correction/retirement receipts")
+		}
 	}
 	// The new guard must reject a forged retirement receipt for a still-active
 	// corrected row even though the requested revision and history exist.

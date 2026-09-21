@@ -106,19 +106,9 @@ func (s *postgresDataStore) replaceKBIdempotent(ctx context.Context, r DataReque
 		}
 
 		if proposalID != "" {
-			p, err := scanCorrectionProposal(s.db.QueryRow(ctx, `SELECT `+correctionProposalReferenceColumns+` FROM memory_correction_proposals WHERE proposal_id=$1::uuid`, proposalID), false)
-			if errors.Is(err, ErrMemoryNotFound) {
-				return Record{}, nil, errReplayUnavailable
-			}
-			if err != nil {
-				return Record{}, nil, err
-			}
-			if err = s.checkCorrectionResult(ctx, p); err != nil {
-				return Record{}, nil, err
-			}
-			p.Draft, p.Replayed = nil, true
-			return Record{}, nil, &correctionProposedError{Proposal: p}
+			return Record{}, nil, s.replayKBCorrectionProposal(ctx, proposalID)
 		}
+
 		// Never requeue extraction or return stored content. The ordinary exact read
 		// applies current RLS, expiry, lifecycle and suppression gates.
 		record, readErr := s.getAtVersioned(ctx, r.Scope, id, false, "", true)
@@ -231,4 +221,19 @@ func commandCorrectionOptions(args commandArgs, id int64, caller *bus.CommandCon
 		}
 	}
 	return expected, key, nil
+}
+
+func (s *postgresDataStore) replayKBCorrectionProposal(ctx context.Context, proposalID string) error {
+	p, err := scanCorrectionProposal(s.db.QueryRow(ctx, `SELECT `+correctionProposalReferenceColumns+` FROM memory_correction_proposals WHERE proposal_id=$1::uuid`, proposalID), false)
+	if errors.Is(err, ErrMemoryNotFound) {
+		return errReplayUnavailable
+	}
+	if err != nil {
+		return err
+	}
+	if err = s.checkCorrectionResult(ctx, p); err != nil {
+		return err
+	}
+	p.Draft, p.Replayed = nil, true
+	return &correctionProposedError{Proposal: p}
 }

@@ -31,38 +31,49 @@ var validEpistemicKinds = map[string]bool{
 // InsertEpistemic is the canonical KB memory write. Authority is derived by the
 // authenticated caller and becomes durable provenance; it is never inferred
 // from the memory text. Active rejection tombstones fail the write closed.
-func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataRequest) (record Record, err error) {
-	replaced := false
-	defer func() {
-		if replaced {
-			return
-		}
-		s.recordMutation(DataRequest{Operation: "insert-epistemic", SessionID: request.SessionID, Authority: request.Authority}, DataResponse{Records: []Record{record}}, err, "")
-	}()
-	if _, ok := s.db.(store.Tx); !ok {
-		return Record{}, errors.New("memory: canonical writes require a transaction")
-	}
-	if err := s.requireKBDomain(); err != nil {
+func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataRequest) (Record, error) {
+	plan, err := s.prepareKBStore(ctx, request)
+	if err != nil {
 		return Record{}, err
 	}
+	return s.applyKBStore(ctx, plan)
+}
+
+type preparedKBStore struct {
+	request               DataRequest
+	provenance, epistemic string
+	ceiling               float64
+	existing              int64
+	correction            *preparedKBCorrection
+}
+
+// Same-key locking and authority admission precede a keyed canonical audit.
+// Both ordinary and retryable stores execute this one admission/apply path.
+func (s *postgresDataStore) prepareKBStore(ctx context.Context, request DataRequest) (plan preparedKBStore, err error) {
+	if _, ok := s.db.(store.Tx); !ok {
+		return plan, errors.New("memory: canonical writes require a transaction")
+	}
+	if err := s.requireKBDomain(); err != nil {
+		return plan, err
+	}
 	if strings.TrimSpace(request.Scope.Value) == missingScopeValue {
-		return Record{}, errors.New("memory: cannot store without active scope context")
+		return plan, errors.New("memory: cannot store without active scope context")
 	}
 	var screenErr error
 	request.Content, screenErr = screenMemoryWrite(request.Key, request.Content)
 	if screenErr != nil {
-		return Record{}, screenErr
+		return plan, screenErr
 	}
 	request.UseCases, screenErr = screenMemoryText(request.UseCases)
 	if screenErr != nil {
-		return Record{}, screenErr
+		return plan, screenErr
 	}
 	epistemic := request.EpistemicKind
 	if epistemic == "" {
 		epistemic = "world_fact"
 	}
 	if !validEpistemicKinds[epistemic] || (request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
-		return Record{}, errors.New("memory: invalid epistemic write policy")
+		return plan, errors.New("memory: invalid epistemic write policy")
 	}
 	provenance := "agent_message"
 	ceiling := 0.8
@@ -77,34 +88,54 @@ func (s *postgresDataStore) InsertEpistemic(ctx context.Context, request DataReq
 		confidence = *request.Confidence
 	}
 	if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
-		return Record{}, errors.New("memory: invalid confidence")
+		return plan, errors.New("memory: invalid confidence")
 	}
 	if confidence > ceiling {
 		confidence = ceiling
 	}
 	scope := request.Scope
-	record.Scope = scope
 	// Serialize the conflict identity even when there is no row to lock yet.
 	identity, _ := json.Marshal([4]string{string(scope.Type), scope.Value, request.Kind, request.Key})
 	if _, err = s.db.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,5747))`, string(identity)); err != nil {
-		return Record{}, err
+		return plan, err
 	}
 	var count int
 	var existing int64
 	if err = s.db.QueryRow(ctx, `SELECT count(*),COALESCE(min(id),0) FROM memories
  WHERE kind=$1 AND key=$2 AND scope_type=$3 AND scope_value=$4 AND lifecycle_state='active'`,
 		request.Kind, request.Key, scope.Type, scope.Value).Scan(&count, &existing); err != nil {
-		return Record{}, err
+		return plan, err
 	}
 	if count > 1 {
-		return Record{}, errors.New("memory: ambiguous active key requires review")
+		return plan, errors.New("memory: ambiguous active key requires review")
 	}
+
+	request.Confidence = &confidence
+	plan.request, plan.provenance, plan.epistemic, plan.ceiling, plan.existing = request, provenance, epistemic, ceiling, existing
 	if existing != 0 {
-		replaced = true
-		request.Confidence = &confidence
-		// All replacements use the same admission rules as edit and supersede.
-		return s.replaceKBAs(ctx, existing, request.Content, confidence, request.SessionID, request.Authority, &request)
+		correction, e := s.prepareKBCorrection(ctx, existing, request.Content, &confidence, request.SessionID, request.Authority, &request, nil)
+		if e != nil {
+			return plan, e
+		}
+		plan.correction = &correction
 	}
+	return plan, nil
+}
+
+func (s *postgresDataStore) applyKBStore(ctx context.Context, plan preparedKBStore) (record Record, err error) {
+	request := plan.request
+	defer func() {
+		operation := "insert-epistemic"
+		if plan.existing != 0 {
+			operation = "supersede"
+		}
+		s.recordMutation(DataRequest{Operation: operation, ID: plan.existing, SessionID: request.SessionID, Authority: request.Authority}, DataResponse{Records: []Record{record}}, err, "")
+	}()
+	if plan.correction != nil {
+		return s.applyKBCorrection(ctx, *plan.correction)
+	}
+	scope, confidence, epistemic, provenance, ceiling := request.Scope, *request.Confidence, plan.epistemic, plan.provenance, plan.ceiling
+	record.Scope = scope
 	err = s.db.QueryRow(ctx, `INSERT INTO memories(tier,kind,epistemic_kind,key,content,use_cases,confidence,confidence_ceiling,
  source_session,provenance_category,scope_type,scope_value,lifecycle_state)
  SELECT $1,$12,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active'

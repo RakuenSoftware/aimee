@@ -108,8 +108,8 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if _, exists := args["read_policy"]; exists && verb != "get" && verb != "runtime" {
 		return commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get"))
 	}
-	if _, exists := args["idempotency_key"]; exists && !((options.placement == PlacementKB && (verb == "supersede" || verb == "update" || verb == "delete")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "delete" || verb == "runtime"))) {
-		return commandResult(commandError("unsupported_mode", "idempotency_key is supported only for conditional corrections or deletion"))
+	if _, exists := args["idempotency_key"]; exists && !((options.placement == PlacementKB && (verb == "store" || verb == "supersede" || verb == "update" || verb == "delete")) || (options.placement == PlacementServer && (verb == "store" || verb == "supersede" || verb == "delete" || verb == "runtime"))) {
+		return commandResult(commandError("unsupported_mode", "idempotency_key is supported for store, conditional corrections and deletion"))
 	}
 	versionedMutation := (options.placement == PlacementKB && (verb == "supersede" || verb == "update" || verb == "delete" || verb == "review_correction")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "delete" || verb == "runtime"))
 	if _, exists := args["expected_version"]; exists && !versionedMutation {
@@ -179,8 +179,8 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		request.Authority = AuthorityUser
 	}
 
-	if _, exists := args["idempotency_key"]; exists && verb != "supersede" && verb != "delete" {
-		return commandResult(commandError("unsupported_mode", "private idempotency keys require conditional supersede or delete"))
+	if _, exists := args["idempotency_key"]; exists && verb != "store" && verb != "supersede" && verb != "delete" {
+		return commandResult(commandError("unsupported_mode", "private idempotency keys require store, conditional supersede or delete"))
 	}
 	confidence := 1.0
 	switch verb {
@@ -235,6 +235,11 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			}
 			request.Key, request.Content = args.stringOr("key", ""), args.stringOr("content", "")
 			request.Tier, request.Kind = args.stringOr("tier", "L2"), args.stringOr("kind", "fact")
+			var refusal map[string]any
+			request.IdempotencyKey, refusal = commandCreationKey(args, options.commandContext)
+			if refusal != nil {
+				return commandResult(refusal)
+			}
 		} else {
 			var ok bool
 			request.ID, ok = args.decimalID("old_id")
@@ -314,6 +319,9 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		switch verb {
 		case "store":
 			result["id"] = record.ID
+			if response.MutationReceipt != nil {
+				result["mutation_receipt"] = response.MutationReceipt
+			}
 		case "get":
 			result["memory"] = record
 			if response.Read != nil {

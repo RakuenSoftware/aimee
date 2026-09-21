@@ -136,6 +136,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseExpectedVersionReplay(t, ctx, tx, handler)
 	exerciseMutationRetryReplay(t, ctx, tx, handler)
 	exerciseDeletionRetryReplay(t, ctx, tx, handler)
+	exerciseCreationRetryReplay(t, ctx, tx, handler)
 	exerciseUpdateRetryReplay(t, ctx, tx, handler)
 	exerciseDemotionReplay(t, ctx, tx, handler)
 	exerciseCodeContextReplay(t, ctx, tx, handler)

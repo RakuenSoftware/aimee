@@ -22,7 +22,7 @@ func TestIdempotencyContractValidation(t *testing.T) {
 			t.Fatal(key, r)
 		}
 	}
-	for _, verb := range []string{"store", "get", "touch", "runtime"} {
+	for _, verb := range []string{"get", "touch", "runtime"} {
 		if r := runPublicCommand(t, client, verb, `{"idempotency_key":"fixture-retry-key"}`); r["kind"] != "unsupported_mode" {
 			t.Fatal(verb, r)
 		}
@@ -225,7 +225,7 @@ func exerciseMutationRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 
 // Exercise actual commits and connection loss, not nested test savepoints. The
 // waiter must block on the key until the first transaction's outcome is known.
-func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
+func TestIdempotentMutationConcurrentCommitAndDisconnect(t *testing.T) {
 	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
 	if dsn == "" {
 		t.Skip("set AIMEE_DB2_REPLAY_URL")
@@ -235,6 +235,8 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 		commitFirst bool
 		authority   int
 	}{
+		{"insert-epistemic", true, AuthorityUser}, {"insert-epistemic", false, AuthorityUser},
+		{"insert-epistemic", true, AuthorityModel}, {"insert-epistemic", false, AuthorityModel},
 		{"supersede", true, AuthorityUser}, {"supersede", false, AuthorityUser}, {"update-as", true, AuthorityUser}, {"update-as", false, AuthorityUser},
 		{"delete-as", true, AuthorityModel}, {"delete-as", false, AuthorityModel},
 		{"delete-as", true, AuthorityUser}, {"delete-as", false, AuthorityUser},
@@ -289,6 +291,10 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 			}
 			confidence := 1.0
 			request := DataRequest{Operation: operation, Scope: scope, ID: old.ID, Content: "corrected", Confidence: &confidence, Authority: authority, ExpectedVersion: observed.Version, IdempotencyKey: "concurrent-fixture-key"}
+			if operation == "insert-epistemic" {
+				request.ID, request.ExpectedVersion = 0, nil
+				request.Key, request.Tier, request.Kind = "new-concurrent", "L2", "fact"
+			}
 			if operation == "update-as" {
 				request.Confidence = nil
 			}
@@ -304,6 +310,9 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 				return tx, &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
 			}
 			mutate := func(s *postgresDataStore) (Record, *MemoryMutationReceipt, error) {
+				if operation == "insert-epistemic" {
+					return s.storeKBIdempotent(ctx, request, caller, "")
+				}
 				if operation == "delete-as" {
 					receipt, err := s.deleteKBIdempotent(ctx, request, authority, caller, "")
 					return Record{ID: request.ID}, receipt, err

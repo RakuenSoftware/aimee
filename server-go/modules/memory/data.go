@@ -1024,7 +1024,8 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if request.ExpectedVersion != nil && (!versionedMutation || !request.ExpectedVersion.validFor(request.ID)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if request.IdempotencyKey != "" && (!versionedMutation || request.ExpectedVersion == nil || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
+	creation := (options.placement == PlacementServer && request.Operation == "store") || (options.placement == PlacementKB && request.Operation == "insert-epistemic")
+	if request.IdempotencyKey != "" && ((!creation && (!versionedMutation || request.ExpectedVersion == nil)) || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementServer {
@@ -1891,8 +1892,17 @@ set_config('aimee.correlation_id',$9,true)`,
 			}
 			request.Scope = scope
 			var record Record
-			record, err = mutations.InsertEpistemic(ctx, request)
-			if err == nil && options.publicWrite {
+			if request.IdempotencyKey != "" {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok || transaction == nil || !options.publicWrite {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				record, response.MutationReceipt, err = backend.storeKBIdempotent(ctx, request, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
+				rollbackOnly = err != nil
+			} else {
+				record, err = mutations.InsertEpistemic(ctx, request)
+			}
+			if err == nil && options.publicWrite && request.IdempotencyKey == "" {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok {
 					return nil, bus.ModuleStatusCapabilityAbsent
@@ -2119,8 +2129,18 @@ set_config('aimee.correlation_id',$9,true)`,
 			confidence = *request.Confidence
 		}
 		var record Record
-		record, err = options.data.Put(ctx, scope, Record{Scope: scope, Tier: request.Tier,
-			Kind: request.Kind, Key: request.Key, Content: request.Content, Confidence: confidence})
+		if request.IdempotencyKey != "" {
+			backend, ok := options.data.(*postgresDataStore)
+			if !ok || options.placement != PlacementServer {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			request.Scope, request.Confidence = scope, &confidence
+			record, response.MutationReceipt, err = backend.mutatePersonalIdempotent(ctx, request, options.commandContext)
+			rollbackOnly = err != nil
+		} else {
+			record, err = options.data.Put(ctx, scope, Record{Scope: scope, Tier: request.Tier,
+				Kind: request.Kind, Key: request.Key, Content: request.Content, Confidence: confidence})
+		}
 		response.Records = []Record{record}
 	case "supersede":
 		if request.ID <= 0 || request.Content == "" || request.Confidence == nil {

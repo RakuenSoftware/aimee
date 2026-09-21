@@ -17986,7 +17986,7 @@ CREATE OR REPLACE FUNCTION memory_deletion_receipt_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE valid_result BOOLEAN;
 BEGIN
- IF NEW.operation='correction' THEN RETURN NEW; END IF;
+ IF NEW.operation NOT IN ('retired','destroyed') THEN RETURN NEW; END IF;
  IF NEW.actor_principal<>COALESCE(current_setting('aimee.principal',true),'') OR
     NEW.target_revision<=0 OR NEW.proposal_id IS NOT NULL OR
     NOT public.memory_row_scope_visible(NEW.scope_type,NEW.scope_value) OR
@@ -18034,6 +18034,56 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
       AND m.scope_type=r.scope_type AND m.scope_value=r.scope_value))))
 $$;
 REVOKE ALL ON FUNCTION memory_deletion_replay_current(UUID,TEXT) FROM PUBLIC;
+-- Creation shares the existing actor/key namespace. Reapplication must accept
+-- already committed creation receipts while preserving all older receipts.
+ALTER TABLE memory_mutation_receipts DROP CONSTRAINT IF EXISTS memory_mutation_receipts_operation_check;
+ALTER TABLE memory_mutation_receipts ADD CONSTRAINT memory_mutation_receipts_operation_check
+ CHECK(operation IN ('correction','retired','destroyed','store','store_noop'));
+CREATE OR REPLACE FUNCTION memory_store_receipt_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF NEW.operation NOT IN ('store','store_noop') THEN RETURN NEW; END IF;
+ IF NEW.actor_principal<>COALESCE(current_setting('aimee.principal',true),'') OR
+    NOT public.memory_row_scope_visible(NEW.scope_type,NEW.scope_value) OR
+    NOT EXISTS(SELECT 1 FROM public.memory_collection_owner o WHERE o.id=1 AND o.owner_id=NEW.owner_id) THEN
+   RAISE EXCEPTION 'memory store receipt requires its admitted owner and scope';
+ END IF;
+ IF NEW.proposal_id IS NOT NULL THEN
+   IF NEW.operation<>'store' OR NOT EXISTS(
+    SELECT 1 FROM public.memory_correction_proposals p
+     JOIN public.memories m ON m.id=p.target_id
+     JOIN public.fact_graph_changes f ON f.object_kind='review' AND f.object_key=p.proposal_id::text AND f.action='insert'
+     JOIN public.fact_graph_commits c ON c.commit_id=f.commit_id
+    WHERE p.proposal_id=NEW.proposal_id AND p.owner_id=NEW.owner_id
+     AND p.target_id=NEW.result_id AND p.target_revision=NEW.target_revision
+     -- Admission deduplicates identical drafts across actors and terminal decisions.
+     -- Preserve the original author's audit; the retry actor owns only its receipt.
+     AND m.record_revision=p.target_revision AND m.lifecycle_state='active'
+     AND m.scope_type=NEW.scope_type AND m.scope_value=NEW.scope_value
+     AND c.commit_id=NEW.commit_id AND c.status='applied' AND c.actor_principal=p.actor_principal) THEN
+    RAISE EXCEPTION 'memory store receipt requires its admitted review proposal';
+   END IF;
+ ELSE
+   IF NEW.target_revision<>0 OR NOT EXISTS(SELECT 1 FROM public.memories m
+     WHERE m.id=NEW.result_id AND m.record_revision=NEW.result_revision AND m.lifecycle_state='active'
+      AND m.scope_type=NEW.scope_type AND m.scope_value=NEW.scope_value) OR
+     NOT EXISTS(SELECT 1 FROM public.fact_graph_commits c
+     WHERE c.commit_id=NEW.commit_id AND c.status='applied' AND c.actor_principal=NEW.actor_principal
+      AND c.operation='memory.'||NEW.operation
+      AND ((NEW.operation='store' AND EXISTS(SELECT 1 FROM public.fact_graph_changes f
+         WHERE f.commit_id=c.commit_id AND f.object_kind='memory' AND f.object_key=NEW.result_id::text
+          AND f.action='insert' AND f.after_version=NEW.result_revision))
+       OR (NEW.operation='store_noop' AND c.origin_ref='memory:'||NEW.result_id::text||':'||NEW.result_revision::text
+         AND NOT EXISTS(SELECT 1 FROM public.fact_graph_changes f WHERE f.commit_id=c.commit_id)))) THEN
+    RAISE EXCEPTION 'memory store receipt requires its admitted canonical audit';
+   END IF;
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_store_receipt_guard ON memory_mutation_receipts;
+CREATE TRIGGER memory_store_receipt_guard BEFORE INSERT ON memory_mutation_receipts
+ FOR EACH ROW EXECUTE FUNCTION memory_store_receipt_guard();
+REVOKE ALL ON FUNCTION memory_store_receipt_guard() FROM PUBLIC;
 -- END memory mutation receipts
 
 -- BEGIN memory correction proposals
@@ -18233,5 +18283,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '27')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '28')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

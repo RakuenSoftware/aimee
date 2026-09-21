@@ -33,6 +33,12 @@ Go performance baseline. It is an inventory, not a claim that those gates pass.
 The requirement text remains bound to that source revision while implementation
 and validation evidence are added here.
 
+The [creation retry implementation](../../validation/memory-creation-retries-2026-09-21.md)
+extends both Go placements with durable store keys, preserving replacement,
+unchanged-result and review admission. Local PostgreSQL/race, upgrade, native,
+export and contract checks pass; fresh creation HTTP/MCP/restart evidence is
+pending. These receipts do not certify downstream consumer freshness.
+
 Delivery follows the program’s dependency order: eligibility/mutations and final
 payload budgets first, then evidence/receipts/coverage, views and indexing,
 followed by task contracts, outcomes, governed actions and disposable state.

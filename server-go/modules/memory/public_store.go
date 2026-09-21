@@ -59,6 +59,11 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		}
 	}
 	request.Confidence = &confidence
+	var refusal map[string]any
+	request.IdempotencyKey, refusal = commandCreationKey(args, options.commandContext)
+	if refusal != nil {
+		return commandResult(refusal)
+	}
 	if args.stringOr("authority", "") == "user" && options.commandContext != nil && options.commandContext.UserAuthority {
 		request.Authority = AuthorityUser
 	}
@@ -96,9 +101,12 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	}
 	r := response.PublicRecords[0]
 	if args.stringOr("view", "") == "mcp" {
-		return mutationMCPResult("store", r.ID, r.ID, r.Key)
+		return mutationMCPResult("store", r.ID, r.ID, r.Key, response.MutationReceipt)
 	}
 	result := map[string]any{"status": "ok", "id": r.ID, "memory": r}
+	if response.MutationReceipt != nil {
+		result["mutation_receipt"] = response.MutationReceipt
+	}
 	if args.stringOr("view", "") == "native" {
 		result["id_text"] = fmt.Sprint(r.ID)
 	}
