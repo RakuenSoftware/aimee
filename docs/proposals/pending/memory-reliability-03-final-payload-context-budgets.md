@@ -91,7 +91,8 @@ with a 32 KiB cap pass 1,246 checks, including 273 provider checks per placement
 Task-composition inheritance, provider token counting and protected packing remain
 open, along with the broader all-surface release/receipt gates.
 
-The recall packer now preserves the complete stored hard-rule set or returns
+[Fresh recall validation](../../validation/memory-protected-recall-2026-09-21.md)
+records 1,261 passing checks. The recall packer preserves the complete stored hard-rule set or returns
 `protected_context_overflow`, including during private/shared composition. The
 former 8/16-rule caps are replaced by a bound derived from minimum serialized
 rule size, with explicit refusal when the set cannot fit. Optional rows remain

@@ -1,0 +1,43 @@
+{
+  "revision": "f6e544e060007669c0ee125766af1731bebd3bdf",
+  "scope": "64 optional Unicode rows; packing only, no database or provider latency",
+  "environment": "linux amd64; Intel Core i7-14700K; Go benchmark",
+  "results": [
+    {
+      "implementation": "linear_removal",
+      "ns_per_op": 14263220,
+      "bytes_per_op": 15545375,
+      "allocations_per_op": 284
+    },
+    {
+      "implementation": "linear_removal",
+      "ns_per_op": 14360333,
+      "bytes_per_op": 15533762,
+      "allocations_per_op": 283
+    },
+    {
+      "implementation": "linear_removal",
+      "ns_per_op": 14423888,
+      "bytes_per_op": 15519764,
+      "allocations_per_op": 282
+    },
+    {
+      "implementation": "bounded_search",
+      "ns_per_op": 1306728,
+      "bytes_per_op": 1396211,
+      "allocations_per_op": 47
+    },
+    {
+      "implementation": "bounded_search",
+      "ns_per_op": 1297982,
+      "bytes_per_op": 1389557,
+      "allocations_per_op": 47
+    },
+    {
+      "implementation": "bounded_search",
+      "ns_per_op": 1281362,
+      "bytes_per_op": 1386511,
+      "allocations_per_op": 47
+    }
+  ]
+}

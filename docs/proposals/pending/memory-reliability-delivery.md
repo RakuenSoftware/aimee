@@ -195,6 +195,19 @@ conformance. All 58 remote CI checks pass on the implementation revision.
 Task-composition limits, token accounting, protected
 packing and the remaining release/receipt gates are still open.
 
+[Complete hard-rule recall validation](../../validation/memory-protected-recall-2026-09-21.md)
+records **1,261/1,261** fresh checks on `f6e544e060` (778 T2, 483 T3).
+Go preserves the complete stored hard-rule set or explicitly refuses, including
+private/shared composition. Bounds on candidate count and cumulative text prevent
+silent 8/16-rule truncation and oversized database replies. MCP preserves the
+owner refusal before session guidance; HTTP classifies overflow as 413 through
+the status provider. Bounded prefix packing is about 11 times faster with about
+91% fewer allocated bytes in the local 64-row stress fixture, not a whole-request
+P95 result. Rule-promotion authority, all-provider protected-context enforcement,
+provider tokens and source-version/dispatch binding remain open.
+All 58 remote CI checks pass on `2269c6c1b9`, including sanitizers and encrypted
+upgrade/rollback; its sole follow-up change is the exact MCP source-review record.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from
