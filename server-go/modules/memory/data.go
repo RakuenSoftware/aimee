@@ -31,6 +31,9 @@ const (
 )
 
 type DataRequest struct {
+	AssemblyBudgetBytes json.RawMessage `json:"assembly_budget_bytes,omitempty"`
+	assemblyBytes       *int
+
 	CorrectionReview *correctionReviewRequest `json:"correction_review,omitempty"`
 	ProposalID       string                   `json:"proposal_id,omitempty"`
 	IdempotencyKey   string                   `json:"idempotency_key,omitempty"`
@@ -887,6 +890,16 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		return DataRequest{}, errors.New("memory: trailing data request")
 	}
 	request.Operation = strings.ToLower(strings.TrimSpace(request.Operation))
+	if len(request.AssemblyBudgetBytes) != 0 {
+		if request.Operation != "assemble-context" {
+			return DataRequest{}, errors.New("memory: assembly budget requires assemble-context")
+		}
+		var err error
+		request.assemblyBytes, err = commandByteLimit(commandArgs{"budget_bytes": request.AssemblyBudgetBytes}, "budget_bytes")
+		if err != nil {
+			return DataRequest{}, err
+		}
+	}
 	request.Kind = strings.TrimSpace(request.Kind)
 	request.Tier = strings.TrimSpace(request.Tier)
 	request.Key = strings.TrimSpace(request.Key)
@@ -2639,10 +2652,14 @@ set_config('aimee.correlation_id',$9,true)`,
 				} else {
 					records, err = options.data.Search(ctx, scope, request.Query, "", "", request.Limit)
 				}
-				assembly := assembleMemoryContext(records, request.Query, request.BlockType)
-				block = assembly.Context
 				if request.Detail {
+					assembly := assembleMemoryContextWithBudget(records, request.Query, request.BlockType, request.assemblyBytes)
+					block = assembly.Context
 					response.ContextAssembly = &assembly
+				} else {
+					// Native hosts need only the projection. Avoid computing
+					// diagnostic scores/metadata for every unused candidate.
+					block, _ = renderMemoryContextBounded(records, request.BlockType, request.assemblyBytes)
 				}
 			} else if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
 				var records []Record

@@ -2069,7 +2069,6 @@
     "src/server/agent_runtime.c": {
       "disposition": "host-context",
       "symbols": [
-        "kb_client_memory_assemble_context",
         "kb_client_memory_find_id_by_key_kind",
         "kb_client_memory_insert",
         "kb_client_memory_recall_native_json",
@@ -2077,7 +2076,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "3a7dc64695ec28fedadb149faabc28b7bb9dbcc7b75d6bc5b811a429e0b33a01"
+      "sha256": "135899074692e3305b349cf0ee9557745844bc2a11db612d092e3724e12e63d8"
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",

@@ -15,13 +15,17 @@ import (
 // The native host supplies its remaining byte allocation. Go owns mandatory
 // content, whole-row retention, rendering and exact retained reminder identity.
 func nativeRecallLimit(args commandArgs) (*int, error) {
-	raw, present := args["native_context_bytes"]
+	return commandByteLimit(args, "native_context_bytes")
+}
+
+func commandByteLimit(args commandArgs, name string) (*int, error) {
+	raw, present := args[name]
 	if !present {
 		return nil, nil
 	}
 	var limit *int
 	if json.Unmarshal(raw, &limit) != nil || limit == nil || *limit < 0 || *limit > maxDataBody {
-		return nil, fmt.Errorf("native_context_bytes must be an integer between zero and memory message capacity")
+		return nil, fmt.Errorf("%s must be an integer between zero and memory message capacity", name)
 	}
 	return limit, nil
 }
@@ -98,10 +102,15 @@ func projectNativeRecall(b recallBundle, limit int) (nativeRecallProjection, int
 	if count > 0 {
 		out.WriteByte('\n')
 	}
-	p.Text = out.String()
-	p.Bytes = len(p.Text)
-	p.Digest = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(p.Text)))
+	reminders := p.Reminders
+	p = nativeProjectionForText(out.String(), limit)
+	p.Reminders = reminders
 	return p, count, nil
+}
+
+func nativeProjectionForText(text string, limit int) nativeRecallProjection {
+	return nativeRecallProjection{Version: 1, Text: text, Bytes: len(text), Limit: limit,
+		Digest: fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(text))), Reminders: []string{}}
 }
 
 func nativeRecallEnvelope(raw []byte, args commandArgs) ([]byte, error) {

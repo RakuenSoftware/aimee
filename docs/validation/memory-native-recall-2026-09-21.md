@@ -52,9 +52,45 @@ made for this projection.
 
 ## Still open
 
-Legacy external rule rendering and caller-prompt/full-context truncation remain
+Legacy external rule rendering and caller-prompt truncation remain
 separate native host paths. Provider-exact token counts/reserves, complete source
 version binding and durable prepared/admitted/dispatched/acknowledged receipts
 remain open. Reminder marking still occurs at host assembly, not at a durable
 provider-dispatch acknowledgment. Text/source digests are projection evidence,
 not durable release receipts.
+
+
+## Follow-up: generic context assembly
+
+The native session-start fallback also forwards its remaining byte allocation to
+the existing Go `assemble_context` command. Go retains complete rows in retrieval
+order, counting headers and the terminal newline. A literal zero produces empty
+context. Omitted rows are marked unselected in explain output; budget diagnostics
+report exact bytes separately from the legacy token estimate. Absent allocations
+preserve the existing rendering.
+
+The C host verifies the same versioned opaque projection and preserves owner
+refusals. It no longer truncates generic memory context. This adds no RPC.
+Go tests exercise zero, exact-fit and one-byte-short allocations, Unicode,
+max-int64 record IDs, invalid public/internal budgets, and the restricted-role
+PostgreSQL public command. This follow-up is later than the fresh `1f198a6b07`
+image; it requires its own fresh-image evidence.
+
+The follow-up passes the full Go memory suite with required PostgreSQL
+replay/evaluation, native application build and context-refusal fixture, all 77
+lint checks, and all 17 S1 integration-contract tests.
+
+The non-explain path now avoids computing diagnostic scores and metadata for
+unused candidates. A local 12-row fixture with 8,192 bytes available, repeated
+Unicode content and three benchmark runs measures:
+
+| Path | Time per operation | Allocated bytes | Allocations |
+|---|---:|---:|---:|
+| Assembly with diagnostic metadata | 246.6–251.6 µs | 193,049–193,096 | 93 |
+| Projection only | 1.60–1.71 µs | 14,694–14,695 | 8 |
+
+Command: `go -C server-go test ./modules/memory -run '^$' -bench '^BenchmarkContextAssemblyProjection$' -benchmem -count=3`.
+The benchmark compares the two assembly paths on the same input and budget;
+PostgreSQL public regressions verify identical retained text with/without explain.
+It excludes retrieval, transport and provider time and does not establish a
+whole-request P95 improvement or MR-18 acceptance.

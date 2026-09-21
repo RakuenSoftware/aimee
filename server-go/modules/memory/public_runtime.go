@@ -12,6 +12,15 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 	invalid := func(message string) ([]byte, bus.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
+	if _, present := args["budget_bytes"]; present {
+		if verb != "assemble_context" {
+			return invalid("budget_bytes requires assemble_context")
+		}
+		if _, err := commandByteLimit(args, "budget_bytes"); err != nil {
+			return invalid(err.Error())
+		}
+		request.AssemblyBudgetBytes = args["budget_bytes"]
+	}
 	switch verb {
 	case "fold_session":
 		request.Operation, request.SessionID = "fold-session", args.stringOr("session_id", "")
@@ -264,6 +273,10 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			return nil, bus.ModuleStatusInternal
 		}
 		result["context"] = *response.Block
+		if request.AssemblyBudgetBytes != nil {
+			limit, _ := commandByteLimit(args, "budget_bytes") // validated before retrieval
+			result["native_context"] = nativeProjectionForText(*response.Block, *limit)
+		}
 		if request.Detail {
 			if response.ContextAssembly == nil {
 				return nil, bus.ModuleStatusInternal

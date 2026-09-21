@@ -300,3 +300,8 @@ byte allocation and verifies the opaque result without another RPC. Exact int64
 reminder transport now survives public selection, marking and completion.
 Local Go/PostgreSQL and native refusal regressions cover this change; fresh-image
 native acceptance and the remaining MR-03/MR-06 clauses stay open.
+
+The generic native context fallback now also passes its remaining byte allocation
+to Go. Whole-row packing and explain selection are owned by Go; the C host verifies
+and appends the opaque projection. Legacy rule/caller-prompt paths, exact provider
+token budgets and durable dispatch receipts remain outstanding.

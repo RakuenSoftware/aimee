@@ -1803,17 +1803,25 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    }
    else if (!skip_kb_client)
    {
-      /* Fallback: full context assembly (budget: architecture) */
-      char *ctx = kb_client_memory_assemble_context(NULL);
-      if (ctx && ctx[0])
+      /* The Go owner retains whole rows within the remaining allocation. */
+      size_t available = pos < cap ? cap - pos - 1 : 0;
+      if (available > budget_arch)
+         available = budget_arch;
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddNumberToObject(request, "budget_bytes", (double)available);
+      char *raw = kb_v1_action_request("memory.assemble_context", request);
+      cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
+      free(raw);
+      if (append_native_memory_projection(reply, available, buf, cap, &pos, 0, error, error_len) !=
+          0)
       {
-         size_t ctx_len = strlen(ctx);
-         if (ctx_len > budget_arch)
-            ctx_len = budget_arch;
-         ctx_append_bytes(buf, cap, &pos, ctx, ctx_len);
-         ctx_appendf(buf, cap, &pos, "\n\n");
+         cJSON_Delete(reply);
+         kb_client_memory_scope_context_clear();
+         free(buf);
+         return NULL;
       }
-      free(ctx);
+      cJSON_Delete(reply);
    }
 
    /* Scheduled maintenance + skill ticks. Non-blocking; never delay the reply. */

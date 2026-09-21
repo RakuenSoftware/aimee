@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -12,6 +13,8 @@ import (
 func TestRuntimePublicValidation(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
 	for _, tt := range []struct{ verb, args string }{
+		{"assemble_context", `{"budget_bytes":null}`}, {"assemble_context", `{"budget_bytes":-1}`},
+		{"assemble_context", `{"budget_bytes":1.5}`}, {"facts", `{"query":"x","budget_bytes":0}`},
 		{"assemble_context", `{"explain":"yes"}`}, {"assemble_context", `{"explain":null}`}, {"query_edges", `{}`}, {"query_edges", `{"entity":""}`}, {"check_drift", `{"task_id":0}`},
 	} {
 		if r := runPublicCommand(t, client, tt.verb, tt.args); r["kind"] != "invalid_argument" {
@@ -92,6 +95,33 @@ SET LOCAL ROLE memory_runtime_test;`)
 	block := run("assemble_context", `{"scope_context":true,"project":"app"}`)["context"].(string)
 	if !strings.Contains(block, "release the app") || !strings.Contains(block, "common conventions") || strings.Contains(block, "secret") {
 		t.Fatal(block)
+	}
+	for _, cap := range []int{0, len(block) - 1, len(block)} {
+		got := run("assemble_context", fmt.Sprintf(`{"scope_context":true,"project":"app","explain":true,"budget_bytes":%d}`, cap))
+		text := got["context"].(string)
+		plain := run("assemble_context", fmt.Sprintf(`{"scope_context":true,"project":"app","budget_bytes":%d}`, cap))
+		if plain["context"] != text {
+			t.Fatal("diagnostics changed selection", plain, got)
+		}
+		projection := got["native_context"].(map[string]any)
+		if len(text) > cap || projection["text"] != text || projection["max_context_bytes"] != float64(cap) {
+			t.Fatal(got)
+		}
+		selected := 0
+		for _, v := range got["candidates"].([]any) {
+			if v.(map[string]any)["selected"] == true {
+				selected++
+			}
+		}
+		if cap == 0 && (text != "" || selected != 0) {
+			t.Fatal(got)
+		}
+		if cap == len(block) && (text != block || selected != 2) {
+			t.Fatal(got)
+		}
+		if cap == len(block)-1 && selected != 1 {
+			t.Fatal(got)
+		}
 	}
 	explained := run("assemble_context", `{"scope_context":true,"project":"app","explain":true}`)
 	if explained["context"] != block || explained["candidate_scope"] != "returned_rows" || strings.Contains(explained["explain_text"].(string), "secret") {
