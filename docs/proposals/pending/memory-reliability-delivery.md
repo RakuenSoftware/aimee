@@ -65,8 +65,10 @@ at `800f4ef2f4` passes **1,561/1,561 fresh checks** (969 T2, 592 T3).
 [Plain-text fact projections](../../validation/memory-fact-source-versions-2026-09-21.md)
 now carry exact assertion/parent versions and emit only Go-retained references
 after host integrity acceptance. Runtime-role and native transport tests pass;
-fresh deployment remains pending. These observations do not certify owner
-revalidation at final release.
+fresh `f055d212f5` passes **1,570/1,570 checks** (978 T2, 592 T3). [Fact query batching](../../validation/memory-fact-query-batching-2026-09-21.md)
+reduces the measured eight-entity recall from 11 SQL calls to three, with 16.2%
+lower local query time and 38.5% fewer allocated bytes. These observations do not
+certify owner revalidation at final release.
 
 Delivery follows the program’s dependency order: eligibility/mutations and final
 payload budgets first, then evidence/receipts/coverage, views and indexing,

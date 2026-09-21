@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
 )
@@ -53,16 +52,4 @@ func validFactSources(block string, refs []typedProjectionRef) bool {
 		seen[ref.ID] = true
 	}
 	return true
-}
-
-func (s *postgresDataStore) RecallFactProjection(ctx context.Context, entity, query string, sensitive bool, capacity int) (string, int, *factProjection, error) {
-	refs := []typedProjectionRef{}
-	block, count, err := s.recallFactsSources(ctx, entity, query, sensitive, capacity, &refs)
-	if err != nil {
-		return "", 0, nil, err
-	}
-	if !validFactSources(block, refs) {
-		return "", 0, nil, fmt.Errorf("memory: invalid fact source projection")
-	}
-	return block, count, newFactProjection(block, refs), nil
 }

@@ -28,6 +28,7 @@
     "server-go/modules/memory/extract.go",
     "server-go/modules/memory/fact_recall.go",
     "server-go/modules/memory/fact_projection.go",
+    "server-go/modules/memory/fact_projection_query.go",
     "server-go/modules/memory/fusion.go",
     "server-go/modules/memory/graph_score.go",
     "server-go/modules/memory/graph_feedback.go",
