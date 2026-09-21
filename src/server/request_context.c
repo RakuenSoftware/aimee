@@ -25,6 +25,21 @@ const request_context_t *request_context_get(void)
    return g_req_ctx_set ? &g_req_ctx : NULL;
 }
 
+int request_context_refuse_assembly(const char *kind)
+{
+   if (!g_req_ctx_set)
+      return -1;
+   if (!g_req_ctx.context_refused)
+   {
+      g_req_ctx.context_refused = 1;
+      /* Preserve a complete owner kind; never invent a truncated error code. */
+      if (!kind || !kind[0] || strlen(kind) >= sizeof(g_req_ctx.context_refusal_kind))
+         kind = "unavailable";
+      snprintf(g_req_ctx.context_refusal_kind, sizeof(g_req_ctx.context_refusal_kind), "%s", kind);
+   }
+   return 0;
+}
+
 void request_context_clear(void)
 {
    memset(&g_req_ctx, 0, sizeof(g_req_ctx));

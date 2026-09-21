@@ -53,6 +53,10 @@ typedef struct
     * 0 absent, 1 present, -1 malformed/duplicate/oversized transport header. */
    int request_budget_present;
    char request_budget_limits[1025];
+   /* Host-only assembly outcome. Never populated from client headers. The first
+    * refusal is terminal for this request and survives async context copies. */
+   int context_refused;
+   char context_refusal_kind[96];
    int aimee_tool_calls; /* cumulative calls observed in this API transcript */
    int aimee_redundant_tool_calls;
    char aimee_intervention[40];
@@ -69,6 +73,10 @@ void request_context_capture_budget_header(request_context_t *ctx, const char *r
 /* Return the current thread's request context, or NULL if none is set. The
  * pointer is valid until the next set/clear on this thread. */
 const request_context_t *request_context_get(void);
+
+/* Retain the first failed required context operation until request clear/set.
+ * Returns -1 without an active request; it never creates a detached TLS latch. */
+int request_context_refuse_assembly(const char *kind);
 
 /* Clear the current thread's request context. */
 void request_context_clear(void);

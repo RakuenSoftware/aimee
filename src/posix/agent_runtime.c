@@ -1073,9 +1073,13 @@ native_provider_http:
                                                                   : WIRE_FENCE_OPENAI_CHAT;
       wire_fence_t *wire_snapshot = NULL;
       wire_fence_bytes_t wire_body;
-      if (wire_fence_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
-                            &wire_body) != 0)
+      int wire_rc = wire_fence_select(economizer_active, wire_route, body, strlen(body),
+                                      &wire_snapshot, &wire_body);
+      if (wire_rc != 0)
       {
+         context_refused = wire_rc == WIRE_FENCE_CONTEXT_REFUSED;
+         if (context_refused)
+            snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
          snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
          free(body);
          break;
@@ -1126,9 +1130,13 @@ native_provider_http:
             }
             wire_fence_t *fb_snapshot = NULL;
             wire_fence_bytes_t fb_wire_body;
-            if (wire_fence_select(economizer_active, wire_route, fb_body, strlen(fb_body),
-                                  &fb_snapshot, &fb_wire_body) != 0)
+            wire_rc = wire_fence_select(economizer_active, wire_route, fb_body, strlen(fb_body),
+                                        &fb_snapshot, &fb_wire_body);
+            if (wire_rc != 0)
             {
+               context_refused = wire_rc == WIRE_FENCE_CONTEXT_REFUSED;
+               if (context_refused)
+                  snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
                snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
                free(fb_body);
                break;

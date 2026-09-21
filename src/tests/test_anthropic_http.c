@@ -13,6 +13,7 @@
 #include <aimee/delegates/delegate_driver.h>
 #include "../headers/log.h"
 #include "../headers/server_http.h"
+#include "../headers/request_context.h"
 #include "../vendor/headers/cJSON.h"
 
 /* anthropic_http.c's write_error now logs aimee-internal error codes; this
@@ -1183,6 +1184,40 @@ static void test_proof_gated_ingress_wire_parity(void)
    PASS("proof_gated_ingress_wire_parity");
 }
 
+/* Exercise the actual buffered/streaming handlers and their final fence.
+ * A missing status provider in this minimal link retains HTTP 502; the owner
+ * kind must still be present and neither transport may be called. */
+static void test_memory_refusal_blocks_provider_dispatch(void)
+{
+   const char *request = "{\"model\":\"ignored\",\"max_tokens\":64,"
+                         "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+   const delegate_driver_t drivers[] = {
+       {.name = "anthropic", .parse_response = parsed_text},
+       {.name = "openai", .build_request = openai_driver_build},
+       {.name = "chatgpt", .build_request = system_prompt_driver_build},
+   };
+   for (size_t i = 0; i < sizeof(drivers) / sizeof(drivers[0]); i++)
+      for (int gated = 0; gated <= 1; gated++)
+      {
+         reset_capture();
+         g_driver = &drivers[i];
+         g_proof_gated = gated;
+         request_context_t context = {0};
+         request_context_set(&context);
+         assert(request_context_refuse_assembly("protected_context_overflow") == 0);
+         char response[4096];
+         assert(messages_buffered(request, response, sizeof(response)) == 502);
+         assert(strstr(response, "protected_context_overflow") && !g_last_body);
+         emit_capture_t cap = {0};
+         (void)messages_stream(request, cap_emit, &cap);
+         assert(cap.count == 1 && !strcmp(cap.events[0], "error"));
+         assert(strstr(cap.data[0], "protected_context_overflow") && !g_last_body);
+         request_context_clear();
+      }
+   reset_capture();
+   PASS("memory_refusal_blocks_provider_dispatch");
+}
+
 static void test_count_tokens_validates_request_shape(void)
 {
    const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
@@ -1242,6 +1277,7 @@ int main(void)
    test_messages_stream_openai_family_translates();
    test_messages_stream_chatgpt_buffered_replays_responses();
    test_proof_gated_ingress_wire_parity();
+   test_memory_refusal_blocks_provider_dispatch();
    test_count_tokens_validates_request_shape();
    test_messages_buffered_rejects_missing_messages();
    printf("anthropic_http: OK\n");

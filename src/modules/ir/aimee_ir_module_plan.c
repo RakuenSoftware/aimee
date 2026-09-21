@@ -241,7 +241,11 @@ static int execute(aimee_request_t *ir, const aimee_ir_module_plan_t *config, ch
    const cJSON *steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
    int changed = 0;
    if (!outputs || !status || strcmp(status, "ok") != 0 || validate_plan(ir, steps, config) != 0)
+   {
+      if (config && config->refuse)
+         config->refuse(string_field(plan, "kind"), config->context);
       goto done;
+   }
    const cJSON *step;
    cJSON_ArrayForEach(step, steps)
    {

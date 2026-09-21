@@ -241,6 +241,7 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
                                           .provided_resources =
                                               persona_inserted ? persona_resources : NULL,
                                           .bindings = server_ir_plan_bindings,
+                                          .refuse = server_ir_plan_refuse,
                                           .resources = server_ir_plan_resources};
    aimee_ir_module_plan_t tools_plan = context_plan;
    tools_plan.phase = "tools";

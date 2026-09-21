@@ -10,6 +10,7 @@
 #include "ingress_preinject.h"
 #include "cJSON.h"
 #include "config.h"
+#include "request_context.h"
 #include "platform_test_util.h"
 #include "kb_client.h"
 #include "support/module_runtime_fixture.h"
@@ -134,6 +135,7 @@ static int apply_plan(aimee_request_t *ir, const char *query, const char *phase)
                                     .provided_query = query,
                                     .provided_resources = fixture_provided_resources,
                                     .bindings = server_ir_plan_bindings,
+                                    .refuse = server_ir_plan_refuse,
                                     .resources = server_ir_plan_resources};
    return aimee_ir_stage_module_plan(ir, &config);
 }
@@ -667,6 +669,39 @@ static void test_invalid_plans_have_no_effects(void)
    fixture_gate = NULL;
    aimee_request_free(&ir);
 }
+static void test_required_plan_failure_is_request_scoped(void)
+{
+   const char *plans[] = {
+       "{\"status\":\"error\",\"kind\":\"protected_context_overflow\"}",
+       "{\"status\":\"ok\",\"steps\":null}",
+       "{\"status\":\"ok\",\"steps\":[]}",
+   };
+   request_context_t context = {0};
+   for (int surface = 0; surface < 2; surface++)
+      for (int scenario = 0; scenario < 4; scenario++)
+      {
+         request_context_set(&context);
+         fixture_gate = plans[scenario < 3 ? scenario : 2];
+         fixture_transport_result = scenario == 3 ? -1 : 1;
+         if (surface == 0)
+            assert(render_text("deploy matrix") == NULL);
+         else
+         {
+            aimee_request_t ir;
+            mk_user_ir(&ir, "deploy matrix");
+            assert(apply_context(&ir, NULL) == 0 && ir.n_system == 0);
+            aimee_request_free(&ir);
+         }
+         assert(request_context_get()->context_refused == (scenario != 2));
+         if (scenario != 2)
+            assert(!strcmp(request_context_get()->context_refusal_kind,
+                           scenario == 0 ? "protected_context_overflow" : "unavailable"));
+         request_context_clear();
+      }
+   fixture_gate = NULL;
+   fixture_transport_result = 1;
+   puts("required plan failures preserve owner kind; successful empty plans remain valid");
+}
 static const char *opaque_payload;
 static cJSON *payload_binding(const cJSON *args, void *context)
 {
@@ -721,6 +756,7 @@ int main(void)
    printf("test_ir_module_plan:\n");
    test_system_prompt_raw_env();
    test_gate_reply_and_audit();
+   test_required_plan_failure_is_request_scoped();
    test_disabled_noop();
    test_ir_stage_appends_system_block();
    const char *const provided[] = {"guidance", NULL};

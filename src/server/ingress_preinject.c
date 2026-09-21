@@ -81,7 +81,7 @@ static __thread char g_session_id[64] = "";
 
 /* Host transport only. The supplied request is consumed; all ingress policy
  * and state live in the shared Go owner. */
-static cJSON *ingress_command(cJSON *request)
+static cJSON *ingress_command(cJSON *request, int required_context)
 {
    cJSON *response = NULL;
    int rc =
@@ -90,6 +90,12 @@ static cJSON *ingress_command(cJSON *request)
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
    if (rc != 1 || !status || strcmp(status, "ok") != 0)
    {
+      if (required_context)
+      {
+         const char *kind =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "kind"));
+         (void)request_context_refuse_assembly(kind);
+      }
       cJSON_Delete(response);
       return NULL;
    }
@@ -305,15 +311,21 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    cJSON_AddBoolToObject(request, "compress", config_ingress_compress_enabled());
    cJSON_AddBoolToObject(request, "compress_disabled", rctx && rctx->compress_disabled);
    cJSON_AddNumberToObject(request, "compress_min", config_ingress_compress_min_chars());
-   cJSON *plan = ingress_command(request);
+   cJSON *plan = ingress_command(request, 1);
    if (!plan)
    {
-      LOG_WARN("memory", "Go ingress plan unavailable; omitting pre-injection envelope");
+      LOG_WARN("memory", "Go ingress plan failed");
       return NULL;
    }
    const char *warning = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "warning"));
    if (warning)
       LOG_WARN("ingress-context", "%s", warning);
+   if (!cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(plan, "active")))
+   {
+      (void)request_context_refuse_assembly("unavailable");
+      cJSON_Delete(plan);
+      return NULL;
+   }
    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "active")))
    {
       cJSON_Delete(plan);
@@ -323,6 +335,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    const char *planned_mode = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "mode"));
    if (!cJSON_IsObject(assembly_plan) || !planned_mode)
    {
+      (void)request_context_refuse_assembly("unavailable");
       cJSON_Delete(plan);
       return NULL;
    }
@@ -350,7 +363,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       cJSON *packet = raw ? cJSON_Parse(raw) : NULL;
       free(raw);
       cJSON_AddItemToObject(task, "packet", packet ? packet : cJSON_CreateNull());
-      cJSON *result = ingress_command(task);
+      cJSON *result = ingress_command(task, 0);
       const char *block = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "block"));
       const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(result, "confidence");
       if (block && cJSON_IsNumber(confidence))
@@ -417,7 +430,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       cJSON_AddStringToObject(outcome, "project", active_project);
       cJSON_AddNumberToObject(outcome, "count", mem_n);
       cJSON_AddBoolToObject(outcome, "unavailable", memory_unavailable);
-      cJSON *result = ingress_command(outcome);
+      cJSON *result = ingress_command(outcome, 0);
       const char *message =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "warning"));
       if (message)
@@ -450,14 +463,15 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    cJSON_AddStringToObject(assembly, "audit", audit ? audit : "");
    free(audit);
 
-   cJSON *response = ingress_command(assembly);
+   cJSON *response = ingress_command(assembly, 1);
    const char *envelope =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "envelope"));
    if (!envelope)
    {
+      (void)request_context_refuse_assembly("unavailable");
       kb_client_memory_scope_context_clear();
       cJSON_Delete(response);
-      LOG_WARN("memory", "Go ingress assembly unavailable; omitting pre-injection envelope");
+      LOG_WARN("memory", "Go ingress assembly failed");
       return NULL;
    }
    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "facts_unavailable")))

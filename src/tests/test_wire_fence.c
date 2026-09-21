@@ -7,6 +7,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Recorded classifications supplied through the same Go-provider seam used by
+ * the server; the wire fence must not invent memory-specific HTTP policy. */
+int server_error_kind_http_status(const char *kind)
+{
+   if (!strcmp(kind, "protected_context_overflow"))
+      return 413;
+   if (!strcmp(kind, "unavailable"))
+      return 503;
+   return 0;
+}
+
 static request_context_t context;
 static econ_request_budget_result_t admission;
 static int admission_calls;
@@ -184,9 +195,37 @@ static void test_proof_gated_empty_registry_is_byte_identical_on_every_route(voi
    }
 }
 
+static void test_context_refusal_blocks_every_route(void)
+{
+   memset(&context, 0, sizeof(context));
+   have_context = 1;
+   context.context_refused = 1;
+   strcpy(context.context_refusal_kind, "protected_context_overflow");
+   int before = admission_calls;
+   for (int gated = 0; gated < 2; gated++)
+      for (unsigned route = 1; route <= 3; route++)
+      {
+         wire_fence_t *snapshot = NULL;
+         wire_fence_bytes_t selected = {0};
+         assert(wire_fence_select(gated, (wire_fence_route_t)route, "abc", 3, &snapshot,
+                                  &selected) == WIRE_FENCE_CONTEXT_REFUSED);
+         assert(!snapshot && !selected.data && !selected.len);
+         assert(strcmp(wire_fence_last_error(), "protected_context_overflow") == 0);
+         assert(wire_fence_error_http_status(wire_fence_last_error()) == 413);
+         assert(strcmp(wire_fence_error_type(wire_fence_last_error()),
+                       "protected_context_overflow") == 0);
+      }
+   assert(admission_calls == before);
+   memset(&context, 0, sizeof(context));
+   wire_fence_t *snapshot = NULL;
+   wire_fence_bytes_t selected = {0};
+   assert(wire_fence_select(0, WIRE_FENCE_OPENAI_CHAT, "abc", 3, &snapshot, &selected) == 0);
+   assert(selected.len == 3);
+}
 int main(void)
 {
    operator_policy(NULL);
+   test_context_refusal_blocks_every_route();
    test_hard_budget_refuses_without_selected_bytes();
    test_operator_policy_reaches_admission_without_request_header();
    test_pristine_copy_is_immutable();

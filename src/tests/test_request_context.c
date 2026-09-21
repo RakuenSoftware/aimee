@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 #include "request_context.h"
 
 #define PASS(name) printf("  %s: ok\n", name)
@@ -125,8 +126,50 @@ static void test_budget_header(void)
    PASS("context: budget header is bounded, copied, cleared and duplicate-safe");
 }
 
+static void *refusal_worker(void *copied)
+{
+   assert(request_context_get() == NULL);
+   request_context_set(copied);
+   assert(request_context_get()->context_refused);
+   assert(strcmp(request_context_get()->context_refusal_kind, "protected_context_overflow") == 0);
+   request_context_clear();
+   request_context_t fresh = {0};
+   request_context_set(&fresh);
+   assert(!request_context_get()->context_refused);
+   assert(request_context_refuse_assembly("permission_denied") == 0);
+   request_context_clear();
+   return NULL;
+}
+static void test_assembly_refusal_lifetime(void)
+{
+   request_context_clear();
+   assert(request_context_refuse_assembly("unavailable") == -1);
+   assert(request_context_get() == NULL);
+   request_context_t fresh = {0};
+   request_context_set(&fresh);
+   assert(request_context_refuse_assembly("protected_context_overflow") == 0);
+   assert(request_context_refuse_assembly("unavailable") == 0);
+   assert(strcmp(request_context_get()->context_refusal_kind, "protected_context_overflow") == 0);
+   request_context_t copy = *request_context_get();
+   pthread_t worker;
+   assert(pthread_create(&worker, NULL, refusal_worker, &copy) == 0);
+   assert(pthread_join(worker, NULL) == 0);
+   assert(strcmp(request_context_get()->context_refusal_kind, "protected_context_overflow") == 0);
+   request_context_clear();
+   request_context_set(&fresh);
+   assert(!request_context_get()->context_refused &&
+          !request_context_get()->context_refusal_kind[0]);
+   char oversized[128];
+   memset(oversized, 'x', sizeof(oversized) - 1);
+   oversized[sizeof(oversized) - 1] = 0;
+   assert(request_context_refuse_assembly(oversized) == 0);
+   assert(strcmp(request_context_get()->context_refusal_kind, "unavailable") == 0);
+   request_context_clear();
+   PASS("context: first refusal survives worker copy without leaking into another request");
+}
 int main(void)
 {
+   test_assembly_refusal_lifetime();
    test_budget_header();
    printf("request_context: unit tests\n");
    test_unset_defaults();

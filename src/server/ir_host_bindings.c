@@ -5,6 +5,7 @@
 #include "ingress_preinject.h"
 #include "module_commands.h"
 #include "log.h"
+#include "request_context.h"
 #include <aimee/core/turn_integrity.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -66,6 +67,15 @@ const aimee_ir_plan_binding_t server_ir_plan_bindings[] = {{"context", context_c
                                                            {NULL, NULL}};
 const aimee_ir_plan_resource_t server_ir_plan_resources[] = {{"guidance", AIMEE_GUIDANCE_BLOCK},
                                                              {NULL, NULL}};
+/* Lean plan consumers may have no HTTP request context. Production HTTP hosts
+ * supply the request-scoped sink, including copied asynchronous workers. */
+extern int request_context_refuse_assembly(const char *kind) __attribute__((weak));
+void server_ir_plan_refuse(const char *kind, void *context)
+{
+   (void)context;
+   if (request_context_refuse_assembly)
+      (void)request_context_refuse_assembly(kind);
+}
 char *server_ir_plan_text(const char *method, const char *operation, const char *phase,
                           const char *query)
 {
@@ -74,6 +84,7 @@ char *server_ir_plan_text(const char *method, const char *operation, const char 
                                           .phase = phase,
                                           .provided_query = query,
                                           .bindings = server_ir_plan_bindings,
+                                          .refuse = server_ir_plan_refuse,
                                           .resources = server_ir_plan_resources};
    return aimee_ir_module_plan_text(&config);
 }

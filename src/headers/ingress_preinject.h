@@ -37,7 +37,10 @@ char *ingress_preinject_last_assistant_from_messages(const cJSON *messages);
  * `ingress_preinject_enabled` (config) and `request_disabled` (per-request
  * override): returns NULL when disabled, when query is blank, or when recall
  * yields no context. Otherwise runs the recall/context-block path, derives a
- * confidence tier, and returns a malloc'd <aimee-context> envelope. */
+ * confidence tier, and returns a malloc'd <aimee-context> envelope.
+ * HTTP callers install a request_context_t before assembly. Required plan or
+ * assembly failures mark that request refused for final provider dispatch;
+ * successful inactive/empty plans may return NULL without refusing. */
 char *ingress_preinject_build(const char *query, int request_disabled);
 
 /* Merge `envelope` with `instructions` (the request system prompt), returning a

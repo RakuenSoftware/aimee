@@ -65,13 +65,39 @@ transport responses; the deployment matrix is broader integration regression
 coverage, not a live native-agent refusal test. Follow-up `b3a2578ae3` adds the
 credential retry/release guards and four retry cases. Its targeted credential
 suite, native build and all 77 lint checks pass locally; the fresh image above
-predates that follow-up. Remote CI for the latest pushed code is pending.
+predates that follow-up. All 58 remote CI checks pass on the subsequent evidence revision `1139676c20`.
 
+
+## HTTP request refusal follow-up
+
+The host now retains the first required Go gateway-plan or ingress assembly
+failure in its existing request context. The final provider fence checks it before
+optional reduction or byte admission. Successful empty/inactive plans remain valid;
+optional retrieval-outcome reporting does not refuse a request. A later successful
+assembly cannot erase an earlier refusal. HTTP lifecycle clear/set removes the
+outcome, and asynchronous copies carry it into their worker. Native execution
+preserves the terminal result when it inherits this HTTP outcome.
+
+The generic IR plan executor exposes an optional host failure callback, so a plan
+transport failure or malformed plan cannot bypass the ingress failure sink by
+preventing ingress from running at all. This adds no memory decision to the IR
+module. The HTTP status is obtained from the existing Go runtime-web provider;
+its absence retains the transport's 502 fallback. This path preserves the owner
+kind, not its full message/envelope.
+
+Local evidence includes real Go ingress assembly and final-fence tests for
+transport failure, explicit refusal, malformed success replies and invalid
+allocation; request-copy/clear/thread-isolation checks; generic plan failures and
+valid empty plans; native inherited refusal with zero provider calls; and actual
+buffered/streaming Anthropic-compatible handlers targeting all three provider
+formats with reduction enabled/disabled and zero provider calls. The full native
+build, all 77 lint checks and 767 benchmark tests (two existing skips) pass. The fresh
+`2123e9a592` deployment receipt above predates this follow-up; a new deployment
+run is required. No additional whole-request latency claim is made.
 
 ## Remaining acceptance
 
-This does not complete MR-03. HTTP ingress still has an omission path that loses
-assembly failures. CLI subprocess hosts, absent/malformed transport replies,
+This does not complete MR-03. CLI subprocess hosts, native absent/malformed transport replies,
 complete native hard-rule rendering, protected caller constraints, provider token
 counting, source-version binding and durable release/dispatch receipts remain
 unproven or unfinished. Existing optional unavailability behavior is not converted

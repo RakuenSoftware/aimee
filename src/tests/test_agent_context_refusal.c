@@ -8,6 +8,7 @@
 #include "platform_test_util.h"
 #include "support/delegate_role_seam_stub.h"
 #include "http_retry.h"
+#include "request_context.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -183,6 +184,20 @@ int main(void)
    recalls = provider_calls = refuse_after = 0;
    final_response = 1;
    recall_reply = "{\"status\":\"ok\",\"recall\":{}}";
+   /* An HTTP worker can inherit an earlier ingress refusal. Even a successful
+    * native recall must not clear it or dispatch through another provider. */
+   request_context_t inherited = {0};
+   request_context_set(&inherited);
+   assert(request_context_refuse_assembly("protected_context_overflow") == 0);
+   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                          &result);
+   assert(rc == AGENT_RC_CONTEXT_REFUSED && !result.success && provider_calls == 0);
+   assert(strcmp(result.stop_reason, "context_refused") == 0);
+   assert(strcmp(result.error, "protected_context_overflow") == 0);
+   assert(!agent_rc_should_try_another(rc, result.error));
+   free(result.response);
+   request_context_clear();
+   recalls = 0;
    rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
                                           &result);
    assert(rc == 0 && result.success && !result.error[0]);

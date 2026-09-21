@@ -26,6 +26,8 @@ typedef struct
    const char *const *provided_resources;
    const aimee_ir_plan_binding_t *bindings;   /* NULL-name terminated */
    const aimee_ir_plan_resource_t *resources; /* NULL-name terminated */
+   /* Optional host failure sink. Successful empty plans do not invoke it. */
+   void (*refuse)(const char *kind, void *context);
    void *context;
 } aimee_ir_module_plan_t;
 

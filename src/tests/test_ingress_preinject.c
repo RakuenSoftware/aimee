@@ -9,6 +9,8 @@
 #include "config.h"
 #include "kb_client.h"
 #include "request_context.h"
+#include "wire_fence.h"
+#include <limits.h>
 #include "support/module_runtime_fixture.h"
 
 static int g_runtime_failure;
@@ -31,14 +33,19 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
    if (g_assembly_failure && operation && !strcmp(operation, "ingress-assemble"))
    {
-      *result = NULL;
-      return -1;
+      *result = g_assembly_failure == 2
+                    ? cJSON_Parse("{\"status\":\"error\",\"kind\":\"protected_context_overflow\"}")
+                : g_assembly_failure == 3 ? cJSON_Parse("{\"status\":\"ok\"}")
+                                          : NULL;
+      return *result ? 1 : -1;
    }
    if (g_runtime_failure)
    {
       *result = g_runtime_failure == 1 ? NULL
-                                       : cJSON_Parse("{\"status\":\"error\",\"block\":\"must not "
-                                                     "inject\",\"item_count\":1,\"confidence\":1}");
+                : g_runtime_failure == 3
+                    ? cJSON_Parse("{\"status\":\"ok\"}")
+                    : cJSON_Parse("{\"status\":\"error\",\"block\":\"must not "
+                                  "inject\",\"item_count\":1,\"confidence\":1}");
       return g_runtime_failure == 1 ? -1 : 1;
    }
    return module_runtime_fixture_call(request, result);
@@ -969,8 +976,63 @@ static void test_typed_evidence_after_integrity_and_packing(void)
    printf("typed_evidence_after_integrity_and_packing OK\n");
 }
 
+static void assert_context_dispatch_refused(const char *kind)
+{
+   assert(request_context_get()->context_refused);
+   assert(strcmp(request_context_get()->context_refusal_kind, kind) == 0);
+   for (unsigned route = 1; route <= 3; route++)
+   {
+      wire_fence_t *snapshot = NULL;
+      wire_fence_bytes_t selected = {0};
+      assert(wire_fence_select(0, (wire_fence_route_t)route, "{}", 2, &snapshot, &selected) ==
+             WIRE_FENCE_CONTEXT_REFUSED);
+      assert(!snapshot && !selected.data && !selected.len);
+      assert(strcmp(wire_fence_last_error(), kind) == 0);
+   }
+}
+static void test_required_assembly_refusal_reaches_dispatch(void)
+{
+   request_context_t context = {0};
+   g_context_mode = "observe";
+   for (int failure = 1; failure <= 3; failure++)
+   {
+      request_context_set(&context);
+      g_runtime_failure = failure;
+      assert(!ingress_preinject_build("deployment matrix", 0));
+      assert_context_dispatch_refused("unavailable");
+   }
+   g_runtime_failure = 0;
+   for (int failure = 1; failure <= 3; failure++)
+   {
+      request_context_set(&context);
+      g_assembly_failure = failure;
+      assert(!ingress_preinject_build("deployment matrix", 0));
+      assert_context_dispatch_refused(failure == 2 ? "protected_context_overflow" : "unavailable");
+   }
+   g_assembly_failure = 0;
+   request_context_set(&context);
+   int saved_budget = g_assembly_budget;
+   g_assembly_budget = INT_MAX;
+   assert(!ingress_preinject_build("deployment matrix", 0));
+   assert_context_dispatch_refused("invalid_argument"); /* decision from real Go owner */
+   g_assembly_budget = saved_budget;
+   /* A later successful build cannot erase a refusal in the same request. */
+   char *text = ingress_preinject_build("deployment matrix", 0);
+   assert(text);
+   free(text);
+   assert_context_dispatch_refused("invalid_argument");
+   request_context_set(&context);
+   assert(!ingress_preinject_build("deployment matrix", 1));
+   assert(!request_context_get()->context_refused); /* explicit successful opt-out */
+   text = ingress_preinject_build("deployment matrix", 0);
+   assert(text && !request_context_get()->context_refused);
+   free(text);
+   request_context_clear();
+   puts("required assembly failure reaches provider fence and clears on new request");
+}
 int main(void)
 {
+   test_required_assembly_refusal_reaches_dispatch();
    test_typed_evidence_after_integrity_and_packing();
    test_evidence_matches_accepted_envelope();
    test_small_budget_does_not_retrieve_or_claim();

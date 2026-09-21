@@ -216,7 +216,12 @@ production-path fixtures cover zero initial dispatches, refusal after five turns
 and successful recovery on the same thread. Fresh `2123e9a592` passes
 **1,261/1,261** deployment checks; the separate credential retry/release follow-up
 `b3a2578ae3` passes its targeted tests, native build and all 77 lint checks.
-HTTP ingress omission paths and the remaining MR-03 acceptance work remain open.
+The HTTP follow-up now carries required gateway-plan/assembly failures through
+request-scoped and asynchronous context to final dispatch, including native
+execution inheriting that context. Local tests cover malformed/failed plans and
+assemblies, successful empty plans, thread isolation and zero provider calls.
+Fresh deployment validation of this follow-up and the remaining MR-03 acceptance
+work remain open.
 
 ## Supporting indexed-lookup repair
 

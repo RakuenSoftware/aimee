@@ -12,6 +12,7 @@ extern econ_request_budget_result_t econ_module_request_budget(unsigned, const v
 extern econ_request_budget_result_t
 econ_module_request_budget_with_policy(unsigned, const void *, size_t, const char *, const char *)
     __attribute__((weak));
+extern int server_error_kind_http_status(const char *) __attribute__((weak));
 static _Thread_local const char *last_error;
 const char *wire_fence_last_error(void)
 {
@@ -28,7 +29,8 @@ int wire_fence_error_http_status(const char *error)
    if (!strcmp(error, "request_budget_unavailable") ||
        !strcmp(error, "request_budget_policy_invalid"))
       return 503;
-   return 502;
+   int classified = server_error_kind_http_status ? server_error_kind_http_status(error) : 0;
+   return classified ? classified : 502;
 }
 const char *wire_fence_error_type(const char *error)
 {
@@ -100,6 +102,11 @@ int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pri
    selected->data = NULL;
    selected->len = 0;
    const request_context_t *context = request_context_get ? request_context_get() : NULL;
+   if (context && context->context_refused)
+   {
+      last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
+      return WIRE_FENCE_CONTEXT_REFUSED;
+   }
    /* Deployment-owned metadata is forwarded unchanged. Go owns validation and
     * intersection with the caller's limit. Empty/unset means no operator cap;
     * literal zero is expressed in the versioned JSON object. */
