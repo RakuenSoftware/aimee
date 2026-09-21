@@ -305,3 +305,9 @@ The generic native context fallback now also passes its remaining byte allocatio
 to Go. Whole-row packing and explain selection are owned by Go; the C host verifies
 and appends the opaque projection. Legacy rule/caller-prompt paths, exact provider
 token budgets and durable dispatch receipts remain outstanding.
+
+Fresh recall image `1f198a6b07` passes **1,311/1,311** checks: 803 enrolled T2
+and 508 standalone T3. Image identities, operator limits and sanitized receipts
+are linked from the native recall validation above. All nine owned containers
+are stopped with volumes retained. Generic assembly and asynchronous worker
+configuration fixes postdate that image; live native/async acceptance remains open.

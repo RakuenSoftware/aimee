@@ -47,7 +47,7 @@ failing descriptor gate. The independently exported Go memory process builds.
 
 These native tests use controlled module replies and provider transport; they do
 not substitute for fresh-image native-agent acceptance. The earlier fresh
-1,311-check HTTP run predates this change. No new whole-request latency claim is
+1,311-check HTTP run on `9deb1efc14` predates this change. No new whole-request latency claim is
 made for this projection.
 
 ## Still open
@@ -109,3 +109,27 @@ fixtures pass. These fixtures do not execute the full asynchronous HTTP worker.
 Live `/v1/runs` success, owner-outage refusal and recovery remain required before
 claiming asynchronous native acceptance. The fresh `1f198a6b07` image predates this
 worker prerequisite.
+
+
+## Fresh recall image regression evidence
+
+Application and harness `1f198a6b07bf70cfffeab914c279abdb8058cb6b` pass
+**1,311/1,311** checks on fresh owned `.253` projects in CT 9498:
+
+- Enrolled T2: **803/803** ([receipt](memory-shared-reliability-2026-09-21/fresh-t2-1f198a6b07.json)).
+- Standalone T3: **508/508** ([receipt](memory-shared-reliability-2026-09-21/fresh-t3-1f198a6b07.json)).
+- Each placement passes 298 provider-boundary checks, including paused real Go
+  owner refusals with zero provider calls and supervised recovery. T3 additionally
+  covers concurrent requests, exact IDs and semantic recall/outage/retirement.
+- Application image: `sha256:a0711c9d2e95d87c60424675285fbe91e7faaf537b60ea0d9c8601a42308d19f`.
+  [Image identities](memory-shared-reliability-2026-09-21/image-identities-1f198a6b07.json)
+  verify the nine containers and 32 KiB deployment-owned request cap.
+- [Provider accounting](memory-shared-reliability-2026-09-21/provider-accounting-1f198a6b07.json)
+  retains byte counts and digests without prompt bodies or credentials.
+- All nine containers are stopped. Images, volumes and remote receipts remain.
+
+The fresh matrix covers HTTP, module transport, storage and recovery regressions.
+It does not invoke the native agent initial/refresh or asynchronous worker paths;
+those distinctions remain as described above. The later generic assembly
+`df4380b4fc` and worker initialization `ad4604dfaa` fixes postdate this image and
+have local validation only. No MR-01–MR-18 proposal is fully accepted by this run.
