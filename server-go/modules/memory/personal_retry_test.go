@@ -53,7 +53,7 @@ func TestPersonalMutationRetry(t *testing.T) {
 	}
 	base := read("schema_conversation.sql")
 	exec(base[strings.Index(base, "CREATE TABLE IF NOT EXISTS user_memories ("):strings.Index(base, "CREATE INDEX IF NOT EXISTS user_memories_recall")])
-	for _, name := range []string{"changes", "versions", "acl", "authority", "proposals", "retries"} {
+	for _, name := range []string{"changes", "versions", "acl", "authority", "proposals", "retries", "retirement_retries"} {
 		exec(read("schema_personal_memory_" + name + ".sql"))
 	}
 	human := &bus.CommandContext{Authenticated: true, UserAuthority: true, Principal: "fixture:human", TransportIdentity: "fixture:http"}
@@ -354,5 +354,220 @@ func TestPersonalMutationRetry(t *testing.T) {
 		if err == nil {
 			t.Fatal("runtime forged or erased receipt", sql)
 		}
+	}
+	// Retirement has the same durable key transaction, but never serves retained
+	// content as a successful mutation result.
+	retiring := create("retirement-retry")
+	retireVersion := one(call(nil, DataRequest{Operation: "get", ID: retiring.ID, IncludeVersion: true})).Version
+	retire := DataRequest{Operation: "delete", ID: retiring.ID, Authority: AuthorityUser,
+		ExpectedVersion: retireVersion, IdempotencyKey: "private-retirement-key"}
+	refusal(call(model, retire), MutationReviewRequired)
+	before = scalar(`SELECT generation FROM user_memory_collection_generation`)
+	exec(`ALTER TABLE user_memory_mutation_receipts ADD CONSTRAINT fixture_failure CHECK(operation<>'delete') NOT VALID`)
+	tx = begin(conn)
+	_, status = invoke(tx, human, retire)
+	_ = tx.Rollback(ctx)
+	if status != bus.ModuleStatusInternal || scalar(`SELECT generation FROM user_memory_collection_generation`) != before ||
+		len(call(nil, DataRequest{Operation: "get", ID: retiring.ID}).Records) != 1 {
+		t.Fatal("receipt failure did not roll back retirement", status)
+	}
+	exec(`ALTER TABLE user_memory_mutation_receipts DROP CONSTRAINT fixture_failure`)
+	retired := call(human, retire)
+	retiredReceipt := receiptOf(retired)
+	if !retired.Deleted || retiredReceipt.Replayed || len(retired.Records) != 0 ||
+		retiredReceipt.Version == *retireVersion ||
+		len(call(nil, DataRequest{Operation: "get", ID: retiring.ID}).Records) != 0 {
+		t.Fatal("retirement returned content or failed to hide the record", retired)
+	}
+	before = scalar(`SELECT generation FROM user_memory_collection_generation`)
+	// A new connection represents a lost response: the same key returns the
+	// same receipt without another transition or invalidation.
+	tx = begin(second)
+	replayed, status := invoke(tx, human, retire)
+	if status != bus.ModuleStatusOK || !replayed.Deleted || !receiptOf(replayed).Replayed ||
+		receiptOf(replayed).CommitID != retiredReceipt.CommitID || len(replayed.Records) != 0 {
+		t.Fatal("retirement replay changed the committed result", replayed, status)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if scalar(`SELECT generation FROM user_memory_collection_generation`) != before {
+		t.Fatal("retirement replay published another transition")
+	}
+	changedRetire := retire
+	changedRetire.SessionID = "different payload"
+	refusal(call(human, changedRetire), MutationIdempotencyConflict)
+	wrongOwner := *retireVersion
+	wrongOwner.OwnerID = "00000000-0000-0000-0000-000000000001"
+	changedRetire = retire
+	changedRetire.ExpectedVersion = &wrongOwner
+	refusal(call(human, changedRetire), MutationVersionConflict)
+	// Runtime public forwarding retains the content-free retirement receipt.
+	deleteArgs, _ := json.Marshal(map[string]any{"operation": "user-delete", "id": retiring.ID,
+		"expected_version": retire.ExpectedVersion, "idempotency_key": retire.IdempotencyKey})
+	tx = begin(conn)
+	backend, _ = NewPostgresDataStore(runtimeRoleDB{evalQueryer{tx}, t}, PlacementServer)
+	handler = NewHandler(nil, WithDataStore(PlacementServer, backend))
+	envelope, status = invokeContextCommand(t, handler, 0, *human, "runtime", string(deleteArgs))
+	if status != bus.ModuleStatusOK || !strings.Contains(envelope["json"].(string), `"replayed":true`) ||
+		!strings.Contains(envelope["json"].(string), `"destroyed":false`) {
+		t.Fatal("runtime retirement replay lost receipt", envelope, status)
+	}
+	envelope, status = invokeContextCommand(t, handler, 0, *human, "delete", string(deleteArgs))
+	publicReceipt, ok := envelope["mutation_receipt"].(map[string]any)
+	if status != bus.ModuleStatusOK || !ok || publicReceipt["replayed"] != true || envelope["destroyed"] != false {
+		t.Fatal("public retirement command lost receipt", envelope, status)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Reusing the key across mutation verbs conflicts, never creates a proposal.
+	crossVerb := retire
+	crossVerb.Operation, crossVerb.Content, crossVerb.Confidence = "supersede", "replacement", &certainty
+	refusal(call(human, crossVerb), MutationIdempotencyConflict)
+	// Neither authorized reactivation nor later erasure frees a committed key.
+	create("retirement-retry")
+	refusal(call(human, retire), MutationReplayUnavailable)
+	exec(`DELETE FROM user_memories WHERE id=$1`, retiring.ID)
+	refusal(call(human, retire), MutationReplayUnavailable)
+	// An intervening correction makes a conditional retirement stale.
+	conditional := create("conditional-retirement")
+	oldVersion := one(call(nil, DataRequest{Operation: "get", ID: conditional.ID, IncludeVersion: true})).Version
+	call(human, DataRequest{Operation: "supersede", Authority: AuthorityUser, ID: conditional.ID,
+		Content: "new current assertion", Confidence: &certainty, ExpectedVersion: oldVersion})
+	refusal(call(human, DataRequest{Operation: "delete", Authority: AuthorityUser,
+		ID: conditional.ID, ExpectedVersion: oldVersion}), MutationVersionConflict)
+	currentVersion := one(call(nil, DataRequest{Operation: "get", ID: conditional.ID, IncludeVersion: true})).Version
+	if !call(human, DataRequest{Operation: "delete", Authority: AuthorityUser,
+		ID: conditional.ID, ExpectedVersion: currentVersion}).Deleted {
+		t.Fatal("conditional retirement failed at current version")
+	}
+
+	// Two real concurrent retirement callers produce one transition and receipt.
+	concurrentRetire := create("concurrent-retirement")
+	retire.ID = concurrentRetire.ID
+	retire.ExpectedVersion = one(call(nil, DataRequest{Operation: "get", ID: retire.ID, IncludeVersion: true})).Version
+	retire.IdempotencyKey = "concurrent-retirement-key"
+	before = scalar(`SELECT generation FROM user_memory_collection_generation`)
+	firstTx, secondTx = begin(conn), begin(second)
+	first, status = invoke(firstTx, human, retire)
+	if status != bus.ModuleStatusOK || !first.Deleted {
+		t.Fatal(first, status)
+	}
+	done = make(chan result, 1)
+	go func() { out, status := invoke(secondTx, human, retire); done <- result{out, status} }()
+	for {
+		var blocked bool
+		if err := observer.QueryRow(ctx, `SELECT $1=ANY(pg_blocking_pids($2))`, conn.PgConn().PID(), second.PgConn().PID()).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			break
+		}
+		select {
+		case got := <-done:
+			t.Fatal("retirement retry did not serialize", got)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if err := firstTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	next = <-done
+	if next.status != bus.ModuleStatusOK || !next.out.Deleted || !receiptOf(next.out).Replayed ||
+		receiptOf(next.out).CommitID != receiptOf(first).CommitID {
+		t.Fatal("concurrent retirement repeated", next)
+	}
+	if err := secondTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if scalar(`SELECT generation FROM user_memory_collection_generation`) != before+1 {
+		t.Fatal("concurrent retirement published more than one transition")
+	}
+
+}
+
+// Apply the new guard to an actual schema-31 receipt. ALTER/DEFAULT must not
+// rewrite a committed key, canonical history, or the original commit identity.
+func TestPersonalRetirementReceiptUpgrade(t *testing.T) {
+	dsn := os.Getenv("AIMEE_MEMORY_EVAL_URL")
+	if dsn == "" {
+		if os.Getenv("AIMEE_MEMORY_EVAL_REQUIRED") == "1" {
+			t.Fatal("AIMEE_MEMORY_EVAL_URL required")
+		}
+		t.Skip("set AIMEE_MEMORY_EVAL_URL")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	schema := pgx.Identifier{fmt.Sprintf("private_retry_upgrade_%d", time.Now().UnixNano())}.Sanitize()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := conn.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec("CREATE SCHEMA " + schema + "; SET search_path=" + schema + ",public")
+	defer func() {
+		if _, err := conn.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE"); err != nil {
+			t.Error(err)
+		}
+	}()
+	read := func(name string) string {
+		t.Helper()
+		raw, err := os.ReadFile("../aimee/families/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	base := read("schema_conversation.sql")
+	exec(base[strings.Index(base, "CREATE TABLE IF NOT EXISTS user_memories ("):strings.Index(base, "CREATE INDEX IF NOT EXISTS user_memories_recall")])
+	for _, name := range []string{"changes", "versions", "acl", "authority", "proposals", "retries"} {
+		exec(read("schema_personal_memory_" + name + ".sql"))
+	}
+	exec(`SELECT set_config('aimee.private_authority','user',false),set_config('aimee.private_principal','fixture:upgrade',false),set_config('aimee.private_transport','fixture:http',false)`)
+	exec(`INSERT INTO user_memories(kind,tier,key,content,confidence) VALUES('fact','L2','legacy','original',1)`)
+	exec(`UPDATE user_memories SET content='corrected',updated_at=now() WHERE key='legacy'`)
+	exec(`INSERT INTO user_memory_mutation_receipts(owner_id,actor_principal,key_hash,request_hash,target_id,target_revision,result_revision)
+ SELECT o.owner_id,'fixture:upgrade',repeat('1',64),repeat('2',64),m.id,1,m.record_revision
+ FROM user_memories m,user_memory_collection_generation o WHERE m.key='legacy' AND o.id=1`)
+	var before, after string
+	if err := conn.QueryRow(ctx, `SELECT row_to_json(r)::text FROM user_memory_mutation_receipts r`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	exec(read("schema_personal_memory_retirement_retries.sql"))
+	if err := conn.QueryRow(ctx, `SELECT (to_jsonb(r)-'operation')::text FROM user_memory_mutation_receipts r WHERE operation='supersede'`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	var a, b map[string]any
+	if json.Unmarshal([]byte(before), &a) != nil || json.Unmarshal([]byte(after), &b) != nil {
+		t.Fatal("invalid receipt")
+	}
+	left, _ := json.Marshal(a)
+	right, _ := json.Marshal(b)
+	if string(left) != string(right) {
+		t.Fatal("migration rewrote the committed correction receipt")
+	}
+	var revision, history int
+	if err := conn.QueryRow(ctx, `SELECT record_revision,(SELECT count(*) FROM user_memory_versions v WHERE v.memory_id=m.id) FROM user_memories m WHERE key='legacy'`).Scan(&revision, &history); err != nil {
+		t.Fatal(err)
+	}
+	if revision != 2 || history != 1 {
+		t.Fatal("migration changed canonical history", revision, history)
+	}
+	// The new guard must reject a forged retirement receipt for a still-active
+	// corrected row even though the requested revision and history exist.
+	_, err = conn.Exec(ctx, `INSERT INTO user_memory_mutation_receipts(owner_id,actor_principal,key_hash,request_hash,target_id,target_revision,result_revision,operation)
+ SELECT o.owner_id,'fixture:upgrade',repeat('3',64),repeat('4',64),m.id,1,m.record_revision,'delete'
+ FROM user_memories m,user_memory_collection_generation o WHERE m.key='legacy' AND o.id=1`)
+	if err == nil {
+		t.Fatal("retirement receipt admitted without a retired canonical result")
 	}
 }

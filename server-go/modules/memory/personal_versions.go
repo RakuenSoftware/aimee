@@ -44,3 +44,10 @@ func (s *postgresDataStore) correctPersonalVersion(ctx context.Context, scope Sc
 	}
 	return s.mutatePersonal(ctx, "supersede", Record{Scope: scope, ID: id, Content: content, Confidence: confidence}, &expected)
 }
+
+func (s *postgresDataStore) retirePersonalVersion(ctx context.Context, scope Scope, id int64, expected MemoryRecordVersion) (out Record, err error) {
+	defer func() {
+		s.recordMutation(DataRequest{Operation: "delete", ID: id}, DataResponse{Deleted: err == nil}, err, "")
+	}()
+	return s.mutatePersonal(ctx, "delete", Record{Scope: scope, ID: id}, &expected)
+}

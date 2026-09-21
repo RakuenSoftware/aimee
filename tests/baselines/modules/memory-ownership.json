@@ -2038,7 +2038,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "63bb3d62d307401ded51717ac2e6c087c83a964355d1a456bc7bdb13edd5e64f"
+      "sha256": "129ef62fc9290fcdc30866edd49833ee95efcb2f0466326e91dbde64dad213cc"
     },
     "src/modules/protocols/mcp/mcp_tools_extended.c": {
       "disposition": "protocol-catalog",
@@ -2594,10 +2594,10 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "a78cd775a3ec3972d9414f79a87a08c4776e4dc2897f770dbc25f6c9c4f5ba9d",
+      "sha256": "5eca97be74c16620d8e1ba5cc1534bcb666ae6427593d757c30f1d0ddd2e5914",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "125ba5406abc3f3facc1b93cf0be5bb6d00e11f264e1799e48cad5c88daaf430"
+        "api/openapi-server-v1.yaml": "1b8f5cce56a0275e153ca764357a1e42dfe6e69ebe4f546da236b406a1cc7f09"
       }
     }
   }

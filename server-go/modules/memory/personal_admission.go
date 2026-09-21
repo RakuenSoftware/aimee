@@ -128,7 +128,14 @@ func (s *postgresDataStore) mutatePersonal(ctx context.Context, operation string
 				return Record{}, err
 			}
 		}
-		_, err = s.db.Exec(ctx, `UPDATE user_memories SET lifecycle_state='retired',updated_at=now() WHERE id=$1`, old.ID)
+		if expected == nil {
+			_, err = s.db.Exec(ctx, `UPDATE user_memories SET lifecycle_state='retired',updated_at=now() WHERE id=$1`, old.ID)
+		} else {
+			err = s.db.QueryRow(ctx, `UPDATE user_memories SET lifecycle_state='retired',updated_at=now() WHERE id=$1 RETURNING record_revision::text`, old.ID).Scan(&revision)
+			if err == nil {
+				old.Version = &MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner, RecordID: strconv.FormatInt(old.ID, 10), RecordRevision: revision}
+			}
+		}
 		return old, err
 	}
 	if operation == "supersede" {

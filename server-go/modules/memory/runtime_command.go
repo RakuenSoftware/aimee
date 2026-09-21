@@ -23,14 +23,14 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 			return runtimeJSONText(commandResult(commandError("invalid_argument", err.Error())))
 		}
 	}
-	if _, exists := args["idempotency_key"]; exists && operation != "user-supersede" && operation != "user-mcp-supersede" {
-		return runtimeJSONText(commandResult(commandError("unsupported_mode", "idempotency_key requires a private correction")))
+	if _, exists := args["idempotency_key"]; exists && operation != "user-supersede" && operation != "user-mcp-supersede" && operation != "user-delete" {
+		return runtimeJSONText(commandResult(commandError("unsupported_mode", "idempotency_key requires a private correction or retirement")))
 	}
 	for _, field := range []string{"at_version", "include_version", "expected_version"} {
 		_, exists := args[field]
 		allowed := operation == "user-get" && field != "expected_version"
 		if field == "expected_version" {
-			allowed = operation == "user-supersede" || operation == "user-mcp-supersede" || operation == "user-correction-review"
+			allowed = operation == "user-supersede" || operation == "user-mcp-supersede" || operation == "user-correction-review" || operation == "user-delete"
 		}
 		if exists && !allowed {
 			return runtimeJSONText(commandResult(commandError("unsupported_mode", field+" is unsupported for this operation")))

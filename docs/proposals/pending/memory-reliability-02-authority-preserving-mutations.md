@@ -83,8 +83,15 @@ payloads conflict, and erasure cannot free a committed key. Private receipt IDs
 identify transactions; they do not claim shared WORM-audit or consumer freshness
 parity. Unkeyed calls incur no retry lookup or key lock. See
 [retry validation](../../validation/memory-private-retries-2026-09-20.md).
-Create/delete keyed retries, remaining mutation preconditions and full durable
-consumer/retention semantics are still acceptance work.
+Migration 32 extends private retirement with expected-version checks and keyed
+retry receipts. HTTP delete and MCP private forget return the same content-free
+receipt after a committed retry; reactivation, further revision or erasure cannot
+repeat the mutation. The row lock protects the precondition, and retirement,
+history, invalidation and receipt commit together. Existing correction receipts
+survive the additive migration. See the [retirement validation](../../validation/memory-private-retirement-2026-09-21.md)
+for implementation and test scope; fresh-image acceptance is pending.
+Private creation retries, shared deletion preconditions/retries, remaining mutation
+preconditions and full durable consumer/retention semantics are still acceptance work.
 
 ### Expected-version shared corrections
 

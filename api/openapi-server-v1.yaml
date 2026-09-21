@@ -3778,23 +3778,21 @@ paths:
               schema: { type: object }
   /memory/delete:
     post:
-      summary: Delete a memory by id
+      summary: Retire a private memory or delete a shared memory by id
       description: >
-        Removes a memory permanently. Prefer /memory/supersede when a belief has
-        merely been replaced: the supersession chain is walked by
-        memory.list_superseded_keys and memory.fact_history, and deleting breaks
-        provenance and the negative examples effectiveness scoring relies on.
-        Delete is for content that should not exist at all, such as a credential, PII
-        under an erasure request, or data written to the wrong store.
-        Requires the memory-write capability.
+        Defaults to store=user: retirement removes a private memory from current
+        recall while retaining governed history and reports destroyed=false.
+        A model cannot retire user-authored or unknown-origin private content.
+        Private expected_version binds the owner, record ID and current revision.
+        With idempotency_key, an authenticated identical retry returns its original
+        mutation_receipt without another transition. Reactivated, changed or erased
+        results are not retired again; changed retry payloads conflict. The receipt
+        contains no retained content. Private retirement is not permanent erasure.
 
-        Whether the row is DESTROYED or merely retired depends on the connection,
-        not on the capability. A caller the transport attested as a person (a
-        local UDS peer, or a webuser over the trusted socket) destroys the row and
-        its provenance irreversibly. Any other caller that clears the capability
-        gate, including a bearer over TCP, retires it instead: it stops answering
-        recall under its key but stays readable through memory.fact_history. The
-        response reports which happened as `destroyed`.
+        Select store=kb explicitly for the shared deletion contract. Its existing
+        authority and retention rules determine whether the record is retired or
+        destroyed; expected_version and idempotency_key are not yet supported for
+        shared deletion. Requires the memory-admin capability.
       requestBody:
         required: true
         content:
@@ -3803,7 +3801,26 @@ paths:
               type: object
               required: [id]
               properties:
-                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                store: { type: string, enum: [user, kb], default: user }
+                id:
+                  oneOf:
+                    - { type: integer, minimum: 1, maximum: 9007199254740991 }
+                    - { type: string, pattern: '^[1-9][0-9]*$' }
+                expected_version:
+                  type: object
+                  additionalProperties: false
+                  required: [schema_version, owner_id, record_id, record_revision]
+                  properties:
+                    schema_version: { type: integer, const: 1 }
+                    owner_id: { type: string, format: uuid }
+                    record_id: { type: string, pattern: '^[1-9][0-9]*$' }
+                    record_revision: { type: string, pattern: '^[1-9][0-9]*$' }
+                idempotency_key:
+                  type: string
+                  minLength: 16
+                  maxLength: 128
+                  pattern: '^[!-~]+$'
+                  description: Private retirement only; requires expected_version and an identical retry payload.
       responses:
         "200":
           description: Deletion result ({ id, deleted, destroyed })
@@ -3812,6 +3829,11 @@ paths:
               schema: { type: object }
         "400":
           description: Missing or non-positive id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "409":
+          description: Stale version, changed retry payload, unavailable committed result or authority conflict
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }

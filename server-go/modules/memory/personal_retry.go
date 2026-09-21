@@ -12,9 +12,9 @@ import (
 // Only keyed calls take the extra lock and receipt reads. Unkeyed mutations
 // retain their existing cost. The receipt is a durable transaction identity,
 // not a cached response or a claim that downstream consumers have caught up.
-func (s *postgresDataStore) correctPersonalIdempotent(ctx context.Context, r DataRequest, caller *bus.CommandContext) (Record, *MemoryMutationReceipt, error) {
-	if s.placement != PlacementServer || r.Operation != "supersede" || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || r.ExpectedVersion == nil || !r.ExpectedVersion.validFor(r.ID) || r.Confidence == nil {
-		return Record{}, nil, errors.New("memory: invalid private idempotent correction")
+func (s *postgresDataStore) mutatePersonalIdempotent(ctx context.Context, r DataRequest, caller *bus.CommandContext) (Record, *MemoryMutationReceipt, error) {
+	if s.placement != PlacementServer || (r.Operation != "supersede" && r.Operation != "delete") || !verifiedRetryCaller(caller) || !validIdempotencyKey(r.IdempotencyKey) || r.ExpectedVersion == nil || !r.ExpectedVersion.validFor(r.ID) || (r.Operation == "supersede" && r.Confidence == nil) {
+		return Record{}, nil, errors.New("memory: invalid private idempotent mutation")
 	}
 	if db, ok := s.db.(store.DB); ok {
 		tx, err := db.Begin(ctx)
@@ -24,7 +24,7 @@ func (s *postgresDataStore) correctPersonalIdempotent(ctx context.Context, r Dat
 		defer tx.Rollback(context.WithoutCancel(ctx))
 		bound := *s
 		bound.db = tx
-		record, receipt, err := bound.correctPersonalIdempotent(ctx, r, caller)
+		record, receipt, err := bound.mutatePersonalIdempotent(ctx, r, caller)
 		if err != nil && proposedCorrection(err) == nil {
 			return Record{}, nil, err
 		}
@@ -61,6 +61,20 @@ func (s *postgresDataStore) correctPersonalIdempotent(ctx context.Context, r Dat
 	if err == nil {
 		if storedDigest != digest {
 			return Record{}, nil, errIdempotencyConflict
+		}
+		if r.Operation == "delete" {
+			// A retirement receipt never returns retained content. Reactivation,
+			// further revision or erasure cannot turn it into a new mutation.
+			var revision, state string
+			err = s.db.QueryRow(ctx, `SELECT record_revision::text,lifecycle_state FROM user_memories WHERE id=$1`, r.ID).Scan(&revision, &state)
+			if store.IsNoRows(err) || (err == nil && (state != "retired" || revision != receipt.Version.RecordRevision || proposalID != "")) {
+				return Record{}, nil, errReplayUnavailable
+			}
+			if err != nil {
+				return Record{}, nil, err
+			}
+			receipt.Replayed = true
+			return Record{ID: r.ID, Version: &receipt.Version}, receipt, nil
 		}
 		if proposalID != "" {
 			// The parent must still authorize inspection even when the proposal has no
@@ -100,7 +114,13 @@ func (s *postgresDataStore) correctPersonalIdempotent(ctx context.Context, r Dat
 	}
 	bound := *s
 	bound.personalActor = actor
-	record, outcome := bound.correctPersonalVersion(ctx, r.Scope, r.ID, r.Content, *r.Confidence, *r.ExpectedVersion)
+	var record Record
+	var outcome error
+	if r.Operation == "delete" {
+		record, outcome = bound.retirePersonalVersion(ctx, r.Scope, r.ID, *r.ExpectedVersion)
+	} else {
+		record, outcome = bound.correctPersonalVersion(ctx, r.Scope, r.ID, r.Content, *r.Confidence, *r.ExpectedVersion)
+	}
 	var proposal any
 	if p := proposedCorrection(outcome); p != nil {
 		proposal = p.ID
@@ -110,8 +130,8 @@ func (s *postgresDataStore) correctPersonalIdempotent(ctx context.Context, r Dat
 	} else {
 		receipt.Version = *record.Version
 	}
-	err = s.db.QueryRow(ctx, `INSERT INTO user_memory_mutation_receipts(owner_id,actor_principal,key_hash,request_hash,target_id,target_revision,result_revision,proposal_id)
- VALUES($1::uuid,$2,$3,$4,$5,$6::bigint,$7::bigint,$8::uuid) RETURNING commit_id::text`, owner, actor.principal, keyHash, digest, r.ID, r.ExpectedVersion.RecordRevision, receipt.Version.RecordRevision, proposal).Scan(&receipt.CommitID)
+	err = s.db.QueryRow(ctx, `INSERT INTO user_memory_mutation_receipts(owner_id,actor_principal,key_hash,request_hash,target_id,target_revision,result_revision,proposal_id,operation)
+ VALUES($1::uuid,$2,$3,$4,$5,$6::bigint,$7::bigint,$8::uuid,$9) RETURNING commit_id::text`, owner, actor.principal, keyHash, digest, r.ID, r.ExpectedVersion.RecordRevision, receipt.Version.RecordRevision, proposal, r.Operation).Scan(&receipt.CommitID)
 	if err != nil {
 		return Record{}, nil, err
 	}

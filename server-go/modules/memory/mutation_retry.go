@@ -12,10 +12,10 @@ import (
 	store "github.com/JBailes/aimee/server-go/db"
 )
 
-var errIdempotencyConflict = errors.New("memory: idempotency key was already used for a different correction")
-var errReplayUnavailable = errors.New("memory: correction was already committed but its result is no longer available at the committed version; the correction was not repeated")
+var errIdempotencyConflict = errors.New("memory: idempotency key was already used for a different mutation")
+var errReplayUnavailable = errors.New("memory: mutation was already committed but its result is no longer available at the committed version; the mutation was not repeated")
 
-// MemoryMutationReceipt identifies the committed correction (a KB audit commit
+// MemoryMutationReceipt identifies the committed mutation (a KB audit commit
 // or private transaction receipt), never a cached content response. A replay must
 // pass current visibility and revision checks.
 type MemoryMutationReceipt struct {
@@ -225,7 +225,7 @@ func commandCorrectionOptions(args commandArgs, id int64, caller *bus.CommandCon
 			return nil, "", commandError("invalid_argument", "idempotency_key requires 16-128 printable ASCII characters and expected_version")
 		}
 		if !verifiedRetryCaller(caller) {
-			return nil, "", commandError("forbidden", "idempotent corrections require an authenticated principal")
+			return nil, "", commandError("forbidden", "idempotent mutations require an authenticated principal")
 		}
 	}
 	return expected, key, nil

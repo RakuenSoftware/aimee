@@ -613,6 +613,60 @@ class Gate:
         replay = self.mcp_document('private keyed erased proposal retry', 'mutate', args)
         self.check('private erased proposal key cannot repeat a mutation', replay.get('reason') == 'idempotent_result_unavailable' and 'proposal' not in replay)
 
+    def personal_keyed_retirement(self):
+        key = self.prefix + '-retirement'
+        mid = self.good('private retirement parent', self.call('store', dict(key=key, content='retained original')))['id']
+        original = self.good('private retirement expected version', self.call('get', dict(id=mid, include_version=True)))['memory']
+        request = dict(id=str(mid), expected_version=original['version'], idempotency_key=key + '-retry')
+        before = self.personal_changes(mid)
+        self.personal_sql("ALTER TABLE user_memory_mutation_receipts ADD CONSTRAINT e2e_retirement_failure CHECK(operation<>'delete') NOT VALID")
+        try:
+            code, failed = self.call('delete', request)
+            self.check('private retirement refuses receipt failure', code >= 500 and failed.get('status') == 'error')
+            current = self.good('private retirement rollback parent', self.call('get', dict(id=mid, include_version=True)))['memory']
+            self.check('private retirement rolls back content and invalidation', current == original and self.personal_changes(mid) == before)
+        finally:
+            self.personal_sql('ALTER TABLE user_memory_mutation_receipts DROP CONSTRAINT e2e_retirement_failure')
+        first = self.good('private conditional retirement commits', self.call('delete', request))
+        receipt = first['mutation_receipt']
+        self.check('private retirement receipt binds a non-destructive transition', first.get('deleted') is True and
+            first.get('destroyed') is False and receipt['replayed'] is False and
+            receipt['version']['record_id'] == str(mid) and receipt['version'] != original['version'] and 'memory' not in first)
+        code, missing = self.call('get', dict(id=mid))
+        self.check('private conditional retirement removes current recall', code == 404 and missing.get('kind') == 'not_found')
+        committed = self.personal_changes(mid)
+        replay = self.good('private retirement HTTP retry', self.call('delete', request))
+        self.check('private retirement retry preserves one commit and invalidation', replay['mutation_receipt']['replayed'] is True and
+            replay['mutation_receipt']['commit_id'] == receipt['commit_id'] and self.personal_changes(mid) == committed)
+        code, conflict = self.call('delete', dict(request, expected_version=receipt['version']))
+        self.check('private retirement rejects changed retry version', code == 409 and conflict.get('reason') == 'idempotency_conflict')
+        self.docker('restart', self.args.server)
+        replay = self.good('private retirement retry after Server restart', self.wait('delete', request))
+        self.check('private retirement receipt survives restart without another effect', replay['mutation_receipt']['replayed'] is True and
+            replay['mutation_receipt']['commit_id'] == receipt['commit_id'] and self.personal_changes(mid) == committed)
+        self.good('private retired history stays governed', self.call('get', dict(id=mid, at_version=original['version'])))
+        self.good('private authorized reactivation', self.call('store', dict(key=key, content='reactivated assertion')))
+        code, unavailable = self.call('delete', request)
+        self.check('private retirement retry cannot retire reactivated content', code == 409 and unavailable.get('reason') == 'idempotent_result_unavailable')
+        self.personal_sql(f'DELETE FROM user_memories WHERE id={int(mid)}')
+        code, unavailable = self.call('delete', request)
+        self.check('private erasure retains retirement retry identity', code == 409 and unavailable.get('reason') == 'idempotent_result_unavailable' and
+            self.personal_sql(f'SELECT count(*) FROM user_memory_mutation_receipts WHERE target_id={int(mid)}') == '1')
+        model_id = self.mcp_document('private model retirement parent', 'mutate', dict(verb='store', key=key+'-model', content='model assertion'))['id']
+        version = self.good('private model retirement version', self.call('get', dict(id=model_id, include_version=True)))['memory']['version']
+        args = dict(verb='forget', store='user', id=str(model_id), expected_version=version, idempotency_key=key+'-model-retry')
+        first = self.mcp_document('private keyed MCP retirement', 'mutate', args)
+        replay = self.mcp_document('private keyed MCP retirement retry', 'mutate', args)
+        self.check('private MCP retirement returns one non-destructive receipt', first.get('destroyed') is False and
+            first['mutation_receipt']['replayed'] is False and replay['mutation_receipt']['replayed'] is True and
+            first['mutation_receipt']['commit_id'] == replay['mutation_receipt']['commit_id'])
+        human_id = self.good('private protected retirement parent', self.call('store', dict(key=key+'-human', content='human assertion')))['id']
+        version = self.good('private protected retirement version', self.call('get', dict(id=human_id, include_version=True)))['memory']['version']
+        refused = self.mcp_document('model conditional retirement of user assertion', 'mutate', dict(verb='forget', id=str(human_id),
+            expected_version=version, idempotency_key=key+'-forged', authority='user'))
+        self.check('model retirement cannot claim user authority', refused.get('kind') == 'review_required')
+        self.good('private protected retirement cleanup', self.call('delete', dict(id=human_id)))
+
     def run_local(self):
         """First-boot regression on a composition containing only Server and its store."""
         content = 'Personal local-only fixture person@local.invalid 🦊'
@@ -680,6 +734,7 @@ class Gate:
         self.personal_versions()
         self.personal_correction_review()
         self.personal_keyed_corrections()
+        self.personal_keyed_retirement()
         return all(c['passed'] for c in self.checks)
 
     def run(self):

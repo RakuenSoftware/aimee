@@ -332,3 +332,13 @@ placements. Exact images, unchanged 32 KiB caps, actual request byte counts and
 per-run receipts are linked from the native validation page. Complete native
 request packing, exact token/reserve accounting and durable dispatch acceptance
 remain open. No MR-01–MR-18 proposal is fully certified by this checkpoint.
+
+
+[Private conditional retirement](../../validation/memory-private-retirement-2026-09-21.md)
+adds expected-version checks and durable keyed receipts to non-destructive private
+delete/forget. Migration 32 preserves existing correction receipts and guards the
+retired canonical result. PostgreSQL tests cover rollback, concurrent duplicates,
+replay after connection changes, authority, stale versions, reactivation and
+erasure. HTTP/MCP restart coverage is added to the deployment fixture; fresh-image
+acceptance remains pending. Creation retries and the remaining MR-02 clauses
+remain open.

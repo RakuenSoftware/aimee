@@ -108,12 +108,12 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if _, exists := args["read_policy"]; exists && verb != "get" && verb != "runtime" {
 		return commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get"))
 	}
-	if _, exists := args["idempotency_key"]; exists && !((options.placement == PlacementKB && (verb == "supersede" || verb == "update")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "runtime"))) {
-		return commandResult(commandError("unsupported_mode", "idempotency_key is supported only for conditional corrections"))
+	if _, exists := args["idempotency_key"]; exists && !((options.placement == PlacementKB && (verb == "supersede" || verb == "update")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "delete" || verb == "runtime"))) {
+		return commandResult(commandError("unsupported_mode", "idempotency_key is supported only for conditional corrections or private retirement"))
 	}
-	versionedCorrection := (options.placement == PlacementKB && (verb == "supersede" || verb == "update" || verb == "review_correction")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "runtime"))
-	if _, exists := args["expected_version"]; exists && !versionedCorrection {
-		return commandResult(commandError("unsupported_mode", "expected_version is supported for supersede, shared update and correction review"))
+	versionedMutation := (options.placement == PlacementKB && (verb == "supersede" || verb == "update" || verb == "review_correction")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "delete" || verb == "runtime"))
+	if _, exists := args["expected_version"]; exists && !versionedMutation {
+		return commandResult(commandError("unsupported_mode", "expected_version is supported for supersede, shared update, private retirement and correction review"))
 	}
 	if _, exists := args["include_version"]; exists && verb != "get" && !(verb == "runtime" && options.placement == PlacementServer) {
 		return commandResult(commandError("unsupported_mode", "include_version is supported only for exact-ID get"))
@@ -179,8 +179,8 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		request.Authority = AuthorityUser
 	}
 
-	if _, exists := args["idempotency_key"]; exists && verb != "supersede" {
-		return commandResult(commandError("unsupported_mode", "private idempotency keys require conditional supersede"))
+	if _, exists := args["idempotency_key"]; exists && verb != "supersede" && verb != "delete" {
+		return commandResult(commandError("unsupported_mode", "private idempotency keys require conditional supersede or delete"))
 	}
 	confidence := 1.0
 	switch verb {
@@ -195,6 +195,13 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("memory." + verb + " requires a positive integer id")
+		}
+		if verb == "delete" {
+			var refusal map[string]any
+			request.ExpectedVersion, request.IdempotencyKey, refusal = commandCorrectionOptions(args, request.ID, options.commandContext)
+			if refusal != nil {
+				return commandResult(refusal)
+			}
 		}
 		if verb == "get" {
 			if raw, exists := args["include_version"]; exists && (string(raw) == "null" || json.Unmarshal(raw, &request.IncludeVersion) != nil) {
@@ -333,6 +340,9 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			return commandResult(commandError("not_found", "no such user memory, or the memory module refused"))
 		}
 		result["id"], result["deleted"], result["destroyed"] = request.ID, true, false
+		if response.MutationReceipt != nil {
+			result["mutation_receipt"] = response.MutationReceipt
+		}
 	case "list", "search":
 		if response.Records == nil {
 			return commandResult(commandError("unavailable", "user memory module unavailable"))
