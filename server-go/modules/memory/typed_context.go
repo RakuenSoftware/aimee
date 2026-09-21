@@ -627,14 +627,18 @@ func (s *postgresDataStore) assembleTypedContext(ctx context.Context, trace uint
 		}
 	}
 	if !invalid && cfg.Flags["episodes"] {
-		var episodes []Episode
-		err := s.typedRead(ctx, func() error { var err error; episodes, err = s.episodeList(ctx, request.Query, 16, exact); return err })
+		var episodes []versionedEpisode
+		err := s.typedRead(ctx, func() error {
+			var err error
+			episodes, err = s.typedEpisodes(ctx, request.Query, 16, exact)
+			return err
+		})
 		if err != nil {
 			r.fail("episodes", "episode retrieval unavailable")
 		} else {
 			for _, e := range episodes {
 				id := strconv.FormatInt(e.ID, 10)
-				r.add("episodes", typedItem{value: map[string]any{"stable_id": id, "episode_key": e.Key, "excerpt": e.Text, "source_session": e.SourceSession, "reference_time": e.ReferenceTime, "trust": "untrusted_data"}, id: id, text: e.Text})
+				r.add("episodes", typedItem{value: map[string]any{"stable_id": id, "episode_key": e.Key, "excerpt": e.Text, "source_session": e.SourceSession, "reference_time": e.ReferenceTime, "trust": "untrusted_data"}, id: id, text: e.Text, source: e.source})
 			}
 		}
 	}

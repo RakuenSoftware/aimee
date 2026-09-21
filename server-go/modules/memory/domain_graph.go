@@ -7,11 +7,13 @@ import (
 
 // Scope is pinned by handleData on the transaction. Parent RLS is an additional
 // bound; currentness applies even for all-scope and privileged reads.
-var domainVisibleParents = `SELECT id,CASE
+const domainScopeRankSQL = `CASE
  WHEN current_setting('aimee.memory_scope_all',true)='1' THEN 1
  WHEN scope_type='project' AND scope_value=current_setting('aimee.memory_project',true) THEN 3
  WHEN scope_type='workspace' AND scope_value=current_setting('aimee.memory_workspace',true) THEN 2
- ELSE 1 END AS scope_rank FROM memories
+ ELSE 1 END`
+
+var domainVisibleParents = `SELECT id,` + domainScopeRankSQL + ` AS scope_rank FROM memories
  WHERE ` + currentMemorySQL("")
 
 const episodeColumns = `id,memory_id,episode_key,episode_text,source_session,reference_time,created_at`

@@ -372,6 +372,55 @@ func exerciseTypedContextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	if got.Watermark.Observations != "2026-01-02" || got.Watermark.Durable == "9999-12-31" {
 		t.Fatal(got.Watermark)
 	}
+	// Episode and parent versions are independent. Keep all mutations inside a
+	// savepoint so the remaining public boundary checks use the original fixture.
+	exec(`SAVEPOINT typed_episode_versions`)
+	episodeSource := func(result typedContextResult) *typedSourceVersion {
+		t.Helper()
+		for _, ref := range result.Retained {
+			if ref.Channel == "episodes" {
+				if !validTypedSource(ref) || ref.Source == nil || ref.Source.Kind != "memory_episode" || ref.ID != "9007199254743001" {
+					t.Fatal("invalid episode source", ref)
+				}
+				return ref.Source
+			}
+		}
+		t.Fatal("episode source missing", result)
+		return nil
+	}
+	initial := episodeSource(got)
+	var owner, parentRevision, parentID string
+	if err := tx.QueryRow(ctx, `SELECT o.owner_id::text,m.record_revision::text,m.id::text FROM memories m,memory_collection_owner o WHERE m.id=$1 AND o.id=1`, parent).Scan(&owner, &parentRevision, &parentID); err != nil {
+		t.Fatal(err)
+	}
+	if initial.Version.OwnerID != owner || initial.Version.RecordRevision != "1" || initial.MemoryParents[0] != (MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner, RecordID: parentID, RecordRevision: parentRevision}) {
+		t.Fatal("episode does not bind exact canonical parent", initial)
+	}
+	exec(`UPDATE memory_episodes SET episode_text=episode_text,record_revision=900 WHERE id=$1`, large)
+	unchanged, _ := call()
+	if unchanged.SelectionDigest != got.SelectionDigest || episodeSource(unchanged).Version != initial.Version {
+		t.Fatal("no-op or caller-assigned revision changed episode identity")
+	}
+	exec(`UPDATE memory_episodes SET source_session='changed-session' WHERE id=$1`, large)
+	edited, _ := call()
+	if episodeSource(edited).Version.RecordRevision != "2" || episodeSource(edited).MemoryParents[0] != initial.MemoryParents[0] || edited.SelectionDigest == got.SelectionDigest {
+		t.Fatal("independent episode provenance change not versioned")
+	}
+	exec(`UPDATE memories SET content=content||' parent revision' WHERE id=$1`, parent)
+	parentEdited, _ := call()
+	if parentEdited.Rendered != edited.Rendered || parentEdited.SelectionDigest == edited.SelectionDigest || episodeSource(parentEdited).Version != episodeSource(edited).Version || episodeSource(parentEdited).MemoryParents[0].RecordRevision == initial.MemoryParents[0].RecordRevision {
+		t.Fatal("parent change not bound independently of identical episode bytes")
+	}
+	for _, state := range []string{"activation_suppressed=1", "lifecycle_state='superseded'", "valid_until='2000-01-01'"} {
+		exec(`SAVEPOINT typed_episode_hidden`)
+		exec(`UPDATE memories SET `+state+` WHERE id=$1`, parent)
+		ineligible, _ := call()
+		if len(ineligible.Channels["episodes"].Items) != 0 {
+			t.Fatal("typed episode retained an ineligible parent", state)
+		}
+		exec(`ROLLBACK TO SAVEPOINT typed_episode_hidden; RELEASE SAVEPOINT typed_episode_hidden`)
+	}
+	exec(`ROLLBACK TO SAVEPOINT typed_episode_versions; RELEASE SAVEPOINT typed_episode_versions`)
 	// Explicit byte limits survive the public command and scoped data hop.
 	args["context_limits"] = map[string]any{"schema_version": 1, "max_context_bytes": 0}
 	got, body = call()

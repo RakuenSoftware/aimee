@@ -9,6 +9,64 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func TestTypedEpisodeSourceProjection(t *testing.T) {
+	const id = "9007199254743001"
+	const owner = "00000000-0000-0000-0000-000000000001"
+	r := newTypedContext(DataRequest{TypedContext: typedTestOptions(t, `{"enable_episodes":true}`)})
+	r.add("episodes", typedItem{id: id, text: "episode", value: map[string]string{"stable_id": id, "excerpt": "episode"}, source: &typedSourceVersion{
+		Kind: "memory_episode", Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner, RecordID: id, RecordRevision: "7"},
+		MemoryParentState: "observed", MemoryParents: []MemoryRecordVersion{{SchemaVersion: 1, OwnerID: owner, RecordID: "9007199254743000", RecordRevision: "3"}},
+	}})
+	if err := r.finish(); err != nil {
+		t.Fatal(err)
+	}
+	encode := func() string {
+		raw, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	decoded, err := decodeTypedProjection(encode())
+	if err != nil || len(decoded.Retained) != 1 || decoded.SourceVersionState != "record_versions_observed" || decoded.Retained[0].Source.Version.RecordID != id || decoded.Retained[0].Source.MemoryParents[0].RecordRevision != "3" {
+		t.Fatal("episode versions lost through host round trip", decoded, err)
+	}
+	if err := decoded.fitProjectionBytes(len(r.Rendered)); err != nil || decoded.SelectionDigest != r.SelectionDigest {
+		t.Fatal("retained episode binding changed", err)
+	}
+	if err := decoded.fitProjectionBytes(0); err != nil || len(decoded.Retained) != 0 || decoded.SourceVersionState != "unavailable" {
+		t.Fatal("dropped episode retains version claim", err)
+	}
+	for _, mutate := range []func(*typedProjectionRef){
+		func(ref *typedProjectionRef) { ref.Channel = "current_assertions" },
+		func(ref *typedProjectionRef) { ref.Source.MemoryParentState = "unavailable" },
+		func(ref *typedProjectionRef) { ref.Source.MemoryParents = nil },
+		func(ref *typedProjectionRef) {
+			ref.Source.MemoryParents = append(ref.Source.MemoryParents, ref.Source.MemoryParents[0])
+		},
+		func(ref *typedProjectionRef) {
+			ref.Source.MemoryParents[0].OwnerID = "00000000-0000-0000-0000-000000000002"
+		},
+	} {
+		copy, err := decodeTypedProjection(encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutate(&copy.Retained[0])
+		if validTypedSource(copy.Retained[0]) {
+			t.Fatal("invalid episode provenance accepted", copy.Retained)
+		}
+	}
+	ref := r.Retained[0]
+	if validTypedSourceItem(ref, json.RawMessage(`{"stable_id":"9007199254743000"}`)) {
+		t.Fatal("episode metadata attached to different record")
+	}
+	r.Retained[0].Source.Version.RecordRevision = "8"
+	if _, err := decodeTypedProjection(encode()); err == nil {
+		t.Fatal("episode revision changed under old selection commitment")
+	}
+}
+
 func TestTypedSourceVersionBinding(t *testing.T) {
 	const id = "9007199254742999"
 	makeProjection := func(owner string) *typedContextResult {

@@ -54,7 +54,14 @@ now bind exact owner/assertion/revision observations into selection identity and
 preserve them through outer packing. Unversioned channels remain explicit. Local
 PostgreSQL/race checks pass. Fresh application/harness `91a1f02969` passes
 **1,558/1,558 checks** (966 T2, 592 T3), with all images and actual caps verified.
-This does not certify supporting-parent versions or owner revalidation at final release.
+[Direct supporting-parent revisions](../../validation/memory-parent-version-lookups-2026-09-21.md)
+are now bound into assertion selections, with a measured 48.3× improvement in the
+isolated parent-eligibility query. [Episode versions](../../validation/memory-episode-source-versions-2026-09-21.md)
+add independent episode and parent revision commitments under shared schema 30;
+local PostgreSQL, race and migration checks pass, with fresh deployment pending.
+[Indexed-deletion audit isolation](../../validation/memory-evidence-event-isolation-2026-09-21.md)
+at `800f4ef2f4` passes **1,561/1,561 fresh checks** (969 T2, 592 T3).
+These observations do not certify owner revalidation at final release.
 
 Delivery follows the program’s dependency order: eligibility/mutations and final
 payload budgets first, then evidence/receipts/coverage, views and indexing,

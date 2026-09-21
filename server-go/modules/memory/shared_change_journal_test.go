@@ -27,6 +27,90 @@ func sharedChangeMigration(t *testing.T) string {
 	return string(body[a:b])
 }
 
+func TestSharedEpisodeRevisionUpgrade(t *testing.T) {
+	dsn := os.Getenv("AIMEE_MEMORY_EVAL_URL")
+	if dsn == "" {
+		if os.Getenv("AIMEE_MEMORY_EVAL_REQUIRED") == "1" {
+			t.Fatal("AIMEE_MEMORY_EVAL_URL required")
+		}
+		t.Skip("set AIMEE_MEMORY_EVAL_URL")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ident := pgx.Identifier{fmt.Sprintf("episode_upgrade_%d", time.Now().UnixNano())}.Sanitize()
+	exec("CREATE SCHEMA " + ident + "; SET LOCAL search_path=" + ident + `,public;
+ CREATE TABLE memories(id BIGINT PRIMARY KEY,scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,content TEXT);
+ CREATE TABLE memory_scopes(memory_id BIGINT REFERENCES memories(id),scope_type TEXT,scope_value TEXT);
+ CREATE FUNCTION memory_row_scope_visible(TEXT,TEXT) RETURNS BOOLEAN LANGUAGE sql AS $$ SELECT true $$;
+ ` + sharedChangeMigration(t) + `;
+ CREATE TABLE memory_episodes(id BIGINT PRIMARY KEY,memory_id BIGINT REFERENCES memories(id),episode_key TEXT,episode_text TEXT,source_session TEXT,reference_time TEXT,created_at TEXT);
+ INSERT INTO memories(id,scope_type,scope_value,content) VALUES(1,'project','upgrade','original');
+ INSERT INTO memory_episodes VALUES(9007199254743001,1,'episode','legacy content','session','2026-01-01','2026-01-02');`)
+	body, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := strings.Index(string(body), "-- BEGIN memory episode revisions"), strings.Index(string(body), "-- END memory episode revisions")
+	if a < 0 || b < a {
+		t.Fatal("episode migration missing")
+	}
+	migration := string(body[a:b])
+	scalar := func(sql string) string {
+		t.Helper()
+		var value string
+		if err := tx.QueryRow(ctx, sql).Scan(&value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	before := scalar(`SELECT to_jsonb(e)::text FROM memory_episodes e`)
+	for range 2 {
+		exec(migration)
+		if scalar(`SELECT (to_jsonb(e)-'record_revision')::text FROM memory_episodes e`) != before || scalar(`SELECT record_revision::text FROM memory_episodes`) != "1" {
+			t.Fatal("upgrade changed existing episode or reset revision")
+		}
+	}
+	exec(`UPDATE memory_episodes SET episode_text=episode_text,record_revision=900`)
+	if scalar(`SELECT record_revision::text FROM memory_episodes`) != "1" {
+		t.Fatal("caller or no-op changed revision")
+	}
+	for i, change := range []string{"episode_text='corrected'", "source_session='new session'", "reference_time='2026-02-01'"} {
+		exec(`UPDATE memory_episodes SET ` + change)
+		if scalar(`SELECT record_revision::text FROM memory_episodes`) != fmt.Sprint(i+2) {
+			t.Fatal("episode field change not versioned", change)
+		}
+	}
+	exec(migration)
+	if scalar(`SELECT record_revision::text FROM memory_episodes`) != "4" {
+		t.Fatal("reapplying migration rewound existing revision")
+	}
+	exec(`SAVEPOINT immutable_episode`)
+	if _, err := tx.Exec(ctx, `UPDATE memory_episodes SET id=2`); err == nil {
+		t.Fatal("episode identity mutation accepted")
+	}
+	exec(`ROLLBACK TO SAVEPOINT immutable_episode; RELEASE SAVEPOINT immutable_episode`)
+	exec(`INSERT INTO memory_episodes(id,memory_id,episode_key,record_revision) VALUES(2,1,'new episode',999)`)
+	if scalar(`SELECT record_revision::text FROM memory_episodes WHERE id=2`) != "1" {
+		t.Fatal("caller supplied initial revision")
+	}
+}
+
 func TestSharedMemoryCollectionCommitOrder(t *testing.T) {
 	dsn := os.Getenv("AIMEE_MEMORY_EVAL_URL")
 	if dsn == "" {

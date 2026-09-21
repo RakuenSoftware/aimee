@@ -7,7 +7,7 @@ import (
 
 // A source version binds a selected owner record and its direct memory parents
 // from the same snapshot. It does not attest to transitive dependencies, current
-// authorization, or final release. Kind separates assertion IDs from memory IDs.
+// authorization, or final release. Kind separates assertion, episode and memory IDs.
 type typedSourceVersion struct {
 	Kind              string                `json:"record_kind"`
 	Version           MemoryRecordVersion   `json:"version"`
@@ -36,7 +36,16 @@ func validTypedSource(ref typedProjectionRef) bool {
 		// claim source-version evidence. Their byte commitments still apply.
 		return true
 	}
-	if ref.Channel != "current_assertions" && ref.Channel != "historical_assertions" || ref.Source.Kind != "semantic_assertion" {
+	switch ref.Source.Kind {
+	case "semantic_assertion":
+		if ref.Channel != "current_assertions" && ref.Channel != "historical_assertions" {
+			return false
+		}
+	case "memory_episode":
+		if ref.Channel != "episodes" || ref.Source.MemoryParentState != "observed" || len(ref.Source.MemoryParents) != 1 {
+			return false
+		}
+	default:
 		return false
 	}
 	switch ref.Source.MemoryParentState {
@@ -69,6 +78,12 @@ func validTypedSourceItem(ref typedProjectionRef, raw json.RawMessage) bool {
 	}
 	if ref.Source == nil {
 		return true
+	}
+	if ref.Source.Kind == "memory_episode" {
+		var episode struct {
+			StableID string `json:"stable_id"`
+		}
+		return json.Unmarshal(raw, &episode) == nil && episode.StableID == ref.ID
 	}
 	var assertion struct {
 		ID       json.Number `json:"assertion_id"`

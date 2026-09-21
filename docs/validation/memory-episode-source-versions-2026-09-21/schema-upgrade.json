@@ -1,0 +1,14 @@
+{
+  "from_schema": 29,
+  "to_schema": 30,
+  "reapplications": 2,
+  "result": "pass",
+  "assertions": [
+    "Exact prior correction and retirement receipts preserved",
+    "Canonical rows and audit events preserved",
+    "Existing episode payload preserved with initial revision one",
+    "Edited episode revision survives reapplication",
+    "Mixed purge/edit event references remain isolated",
+    "Receipt verifier ACL remains restricted"
+  ]
+}

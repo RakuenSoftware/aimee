@@ -138,6 +138,7 @@
     "server-go/modules/memory/assertion_search.go",
     "server-go/modules/memory/typed_context.go",
     "server-go/modules/memory/typed_source_version.go",
+    "server-go/modules/memory/typed_episode.go",
     "server-go/modules/memory/css_conventions.go",
     "server-go/modules/memory/fact_maintenance.go",
     "server-go/modules/memory/ontology_review.go",

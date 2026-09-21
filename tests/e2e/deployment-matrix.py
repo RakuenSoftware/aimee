@@ -185,6 +185,42 @@ def typed_source_version_gate(kb, check):
         code, empty = call(dict(context_limits=dict(schema_version=1, max_context_bytes=0)))
         check('Omitted typed assertion claims no retained source revision', code == 200 and
               empty.get('retained_items') == [] and empty.get('source_version_state') == 'unavailable')
+        # This authored episode has a different key from the parent, so indexing
+        # cannot replace it with the generated parent-key episode.
+        episode_id = sql(f"""INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session)
+            VALUES({int(fixture['parent_id'])},'{key}-episode','{key} episode','fixture') RETURNING id::text""").strip()
+        payload.update(query=key+'-episode', enable_semantic_assertions=False, enable_episodes=True)
+        def episode_source(result):
+            return next((r.get('source_version', {}) for r in result.get('retained_items', [])
+                         if r.get('channel') == 'episodes' and r.get('stable_id') == episode_id), {})
+        code, episode = call()
+        expected_episode = dict(schema_version=1, owner_id=fixture['owner_id'],
+                                record_id=episode_id, record_revision='1')
+        check('Typed episode binds its own and parent revisions', code == 200 and
+              episode_source(episode) == dict(record_kind='memory_episode', version=expected_episode,
+                  memory_parents=[expected_parent], memory_parent_state='observed') and matches(episode))
+        sql(f"UPDATE memory_episodes SET episode_text=episode_text,record_revision=900 WHERE id={int(episode_id)}")
+        code, episode_noop = call()
+        check('Typed episode no-op preserves revision and selection', code == 200 and
+              episode_noop.get('selection_digest') == episode.get('selection_digest'))
+        sql(f"UPDATE memory_episodes SET source_session='edited provenance' WHERE id={int(episode_id)}")
+        code, episode_edit = call()
+        expected_episode['record_revision'] = '2'
+        check('Episode provenance changes independently of its parent', code == 200 and
+              episode_source(episode_edit).get('version') == expected_episode and
+              episode_source(episode_edit).get('memory_parents') == [expected_parent] and
+              episode_edit.get('selection_digest') != episode.get('selection_digest') and matches(episode_edit))
+        sql(f"UPDATE memories SET content='episode supporting source changed' WHERE id={int(fixture['parent_id'])}")
+        code, episode_parent_edit = call()
+        expected_parent['record_revision'] = str(int(expected_parent['record_revision'])+1)
+        check('Parent revision binds identical rendered episode bytes', code == 200 and
+              episode_source(episode_parent_edit).get('version') == expected_episode and
+              episode_source(episode_parent_edit).get('memory_parents') == [expected_parent] and
+              episode_parent_edit.get('rendered_context') == episode_edit.get('rendered_context') and
+              episode_parent_edit.get('selection_digest') != episode_edit.get('selection_digest') and matches(episode_parent_edit))
+        code, episode_empty = call(dict(context_limits=dict(schema_version=1, max_context_bytes=0)))
+        check('Omitted typed episode claims no retained source revision', code == 200 and
+              episode_empty.get('retained_items') == [] and episode_empty.get('source_version_state') == 'unavailable')
     finally:
         sql(f"""BEGIN; UPDATE entity_edges SET lifecycle_state='invalidated',version=version+1 WHERE commit_id='{key}';
             INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,

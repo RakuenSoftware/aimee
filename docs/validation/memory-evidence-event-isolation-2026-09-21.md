@@ -41,6 +41,14 @@ Validation:
 
 The full Go/PostgreSQL memory suite, cross-object evidence-lifecycle SQL suite,
 standalone export, all 77 lint gates, and documentation/link checks pass. Targeted
-runtime-role race tests, native build/routing and all 17 S1 checks pass. Fresh
-deployment of schema 29 remains pending. GitHub's complete script-regression job passes at `a49f6c0101`. The earlier 1,560-check image is not evidence for schema 29. This repair
+runtime-role race tests, native build/routing and all 17 S1 checks pass. Fresh application and harness `800f4ef2f4756bd3a083bd714c4d658f8cb34936`
+passed **1,561/1,561 checks** on owned `.253` deployments: [969 T2 checks](memory-evidence-event-isolation-2026-09-21/fresh-t2-800f4ef2f4.json)
+and [592 T3 checks](memory-evidence-event-isolation-2026-09-21/fresh-t3-800f4ef2f4.json).
+This includes indexing before the destructive mutation, all seven typed source
+checks, and all 37 asynchronous native checks per placement. Actual provider
+request bytes remained within the configured 32 KiB ceilings. All nine
+[image identities and three actual caps](memory-evidence-event-isolation-2026-09-21/image-identities-800f4ef2f4.json)
+were verified; all nine owned containers and nine empty networks were removed,
+preserving images, volumes and raw receipts. Latest-head GitHub CI was still
+running when this evidence was collected. This repair
 does not complete MR-02, MR-04 or MR-06, nor certify old event references as correct.

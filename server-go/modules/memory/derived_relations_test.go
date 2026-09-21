@@ -61,7 +61,7 @@ func exerciseDerivedRelationsReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 		t.Helper()
 		var text string
 		if err := tx.QueryRow(ctx, `SELECT concat_ws('|',
- (SELECT string_agg(id::text,',' ORDER BY id) FROM memory_episodes WHERE memory_id=$1),
+ (SELECT string_agg(id::text||':'||record_revision::text,',' ORDER BY id) FROM memory_episodes WHERE memory_id=$1),
  (SELECT string_agg(id::text,',' ORDER BY id) FROM memory_relations WHERE memory_id=$1),
  (SELECT string_agg(id::text,',' ORDER BY id) FROM memory_summaries WHERE memory_id=$1))`, id).Scan(&text); err != nil {
 			t.Fatal(err)

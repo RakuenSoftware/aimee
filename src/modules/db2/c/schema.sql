@@ -17933,6 +17933,17 @@ END
 $memory_change_acl$;
 -- END memory change journal
 
+-- BEGIN memory episode revisions
+-- Episode text and provenance can change independently of the canonical parent.
+-- Keep an owner revision for typed selection/release identities. No-op refreshes
+-- preserve it; clients cannot force or rewind the counter by assigning it.
+ALTER TABLE memory_episodes ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1
+  CHECK (record_revision > 0);
+DROP TRIGGER IF EXISTS memory_episode_record_revision ON memory_episodes;
+CREATE TRIGGER memory_episode_record_revision BEFORE INSERT OR UPDATE ON memory_episodes
+  FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{}');
+-- END memory episode revisions
+
 -- BEGIN memory mutation receipts
 -- Content-free, immutable retry references into the existing canonical audit.
 -- No foreign key to memories: erasure must not permit a retry to repeat a write.
@@ -18286,5 +18297,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '29')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '30')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
