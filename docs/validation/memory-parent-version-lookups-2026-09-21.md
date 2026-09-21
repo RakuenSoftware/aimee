@@ -47,9 +47,14 @@ checks pass. Fresh deployment is pending.
 
 The preceding `91a1f02969` CI exposed a missing `creation_retry_test.go` ownership
 entry; the descriptor is fixed and all 47 descriptor tests pass. Its T2 gate also
-reported a restored-episode miss and a generic deletion failure. The cause is
-not established. This change retains failed MCP responses and exports only fixed
+reported a restored-episode miss and a generic deletion failure. The episode
+fixture reused its parent's generated episode key: background indexing replaces
+that episode and changes the latest row returned by `EpisodeGet`. A runtime-role
+regression confirms the parent-key replacement and preservation of a distinct
+curated episode key. The E2E fixture now uses separate parent and authored episode
+keys. The deletion failure's cause is still unresolved. This change retains failed
+MCP responses and exports only fixed
 memory failure categories/SQLSTATEs from logs, excluding SQL, request content,
 connection strings and driver messages. No retries or eligibility relaxations
 were added. Fresh validation of this change must not be represented as a proven
-repair of an unreproduced earlier failure.
+repair of the unresolved deletion failure.

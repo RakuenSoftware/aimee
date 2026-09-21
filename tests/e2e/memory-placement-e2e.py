@@ -143,8 +143,10 @@ class Gate:
         key = self.prefix + '-derived-validity'
         text = 'eligible derived episode ' + self.prefix
         target = 'eligible-derived-target-' + self.prefix
+        # The indexer owns episodes named after the parent key. Use a distinct
+        # authored episode key so a background refresh cannot replace this fixture.
         mid = int(self.sql(f"""INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
-            VALUES('L2','fact','{key}','derived source','project','{key}') RETURNING id""").splitlines()[0])
+            VALUES('L2','fact','{key}-parent','derived source','project','{key}') RETURNING id""").splitlines()[0])
         self.sql(f"""INSERT INTO memory_episodes(memory_id,episode_key,episode_text)
             VALUES({mid},'{key}','{text}');
             INSERT INTO memory_entities(memory_id,entity) VALUES({mid},'{key}');
