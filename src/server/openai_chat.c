@@ -930,8 +930,6 @@ static void emit_text_chunk(server_http_sse_emit emit, void *ctx, const char *id
       emit(ctx, frame);
 }
 
-/* Resolve the agent for `model` into *acfg (caller-owned, must outlive the
- * returned pointer — it indexes into acfg). Returns NULL when none configured. */
 /* Fills `out` with the selected agent; returns 0 on success.
  *
  * Took an agent_config_t* and returned a pointer into it, which meant every
@@ -1806,10 +1804,12 @@ static void *run_job_worker(void *arg)
    openai_runs_store_append_event(j->run_id, "response.in_progress",
                                   run_status_json(j, "in_progress", buf, RUN_JSON_CAP));
 
-   agent_config_t acfg;
+   /* Registry selection validates the requested model, but the tool loop
+    * routes using a complete configuration. Load it before handing it off. */
+   agent_config_t acfg = {0};
    agent_t agbuf;
    agent_t *ag = stream_pick_agent(&agbuf, j->model) == 0 ? &agbuf : NULL;
-   if (!ag)
+   if (agent_load_config(&acfg) != 0 || !ag)
    {
       openai_runs_store_append_event(j->run_id, "error", "{\"error\":\"no agent configured\"}");
       openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED,

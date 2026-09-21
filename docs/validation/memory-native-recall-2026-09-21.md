@@ -94,3 +94,18 @@ The benchmark compares the two assembly paths on the same input and budget;
 PostgreSQL public regressions verify identical retained text with/without explain.
 It excludes retrieval, transport and provider time and does not establish a
 whole-request P95 improvement or MR-18 acceptance.
+
+
+## Asynchronous native worker prerequisite
+
+Inspection of `/v1/runs` found that registry-based model selection no longer
+loaded the full `agent_config_t`, but the worker still passed that uninitialized
+object to `agent_run_with_tools`. The worker now explicitly loads the routing
+configuration and refuses execution when loading fails. A stale comment from the
+old model-selection contract is removed.
+
+The native application builds; existing run-store and native context-refusal
+fixtures pass. These fixtures do not execute the full asynchronous HTTP worker.
+Live `/v1/runs` success, owner-outage refusal and recovery remain required before
+claiming asynchronous native acceptance. The fresh `1f198a6b07` image predates this
+worker prerequisite.
