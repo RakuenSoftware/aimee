@@ -339,6 +339,9 @@ adds expected-version checks and durable keyed receipts to non-destructive priva
 delete/forget. Migration 32 preserves existing correction receipts and guards the
 retired canonical result. PostgreSQL tests cover rollback, concurrent duplicates,
 replay after connection changes, authority, stale versions, reactivation and
-erasure. HTTP/MCP restart coverage is added to the deployment fixture; fresh-image
-acceptance remains pending. Creation retries and the remaining MR-02 clauses
-remain open.
+erasure. Fresh application/harness `e697581ac9` passes **1,441/1,441** checks
+(**868 T2**, **573 T3**), including 27 new real HTTP/MCP retirement checks in
+each topology. The independently exported Go schema owner now carries all 32
+embedded migrations and shares its database/schema/peer startup assembly with
+the bundled executable. Creation retries and the remaining MR-02 clauses remain
+open.

@@ -89,7 +89,8 @@ receipt after a committed retry; reactivation, further revision or erasure canno
 repeat the mutation. The row lock protects the precondition, and retirement,
 history, invalidation and receipt commit together. Existing correction receipts
 survive the additive migration. See the [retirement validation](../../validation/memory-private-retirement-2026-09-21.md)
-for implementation and test scope; fresh-image acceptance is pending.
+for implementation and test scope; fresh `e697581ac9` passes 1,441/1,441
+checks across enrolled T2 and standalone T3.
 Private creation retries, shared deletion preconditions/retries, remaining mutation
 preconditions and full durable consumer/retention semantics are still acceptance work.
 

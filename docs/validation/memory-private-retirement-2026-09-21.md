@@ -48,7 +48,33 @@ S1 guard tests, all 77 repository lint gates, shared process/assembly tests, and
 (19 tests, one existing skip). Fresh deployment results will be recorded against
 the exact committed image revision.
 
-Fresh-image acceptance is pending. Private creation retries, shared deletion
+Fresh application/harness `e697581ac912900961a65dbd3891406258051457` passes
+**1,441/1,441 checks** on the owned `.253` CT 9498: **868 enrolled T2** and
+**573 standalone T3**. Each topology includes 195 local-memory checks, with
+27 new retirement checks, plus 298 provider-boundary and 37 native asynchronous
+checks. Both fresh private databases apply migration 32 through the shared Go startup
+assembly. The new cases exercise receipt-write rollback, exact-version retirement,
+one committed retry identity across a Server restart, changed-payload refusal,
+governed history, reactivation/erasure and model-authority refusal through actual
+HTTP and MCP adapters.
+
+- [T2 verdicts](memory-private-retirement-2026-09-21/fresh-t2-e697581ac9.json)
+- [T3 verdicts](memory-private-retirement-2026-09-21/fresh-t3-e697581ac9.json)
+- [Exact image identities](memory-private-retirement-2026-09-21/image-identities-e697581ac9.json)
+
+Application image: `sha256:242f192843b4999f7f4047dbbdfe330146632b3a1924afa286a5eb9398dc58d0`.
+The pinned PostgreSQL and embedder images are unchanged. All nine container
+identities were verified; all three application containers enforce the actual
+32 KiB provider ceiling. Largest native wire requests were 26,558 bytes in T2
+and 25,980 bytes in T3. Native refresh, owner outage and restart, zero-budget
+refusal and quoted provider-error serialization continue to pass. These are
+correctness/size results, not a new latency claim or complete provider-token gate.
+
+After evidence collection, all nine owned containers and nine empty owned
+networks were removed. Images, volumes and raw receipts remain available on
+CT 9498 for follow-up inspection.
+
+Private creation retries, shared deletion
 preconditions/retries, complete consumer/checkpoint/retention behavior and the
 remaining MR-02 acceptance clauses remain open. This does not implement permanent
 erasure or retire unrelated DB2 consumers. The C bus is unchanged.
