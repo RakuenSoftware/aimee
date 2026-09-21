@@ -387,3 +387,14 @@ func TestMemoryFailureClassDoesNotExposeErrorDetails(t *testing.T) {
 		}
 	}
 }
+
+func TestMemoryFailureOperationDoesNotLogUnknownInput(t *testing.T) {
+	for _, value := range []string{"secret operation", "store\nprivate", "some-private-key", ""} {
+		if got := memoryFailureOperation(value); got != "other" {
+			t.Fatalf("unknown operation became diagnostic: %q", got)
+		}
+	}
+	if memoryFailureOperation("delete-as") != "delete-as" {
+		t.Fatal("known operation lost diagnostic category")
+	}
+}

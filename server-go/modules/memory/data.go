@@ -1229,7 +1229,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		}
 		// Never log the request, SQL, driver message or connection string.
 		log.Printf("memory data failure operation=%q trace=%d status=%d class=%s",
-			request.Operation[:min(len(request.Operation), 64)], invocation.TraceID, status, memoryFailureClass(cause))
+			memoryFailureOperation(request.Operation), invocation.TraceID, status, memoryFailureClass(cause))
 	}()
 	if request.Operation == "code-index" {
 		code, ok := options.data.(*postgresDataStore)
@@ -2921,4 +2921,18 @@ func memoryFailureClass(err error) string {
 		return "transaction_closed"
 	}
 	return "internal"
+}
+
+// Unknown input must not become diagnostic text if opening the store fails
+// before the operation dispatcher rejects it.
+func memoryFailureOperation(operation string) string {
+	switch operation {
+	case "get", "store", "insert-epistemic", "supersede", "update-as", "delete", "delete-as",
+		"correction-review", "recall-bundle", "compose-recall", "typed-context", "assertion-search",
+		"episode-list", "episode-get", "relation-search", "entity-edges", "entity-profile",
+		"rebuild-derived", "code-index", "change-feed", "vector-search", "vector-rebuild":
+		return operation
+	default:
+		return "other"
+	}
 }
