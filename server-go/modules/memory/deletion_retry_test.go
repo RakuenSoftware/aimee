@@ -40,6 +40,8 @@ func exerciseDeletionRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 		}
 		return n
 	}
+	exec(`SAVEPOINT indexed_deletion_retry`)
+	defer func() { exec(`ROLLBACK TO SAVEPOINT indexed_deletion_retry; RELEASE SAVEPOINT indexed_deletion_retry`) }()
 	for _, authority := range []string{"model", "user"} {
 		scope := "deletion-retry-" + authority
 		created := invoke("store", map[string]any{"key": scope, "content": "deletion fixture", "authority": authority, "project": scope, "scope_context": true})
@@ -47,6 +49,15 @@ func exerciseDeletionRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 			t.Fatal(created)
 		}
 		id := int64(created["id"].(float64))
+		// Exercise the same derived rows the asynchronous indexer can create
+		// before a deletion. A bare freshly inserted parent misses that boundary.
+		if out := invoke("reindex", map[string]any{"project": scope, "scope_context": true}); out["status"] != "ok" {
+			t.Fatal("index deletion fixture", out)
+		}
+		if scalar(`SELECT count(*) FROM memory_episodes WHERE memory_id=$1`, id) == 0 ||
+			scalar(`SELECT count(*) FROM memory_units WHERE memory_id=$1`, id) == 0 {
+			t.Fatal("deletion fixture lacks indexed dependencies")
+		}
 		get := map[string]any{"id": id, "include_version": true, "project": scope, "scope_context": true}
 		read := invoke("get", get)
 		version := read["memory"].(map[string]any)["version"]
@@ -88,6 +99,19 @@ func exerciseDeletionRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 			t.Fatal(first)
 		}
 		receipt := first["mutation_receipt"].(map[string]any)
+		if scalar(`SELECT count(*) FROM memory_evidence_events WHERE changeset_id=$1 AND
+ ((operation='purge' AND (before_ref<>'' OR after_ref<>'')) OR
+  (before_ref<>'' AND NOT starts_with(before_ref,object_kind||':'||object_id||':')) OR
+  (after_ref<>'' AND NOT starts_with(after_ref,object_kind||':'||object_id||':')))`, receipt["commit_id"]) != 0 {
+			var evidence string
+			if err := tx.QueryRow(ctx, `SELECT json_agg(json_build_object('kind',object_kind,'id',object_id,'op',operation,'before',before_ref,'after',after_ref))::text FROM memory_evidence_events WHERE changeset_id=$1`, receipt["commit_id"]).Scan(&evidence); err != nil {
+				t.Fatal(err)
+			}
+			t.Fatal("one changed object rewrote another object's evidence references", evidence)
+		}
+		if authority == "user" && scalar(`SELECT count(*) FROM memory_evidence_events WHERE changeset_id=$1 AND operation='purge'`, receipt["commit_id"]) < 2 {
+			t.Fatal("indexed destruction did not retain its cascaded purge events")
+		}
 		if receipt["schema_version"] != float64(2) || receipt["replayed"] != false || !reflect.DeepEqual(receipt["target_version"], version) {
 			t.Fatal(receipt)
 		}

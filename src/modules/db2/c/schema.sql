@@ -16220,7 +16220,7 @@ DECLARE oldj JSONB := CASE WHEN TG_OP='INSERT' THEN '{}'::JSONB ELSE to_jsonb(OL
         newj JSONB := CASE WHEN TG_OP='DELETE' THEN '{}'::JSONB ELSE to_jsonb(NEW) END;
         rowj JSONB; oid TEXT; cid TEXT; action TEXT; op TEXT; actor TEXT;
         authority TEXT; transport TEXT; correlation TEXT; reversible BIGINT := 1;
-        owns_changeset BOOLEAN := true;
+        owns_changeset BOOLEAN := true; emitted_change BIGINT;
         old_state TEXT; new_state TEXT; old_version BIGINT; new_version BIGINT;
 BEGIN
   rowj := CASE WHEN TG_OP='DELETE' THEN oldj ELSE newj END;
@@ -16284,15 +16284,18 @@ BEGIN
     COALESCE(NULLIF(newj->>'confidence','')::DOUBLE PRECISION,0),
     COALESCE(NULLIF(oldj->>'authority_rank','')::BIGINT,0),
     COALESCE(NULLIF(newj->>'authority_rank','')::BIGINT,0),old_version,new_version,
-    TG_TABLE_NAME||' '||lower(TG_OP));
+    TG_TABLE_NAME||' '||lower(TG_OP)) RETURNING id INTO emitted_change;
   -- Rewrite the event's transport proof and content-free typed references while
-  -- the trigger still has both row images.  Purge deliberately retains neither.
+  -- the trigger still has both row images. Purge deliberately retains neither.
+  -- A staged changeset may contain many objects, including cascaded purges;
+  -- never rewrite another item's references with this row's hashes.
   UPDATE memory_evidence_events SET transport_identity=transport,
     before_ref=CASE WHEN op='purge' OR TG_OP='INSERT' THEN '' ELSE
       TG_ARGV[0]||':'||oid||':h='||md5(oldj::TEXT) END,
     after_ref=CASE WHEN op='purge' OR TG_OP='DELETE' THEN '' ELSE
       TG_ARGV[0]||':'||oid||':h='||md5(newj::TEXT) END,
-    correlation_id=correlation WHERE changeset_id=cid;
+    correlation_id=correlation WHERE changeset_id=cid AND event_id=(
+      SELECT event_id FROM fact_graph_changes WHERE id=emitted_change);
   IF owns_changeset THEN
     UPDATE fact_graph_commits SET status='applied',closed_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
      WHERE commit_id=cid;
@@ -18283,5 +18286,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '28')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '29')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

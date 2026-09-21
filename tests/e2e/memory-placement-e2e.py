@@ -149,13 +149,13 @@ class Gate:
             VALUES('L2','fact','{key}-parent','derived source','project','{key}') RETURNING id""").splitlines()[0])
         self.sql(f"""INSERT INTO memory_episodes(memory_id,episode_key,episode_text)
             VALUES({mid},'{key}','{text}');
-            INSERT INTO memory_entities(memory_id,entity) VALUES({mid},'{key}');
             INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text)
             VALUES({mid},'{key}','owns','{target}','derived fact')""")
         tools = [
             ('get_episode', dict(episode_key=key), text, 'memory episode not found'),
             ('search_graph', dict(query=key), target, 'No graph relations found'),
-            ('get_entity', dict(entity=key), 'Mentions: 1', 'memory profile not found'),
+            # The authored relation survives refresh; generated mention rows do not.
+            ('get_entity', dict(entity=key), 'Relations: 1', 'memory profile not found'),
             ('get_entity_edges', dict(entity=key), target, 'No edges found'),
         ]
         try:
@@ -222,6 +222,21 @@ class Gate:
         key = self.prefix + '-shared-deletion'
         human = self.good('shared destructive deletion parent', self.call('store', dict(store='kb', key=key, content='explicit user deletion fixture')))
         mid = human['id']
+        # Wait for fixture preparation, not for a failed mutation to succeed.
+        # Indexed children previously made the deletion's evidence trigger fail.
+        deadline = time.monotonic() + 60
+        indexed = False
+        while time.monotonic() < deadline:
+            indexed = self.sql(f"""SELECT (EXISTS(SELECT 1 FROM kb_async_jobs WHERE kind='memory_index'
+                AND document_id={int(mid)} AND status='done') AND
+                EXISTS(SELECT 1 FROM memory_units WHERE memory_id={int(mid)}) AND
+                EXISTS(SELECT 1 FROM memory_summaries WHERE memory_id={int(mid)}))::text""") == 'true'
+            if indexed:
+                break
+            time.sleep(0.2)
+        self.check('shared deletion fixture indexed before mutation', indexed)
+        if not indexed:
+            raise RuntimeError('shared deletion fixture indexing did not complete')
         version = self.good('shared deletion expected version', self.call('get', dict(store='kb', id=mid, include_version=True)))['memory']['version']
         request = dict(store='kb', id=str(mid), expected_version=version, idempotency_key=key+'-retry')
         refused = self.mcp_document('model cannot elevate shared deletion', 'mutate', dict(verb='forget', authority='user', **request))

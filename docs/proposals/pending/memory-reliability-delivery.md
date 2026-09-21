@@ -392,3 +392,13 @@ lookup measures 48.3× faster than the prior join in the documented local fixtur
 this is not a whole-request P95 result. Episode/non-memory/transitive dependencies,
 collection generations and final release revalidation remain open. Fresh deployment
 of this implementation is pending; no proposal is certified by this slice.
+
+
+The parent-version implementation at `5aee043dd6` passes **1,560/1,560 fresh checks**
+(968 T2, 592 T3); exact images/caps and cleanup are linked from its validation page.
+A subsequent [indexed-deletion repair](../../validation/memory-evidence-event-isolation-2026-09-21.md)
+fixes a reproduced audit-trigger error: per-object reference updates were applied
+to every event in a changeset, corrupting references and causing mixed purge/update
+batches to fail. Schema 29 isolates the emitted event, preserves the purge invariant,
+and passes the runtime regression and 28→29→29 preservation check. Its broader
+and fresh validation remain pending; existing history is not retroactively certified.
