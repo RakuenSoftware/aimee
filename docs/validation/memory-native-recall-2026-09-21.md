@@ -201,3 +201,57 @@ request byte lengths. This isolates native lifecycle checks under the same
 operator ceiling. It does not implement automatic repacking against the complete
 serialized native request; that MR-03 work remains open. Fresh validation of the
 bounded fixture and error-event fix is pending.
+
+
+Retained receipts distinguish complete matrices from follow-up diagnostics:
+
+- [T3 `7ebee54d83`: 527 passing checks](memory-shared-reliability-2026-09-21/fresh-t3-7ebee54d83.json).
+- [T3 live refresh: 33 passing checks](memory-shared-reliability-2026-09-21/native-refresh-t3-7ebee54d83.json), harness `3d43ebdbf7`.
+- [T2 initial async diagnostic failure](memory-shared-reliability-2026-09-21/native-async-t2-7ebee54d83-diagnostic.json); the complete T2 matrix is not accepted.
+- [T2 bounded live refresh: 33 passing checks](memory-shared-reliability-2026-09-21/native-refresh-t2-7ebee54d83-bounded.json), derived from harness `64c1871cc0` with only its new provider-error case omitted because this image predates that fix. This is a follow-up on the retained deployment, not a replacement fresh-matrix receipt. Its largest dispatched body is 27,516 bytes; complete private identities survive refresh and restart.
+- [Image identities and unchanged operator limits](memory-shared-reliability-2026-09-21/image-identities-7ebee54d83.json).
+
+All nine `7ebee54d83` containers have been stopped and removed; volumes, images
+and receipts are retained. Twelve empty networks belonging to those deployments
+and the failed initial `64c1871cc0` bootstrap attempts were removed. The initial
+bootstrap attempts are retained separately. New T2/T3 deployments of
+`64c1871cc0` are running the complete matrix, including the provider-error case.
+
+
+## Complete fresh native/async validation
+
+Application and harness `64c1871cc0149835d201b32d1e3a72c9c74793da` pass
+**1,387/1,387 checks** on new owned `.253` deployments: **841 T2** and **546 T3**.
+Each includes 37 native asynchronous checks alongside the existing private,
+shared, semantic, identity, review and provider-boundary gates applicable to its
+placement. Both matrices terminated successfully before receipt collection.
+
+- [T2 verdicts, byte accounting and eight native run receipts](memory-shared-reliability-2026-09-21/fresh-t2-64c1871cc0.json).
+- [T3 verdicts, byte accounting and eight native run receipts](memory-shared-reliability-2026-09-21/fresh-t3-64c1871cc0.json).
+- [All nine image identities and operator caps](memory-shared-reliability-2026-09-21/image-identities-64c1871cc0.json).
+
+The exact application image is
+`sha256:3a96cf69e0da22160b9054f670edd0019656fa814e5a4067756f651c3eb3f461`.
+The existing pinned PostgreSQL and embedder images are unchanged. Every application
+container has the same verified 32,768-byte operator ceiling. The largest native
+provider requests were 26,475 bytes in T2 and 25,980 bytes in T3. These are actual
+received wire lengths, not token estimates or a whole-request latency benchmark.
+
+In each placement, the provider receives five real file-read responses and the
+next request includes newly committed memory. Pausing the real owner before the
+fifth response prevents a sixth provider request. Restart preserves both private
+identities and new execution succeeds. A permanent HTTP 400 with quoted,
+multiline, backslash and Unicode diagnostics produces a valid failure event and
+exactly one provider request. Inherited zero-byte refusal and initial owner outage
+produce no provider requests. The tests restore the original model roster and
+recall setting, and retire only their own records.
+
+This closes fresh validation of the generic Go native assembly, initialized
+asynchronous worker, standalone detection, bounded compose wait and error-event
+serialization. Automatic packing against the complete native wire request,
+provider-exact token/reserve accounting, remaining protected host inputs and
+durable dispatch receipts remain open; no full MR proposal is certified here.
+
+All nine `64c1871cc0` containers were stopped and removed after receipt and image
+verification; their nine empty networks were removed. Volumes, images and raw
+receipts remain available on the owned validation host.

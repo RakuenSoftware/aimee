@@ -311,3 +311,24 @@ and 508 standalone T3. Image identities, operator limits and sanitized receipts
 are linked from the native recall validation above. All nine owned containers
 are stopped with volumes retained. Generic assembly and asynchronous worker
 configuration fixes postdate that image; live native/async acceptance remains open.
+
+
+The later native/async checkpoint is now linked from the same validation page:
+`7ebee54d83` passes all 527 fresh standalone checks and a 33-check live refresh
+follow-up. Its enrolled matrix correctly refuses an over-budget post-restart
+request and is not accepted. A bounded model-allocation follow-up then passes all
+33 enrolled native lifecycle/refresh checks under the unchanged 32 KiB operator
+ceiling. These tests use actual Go owners and five real tool calls. They do not
+close automatic packing against the complete native request. The worker also
+serializes quoted/multiline error diagnostics correctly; complete fresh
+`64c1871cc0` acceptance of the new fixture and error fix is pending.
+
+
+Complete fresh application/harness `64c1871cc0` now passes **1,387/1,387 checks**
+(841 T2, 546 T3), including 37 real asynchronous native checks per placement.
+Five tool calls, newly committed memory on refresh, refusal before the next
+provider dispatch, owner restart and escaped provider-error events pass in both
+placements. Exact images, unchanged 32 KiB caps, actual request byte counts and
+per-run receipts are linked from the native validation page. Complete native
+request packing, exact token/reserve accounting and durable dispatch acceptance
+remain open. No MR-01–MR-18 proposal is fully certified by this checkpoint.
