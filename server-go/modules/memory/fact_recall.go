@@ -2,8 +2,10 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -65,12 +67,16 @@ var currentFactRecallSQL = `e.edge_class='semantic' AND e.lifecycle_state IN ('p
  AND e.suppressed=0 AND ` + assertionCurrent + `
  AND ` + currentMemoryEvidenceSQL("e", "", false)
 
-// recallFactBlock owns typed-fact selection, ordering, formatting, and PII
+// recallFactBlockSources owns typed-fact selection, ordering, formatting, and PII
 // policy. C callers receive the finished block over the event bus and do not
 // inspect the database or make memory decisions.
-func (s *postgresDataStore) recallFactBlock(ctx context.Context, entity string,
-	turnRequestsSensitive bool, capacity int) (string, int, error) {
-	rows, err := s.db.Query(ctx, `SELECT relation, target, confidence FROM entity_edges e
+func (s *postgresDataStore) recallFactBlockSources(ctx context.Context, entity string,
+	turnRequestsSensitive bool, capacity int, refs *[]typedProjectionRef) (string, int, error) {
+	columns := "relation,target,confidence"
+	if refs != nil {
+		columns += ",e.id,e.version,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)," + assertionMemoryVersions
+	}
+	rows, err := s.db.Query(ctx, `SELECT `+columns+` FROM entity_edges e
 WHERE source = $1 AND `+currentFactRecallSQL+`
 ORDER BY confidence DESC, id ASC LIMIT $2`, entity, factRecallMaxFacts)
 	if err != nil {
@@ -83,7 +89,13 @@ ORDER BY confidence DESC, id ASC LIMIT $2`, entity, factRecallMaxFacts)
 	for rows.Next() {
 		var relation, target string
 		var confidence float64
-		if err := rows.Scan(&relation, &target, &confidence); err != nil {
+		var hit assertionHit
+		var parents string
+		columns := []any{&relation, &target, &confidence}
+		if refs != nil {
+			columns = append(columns, &hit.ID, &hit.Version, &hit.ownerID, &parents)
+		}
+		if err := rows.Scan(columns...); err != nil {
 			return "", 0, err
 		}
 		if relation == "" || target == "" ||
@@ -98,6 +110,20 @@ ORDER BY confidence DESC, id ASC LIMIT $2`, entity, factRecallMaxFacts)
 		// contract so the bus adapter can copy the returned block verbatim.
 		if block.Len()+len(line) >= capacity {
 			break
+		}
+		if refs != nil {
+			if err := json.Unmarshal([]byte(parents), &hit.memoryParents); err != nil {
+				return "", 0, err
+			}
+			hit.StableID, hit.memoryParentsObserved = strconv.FormatInt(hit.ID, 10), true
+			for i := range hit.memoryParents {
+				hit.memoryParents[i].SchemaVersion, hit.memoryParents[i].OwnerID = 1, hit.ownerID
+			}
+			ref := typedProjectionRef{Channel: "facts", ID: hit.StableID, Source: hit.sourceVersion()}
+			if ref.Source == nil || !validTypedSource(ref) {
+				return "", 0, errors.New("memory: fact source versions unavailable or exceed capacity")
+			}
+			*refs = append(*refs, ref)
 		}
 		block.WriteString(line)
 		count++
@@ -174,6 +200,11 @@ ORDER BY source LIMIT $2`, query, factRecallMaxEntities)
 
 func (s *postgresDataStore) RecallFacts(ctx context.Context, entity, query string,
 	turnRequestsSensitive bool, capacity int) (string, int, error) {
+	return s.recallFactsSources(ctx, entity, query, turnRequestsSensitive, capacity, nil)
+}
+
+func (s *postgresDataStore) recallFactsSources(ctx context.Context, entity, query string,
+	turnRequestsSensitive bool, capacity int, refs *[]typedProjectionRef) (string, int, error) {
 	if s.placement != PlacementKB {
 		return "", 0, errors.New("memory: typed fact recall belongs to kb placement")
 	}
@@ -181,14 +212,14 @@ func (s *postgresDataStore) RecallFacts(ctx context.Context, entity, query strin
 		return "", 0, errors.New("memory: typed fact recall requires output capacity")
 	}
 	if entity != "" {
-		return s.recallFactBlock(ctx, entity, turnRequestsSensitive, capacity)
+		return s.recallFactBlockSources(ctx, entity, turnRequestsSensitive, capacity, refs)
 	}
 	// Query recall owns classification as well as filtering. Native callers no
 	// longer classify the turn separately, and a caller-supplied true flag cannot
 	// turn an unrelated query into permission to include PII.
 	turnRequestsSensitive = TurnRequestsSensitive(query)
 
-	block, total, err := s.recallFactBlock(ctx, "user", turnRequestsSensitive, capacity)
+	block, total, err := s.recallFactBlockSources(ctx, "user", turnRequestsSensitive, capacity, refs)
 	if err != nil {
 		return "", 0, err
 	}
@@ -201,7 +232,7 @@ func (s *postgresDataStore) RecallFacts(ctx context.Context, entity, query strin
 		if remaining <= 1 {
 			break
 		}
-		addition, count, recallErr := s.recallFactBlock(ctx, name, turnRequestsSensitive, remaining)
+		addition, count, recallErr := s.recallFactBlockSources(ctx, name, turnRequestsSensitive, remaining, refs)
 		if recallErr != nil {
 			return "", 0, recallErr
 		}

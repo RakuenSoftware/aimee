@@ -22,8 +22,11 @@ now returns retained typed IDs and source/final projection and selection digests
 after row-level repacking. This is an assembly response before host integrity
 acceptance. The host now also [emits Go-retained typed projection references](../../validation/memory-typed-assembly-evidence-2026-09-20.md)
 after integrity acceptance, preserving final selection identity without inventing
-source versions. The legacy plain-text facts block and durable host/provider
-receipt pipeline remain open. Bounded trace reads now refuse partial payloads.
+source versions. The [plain-text facts block](../../validation/memory-fact-source-versions-2026-09-21.md)
+now also binds exact assertion and direct-parent revisions, validates their byte
+commitments in Go assembly, and emits only retained references after host integrity
+acceptance. The durable host/provider receipt pipeline and final source revalidation
+remain open. Bounded trace reads now refuse partial payloads.
 
 Record distinct retrieval, selection, assembly, preparation, dispatch and acknowledgement stages. Connect them to the existing audit/WORM infrastructure with bounded metadata and truthful evidence states.
 

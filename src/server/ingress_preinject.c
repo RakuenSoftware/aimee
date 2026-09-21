@@ -497,9 +497,10 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    const cJSON *retained_memories = cJSON_GetObjectItemCaseSensitive(response, "retained_memories");
    const cJSON *retained_code = cJSON_GetObjectItemCaseSensitive(response, "retained_code_indices");
    const cJSON *retained_typed = cJSON_GetObjectItemCaseSensitive(response, "retained_typed_refs");
+   const cJSON *retained_facts = cJSON_GetObjectItemCaseSensitive(response, "retained_fact_refs");
    if (result && config_kb_evidence_emit_enabled() &&
        (cJSON_GetArraySize(retained_memories) > 0 || cJSON_GetArraySize(retained_code) > 0 ||
-        cJSON_GetArraySize(retained_typed) > 0))
+        cJSON_GetArraySize(retained_typed) > 0 || cJSON_GetArraySize(retained_facts) > 0))
    {
       const char *tid = ingress_preinject_turn_id();
       char minted[40];
@@ -584,6 +585,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       }
       /* Merge after the legacy memory writer, whose turn creation is first-wins. */
       ingress_emit_projection_refs(retained_typed, tid, fp);
+      ingress_emit_projection_refs(retained_facts, tid, fp);
    }
 
    kb_client_memory_scope_context_clear();

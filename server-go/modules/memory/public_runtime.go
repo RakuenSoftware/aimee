@@ -140,6 +140,7 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			return invalid("missing query")
 		}
 		request.Operation, request.ContentCapacity = "fact-recall", 2048
+		request.CollectFactSources = verb == "facts"
 		if verb == "context_block" {
 			request.Operation = "context-ingress"
 			request.BlockType, request.Limit = args.stringOr("block_type", "general"), args.limit("limit", 5, 100)
@@ -265,6 +266,9 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			field = "facts"
 		}
 		result[field] = *response.Block
+		if verb == "facts" {
+			result["fact_projection"] = response.FactProjection
+		}
 		if response.Reason != "" {
 			result["retraction"] = response.Reason
 		}

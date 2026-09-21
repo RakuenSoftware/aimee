@@ -359,6 +359,68 @@ func TestIngressTypedProjectionRepackingAndIdentity(t *testing.T) {
 	}
 }
 
+func TestIngressFactSourceProjection(t *testing.T) {
+	const id = "9007199254743001"
+	const block = "- role: engineer 界\n"
+	makeSource := func() *factProjection {
+		version := MemoryRecordVersion{SchemaVersion: 1, OwnerID: "00000000-0000-0000-0000-000000000001", RecordID: id, RecordRevision: "7"}
+		return newFactProjection(block, []typedProjectionRef{{Channel: "facts", ID: id, Source: &typedSourceVersion{Kind: "semantic_assertion", Version: version, MemoryParentState: "observed"}}})
+	}
+	assemble := func(text string, source *factProjection, budget int) (map[string]any, error) {
+		raw, err := json.Marshal(map[string]any{"status": "ok", "facts": text, "fact_projection": source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ingressAssemble(ingressAssemblyRequest{Budget: budget, FactsRequested: true, FactsResponse: raw,
+			ContextLimits: &ContextLimits{SchemaVersion: 1, MaxContextBytes: &budget}})
+	}
+	source := makeSource()
+	got, err := assemble(block, source, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection := got["facts_projection"].(map[string]any)
+	refs := got["retained_fact_refs"].([]ingressProjectionEvidenceRef)
+	if projection["selection_digest"] != source.SelectionDigest || len(refs) != 1 || refs[0].Ref != "facts:v1:"+source.SelectionDigest+":semantic_assertion:"+id || !strings.Contains(got["envelope"].(string), "## Known facts\n"+block) {
+		t.Fatal(got)
+	}
+	got, err = assemble(block, source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection = got["facts_projection"].(map[string]any)
+	if len(got["retained_fact_refs"].([]ingressProjectionEvidenceRef)) != 0 || len(projection["retained_items"].([]typedProjectionRef)) != 0 || projection["source_version_state"] != "unavailable" || projection["source_selection_digest"] != source.SelectionDigest || projection["omitted_count"] != 1 || got["envelope"] != "" {
+		t.Fatal(got)
+	}
+	for _, change := range []string{"text", "revision", "parent", "channel", "id", "duplicate", "null", "count"} {
+		p, text := makeSource(), block
+		switch change {
+		case "text":
+			text = strings.Replace(block, "engineer", "operator", 1)
+		case "revision":
+			p.Retained[0].Source.Version.RecordRevision = "8"
+		case "parent":
+			p.Retained[0].Source.MemoryParentState = "unavailable"
+		case "channel":
+			p.Retained[0].Channel = "current_assertions"
+		case "id":
+			p.Retained[0].ID = "1"
+		case "duplicate":
+			p.Retained = append(p.Retained, p.Retained[0])
+			p.SelectionDigest = typedSelectionDigest(p.ProjectionDigest, p.Retained)
+		case "null":
+			p = nil
+		case "count":
+			p.RenderedBytes++
+		}
+		result, err := assemble(text, p, 4096)
+		var refusal *contextBudgetError
+		if result != nil || !errors.As(err, &refusal) || refusal.kind != "invalid_projection" {
+			t.Fatal("invalid fact binding accepted", change, result, err)
+		}
+	}
+}
+
 func TestIngressRejectsMismatchedTypedProjection(t *testing.T) {
 	for _, mutation := range []string{"rendered", "selection", "digest", "version", "channels", "accounting", "rows", "references"} {
 		t.Run(mutation, func(t *testing.T) {

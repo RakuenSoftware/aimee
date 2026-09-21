@@ -58,10 +58,15 @@ PostgreSQL/race checks pass. Fresh application/harness `91a1f02969` passes
 are now bound into assertion selections, with a measured 48.3× improvement in the
 isolated parent-eligibility query. [Episode versions](../../validation/memory-episode-source-versions-2026-09-21.md)
 add independent episode and parent revision commitments under shared schema 30;
-local PostgreSQL, race and migration checks pass, with fresh deployment pending.
+local PostgreSQL, race and migration checks pass. Fresh application/harness
+`97fcb4ae04` passes **1,566/1,566 checks** (974 T2, 592 T3).
 [Indexed-deletion audit isolation](../../validation/memory-evidence-event-isolation-2026-09-21.md)
 at `800f4ef2f4` passes **1,561/1,561 fresh checks** (969 T2, 592 T3).
-These observations do not certify owner revalidation at final release.
+[Plain-text fact projections](../../validation/memory-fact-source-versions-2026-09-21.md)
+now carry exact assertion/parent versions and emit only Go-retained references
+after host integrity acceptance. Runtime-role and native transport tests pass;
+fresh deployment remains pending. These observations do not certify owner
+revalidation at final release.
 
 Delivery follows the program’s dependency order: eligibility/mutations and final
 payload budgets first, then evidence/receipts/coverage, views and indexing,

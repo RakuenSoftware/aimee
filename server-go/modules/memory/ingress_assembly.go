@@ -223,11 +223,20 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		score = max(score, memoryScore)
 	}
 	var facts struct {
-		Status string  `json:"status"`
-		Facts  *string `json:"facts"`
+		Status     string          `json:"status"`
+		Facts      *string         `json:"facts"`
+		Projection json.RawMessage `json:"fact_projection"`
 	}
+	var factSources *factProjection
+	factEntry := -1
 	factsUnavailable := request.FactsRequested && (json.Unmarshal(request.FactsResponse, &facts) != nil || facts.Status != "ok" || facts.Facts == nil)
+	if request.FactsRequested && !factsUnavailable && len(facts.Projection) != 0 {
+		if json.Unmarshal(facts.Projection, &factSources) != nil || !factSources.valid(*facts.Facts) {
+			return nil, &contextBudgetError{"invalid_projection", "fact projection identity or serialized evidence mismatch"}
+		}
+	}
 	if request.FactsRequested && !factsUnavailable && *facts.Facts != "" {
+		factEntry = len(entries)
 		entries = append(entries, ingressEntry{"facts", "", "## Known facts\n" + ingressTerminated(*facts.Facts)})
 		score = max(score, .5)
 	}
@@ -286,7 +295,11 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 	retained := []string{}
 	retainedMemories := []ingressRetainedMemory{}
 	retainedCode := []int{}
+	factsRetained := false
 	for _, index := range selected {
+		if index == factEntry {
+			factsRetained = true
+		}
 		if memory, ok := memoryEntries[index]; ok {
 			retained = append(retained, memory.ID)
 			retainedMemories = append(retainedMemories, memory)
@@ -300,6 +313,24 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		"retained_memories": retainedMemories, "retained_code_indices": retainedCode,
 		"omitted_count": omitted, "headline_missing_count": missing, "folded_count": folded,
 		"folded_saved": saved, "facts_unavailable": factsUnavailable, "typed_unavailable": typedUnavailable}
+	if factSources != nil {
+		sourceProjection, sourceSelection, sourceCount := factSources.ProjectionDigest, factSources.SelectionDigest, len(factSources.Retained)
+		if !factsRetained {
+			factSources = newFactProjection("", nil)
+		}
+		refs := make([]ingressProjectionEvidenceRef, 0, len(factSources.Retained))
+		for _, ref := range factSources.Retained {
+			refs = append(refs, ingressProjectionEvidenceRef{Type: "memory_projection_item", Ref: "facts:v1:" + factSources.SelectionDigest + ":" + ref.Source.Kind + ":" + ref.ID})
+		}
+		result["retained_fact_refs"] = refs
+		result["facts_projection"] = map[string]any{
+			"schema_version": 1, "boundary": "ingress_envelope", "source_projection_digest": sourceProjection,
+			"source_selection_digest": sourceSelection, "projection_digest": factSources.ProjectionDigest,
+			"selection_digest": factSources.SelectionDigest, "retained_items": factSources.Retained,
+			"rendered_bytes": factSources.RenderedBytes, "source_version_state": factSources.SourceVersionState,
+			"omitted_count": sourceCount - len(factSources.Retained),
+		}
+	}
 	if typed != nil {
 		refs := make([]ingressProjectionEvidenceRef, 0, len(typed.Retained))
 		for _, item := range typed.Retained {

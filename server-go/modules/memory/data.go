@@ -43,6 +43,8 @@ type DataRequest struct {
 	ExpectedVersion *MemoryRecordVersion `json:"expected_version,omitempty"`
 	AtVersion       *MemoryRecordVersion `json:"at_version,omitempty"`
 
+	CollectFactSources bool `json:"collect_fact_sources,omitempty"`
+
 	Changes        *MemoryChangesRequest `json:"changes,omitempty"`
 	ReadPolicy     *MemoryReadPolicy     `json:"read_policy,omitempty"`
 	pageRankConfig *pageRankConfig
@@ -182,6 +184,7 @@ type Record struct {
 }
 
 type DataResponse struct {
+	FactProjection  *factProjection        `json:"fact_projection,omitempty"`
 	Proposal        *correctionProposal    `json:"proposal,omitempty"`
 	MutationReceipt *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
 
@@ -2308,8 +2311,18 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 		var block string
 		var count int
-		block, count, err = recall.RecallFacts(ctx, request.Entity, request.Query,
-			request.TurnRequestsSensitive, request.ContentCapacity)
+		if request.CollectFactSources {
+			projection, ok := options.data.(interface {
+				RecallFactProjection(context.Context, string, string, bool, int) (string, int, *factProjection, error)
+			})
+			if !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			block, count, response.FactProjection, err = projection.RecallFactProjection(ctx, request.Entity, request.Query, request.TurnRequestsSensitive, request.ContentCapacity)
+		} else {
+			block, count, err = recall.RecallFacts(ctx, request.Entity, request.Query,
+				request.TurnRequestsSensitive, request.ContentCapacity)
+		}
 		response.Block, response.Count = &block, &count
 	case "directive-create", "directive-list", "directive-get", "directive-resolve", "directive-suppress",
 		"directive-sweep", "directive-match", "directive-mark-surfaced", "directive-count":

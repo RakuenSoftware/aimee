@@ -30,7 +30,15 @@ Validation:
   history and episode payloads. An additional reapplication preserves an edited
   episode revision. Audit isolation and restricted verifier permissions remain.
 - All 77 lint gates, standalone export, 17 S1 tests, and documentation/link checks
-  pass. Fresh application validation of schema 30 remains pending.
+  pass. Fresh application and harness `97fcb4ae04fe190278101a3b12ae2aaa3f6473e9`
+  pass **1,566/1,566 checks** on owned `.253` environments:
+  [974 T2](memory-episode-source-versions-2026-09-21/fresh-t2-97fcb4ae04.json)
+  and [592 T3](memory-episode-source-versions-2026-09-21/fresh-t3-97fcb4ae04.json).
+  All five episode checks and all 37 asynchronous native checks per placement pass.
+  [Nine image identities and three actual provider caps](memory-episode-source-versions-2026-09-21/image-identities-97fcb4ae04.json)
+  were verified. Native provider requests stayed within 32 KiB. All nine owned
+  containers and nine empty networks were removed; images, volumes and raw receipts
+  remain. GitHub CI was still running when these results were collected.
 
 Five fresh authenticated KB checks were added for episode/parent binding, no-op
 stability, independent provenance edits, identical rendered bytes under parent

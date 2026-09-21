@@ -185,6 +185,30 @@ def typed_source_version_gate(kb, check):
         code, empty = call(dict(context_limits=dict(schema_version=1, max_context_bytes=0)))
         check('Omitted typed assertion claims no retained source revision', code == 200 and
               empty.get('retained_items') == [] and empty.get('source_version_state') == 'unavailable')
+        # The legacy plain-text channel keeps the same wording, but now carries
+        # source versions alongside it for assembly and later release decisions.
+        def plain_facts():
+            return kb.kb_request('/v1/actions/memory.facts', dict(query=key, project=key, scope_context=True))
+        code, facts = plain_facts()
+        fact_projection = facts.get('fact_projection', {})
+        fact_source = selected(fact_projection).get('source_version', {})
+        check('Plain facts bind exact assertion and parent revisions', code == 200 and
+              fact_source.get('record_kind') == 'semantic_assertion' and
+              fact_source.get('version') == new_source and fact_source.get('memory_parents') == [expected_parent])
+        check('Plain facts digest binds rendered bytes and source selection', matches(fact_projection) and
+              fact_projection.get('projection_digest') == 'sha256:' + hashlib.sha256(facts.get('facts', '').encode()).hexdigest() and
+              fact_projection.get('rendered_bytes') == len(facts.get('facts', '').encode()))
+        code, facts_again = plain_facts()
+        check('Unchanged plain facts preserve selection identity', code == 200 and
+              facts_again.get('fact_projection') == fact_projection)
+        sql(f"UPDATE memories SET content='plain fact supporting source changed' WHERE id={int(fixture['parent_id'])}")
+        code, facts_parent_changed = plain_facts()
+        expected_parent['record_revision'] = str(int(expected_parent['record_revision'])+1)
+        changed_facts_projection = facts_parent_changed.get('fact_projection', {})
+        check('Parent revision changes plain fact binding with identical text', code == 200 and
+              facts_parent_changed.get('facts') == facts.get('facts') and
+              selected(changed_facts_projection).get('source_version', {}).get('memory_parents') == [expected_parent] and
+              changed_facts_projection.get('selection_digest') != fact_projection.get('selection_digest') and matches(changed_facts_projection))
         # This authored episode has a different key from the parent, so indexing
         # cannot replace it with the generated parent-key episode.
         episode_id = sql(f"""INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session)

@@ -17,7 +17,8 @@ static int g_runtime_failure;
 static int g_scope_active;
 static int g_evidence_enabled;
 static int g_assembly_budget = 1200;
-static int g_evidence_count, g_bridge_count, g_code_count, g_typed_count;
+static int g_evidence_count, g_bridge_count, g_code_count, g_typed_count, g_fact_count;
+static int g_fact_projection;
 static char g_typed_first_ref[512];
 static int64_t g_evidence_ids[5];
 static char g_evidence_preview[256];
@@ -132,6 +133,18 @@ char *kb_v1_action_request(const char *method, cJSON *request)
       return strdup("not-json");
    if (g_facts_failure == 3)
       return strdup("{\"status\":\"error\",\"facts\":\"must not inject\"}");
+   if (g_fact_projection)
+      return strdup(
+          "{\"status\":\"ok\",\"facts\":\"- global preference: never substitute for proj"
+          "ect evidence\\n\",\"fact_projection\":{\"schema_version\":1,\"projection_dige"
+          "st\":\"sha256:40fa720370de964a9113864fbad1ad1dd4dd5bf6b8ae328c362435a107"
+          "6afa3a\",\"selection_digest\":\"sha256:d46b7f9199b8eaa29e0fa7f60359d2e38ef"
+          "98e4d1dd446d90300980fc0e8965e\",\"rendered_bytes\":59,\"retained_items\":[{"
+          "\"channel\":\"facts\",\"stable_id\":\"9007199254743001\",\"source_version\":{\"re"
+          "cord_kind\":\"semantic_assertion\",\"version\":{\"schema_version\":1,\"owner_i"
+          "d\":\"00000000-0000-0000-0000-000000000001\",\"record_id\":\"900719925474300"
+          "1\",\"record_revision\":\"7\"},\"memory_parent_state\":\"observed\"}}],\"source_"
+          "version_state\":\"record_versions_observed\"}}");
    return strdup("{\"status\":\"ok\",\"facts\":\"- global preference: never substitute for project "
                  "evidence\\n\"}");
 }
@@ -372,7 +385,13 @@ int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *ro
    assert(g_scope_active && turn_id && role && query_fingerprint);
    if (n > 0 && !strcmp(types[0], "memory_projection_item"))
    {
-      assert(versions == NULL); /* No canonical storage version is being claimed. */
+      assert(versions == NULL); /* References bind a projection, not a storage row. */
+      if (!strncmp(refs[0], "facts:v1:sha256:", 16))
+      {
+         assert(n == 1 && strstr(refs[0], ":semantic_assertion:9007199254743001"));
+         g_fact_count += n;
+         return 0;
+      }
       for (int i = 0; i < n; i++)
       {
          assert(!strcmp(types[i], "memory_projection_item"));
@@ -868,7 +887,7 @@ static void test_small_budget_does_not_retrieve_or_claim(void)
 
 static void reset_evidence(void)
 {
-   g_evidence_count = g_bridge_count = g_code_count = g_typed_count = 0;
+   g_evidence_count = g_bridge_count = g_code_count = g_typed_count = g_fact_count = 0;
    g_typed_first_ref[0] = 0;
    g_evidence_preview[0] = 0;
 }
@@ -928,6 +947,35 @@ static void test_evidence_matches_accepted_envelope(void)
    g_assembly_budget = 1200;
    ingress_preinject_set_turn_id(NULL);
    printf("evidence_matches_accepted_envelope OK\n");
+}
+
+static void test_fact_evidence_after_integrity_and_packing(void)
+{
+   g_evidence_enabled = g_fact_projection = 1;
+   ingress_preinject_set_turn_id("fact-evidence-turn");
+   reset_evidence();
+   char *env = ingress_preinject_build("deployment matrix", 0);
+   assert(env && g_fact_count == 1 && strstr(env, "## Known facts"));
+   free(env);
+
+   g_assembly_budget = 650;
+   reset_evidence();
+   env = ingress_preinject_build("deployment matrix", 0);
+   assert(env && !g_fact_count && !strstr(env, "## Known facts"));
+   free(env);
+   g_assembly_budget = 1200;
+
+   for (int mode = 0; mode < 2; mode++)
+   {
+      reset_evidence();
+      g_malicious_preview = mode == 0;
+      g_assembly_failure = mode == 1;
+      assert(ingress_preinject_build("deployment matrix", 0) == NULL);
+      assert(!g_fact_count && !g_scope_active);
+   }
+   g_malicious_preview = g_assembly_failure = g_evidence_enabled = g_fact_projection = 0;
+   ingress_preinject_set_turn_id(NULL);
+   printf("fact_evidence_after_integrity_and_packing OK\n");
 }
 
 static void test_typed_evidence_after_integrity_and_packing(void)
@@ -1043,6 +1091,7 @@ static void test_required_assembly_refusal_reaches_dispatch(void)
 int main(void)
 {
    test_required_assembly_refusal_reaches_dispatch();
+   test_fact_evidence_after_integrity_and_packing();
    test_typed_evidence_after_integrity_and_packing();
    test_evidence_matches_accepted_envelope();
    test_small_budget_does_not_retrieve_or_claim();

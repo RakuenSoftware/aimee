@@ -2,12 +2,14 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"strings"
 	"testing"
 
+	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
 )
 
@@ -246,6 +248,48 @@ func exerciseCurrentFactRecallReplay(t *testing.T, ctx context.Context, tx pgx.T
 		}
 	}
 	check()
+	blockBefore, countBefore, projection, err := backend.RecallFactProjection(ctx, "CurrentFactEntity", "", false, 8192)
+	if err != nil || countBefore != 1 || !projection.valid(blockBefore) || len(projection.Retained) != 1 || projection.Retained[0].ID != fmt.Sprint(good) || projection.Retained[0].Source.MemoryParents[0].RecordID != fmt.Sprint(local) {
+		t.Fatal("fact source projection lost selected assertion or parent", projection, err)
+	}
+	public, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementKB, backend)), 0, bus.CommandContext{}, "facts", `{"query":"CurrentFactEntity","project":"current-fact-project","scope_context":true}`)
+	if status != bus.ModuleStatusOK || public["status"] != "ok" {
+		t.Fatal("public fact projection unavailable", public, status)
+	}
+	encoded, _ := json.Marshal(public["fact_projection"])
+	var transported factProjection
+	if json.Unmarshal(encoded, &transported) != nil || !transported.valid(public["facts"].(string)) {
+		t.Fatal("public fact projection lost binding", public)
+	}
+	found := false
+	for _, ref := range transported.Retained {
+		if ref.ID == fmt.Sprint(good) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("public fact projection omitted selected assertion", public)
+	}
+	exec(`SAVEPOINT fact_source_revision`)
+	exec(`UPDATE memories SET content=content||' changed supporting text' WHERE id=$1`, local)
+	blockAfter, _, changed, err := backend.RecallFactProjection(ctx, "CurrentFactEntity", "", false, 8192)
+	if err != nil || blockAfter != blockBefore || changed.ProjectionDigest != projection.ProjectionDigest || changed.SelectionDigest == projection.SelectionDigest || changed.Retained[0].Source.Version != projection.Retained[0].Source.Version || changed.Retained[0].Source.MemoryParents[0].RecordRevision == projection.Retained[0].Source.MemoryParents[0].RecordRevision {
+		t.Fatal("same rendered fact reused stale parent binding", changed, err)
+	}
+	blockAfter, countAfter, empty, err := backend.RecallFactProjection(ctx, "CurrentFactEntity", "", false, 1)
+	if err != nil || blockAfter != "" || countAfter != 0 || !empty.valid("") || len(empty.Retained) != 0 || empty.SourceVersionState != "unavailable" {
+		t.Fatal("omitted fact claims retained sources", empty, err)
+	}
+	// A selected assertion with an incomplete parent set must refuse its block.
+	exec(`WITH parents AS (INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+ SELECT 'L2','fact','fact-overflow-'||n,'source','project','current-fact-project' FROM generate_series(1,$1)n RETURNING id)
+ INSERT INTO fact_evidence(assertion_id,source_kind,source_id) SELECT $2,'memory','memory:'||id::text FROM parents`, maxTypedMemoryParents, good)
+	blockAfter, countAfter, overflow, err := backend.RecallFactProjection(ctx, "CurrentFactEntity", "", false, 8192)
+	if err == nil || blockAfter != "" || countAfter != 0 || overflow != nil {
+		t.Fatal("partial fact provenance presented as complete", overflow, err)
+	}
+	check() // Ordinary legacy recall still uses its existing selection contract.
+	exec(`ROLLBACK TO SAVEPOINT fact_source_revision; RELEASE SAVEPOINT fact_source_revision`)
 	// Malformed world time must refuse the result, never leave a plausible
 	// partial fact block. The caller can recover after its scoped rollback.
 	exec(`SAVEPOINT current_fact_malformed`)

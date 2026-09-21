@@ -38,7 +38,7 @@ func validTypedSource(ref typedProjectionRef) bool {
 	}
 	switch ref.Source.Kind {
 	case "semantic_assertion":
-		if ref.Channel != "current_assertions" && ref.Channel != "historical_assertions" {
+		if ref.Channel != "current_assertions" && ref.Channel != "historical_assertions" && ref.Channel != "facts" {
 			return false
 		}
 	case "memory_episode":
