@@ -1020,7 +1020,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if request.AtVersion != nil && (options.placement != PlacementServer || request.Operation != "get" || !request.AtVersion.validFor(request.ID) || request.ReadPolicy != nil || request.AsOf != "") {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	versionedMutation := (options.placement == PlacementKB && versionedCorrectionOperation(request.Operation)) || (options.placement == PlacementServer && (request.Operation == "supersede" || request.Operation == "delete"))
+	versionedMutation := (options.placement == PlacementKB && (versionedCorrectionOperation(request.Operation) || request.Operation == "delete-as")) || (options.placement == PlacementServer && (request.Operation == "supersede" || request.Operation == "delete"))
 	if request.ExpectedVersion != nil && (!versionedMutation || !request.ExpectedVersion.validFor(request.ID)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -1947,7 +1947,29 @@ set_config('aimee.correlation_id',$9,true)`,
 			if request.ID <= 0 || (request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			response.Deleted, err = mutations.DeleteAs(ctx, request.ID, request.Authority)
+			if request.ExpectedVersion != nil {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok || transaction == nil || !options.publicWrite {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				authority := AuthorityModel
+				if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+					authority = AuthorityUser
+				}
+				if request.IdempotencyKey != "" {
+					request.Scope = scope
+					response.MutationReceipt, err = backend.deleteKBIdempotent(ctx, request, authority, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
+					response.Deleted = err == nil
+					rollbackOnly = err != nil
+				} else {
+					response.Deleted, err = backend.deleteKBVersion(ctx, request.ID, authority, request.ExpectedVersion)
+				}
+				if errors.Is(err, ErrMemoryNotFound) {
+					err = nil
+				}
+			} else {
+				response.Deleted, err = mutations.DeleteAs(ctx, request.ID, request.Authority)
+			}
 		}
 	case "pii-inject":
 		if request.Sensitivity < int(SensNormal) || request.Sensitivity > int(SensSecret) ||

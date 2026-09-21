@@ -3783,7 +3783,7 @@ paths:
         Defaults to store=user: retirement removes a private memory from current
         recall while retaining governed history and reports destroyed=false.
         A model cannot retire user-authored or unknown-origin private content.
-        Private expected_version binds the owner, record ID and current revision.
+        The expected_version precondition binds the owner, record ID and current revision.
         With idempotency_key, an authenticated identical retry returns its original
         mutation_receipt without another transition. Reactivated, changed or erased
         results are not retired again; changed retry payloads conflict. The receipt
@@ -3791,8 +3791,11 @@ paths:
 
         Select store=kb explicitly for the shared deletion contract. Its existing
         authority and retention rules determine whether the record is retired or
-        destroyed; expected_version and idempotency_key are not yet supported for
-        shared deletion. Requires the memory-admin capability.
+        destroyed. Shared conditional deletion supports the same precondition and retry
+        key. Its schema-version-2 receipt names the target_version and outcome
+        (retired or destroyed). Retirement includes the resulting version;
+        destruction has no current version. A changed, restored or hidden result
+        cannot be deleted again through an old receipt. Requires memory-admin.
       requestBody:
         required: true
         content:
@@ -3820,7 +3823,7 @@ paths:
                   minLength: 16
                   maxLength: 128
                   pattern: '^[!-~]+$'
-                  description: Private retirement only; requires expected_version and an identical retry payload.
+                  description: Requires expected_version, an authenticated principal and an identical retry payload.
       responses:
         "200":
           description: Deletion result ({ id, deleted, destroyed })

@@ -21,7 +21,9 @@ var errReplayUnavailable = errors.New("memory: mutation was already committed bu
 type MemoryMutationReceipt struct {
 	SchemaVersion int                 `json:"schema_version"`
 	CommitID      string              `json:"commit_id"`
-	Version       MemoryRecordVersion `json:"version"`
+	Version       MemoryRecordVersion `json:"version,omitzero"`
+	TargetVersion MemoryRecordVersion `json:"target_version,omitzero"`
+	Outcome       string              `json:"outcome,omitempty"`
 	Replayed      bool                `json:"replayed"`
 }
 

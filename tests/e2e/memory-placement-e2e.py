@@ -179,6 +179,74 @@ class Gate:
         self.check('MCP retries retain exactly one replacement', self.sql(
             f"SELECT count(*) FROM memories WHERE key='{key}' OR key LIKE '{key}#v%'") == '2')
 
+    def shared_keyed_deletion(self):
+        key = self.prefix + '-shared-deletion'
+        human = self.good('shared destructive deletion parent', self.call('store', dict(store='kb', key=key, content='explicit user deletion fixture')))
+        mid = human['id']
+        version = self.good('shared deletion expected version', self.call('get', dict(store='kb', id=mid, include_version=True)))['memory']['version']
+        request = dict(store='kb', id=str(mid), expected_version=version, idempotency_key=key+'-retry')
+        refused = self.mcp_document('model cannot elevate shared deletion', 'mutate', dict(verb='forget', authority='user', **request))
+        self.check('shared deletion precondition grants no user authority', refused.get('kind') == 'review_required')
+        stale = dict(version, record_revision='9223372036854775807')
+        code, conflict = self.call('delete', dict(request, expected_version=stale))
+        self.check('shared deletion rejects a stale target', code == 409 and conflict.get('reason') == 'expected_version_conflict')
+        self.sql("ALTER TABLE memory_mutation_receipts ADD CONSTRAINT shared_delete_failure CHECK(operation<>'destroyed') NOT VALID")
+        try:
+            before = self.shared_changes(mid)
+            code, failed = self.call('delete', request)
+            self.check('shared destruction refuses a receipt write failure', code >= 500 and failed.get('status') == 'error')
+            current = self.good('failed shared destruction preserves its parent', self.call('get', dict(store='kb', id=mid, include_version=True)))['memory']
+            self.check('shared destruction failure rolls back revision and invalidation', current['version'] == version and self.shared_changes(mid) == before)
+        finally:
+            self.sql('ALTER TABLE memory_mutation_receipts DROP CONSTRAINT shared_delete_failure')
+        first = self.good('shared keyed destruction commits', self.call('delete', request))
+        receipt = first['mutation_receipt']
+        self.check('shared destruction receipt invents no current record version', first.get('destroyed') is True and receipt['schema_version'] == 2 and
+            receipt['outcome'] == 'destroyed' and receipt['target_version'] == version and 'version' not in receipt and receipt['replayed'] is False)
+        self.check('shared destruction is physically applied and audited as irreversible', self.sql(f"SELECT count(*) FROM memories WHERE id={int(mid)}") == '0' and
+            self.sql(f"SELECT reversible FROM fact_graph_commits WHERE commit_id='{receipt['commit_id']}'") == '0')
+        replay = self.good('shared destruction HTTP retry', self.call('delete', request))
+        self.check('shared destruction retry preserves its committed identity', replay['mutation_receipt']['replayed'] is True and replay['mutation_receipt']['commit_id'] == receipt['commit_id'])
+        code, conflict = self.call('delete', dict(request, expected_version=stale))
+        self.check('shared destruction key rejects a changed request', code == 409 and conflict.get('reason') == 'idempotency_conflict')
+        self.shared_destroy_retry = (request, receipt)
+        model_key = key+'-model'
+        code, created = self.mcp('mutate', dict(verb='store', store='kb', key=model_key, content='model retirement fixture'))
+        self.check('MCP creates shared retirement parent', code == 200 and 'stored memory id=' in created)
+        model_id = int(self.sql(f"SELECT id FROM memories WHERE key='{model_key}' AND lifecycle_state='active'"))
+        version = self.mcp_document('MCP shared retirement expected version', 'memory_get', dict(store='kb', id=str(model_id), include_version=True))['memory']['version']
+        args = dict(verb='forget', store='kb', id=str(model_id), expected_version=version, idempotency_key=key+'-model-retry')
+        first = self.mcp_document('MCP keyed shared retirement', 'mutate', args)
+        receipt = first['mutation_receipt']
+        self.check('MCP shared retirement receipt binds both versions', receipt['schema_version'] == 2 and receipt['outcome'] == 'retired' and
+            receipt['target_version'] == version and receipt['version']['record_id'] == str(model_id) and receipt['version'] != version and receipt['replayed'] is False)
+        committed = self.shared_changes(model_id)
+        replay = self.mcp_document('MCP shared retirement retry', 'mutate', args)
+        self.check('MCP shared retirement replay repeats no mutation or host audit', replay['mutation_receipt']['commit_id'] == receipt['commit_id'] and
+            replay['mutation_receipt']['replayed'] is True and 'audit_id' not in replay and self.shared_changes(model_id) == committed)
+        self.shared_retire_retry = (args, receipt)
+
+    def shared_deletion_after_restart(self):
+        request, receipt = self.shared_destroy_retry
+        replay = self.good('shared destruction receipt after KB restart', self.call('delete', request))
+        self.check('shared destruction restart retry retains one commit', replay['mutation_receipt']['replayed'] is True and replay['mutation_receipt']['commit_id'] == receipt['commit_id'])
+        mid = int(request['id'])
+        self.sql(f"INSERT INTO memories(id,key,content,tier,kind,scope_type,scope_value,provenance_category) VALUES({mid},'{self.prefix}-resurrected','restored hidden record','L2','fact','project','hidden-restoration','user_stated')")
+        code, unavailable = self.call('delete', request)
+        self.check('shared destruction retry cannot certify a hidden restored ID as absent', code == 409 and unavailable.get('reason') == 'idempotent_result_unavailable' and 'mutation_receipt' not in unavailable)
+        self.sql(f'DELETE FROM memories WHERE id={mid}')
+        args, receipt = self.shared_retire_retry
+        replay = self.mcp_document('MCP shared retirement after KB restart', 'mutate', args)
+        self.check('shared retirement restart retry retains one commit', replay.get('mutation_receipt', {}).get('replayed') is True and replay['mutation_receipt']['commit_id'] == receipt['commit_id'])
+        mid = int(args['id'])
+        self.sql(f"UPDATE memories SET lifecycle_state='active',activation_suppressed=0,valid_until=NULL WHERE id={mid}")
+        unavailable = self.mcp_document('MCP retirement of reactivated result', 'mutate', args)
+        self.check('shared retirement retry cannot repeat after reactivation', unavailable.get('reason') == 'idempotent_result_unavailable' and 'mutation_receipt' not in unavailable)
+        self.sql(f'DELETE FROM memories WHERE id={mid}')
+        unavailable = self.mcp_document('MCP retirement of erased result', 'mutate', args)
+        self.check('shared retirement key survives erasure', unavailable.get('reason') == 'idempotent_result_unavailable' and
+            self.sql(f"SELECT count(*) FROM memory_mutation_receipts WHERE result_id={mid} AND operation='retired'") == '1')
+
     def shared_correction_admission(self, old_id, version):
         before = self.shared_changes(old_id)
         keys = []
@@ -855,8 +923,10 @@ class Gate:
         self.check('local retirement leaves KB content unchanged', json.loads(self.sql(f'SELECT to_json(content) FROM memories WHERE id={mid}')) == shared)
         self.shared_mcp_corrections()
         journal_id, journal = self.shared_journal()
+        self.shared_keyed_deletion()
         self.docker('restart', self.args.kb)
         self.good('shared replacement survives KB restart', self.wait('get', dict(store='kb', id=journal_id)))
+        self.shared_deletion_after_restart()
         restarted = self.shared_changes(journal_id)
         # Background indexing may add the primary scope tag or normalize derived
         # fields after restart. Those are real governed mutations: require the

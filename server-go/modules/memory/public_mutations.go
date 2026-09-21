@@ -60,13 +60,15 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 			return invalid("memory." + verb + " requires a positive integer id")
 		}
 		request.Operation = map[string]string{"delete": "delete-as", "update": "update-as", "touch": "touch", "reject": "reject", "restore": "restore"}[verb]
-		if verb == "update" {
+		if verb == "update" || verb == "delete" {
 			var refusal map[string]any
 			request.ExpectedVersion, request.IdempotencyKey, refusal = commandCorrectionOptions(args, request.ID, options.commandContext)
 			if refusal != nil {
 				return commandResult(refusal)
 			}
 			options.publicWrite = true
+		}
+		if verb == "update" {
 			request.Content = args.stringOr("content", "")
 			if request.Content == "" {
 				return invalid("missing content")
@@ -200,6 +202,9 @@ func mutationMCPResult(verb string, id, newID int64, key string, receipts ...*Me
 	result := map[string]any{"status": "ok", "text": text, "audit_id": fmt.Sprint(newID)}
 	if len(receipts) > 0 && receipts[0] != nil {
 		result["mutation_receipt"] = receipts[0]
+		if verb == "delete" && receipts[0].Outcome == "destroyed" {
+			result["text"] = fmt.Sprintf("deleted memory id=%d (destroyed)", id)
+		}
 		if receipts[0].Replayed {
 			delete(result, "audit_id")
 		}

@@ -345,3 +345,12 @@ each topology. The independently exported Go schema owner now carries all 32
 embedded migrations and shares its database/schema/peer startup assembly with
 the bundled executable. Creation retries and the remaining MR-02 clauses remain
 open.
+
+[Shared conditional deletion](../../validation/memory-shared-deletion-2026-09-21.md)
+adds expected versions and durable retries for model retirement and the existing
+verified-user destructive operation. Schema-two receipts distinguish target and
+result, and omit a current version for destruction. Scope-aware outcome checks
+refuse a restored ID even when RLS hides it. PostgreSQL rollback, concurrency,
+disconnect/reconnect, forged-receipt, authority and full schema-upgrade checks
+pass locally. Fresh T2/T3 acceptance is pending; creation retries and the remaining
+MR-02 acceptance clauses are still open.

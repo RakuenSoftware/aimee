@@ -77,7 +77,11 @@ func (s *postgresDataStore) openFactCommit(ctx context.Context, a FactActor, ope
 	if _, err := s.db.Exec(ctx, `SELECT set_config('aimee.principal',$1,true),set_config('aimee.authority',$2,true),set_config('aimee.transport_identity',$3,true),set_config('aimee.correlation_id',$4,true)`, a.Principal, a.Role, a.TransportIdentity, parent); err != nil {
 		return "", err
 	}
-	_, err := s.db.Exec(ctx, `INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,authority_rank,status,reversible,parent_commit_id,origin_ref) VALUES($1,$2,$3,$4,$5,'open',1,$6,$6)`, id, operation, a.Principal, a.Role, a.Rank, parent)
+	reversible := 1
+	if operation == "memory.delete" {
+		reversible = 0
+	}
+	_, err := s.db.Exec(ctx, `INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,authority_rank,status,reversible,parent_commit_id,origin_ref) VALUES($1,$2,$3,$4,$5,'open',$7,$6,$6)`, id, operation, a.Principal, a.Role, a.Rank, parent, reversible)
 	return id, err
 }
 

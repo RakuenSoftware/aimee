@@ -91,7 +91,7 @@ history, invalidation and receipt commit together. Existing correction receipts
 survive the additive migration. See the [retirement validation](../../validation/memory-private-retirement-2026-09-21.md)
 for implementation and test scope; fresh `e697581ac9` passes 1,441/1,441
 checks across enrolled T2 and standalone T3.
-Private creation retries, shared deletion preconditions/retries, remaining mutation
+Private creation retries, remaining mutation
 preconditions and full durable consumer/retention semantics are still acceptance work.
 
 ### Expected-version shared corrections
@@ -162,10 +162,16 @@ the complete owner receipt instead of dropping it into a plain success string.
 The Go owner omits the host audit request on replay, preventing duplicate host
 mutation events. Legacy unkeyed MCP responses retain their existing text format.
 
-This shared contract covers update and supersede. Private conditional corrections
-now have the corresponding receipt contract described above. Other mutation
-verbs still refuse retry keys; create/delete idempotency, retention/restore policy
-and consumer progress remain open.
+Shared delete/forget now accepts the same expected-version and authenticated
+retry-key contract. Model retirement retains history; the existing verified-user
+destructive operation emits an irreversible audit. Schema-two deletion receipts
+name the target and outcome without inventing a current version after erasure.
+A scoped replay verifier checks the actual canonical outcome, including restored
+IDs hidden by RLS. Schema 27 preserves existing correction receipts. See the
+[shared deletion validation](../../validation/memory-shared-deletion-2026-09-21.md)
+for local concurrency, rollback, upgrade and authority evidence; fresh-image
+acceptance is pending. Creation retries, further mutation preconditions,
+retention/restore policy and consumer progress remain open.
 
 ### Linked model correction proposals
 

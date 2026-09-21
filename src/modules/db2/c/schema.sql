@@ -17974,6 +17974,66 @@ BEGIN
  END IF;
 END
 $memory_receipt_grants$;
+-- Shared conditional retirement/destruction use the same actor/key namespace.
+-- A destroyed result has no current record version; result_revision retains the
+-- admitted target revision and operation distinguishes it from a live result.
+ALTER TABLE memory_mutation_receipts ADD COLUMN IF NOT EXISTS operation TEXT NOT NULL DEFAULT 'correction'
+ CHECK(operation IN ('correction','retired','destroyed'));
+ALTER TABLE memory_mutation_receipts ADD COLUMN IF NOT EXISTS target_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE memory_mutation_receipts ADD COLUMN IF NOT EXISTS scope_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE memory_mutation_receipts ADD COLUMN IF NOT EXISTS scope_value TEXT NOT NULL DEFAULT '';
+CREATE OR REPLACE FUNCTION memory_deletion_receipt_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE valid_result BOOLEAN;
+BEGIN
+ IF NEW.operation='correction' THEN RETURN NEW; END IF;
+ IF NEW.actor_principal<>COALESCE(current_setting('aimee.principal',true),'') OR
+    NEW.target_revision<=0 OR NEW.proposal_id IS NOT NULL OR
+    NOT public.memory_row_scope_visible(NEW.scope_type,NEW.scope_value) OR
+    NOT EXISTS(SELECT 1 FROM public.memory_collection_owner o WHERE o.id=1 AND o.owner_id=NEW.owner_id) OR
+    NOT EXISTS(SELECT 1 FROM public.fact_graph_commits c JOIN public.fact_graph_changes f ON f.commit_id=c.commit_id
+     WHERE c.commit_id=NEW.commit_id AND c.status='applied' AND c.actor_principal=NEW.actor_principal
+      AND c.operation=CASE WHEN NEW.operation='destroyed' THEN 'memory.delete' ELSE 'memory.retire' END
+      AND (NEW.operation<>'destroyed' OR c.authority_rank>=30)
+      AND f.object_kind='memory' AND f.object_key=NEW.result_id::text
+      AND f.before_version=NEW.target_revision
+      AND (NEW.operation<>'retired' OR f.after_version=NEW.result_revision)
+      AND (NEW.operation<>'destroyed' OR c.reversible=0)
+      AND f.action=CASE WHEN NEW.operation='destroyed' THEN 'purge' ELSE 'update' END) THEN
+   RAISE EXCEPTION 'memory deletion receipt requires its admitted canonical audit';
+ END IF;
+ IF NEW.operation='destroyed' THEN
+   valid_result:=NEW.result_revision=NEW.target_revision AND NOT EXISTS(
+    SELECT 1 FROM public.memories WHERE id=NEW.result_id);
+ ELSE
+   valid_result:=NEW.result_revision>NEW.target_revision AND EXISTS(SELECT 1 FROM public.memories m
+    WHERE m.id=NEW.result_id AND m.record_revision=NEW.result_revision AND m.lifecycle_state='superseded'
+     AND m.archive_reason='retired by model' AND m.activation_suppressed=1
+     AND m.scope_type=NEW.scope_type AND m.scope_value=NEW.scope_value);
+ END IF;
+ IF NOT valid_result THEN RAISE EXCEPTION 'memory deletion receipt has no canonical outcome'; END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_deletion_receipt_guard ON memory_mutation_receipts;
+CREATE TRIGGER memory_deletion_receipt_guard BEFORE INSERT ON memory_mutation_receipts
+ FOR EACH ROW EXECUTE FUNCTION memory_deletion_receipt_guard();
+REVOKE ALL ON FUNCTION memory_deletion_receipt_guard() FROM PUBLIC;
+-- A scoped caller cannot infer destruction merely because RLS hides a restored
+-- ID. This bounded verifier inspects only the caller's own receipt, checks its
+-- current scope, and returns no record data or unrestricted existence oracle.
+CREATE OR REPLACE FUNCTION memory_deletion_replay_current(p_owner UUID,p_key TEXT) RETURNS BOOLEAN
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
+ SELECT EXISTS(SELECT 1 FROM public.memory_mutation_receipts r,public.memory_collection_owner o
+  WHERE o.id=1 AND o.owner_id=p_owner AND r.owner_id=o.owner_id AND r.key_hash=p_key
+   AND r.actor_principal=COALESCE(current_setting('aimee.principal',true),'')
+   AND public.memory_row_scope_visible(r.scope_type,r.scope_value)
+   AND ((r.operation='destroyed' AND NOT EXISTS(SELECT 1 FROM public.memories m WHERE m.id=r.result_id))
+    OR (r.operation='retired' AND EXISTS(SELECT 1 FROM public.memories m WHERE m.id=r.result_id
+      AND m.record_revision=r.result_revision AND m.lifecycle_state='superseded'
+      AND m.archive_reason='retired by model' AND m.activation_suppressed=1
+      AND m.scope_type=r.scope_type AND m.scope_value=r.scope_value))))
+$$;
+REVOKE ALL ON FUNCTION memory_deletion_replay_current(UUID,TEXT) FROM PUBLIC;
 -- END memory mutation receipts
 
 -- BEGIN memory correction proposals
@@ -18147,7 +18207,7 @@ BEGIN
     memory_active_embedder, kb_embeddings, kb_documents,
     document_versions, derivation_policy_versions TO aimee_store_runtime;
   GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT),
-    kb_fact_commit_worm_seal(TEXT,TEXT) TO aimee_store_runtime;
+    kb_fact_commit_worm_seal(TEXT,TEXT), memory_deletion_replay_current(UUID,TEXT) TO aimee_store_runtime;
 END
 $memory_store_grants$;
 
@@ -18173,5 +18233,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '26')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '27')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

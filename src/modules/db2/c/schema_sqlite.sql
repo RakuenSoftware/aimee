@@ -912,6 +912,8 @@ CREATE TABLE IF NOT EXISTS memory_mutation_receipts (
  commit_id TEXT NOT NULL REFERENCES fact_graph_commits(commit_id),
  result_id INTEGER NOT NULL, result_revision INTEGER NOT NULL,
  proposal_id TEXT,
+ operation TEXT NOT NULL DEFAULT 'correction',target_revision INTEGER NOT NULL DEFAULT 0,
+ scope_type TEXT NOT NULL DEFAULT '',scope_value TEXT NOT NULL DEFAULT '',
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  PRIMARY KEY(owner_id,actor_principal,key_hash)
 );

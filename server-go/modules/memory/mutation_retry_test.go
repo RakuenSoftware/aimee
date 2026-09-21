@@ -22,7 +22,7 @@ func TestIdempotencyContractValidation(t *testing.T) {
 			t.Fatal(key, r)
 		}
 	}
-	for _, verb := range []string{"store", "get", "touch", "delete", "runtime"} {
+	for _, verb := range []string{"store", "get", "touch", "runtime"} {
 		if r := runPublicCommand(t, client, verb, `{"idempotency_key":"fixture-retry-key"}`); r["kind"] != "unsupported_mode" {
 			t.Fatal(verb, r)
 		}
@@ -233,11 +233,14 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 	for _, test := range []struct {
 		operation   string
 		commitFirst bool
+		authority   int
 	}{
-		{"supersede", true}, {"supersede", false}, {"update-as", true}, {"update-as", false},
+		{"supersede", true, AuthorityUser}, {"supersede", false, AuthorityUser}, {"update-as", true, AuthorityUser}, {"update-as", false, AuthorityUser},
+		{"delete-as", true, AuthorityModel}, {"delete-as", false, AuthorityModel},
+		{"delete-as", true, AuthorityUser}, {"delete-as", false, AuthorityUser},
 	} {
-		operation, commitFirst := test.operation, test.commitFirst
-		t.Run(fmt.Sprintf("%s/commit=%v", operation, commitFirst), func(t *testing.T) {
+		operation, commitFirst, authority := test.operation, test.commitFirst, test.authority
+		t.Run(fmt.Sprintf("%s/authority=%d/commit=%v", operation, authority, commitFirst), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			connect := func() *pgx.Conn {
@@ -273,7 +276,7 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 			defer create.Rollback(context.Background())
 			backend := &postgresDataStore{db: evalQueryer{create}, placement: PlacementKB}
 			originalConfidence := 0.47
-			old, e := backend.InsertEpistemic(ctx, DataRequest{Confidence: &originalConfidence, Scope: scope, Tier: "L2", Kind: "fact", Key: "concurrent", Content: "original", Authority: AuthorityUser})
+			old, e := backend.InsertEpistemic(ctx, DataRequest{Confidence: &originalConfidence, Scope: scope, Tier: "L2", Kind: "fact", Key: "concurrent", Content: "original", Authority: authority})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -285,7 +288,7 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 				t.Fatal(e)
 			}
 			confidence := 1.0
-			request := DataRequest{Operation: operation, Scope: scope, ID: old.ID, Content: "corrected", Confidence: &confidence, Authority: AuthorityUser, ExpectedVersion: observed.Version, IdempotencyKey: "concurrent-fixture-key"}
+			request := DataRequest{Operation: operation, Scope: scope, ID: old.ID, Content: "corrected", Confidence: &confidence, Authority: authority, ExpectedVersion: observed.Version, IdempotencyKey: "concurrent-fixture-key"}
 			if operation == "update-as" {
 				request.Confidence = nil
 			}
@@ -300,11 +303,22 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 				}
 				return tx, &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
 			}
+			mutate := func(s *postgresDataStore) (Record, *MemoryMutationReceipt, error) {
+				if operation == "delete-as" {
+					receipt, err := s.deleteKBIdempotent(ctx, request, authority, caller, "")
+					return Record{ID: request.ID}, receipt, err
+				}
+				return s.replaceKBIdempotent(ctx, request, authority, caller, "")
+			}
+			if operation == "delete-as" {
+				request.Content = ""
+				request.Confidence = nil
+			}
 			a, as := begin(first)
 			defer a.Rollback(context.Background())
 			b, bs := begin(second)
 			defer b.Rollback(context.Background())
-			record, receipt, e := as.replaceKBIdempotent(ctx, request, AuthorityUser, caller, "")
+			record, receipt, e := mutate(as)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -315,7 +329,7 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 			}
 			done := make(chan outcome, 1)
 			go func() {
-				r, c, e := bs.replaceKBIdempotent(ctx, request, AuthorityUser, caller, "")
+				r, c, e := mutate(bs)
 				done <- outcome{r, c, e}
 			}()
 			for {
@@ -354,7 +368,7 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 			if commitFirst && (result.row.ID != record.ID || result.receipt.CommitID != receipt.CommitID) {
 				t.Fatal("retry did not identify first commit", result)
 			}
-			if !commitFirst && (result.row.ID == record.ID || result.receipt.CommitID == receipt.CommitID) {
+			if !commitFirst && ((operation != "delete-as" && result.row.ID == record.ID) || result.receipt.CommitID == receipt.CommitID) {
 				t.Fatal("uncommitted result survived disconnect", result)
 			}
 			if e = b.Commit(ctx); e != nil {
@@ -365,7 +379,7 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 			third := connect()
 			replayTx, replayStore := begin(third)
 			defer replayTx.Rollback(context.Background())
-			replay, replayed, e := replayStore.replaceKBIdempotent(ctx, request, AuthorityUser, caller, "")
+			replay, replayed, e := mutate(replayStore)
 			if e != nil || replayed == nil || !replayed.Replayed || replay.ID != result.row.ID || replayed.CommitID != result.receipt.CommitID {
 				t.Fatal(replay, replayed, e)
 			}
@@ -375,11 +389,18 @@ func TestIdempotentCorrectionConcurrentCommitAndDisconnect(t *testing.T) {
 			if e = replayTx.Commit(ctx); e != nil {
 				t.Fatal(e)
 			}
+			wantRows, wantJobs := 2, 1
+			if operation == "delete-as" {
+				wantRows, wantJobs = 1, 0
+				if authority == AuthorityUser {
+					wantRows = 0
+				}
+			}
 			var rows, receipts, jobs int
 			if e = owner.QueryRow(ctx, `SELECT
     (SELECT count(*) FROM memories WHERE scope_type='project' AND scope_value=$1),
     (SELECT count(*) FROM memory_mutation_receipts WHERE actor_principal=$2),
-    (SELECT count(*) FROM kb_async_jobs WHERE kind='memory_facts' AND document_id=$3 AND generation=1)`, scope.Value, caller.Principal, replay.ID).Scan(&rows, &receipts, &jobs); e != nil || rows != 2 || receipts != 1 || jobs != 1 {
+    (SELECT count(*) FROM kb_async_jobs WHERE kind='memory_facts' AND document_id=$3 AND generation=1)`, scope.Value, caller.Principal, replay.ID).Scan(&rows, &receipts, &jobs); e != nil || rows != wantRows || receipts != 1 || jobs != wantJobs {
 				t.Fatal(rows, receipts, jobs, e)
 			}
 		})
