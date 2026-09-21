@@ -26,7 +26,7 @@ func handleDiagnosticCommand(options handlerOptions, invocation bus.ModuleInvoca
 	if !ok {
 		return commandResult(commandError("invalid_argument", "missing query"))
 	}
-	request := DataRequest{Query: query, IncludeAll: true, PublicView: true, Limit: args.limit("limit", 10, 64)}
+	request := DataRequest{Query: query, IncludeAll: true, PublicView: true, Limit: args.limit("limit", 10, 64), IngressPreview: args.stringOr("format", "") == "ingress"}
 	scoped := false
 	if verb == "explain_match" {
 		request.Operation = "explain"
@@ -59,6 +59,15 @@ func handleDiagnosticCommand(options handlerOptions, invocation bus.ModuleInvoca
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
+	if request.IngressPreview {
+		if !response.PreviewProjection.valid(response.MemoryPreviews) {
+			return nil, bus.ModuleStatusInternal
+		}
+		if response.MemoryPreviews == nil {
+			response.MemoryPreviews = []ingressMemoryPreview{}
+		}
+		return commandResult(map[string]any{"status": "ok", "memories": response.MemoryPreviews, "memory_projection": response.PreviewProjection})
+	}
 	metadata := make(map[int64]publicMemoryRecord, len(response.PublicRecords))
 	for _, r := range response.PublicRecords {
 		metadata[r.ID] = r
@@ -68,18 +77,6 @@ func handleDiagnosticCommand(options handlerOptions, invocation bus.ModuleInvoca
 		if record, ok := metadata[d.Memory.ID]; ok {
 			rows = append(rows, publicDiagnostic{Memory: record, Parts: d.Parts})
 		}
-	}
-	if args.stringOr("format", "") == "ingress" {
-		previews := make([]map[string]any, 0, len(rows))
-		for _, r := range rows {
-			m := r.Memory
-			preview := m.Headline
-			if preview == "" {
-				preview = m.Content
-			}
-			previews = append(previews, map[string]any{"id": strconv.FormatInt(m.ID, 10), "key": m.Key, "tier": m.Tier, "kind": m.Kind, "headline": m.Headline, "content": m.Content, "score": r.Parts.Total, "preview": preview})
-		}
-		return commandResult(map[string]any{"status": "ok", "memories": previews})
 	}
 	if verb == "explain_match" && args.stringOr("format", "") == "mcp" {
 		if len(rows) != 1 {

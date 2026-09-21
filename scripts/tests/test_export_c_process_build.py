@@ -40,6 +40,37 @@ class CProcessBuildTests(unittest.TestCase):
         self.assertIn("server-go/modules/egress/egress.go", exporter.go_process_shared_sources("memory"))
         self.assertIn("server-go/modules/audit/action.go", exporter.go_process_shared_sources("memory"))
 
+    @unittest.skipUnless(shutil.which("go"), "go is not installed")
+    def test_aimee_export_builds_with_its_embedded_schema_and_process(self) -> None:
+        # Exercise the actual independent repository, not merely generator text:
+        # the previous generic entry point referred to a nonexistent Handle and
+        # the descriptor silently omitted every go:embed migration input.
+        contract = exporter.process_contracts.validate()["aimee"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exporter.export_module(root, "aimee", "required", contract,
+                                   exporter.source_timestamp(),
+                                   exporter.CORE_VERSION_FILE.read_text().strip())
+            module = root / "aimee-module-aimee"
+            sql_files = list((REPO_ROOT / "server-go/modules/aimee/families").glob("schema_*.sql"))
+            self.assertTrue(sql_files)
+            cmake = (module / "CMakeLists.txt").read_text()
+            for source in sql_files:
+                relative = source.relative_to(REPO_ROOT)
+                self.assertEqual((module / relative).read_bytes(), source.read_bytes())
+                self.assertIn(str(relative), cmake)
+            binary = module / "aimee-module-aimee"
+            build = subprocess.run(["go", "build", "-o", str(binary), "./runtime"],
+                                   cwd=module, capture_output=True, text=True, timeout=180)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            usage = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(usage.returncode, 2)
+            self.assertIn("DAEMON_MODULE_BUS_SOCKET", usage.stderr)
+            absent = subprocess.run([str(binary), str(root / "absent.sock")],
+                                    capture_output=True, text=True, timeout=10)
+            self.assertEqual(absent.returncode, 1)
+            self.assertIn("no store backend", absent.stderr)
+
     def test_audit_publication_is_not_an_arbitrary_request_grant(self) -> None:
         client = {"id": "memory-postgres", "principal_ref": 73,
                   "executable": "/module", "placements": ["server", "kb"],
@@ -361,6 +392,29 @@ class CProcessBuildTests(unittest.TestCase):
         self.assertEqual(cmake.count("find_package(OpenSSL REQUIRED)"), 1)
         self.assertIn("OpenSSL::Crypto", cmake)
         self.assertIn("OpenSSL::SSL", cmake)
+
+    def test_exported_admission_process_uses_owner_poll_ceiling(self) -> None:
+        main = exporter.go_module_main("economizer", 27, [])
+        self.assertIn("MaxIdlePollInterval: handler.RequestAdmissionPollInterval", main)
+        self.assertIn("Handler: handler.NewHandler()", main)
+        self.assertNotIn("MaxIdlePollInterval", exporter.go_module_main("memory", 7, []))
+
+    def test_final_request_admission_is_started_and_granted(self) -> None:
+        # Exercise the shipping descriptors, rather than merely proving the
+        # multicall binary knows a stage that no deployed process will serve.
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory) / "bundle"
+            exporter.export_runtime_bundle(bundle)
+            row = "economizer\t/usr/local/libexec/aimee-modules/aimee-module-economizer"
+            self.assertIn(row, (bundle / "server.modules").read_text().splitlines())
+            self.assertNotIn(row, (bundle / "kb.modules").read_text().splitlines())
+            grant = (bundle / "grants/server/economizer.grant").read_text()
+            serve = next(line.removeprefix("serve=") for line in grant.splitlines()
+                         if line.startswith("serve="))
+            self.assertIn("11016", serve.split(","))
+            lock = json.loads(exporter.LOCK.read_text())
+            pin = next(module for module in lock["modules"] if module["id"] == "economizer")
+            self.assertEqual(pin["serve"], [int(kind) for kind in serve.split(",")])
 
     def test_runtime_bundle_emits_an_exhaustive_non_amalgamated_c_build(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

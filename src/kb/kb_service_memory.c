@@ -1,3 +1,4 @@
+#include "json_int64.h"
 /* kb_service_memory.c: aimee-kb dispatch handlers for the memory.*
  * RPC family (find_facts, list, get, briefing, context_block,
  * entity_profile, entity_edges, search_graph, get_episode, ask,
@@ -85,8 +86,16 @@ int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req)
       for (int i = 0; i < n; i++)
       {
          cJSON *e = cJSON_GetArrayItem(ids_j, i);
-         if (cJSON_IsNumber(e) && e->valuedouble > 0)
-            ids[n_ids++] = (int64_t)e->valuedouble;
+         int64_t id;
+         if (!jo_read_i64_exact(e, &id))
+         {
+            free(ids);
+            return kb_send_error(
+                fd,
+                "source ids require exact integers; use decimal strings above the JSON safe range");
+         }
+         if (id > 0)
+            ids[n_ids++] = id;
       }
    }
 
@@ -278,15 +287,23 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
       for (int i = 0; sources && i < n; i++)
       {
          cJSON *e = cJSON_GetArrayItem(ids, i);
-         if (!cJSON_IsNumber(e) || e->valuedouble <= 0)
+         int64_t id;
+         if (!jo_read_i64_exact(e, &id))
+         {
+            cJSON *unknown = cJSON_CreateObject();
+            cJSON_AddStringToObject(unknown, "identity_state", "unavailable");
+            cJSON_AddStringToObject(unknown, "reason",
+                                    "stored source identity is not an exact integer");
+            cJSON_AddBoolToObject(unknown, "present", 0);
+            cJSON_AddBoolToObject(unknown, "error", 1);
+            cJSON_AddItemToArray(sources, unknown);
             continue;
-         /* Same cast the emit writer (kb_handle_evidence_emit_retrieval_event)
-          * used to store the id, so the round-trip is lossless for the values
-          * actually persisted. */
-         int64_t id = (int64_t)e->valuedouble;
+         }
+         if (id <= 0)
+            continue;
          cJSON *record_args = cJSON_CreateObject(), *record_reply = NULL;
          cJSON_AddStringToObject(record_args, "operation", "record");
-         cJSON_AddNumberToObject(record_args, "id", (double)id);
+         cJSON_AddItemToObject(record_args, "id", jo_i64_value_exact(id));
          int fetched =
              aimee_module_commands_dispatch_internal("memory.runtime", record_args, &record_reply);
          cJSON_Delete(record_args);
@@ -299,7 +316,7 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
          const char *kind = jo_cstr(record, "kind"), *source = jo_cstr(record, "source_session"),
                     *version = jo_cstr(record, "updated_at");
          cJSON *src = cJSON_CreateObject();
-         cJSON_AddNumberToObject(src, "id", (double)id);
+         cJSON_AddItemToObject(src, "id", jo_i64_value_exact(id));
          cJSON_AddStringToObject(src, "kind", kind);
          cJSON_AddStringToObject(src, "source", source);
          cJSON_AddStringToObject(src, "version", version); /* live/current version */
@@ -320,7 +337,8 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
             {
                cJSON *it = cJSON_GetArrayItem(items, j);
                cJSON *iid = it ? cJSON_GetObjectItemCaseSensitive(it, "id") : NULL;
-               if (cJSON_IsNumber(iid) && (int64_t)iid->valuedouble == id)
+               int64_t item_id;
+               if (jo_read_i64_exact(iid, &item_id) && item_id == id)
                {
                   cJSON *v = cJSON_GetObjectItemCaseSensitive(it, "v");
                   if (cJSON_IsString(v) && v->valuestring)

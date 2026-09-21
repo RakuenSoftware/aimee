@@ -29,6 +29,9 @@ int send_and_free(server_conn_t *conn, cJSON *response)
 static int calls, clears, result;
 static kb_valid_at_t answer;
 static const char *expected_time;
+static const char *expected_read_policy;
+static const char *expected_version;
+static int expect_include_version;
 
 int workspace_repo_identity(const char *cwd, char *project, size_t project_cap, char *workspace,
                             size_t workspace_cap)
@@ -90,6 +93,18 @@ memory_authority_t server_account_memory_authority(const char *account)
    return account && !strcmp(account, "user") ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
 }
 static int expected_store_authority;
+static const char *request_account;
+const char *server_request_account(void)
+{
+   return request_account;
+}
+
+static const char *request_principal = "";
+static cJSON *observed_private_context;
+const char *request_context_principal(void)
+{
+   return request_principal;
+}
 
 /* Go validates and shapes these commands. This native test only verifies the
  * explicit user/KB routing boundary and propagation of complete module replies. */
@@ -173,6 +188,8 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    if (!strcmp(method, "memory.get"))
    {
       calls++;
+      if (expect_include_version)
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "include_version")));
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
       assert(!cJSON_HasObjectItem(request, "actor") && !cJSON_HasObjectItem(request, "authority"));
       if (get_reply)
@@ -185,6 +202,15 @@ char *kb_v1_action_request(const char *method, cJSON *request)
       assert(cJSON_GetObjectItemCaseSensitive(request, "id")->valuedouble == 42);
       const char *as_of = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "as_of"));
       assert(!strcmp(as_of ? as_of : "", expected_time));
+      const cJSON *policy = cJSON_GetObjectItemCaseSensitive(request, "read_policy");
+      if (expected_read_policy)
+      {
+         char *encoded = cJSON_PrintUnformatted(policy);
+         assert(encoded && !strcmp(encoded, expected_read_policy));
+         free(encoded);
+      }
+      else
+         assert(!policy);
       cJSON_Delete(request);
       if (result)
          return strdup(result < 0 ? "{\"status\":\"error\",\"kind\":\"unavailable\"}"
@@ -203,9 +229,20 @@ char *kb_v1_action_request(const char *method, cJSON *request)
       cJSON_Delete(reply);
       return raw;
    }
-   if (!strcmp(method, "memory.store") || !strcmp(method, "memory.delete"))
+   if (!strcmp(method, "memory.store") || !strcmp(method, "memory.delete") ||
+       !strcmp(method, "memory.supersede"))
    {
       store_calls++;
+      if (expected_version)
+      {
+         char *encoded =
+             cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(request, "expected_version"));
+         assert(encoded && !strcmp(encoded, expected_version));
+         assert(!strcmp(
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "idempotency_key")),
+             "fixture-retry-key-001"));
+         free(encoded);
+      }
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
       assert(!cJSON_HasObjectItem(request, "include_all"));
       assert(!cJSON_HasObjectItem(request, "actor"));
@@ -576,6 +613,27 @@ static void test_get_delete_owner_envelopes(void)
 }
 
 extern int handle_memory_supersede(server_ctx_t *, server_conn_t *, cJSON *);
+static void test_shared_supersede_authority(void)
+{
+   cJSON *request = cJSON_Parse("{\"store\":\"kb\",\"old_id\":42,\"new_content\":\"corrected\","
+                                "\"authority\":\"user\",\"actor\":\"forged\"}");
+   expected_version = "{\"schema_version\":1,\"owner_id\":\"00000000-0000-0000-0000-000000000001\","
+                      "\"record_id\":\"42\",\"record_revision\":\"9007199254740993\"}";
+   cJSON_AddItemToObject(request, "expected_version", cJSON_Parse(expected_version));
+   cJSON_AddStringToObject(request, "idempotency_key", "fixture-retry-key-001");
+   store_reply = "{\"status\":\"ok\",\"store\":\"kb\",\"id\":9007199254740993}";
+   for (expected_store_authority = 0; expected_store_authority < 2; expected_store_authority++)
+   {
+      request_account = expected_store_authority ? "user" : NULL;
+      handle_memory_supersede(NULL, NULL, request);
+      assert(search_wire_reply && !strcmp(search_wire_reply, store_reply));
+   }
+   request_account = NULL;
+   expected_version = NULL;
+   expected_store_authority = 0;
+   store_reply = NULL;
+   cJSON_Delete(request);
+}
 static void test_private_command_envelopes(void)
 {
    const char *operations[] = {"user-store",  "user-get",       "user-list", "user-search",
@@ -682,6 +740,101 @@ static void test_personal_recall_owner_envelope(void)
    assert(server_user_memory_recall_json("private query", 8192, 1) == NULL);
 }
 
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
+{
+   assert(timeout_ms == 60000);
+   cJSON_Delete(observed_private_context);
+   observed_private_context = cJSON_Duplicate(context, 1);
+   const char *operation =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation"));
+   *result =
+       server_invoke_module_operation(method, operation, args, "user memory module unavailable");
+   return *result ? 1 : -1;
+}
+
+static void test_private_verified_context(void)
+{
+   cJSON *request = cJSON_Parse("{\"key\":\"actor\",\"content\":\"content\",\"authority\":\"user\","
+                                "\"principal\":\"forged\",\"operation\":\"forged\"}");
+   private_command_operation = "user-store";
+   private_command_reply = "{\"status\":\"ok\",\"store\":\"user\",\"id\":42}";
+   for (int authenticated = 0; authenticated < 2; ++authenticated)
+      for (int user = 0; user < 2; ++user)
+      {
+         request_account = authenticated ? "user" : "";
+         request_principal = authenticated ? "verified-device" : "";
+         cJSON *reply =
+             memory_store_command(request, user ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL);
+         assert(reply);
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(observed_private_context,
+                                                              "authenticated")) == authenticated);
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+                    observed_private_context, "user_authority")) == (authenticated && user));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            observed_private_context, "principal")),
+                        authenticated ? "user" : ""));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            observed_private_context, "transport_identity")),
+                        request_principal));
+         cJSON_Delete(reply);
+      }
+   request_account = "user";
+   request_principal = "verified-device";
+   private_command_operation = "user-mcp-supersede";
+   private_command_reply =
+       "{\"status\":\"ok\",\"store\":\"user\",\"records\":[{\"id\":9007199254740993}]}";
+   cJSON *reply = memory_user_mcp_supersede_command(request);
+   assert(
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(observed_private_context, "authenticated")));
+   assert(
+       cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(observed_private_context, "user_authority")));
+   char *wire = cJSON_PrintUnformatted(reply);
+   assert(wire && strstr(wire, "9007199254740993"));
+   free(wire);
+   cJSON_Delete(reply);
+   cJSON_Delete(observed_private_context);
+   observed_private_context = NULL;
+   private_command_operation = private_command_reply = NULL;
+   request_account = request_principal = "";
+   cJSON_Delete(request);
+}
+
+static void test_private_correction_review_transport(void)
+{
+   cJSON *request = cJSON_Parse("{\"store\":\"user\",\"proposal_id\":\"fixture\","
+                                "\"action\":\"approve\",\"principal\":\"forged\","
+                                "\"authority\":\"user\"}");
+   for (int review = 0; review < 2; ++review)
+      for (int authenticated = 0; authenticated < 2; ++authenticated)
+      {
+         request_account = authenticated ? "verified-user" : "";
+         request_principal = authenticated ? "verified-device" : "";
+         private_command_operation =
+             review ? "user-correction-review" : "user-correction-proposals";
+         private_command_reply = review
+                                     ? "{\"status\":\"ok\",\"store\":\"user\",\"proposal\":{"
+                                       "\"target_version\":{\"record_id\":\"9007199254740993\"}}}"
+                                     : "{\"status\":\"ok\",\"store\":\"user\",\"proposals\":[]}";
+         if (review)
+            handle_memory_review_correction(NULL, NULL, request);
+         else
+            handle_memory_correction_proposals(NULL, NULL, request);
+         assert(search_wire_reply && !strcmp(search_wire_reply, private_command_reply));
+         assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+                    observed_private_context, "user_authority")) == (review && authenticated));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            observed_private_context, "principal")),
+                        authenticated ? "verified-user" : ""));
+      }
+   cJSON_Delete(observed_private_context);
+   observed_private_context = NULL;
+   private_command_operation = private_command_reply = NULL;
+   request_account = request_principal = "";
+   cJSON_Delete(request);
+}
+
 int main(void)
 {
    test_user_namespace();
@@ -716,6 +869,19 @@ int main(void)
    }
    assert(calls == 6 && clears == calls);
    cJSON_Delete(request);
+   result = 0;
+   expected_read_policy =
+       "{\"schema_version\":1,\"mode\":\"historical\",\"valid_at\":\"2026-01-01T00:00:00Z\"}";
+   request = cJSON_Parse("{\"store\":\"kb\",\"id\":42}");
+   cJSON_AddItemToObject(request, "read_policy", cJSON_Parse(expected_read_policy));
+   cJSON_AddBoolToObject(request, "include_version", 1);
+   expect_include_version = 1;
+   response = materialize_reply(memory_get_command(request));
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(response, "memory")));
+   cJSON_Delete(response);
+   cJSON_Delete(request);
+   expected_read_policy = NULL;
+   expect_include_version = 0;
    test_store_confidence();
    test_review_transport();
    test_store_owner_envelope();
@@ -727,5 +893,8 @@ int main(void)
    test_read_owner_refusal();
    test_personal_recall_owner_envelope();
    test_private_command_envelopes();
+   test_shared_supersede_authority();
+   test_private_verified_context();
+   test_private_correction_review_transport();
    return 0;
 }

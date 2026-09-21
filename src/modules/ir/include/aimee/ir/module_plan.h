@@ -21,8 +21,13 @@ typedef struct
    const char *operation;
    const char *phase;
    const char *provided_query;
+   /* NULL-terminated resource names already inserted by this host assembly,
+    * never inferred from caller text or model-supplied labels. */
+   const char *const *provided_resources;
    const aimee_ir_plan_binding_t *bindings;   /* NULL-name terminated */
    const aimee_ir_plan_resource_t *resources; /* NULL-name terminated */
+   /* Optional host failure sink. Successful empty plans do not invoke it. */
+   void (*refuse)(const char *kind, void *context);
    void *context;
 } aimee_ir_module_plan_t;
 

@@ -218,19 +218,6 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       return 400;
    }
 
-   /* Build the pre-injection envelope up front: it is part of the model input,
-    * so the §4 dedup key must hash it (a stale reply must not be replayed after
-    * the injected memory/context changes). On a cache miss it is reused for the
-    * provider call below; on a hit it is freed unused. */
-   int first_turn = !chat || !openai_request_has_assistant(body);
-   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt);
-   char *persona_txt = legacy_persona_text(prompt, !first_turn);
-   if (persona_txt)
-   {
-      free(prompt);
-      prompt = persona_txt;
-   }
-
    /* Resolve the backend BEFORE dedup so the key carries the resolved
     * provider/model — two requests resolving to a different backend must not
     * collide even with an identical body. Honour the requested model: "aimee"
@@ -241,7 +228,6 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    agent_t *ag = agent_registry_resolve_ingress_model(model, &agbuf) == 0 ? &agbuf : NULL;
    if (!ag)
    {
-      free(pi_env);
       free(prompt);
       if (model[0] && strcmp(model, "aimee") != 0)
       {
@@ -273,13 +259,17 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       {
          parsed_response_t parsed;
          char upstream_error[512];
+         char *legacy_context =
+             !aimee_ir_path_enabled() && !instructions
+                 ? server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt)
+                 : NULL;
          int trc = agent_execute_messages(
-             ag, messages, tools, instructions ? instructions : pi_env,
+             ag, messages, tools, instructions ? instructions : legacy_context,
              openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768),
              openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed,
              upstream_error, sizeof(upstream_error));
          free(instructions);
-         free(pi_env);
+         free(legacy_context);
          free(prompt);
 
          if (trc != 0)
@@ -287,8 +277,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
             agent_free_parsed_response(&parsed);
             cJSON_Delete(messages);
             cJSON_Delete(tools);
-            openai_format_error(resp, cap, "upstream_error", upstream_error);
-            return 502;
+            openai_format_error(resp, cap, wire_fence_error_type(upstream_error), upstream_error);
+            return wire_fence_error_http_status(upstream_error);
          }
 
          if (agent_ingress_accounting_enabled())
@@ -331,6 +321,21 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       free(instructions);
       cJSON_Delete(messages);
       cJSON_Delete(tools);
+   }
+
+   /* Plain-text serving owns this envelope; the structured tool path above
+    * runs memory/persona stages during final provider assembly instead.
+    * Build it before dedup: it is part of the model input,
+    * so the §4 dedup key must hash it (a stale reply must not be replayed after
+    * the injected memory/context changes). On a cache miss it is reused for the
+    * provider call below; on a hit it is freed unused. */
+   int first_turn = !chat || !openai_request_has_assistant(body);
+   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt);
+   char *persona_txt = legacy_persona_text(prompt, !first_turn);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
    }
 
    /* §4 short-window dedup: serve a re-sent identical request (same account/source
@@ -388,10 +393,10 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
 
    if (erc != 0 || !result.response)
    {
-      openai_format_error(resp, cap, "upstream_error",
+      openai_format_error(resp, cap, wire_fence_error_type(result.error),
                           result.error[0] ? result.error : "completion failed");
       free(result.response);
-      return 502;
+      return wire_fence_error_http_status(result.error);
    }
 
    /* Cost accounting for the OpenAI-compatible ingress: this handler runs the
@@ -722,13 +727,26 @@ static void responses_store_turn(const char *id, const char *full, const char *r
 }
 
 /* POST /v1/responses: the OpenAI Responses API (non-streaming). Runs inference
- * on the flattened `input` like chat/completions and shapes a `response`
+ * on structured `input`, instructions and tools and shapes a `response`
  * object. When `previous_response_id` names a prior turn (held in the
  * in-process responses store), its accumulated transcript is prepended so the
  * model continues the conversation; the new turn (prior transcript + this input
  * + the assistant reply) is stored under the freshly minted response id so a
  * follow-up can chain off it in turn. The store is in-process only (not durable
  * across restarts), matching this surface's local single-owner posture. */
+/* Buffered Responses uses the same governed tool-result shape as SSE. */
+static void responses_buffered_tool_result(void *ctx, const char *event, const char *data)
+{
+   if (strcmp(event, "response.completed") != 0)
+      return;
+   cJSON **result = ctx;
+   cJSON *root = cJSON_Parse(data);
+   cJSON *response = cJSON_DetachItemFromObjectCaseSensitive(root, "response");
+   cJSON_Delete(root);
+   cJSON_Delete(*result);
+   *result = response;
+}
+
 static int responses_handler(const char *body, char *resp, int cap)
 {
    char model[64] = "";
@@ -778,59 +796,112 @@ static int responses_handler(const char *body, char *resp, int cap)
    {
       size_t need = strlen(prev) + 1 + strlen(prompt) + 1;
       combined = malloc(need);
-      if (combined)
+      if (!combined)
       {
-         snprintf(combined, need, "%s\n%s", prev, prompt);
-         full = combined;
+         free(prompt);
+         openai_format_error(resp, cap, "server_error", "could not retain Responses history");
+         return 500;
       }
+      snprintf(combined, need, "%s\n%s", prev, prompt);
+      full = combined;
    }
 
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
-    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
-   int first_turn = !prev_id[0] && !openai_request_has_assistant(body);
-   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", full);
-   /* `full` aliases `prompt` or `combined`, both freed on the exit paths below,
-    * so it must NOT be freed here. Pass the persona-prefixed copy when there is
-    * one and free only that. */
-   char *persona_txt = legacy_persona_text(full, !first_turn);
-   int erc =
-       agent_dispatch_one(ag, NULL, NULL, pi_env, persona_txt ? persona_txt : full, max_tokens,
-                          temperature, 0 /* use_tools: plain chat completion */, &result);
-   free(pi_env);
-   free(persona_txt);
-
-   if (erc != 0 || !result.response)
+   /* Preserve instructions, roles and tool schemas through the same provider
+    * assembly path as streaming Responses. Flattening is only for the legacy
+    * local continuation transcript, never for the current provider request. */
+   char parsed_model[64], *instructions = NULL;
+   cJSON *messages = NULL, *tools = NULL;
+   int parsed_stream = 0;
+   int parsed_ok =
+       aimee_ir_path_enabled() &&
+       aimee_ir_responses_to_chat(body, parsed_model, sizeof(parsed_model), &instructions,
+                                  &messages, &tools, &parsed_stream) == 0;
+   if (!parsed_ok)
+      parsed_ok =
+          openai_parse_responses_to_chat(body, parsed_model, sizeof(parsed_model), &instructions,
+                                         &messages, &tools, &parsed_stream) == 0;
+   if (!parsed_ok)
    {
-      openai_format_error(resp, cap, "upstream_error",
-                          result.error[0] ? result.error : "response failed");
-      free(result.response);
       free(prompt);
       free(combined);
-      return 502;
+      free(instructions);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
+      openai_format_error(resp, cap, "invalid_request_error", "invalid structured Responses input");
+      return 400;
    }
-
-   /* Cost accounting: buffered /v1/responses runs the provider call directly. */
-   snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
+   if (combined)
+   {
+      cJSON *history = cJSON_CreateObject();
+      if (!history || !cJSON_AddStringToObject(history, "role", "user") ||
+          !cJSON_AddStringToObject(history, "content", prev) ||
+          !cJSON_InsertItemInArray(messages, 0, history))
+      {
+         cJSON_Delete(history);
+         free(prompt);
+         free(combined);
+         free(instructions);
+         cJSON_Delete(messages);
+         cJSON_Delete(tools);
+         openai_format_error(resp, cap, "server_error", "could not retain Responses history");
+         return 500;
+      }
+   }
+   message_history_repair(messages);
+   parsed_response_t result;
+   char upstream_error[512];
+   int erc = agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
+                                    &result, upstream_error, sizeof(upstream_error));
+   free(instructions);
+   if (erc != 0)
+   {
+      openai_format_error(resp, cap, wire_fence_error_type(upstream_error), upstream_error);
+      agent_free_parsed_response(&result);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
+      free(prompt);
+      free(combined);
+      return wire_fence_error_http_status(upstream_error);
+   }
    if (agent_ingress_accounting_enabled())
-      agent_record_token_audit(&result, "", "openai-ingress");
+      agent_ingress_record_cost(ag->name, ag->model, model, result.stop_reason,
+                                result.prompt_tokens, result.completion_tokens,
+                                result.cache_write_tokens, result.cache_read_tokens,
+                                "openai-ingress", NULL);
+   if (gw_response_run_completion(&result, messages, tools, "tool_calls"))
+      LOG_INFO("completion.gate", "continued incomplete buffered OpenAI Responses repair");
+   if (result.is_tool_call && result.call_count > 0)
+      (void)gw_response_run_governance(&result, openai_governance_enabled(),
+                                       gateway_prevent_subagents_enabled());
+   cJSON_Delete(messages);
+   cJSON_Delete(tools);
 
    long created = (long)time(NULL);
    char id[64];
    responses_mint_id(created, id, sizeof(id));
-   responses_store_turn(id, full, result.response);
+   responses_store_turn(id, full, result.content ? result.content : "");
    free(prompt);
    free(combined);
-
-   int len = openai_format_response(id, model, result.response, created, result.prompt_tokens,
-                                    result.completion_tokens, result.cache_read_tokens, resp, cap);
-   free(result.response);
+   int len;
+   if (result.is_tool_call && result.call_count > 0)
+   {
+      cJSON *response = NULL;
+      openai_responses_emit_policed(&result, id, model, created, responses_buffered_tool_result,
+                                    &response);
+      len = response && cJSON_PrintPreallocated(response, resp, cap, 0) ? (int)strlen(resp) : -1;
+      cJSON_Delete(response);
+   }
+   else
+      len = openai_format_response(id, model, result.content ? result.content : "", created,
+                                   result.prompt_tokens, result.completion_tokens,
+                                   result.cache_read_tokens, resp, cap);
+   agent_free_parsed_response(&result);
    if (len < 0)
    {
       openai_format_error(resp, cap, "server_error", "response did not fit the buffer");
       return 500;
    }
+
    return 200;
 }
 
@@ -859,8 +930,6 @@ static void emit_text_chunk(server_http_sse_emit emit, void *ctx, const char *id
       emit(ctx, frame);
 }
 
-/* Resolve the agent for `model` into *acfg (caller-owned, must outlive the
- * returned pointer — it indexes into acfg). Returns NULL when none configured. */
 /* Fills `out` with the selected agent; returns 0 on success.
  *
  * Took an agent_config_t* and returned a pointer into it, which meant every
@@ -923,7 +992,8 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
          if (trc != 0)
          {
             char error_frame[1024];
-            openai_format_error(error_frame, sizeof(error_frame), "upstream_error", upstream_error);
+            openai_format_error(error_frame, sizeof(error_frame),
+                                wire_fence_error_type(upstream_error), upstream_error);
             emit(ctx, error_frame);
             emit(ctx, "[DONE]");
             agent_free_parsed_response(&parsed);
@@ -1339,6 +1409,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    if (wire_fence_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
                          &wire_body) != 0)
    {
+      snprintf(error, error_cap, "%s", wire_fence_last_error());
       free(body);
       cJSON_Delete(mbox);
       gw_mutate_ctx_free(&gwmc);
@@ -1529,8 +1600,11 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
        * the OpenAI backend would, so Codex applies its typed-error handling
        * (retry/backoff) instead of treating a failed turn as an empty success.
        * Unknown `code` maps to ApiError::Retryable in Codex's parser. */
-      if (openai_format_responses_failed(id, model, created, "server_error", upstream_error, frame,
-                                         sizeof(frame)) > 0)
+      if (openai_format_responses_failed(id, model, created,
+                                         wire_fence_error_http_status(upstream_error) == 502
+                                             ? "server_error"
+                                             : wire_fence_error_type(upstream_error),
+                                         upstream_error, frame, sizeof(frame)) > 0)
          emit(ctx, "response.failed", frame);
       agent_free_parsed_response(&parsed);
       free(instructions);
@@ -1730,10 +1804,12 @@ static void *run_job_worker(void *arg)
    openai_runs_store_append_event(j->run_id, "response.in_progress",
                                   run_status_json(j, "in_progress", buf, RUN_JSON_CAP));
 
-   agent_config_t acfg;
+   /* Registry selection validates the requested model, but the tool loop
+    * routes using a complete configuration. Load it before handing it off. */
+   agent_config_t acfg = {0};
    agent_t agbuf;
    agent_t *ag = stream_pick_agent(&agbuf, j->model) == 0 ? &agbuf : NULL;
-   if (!ag)
+   if (agent_load_config(&acfg) != 0 || !ag)
    {
       openai_runs_store_append_event(j->run_id, "error", "{\"error\":\"no agent configured\"}");
       openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED,
@@ -1765,7 +1841,10 @@ static void *run_job_worker(void *arg)
    int erc = agent_run_with_tools(&acfg, "execute", NULL, j->prompt, j->max_tokens, &result);
    agent_set_ingress_source("");
    if (j->has_reqctx)
+   {
+      ingress_preinject_finish_sources();
       request_context_clear();
+   }
    agent_tools_set_tool_event_cb(NULL, NULL);
 
    /* Honor a cancel requested while the (blocking) step ran. */
@@ -1781,10 +1860,15 @@ static void *run_job_worker(void *arg)
 
    if (erc != 0 || !result.response)
    {
-      char errbuf[256];
-      snprintf(errbuf, sizeof(errbuf), "{\"error\":\"%s\"}",
-               result.error[0] ? result.error : "run failed");
-      openai_runs_store_append_event(j->run_id, "error", errbuf);
+      /* Owner/provider diagnostics can contain quotes, newlines and Unicode.
+       * Serialize the complete string rather than interpolating/truncating JSON. */
+      cJSON *failure = cJSON_CreateObject();
+      cJSON_AddStringToObject(failure, "error", result.error[0] ? result.error : "run failed");
+      char *failure_json = cJSON_PrintUnformatted(failure);
+      openai_runs_store_append_event(j->run_id, "error",
+                                     failure_json ? failure_json : "{\"error\":\"run failed\"}");
+      free(failure_json);
+      cJSON_Delete(failure);
       openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED,
                                  run_status_json(j, "failed", buf, RUN_JSON_CAP));
       free(result.response);

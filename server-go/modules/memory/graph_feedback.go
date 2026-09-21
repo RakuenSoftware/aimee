@@ -75,10 +75,9 @@ func (s *postgresDataStore) feedbackPath(ctx context.Context, request DataReques
 	// the path. Hidden/retired memory evidence and stale code cannot be reinforced.
 	// Visibility is fixed on the transaction by the Go owner.
 	_, err = s.db.Exec(ctx, `WITH nodes AS (SELECT * FROM jsonb_to_recordset($1::jsonb) AS n(node text,credit double precision)),
- visible AS MATERIALIZED (SELECT id FROM memories WHERE lifecycle_state='active' AND activation_suppressed=0),
+ visible AS MATERIALIZED (SELECT id FROM memories WHERE `+currentMemorySQL("")+`),
  eligible AS (SELECT e.id,sum(n.credit) AS credit FROM entity_edges e JOIN nodes n ON n.node=e.source OR n.node=e.target
- WHERE e.edge_class<>'semantic' AND (NOT EXISTS(SELECT 1 FROM fact_evidence fe WHERE fe.assertion_id=e.id AND fe.source_kind='memory')
- OR EXISTS(SELECT 1 FROM fact_evidence fe JOIN visible v ON fe.source_id='memory:'||v.id::text WHERE fe.assertion_id=e.id AND fe.source_kind='memory'))
+ WHERE e.edge_class<>'semantic' AND `+currentMemoryEvidenceSQL("e", "", false)+`
  AND (e.edge_origin<>'code_projection' OR EXISTS(SELECT 1 FROM code_projection_generations g JOIN projects p ON p.name=g.project
  WHERE g.id=e.projection_generation_id AND g.state='visible' AND p.lifecycle_state='current'
  AND (current_setting('aimee.memory_scope_all',true)='1' OR p.name=current_setting('aimee.memory_project',true))))

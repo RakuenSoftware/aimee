@@ -508,6 +508,9 @@ char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int 
 /* Shared-store recall without the legacy personal-memory merge. */
 char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,
                                           int session_start);
+/* Ask the Go owner to render within the remaining native context allocation. */
+char *kb_client_memory_recall_native_json(const char *task_hint, int limit_tokens,
+                                          int session_start, size_t native_bytes);
 /* ABI-compatible legacy form; the fusion argument is ignored. The receiving
  * instance applies its own configuration. */
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
@@ -552,7 +555,12 @@ char *kb_client_memory_assemble_context(const char *task_hint);
 /* Assemble the default temporal-learning context (current semantic assertions,
  * active observations, and reviewed procedures) via aimee-kb. Returns the
  * trust-labelled rendered context, or NULL when unavailable or empty. */
+/* Owned raw owner response; preserve item numbers and projection identity. */
+char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSON *context_limits);
 char *kb_client_memory_assemble_typed_context(const char *query);
+/* Forward the Go owner's budget contract unchanged. The JSON is borrowed. */
+char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
+                                                          const cJSON *context_limits);
 
 /* Export rules to JSONL via aimee-kb.  Returns row count or -1. */
 int kb_client_rules_export_jsonl(const char *path);

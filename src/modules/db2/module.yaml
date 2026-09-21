@@ -370,6 +370,7 @@
       "src/headers/dstr.h",
       "src/headers/embed_input_type.h",
       "src/headers/index.h",
+      "src/headers/json_int64.h",
       "src/headers/kb_identity.h",
       "src/headers/kb_identity_token.h",
       "src/headers/kb_mgmt_jwks_publication.h",

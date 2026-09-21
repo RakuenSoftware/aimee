@@ -4,10 +4,12 @@
  * over the event bus. This header is the whole C-side surface: it builds
  * requests, makes calls, and installs module-owned results.
  *
- * FAIL-OPEN IS THE CONTRACT. An unreachable module, a timeout, a malformed reply
+ * Optional reduction fails open. An unreachable module, a timeout, a malformed reply
  * or an over-size body all leave `messages` untouched and report "no reduction",
  * so a turn proceeds with its original context rather than failing. Losing the
- * economizer costs tokens; failing the turn costs the user's work. */
+ * economizer costs tokens; failing the turn costs the user's work.
+ * Declared hard request limits instead fail closed through the separate budget
+ * admission stage, even when optional reduction is disabled. */
 #ifndef DEC_ECONOMIZER_MODULE_CLIENT_H
 #define DEC_ECONOMIZER_MODULE_CLIENT_H 1
 
@@ -36,6 +38,27 @@ extern "C"
 #define AIMEE_ECONOMIZER_STAGE_POST_STATUS  6u
 #define AIMEE_ECONOMIZER_EVENT_STATS        11015u
 #define AIMEE_ECONOMIZER_STAGE_STATS        7u
+
+#define AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET 11016u
+#define AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET 8u
+
+   typedef enum
+   {
+      ECON_REQUEST_BUDGET_ADMITTED = 0,
+      ECON_REQUEST_BUDGET_INVALID = 1,
+      ECON_REQUEST_BUDGET_OVERFLOW = 2,
+      ECON_REQUEST_BUDGET_TOKENS_UNAVAILABLE = 3,
+      ECON_REQUEST_BUDGET_UNAVAILABLE = 4,
+      ECON_REQUEST_BUDGET_POLICY_INVALID = 5
+   } econ_request_budget_result_t;
+
+   /* Hard-limit admission fails closed, independently of optional reduction.
+    * Only length, digest, route and limits cross the bus; never prompt bytes. */
+   econ_request_budget_result_t econ_module_request_budget(unsigned route, const void *body,
+                                                           size_t body_len, const char *limits);
+   econ_request_budget_result_t
+   econ_module_request_budget_with_policy(unsigned route, const void *body, size_t body_len,
+                                          const char *limits, const char *policy);
 
 #define ECON_MODULE_JSON_MAX_INPUT  (16u * 1024u * 1024u)
 #define ECON_MODULE_TOOL_OUTPUT_MAX (2u * 1024u * 1024u)

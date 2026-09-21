@@ -1,3 +1,4 @@
+#include "json_wire.h"
 #include "module_commands.h"
 #include "json_fluent.h"
 #include "aimee.h"
@@ -841,6 +842,21 @@ int kb_dispatch_action_json(const char *action, const char *body, int body_len, 
       snprintf(out_buf, (size_t)out_cap,
                "{\"status\":\"error\",\"message\":\"knowledge service unavailable\"}");
       return 503;
+   }
+
+   /* These actions carry exact source identities. cJSON strings cannot retain
+    * embedded NULs, so reject them before parsing can turn an invalid ID into
+    * a valid prefix. Other actions retain their existing body contract. */
+   int evidence_identity = strncmp(action, "evidence.", 9) == 0 ||
+                           strcmp(action, "memory.record_retrieval_outcome") == 0 ||
+                           strcmp(action, "ranker.record_outcome") == 0 ||
+                           strcmp(action, "ranker.emit_event") == 0;
+   if (evidence_identity && body && body_len > 0 &&
+       (memchr(body, 0, (size_t)body_len) || json_wire_has_nul_escape(body, (size_t)body_len)))
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"status\":\"error\",\"message\":\"evidence identity cannot contain NUL\"}");
+      return 400;
    }
 
    cJSON *req = NULL;

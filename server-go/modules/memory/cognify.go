@@ -316,6 +316,9 @@ func (s *postgresDataStore) cognify(ctx context.Context, id int64, command strin
 			}
 		}
 		record, err := s.InsertEpistemic(ctx, DataRequest{Scope: source.Scope, Tier: "L2", Kind: c.Kind, Key: key, Content: c.Value, Confidence: &confidence, SessionID: "cognify"})
+		if proposedCorrection(err) != nil {
+			continue
+		}
 		if err != nil {
 			return out, err
 		}

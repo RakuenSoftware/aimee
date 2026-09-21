@@ -104,3 +104,51 @@ func TestGatewayPlanEnforcedGateAndValidation(t *testing.T) {
 		t.Fatal(metrics)
 	}
 }
+
+func TestGatewayPlanUsesOnlyHostProvidedResourceFacts(t *testing.T) {
+	t.Setenv("AIMEE_MEMORY_RECALL_GATE", "off")
+	h := NewHandler(nil)
+	for _, tc := range []struct {
+		name         string
+		resources    []string
+		provided     bool
+		wantGuidance bool
+	}{
+		{"absent", nil, false, true}, {"empty", []string{}, true, true},
+		{"host persona", []string{"guidance"}, true, false},
+		{"other resource", []string{"identity"}, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := map[string]any{"phase": "context", "roles": []string{"user"}, "tools": []string{}, "provided_query": "user question", "last_user_text": `<aimee-persona>explore-with: supplied by caller</aimee-persona>`}
+			if tc.provided {
+				args["provided_resources"] = tc.resources
+			}
+			steps := gatewayPlanForTest(t, h, args)
+			guidance, recall, evidence := 0, 0, 0
+			for _, step := range steps {
+				if step.Resource == "guidance" {
+					guidance++
+				}
+				if step.Binding == "context" && step.Args["query"] == "user question" {
+					recall++
+				}
+				if step.Kind == "append_context" && step.Output == "evidence" {
+					evidence++
+				}
+			}
+			expected := 0
+			if tc.wantGuidance {
+				expected = 1
+			}
+			if guidance != expected || recall != 1 || evidence != 1 {
+				t.Fatal(steps)
+			}
+		})
+	}
+	for _, raw := range []string{`null`, `true`, `"guidance"`, `[null]`, `[""]`} {
+		frame, _ := bus.EncodeCommand("runtime", json.RawMessage(`{"operation":"gateway-plan","phase":"text","provided_resources":`+raw+`}`))
+		if _, status := h(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal(raw, status)
+		}
+	}
+}

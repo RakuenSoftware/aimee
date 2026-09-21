@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "source_revision": "0e6b6a6ab621ae66d37798e31dae86280d95398c",
+  "source_revision": "41428a7a132ebbbd709222833f8925d40427160d",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 115,
@@ -10,8 +10,8 @@
     "production_consumers": 124,
     "test_consumers": 147,
     "include_directives": 782,
-    "outbound_dependency_rows": 142,
-    "outbound_include_directives": 142
+    "outbound_dependency_rows": 144,
+    "outbound_include_directives": 144
   },
   "source_files": {
     "c": [
@@ -5565,6 +5565,13 @@
       "count": 1
     },
     {
+      "source": "src/modules/db2/c/demotion.c",
+      "header": "json_int64.h",
+      "resolved": "src/headers/json_int64.h",
+      "classification": "host-api",
+      "count": 1
+    },
+    {
       "source": "src/modules/db2/c/enrollments.c",
       "header": "../support/db2_log.h",
       "resolved": "src/modules/db2/support/db2_log.h",
@@ -5653,6 +5660,13 @@
       "header": "cJSON.h",
       "resolved": "src/modules/db2/support/cJSON.h",
       "classification": "module-private-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/fidelity.c",
+      "header": "json_int64.h",
+      "resolved": "src/headers/json_int64.h",
+      "classification": "host-api",
       "count": 1
     },
     {
@@ -6020,5 +6034,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "44b0c313d328763686010c3274020dca253225b3a5d9b2056f3dd63328dd5507"
+  "fingerprint": "4855cc643b1d80b14f018545cd1e6deb6bf83799fa19d8563ff975d07f66d465"
 }

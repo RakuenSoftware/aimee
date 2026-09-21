@@ -126,18 +126,35 @@ func (s *postgresDataStore) AssembleContext(ctx context.Context, scope Scope, qu
 }
 
 func renderMemoryContext(records []Record, blockType string) string {
+	text, _ := renderMemoryContextBounded(records, blockType, nil)
+	return text
+}
+
+// A byte allocation retains a whole prefix in retrieval order. Each row is
+// formatted once; headers and the terminal newline count toward the allocation.
+func renderMemoryContextBounded(records []Record, blockType string, limit *int) (string, int) {
 	var out strings.Builder
-	out.WriteString("# Memory Context\n")
+	header := "# Memory Context\n"
 	if blockType != "" {
-		fmt.Fprintf(&out, "\nType: %s\n", blockType)
+		header += fmt.Sprintf("\nType: %s\n", blockType)
 	}
+	if limit != nil && len(header) > *limit {
+		return "", 0
+	}
+	out.WriteString(header)
+	count := 0
 	for _, item := range records {
-		fmt.Fprintf(&out, "\n- [#%d] %s: %s", item.ID, item.Key, item.Content)
+		line := fmt.Sprintf("\n- [#%d] %s: %s", item.ID, item.Key, item.Content)
+		if limit != nil && out.Len()+len(line)+1 > *limit {
+			break
+		}
+		out.WriteString(line)
+		count++
 	}
-	if len(records) > 0 {
+	if count > 0 {
 		out.WriteByte('\n')
 	}
-	return out.String()
+	return out.String(), count
 }
 
 // Confidence is display metadata and cannot cross the ranking input boundary.

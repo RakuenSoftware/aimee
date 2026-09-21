@@ -2,23 +2,25 @@ package memory
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
 
 type ingressBeginRequest struct {
-	Query            string `json:"query"`
-	Session          string `json:"session"`
-	Project          string `json:"project"`
-	ActiveScope      bool   `json:"active_scope"`
-	Disabled         bool   `json:"disabled"`
-	PreviewEnabled   bool   `json:"preview_enabled"`
-	Mode             string `json:"mode"`
-	Budget           int    `json:"budget"`
-	Compress         bool   `json:"compress"`
-	CompressDisabled bool   `json:"compress_disabled"`
-	CompressMin      int    `json:"compress_min"`
+	ContextLimits    *ContextLimits `json:"context_limits,omitempty"`
+	Query            string         `json:"query"`
+	Session          string         `json:"session"`
+	Project          string         `json:"project"`
+	ActiveScope      bool           `json:"active_scope"`
+	Disabled         bool           `json:"disabled"`
+	PreviewEnabled   bool           `json:"preview_enabled"`
+	Mode             string         `json:"mode"`
+	Budget           int            `json:"budget"`
+	Compress         bool           `json:"compress"`
+	CompressDisabled bool           `json:"compress_disabled"`
+	CompressMin      int            `json:"compress_min"`
 }
 
 func ingressBegin(state *gatewayState, request ingressBeginRequest) map[string]any {
@@ -41,8 +43,23 @@ func ingressBegin(state *gatewayState, request ingressBeginRequest) map[string]a
 	if budget <= 0 {
 		budget = 6144
 	}
+	budget, err := request.ContextLimits.byteLimit(budget)
+	if err != nil {
+		kind := "invalid_argument"
+		var refusal *contextBudgetError
+		if errors.As(err, &refusal) {
+			kind = refusal.kind
+		}
+		result = commandError(kind, err.Error())
+		result["active"] = false
+		return result
+	}
 	// Do not consume a first-task claim or retrieve data for an unusable budget.
 	if budget <= 384 {
+		return result
+	}
+	if budget > maxDataBody {
+		result["warning"] = "context byte limit exceeds memory message capacity"
 		return result
 	}
 	result["active"], result["mode"] = true, mode
@@ -50,8 +67,9 @@ func ingressBegin(state *gatewayState, request ingressBeginRequest) map[string]a
 	result["facts"], result["temporal"] = facts, request.PreviewEnabled
 	result["task"] = request.PreviewEnabled && mode != "off" && state.tasks.claim(request.Session, request.Project, request.Query)
 	result["assembly"] = map[string]any{"operation": "ingress-assemble", "budget": budget,
-		"compress": request.Compress && !request.CompressDisabled, "compress_min": request.CompressMin,
-		"facts_requested": facts}
+		"context_limits": ContextLimits{SchemaVersion: 1, MaxContextBytes: &budget},
+		"compress":       request.Compress && !request.CompressDisabled, "compress_min": request.CompressMin,
+		"facts_requested": facts, "typed_requested": request.PreviewEnabled}
 	return result
 }
 
@@ -96,7 +114,8 @@ func handleIngressPlan(state *gatewayState, args commandArgs) ([]byte, bus.Modul
 	switch args.stringOr("operation", "") {
 	case "ingress-begin":
 		var request ingressBeginRequest
-		if json.Unmarshal(raw, &request) != nil {
+		_, limitsPresent := args["context_limits"]
+		if json.Unmarshal(raw, &request) != nil || (limitsPresent && request.ContextLimits == nil) {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		return commandResult(ingressBegin(state, request))

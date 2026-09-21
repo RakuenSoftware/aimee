@@ -1,12 +1,107 @@
 # MR-03: Final-payload context budgets and protected projections
 
-- **State:** Proposed
+- **State:** In progress; minimal typed projection and retained-item receipt implemented
 - **Priority:** P0: context correctness
 - **Owner:** Go memory projection, with host/provider assembly and economizer accounting
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md) for eligible candidates
 - **Delivery:** Three implementation slices
 
 ## Problem and intended result
+
+The Go typed-context projection now emits selected evidence without channel
+budget/status diagnostics and renders reviewed procedures only in their dedicated
+envelope. The response records exact rendered bytes, a deterministic SHA-256
+projection digest and retained channel/ID pairs. Procedure identities use the
+specific proposal ID. The legacy bytes/4 estimate remains visible for compatibility
+but explicitly has unavailable token-count provenance. A fixed two-item regression
+renders the same evidence in 280 bytes instead of 1,044 bytes; this is a projection
+size result, not a provider token or latency measurement. Full provider-request
+accounting, source-version binding, protected packing and complete channel/host
+feedback remain acceptance work.
+
+The shipping Go ingress plan also supplies version-one `context_limits` with
+`max_context_bytes`. The assembler verifies the final memory envelope's UTF-8
+byte length, reports its digest and exact retained memory IDs, and preserves
+literal zero separately from the legacy inherited budget. Unknown limit fields,
+unsupported schemas and token caps/reserves without provider counting are
+refused. This boundary covers the memory envelope; subsequent provider formatting,
+full-request token accounting and protected content still require integration.
+
+Automatic legacy ingress now reports retained code indices and exact clipped
+memory previews from Go packing. The host emits this assembly evidence only after
+integrity acceptance, preventing omitted or rejected candidates from receiving
+exposure feedback. [Boundary validation](../../validation/memory-ingress-evidence-2026-09-20.md)
+distinguishes this completed correction from remaining provider dispatch and
+all-channel accounting work.
+
+[Provider-bound capture](../../validation/memory-provider-boundary-2026-09-20.md)
+found and corrected dropped instructions/tools in buffered Responses and wrong
+wire serialization for Chat/Responses targeting Anthropic. The deployment matrix
+now checks the complete Go-recalled memory projection, user constraints and tool
+schemas at the actual HTTP provider boundary. This validates preservation and
+exact request byte accounting in the fixture; production hard caps and tokenizer
+integration remain required.
+
+Responses decoding now defers memory and guidance stages until final provider
+assembly. Previously both the intermediate conversion and final builder ran them,
+duplicating lookup and standing guidance while contaminating the second recall
+query with persona text. Native regressions verify one context/tool-plan call and
+the pristine query across OpenAI, Anthropic and Responses providers; final-wire
+[fresh final-wire coverage](../../validation/memory-provider-stage-once-2026-09-20.md)
+additionally checks buffered and streaming Responses guidance counts. Go uses
+host insertion facts to reuse persona-provided guidance without trusting
+lookalike caller text.
+
+[Token-evidence binding](../../validation/memory-token-evidence-2026-09-20.md)
+now requires a request digest in the existing Go economizer planners. Equal-length
+content edits cannot reuse old token evidence. This closes a prerequisite for
+provider-bound accounting without claiming a production tokenizer exists.
+
+[Typed byte limits](../../validation/memory-typed-byte-budgets-2026-09-20.md)
+now count complete JSON and trust wrappers with literal zero handling. The
+[outer Go packer](../../validation/memory-typed-outer-packing-2026-09-20.md)
+verifies the owner projection and selection commitments, then repacks complete
+rows into the space left by earlier context. It reports the exact retained IDs
+and both source/final identities. This addresses whole-block loss at that
+boundary; final provider accounting, source-version release checks and protected
+content remain required.
+
+[Final request byte admission](../../validation/memory-final-request-budgets-2026-09-20.md)
+adds an explicit HTTP header contract at the common provider serialization fence.
+Go checks complete final byte counts and returns a commitment bound to route,
+body digest, byte length and limits. Refusal prevents dispatch even with optional
+reduction disabled; unsupported token limits fail explicitly. The Server starts
+the admission process independently of reduction settings. Full provider token
+counting, inherited limits and protected optional repacking remain open.
+
+[Inherited memory context limits](../../validation/memory-inherited-context-limits-2026-09-20.md)
+now treat the host's assembly allocation as a ceiling. Explicit limits can lower
+it but cannot increase it, and absence inherits it. Go rejects duplicate limit
+fields, case aliases, null values and invalid integers. Authenticated HTTP tests
+preserve raw duplicate JSON through the native adapter and verify refusal without
+serving context. Fresh T2/T3 deployments pass 1,100 checks. This closes the memory
+envelope inheritance gap; inherited limits on the complete provider request and
+task composition, provider token counting and protected packing remain open.
+
+[Deployment-owned final request limits](../../validation/memory-operator-request-limits-2026-09-21.md)
+extend the final serialization gate with an opaque operator policy forwarded to
+Go. Go combines it with the caller's policy in one admission call; an absent or
+larger caller limit cannot bypass the deployment byte ceiling. Fresh T2/T3 stacks
+with a 32 KiB cap pass 1,246 checks, including 273 provider checks per placement.
+Task-composition inheritance, provider token counting and protected packing remain
+open, along with the broader all-surface release/receipt gates.
+
+[Fresh recall validation](../../validation/memory-protected-recall-2026-09-21.md)
+records 1,261 passing checks. The recall packer preserves the complete stored hard-rule set or returns
+`protected_context_overflow`, including during private/shared composition. The
+former 8/16-rule caps are replaced by a bound derived from minimum serialized
+rule size, with explicit refusal when the set cannot fit. Optional rows remain
+whole and ordered; bounded prefix search avoids repeated row-by-row serialization.
+The legacy allocation is still bytes/4, not exact provider token accounting.
+HTTP classifies the refusal through the existing status provider, and MCP
+preserves it before optional session guidance. Rule-promotion authority, all-host
+provider refusal, protected user-constraint transformations and final release
+binding remain open; preserving stored hard rules does not certify those gates.
 
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
@@ -38,6 +133,12 @@ No implicit “always include the first result” exception is permitted. Missin
 ## Protected-content transformation
 
 Preserve user constraints, negation, numerical bounds, deadlines, required identifiers and authority-bearing instructions through any condensation step. Bind transformed bytes to the request/attempt and require existing economizer admission before applying a cost-saving transform. Heuristic commitment extraction is a check, not proof of semantic equivalence. Failed validation falls back only if the original still fits; otherwise return an explicit overflow outcome.
+
+[Native refusal propagation](../../validation/memory-context-refusals-2026-09-21.md)
+now stops initial native dispatch and refresh on explicit Go recall refusal and
+preserves that result through routing/fallback. MCP retains non-success statuses
+before guidance. HTTP ingress omission paths and full protected-context rendering
+remain acceptance work.
 
 ## Implementation slices
 

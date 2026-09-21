@@ -4,6 +4,7 @@
 #include <aimee/audit/obs_bus.h>
 
 #include <assert.h>
+#include <openssl/sha.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +17,10 @@
 
 static int available = 1;
 static int malformed;
+static int stale_budget_commitment;
+static uint16_t budget_result;
+static const char *expected_policy;
+static const char *expected_limits = "{}";
 
 static uint32_t get_u32(const uint8_t *p)
 {
@@ -71,7 +76,35 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
 {
    (void)trace_id, (void)cancelled, (void)cancel_context;
    assert(deadline_ns != 0);
-   if (event_kind == AIMEE_ECONOMIZER_EVENT_JSON_COMPACT)
+   if (event_kind == AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET)
+   {
+      const uint8_t *request = request_body;
+      assert(stage_id == AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET);
+      size_t header = expected_policy ? 56 : 52;
+      size_t limits_len = expected_limits ? strlen(expected_limits) : 0;
+      size_t policy_len = expected_policy ? strlen(expected_policy) : 0;
+      assert(request_len == header + limits_len + policy_len && get_u32(request) == 0x54474442u);
+      assert(request[4] == (expected_policy ? 2 : 1) && request[5] == 0 && request[6] == 1 &&
+             request[7] == 0);
+      assert(get_u32(request + 8) == 3 && get_u32(request + 12) == 0);
+      assert(get_u32(request + 48) == limits_len);
+      if (limits_len)
+         assert(memcmp(request + header, expected_limits, limits_len) == 0);
+      if (expected_policy)
+      {
+         assert(get_u32(request + 52) == policy_len);
+         assert(memcmp(request + header + limits_len, expected_policy, policy_len) == 0);
+      }
+      unsigned char digest[SHA256_DIGEST_LENGTH];
+      SHA256((const unsigned char *)"abc", 3, digest);
+      assert(memcmp(request + 16, digest, sizeof(digest)) == 0);
+      SHA256(request_body, request_len, digest);
+      if (stale_budget_commitment)
+         digest[0] ^= 1;
+      aux_reply(response_body, response_capacity, response_len, 0x54474442u, budget_result, digest,
+                sizeof(digest));
+   }
+   else if (event_kind == AIMEE_ECONOMIZER_EVENT_JSON_COMPACT)
    {
       assert(stage_id == AIMEE_ECONOMIZER_STAGE_JSON_COMPACT);
       assert(request_len == 5 && memcmp(request_body, " { } ", 5) == 0);
@@ -120,6 +153,47 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
 
 int main(void)
 {
+   for (budget_result = 0; budget_result <= 3; budget_result++)
+      assert(econ_module_request_budget(1, "abc", 3, "{}") == budget_result);
+   budget_result = 0;
+   stale_budget_commitment = 1;
+   assert(econ_module_request_budget(1, "abc", 3, "{}") == ECON_REQUEST_BUDGET_UNAVAILABLE);
+   stale_budget_commitment = 0;
+   budget_result = 4;
+   assert(econ_module_request_budget(1, "abc", 3, "{}") == ECON_REQUEST_BUDGET_UNAVAILABLE);
+   budget_result = 0;
+   malformed = 1;
+   assert(econ_module_request_budget(1, "abc", 3, "{}") == ECON_REQUEST_BUDGET_UNAVAILABLE);
+   malformed = 0;
+   available = 0;
+   assert(econ_module_request_budget(1, "abc", 3, "{}") == ECON_REQUEST_BUDGET_UNAVAILABLE);
+   available = 1;
+   assert(econ_module_request_budget(0, "abc", 3, "{}") == ECON_REQUEST_BUDGET_INVALID);
+   assert(econ_module_request_budget(1, NULL, 3, "{}") == ECON_REQUEST_BUDGET_INVALID);
+   assert(econ_module_request_budget(1, "abc", 3, "") == ECON_REQUEST_BUDGET_INVALID);
+
+   expected_policy = "opaque operator policy";
+   budget_result = ECON_REQUEST_BUDGET_POLICY_INVALID;
+   assert(econ_module_request_budget_with_policy(1, "abc", 3, "{}", expected_policy) ==
+          ECON_REQUEST_BUDGET_POLICY_INVALID);
+   budget_result = ECON_REQUEST_BUDGET_ADMITTED;
+   expected_limits = NULL;
+   assert(econ_module_request_budget_with_policy(1, "abc", 3, NULL, expected_policy) ==
+          ECON_REQUEST_BUDGET_ADMITTED);
+   stale_budget_commitment = 1;
+   assert(econ_module_request_budget_with_policy(1, "abc", 3, NULL, expected_policy) ==
+          ECON_REQUEST_BUDGET_UNAVAILABLE);
+   stale_budget_commitment = 0;
+   assert(econ_module_request_budget_with_policy(1, "abc", 3, NULL, "") ==
+          ECON_REQUEST_BUDGET_POLICY_INVALID);
+   char oversized_policy[1026];
+   memset(oversized_policy, ' ', sizeof(oversized_policy) - 1);
+   oversized_policy[sizeof(oversized_policy) - 1] = 0;
+   assert(econ_module_request_budget_with_policy(1, "abc", 3, NULL, oversized_policy) ==
+          ECON_REQUEST_BUDGET_POLICY_INVALID);
+   expected_policy = NULL;
+   expected_limits = "{}";
+
    uint8_t *compacted = NULL;
    size_t compacted_len = 0;
    assert(econ_module_json_compact(" { } ", 5, &compacted, &compacted_len) == 0);

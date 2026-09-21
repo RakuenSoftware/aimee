@@ -37,9 +37,43 @@ REVOKE CONNECT ON DATABASE aimee_store FROM PUBLIC;
 GRANT CONNECT ON DATABASE aimee_store TO aimee_store_runtime;
 GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
 
--- A fresh cluster has no application objects yet; an upgraded one does. Default
--- privileges only affect future migrations, so transfer and grant every
--- existing object before the old known-password owner is disabled.
+-- Only legacy-owned objects need baseline runtime grants. Modern migrations
+-- deliberately restrict journals, history and privileged helpers. Regranting
+-- every existing object on a PostgreSQL restart would undo those restrictions.
+-- Grant before ownership transfer so a repeated reconciliation preserves ACLs.
+DO $legacy_runtime_grants$
+DECLARE object record;
+BEGIN
+  FOR object IN
+    SELECT c.relkind,n.nspname,c.relname FROM pg_class c
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S','f')
+      AND pg_get_userbyid(c.relowner) IN ('aimee','postgres')
+      AND NOT EXISTS (SELECT 1 FROM pg_depend d
+        WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='e')
+  LOOP
+    IF object.relkind='S' THEN
+      EXECUTE format('GRANT USAGE, SELECT, UPDATE ON SEQUENCE %I.%I TO aimee_store_runtime',
+        object.nspname,object.relname);
+    ELSE
+      EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I.%I TO aimee_store_runtime',
+        object.nspname,object.relname);
+    END IF;
+  END LOOP;
+  FOR object IN
+    SELECT p.oid::regprocedure AS signature FROM pg_proc p
+    JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public' AND pg_get_userbyid(p.proowner) IN ('aimee','postgres')
+      AND NOT EXISTS (SELECT 1 FROM pg_depend d
+        WHERE d.classid='pg_proc'::regclass AND d.objid=p.oid AND d.deptype='e')
+  LOOP
+    EXECUTE format('GRANT EXECUTE ON ROUTINE %s TO aimee_store_runtime',object.signature);
+  END LOOP;
+END
+$legacy_runtime_grants$;
+
+-- A fresh cluster has no application objects yet; an upgraded one does.
+-- Transfer existing ownership before disabling the old bootstrap owner.
 DO $reconcile$
 DECLARE
   object record;
@@ -98,9 +132,6 @@ BEGIN
 END
 $reconcile$;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO aimee_store_runtime;
-GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO aimee_store_runtime;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO aimee_store_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_store_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
@@ -109,7 +140,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
   GRANT EXECUTE ON FUNCTIONS TO aimee_store_runtime;
 
 -- The version ledger is migration authority, not an application table. Keep
--- an existing ledger private immediately after the blanket upgrade grants;
+-- an existing ledger private immediately after legacy ownership adoption;
 -- the provider applies the same rule atomically when first creating it.
 DO $ledger$
 BEGIN

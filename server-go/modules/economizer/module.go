@@ -24,20 +24,22 @@ import (
 // 4096 + ordinal*256 + stage. The economizer is inventory ordinal 27, so these
 // are not a free choice.
 const (
-	EventReduce      uint32 = 11009
-	StageReduce      uint32 = 1
-	EventJSONCompact uint32 = 11010
-	StageJSONCompact uint32 = 2
-	EventToolRecall  uint32 = 11011
-	StageToolRecall  uint32 = 3
-	EventToolStats   uint32 = 11012
-	StageToolStats   uint32 = 4
-	EventRecordBuild uint32 = 11013
-	StageRecordBuild uint32 = 5
-	EventPostStatus  uint32 = 11014
-	StagePostStatus  uint32 = 6
-	EventStats       uint32 = 11015
-	StageStats       uint32 = 7
+	EventReduce        uint32 = 11009
+	StageReduce        uint32 = 1
+	EventJSONCompact   uint32 = 11010
+	StageJSONCompact   uint32 = 2
+	EventToolRecall    uint32 = 11011
+	StageToolRecall    uint32 = 3
+	EventToolStats     uint32 = 11012
+	StageToolStats     uint32 = 4
+	EventRecordBuild   uint32 = 11013
+	StageRecordBuild   uint32 = 5
+	EventPostStatus    uint32 = 11014
+	StagePostStatus    uint32 = 6
+	EventRequestBudget uint32 = 11016
+	StageRequestBudget uint32 = 8
+	EventStats         uint32 = 11015
+	StageStats         uint32 = 7
 )
 
 // StatsRequest asks for the published snapshot.
@@ -187,6 +189,8 @@ func NewHandlerWithStore(store StateStore) bus.ModuleHandler {
 			return nil, bus.ModuleStatusCancelled
 		}
 		switch invocation.StageID {
+		case StageRequestBudget:
+			return handleRequestBudget(invocation, request)
 		case StageStats:
 			var req StatsRequest
 			if err := json.Unmarshal(request, &req); err != nil {

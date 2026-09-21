@@ -3676,6 +3676,56 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/correction_proposals:
+    post:
+      summary: Inspect correction drafts outside recall
+      description: Select store=user for private drafts or store=kb for scoped shared drafts. The default is kb.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                store: { type: string, enum: [user, kb], default: kb }
+                proposal_id: { type: string, format: uuid }
+                limit: { type: integer, minimum: 1, maximum: 100, default: 50 }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+      responses:
+        "200":
+          description: Draft references; an exact proposal_id also includes its screened payload
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/review_correction:
+    post:
+      summary: Approve or reject an exact correction draft
+      description: Requires authenticated user authority, an exact target version and payload digest. Approval preserves model authorship and confidence; retries reuse the durable decision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [proposal_id, payload_digest, expected_version, action]
+              properties:
+                store: { type: string, enum: [user, kb], default: kb }
+                proposal_id: { type: string, format: uuid }
+                payload_digest: { type: string, pattern: '^[0-9a-f]{64}$' }
+                expected_version: { type: object }
+                action: { type: string, enum: [approve, reject] }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+      responses:
+        "200":
+          description: Durable review decision and resulting version when approved
+          content:
+            application/json:
+              schema: { type: object }
+        "409":
+          description: Draft, target version or prior decision no longer matches
   /memory/reject:
     post:
       summary: Reject a memory and create a durable exact-value tombstone
@@ -3728,23 +3778,24 @@ paths:
               schema: { type: object }
   /memory/delete:
     post:
-      summary: Delete a memory by id
+      summary: Retire a private memory or delete a shared memory by id
       description: >
-        Removes a memory permanently. Prefer /memory/supersede when a belief has
-        merely been replaced: the supersession chain is walked by
-        memory.list_superseded_keys and memory.fact_history, and deleting breaks
-        provenance and the negative examples effectiveness scoring relies on.
-        Delete is for content that should not exist at all, such as a credential, PII
-        under an erasure request, or data written to the wrong store.
-        Requires the memory-write capability.
+        Defaults to store=user: retirement removes a private memory from current
+        recall while retaining governed history and reports destroyed=false.
+        A model cannot retire user-authored or unknown-origin private content.
+        The expected_version precondition binds the owner, record ID and current revision.
+        With idempotency_key, an authenticated identical retry returns its original
+        mutation_receipt without another transition. Reactivated, changed or erased
+        results are not retired again; changed retry payloads conflict. The receipt
+        contains no retained content. Private retirement is not permanent erasure.
 
-        Whether the row is DESTROYED or merely retired depends on the connection,
-        not on the capability. A caller the transport attested as a person (a
-        local UDS peer, or a webuser over the trusted socket) destroys the row and
-        its provenance irreversibly. Any other caller that clears the capability
-        gate, including a bearer over TCP, retires it instead: it stops answering
-        recall under its key but stays readable through memory.fact_history. The
-        response reports which happened as `destroyed`.
+        Select store=kb explicitly for the shared deletion contract. Its existing
+        authority and retention rules determine whether the record is retired or
+        destroyed. Shared conditional deletion supports the same precondition and retry
+        key. Its schema-version-2 receipt names the target_version and outcome
+        (retired or destroyed). Retirement includes the resulting version;
+        destruction has no current version. A changed, restored or hidden result
+        cannot be deleted again through an old receipt. Requires memory-admin.
       requestBody:
         required: true
         content:
@@ -3753,7 +3804,26 @@ paths:
               type: object
               required: [id]
               properties:
-                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                store: { type: string, enum: [user, kb], default: user }
+                id:
+                  oneOf:
+                    - { type: integer, minimum: 1, maximum: 9007199254740991 }
+                    - { type: string, pattern: '^[1-9][0-9]*$' }
+                expected_version:
+                  type: object
+                  additionalProperties: false
+                  required: [schema_version, owner_id, record_id, record_revision]
+                  properties:
+                    schema_version: { type: integer, const: 1 }
+                    owner_id: { type: string, format: uuid }
+                    record_id: { type: string, pattern: '^[1-9][0-9]*$' }
+                    record_revision: { type: string, pattern: '^[1-9][0-9]*$' }
+                idempotency_key:
+                  type: string
+                  minLength: 16
+                  maxLength: 128
+                  pattern: '^[!-~]+$'
+                  description: Requires expected_version, an authenticated principal and an identical retry payload.
       responses:
         "200":
           description: Deletion result ({ id, deleted, destroyed })
@@ -3762,6 +3832,11 @@ paths:
               schema: { type: object }
         "400":
           description: Missing or non-positive id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "409":
+          description: Stale version, changed retry payload, unavailable committed result or authority conflict
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -3774,9 +3849,13 @@ paths:
     post:
       summary: Replace a memory with a corrected one, linking the two
       description: >
-        The preferred correction: the old memory is retained and linked to its
-        replacement, so provenance and retrieval history stay intact.
-        Requires the memory-write capability.
+        Correct memory in the selected store. Private memory retains the stable ID
+        and prior revision; shared KB memory links the old and replacement records.
+        expected_version binds the owner, ID and revision. With idempotency_key,
+        identical authenticated retries return the original mutation_receipt after
+        checking current result eligibility and version. Changed payloads conflict;
+        hidden or changed results are not repeated. A model correction requiring
+        review returns a durable proposal reference. Requires memory-write capability.
       requestBody:
         required: true
         content:
@@ -3785,7 +3864,26 @@ paths:
               type: object
               required: [old_id, new_content]
               properties:
-                old_id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                store: { type: string, enum: [user, kb], default: user }
+                old_id:
+                  oneOf:
+                    - { type: integer, minimum: 1, maximum: 9007199254740991 }
+                    - { type: string, pattern: '^[1-9][0-9]*$' }
+                expected_version:
+                  type: object
+                  additionalProperties: false
+                  required: [schema_version, owner_id, record_id, record_revision]
+                  properties:
+                    schema_version: { type: integer, const: 1 }
+                    owner_id: { type: string, format: uuid }
+                    record_id: { type: string, pattern: '^[1-9][0-9]*$' }
+                    record_revision: { type: string, pattern: '^[1-9][0-9]*$' }
+                idempotency_key:
+                  type: string
+                  minLength: 16
+                  maxLength: 128
+                  pattern: '^[!-~]+$'
+                  description: Requires expected_version. Reuse only for the identical correction.
                 new_content: { type: string }
                 confidence: { type: number, minimum: 0, maximum: 1 }
                 session_id: { type: string }
@@ -3797,6 +3895,11 @@ paths:
               schema: { type: object }
         "400":
           description: Missing old_id or empty new_content
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "409":
+          description: Version, retry payload, unavailable committed result or review-required conflict
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -4129,7 +4232,14 @@ paths:
   /memory/store:
     post:
       summary: Store a memory (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
+      description: >
+        Mutating route; reachable only on the local Unix-domain socket. Shared writes
+        require an active project/workspace or explicit scope=all. Optional authenticated
+        idempotency_key binds the admitted request and authority to one durable outcome;
+        identical retries return that result without repeating extraction or invalidation.
+        Existing same-key replacement and review rules still apply. Changed requests
+        conflict; hidden, expired, superseded or erased results are unavailable.
+        Creation does not accept expected_version.
       requestBody:
         required: true
         content:
@@ -4140,9 +4250,21 @@ paths:
               properties:
                 key: { type: string }
                 content: { type: string }
+                store: { type: string, enum: [user, kb], default: user }
+                tier: { type: string }
+                kind: { type: string }
+                confidence: { type: number, minimum: 0, maximum: 1 }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+                idempotency_key:
+                  type: string
+                  minLength: 16
+                  maxLength: 128
+                  pattern: '^[!-~]+$'
       responses:
         "200":
-          description: Stored memory envelope
+          description: Stored memory envelope; keyed outcomes include schema-2 mutation_receipt with stored/unchanged outcome, commit_id, exact version and replayed flag, or a linked review proposal
           content:
             application/json:
               schema: { type: object }

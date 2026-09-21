@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -18,6 +19,17 @@ func TestRecallBudget(t *testing.T) {
 		b := recallBundle{AlwaysOnRules: []recallRule{{ID: math.MaxInt64, Title: "Keep hard rules", Description: "Rule text"}}, Identity: items, Preferences: items, ActiveContext: items, OpenCommitments: items,
 			Reminders: []recallReminder{{MemoryID: math.MaxInt64, Text: "Reminder"}}, Directives: []recallDirective{{MemoryID: math.MaxInt64, Text: "Directive"}}, LimitTokens: limit, Explain: []any{}}
 		raw, err := b.encodeBudgeted()
+		if err != nil {
+			var refusal *contextBudgetError
+			minimum, _, _ := b.encodePrefix(0)
+			if !errors.As(err, &refusal) || refusal.kind != "protected_context_overflow" || minimum.ApproxTokens <= limit || len(raw) != 0 {
+				t.Fatal("incorrect protected refusal", limit, err)
+			}
+			continue
+		}
+		if len(b.AlwaysOnRules) != 1 {
+			t.Fatal("hard rule dropped", limit)
+		}
 		if err != nil || !json.Valid(raw) || b.ApproxTokens != (len(raw)+3)/4 || b.UsedTokens != b.ApproxTokens {
 			t.Fatal(limit, string(raw), err)
 		}
@@ -199,17 +211,46 @@ func exerciseRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 		}
 	}
 	before := count()
-	tiny, _ := recall("backend migration", 64, false, "")
-	if len(tiny.Directives) != 0 || len(tiny.Identity) != 0 || tiny.BudgetExceeded != (tiny.ApproxTokens > tiny.LimitTokens) || count() != before {
-		t.Fatal("trimmed directive was counted", tiny, surfaced)
+	tiny := runPublicCommand(t, client, "recall", `{"task_hint":"backend migration","limit_tokens":64,"scope_context":true,"project":"recall-project"}`)
+	if tiny["kind"] != "protected_context_overflow" || tiny["recall"] != nil || count() != before {
+		t.Fatal("protected overflow lost or surfaced directive counted", tiny, surfaced)
 	}
-	// The default and clamped budgets remain truthful, including all aliases.
-	for _, limit := range []int{0, 96, 600, math.MaxInt32} {
+	for _, limit := range []int{0, 128, 600, math.MaxInt32} {
 		r, _ := recall("backend migration", limit, false, "")
-		if r.LimitTokens != recallTokenLimit(limit, false) || r.ApproxTokens > r.LimitTokens && !r.BudgetExceeded {
+		if r.LimitTokens != recallTokenLimit(limit, false) || r.ApproxTokens > r.LimitTokens || len(r.AlwaysOnRules) != 1 {
 			t.Fatal(r)
 		}
 	}
+	// More hard rules than either former row cap must all survive. Even an
+	// oversized lowest-priority rule must refuse, not hide behind the cap.
+	exec(`SAVEPOINT recall_many_rules`)
+	exec(`INSERT INTO rules(polarity,title,description,weight,directive_type,created_at,updated_at)
+ SELECT 'negative','Required rule '||n,'Keep required identifier '||n,1,'hard',pg_now_text(),pg_now_text() FROM generate_series(1,20) n`)
+	for _, start := range []bool{false, true} {
+		many, _ := recall("", 8192, start, "")
+		if len(many.AlwaysOnRules) != 21 {
+			t.Fatal("hard rule row cap", len(many.AlwaysOnRules))
+		}
+	}
+	exec(`UPDATE rules SET description=repeat('界',20000) WHERE title='Required rule 20'`)
+	overflow := runPublicCommand(t, client, "recall", `{"limit_tokens":8192}`)
+	if overflow["kind"] != "protected_context_overflow" || overflow["recall"] != nil {
+		t.Fatal("large protected text truncated", overflow)
+	}
+	exec(`ROLLBACK TO SAVEPOINT recall_many_rules; RELEASE SAVEPOINT recall_many_rules`)
+	exec(`SAVEPOINT recall_minimum_rules`)
+	exec(`INSERT INTO rules(polarity,title,description,weight,directive_type,created_at,updated_at)
+ SELECT 'negative','Bounded rule '||n,'',1,'hard',pg_now_text(),pg_now_text() FROM generate_series(1,600) n`)
+	overflow = runPublicCommand(t, client, "recall", `{"limit_tokens":8192}`)
+	if overflow["kind"] != "protected_context_overflow" || overflow["recall"] != nil {
+		t.Fatal("rule count cap silently truncated", overflow)
+	}
+	exec(`UPDATE rules SET description=repeat('界',10000) WHERE title LIKE 'Bounded rule %'`)
+	overflow = runPublicCommand(t, client, "recall", `{"limit_tokens":8192}`)
+	if overflow["kind"] != "protected_context_overflow" || overflow["recall"] != nil {
+		t.Fatal("large aggregate crossed DB reply bound", overflow)
+	}
+	exec(`ROLLBACK TO SAVEPOINT recall_minimum_rules; RELEASE SAVEPOINT recall_minimum_rules`)
 	// Activation still gates before LIMIT and preserves scope ordering.
 	activated, _ := recall("backend migration", 8192, false, fmt.Sprintf(`,"activation":{"current_turn":2,"rows":[{"memory_id":%d,"last_turn":1}]}`, self))
 	if len(activated.Identity) != 3 || activated.Identity[0].ID != role || !activated.Identity[0].ActivationManaged {
@@ -235,4 +276,96 @@ func exerciseRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 		t.Fatal(result)
 	}
 	exec(`ROLLBACK TO SAVEPOINT recall_denied; RELEASE SAVEPOINT recall_denied`)
+}
+
+// Compare the bounded search with exhaustive reverse-priority removal. This
+// catches count digit boundaries, escaping and off-by-one prefix selections.
+func TestRecallProtectedPackingMatchesExhaustive(t *testing.T) {
+	for _, limit := range []int{64, 96, 128, 255, 256, 257, 600, 999, 1000, 1800, 8192} {
+		for _, rules := range []int{0, 1, 20} {
+			input := recallBundle{AlwaysOnRules: []recallRule{}, Identity: []RecallRecord{}, Preferences: []RecallRecord{}, ActiveContext: []RecallRecord{}, OpenCommitments: []RecallRecord{}, Reminders: []recallReminder{}, Directives: []recallDirective{}, Explain: []any{}, LimitTokens: limit}
+			for n := 0; n < rules; n++ {
+				input.AlwaysOnRules = append(input.AlwaysOnRules, recallRule{ID: int64(n + 1), Title: "Never omit", Description: "Do not spend more than 10 EUR before 2026-10-01."})
+			}
+			for n := 0; n < 12; n++ {
+				row := recallItems([]Record{{ID: int64(n + 1), Content: strings.Repeat("\"界\n", n*17)}})[0]
+				input.Identity = append(input.Identity, row)
+				input.Preferences = append(input.Preferences, row)
+				input.ActiveContext = append(input.ActiveContext, row)
+				input.OpenCommitments = append(input.OpenCommitments, row)
+				input.Reminders = append(input.Reminders, recallReminder{Text: row.Text})
+				input.Directives = append(input.Directives, recallDirective{Text: row.Text})
+			}
+			actual := input
+			raw, err := actual.encodeBudgeted()
+			var expected []byte
+			for n := input.optionalCount(); n >= 0; n-- {
+				candidate, encoded, e := input.encodePrefix(n)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if candidate.ApproxTokens <= limit {
+					expected = encoded
+					break
+				}
+			}
+			if expected == nil && rules > 0 {
+				var refusal *contextBudgetError
+				if !errors.As(err, &refusal) || refusal.kind != "protected_context_overflow" || raw != nil {
+					t.Fatal(limit, rules, err)
+				}
+			} else if expected != nil {
+				if err != nil || string(raw) != string(expected) {
+					t.Fatal("different maximal prefix", limit, rules, err)
+				}
+				again := input
+				repeated, e := again.encodeBudgeted()
+				if e != nil || string(repeated) != string(raw) {
+					t.Fatal("nondeterministic packing")
+				}
+			} else if err != nil || !actual.BudgetExceeded || actual.optionalCount() != 0 {
+				t.Fatal("empty legacy diagnostic", limit, err)
+			}
+		}
+	}
+}
+
+func BenchmarkRecallPacking(b *testing.B) {
+	input := recallBundle{AlwaysOnRules: []recallRule{{ID: 1, Title: "Required", Description: "Never omit"}}, LimitTokens: 600, Explain: []any{}}
+	for i := 0; i < 64; i++ {
+		row := recallItems([]Record{{ID: int64(i + 1), Content: strings.Repeat("optional 界\n", 120)}})[0]
+		input.Identity = append(input.Identity, row)
+	}
+	for _, name := range []string{"linear_removal", "bounded_search"} {
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				candidate := input
+				if name == "bounded_search" {
+					if _, err := candidate.encodeBudgeted(); err != nil {
+						b.Fatal(err)
+					}
+				} else {
+					for {
+						raw, err := json.Marshal(candidate)
+						if err != nil {
+							b.Fatal(err)
+						}
+						tokens := (len(raw) + 3) / 4
+						if candidate.ApproxTokens != tokens || candidate.UsedTokens != tokens {
+							candidate.ApproxTokens, candidate.UsedTokens = tokens, tokens
+							continue
+						}
+						if tokens <= candidate.LimitTokens {
+							break
+						}
+						if len(candidate.Identity) == 0 {
+							b.Fatal("fixture hard rules do not fit")
+						}
+						candidate.Identity = candidate.Identity[:len(candidate.Identity)-1]
+					}
+				}
+			}
+		})
+	}
 }

@@ -38,7 +38,7 @@ func handleRecallComposition(options handlerOptions, invocation bus.ModuleInvoca
 		return nil, bus.ModuleStatusInternal
 	}
 	// A string carries exact int64 tokens through native JSON transport.
-	return commandResult(map[string]any{"status": "ok", "json": string(response.Payload)})
+	return nativeRecallText(response.Payload, args)
 }
 
 func (s *postgresDataStore) ComposeRecall(ctx context.Context, shared json.RawMessage, tokens int, sessionStart bool) (json.RawMessage, error) {

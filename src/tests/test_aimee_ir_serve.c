@@ -25,6 +25,10 @@ static const char *REQ =
 
 void ir_seam_test_session(const char *session_id);
 void ir_seam_test_persona(const char *instructions);
+void ir_seam_test_memory(int enabled);
+int ir_seam_test_plan_calls(const char *phase);
+const char *ir_seam_test_query(void);
+int ir_seam_test_guidance_provided(void);
 
 int main(void)
 {
@@ -114,6 +118,44 @@ int main(void)
    cJSON_Delete(rmsgs);
    cJSON_Delete(rtls);
 
+   /* Responses decoding must not recall, consume persona delivery or police
+    * tools before routing. The final builder runs those stages once and recalls
+    * the original user query, without persona/guidance contamination. */
+   for (int provider = 0; provider < 3; provider++)
+   {
+      const char *drivers[] = {"openai", "anthropic", "chatgpt"};
+      ir_seam_test_session("responses-stage-once");
+      ir_seam_test_persona("PERSONA_BOUNDARY_FIXTURE");
+      ir_seam_test_memory(1);
+      instr = NULL;
+      rmsgs = rtls = NULL;
+      assert(aimee_ir_responses_to_chat(RBODY, mdl, sizeof mdl, &instr, &rmsgs, &rtls, &strm) == 0);
+      assert(ir_seam_test_plan_calls("context") == 0);
+      assert(ir_seam_test_plan_calls("tools") == 0);
+      assert(strcmp(cJSON_GetStringValue(
+                        cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rmsgs, 0), "content")),
+                    "hi") == 0);
+      cJSON *provider_body =
+          aimee_ir_build_from_chat(mdl, rmsgs, rtls, instr, drivers[provider], 32, 0.2);
+      assert(provider_body);
+      assert(ir_seam_test_plan_calls("context") == 1);
+      assert(ir_seam_test_plan_calls("tools") == 1);
+      assert(strcmp(ir_seam_test_query(), "hi") == 0);
+      assert(ir_seam_test_guidance_provided() == 1);
+      char *wire = cJSON_PrintUnformatted(provider_body);
+      assert(wire && strstr(wire, "be helpful"));
+      const char *persona = strstr(wire, "PERSONA_BOUNDARY_FIXTURE");
+      assert(persona && !strstr(persona + 1, "PERSONA_BOUNDARY_FIXTURE"));
+      free(wire);
+      cJSON_Delete(provider_body);
+      free(instr);
+      cJSON_Delete(rmsgs);
+      cJSON_Delete(rtls);
+   }
+   ir_seam_test_memory(0);
+   ir_seam_test_persona(NULL);
+   ir_seam_test_session(NULL);
+
    /* A namespaced tool call in the history survives the CHAT HOP.
     *
     * A Responses request does not go responses -> IR -> responses. It goes
@@ -160,6 +202,29 @@ int main(void)
    assert(cJSON_IsFalse(cJSON_GetObjectItem(fc, "store"))); /* codex req shape */
    assert(cJSON_GetObjectItem(fc, "instructions"));         /* system -> instructions */
    assert(cJSON_GetArraySize(cJSON_GetObjectItem(fc, "input")) >= 1);
+   cJSON_Delete(fc);
+
+   /* Chat/Responses ingress targeting Anthropic must retain policy in its
+    * separate system field and translate tool schemas to the selected wire. */
+   const char *policy = "Do not exceed LIMIT_7; preserve αβ🦊 and identifiers.";
+   fc = aimee_ir_build_from_chat("fixture-anthropic", cm, ct, policy, "anthropic", 32, 0.2);
+   assert(fc);
+   const cJSON *system = cJSON_GetObjectItemCaseSensitive(fc, "system");
+   assert(cJSON_IsArray(system));
+   const cJSON *first_system = cJSON_GetArrayItem(system, 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first_system, "text")),
+                 policy) == 0);
+   const cJSON *wire_messages = cJSON_GetObjectItemCaseSensitive(fc, "messages");
+   assert(cJSON_GetArraySize(wire_messages) == 1);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                     cJSON_GetArrayItem(wire_messages, 0), "role")),
+                 "user") == 0);
+   const cJSON *wire_tool = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(fc, "tools"), 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(wire_tool, "name")),
+                 "Read") == 0);
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(wire_tool, "input_schema")));
+   assert(!cJSON_GetObjectItemCaseSensitive(wire_tool, "function"));
+   assert(cJSON_GetObjectItemCaseSensitive(fc, "max_tokens")->valueint == 32);
    cJSON_Delete(fc);
    cJSON_Delete(cm);
    cJSON_Delete(ct);

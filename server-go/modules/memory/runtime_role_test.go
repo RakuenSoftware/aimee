@@ -133,6 +133,11 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseReembedReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseSharedRecallReplay(t, ctx, tx, backend.(*postgresDataStore))
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
+	exerciseExpectedVersionReplay(t, ctx, tx, handler)
+	exerciseMutationRetryReplay(t, ctx, tx, handler)
+	exerciseDeletionRetryReplay(t, ctx, tx, handler)
+	exerciseCreationRetryReplay(t, ctx, tx, handler)
+	exerciseUpdateRetryReplay(t, ctx, tx, handler)
 	exerciseDemotionReplay(t, ctx, tx, handler)
 	exerciseCodeContextReplay(t, ctx, tx, handler)
 	exerciseScopeReplay(t, ctx, tx, handler)
@@ -141,6 +146,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseBenchmarkDiagnosticsReplay(t, ctx, tx, handler)
 	exerciseBenchmarkScoreReplay(t, ctx, tx, handler)
 	exerciseAssertionSearchReplay(t, ctx, tx, backend.(*postgresDataStore))
+	exerciseDerivedEligibilityReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseCurrentFactRecallReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseTypedContextReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseCSSConventionsReplay(t, ctx, tx, backend.(*postgresDataStore))
@@ -274,6 +280,32 @@ WHERE c.object_kind='memory' AND c.object_key=$1 AND g.actor_principal=$2 AND g.
 	if _, err := tx.Exec(ctx, `INSERT INTO memory_scopes(memory_id,scope_type,scope_value) VALUES ($1,'workspace','runtime-team')`, oldID); err != nil {
 		t.Fatal(err)
 	}
+	// Scope copies run after the new parent becomes visible to child RLS, but
+	// remain in the same request transaction. A late copy failure must restore
+	// the original active row and every collection position.
+	var generationBefore, generationAfter int64
+	if err := tx.QueryRow(ctx, `SELECT generation FROM memory_collection_generations WHERE scope_type='project' AND scope_value='runtime-project-a'`).Scan(&generationBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`RESET ROLE;
+ALTER TABLE memory_scopes ADD CONSTRAINT runtime_scope_copy_failure CHECK(memory_id=%d OR scope_value<>'runtime-team') NOT VALID;
+SET LOCAL ROLE aimee_store_runtime`, oldID)); err != nil {
+		t.Fatal(err)
+	}
+	failedCopy, _ := invokeContextCommand(t, handler, 0, caller, "update", fmt.Sprintf(`{"id":%d,"content":"must roll back","scope_context":true,"project":"runtime-project-a"}`, oldID))
+	if failedCopy["status"] == "ok" {
+		t.Fatal("scope copy failure accepted replacement", failedCopy)
+	}
+	var originalStillActive bool
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state='active' AND content='original' FROM memories WHERE id=$1`, oldID).Scan(&originalStillActive); err != nil || !originalStillActive {
+		t.Fatal("scope copy failure retired the original", originalStillActive, err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT generation FROM memory_collection_generations WHERE scope_type='project' AND scope_value='runtime-project-a'`).Scan(&generationAfter); err != nil || generationAfter != generationBefore {
+		t.Fatal("failed replacement published invalidation", generationBefore, generationAfter, err)
+	}
+	if _, err := tx.Exec(ctx, `RESET ROLE; ALTER TABLE memory_scopes DROP CONSTRAINT runtime_scope_copy_failure; SET LOCAL ROLE aimee_store_runtime`); err != nil {
+		t.Fatal(err)
+	}
 	updated := command("update", fmt.Sprintf(`{"id":%d,"content":"model replacement","scope_context":true,"project":"runtime-project-a"}`, oldID), true)
 	newID := int64(updated["id"].(float64))
 	if newID == oldID || updated["superseded"] != true {
@@ -308,6 +340,7 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 	command("delete", fmt.Sprintf(`{"id":%d,"authority":"user"}`, newID), true)
 	exerciseMaintenanceReplay(t, ctx, tx, handler)
 	exerciseDiagnosticReplay(t, ctx, tx, handler)
+	exercisePreviewSourceReplay(t, ctx, tx, backend.(*postgresDataStore), handler)
 	exerciseAnswerReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseVectorMaintenanceReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseVectorRepairReplay(t, ctx, tx, backend.(*postgresDataStore))

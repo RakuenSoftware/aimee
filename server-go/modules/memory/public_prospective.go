@@ -16,6 +16,13 @@ func handleProspectiveCommand(options handlerOptions, invocation bus.ModuleInvoc
 	invalid := func(message string) ([]byte, bus.ModuleStatus) {
 		return commandResult(commandError("invalid_argument", message))
 	}
+	nativeLimit, err := nativeRecallLimit(args)
+	if err != nil {
+		return invalid(err.Error())
+	}
+	if nativeLimit != nil && verb != "prospective_match" {
+		return invalid("native projection requires prospective_match")
+	}
 	limit := func(key string, fallback, maximum int) int {
 		n, ok := args.number(key)
 		if !ok || n < 1 {
@@ -53,7 +60,7 @@ func handleProspectiveCommand(options handlerOptions, invocation bus.ModuleInvoc
 		request.Limit = limit("max", 3, 8)
 	case "prospective_complete", "prospective_mark_triggered":
 		var ok bool
-		request.ID, ok = args.positiveID("id")
+		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("missing or invalid id")
 		}
@@ -77,10 +84,10 @@ func handleProspectiveCommand(options handlerOptions, invocation bus.ModuleInvoc
 	result := map[string]any{"status": "ok"}
 	switch verb {
 	case "prospective_create", "prospective_list", "prospective_match", "prospective_dashboard", "prospective_briefing":
-		rows := make([]map[string]any, 0, len(response.Prospectives))
+		rows := make([]map[string]json.RawMessage, 0, len(response.Prospectives))
 		for _, item := range response.Prospectives {
 			encoded, _ := json.Marshal(item)
-			var row map[string]any
+			var row map[string]json.RawMessage
 			if json.Unmarshal(encoded, &row) != nil {
 				return nil, bus.ModuleStatusInternal
 			}
@@ -136,6 +143,18 @@ func handleProspectiveCommand(options handlerOptions, invocation bus.ModuleInvoc
 		case "prospective_list":
 			result["prospectives"] = rows
 		case "prospective_match":
+			if nativeLimit != nil {
+				bundle := recallBundle{}
+				for _, item := range response.Prospectives {
+					bundle.Reminders = append(bundle.Reminders, recallReminder{MemoryID: item.ID, Text: item.ActionText, Key: item.TriggerText})
+				}
+				projection, count, err := projectNativeRecall(bundle, *nativeLimit)
+				if err != nil {
+					return invalid(err.Error())
+				}
+				result["native_context"] = projection
+				rows = rows[:count]
+			}
 			result["matches"] = rows
 		}
 	case "prospective_complete":

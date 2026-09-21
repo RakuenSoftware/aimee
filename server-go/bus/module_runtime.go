@@ -22,13 +22,13 @@ const (
 	clientHeartbeatInterval = 5 * time.Second
 )
 
-func nextModuleIdle(delay time.Duration) time.Duration {
-	if delay >= moduleIdleMax {
-		return moduleIdleMax
+func nextModuleIdle(delay, maximum time.Duration) time.Duration {
+	if delay >= maximum {
+		return maximum
 	}
 	delay *= 2
-	if delay > moduleIdleMax {
-		return moduleIdleMax
+	if delay > maximum {
+		return maximum
 	}
 	return delay
 }
@@ -100,6 +100,11 @@ type ModuleProcessConfig struct {
 	PrincipalRef   uint32
 	Stages         []ModuleStage
 	Handler        ModuleHandler
+	// MaxIdlePollInterval caps this Go consumer's scheduled idle backoff.
+	// Zero preserves the 10ms idle ceiling. Latency-sensitive modules may choose
+	// a ceiling between 1ms and 10ms, trading bounded idle wakeups for latency.
+	// This does not alter the shared-memory protocol or the C host's polling.
+	MaxIdlePollInterval time.Duration
 	// AfterAttach hardens process state that would otherwise prevent the host
 	// from authenticating this executable through its peer credentials.
 	AfterAttach func() error
@@ -154,6 +159,10 @@ func monotonicNowNS() uint64 {
 }
 
 func validateModuleConfig(config ModuleProcessConfig) (map[uint32]uint32, error) {
+	if config.MaxIdlePollInterval != 0 &&
+		(config.MaxIdlePollInterval < moduleIdle || config.MaxIdlePollInterval > moduleIdleMax) {
+		return nil, ErrModuleConfig
+	}
 	if config.SocketPath == "" || config.ModuleName == "" || config.PrincipalClass == 0 ||
 		config.PrincipalRef == 0 || len(config.Stages) == 0 {
 		return nil, ErrModuleConfig
@@ -350,6 +359,10 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 	jobs := make(map[moduleCallKey]*moduleWork)
 	done := make(chan moduleResult, moduleMaxInFlight)
 	idleDelay := moduleIdle
+	idleMaximum := config.MaxIdlePollInterval
+	if idleMaximum == 0 {
+		idleMaximum = moduleIdleMax
+	}
 	idleTimer := time.NewTimer(idleDelay)
 	defer idleTimer.Stop()
 
@@ -404,7 +417,7 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 				}
 				idleDelay = moduleIdle
 			case <-idleTimer.C:
-				idleDelay = nextModuleIdle(idleDelay)
+				idleDelay = nextModuleIdle(idleDelay, idleMaximum)
 			case <-ctx.Done():
 				// The loop's shutdown path cancels and drains admitted handlers.
 			}

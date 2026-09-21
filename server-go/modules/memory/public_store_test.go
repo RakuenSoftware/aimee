@@ -25,6 +25,16 @@ func TestStorePublicValidation(t *testing.T) {
 			t.Fatal("confidence refusal changed the public contract", r)
 		}
 	}
+	for _, context := range []string{
+		`"project":"__aimee_scope_missing__","workspace":"__aimee_scope_missing__"`,
+		`"workspace":"__aimee_scope_missing__"`,
+		`"project":"  __aimee_scope_missing__  "`,
+	} {
+		r := runPublicCommand(t, client, "store", `{"key":"x","content":"y","scope_context":true,`+context+`}`)
+		if r["kind"] != "invalid_argument" || r["reason"] != "active_context_missing" || r["active_context_missing"] != true {
+			t.Fatal("missing scope must be refused before accessing storage", r)
+		}
+	}
 	if r := runPublicCommand(t, client, "store", `{"key":"x","content":"y"}`); r["kind"] != "unavailable" {
 		t.Fatal(r)
 	}
@@ -63,6 +73,7 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	if err != nil {
 		t.Fatal(err)
 	}
+	installProposalFixture(t, ctx, tx)
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
 	client := clientForHandler(t, handler)
 	caller := bus.CommandContext{Authenticated: true, Principal: "user:alice", UserAuthority: true, TransportIdentity: "cert:server"}
@@ -76,6 +87,22 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 			t.Fatal(status)
 		}
 		return r
+	}
+	// Canonical store admission also covers Put, workflows and practice writes.
+	backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+	for _, scope := range []Scope{{Type: ScopeProject, Value: missingScopeValue}, {Type: ScopeWorkspace, Value: missingScopeValue}} {
+		_, err := backend.InsertEpistemic(ctx, DataRequest{Scope: scope, Tier: "L2", Kind: "fact", Key: "missing-context", Content: "must not persist"})
+		if err == nil || !strings.Contains(err.Error(), "active scope context") {
+			t.Fatal("canonical insert accepted missing context", scope, err)
+		}
+		_, err = backend.Put(ctx, scope, Record{Tier: "L2", Kind: "fact", Key: "missing-context", Content: "must not persist"})
+		if err == nil || !strings.Contains(err.Error(), "active scope context") {
+			t.Fatal("Put accepted missing context", scope, err)
+		}
+	}
+	var missingRows int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE key='missing-context'`).Scan(&missingRows); err != nil || missingRows != 0 {
+		t.Fatal(missingRows, err)
 	}
 	r := put(`{"key":"model-note","content":"a useful note","authority":"user","actor":"user:forged","tier":"L2","confidence":1,"session_id":"session","use_cases":"answer questions"}`, false)
 	if r["status"] != "ok" {
@@ -181,6 +208,25 @@ CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id b
 	if low := put(`{"key":"hypothesis","content":"tentative","tier":"L5","authority":"user"}`, true); low["status"] != "ok" || low["memory"].(map[string]any)["confidence"] != 0.5 {
 		t.Fatal(low)
 	}
+	// Supersede has the same host-authorized user correction path as update.
+	supersedeSource := put(`{"key":"verified-supersede","content":"user original","authority":"user"}`, true)
+	supersedeArgs := fmt.Sprintf(`{"old_id":%.0f,"new_content":"user correction","authority":"user"}`, supersedeSource["id"])
+	for _, unverified := range []bus.CommandContext{
+		{}, {Authenticated: true, Principal: "model:host"},
+	} {
+		if got, status := invokeContextCommand(t, handler, 0, unverified, "supersede", supersedeArgs); status != bus.ModuleStatusOK || got["kind"] != "review_required" {
+			t.Fatal("supersede accepted unverified authority", unverified, got, status)
+		}
+	}
+	correction, status := invokeContextCommand(t, handler, 0, caller, "supersede", supersedeArgs)
+	if status != bus.ModuleStatusOK || correction["status"] != "ok" {
+		t.Fatal("verified user correction refused", correction, status)
+	}
+	correctedMemory := correction["memory"].(map[string]any)
+	if correctedMemory["id"] == supersedeSource["id"] || correctedMemory["provenance_category"] != "user_stated" {
+		t.Fatal("verified correction lost version or authority", correction)
+	}
+	checkActor(correctedMemory["id"], "user:alice", 30, 1)
 	// Both failure positions roll back the memory row, actor capture and enqueue.
 	for _, tt := range []struct{ table, check, key string }{
 		{"memory_fact_actors", "authority_rank<0", "capture-failure"}, {"kb_async_jobs", "document_id<0", "enqueue-failure"},
@@ -443,6 +489,15 @@ SET LOCAL ROLE memory_store_test;`)
 	editRaw = fmt.Sprintf(`{"old_id":%.0f,"new_content":"password=replacement"}`, redacted["id"])
 	if r := runPublicCommand(t, client, "supersede", editRaw); r["status"] != "ok" || r["memory"].(map[string]any)["content"] != "[REDACTED]" {
 		t.Fatal(r)
+	}
+
+	global := put(`{"key":"explicit-global","content":"global note","scope_context":true,"include_all":true}`, false)
+	if global["status"] != "ok" {
+		t.Fatal("explicit global store must remain available", global)
+	}
+	var globalScope string
+	if err := tx.QueryRow(ctx, `SELECT scope_type||':'||scope_value FROM memories WHERE id=$1`, int64(global["id"].(float64))).Scan(&globalScope); err != nil || globalScope != "global:_global" {
+		t.Fatal(globalScope, err)
 	}
 
 }

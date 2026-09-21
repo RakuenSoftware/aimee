@@ -43,7 +43,8 @@ int aimee_ir_stream_relay_enabled(void);
  * of a direct Responses->chat translation. Same out-param contract: `model` buffer,
  * malloc'd `*instructions_out`, and detached `*messages_out`/`*tools_out` cJSON the
  * caller owns; `*stream_out` mirrors the request. Returns 0, or -1 (caller falls
- * back to the legacy translator). */
+ * back to the legacy translator). This conversion does not apply request stages;
+ * the final provider builder applies them after routing. */
 int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
                                char **instructions_out, struct cJSON **messages_out,
                                struct cJSON **tools_out, int *stream_out);
@@ -52,7 +53,8 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
  * + system) VIA THE IR, replacing driver->build_request's direct chat->provider
  * translation. Assembles a chat request, parses it to the IR, overrides the served
  * model, and builds for the backend named by `driver_name` ("chatgpt" -> Responses,
- * else OpenAI). Returns a new cJSON the caller owns, or NULL to fall back. */
+ * "anthropic" -> Anthropic Messages, else OpenAI). Applies request stages once
+ * before serialization. Returns a new cJSON the caller owns, or NULL to fall back. */
 /* Flat-text persona delivery for the legacy (non-IR) chat path. Claims the
  * once-per-session delivery, prepends when this is a first turn, and releases the
  * claim. Returns NULL when the claim state is unreadable so the caller keeps the

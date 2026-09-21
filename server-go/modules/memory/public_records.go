@@ -13,6 +13,8 @@ import (
 // Public records retain the KB response shape, without the former native
 // fixed-size content buffer. Metadata is read inside the same scoped transaction.
 type publicMemoryRecord struct {
+	Version *MemoryRecordVersion `json:"version,omitempty"`
+
 	ID                 int64   `json:"id"`
 	Tier               string  `json:"tier"`
 	Kind               string  `json:"kind"`
@@ -66,6 +68,7 @@ FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 		if !ok {
 			return nil, fmt.Errorf("memory: metadata missing for record %d", record.ID)
 		}
+		r.Version = record.Version
 		r.Tier, r.Kind, r.Key, r.Content, r.Confidence = record.Tier, record.Kind, record.Key, record.Content, record.Confidence
 		result = append(result, r)
 	}
@@ -134,7 +137,19 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			}
 		}
 	case "get":
+		if raw, exists := args["include_version"]; exists {
+			if string(raw) == "null" || json.Unmarshal(raw, &request.IncludeVersion) != nil {
+				return invalid("include_version must be boolean")
+			}
+		}
 		var ok bool
+		if request.IncludeVersion && (args.stringOr("view", "") == "session" || (args.stringOr("view", "") == "console" && args.stringOr("format", "json") != "json")) {
+			return commandResult(commandError("unsupported_mode", "include_version requires a JSON record view"))
+		}
+		request.ReadPolicy, ok = commandReadPolicy(args)
+		if !ok {
+			return invalid("read_policy must be a versioned object with recognized fields")
+		}
 		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("memory.get requires a positive integer id")
@@ -205,6 +220,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
+	if response.Read != nil && response.Read.ErrorCode != "" {
+		return commandResult(commandError(response.Read.ErrorCode, response.Read.Message))
+	}
 	if args.stringOr("view", "") == "session" {
 		return sessionMemoryView(options, invocation, args, request, response.PublicRecords)
 	}
@@ -263,6 +281,9 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			return commandResult(commandError("not_found", "memory not found"))
 		}
 		result["memory"] = response.PublicRecords[0]
+		if response.Read != nil {
+			result["read"] = response.Read
+		}
 		if request.AsOf != "" {
 			result["as_of"] = request.AsOf
 			result["valid_at"] = "unknown"
@@ -298,12 +319,16 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 // Preserve the native console's record schema while keeping its contents and
 // integer IDs in the owner. The host transports the rendered output as a string.
 func consoleMemoryRecord(r publicMemoryRecord) map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"id": r.ID, "tier": r.Tier, "kind": r.Kind, "key": r.Key, "content": r.Content,
 		"confidence": r.Confidence, "use_count": r.UseCount, "last_used_at": r.LastUsedAt,
 		"created_at": r.CreatedAt, "updated_at": r.UpdatedAt, "source_session": r.SourceSession,
 		"provenance_category": r.ProvenanceCategory,
 	}
+	if r.Version != nil {
+		result["version"] = r.Version
+	}
+	return result
 }
 
 func historyInspection(records []publicMemoryRecord, args commandArgs) ([]byte, bus.ModuleStatus) {

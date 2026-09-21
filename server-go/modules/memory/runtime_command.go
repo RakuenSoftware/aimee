@@ -15,7 +15,40 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	operation := args.stringOr("operation", "")
+	if _, exists := args["native_context_bytes"]; exists {
+		if operation != "personal-recall" && operation != "compose-recall" {
+			return runtimeJSONText(commandResult(commandError("unsupported_mode", "native projection requires recall")))
+		}
+		if _, err := nativeRecallLimit(args); err != nil {
+			return runtimeJSONText(commandResult(commandError("invalid_argument", err.Error())))
+		}
+	}
+	if _, exists := args["idempotency_key"]; exists && operation != "user-store" && operation != "user-supersede" && operation != "user-mcp-supersede" && operation != "user-delete" {
+		return runtimeJSONText(commandResult(commandError("unsupported_mode", "idempotency_key requires a private store, correction or retirement")))
+	}
+	for _, field := range []string{"at_version", "include_version", "expected_version"} {
+		_, exists := args[field]
+		allowed := operation == "user-get" && field != "expected_version"
+		if field == "expected_version" {
+			allowed = operation == "user-supersede" || operation == "user-mcp-supersede" || operation == "user-correction-review" || operation == "user-delete"
+		}
+		if exists && !allowed {
+			return runtimeJSONText(commandResult(commandError("unsupported_mode", field+" is unsupported for this operation")))
+		}
+	}
+	if _, exists := args["read_policy"]; exists && operation != "user-get" {
+		return runtimeJSONText(commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get")))
+	}
 	switch operation {
+	case "user-correction-proposals", "user-correction-review":
+		if options.placement != PlacementServer {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		verb := "correction_proposals"
+		if operation == "user-correction-review" {
+			verb = "review_correction"
+		}
+		return runtimeJSONText(handleCorrectionProposalCommand(options, invocation, verb, args))
 	case "user-mcp-supersede":
 		args["old_id"], args["new_content"] = args["id"], args["content"]
 		args["view"] = json.RawMessage(`"mcp"`)
@@ -24,7 +57,15 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		if options.placement != PlacementServer {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
-		return runtimeJSONText(handleRecallCommand(options, invocation, args))
+		encoded, status := handleRecallCommand(options, invocation, args)
+		if status != bus.ModuleStatusOK {
+			return nil, status
+		}
+		raw, err := bus.DecodeCommandResult(encoded)
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		return nativeRecallText(raw, args)
 	case "compose-recall":
 		return handleRecallComposition(options, invocation, args)
 	case "maintenance-model-plan":
@@ -62,7 +103,9 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	case "ingress-begin", "ingress-task-result", "ingress-recall-result", "ingress-metrics":
 		return handleIngressPlan(options.gateway, args)
 	case "ingress-assemble":
-		return handleIngressAssembly(args)
+		return handleIngressAssembly(options.gateway, args)
+	case "source-release-plan", "source-release-result", "source-release-finish", "source-release-discard":
+		return handleSourceRelease(&options.gateway.releases, args)
 	case "ingress-task-packet":
 		return handleIngressTaskPacket(args)
 	case "ingress-task-claim", "ingress-task-rearm", "ingress-task-reset":

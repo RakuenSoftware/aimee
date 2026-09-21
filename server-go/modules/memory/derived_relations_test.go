@@ -61,14 +61,28 @@ func exerciseDerivedRelationsReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 		t.Helper()
 		var text string
 		if err := tx.QueryRow(ctx, `SELECT concat_ws('|',
- (SELECT string_agg(id::text,',' ORDER BY id) FROM memory_episodes WHERE memory_id=$1),
+ (SELECT string_agg(id::text||':'||record_revision::text,',' ORDER BY id) FROM memory_episodes WHERE memory_id=$1),
  (SELECT string_agg(id::text,',' ORDER BY id) FROM memory_relations WHERE memory_id=$1),
  (SELECT string_agg(id::text,',' ORDER BY id) FROM memory_summaries WHERE memory_id=$1))`, id).Scan(&text); err != nil {
 			t.Fatal(err)
 		}
 		return text
 	}
+	// A parent-key episode belongs to the generator and is replaced. Authored
+	// fixtures must use a separate key to survive asynchronous refresh.
+	beforeEpisode, err := backend.EpisodeGet(ctx, "relations-owner")
+	if err != nil || beforeEpisode.ID != oldEpisode {
+		t.Fatal("legacy parent-key episode missing before refresh", beforeEpisode, err)
+	}
 	call()
+	parentEpisode, err := backend.EpisodeGet(ctx, "relations-owner")
+	if err != nil || parentEpisode.ID == oldEpisode || parentEpisode.Text != "Robert: Robert deployed infrastructure." {
+		t.Fatal("parent-key lookup did not advance to generated episode", parentEpisode, err)
+	}
+	authoredEpisode, err := backend.EpisodeGet(ctx, "curated-episode")
+	if err != nil || authoredEpisode.ID != customEpisode || authoredEpisode.Text != "Authored episode" {
+		t.Fatal("distinct authored episode changed during refresh", authoredEpisode, err)
+	}
 	first := snapshot()
 	call()
 	if after := snapshot(); after != first {

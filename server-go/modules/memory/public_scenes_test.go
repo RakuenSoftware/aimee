@@ -25,9 +25,9 @@ func TestSceneCommandsPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memories(id bigint PRIMARY KEY,key text,scope_value text,lifecycle_state text DEFAULT 'active');
- INSERT INTO memories VALUES(1,repeat('long-key',100),'app','active'),(2,'hidden','private','active'),(3,'retired','app','rejected');
- INSERT INTO memories SELECT n,'member-'||n,'app','active' FROM generate_series(4,604)n;
+	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memories(id bigint PRIMARY KEY,key text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
+ INSERT INTO memories(id,key,scope_value,lifecycle_state) VALUES(1,repeat('long-key',100),'app','active'),(2,'hidden','private','active'),(3,'retired','app','rejected');
+ INSERT INTO memories(id,key,scope_value,lifecycle_state) SELECT n,'member-'||n,'app','active' FROM generate_series(4,604)n;
  CREATE TEMP TABLE memory_scenes(id bigint PRIMARY KEY,workspace_id text,turn_count int,created_at text);
  INSERT INTO memory_scenes VALUES(1,'app',602,'2026-01-01'),(2,'private',1,'2026-02-01'),(3,'retired',1,'2026-03-01');
  CREATE TEMP TABLE memory_scene_members(scene_id bigint,memory_id bigint,membership_strength double precision);

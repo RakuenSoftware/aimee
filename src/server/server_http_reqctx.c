@@ -217,5 +217,6 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
       http_header(buf, "X-Aimee-Session-Key", ctx.session_key, sizeof(ctx.session_key));
    }
 
+   request_context_capture_budget_header(&ctx, buf);
    request_context_set(&ctx);
 }

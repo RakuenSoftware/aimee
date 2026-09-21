@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
@@ -32,7 +33,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"control-web", 24, []uint32{10241}},
 		{"benchmarks", 25, []uint32{10497, 10498}},
 		{"sandbox", 26, []uint32{10753, 10754, 10755, 10756}},
-		{"economizer", 27, []uint32{11009, 11010, 11011, 11012, 11013, 11014, 11015}},
+		{"economizer", 27, []uint32{11009, 11010, 11011, 11012, 11013, 11014, 11015, 11016}},
 		// Two stages: health, and the SQL stage every store call in the tree
 		// lands on. 11266 is not conditional -- the handler opens its pool on
 		// first use and answers with the reason when it cannot, so the stage is
@@ -52,6 +53,13 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 			config.PrincipalRef != test.principal || len(config.Stages) != len(test.events) ||
 			config.Handler == nil {
 			t.Fatalf("%s config = %#v, ok=%v", test.name, config, ok)
+		}
+		wantIdle := time.Duration(0)
+		if test.name == "economizer" {
+			wantIdle = time.Millisecond
+		}
+		if config.MaxIdlePollInterval != wantIdle {
+			t.Fatalf("%s idle poll ceiling = %v, want %v", test.name, config.MaxIdlePollInterval, wantIdle)
 		}
 		// The stage id is derived from the event kind rather than the position:
 		// a module may declare a non-contiguous set when one of its stages is

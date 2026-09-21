@@ -48,7 +48,9 @@
         "src/tests/test_agent_memory_transport.c",
         "src/tests/test_ingress_preinject.c",
         "src/tests/test_ir_module_plan.c",
-        "server-go/modules/memory/public_records_test.go"
+        "server-go/modules/memory/public_records_test.go",
+        "src/tests/test_agent_context_refusal.c",
+        "server-go/modules/memory/native_recall_test.go"
       ],
       "cutover_dependency": "Completed: this external owner is outside the memory module; the module-only and native-boundary gates prohibit a native fallback."
     },
@@ -1869,7 +1871,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "e0406a9b12f758870d423edbd76001cccf3573052e47a3a06621c1e3486cd074"
+      "sha256": "1378e4b1b5c58cae19ebf9d471c7dff9056c240d2ea3a204ed6366e95e40a240"
     },
     "src/modules/benchmarks/agent_eval_memory_transport.c": {
       "disposition": "benchmark-transport",
@@ -1924,6 +1926,8 @@
       "symbols": [
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_json",
+        "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_audit_hook_fn",
         "kb_client_memory_audit_note",
         "kb_client_memory_benchmark_json",
@@ -1939,13 +1943,14 @@
         "kb_client_memory_learn_style",
         "kb_client_memory_recall_json",
         "kb_client_memory_recall_json_ex",
+        "kb_client_memory_recall_native_json",
         "kb_client_memory_recall_shared_json",
         "kb_client_memory_scan_conversations",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "e082bca050fc187928d2c02d15d2e431719f84af763c18b59bf4270992ab33e2"
+      "sha256": "63b192df45870cd37c1e165ed4c57c214e547e7bfaf43bad12b5a40fce4f9097"
     },
     "src/modules/kb_client/kb_client_agent.c": {
       "disposition": "kb-client",
@@ -1971,6 +1976,8 @@
       "symbols": [
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_json",
+        "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_benchmark_json",
         "kb_client_memory_compact_windows",
         "kb_client_memory_get",
@@ -1979,12 +1986,13 @@
         "kb_client_memory_internal",
         "kb_client_memory_recall_json",
         "kb_client_memory_recall_json_ex",
+        "kb_client_memory_recall_native_json",
         "kb_client_memory_recall_shared_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "5f18e47d490c35f94fc6d4134eb1af3f75a4df76c08ad6d3196fec4c09ddfc09"
+      "sha256": "381d5be6b3b29084a89541d4ad214edaae4a2b214fc37833f2dbccb27d8c78fc"
     },
     "src/modules/kb_client/kb_client_memory_audit.c": {
       "disposition": "kb-client",
@@ -2030,7 +2038,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "5485d242e02582c15ca2e6355837ba8e91cdf04e79236a78b8041ec741d9c6b1"
+      "sha256": "57a1b8ff0649e66f81ef290b0ae0ddf3c2300279890f94b0486f568112a88279"
     },
     "src/modules/protocols/mcp/mcp_tools_extended.c": {
       "disposition": "protocol-catalog",
@@ -2061,25 +2069,24 @@
     "src/server/agent_runtime.c": {
       "disposition": "host-context",
       "symbols": [
-        "kb_client_memory_assemble_context",
         "kb_client_memory_find_id_by_key_kind",
         "kb_client_memory_insert",
-        "kb_client_memory_recall_json_ex",
+        "kb_client_memory_recall_native_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "7dfe5addbcf20b6ca74381ff2927279a77195ade663b8885a5235d897691ec0b"
+      "sha256": "5b8a2b14cc28c92b5c0c852455833e53db994862dab10e3744a5997b20c6e2f0"
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
       "symbols": [
-        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "f7271431082fb9377a1908875c57595897d47131d96f2f7b7d3c2abcc8f002fb"
+      "sha256": "970929e1c7d5fb0e8fdb8fe9ef9a29f76cb473dcce944d73e91ea25021318298"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2126,7 +2133,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "35b7399e72a62d9616b06520af5363156809b3780857ab2abf9b505c676d2460"
+      "sha256": "3eea587e381db78aa38a0a04bad788e50ebd22d78c3ebca85fbf4b62d5999a45"
     },
     "src/server/server_facts.c": {
       "disposition": "host-transport",
@@ -2147,7 +2154,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "fb7dcf36e45c32454e6ff77eeedf7d734fde85e42eb38716d2f1e14d9b387dd7"
+      "sha256": "650b5927bd83fa7bebd4890b980fb73ae7ab31cf237d6b6469e7e0e35a3d230a"
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2158,7 +2165,7 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "664b7f7054f15b8964b0d6dc9137865faa64a0f6fe0f8e2a3b84ad46ee9da411"
+      "sha256": "4c070b91498cb115b931aecffbfa1e93d69a5d921ab13e3ad8e72e8d90c28aaa"
     },
     "src/server/server_mcp_call_table.c": {
       "disposition": "host-transport",
@@ -2172,7 +2179,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "2bcbe9f4c674a2862679f89aeff8d5d4fdb68fc40f62a69b77d71f97ff2aca9b"
+      "sha256": "8a8ef87ddd55c56ccfb14440ad4e10bb141e33aec98b13645caf21a6186cfb0d"
     },
     "src/server/server_memory.c": {
       "disposition": "host-transport",
@@ -2181,7 +2188,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "3566e116831a5afd23db6026a543f25f8dfcce73c29e21e8bdb20ade65aa7b72"
+      "sha256": "26b00a0f48d9e7059eff198d981ededc029584b18a8eb000ab9568336b3fd5c3"
     },
     "src/server/server_memory_benchmark.c": {
       "disposition": "host-transport",
@@ -2333,22 +2340,22 @@
     "src/tests/test_ingress_preinject.c": {
       "disposition": "host-fixture",
       "symbols": [
-        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "490ff36b0a88d766d83140b89e4bb5760e977b56d4dca86ec0587ca4e5ca72ce"
+      "sha256": "a44f2f790a421ecd28c99182e09ce09721f5b8b991b0d22c2eed30f7112c242f"
     },
     "src/tests/test_ir_module_plan.c": {
       "disposition": "host-fixture",
       "symbols": [
-        "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "262a6da40ab32b8d9895c1bf50ea380f42ef6676e0ee00235079fac5dfb47a7d"
+      "sha256": "4366bc6ab823199e0fe7569cddc587435f95f5bf44bb9e5617bd79cd89f2a55c"
     },
     "src/tests/test_kb.c": {
       "disposition": "host-fixture",
@@ -2362,6 +2369,8 @@
       "symbols": [
         "kb_client_memory_assemble_context",
         "kb_client_memory_assemble_typed_context",
+        "kb_client_memory_assemble_typed_context_json",
+        "kb_client_memory_assemble_typed_context_with_limits",
         "kb_client_memory_benchmark_json",
         "kb_client_memory_find_id_by_key_kind",
         "kb_client_memory_get",
@@ -2369,12 +2378,13 @@
         "kb_client_memory_get_json_as_of",
         "kb_client_memory_insert",
         "kb_client_memory_recall_json",
+        "kb_client_memory_recall_native_json",
         "kb_client_memory_recall_shared_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "e3fdf020e66057362ec3994f4d6c60d51f5dc03d936b7be095fbc83172eddb06"
+      "sha256": "38f761fd0d653d0ba2ced825caad33b6059948dc41f4e82e105869eb24f94aa8"
     },
     "src/tests/test_kb_memory_facts_connection.c": {
       "disposition": "host-fixture",
@@ -2388,7 +2398,14 @@
       "symbols": [
         "memory_recall"
       ],
-      "sha256": "e35d836a7c290bdd6ff3f2e0c2a07d0c849a884d6d51a23620e4e4db036ceca5"
+      "sha256": "cbace789f30dfb9b030e7acf16bc081cdd1f16a06d8395024f969f051cb7a119"
+    },
+    "src/tests/test_mcp_directive_transport.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_recall_shared_json"
+      ],
+      "sha256": "46d3f78c321aa9111c3cdcf3b43e62792d25a2b1c3ef97031e02ec1e6d5358c9"
     },
     "src/tests/test_mcp_memory_answer.c": {
       "disposition": "host-fixture",
@@ -2399,14 +2416,14 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "30fda6badd59af2b403255d89a4f16de59be388efceef3a632940025dbc6bb4f"
+      "sha256": "4a1c2932e5896920e6cea9d7b39e89b3aac0de3a1ef1f31be4edf81c16ca42cd"
     },
     "src/tests/test_mcp_roundtable_contract.c": {
       "disposition": "host-fixture",
       "symbols": [
         "memory_get"
       ],
-      "sha256": "38da9e34b27ede7e18de9bf3e50a37b0b3c619f92164400cc1e7c3e64b0d7926"
+      "sha256": "d5701cf5caf3b4f058d0d3a3ec06078ebbc5d28bfc314698640e00c17a380986"
     },
     "src/tests/test_memory_advanced.c": {
       "disposition": "legacy-fixture",
@@ -2470,7 +2487,7 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "a95e671fb426956b20144f9b3e2aa2c6f58b29676c28d2a39bc7891b010035ee"
+      "sha256": "c108f0c3d79646d0e64e737b9ce425ce423de699bd37a9a3a4f8e2f068adb530"
     },
     "src/tests/test_server_facts_transport.c": {
       "disposition": "host-fixture",
@@ -2505,7 +2522,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "08be03e82c3d75dbd904bf881a604c636d9645d2455cdb60358ff02c7230ca39"
+      "sha256": "ca759cedb2604ba95ef4a2a1bd9209d89b9cf6dec8fc42d12fe45882004903f1"
     },
     "src/tests/test_server_prospective.c": {
       "disposition": "host-fixture",
@@ -2565,11 +2582,11 @@
       "symbols": [
         "db2_memory_find_facts_like"
       ],
-      "sha256": "99cd0b91a16a185c997b90573b8fb34b3eb62782df88a0a8fb111c0f168c2467",
+      "sha256": "2d5cac8660ca613ed4b17b8722d1a3494bd5525e96eb415f287d6e1314c6d38c",
       "inputs": {
         "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "32dfd6a067e835bbc36f36188888553fa16b866f56923b2da128ee116ac56f4e",
-        "src/modules/db2/c/schema_sqlite.sql": "ef328b37b01c52099d6a91cb778ea3992930debe9d7a54a3e2047fb65dfdd341"
+        "src/modules/db2/c/schema.sql": "eff2d45161b7aeed590437ac8f1ced2fb99d7125453127e7f3dd60a829e8d6a7",
+        "src/modules/db2/c/schema_sqlite.sql": "3d5ef4d20f1e3f2a9025e8bbc350c0d3e29f2654000f59620db51dc00ecb48a0"
       }
     },
     "src/server/openapi_server_data.h": {
@@ -2577,10 +2594,10 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "eb744127583db29d8f320c9ca05b68569e4e2779012e35d667fbda386d0f8517",
+      "sha256": "dccc48c336f317720a650303a2755d7a0c8ab1b30a0af42eaf041d7f2aa8d6b9",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "2c0f7706ad2a88ee6ed785c32e9fa8b96a1f67801091a0da15c831fd1f1a3f1c"
+        "api/openapi-server-v1.yaml": "f8661d95202267f318ad9d0f2d59fd74530f5678d86be7ee4ef820851b504e5b"
       }
     }
   }

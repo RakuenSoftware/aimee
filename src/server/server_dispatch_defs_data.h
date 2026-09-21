@@ -86,6 +86,8 @@
     {"memory.get", handle_memory_get},
     {"memory.delete", handle_memory_delete},
     {"memory.supersede", handle_memory_supersede},
+    {"memory.correction_proposals", handle_memory_correction_proposals},
+    {"memory.review_correction", handle_memory_review_correction},
     {"facts.retract", handle_facts_retract},
     {"entities.merge", handle_entities_merge},
     {"entities.unmerge", handle_entities_unmerge},

@@ -234,7 +234,7 @@ def module_owned_files(module_id: str, descriptor: dict[str, object]) -> list[st
     """Return descriptor-owned source-tree inputs for the module repository."""
     result = [f"src/modules/{module_id}/module.yaml"]
     for key in ("sources", "private_headers", "public_headers", "contracts", "tests", "docs",
-                "go_sources", "go_tests"):
+                "go_sources", "go_tests", "go_assets"):
         values = descriptor.get(key, [])
         if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
             raise ExportError(f"{module_id}: descriptor field {key} must be a string array")
@@ -622,6 +622,8 @@ def go_module_main(module_id: str, principal_ref: int,
         for stage in stages
     )
     handler = "handler.NewDefaultHandler()" if module_id == "delegates" else "handler.Handle"
+    if module_id == "economizer":
+        handler = "handler.NewHandler()"
     extra_imports = ""
     watchdog = """\tif handled, code := handler.RunWatchdog(os.Args); handled {
 \t\tos.Exit(code)
@@ -632,9 +634,19 @@ def go_module_main(module_id: str, principal_ref: int,
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     setup = ""
     process_setup = ""
+    process_options = "\t\tMaxIdlePollInterval: handler.RequestAdmissionPollInterval,\n" if module_id == "economizer" else ""
     if module_id in {"config", "providers"}:
         handler = "moduleHandler"
         setup = """\tmoduleHandler, err := handler.NewDefaultHandler()
+\tif err != nil {
+\t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
+\t\tos.Exit(1)
+\t}
+"""
+    if module_id == "aimee":
+        extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/aimee/process"\n'
+        handler = "moduleHandler.Handle"
+        process_setup = """\tmoduleHandler, err := process.New(ctx, os.Args[1])
 \tif err != nil {
 \t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
 \t\tos.Exit(1)
@@ -668,6 +680,7 @@ def go_module_main(module_id: str, principal_ref: int,
         setup = """\tmoduleHandler, err := handler.NewHandler(os.Getenv("AIMEE_HOME"))
 \tif err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 """
+    handler_import = f'\thandler "github.com/JBailes/aimee/server-go/modules/{module_id}"\n' if module_id != "aimee" else ""
     return f"""package main
 
 import (
@@ -678,8 +691,7 @@ import (
 \t"syscall"
 
 \t"github.com/JBailes/aimee/server-go/bus"
-\thandler "github.com/JBailes/aimee/server-go/modules/{module_id}"
-{extra_imports})
+{handler_import}{extra_imports})
 
 func main() {{
 {watchdog}\
@@ -699,7 +711,7 @@ func main() {{
 {entries}
 \t\t}},
 \t\tHandler: {handler},
-\t}}
+{process_options}\t}}
 \tif err := bus.RunModuleProcess(ctx, config); err != nil {{
 \t\tfmt.Fprintf(os.Stderr, "aimee-module-{module_id}: %v\\n", err)
 \t\tos.Exit(1)
@@ -714,7 +726,7 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
         path.relative_to(ROOT).as_posix()
         for path in (ROOT / "server-go/bus").glob("*.go")
         if not path.name.endswith("_test.go") and
-        (path.name != "concurrent_module_caller.go" or module_id in {"delegates", "roundtable", "providers", "memory"})
+        (path.name != "concurrent_module_caller.go" or module_id in {"aimee", "delegates", "roundtable", "providers", "memory"})
     )
 
 
@@ -966,6 +978,7 @@ require (
             cmake_dependencies = "\n".join(
                 f"        ${{CMAKE_CURRENT_SOURCE_DIR}}/{relative}"
                 for relative in ["runtime/main.go", *go_sources, *bus_sources, *shared_sources,
+                                 *descriptor.get("contracts", []), *descriptor.get("go_assets", []),
                                  "go.mod", "go.sum"]
             )
             write_text(

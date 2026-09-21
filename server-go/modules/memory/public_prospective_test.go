@@ -3,7 +3,9 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +20,12 @@ func TestProspectivePublicValidation(t *testing.T) {
 		{"prospective_list", `{"state":"bogus"}`},
 		{"prospective_complete", `{"id":1.2}`},
 		{"prospective_mark_triggered", `{"id":0}`},
+		{"prospective_mark_triggered", `{"id":"01"}`},
+		{"prospective_mark_triggered", `{"id":"9223372036854775808"}`},
+		{"prospective_complete", `{"id":9223372036854775807}`},
+		{"prospective_match", `{"native_context_bytes":null}`},
+		{"prospective_match", `{"native_context_bytes":-1}`},
+		{"prospective_list", `{"native_context_bytes":0}`},
 	} {
 		result := runPublicCommand(t, client, test.verb, test.args)
 		if result["status"] != "error" || result["kind"] != "invalid_argument" {
@@ -86,6 +94,20 @@ func TestProspectivePublicPostgresLifecycle(t *testing.T) {
 	if rows, ok := matches["matches"].([]any); !ok || len(rows) != 1 {
 		t.Fatal(matches)
 	}
+	for _, budget := range []int{0, 1024} {
+		result := runPublicCommand(t, client, "prospective_match", fmt.Sprintf(`{"turn_text":"release","max":2,"native_context_bytes":%d}`, budget))
+		projection, ok := result["native_context"].(map[string]any)
+		if !ok || projection["max_context_bytes"] != float64(budget) {
+			t.Fatal(result)
+		}
+		ids := projection["retained_reminder_ids"].([]any)
+		if budget == 0 && (len(ids) != 0 || projection["text"] != "" || len(result["matches"].([]any)) != 0) {
+			t.Fatal("prospective allocation bypassed", result)
+		}
+		if budget == 1024 && (len(ids) != 2 || !strings.Contains(projection["text"].(string), "review deployment")) {
+			t.Fatal("whole reminders lost", result)
+		}
+	}
 	briefing := runHostRuntime(t, handler, `{"operation":"prospective-briefing","limit":1}`)
 	if briefing["block"] != "# Open Commitments\n- when `release` → review deployment\n\n" {
 		t.Fatal(briefing)
@@ -153,4 +175,34 @@ func TestProspectivePublicPostgresLifecycle(t *testing.T) {
 	if rows, ok := matches["matches"].([]any); !ok || len(rows) != 8 {
 		t.Fatal("match cap lost", matches)
 	}
+	// Preserve exact IDs through public row serialization and the native
+	// projection. A float64 map round trip silently changes this identity.
+	if _, err := tx.Exec(ctx, `INSERT INTO prospective_memories(id,trigger_text,action_text)
+        VALUES (9223372036854775807,'exactidentityfixture','retain exact reminder')`); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := client.Command(ctx, 73, "prospective_match", json.RawMessage(`{"turn_text":"exactidentityfixture","native_context_bytes":1024}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exact struct {
+		Matches []struct {
+			ID int64 `json:"id"`
+		} `json:"matches"`
+		Projection nativeRecallProjection `json:"native_context"`
+	}
+	if err := json.Unmarshal(raw, &exact); err != nil {
+		t.Fatal(err)
+	}
+	if len(exact.Matches) != 1 || exact.Matches[0].ID != 9223372036854775807 ||
+		len(exact.Projection.Reminders) != 1 || exact.Projection.Reminders[0] != "9223372036854775807" {
+		t.Fatalf("rounded reminder identity: %s", raw)
+	}
+	if result := runPublicCommand(t, client, "prospective_mark_triggered", `{"id":"9223372036854775807"}`); result["status"] != "ok" {
+		t.Fatal(result)
+	}
+	if result := runPublicCommand(t, client, "prospective_complete", `{"id":"9223372036854775807"}`); result["status"] != "ok" {
+		t.Fatal(result)
+	}
+
 }

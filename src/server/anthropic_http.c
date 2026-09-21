@@ -604,8 +604,9 @@ static int messages_buffered(const char *body, char *resp, int cap)
    if (wire_fence_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
                          &wire_snapshot, &wire_body) != 0)
    {
-      status = write_error(resp, cap, 503, "api_error", "economizer wire fence unavailable",
-                           AIMEE_ERR_REQUEST_PIPELINE);
+      const char *error = wire_fence_last_error();
+      status = write_error(resp, cap, wire_fence_error_http_status(error),
+                           wire_fence_error_type(error), error, AIMEE_ERR_REQUEST_PIPELINE);
       goto cleanup;
    }
    http_status = agent_http_post_bytes(url, auth, wire_body.data, wire_body.len, &response,
@@ -1489,12 +1490,13 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    if (wire_fence_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
                          &wire_snapshot, &wire_body) != 0)
    {
-      xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
-      if (xl)
-      {
-         anthropic_stream_finish(xl);
-         anthropic_stream_free(xl);
-      }
+      const char *error = wire_fence_last_error();
+      char frame[256];
+      snprintf(frame, sizeof(frame),
+               "{\"type\":\"error\",\"error\":{\"type\":\"%s\",\"message\":\"%s\"}}",
+               wire_fence_error_type(error), error);
+      emit(ctx, "error", frame);
+      stream_status = wire_fence_error_http_status(error);
       goto cleanup;
    }
    wire_prov_body = (const char *)wire_body.data;

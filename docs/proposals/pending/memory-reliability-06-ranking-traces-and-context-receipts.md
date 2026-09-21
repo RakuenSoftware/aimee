@@ -1,6 +1,6 @@
 # MR-06: Actual ranking traces, context receipts and evidence states
 
-- **State:** Proposed
+- **State:** In progress; legacy ingress assembly evidence corrected
 - **Priority:** P0 for receipt correctness; P1 for complete diagnostics
 - **Owner:** Go memory traces, with host/provider dispatch and audit receipts
 - **Depends on:** [MR-03](memory-reliability-03-final-payload-context-budgets.md); joins [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) and [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) outputs
@@ -9,6 +9,24 @@
 ## Problem and intended result
 
 Post-hoc diagnostic scores need not explain actual SQL/dense/graph ordering. A retrieval event emitted before final packing can include records the model never received. A digest proves correspondence when bytes are available; it cannot reconstruct missing content by itself.
+
+Legacy automatic ingress now records only Go-retained ordinary memory/code items
+after host integrity acceptance. Outcome feedback receives the exact clipped
+memory preview. Failed assembly and rejected/empty envelopes emit no such evidence.
+[Validation](../../validation/memory-ingress-evidence-2026-09-20.md) covers these
+boundaries; complete channel coverage, durable stage receipts, dispatch observation
+and crash recovery remain open.
+
+The [typed outer assembler](../../validation/memory-typed-outer-packing-2026-09-20.md)
+now returns retained typed IDs and source/final projection and selection digests
+after row-level repacking. This is an assembly response before host integrity
+acceptance. The host now also [emits Go-retained typed projection references](../../validation/memory-typed-assembly-evidence-2026-09-20.md)
+after integrity acceptance, preserving final selection identity without inventing
+source versions. The [plain-text facts block](../../validation/memory-fact-source-versions-2026-09-21.md)
+now also binds exact assertion and direct-parent revisions, validates their byte
+commitments in Go assembly, and emits only retained references after host integrity
+acceptance. The durable host/provider receipt pipeline and final source revalidation
+remain open. Bounded trace reads now refuse partial payloads.
 
 Record distinct retrieval, selection, assembly, preparation, dispatch and acknowledgement stages. Connect them to the existing audit/WORM infrastructure with bounded metadata and truthful evidence states.
 
@@ -43,6 +61,12 @@ Persist `dispatch_admitted` before handing bytes to the transport, with one host
 Transport handoff and network effects are not atomic with the receipt store. Do not rename durable intent as observed dispatch to hide that gap. Retry decisions preserve the unresolved attempt, allocate a distinct attempt identity and account for potentially executed work under the existing budget policy. Governed external effects additionally follow [MR-16](memory-reliability-16-evidence-bound-actions-and-composition.md)'s reconciliation/idempotency rules.
 
 ## Verification and retention
+
+The [provider handoff source check](../../validation/memory-source-revalidation-2026-09-21.md)
+now revalidates retained assertion/episode and direct-parent versions under the
+authenticated KB scope. Its process-local handles and attempt challenges refuse
+stale or unavailable sources; they are not durable prepared/dispatch receipts and
+do not bind the final body or eliminate mutations after the check's snapshot.
 
 Expose independent evidence dimensions: schema-valid, authenticated producer, source-version available, payload-verifiable, decision-replayed, chain-included, externally-compared and effect-confirmed. Do not collapse them into a single “verified” bit or assume an ordering of strength.
 

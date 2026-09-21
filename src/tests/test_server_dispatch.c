@@ -783,6 +783,20 @@ int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return stub_handler(conn, "memory.delete");
 }
 
+int handle_memory_correction_proposals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)conn;
+   (void)req;
+   return 0;
+}
+int handle_memory_review_correction(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)conn;
+   (void)req;
+   return 0;
+}
 int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.supersede");

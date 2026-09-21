@@ -95,16 +95,21 @@ int db1_context_snapshot_insert_turn(const char *session_id_arg, int64_t memory_
 }
 
 static int composition_calls;
+static int native_projection_bytes;
 static int composition_transport = 1;
 static const char *composition_reply;
-int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
+                                                    int timeout_ms, cJSON **result)
 {
+   assert(timeout_ms == 60000);
    assert(strcmp(method, "memory.runtime") == 0);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
                  "compose-recall") == 0);
    const char *shared = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "shared_json"));
    assert(shared != NULL);
    composition_calls++;
+   const cJSON *native = cJSON_GetObjectItemCaseSensitive(args, "native_context_bytes");
+   native_projection_bytes = cJSON_IsNumber(native) ? native->valueint : -1;
    *result = NULL;
    if (composition_transport != 1)
       return composition_transport;
@@ -245,6 +250,8 @@ static int explicit_scope_post_handler(const char *url, const char *auth_header,
    return 200;
 }
 
+static int typed_context_expect_limits;
+
 static int typed_context_post_handler(const char *url, const char *auth_header, const char *body,
                                       char **response_buf, int timeout_ms,
                                       const char *extra_headers)
@@ -257,9 +264,20 @@ static int typed_context_post_handler(const char *url, const char *auth_header, 
    assert(strstr(body, "\"query\":\"recover deployment\"") != NULL);
    assert(strstr(body, "enable_semantic_assertions") == NULL);
    assert(strstr(body, "enable_observations") == NULL);
+   cJSON *request = cJSON_Parse(body);
+   const cJSON *limits = cJSON_GetObjectItemCaseSensitive(request, "context_limits");
+   if (typed_context_expect_limits)
+   {
+      assert(cJSON_IsObject(limits));
+      assert(cJSON_GetObjectItemCaseSensitive(limits, "schema_version")->valueint == 1);
+      assert(cJSON_GetObjectItemCaseSensitive(limits, "max_context_bytes")->valueint == 0);
+   }
+   else
+      assert(!limits);
+   cJSON_Delete(request);
    if (response_buf)
-      *response_buf =
-          strdup("{\"status\":\"ok\",\"used_tokens\":4,\"rendered_context\":\"temporal\"}");
+      *response_buf = strdup("{\"status\":\"ok\",\"revision\":9223372036854775807,\"used_tokens\":"
+                             "4,\"rendered_context\":\"temporal\"}");
    return 200;
 }
 
@@ -337,6 +355,11 @@ static void test_recall_carries_and_records_production_activation(void)
    assert(activation_writes == writes);
    composition_transport = 1;
    mock_agent_http_reset();
+   composition_reply = "{\"status\":\"ok\",\"recall\":{\"identity\":[]}}";
+   json = kb_client_memory_recall_native_json("native projection", 128, 0, 4096);
+   assert(json && native_projection_bytes == 4096);
+   free(json);
+   composition_reply = NULL;
    printf("  PASS: test_recall_carries_and_records_production_activation\n");
 }
 
@@ -484,6 +507,18 @@ static void test_typed_context_uses_server_defaults(void)
    char *context = kb_client_memory_assemble_typed_context("recover deployment");
    assert(context && strcmp(context, "temporal") == 0);
    free(context);
+   typed_context_expect_limits = 1;
+   cJSON *limits = cJSON_Parse("{\"schema_version\":1,\"max_context_bytes\":0}");
+   context = kb_client_memory_assemble_typed_context_with_limits("recover deployment", limits);
+   assert(context && strcmp(context, "temporal") == 0);
+   assert(cJSON_GetObjectItemCaseSensitive(limits, "max_context_bytes")->valueint == 0);
+   free(context);
+   context = kb_client_memory_assemble_typed_context_json("recover deployment", limits);
+   assert(context && strcmp(context, "{\"status\":\"ok\",\"revision\":9223372036854775807,\"used_"
+                                     "tokens\":4,\"rendered_context\":\"temporal\"}") == 0);
+   free(context);
+   cJSON_Delete(limits);
+   typed_context_expect_limits = 0;
    mock_agent_http_reset();
    printf("  PASS: test_typed_context_uses_server_defaults\n");
 }
@@ -531,6 +566,15 @@ static void test_as_of_reaches_the_kb_and_its_verdict_comes_back(void)
    assert(strstr(last_request_body, "\"as_of\"") != NULL);
    assert(strstr(last_request_body, "2026-06-12 00:00:00") != NULL);
    assert(verdict == KB_VALID_AT_NO);
+
+   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9007199254740993,\"key\":\"k\"}}";
+   assert(kb_client_memory_get(INT64_C(9007199254740993), &m) == 0);
+   assert(m.id == INT64_C(9007199254740993));
+   assert(strstr(last_request_body, "\"id\":\"9007199254740993\""));
+   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9223372036854775807,\"key\":\"k\"}}";
+   assert(kb_client_memory_get(INT64_MAX, &m) == 0 && m.id == INT64_MAX);
+   as_of_reply = "{\"status\":\"ok\",\"memory\":{\"id\":9223372036854775808}}";
+   assert(kb_client_memory_get(INT64_MAX, &m) < 0 && m.id == 0);
 
    /* "unknown" must survive as a third answer. Folding it into NO would report
     * "not in force" for a row the service could not judge. */
@@ -866,6 +910,51 @@ static void test_exact_mutation_identity(void)
    mock_agent_http_reset();
 }
 
+static int exact_evidence_post(const char *url, const char *auth, const char *body, char **reply,
+                               int timeout, const char *headers)
+{
+   (void)auth;
+   (void)timeout;
+   (void)headers;
+   int outcomes =
+       strstr(url, "record_outcome") != NULL || strstr(url, "record_retrieval_outcome") != NULL;
+   const char *key = outcomes                           ? "rows"
+                     : strstr(url, "ranker.emit_event") ? "doc_ids"
+                                                        : "surfaced_ids";
+   cJSON *request = cJSON_Parse(body);
+   cJSON *ids = cJSON_GetObjectItemCaseSensitive(request, key);
+   assert(cJSON_GetArraySize(ids) == 3);
+   const char *expected[] = {NULL, "9007199254740993", "9223372036854775807"};
+   for (int i = 0; i < 3; i++)
+   {
+      cJSON *id = cJSON_GetArrayItem(ids, i);
+      if (outcomes)
+         id = cJSON_GetObjectItemCaseSensitive(id, "id");
+      if (i == 0)
+         assert(cJSON_IsNumber(id) && id->valuedouble == 42);
+      else
+         assert(cJSON_IsString(id) && !strcmp(cJSON_GetStringValue(id), expected[i]));
+   }
+   cJSON_Delete(request);
+   *reply = strdup("{\"status\":\"ok\",\"retrieval_event_id\":\"exact-event\",\"written\":3}");
+   return 200;
+}
+static void test_exact_evidence_transport(void)
+{
+   kb_client_dependency_reset_for_tests();
+   mock_agent_http_set_post_handler(exact_evidence_post);
+   int64_t ids[] = {42, INT64_C(9007199254740993), INT64_MAX};
+   char event_id[64];
+   assert(kb_client_evidence_emit_retrieval_event_ex("turn", "Recall", "fp", ids, 3, event_id,
+                                                     sizeof(event_id)) == 0);
+   assert(!strcmp(event_id, "exact-event"));
+   assert(kb_client_ranker_emit_event(ids, 3, "fp", event_id, sizeof(event_id)) == 0);
+   assert(!strcmp(event_id, "exact-event"));
+   assert(kb_client_record_retrieval_outcome("memory", event_id, ids, 3, "accepted") == 0);
+   assert(kb_client_record_retrieval_outcome("ranker", event_id, ids, 3, "accepted") == 0);
+   mock_agent_http_reset();
+}
+
 int main(void)
 {
    test_screen_failures();
@@ -874,6 +963,7 @@ int main(void)
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
    assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
+   test_exact_evidence_transport();
    test_exact_mutation_identity();
    test_benchmark_file_transport();
    test_generic_action_preserves_budget_auth_and_refusal();

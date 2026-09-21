@@ -343,6 +343,9 @@ fi
 # §7/§11: the local operator is OS-attested and keeps full capability with no
 # token at all. If this ever fails the local CLI is broken by the feature.
 step "UDS precedence: the local operator needs no token"
+# A local user assertion must not replace the model-authored token probe.
+# Otherwise the following TTL checks test memory authority, not token lifetime.
+uds_store_body='{"key":"enforce-rig-uds-probe","content":"local operator probe"}'
 if ./aimee memory store "enforcement rig uds probe" >/dev/null 2>&1; then
   pass "UDS write with no identity token -> allowed"
 else
@@ -351,7 +354,7 @@ else
   [ -S "$sock" ] || sock=$(ls "$AIMEE_HOME"/*.sock 2>/dev/null | head -1)
   if [ -n "$sock" ] && [ -S "$sock" ]; then
     code=$(curl -s -o /dev/null -w '%{http_code}' --unix-socket "$sock" \
-             -X POST -H 'Content-Type: application/json' --data "$store_body" \
+             -X POST -H 'Content-Type: application/json' --data "$uds_store_body" \
              "http://localhost$STORE")
     if is2xx "$code"; then pass "UDS write with no identity token -> $code"
     else fail "UDS write with no identity token -> $code (expected 2xx; §7 exemption)"; fi

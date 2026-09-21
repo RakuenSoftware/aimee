@@ -151,6 +151,12 @@ func exerciseBriefingReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
 	if b.LimitTokens != 3000 || b.BriefingStyle != "evidence_heavy" {
 		t.Fatal(b)
 	}
+	for _, limit := range []int{64, 128, 1024, 2500, 3000, 8192} {
+		limited, encoded := run(limit)
+		if limited.LimitTokens != limit || limited.BriefingStyle != "evidence_heavy" || len(encoded) > limit*4 {
+			t.Fatal("promoted style raised caller allocation", limit, limited, string(encoded))
+		}
+	}
 	b, _ = run(99999)
 	if b.LimitTokens != 8192 {
 		t.Fatal(b)

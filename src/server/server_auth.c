@@ -55,6 +55,8 @@ const method_policy_t method_registry[] = {
     {"memory.reject", CAP_MEMORY_WRITE, "reject a memory"},
     {"memory.restore", CAP_MEMORY_ADMIN, "restore a rejected memory"},
     {"memory.review_list", CAP_MEMORY_READ, "review visible memories"},
+    {"memory.correction_proposals", CAP_MEMORY_READ, "inspect correction drafts"},
+    {"memory.review_correction", CAP_MEMORY_WRITE, "review a correction draft"},
     {"memory.reembed_start", CAP_INDEX_ADMIN, "stage a memory embedding version"},
     {"memory.reembed_cutover", CAP_INDEX_ADMIN, "activate a memory embedding version"},
     {"memory.reembed_rollback", CAP_INDEX_ADMIN, "restore a memory embedding version"},

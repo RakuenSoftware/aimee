@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -31,6 +32,23 @@ const (
 )
 
 type DataRequest struct {
+	AssemblyBudgetBytes json.RawMessage `json:"assembly_budget_bytes,omitempty"`
+	assemblyBytes       *int
+
+	CorrectionReview *correctionReviewRequest `json:"correction_review,omitempty"`
+	ProposalID       string                   `json:"proposal_id,omitempty"`
+	IdempotencyKey   string                   `json:"idempotency_key,omitempty"`
+
+	IncludeVersion  bool                 `json:"include_version,omitempty"`
+	ExpectedVersion *MemoryRecordVersion `json:"expected_version,omitempty"`
+	AtVersion       *MemoryRecordVersion `json:"at_version,omitempty"`
+
+	CollectFactSources bool                `json:"collect_fact_sources,omitempty"`
+	Revalidation       *sourceRevalidation `json:"revalidation,omitempty"`
+	IngressPreview     bool                `json:"ingress_preview,omitempty"`
+
+	Changes        *MemoryChangesRequest `json:"changes,omitempty"`
+	ReadPolicy     *MemoryReadPolicy     `json:"read_policy,omitempty"`
 	pageRankConfig *pageRankConfig
 	requestedLimit int
 	PageRank       *pageRankRequest        `json:"pagerank,omitempty"`
@@ -148,6 +166,10 @@ type DataRequest struct {
 }
 
 type Record struct {
+	Authorship *PersonalAuthorship  `json:"authorship,omitempty"`
+	Version    *MemoryRecordVersion `json:"version,omitempty"`
+	Historical bool                 `json:"historical,omitempty"`
+
 	retrievalScore  float64
 	retrievalBase   float64
 	pageRankBonus   float64
@@ -164,6 +186,14 @@ type Record struct {
 }
 
 type DataResponse struct {
+	MemoryPreviews    []ingressMemoryPreview `json:"memory_previews,omitempty"`
+	PreviewProjection *previewProjection     `json:"preview_projection,omitempty"`
+	FactProjection    *factProjection        `json:"fact_projection,omitempty"`
+	Proposal          *correctionProposal    `json:"proposal,omitempty"`
+	MutationReceipt   *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
+
+	Changes            *MemoryChangePage    `json:"changes,omitempty"`
+	Read               *MemoryReadResult    `json:"read,omitempty"`
 	ContextAssembly    *ContextAssembly     `json:"context_assembly,omitempty"`
 	Dimension          int                  `json:"dimension,omitempty"`
 	Embedding          *EmbedResponse       `json:"embedding,omitempty"`
@@ -436,6 +466,7 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
+	personalActor   personalActor
 	pageRankSamples *[]pageRankResult
 	recallExecutor  egress.Executor
 	requireSemantic bool // standalone evaluation must not silently fall back to lexical recall
@@ -480,14 +511,34 @@ func (s *postgresDataStore) Get(ctx context.Context, scope Scope, id int64) (Rec
 }
 
 func (s *postgresDataStore) get(ctx context.Context, scope Scope, id int64, historical bool) (Record, error) {
+	return s.getAt(ctx, scope, id, historical, "")
+}
+
+// A nonempty validAt is already normalized by the versioned read contract.
+// Historical interval selection stays in the same query as scope/lifecycle
+// admission, avoiding a second metadata round trip and a time-of-check gap.
+func (s *postgresDataStore) getAt(ctx context.Context, scope Scope, id int64, historical bool, validAt string) (Record, error) {
+	return s.getAtVersioned(ctx, scope, id, historical, validAt, false)
+}
+func (s *postgresDataStore) getAtVersioned(ctx context.Context, scope Scope, id int64, historical bool, validAt string, includeVersion bool) (Record, error) {
 	var r Record
 	if s.placement == PlacementServer {
 		r.Scope = scope
-		err := s.db.QueryRow(ctx, `SELECT id, tier, kind, key, content, confidence
+		columns := "id,tier,kind,key,content,confidence"
+		destinations := []any{&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence}
+		if includeVersion {
+			r.Version = &MemoryRecordVersion{SchemaVersion: 1, RecordID: strconv.FormatInt(id, 10)}
+			columns += ",(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),record_revision::text"
+			destinations = append(destinations, &r.Version.OwnerID, &r.Version.RecordRevision)
+			r.Authorship = &PersonalAuthorship{}
+			columns += ",provenance_category,author_principal,author_transport,reviewer_principal,reviewer_transport,review_proposal_id"
+			destinations = append(destinations, &r.Authorship.Category, &r.Authorship.Principal, &r.Authorship.Transport, &r.Authorship.Reviewer, &r.Authorship.ReviewTransport, &r.Authorship.ProposalID)
+		}
+		err := s.db.QueryRow(ctx, `SELECT `+columns+`
 FROM user_memories
 WHERE id = $1 AND lifecycle_state = 'active'
   AND (valid_until IS NULL OR valid_until > now())`, id).
-			Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
+			Scan(destinations...)
 		if store.IsNoRows(err) {
 			return Record{}, ErrMemoryNotFound
 		}
@@ -497,10 +548,19 @@ WHERE id = $1 AND lifecycle_state = 'active'
 	if historical {
 		predicate = historicalMemoryInspectionSQL("")
 	}
-	err := s.db.QueryRow(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
-FROM memories
-WHERE id = $1 AND `+predicate, id).
-		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
+	parameters := []any{id}
+	if validAt != "" {
+		predicate += " AND " + memoryValidityAtSQL("", "$2::timestamptz")
+		parameters = append(parameters, validAt)
+	}
+	columns := "id, scope_type, scope_value, tier, kind, key, content, confidence"
+	destinations := []any{&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence}
+	if includeVersion {
+		r.Version = &MemoryRecordVersion{SchemaVersion: 1, RecordID: strconv.FormatInt(id, 10)}
+		columns += ",(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),record_revision::text"
+		destinations = append(destinations, &r.Version.OwnerID, &r.Version.RecordRevision)
+	}
+	err := s.db.QueryRow(ctx, "SELECT "+columns+" FROM memories WHERE id=$1 AND "+predicate, parameters...).Scan(destinations...)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
 	}
@@ -569,19 +629,7 @@ func (s *postgresDataStore) Supersede(ctx context.Context, scope Scope, id int64
 		return Record{}, screenErr
 	}
 	if s.placement == PlacementServer {
-		// Personal memory has one row per (kind,key). Replace atomically: a
-		// failed write must not retire the only copy or touch the KB namespace.
-		r := Record{Scope: scope}
-		err := s.db.QueryRow(ctx, `UPDATE user_memories
-SET content=$2, confidence=$3, updated_at=now()
-WHERE id=$1 AND lifecycle_state='active'
-  AND (valid_until IS NULL OR valid_until>now())
-RETURNING id,tier,kind,key,content,confidence`, id, content, confidence).
-			Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
-		if store.IsNoRows(err) {
-			return Record{}, ErrMemoryNotFound
-		}
-		return r, err
+		return s.mutatePersonal(ctx, "supersede", Record{Scope: scope, ID: id, Content: content, Confidence: confidence}, nil)
 	}
 	return s.supersedeKB(ctx, id, content, confidence, "")
 }
@@ -619,7 +667,32 @@ func (s *postgresDataStore) Maintenance(ctx context.Context, scope Scope) (int, 
 	stamp := "pg_now_text()"
 	expiryCutoff := "pg_now_text('-90 days')"
 	if s.placement == PlacementServer {
-		table, where, args = "user_memories", "", nil
+		if db, ok := s.db.(store.DB); ok {
+			tx, err := db.Begin(ctx)
+			if err != nil {
+				return 0, 0, 0, err
+			}
+			defer tx.Rollback(context.WithoutCancel(ctx))
+			bound := *s
+			bound.db = tx
+			promoted, demoted, expired, err := bound.Maintenance(ctx, scope)
+			if err != nil {
+				return 0, 0, 0, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return 0, 0, 0, err
+			}
+			return promoted, demoted, expired, nil
+		}
+		if _, ok := s.db.(store.Tx); !ok {
+			return 0, 0, 0, errors.New("memory: private maintenance requires a transaction")
+		}
+		if _, err := s.db.Exec(ctx, `SELECT set_config('aimee.private_authority','model',true),set_config('aimee.private_principal','system:memory-maintenance',true),set_config('aimee.private_transport','internal',true)`); err != nil {
+			return 0, 0, 0, err
+		}
+		// Background hygiene cannot rewrite user/unknown authorship or protected
+		// kinds. Those candidates require the proposal/review workflow.
+		table, where, args = "user_memories", "provenance_category='agent_message' AND kind NOT IN ('episode','experience','instruction','policy') AND lifecycle_state='active' AND ", nil
 		stamp, expiryCutoff = "now()", "now() - interval '90 days'"
 	}
 	promoteSQL := fmt.Sprintf("UPDATE %s SET tier = 'L3', updated_at = %s WHERE %stier = 'L2' AND confidence >= 0.95 AND use_count >= 5", table, stamp, where)
@@ -757,15 +830,7 @@ func (s *postgresDataStore) Put(ctx context.Context, scope Scope, r Record) (out
 	}
 	r.Scope = scope
 	if s.placement == PlacementServer {
-		err := s.db.QueryRow(ctx, `INSERT INTO user_memories
-  (kind, tier, key, content, confidence, updated_at)
-VALUES ($1, $2, $3, $4, $5, now())
-ON CONFLICT (kind, key) DO UPDATE SET
-  tier = EXCLUDED.tier, content = EXCLUDED.content,
-  confidence = EXCLUDED.confidence, lifecycle_state = 'active',
-  valid_until = NULL, updated_at = now()
-RETURNING id`, r.Kind, r.Tier, r.Key, r.Content, r.Confidence).Scan(&r.ID)
-		return r, err
+		return s.mutatePersonal(ctx, "store", r, nil)
 	}
 	return s.InsertEpistemic(ctx, DataRequest{Scope: scope, Tier: r.Tier, Kind: r.Kind, Key: r.Key, Content: r.Content, Confidence: &r.Confidence, Authority: AuthorityModel})
 }
@@ -793,17 +858,11 @@ func (s *postgresDataStore) Delete(ctx context.Context, scope Scope, id int64) (
 	defer func() {
 		s.recordMutation(DataRequest{Operation: "delete", ID: id}, DataResponse{Deleted: changed}, err, "memory.retire")
 	}()
-	var (
-		tag store.Tag
-	)
-	if s.placement == PlacementServer {
-		tag, err = s.db.Exec(ctx, `UPDATE user_memories SET lifecycle_state = 'retired', updated_at = now()
-WHERE id = $1 AND lifecycle_state = 'active'`, id)
+	_, err = s.mutatePersonal(ctx, "delete", Record{Scope: scope, ID: id}, nil)
+	if errors.Is(err, ErrMemoryNotFound) {
+		return false, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	return tag.RowsAffected() > 0, nil
+	return err == nil, err
 }
 
 type handlerOptions struct {
@@ -839,6 +898,16 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		return DataRequest{}, errors.New("memory: trailing data request")
 	}
 	request.Operation = strings.ToLower(strings.TrimSpace(request.Operation))
+	if len(request.AssemblyBudgetBytes) != 0 {
+		if request.Operation != "assemble-context" {
+			return DataRequest{}, errors.New("memory: assembly budget requires assemble-context")
+		}
+		var err error
+		request.assemblyBytes, err = commandByteLimit(commandArgs{"budget_bytes": request.AssemblyBudgetBytes}, "budget_bytes")
+		if err != nil {
+			return DataRequest{}, err
+		}
+	}
 	request.Kind = strings.TrimSpace(request.Kind)
 	request.Tier = strings.TrimSpace(request.Tier)
 	request.Key = strings.TrimSpace(request.Key)
@@ -949,6 +1018,42 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	request, err := decodeDataRequest(body)
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if request.Changes != nil && request.Operation != "change-feed" {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if request.IncludeVersion && request.Operation != "get" {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if request.IngressPreview && (!request.PublicView || (request.Operation != "diagnose" && request.Operation != "explain")) {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if request.AtVersion != nil && (options.placement != PlacementServer || request.Operation != "get" || !request.AtVersion.validFor(request.ID) || request.ReadPolicy != nil || request.AsOf != "") {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	versionedMutation := (options.placement == PlacementKB && (versionedCorrectionOperation(request.Operation) || request.Operation == "delete-as")) || (options.placement == PlacementServer && (request.Operation == "supersede" || request.Operation == "delete"))
+	if request.ExpectedVersion != nil && (!versionedMutation || !request.ExpectedVersion.validFor(request.ID)) {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	creation := (options.placement == PlacementServer && request.Operation == "store") || (options.placement == PlacementKB && request.Operation == "insert-epistemic")
+	if request.IdempotencyKey != "" && ((!creation && (!versionedMutation || request.ExpectedVersion == nil)) || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementServer {
+		bound := *backend
+		bound.personalActor = personalCaller(options.commandContext, request.Authority)
+		options.data = &bound
+	}
+	var readResult *MemoryReadResult
+	if request.ReadPolicy != nil {
+		readResult = request.ReadPolicy.validate(options.placement, request.Operation, request.AsOf)
+		if readResult.ErrorCode != "" {
+			encoded, encodeErr := json.Marshal(DataResponse{Read: readResult, Records: []Record{}})
+			if encodeErr != nil {
+				return nil, bus.ModuleStatusInternal
+			}
+			return encoded, bus.ModuleStatusOK
+		}
 	}
 	explicitScope := request.Scope.Type != "" || request.Scope.Value != ""
 	if options.placement == PlacementKB && !explicitScope {
@@ -1124,6 +1229,18 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
+	defer func() {
+		if status != bus.ModuleStatusInternal && status != bus.ModuleStatusCancelled {
+			return
+		}
+		cause := err
+		if cause == nil {
+			cause = ctx.Err()
+		}
+		// Never log the request, SQL, driver message or connection string.
+		log.Printf("memory data failure operation=%q trace=%d status=%d class=%s",
+			memoryFailureOperation(request.Operation), invocation.TraceID, status, memoryFailureClass(cause))
+	}()
 	if request.Operation == "code-index" {
 		code, ok := options.data.(*postgresDataStore)
 		if !ok || request.CodeIndex == nil {
@@ -1140,7 +1257,8 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return encoded, bus.ModuleStatusOK
 	}
 
-	response := DataResponse{}
+	response := DataResponse{Read: readResult}
+	rollbackOnly := false
 	// Pin policy to one lazy snapshot per request, including its error. A
 	// request must not mix settings from successive configuration generations;
 	// the next request still observes changes immediately.
@@ -1154,6 +1272,10 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		bound.auditBatch = &mutationAuditBatch{}
 		options.data = &bound
 		defer func() {
+			if rollbackOnly {
+				publishMutationAudit(bound.auditAction, request, response, status)
+				return
+			}
 			if status == bus.ModuleStatusOK && len(bound.auditBatch.actions) > 0 {
 				bound.auditBatch.flush(bound.auditAction)
 			} else {
@@ -1233,6 +1355,21 @@ set_config('aimee.correlation_id',$9,true)`,
 				err = errors.New("memory: CSS conventions exceed response capacity")
 			}
 		}
+	case "source-revalidate":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil || !request.Revalidation.valid() {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		exact := Scope{}
+		if explicitScope {
+			exact = scope
+		}
+		var eligible bool
+		eligible, err = backend.revalidateSources(ctx, request.Revalidation, exact)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "eligible": eligible,
+				"check_id": request.Revalidation.CheckID, "sources_digest": releaseDigest(request.Revalidation.Sources)})
+		}
 	case "typed-context":
 		backend, ok := options.data.(*postgresDataStore)
 		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {
@@ -1246,6 +1383,14 @@ set_config('aimee.correlation_id',$9,true)`,
 			if !ok || n < 0 || n > 4096 {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
+		}
+		if _, budgetErr := request.TypedContext.ContextLimits.byteLimit(maxDataBody); budgetErr != nil {
+			var refusal *contextBudgetError
+			if !errors.As(budgetErr, &refusal) {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			response.Payload, err = json.Marshal(commandError(refusal.kind, refusal.message))
+			break
 		}
 		if explicitScope {
 			request.Scope = scope
@@ -1477,6 +1622,53 @@ set_config('aimee.correlation_id',$9,true)`,
 		candidates, err = backend.factCandidates(ctx, request.Limit)
 		if err == nil {
 			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "candidates": candidates})
+		}
+	case "correction-proposals", "correction-review":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || (options.placement == PlacementKB && transaction == nil) {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var result any
+		if request.Operation == "correction-proposals" {
+			if request.ProposalID != "" && !validProposalID(request.ProposalID) {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			var proposals []correctionProposal
+			if options.placement == PlacementServer {
+				proposals, err = backend.listPersonalCorrectionProposals(ctx, request.ProposalID, request.Limit)
+			} else {
+				proposals, err = backend.listCorrectionProposals(ctx, request.ProposalID, request.Limit)
+			}
+			result = map[string]any{"status": "ok", "proposals": proposals}
+		} else {
+			caller := options.commandContext
+			if !verifiedRetryCaller(caller) || !caller.UserAuthority || !request.CorrectionReview.valid() {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			var proposal correctionProposal
+			if options.placement == PlacementServer {
+				proposal, err = backend.reviewPersonalCorrection(ctx, *request.CorrectionReview, caller)
+			} else {
+				proposal, err = backend.reviewKBCorrection(ctx, *request.CorrectionReview, caller)
+			}
+			rollbackOnly = err != nil
+			result = map[string]any{"status": "ok", "proposal": proposal}
+			if errors.Is(err, ErrMemoryNotFound) || errors.Is(err, errCorrectionReviewConflict) {
+				kind := "conflict"
+				if errors.Is(err, ErrMemoryNotFound) {
+					kind = "not_found"
+				}
+				result = commandError(kind, "correction review refused: hidden, missing, mismatched or already decided")
+				err = nil
+			}
+		}
+		if err == nil {
+			if options.placement == PlacementServer {
+				if envelope, ok := result.(map[string]any); ok && envelope["status"] == "ok" {
+					envelope["store"] = "user"
+				}
+			}
+			response.Payload, err = json.Marshal(result)
 		}
 	case "fact-review":
 		backend, ok := options.data.(*postgresDataStore)
@@ -1738,8 +1930,17 @@ set_config('aimee.correlation_id',$9,true)`,
 			}
 			request.Scope = scope
 			var record Record
-			record, err = mutations.InsertEpistemic(ctx, request)
-			if err == nil && options.publicWrite {
+			if request.IdempotencyKey != "" {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok || transaction == nil || !options.publicWrite {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				record, response.MutationReceipt, err = backend.storeKBIdempotent(ctx, request, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
+				rollbackOnly = err != nil
+			} else {
+				record, err = mutations.InsertEpistemic(ctx, request)
+			}
+			if err == nil && options.publicWrite && request.IdempotencyKey == "" {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok {
 					return nil, bus.ModuleStatusCapabilityAbsent
@@ -1757,10 +1958,33 @@ set_config('aimee.correlation_id',$9,true)`,
 			}
 			var code int
 			var newID int64
-			code, newID, err = mutations.UpdateAs(ctx, request.ID, request.Content, request.Authority)
-			if err == nil && code == MutationOK && options.publicWrite {
-				backend := options.data.(*postgresDataStore)
-				err = backend.captureStoredFactActor(ctx, newID, request.Authority, options.commandContext)
+			if request.ExpectedVersion != nil || request.IdempotencyKey != "" {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok || transaction == nil || !options.publicWrite {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				authority := AuthorityModel
+				if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+					authority = AuthorityUser
+				}
+				var record Record
+				if request.IdempotencyKey != "" {
+					request.Scope = scope
+					record, response.MutationReceipt, err = backend.replaceKBIdempotent(ctx, request, authority, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
+					rollbackOnly = err != nil
+				} else {
+					record, err = backend.replaceKBCorrection(ctx, request.ID, request.Content, nil, "", authority, nil, request.ExpectedVersion)
+					if err == nil {
+						err = backend.captureStoredFactActor(ctx, record.ID, authority, options.commandContext)
+					}
+				}
+				newID = record.ID
+			} else {
+				code, newID, err = mutations.UpdateAs(ctx, request.ID, request.Content, request.Authority)
+				if err == nil && code == MutationOK && options.publicWrite {
+					backend := options.data.(*postgresDataStore)
+					err = backend.captureStoredFactActor(ctx, newID, request.Authority, options.commandContext)
+				}
 			}
 			if errors.Is(err, ErrMemoryNotFound) {
 				code, err = -1, nil
@@ -1771,7 +1995,29 @@ set_config('aimee.correlation_id',$9,true)`,
 			if request.ID <= 0 || (request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			response.Deleted, err = mutations.DeleteAs(ctx, request.ID, request.Authority)
+			if request.ExpectedVersion != nil {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok || transaction == nil || !options.publicWrite {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				authority := AuthorityModel
+				if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+					authority = AuthorityUser
+				}
+				if request.IdempotencyKey != "" {
+					request.Scope = scope
+					response.MutationReceipt, err = backend.deleteKBIdempotent(ctx, request, authority, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
+					response.Deleted = err == nil
+					rollbackOnly = err != nil
+				} else {
+					response.Deleted, err = backend.deleteKBVersion(ctx, request.ID, authority, request.ExpectedVersion)
+				}
+				if errors.Is(err, ErrMemoryNotFound) {
+					err = nil
+				}
+			} else {
+				response.Deleted, err = mutations.DeleteAs(ctx, request.ID, request.Authority)
+			}
 		}
 	case "pii-inject":
 		if request.Sensitivity < int(SensNormal) || request.Sensitivity > int(SensSecret) ||
@@ -1781,13 +2027,39 @@ set_config('aimee.correlation_id',$9,true)`,
 		allowed := ShouldInject(RelSensitivity(request.Sensitivity), *request.Confidence,
 			request.TurnRequestsSensitive)
 		response.Allowed = &allowed
+	case "change-feed":
+		// The feed carries private record identities. Only the embedding host
+		// may consume it; it is not an advertised model/public diagnostic tool.
+		if invocation.PrincipalRef != 0 || request.Changes == nil || !request.Changes.valid() {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var page MemoryChangePage
+		if options.placement == PlacementKB {
+			if request.IncludeAll {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			page, err = backend.sharedChanges(ctx, scope, *request.Changes)
+		} else {
+			page, err = backend.personalChanges(ctx, *request.Changes)
+		}
+		response.Changes = &page
 	case "get":
 		if request.ID <= 0 {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		var record Record
 		var getErr error
-		if request.AsOf != "" {
+		if request.AtVersion != nil {
+			backend, ok := options.data.(*postgresDataStore)
+			if !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			record, getErr = backend.personalVersion(ctx, scope, *request.AtVersion)
+		} else if request.AsOf != "" || (request.ReadPolicy != nil && request.ReadPolicy.Mode == "historical") {
 			if options.placement != PlacementKB {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
@@ -1795,7 +2067,17 @@ set_config('aimee.correlation_id',$9,true)`,
 			if !ok {
 				return nil, bus.ModuleStatusCapabilityAbsent
 			}
-			record, getErr = backend.get(ctx, scope, request.ID, true)
+			when := ""
+			if readResult != nil {
+				when = readResult.ValidAt
+			}
+			record, getErr = backend.getAtVersioned(ctx, scope, request.ID, true, when, request.IncludeVersion)
+		} else if request.IncludeVersion {
+			backend, ok := options.data.(*postgresDataStore)
+			if !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			record, getErr = backend.getAtVersioned(ctx, scope, request.ID, false, "", true)
 		} else {
 			record, getErr = options.data.Get(ctx, scope, request.ID)
 		}
@@ -1885,8 +2167,18 @@ set_config('aimee.correlation_id',$9,true)`,
 			confidence = *request.Confidence
 		}
 		var record Record
-		record, err = options.data.Put(ctx, scope, Record{Scope: scope, Tier: request.Tier,
-			Kind: request.Kind, Key: request.Key, Content: request.Content, Confidence: confidence})
+		if request.IdempotencyKey != "" {
+			backend, ok := options.data.(*postgresDataStore)
+			if !ok || options.placement != PlacementServer {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			request.Scope, request.Confidence = scope, &confidence
+			record, response.MutationReceipt, err = backend.mutatePersonalIdempotent(ctx, request, options.commandContext)
+			rollbackOnly = err != nil
+		} else {
+			record, err = options.data.Put(ctx, scope, Record{Scope: scope, Tier: request.Tier,
+				Kind: request.Kind, Key: request.Key, Content: request.Content, Confidence: confidence})
+		}
 		response.Records = []Record{record}
 	case "supersede":
 		if request.ID <= 0 || request.Content == "" || request.Confidence == nil {
@@ -1899,11 +2191,37 @@ set_config('aimee.correlation_id',$9,true)`,
 		if options.publicWrite && transaction == nil {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
+		if request.ExpectedVersion != nil {
+			if _, ok := options.data.(*postgresDataStore); !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+		}
 		var record Record
 		if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB {
-			record, err = backend.supersedeKB(ctx, request.ID, request.Content, *request.Confidence, request.SessionID)
-			if err == nil && options.publicWrite {
-				err = backend.captureStoredFactActor(ctx, record.ID, AuthorityModel, nil)
+			authority := AuthorityModel
+			if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+				authority = AuthorityUser
+			}
+			if request.IdempotencyKey != "" {
+				if transaction == nil || !options.publicWrite {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				request.Scope = scope
+				record, response.MutationReceipt, err = backend.replaceKBIdempotent(ctx, request, authority, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
+				rollbackOnly = err != nil
+			} else {
+				record, err = backend.replaceKBVersion(ctx, request.ID, request.Content, *request.Confidence, request.SessionID, authority, nil, request.ExpectedVersion)
+				if err == nil && options.publicWrite {
+					err = backend.captureStoredFactActor(ctx, record.ID, authority, options.commandContext)
+				}
+			}
+		} else if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementServer && request.ExpectedVersion != nil {
+			if request.IdempotencyKey != "" {
+				request.Scope = scope
+				record, response.MutationReceipt, err = backend.mutatePersonalIdempotent(ctx, request, options.commandContext)
+				rollbackOnly = err != nil
+			} else {
+				record, err = backend.correctPersonalVersion(ctx, scope, request.ID, request.Content, *request.Confidence, *request.ExpectedVersion)
 			}
 		} else {
 			record, err = advanced.Supersede(ctx, scope, request.ID, request.Content, *request.Confidence)
@@ -2015,8 +2333,18 @@ set_config('aimee.correlation_id',$9,true)`,
 		}
 		var block string
 		var count int
-		block, count, err = recall.RecallFacts(ctx, request.Entity, request.Query,
-			request.TurnRequestsSensitive, request.ContentCapacity)
+		if request.CollectFactSources {
+			projection, ok := options.data.(interface {
+				RecallFactProjection(context.Context, string, string, bool, int) (string, int, *factProjection, error)
+			})
+			if !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			block, count, response.FactProjection, err = projection.RecallFactProjection(ctx, request.Entity, request.Query, request.TurnRequestsSensitive, request.ContentCapacity)
+		} else {
+			block, count, err = recall.RecallFacts(ctx, request.Entity, request.Query,
+				request.TurnRequestsSensitive, request.ContentCapacity)
+		}
 		response.Block, response.Count = &block, &count
 	case "directive-create", "directive-list", "directive-get", "directive-resolve", "directive-suppress",
 		"directive-sweep", "directive-match", "directive-mark-surfaced", "directive-count":
@@ -2414,10 +2742,14 @@ set_config('aimee.correlation_id',$9,true)`,
 				} else {
 					records, err = options.data.Search(ctx, scope, request.Query, "", "", request.Limit)
 				}
-				assembly := assembleMemoryContext(records, request.Query, request.BlockType)
-				block = assembly.Context
 				if request.Detail {
+					assembly := assembleMemoryContextWithBudget(records, request.Query, request.BlockType, request.assemblyBytes)
+					block = assembly.Context
 					response.ContextAssembly = &assembly
+				} else {
+					// Native hosts need only the projection. Avoid computing
+					// diagnostic scores/metadata for every unused candidate.
+					block, _ = renderMemoryContextBounded(records, request.BlockType, request.assemblyBytes)
 				}
 			} else if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
 				var records []Record
@@ -2467,18 +2799,49 @@ set_config('aimee.correlation_id',$9,true)`,
 		if request.ID <= 0 {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
-		response.Deleted, err = options.data.Delete(ctx, scope, request.ID)
+		if options.placement == PlacementServer && request.ExpectedVersion != nil {
+			backend, ok := options.data.(*postgresDataStore)
+			if !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			if request.IdempotencyKey != "" {
+				request.Scope = scope
+				_, response.MutationReceipt, err = backend.mutatePersonalIdempotent(ctx, request, options.commandContext)
+				rollbackOnly = err != nil
+			} else {
+				_, err = backend.retirePersonalVersion(ctx, scope, request.ID, *request.ExpectedVersion)
+			}
+			response.Deleted = err == nil
+			if errors.Is(err, ErrMemoryNotFound) {
+				err = nil
+			}
+		} else {
+			response.Deleted, err = options.data.Delete(ctx, scope, request.ID)
+		}
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if code := mutationRefusal(err); code != 0 {
-		response = DataResponse{Code: &code}
+		proposal := proposedCorrection(err)
+		response = DataResponse{Code: &code, Proposal: proposal}
+		// Canonical admission has not written a version. The linked draft and
+		// its audit/retry reference are the successful outcome of this request.
+		if proposal != nil {
+			rollbackOnly = false
+		}
 		err = nil
 	}
 
 	if err != nil {
 		if invocation.Cancelled() || ctx.Err() != nil {
 			return nil, bus.ModuleStatusCancelled
+		}
+
+		var budgetRefusal *contextBudgetError
+		if (request.Operation == "recall-bundle" || request.Operation == "compose-recall") && errors.As(err, &budgetRefusal) {
+			payload, _ := json.Marshal(commandError(budgetRefusal.kind, budgetRefusal.message))
+			raw, _ := json.Marshal(DataResponse{Payload: payload})
+			return raw, bus.ModuleStatusOK // transaction rolls back; no surfaced counters
 		}
 
 		if request.Operation == "fact-retract" {
@@ -2530,13 +2893,24 @@ set_config('aimee.correlation_id',$9,true)`,
 			for i := range response.Diagnostics {
 				d := &response.Diagnostics[i]
 				response.Records = append(response.Records, d.Memory)
+				if request.IngressPreview {
+					continue
+				}
 				d.EpistemicKind, err = backend.EpistemicKind(ctx, d.Memory.ID)
 				if err != nil {
 					return nil, bus.ModuleStatusInternal
 				}
 			}
 		}
-		response.PublicRecords, err = backend.publicRecords(ctx, response.Records)
+		if request.IngressPreview {
+			exact := Scope{}
+			if explicitScope {
+				exact = request.Scope
+			}
+			response.MemoryPreviews, response.PreviewProjection, err = backend.ingressMemoryPreviews(ctx, response.Diagnostics, exact)
+		} else {
+			response.PublicRecords, err = backend.publicRecords(ctx, response.Records)
+		}
 		if err != nil {
 			return nil, bus.ModuleStatusInternal
 		}
@@ -2551,10 +2925,60 @@ set_config('aimee.correlation_id',$9,true)`,
 	if err != nil {
 		return nil, bus.ModuleStatusInternal
 	}
-	if transaction != nil {
-		if err := transaction.Commit(ctx); err != nil {
+	if transaction != nil && !rollbackOnly {
+		if err = transaction.Commit(ctx); err != nil {
 			return nil, bus.ModuleStatusInternal
 		}
 	}
 	return encoded, bus.ModuleStatusOK
+}
+
+// Only fixed categories and validated SQLSTATEs may cross the diagnostic boundary.
+func memoryFailureClass(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "deadline"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	var wireError *store.StoreError
+	var sqlError interface{ SQLState() string }
+	code := ""
+	if errors.As(err, &wireError) {
+		code = wireError.SQLState
+	} else if errors.As(err, &sqlError) {
+		code = sqlError.SQLState()
+	}
+	if len(code) == 5 {
+		valid := true
+		for _, c := range code {
+			valid = valid && (c >= '0' && c <= '9' || c >= 'A' && c <= 'Z')
+		}
+		if valid {
+			return "sqlstate_" + code
+		}
+	}
+	switch {
+	case errors.Is(err, store.ErrStoreUnavailable):
+		return "store_unavailable"
+	case errors.Is(err, store.ErrResultTooLarge):
+		return "result_capacity"
+	case errors.Is(err, store.ErrTxClosed):
+		return "transaction_closed"
+	}
+	return "internal"
+}
+
+// Unknown input must not become diagnostic text if opening the store fails
+// before the operation dispatcher rejects it.
+func memoryFailureOperation(operation string) string {
+	switch operation {
+	case "get", "store", "insert-epistemic", "supersede", "update-as", "delete", "delete-as",
+		"correction-review", "recall-bundle", "compose-recall", "typed-context", "assertion-search",
+		"episode-list", "episode-get", "relation-search", "entity-edges", "entity-profile",
+		"rebuild-derived", "code-index", "change-feed", "vector-search", "vector-rebuild":
+		return operation
+	default:
+		return "other"
+	}
 }

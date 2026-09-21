@@ -1,0 +1,585 @@
+{
+  "headRefOid": "2269c6c1b9fe9771c06fe9a7d2099097e4472d31",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:50:13Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693404/job/106179268675",
+      "name": "smoke",
+      "startedAt": "2026-09-21T00:45:20Z",
+      "status": "COMPLETED",
+      "workflowName": "Benchmark Smoke"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:48:53Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339084",
+      "name": "Cppcheck (0/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:46:03Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693360/job/106179268477",
+      "name": "release-policy",
+      "startedAt": "2026-09-21T00:45:56Z",
+      "status": "COMPLETED",
+      "workflowName": "Release policy"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:35Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693378/job/106179268488",
+      "name": "pins",
+      "startedAt": "2026-09-21T00:45:20Z",
+      "status": "COMPLETED",
+      "workflowName": "c-repository-pins"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:56Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339090",
+      "name": "Cppcheck (1/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:12Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179338963",
+      "name": "Cppcheck (2/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:53:19Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339127",
+      "name": "Cppcheck (3/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:48:35Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339085",
+      "name": "Cppcheck (4/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:50:53Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339135",
+      "name": "Cppcheck (5/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:48:09Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339098",
+      "name": "Cppcheck (6/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:52Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339058",
+      "name": "Cppcheck (7/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:48:04Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339194",
+      "name": "Clang-tidy (0/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:49Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339071",
+      "name": "Clang-tidy (1/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:41Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339101",
+      "name": "Clang-tidy (2/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:50Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339115",
+      "name": "Clang-tidy (3/8)",
+      "startedAt": "2026-09-21T00:46:23Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:48:06Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339076",
+      "name": "Clang-tidy (4/8)",
+      "startedAt": "2026-09-21T00:45:47Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:48:35Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339166",
+      "name": "Clang-tidy (5/8)",
+      "startedAt": "2026-09-21T00:45:50Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:04Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339129",
+      "name": "Clang-tidy (6/8)",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:48:21Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339203",
+      "name": "Clang-tidy (7/8)",
+      "startedAt": "2026-09-21T00:45:53Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:10Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339087",
+      "name": "Secret scanning",
+      "startedAt": "2026-09-21T00:45:49Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T01:00:45Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339123",
+      "name": "Complete script regression suite",
+      "startedAt": "2026-09-21T00:45:49Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T01:03:05Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339140",
+      "name": "Address and undefined-behavior sanitizers",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:46:07Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339134",
+      "name": "change-scope",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:46:08Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179339097",
+      "name": "no-coauthor-trailers",
+      "startedAt": "2026-09-21T00:45:48Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:53:33Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106180406576",
+      "name": "Static analysis and secret scanning",
+      "startedAt": "2026-09-21T00:53:23Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:48:21Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390703",
+      "name": "lint",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:18Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390721",
+      "name": "frontend-tests",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:50:18Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390687",
+      "name": "go-unit-tests",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:44Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390647",
+      "name": "build",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:10Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390640",
+      "name": "build-integrity",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:50:03Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390707",
+      "name": "unit-tests (1/2)",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:38Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390759",
+      "name": "unit-tests (2/2)",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:54:27Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390917",
+      "name": "unit-tests-pg (1/3)",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:39Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390807",
+      "name": "unit-tests-pg (2/3)",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:36Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390855",
+      "name": "unit-tests-pg (3/3)",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:51:16Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390944",
+      "name": "db2-process-replay",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:25Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390909",
+      "name": "lsp-real-providers (ubuntu-24.04, linux)",
+      "startedAt": "2026-09-21T00:46:12Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:43Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390920",
+      "name": "lsp-real-providers (macos-latest, macos)",
+      "startedAt": "2026-09-21T00:46:19Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:07Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390885",
+      "name": "identity-mint-e2e",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:06Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390760",
+      "name": "oidc-login-live",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:27Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390820",
+      "name": "write-tier-enforce-live",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:38Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390794",
+      "name": "pam-login-live",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:53:42Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390800",
+      "name": "authz-residual-live",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:06Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390963",
+      "name": "p1-rls-gate",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:50:26Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390924",
+      "name": "integration-tests",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:48:46Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390861",
+      "name": "init-migrate-service-test",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:02Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390842",
+      "name": "windows-cmake",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:02Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390835",
+      "name": "windows-build",
+      "startedAt": "2026-09-21T00:46:11Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:09Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179391036",
+      "name": "macos-build",
+      "startedAt": "2026-09-21T00:46:16Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:32Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390918",
+      "name": "memory-retrieval-eval",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:54:55Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390961",
+      "name": "e2e-docker (T1)",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:59:17Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390922",
+      "name": "e2e-docker (T2)",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:55:49Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390982",
+      "name": "e2e-docker (T3)",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T01:03:12Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390955",
+      "name": "e2e-docker (T2-luks)",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:49:22Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390827",
+      "name": "e2e-adoption",
+      "startedAt": "2026-09-21T00:46:12Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:47:08Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390814",
+      "name": "treesitter",
+      "startedAt": "2026-09-21T00:46:10Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:46:44Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106179390822",
+      "name": "vault-pkcs11-token",
+      "startedAt": "2026-09-21T00:46:12Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-09-21T00:54:32Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/RakuenSoftware/aimee/actions/runs/35548693341/job/106180568674",
+      "name": "unit-tests",
+      "startedAt": "2026-09-21T00:54:30Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    }
+  ]
+}

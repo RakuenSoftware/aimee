@@ -17,6 +17,9 @@ import (
 // replacement for that durable write. Server composition hooks remain until
 // their pre-dispatch refusal policy also migrates.
 func mutationAudit(request DataRequest, response DataResponse, status bus.ModuleStatus) (audit.Action, bool) {
+	if response.MutationReceipt != nil && response.MutationReceipt.Replayed {
+		return audit.Action{}, false
+	}
 	a := audit.Action{Actor: "memory", ArgsHash: "v1-", TaskID: request.ID, Verdict: "fail"}
 	success := status == bus.ModuleStatusOK
 	switch request.Operation {

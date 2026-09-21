@@ -4,6 +4,7 @@
 #include "request_context.h"
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 static _Thread_local request_context_t g_req_ctx;
 static _Thread_local int g_req_ctx_set;
@@ -22,6 +23,29 @@ void request_context_set(const request_context_t *ctx)
 const request_context_t *request_context_get(void)
 {
    return g_req_ctx_set ? &g_req_ctx : NULL;
+}
+
+int request_context_refuse_assembly(const char *kind)
+{
+   if (!g_req_ctx_set)
+      return -1;
+   if (!g_req_ctx.context_refused)
+   {
+      g_req_ctx.context_refused = 1;
+      /* Preserve a complete owner kind; never invent a truncated error code. */
+      if (!kind || !kind[0] || strlen(kind) >= sizeof(g_req_ctx.context_refusal_kind))
+         kind = "unavailable";
+      snprintf(g_req_ctx.context_refusal_kind, sizeof(g_req_ctx.context_refusal_kind), "%s", kind);
+   }
+   return 0;
+}
+
+int request_context_set_source_release(const char *ticket)
+{
+   if (!g_req_ctx_set || !ticket || strlen(ticket) >= sizeof(g_req_ctx.memory_source_release))
+      return -1;
+   snprintf(g_req_ctx.memory_source_release, sizeof(g_req_ctx.memory_source_release), "%s", ticket);
+   return 0;
 }
 
 void request_context_clear(void)
@@ -85,4 +109,47 @@ void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls
             intervention ? intervention : "");
    snprintf(g_req_ctx.aimee_tool_transport, sizeof(g_req_ctx.aimee_tool_transport), "%s",
             tool_transport ? tool_transport : "none");
+}
+
+void request_context_capture_budget_header(request_context_t *ctx, const char *request)
+{
+   if (!ctx)
+      return;
+   ctx->request_budget_present = 0;
+   ctx->request_budget_limits[0] = 0;
+   static const char name[] = "X-Aimee-Context-Limits";
+   const size_t nlen = sizeof(name) - 1;
+   int prior_budget = 0;
+   for (const char *line = request; line && *line;)
+   {
+      const char *end = strstr(line, "\r\n");
+      if (!end || end == line)
+         break; /* Never search the request body for a header. */
+      size_t length = (size_t)(end - line);
+      if (prior_budget && (*line == ' ' || *line == '\t'))
+      {
+         ctx->request_budget_present = -1;
+         ctx->request_budget_limits[0] = 0;
+         return; /* Folded limits are ambiguous, never silently truncated. */
+      }
+      prior_budget = 0;
+      if (length > nlen && !strncasecmp(line, name, nlen) && line[nlen] == ':')
+      {
+         const char *value = line + nlen + 1;
+         while (value < end && (*value == ' ' || *value == '\t'))
+            value++;
+         size_t size = (size_t)(end - value);
+         if (ctx->request_budget_present || !size || size >= sizeof(ctx->request_budget_limits))
+         {
+            ctx->request_budget_present = -1;
+            ctx->request_budget_limits[0] = 0;
+            return;
+         }
+         prior_budget = 1;
+         ctx->request_budget_present = 1;
+         memcpy(ctx->request_budget_limits, value, size);
+         ctx->request_budget_limits[size] = 0;
+      }
+      line = end + 2;
+   }
 }

@@ -22,6 +22,12 @@ This language boundary does not certify all historical behavioral parity or the
 numbered reliability proposals.
 
 
+The host missing-context marker is a read restriction, never a writable project
+or workspace. Shared store refuses that marker with `active_context_missing`;
+MCP callers must provide real context or explicitly request `scope=all` for a
+global write. Unscoped legacy global writes and private writes retain their
+existing behavior. Canonical Go admission also protects internal store callers.
+
 Shared KB get and ID-based mutations also accept canonical positive decimal-string
 IDs, preserving int64 identities through native JSON transports. Unsafe numeric
 IDs, noncanonical strings and overflow remain invalid. Server delete reports
@@ -89,6 +95,20 @@ unknown states and suppressed active rows. Scope checks still apply. Mutation
 admission reads the scoped identity independently of serving eligibility so an
 authorized caller can retire an excluded active row.
 
+Exact-ID `get` also accepts a versioned `read_policy` object through the data
+stage, public command and HTTP endpoints. With `schema_version: 1`, `mode:
+"current"` uses the storage transaction clock; `mode: "historical"` requires an
+absolute `valid_at` and returns only a retained KB version whose half-open
+interval contains that instant. The response's `read` object reports the applied
+policy and normalized historical time. Unlike legacy `as_of` inspection, an
+out-of-interval version returns `not_found`. Revocation, quarantine, suppression
+and scope rules still apply. The object cannot grant principal or scope authority.
+`believed_at`, unsupported modes/versions, personal historical reconstruction and
+use on other operations explicitly fail; legacy `as_of` cannot be combined with
+the new contract. HTTP classifies unsupported modes/versions as caller errors.
+Historical selection adds no SQL round trip. This is a temporal read contract,
+not yet the complete evidence decision, validity CLI or release-generation receipt.
+
 Directive/reminder matching, recall fallback and briefing views share the same
 normalized expiry gate. Sweeps expire a row at the exact upper boundary; serving
 does not wait for a sweep. Operator lists/dashboard counts retain stored lifecycle
@@ -107,6 +127,59 @@ leave a successful partial block. Operator review/history semantics are separate
 The baseline policy fingerprint includes this version. This current-state slice
 does not certify all MR-01 surfaces, privileged historical/belief-time access,
 utility horizons or a final release/revocation generation check.
+
+## Context projection and limits
+
+The Go ingress planner emits version-one `context_limits.max_context_bytes` for
+its assembler. The assembler checks the serialized memory envelope, returns
+exact UTF-8 byte accounting and retained memory IDs, and treats an explicit zero
+as zero. Token caps and reserves currently return `unsupported_mode` because
+complete provider-bound token counting is unavailable. The result certifies
+neither the complete provider request nor source freshness. Typed context keeps
+packing diagnostics outside the prompt, renders reviewed procedures once, and
+reports unknown task coverage until requirements are evaluated.
+
+The host's assembly allocation is an inherited ceiling: an explicit byte cap may
+reduce it but cannot increase it. An absent cap inherits that ceiling. Versioned
+limits reject duplicate fields (including escaped aliases), case aliases, null
+values, unknown fields and invalid integers. Explicit null limit objects are
+rejected at the ingress and typed-context command boundaries.
+
+## Memory invalidation producers
+
+Personal storage now records a monotonic `record_revision` and a content-free
+invalidation event atomically with each governed row mutation. A collection row
+serializes event positions in commit order; rollback restores both position and
+event. Deletes retain an invalidation. Runtime roles may read the stream but
+cannot advance or erase its progress. Source IDs are immutable. Counter-only
+updates do not invoke the capture trigger, avoiding content serialization and
+invalidation during ordinary reads.
+
+The host-only data operation `change-feed` accepts `changes` with
+`schema_version: 1`, an optional `after: {owner_id, generation}` cursor and a
+bounded `limit` (default 64, maximum 256). It reads the current head and page in
+one SQL snapshot. A new consumer, changed owner, cursor beyond the current head or missing
+event requires a new canonical snapshot (`snapshot_required: true`); the feed
+does not supply that snapshot or acknowledge consumer application. Events remain
+retained. Server/personal placement uses the instance-local collection. Shared
+KB placement uses the request's explicit primary scope and includes `collection`
+in its cursor. A cursor from another collection requires resynchronization.
+All-scope feed requests and non-host access are refused.
+
+Shared record mutations advance separate counters for affected primary scopes;
+a scope move advances both the old and new collections. Unrelated scopes can
+commit independently. Secondary tag changes advance the parent record's revision
+and primary collection, and secondary tags inherit parent visibility through RLS.
+The journal never exposes a hidden parent's identity through a secondary tag.
+Empty collections retain owner identity with generation zero without a read-side
+write. Existing KB audit envelopes also record the new row revision.
+
+This is the producer foundation for MR-02. Personal content history, further
+governed child/dependency coverage, durable consumer checkpoints and release checks remain
+separate work; the feed cannot certify derivative freshness by itself. Backup
+restoration must rotate the producer identity before replay resumes; automatic
+restore identity rotation and restore-resistant erasure intent are not implemented
+by this producer slice.
 
 ## Canonical KB mutation admission
 
@@ -705,6 +778,18 @@ is claimed without paired evaluation.
 There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report
 success; a local fallback is forbidden.
+
+## Correction preconditions
+
+Shared `memory.get` with `include_version: true` returns `memory.version` alongside
+its content. Shared `memory.supersede` accepts that object as `expected_version`:
+`{"schema_version":1,"owner_id":"<owner UUID>","record_id":"42","record_revision":"3"}`.
+The Go owner compares all identifiers under the replacement lock. A stale version
+returns `conflict` / `expected_version_conflict`; callers should inspect the current
+record before deciding whether to submit a new correction. The native HTTP host
+only forwards these fields. Other verbs and the personal placement currently
+refuse this optional contract. It grants no additional authority and is not an
+idempotency key or release-freshness receipt.
 
 ## Extension and removal
 

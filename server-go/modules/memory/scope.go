@@ -31,6 +31,10 @@ type Scope struct {
 	Value string `json:"value,omitempty"`
 }
 
+// The host uses this marker to restrict reads when no caller context exists.
+// It is never a writable project or workspace.
+const missingScopeValue = "__aimee_scope_missing__"
+
 const (
 	ScopeUser      = "user"
 	ScopeGlobal    = "global"

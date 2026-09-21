@@ -16,6 +16,9 @@ var sharedCommandRoutes = []commandRoute{
 }
 
 var kbCommandRoutes = []commandRoute{
+	{"memory", "revalidate_sources", "Recheck scoped source versions before provider handoff.", handleSourceRevalidation, true},
+	{"memory", "correction_proposals", "Inspect scoped correction drafts outside recall.", handleCorrectionProposalCommand, true},
+	{"memory", "review_correction", "Approve or reject the exact scoped correction draft.", handleCorrectionProposalCommand, true},
 	{"memory", "benchmark", "Evaluate live scoped retrieval with complete per-case receipts.", handleLiveBenchmark, true},
 	{"memory", "audit", "Audit labelled queries against actual scoped candidate order.", handleLabelAudit, true},
 	{"memory", "calibrate", "Fit diagnostic multipliers without changing the serving ranker.", handleLabelAudit, true},

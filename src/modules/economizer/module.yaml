@@ -6,7 +6,7 @@
     "ir",
     "module-runtime"
   ],
-  "enabled_by_default": false,
+  "enabled_by_default": true,
   "runtime_toggle": {
     "supported": false
   },
@@ -46,6 +46,7 @@
     "server-go/modules/economizer/reduce.go",
     "server-go/modules/economizer/register.go",
     "server-go/modules/economizer/repair.go",
+    "server-go/modules/economizer/request_budget.go",
     "server-go/modules/economizer/state.go",
     "server-go/modules/economizer/state_store.go",
     "server-go/modules/economizer/stats.go"
@@ -77,6 +78,7 @@
     "server-go/modules/economizer/reduce_test.go",
     "server-go/modules/economizer/register_test.go",
     "server-go/modules/economizer/repair_test.go",
+    "server-go/modules/economizer/request_budget_test.go",
     "server-go/modules/economizer/state_test.go",
     "server-go/modules/economizer/stats_test.go"
   ],

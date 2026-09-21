@@ -22,6 +22,10 @@
 #include "index.h" /* code_search_hit_t */
 #include <stddef.h>
 
+/* Authenticated transport for Go-owned source revalidation at the wire fence. */
+int ingress_preinject_revalidate_sources(void);
+void ingress_preinject_finish_sources(void);
+
 /* Extract the recall seed query from a parsed chat `messages` array: the text
  * of the last user-role message. Returns a malloc'd string (caller frees) or
  * NULL when there is no usable user text. Pure (no kb). */
@@ -37,7 +41,10 @@ char *ingress_preinject_last_assistant_from_messages(const cJSON *messages);
  * `ingress_preinject_enabled` (config) and `request_disabled` (per-request
  * override): returns NULL when disabled, when query is blank, or when recall
  * yields no context. Otherwise runs the recall/context-block path, derives a
- * confidence tier, and returns a malloc'd <aimee-context> envelope. */
+ * confidence tier, and returns a malloc'd <aimee-context> envelope.
+ * HTTP callers install a request_context_t before assembly. Required plan or
+ * assembly failures mark that request refused for final provider dispatch;
+ * successful inactive/empty plans may return NULL without refusing. */
 char *ingress_preinject_build(const char *query, int request_disabled);
 
 /* Merge `envelope` with `instructions` (the request system prompt), returning a

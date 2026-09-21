@@ -36,3 +36,12 @@ __attribute__((weak)) int aimee_module_commands_dispatch_internal(const char *me
    cJSON_AddStringToObject(*result, "kind", "not_found");
    return 1;
 }
+
+__attribute__((weak)) int aimee_module_commands_dispatch_internal_timeout(const char *method,
+                                                                          const cJSON *args,
+                                                                          int timeout_ms,
+                                                                          cJSON **result)
+{
+   (void)timeout_ms;
+   return aimee_module_commands_dispatch_internal(method, args, result);
+}

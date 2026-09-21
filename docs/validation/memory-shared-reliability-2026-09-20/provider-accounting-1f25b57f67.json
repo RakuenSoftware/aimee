@@ -1,0 +1,162 @@
+{
+  "t2": [
+    {
+      "frontend": "chat",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 10318,
+      "memory_projection_bytes": 1625,
+      "digest": "sha256:4fde01dea502b4895176ffbfd0f761127fc7e864e51d9bfaee53532ec4da0809",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 12514,
+      "memory_projection_bytes": 1625,
+      "digest": "sha256:191546e9e4a0db2d6c1d3f48b9ed5c4fa7780fe229ec3884b9afce293f8dd54d",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "messages",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 10316,
+      "memory_projection_bytes": 1625,
+      "digest": "sha256:cac4cde926ba037d3e785c379c542fb1afa199daf8aaee3a0b96fe70849f6bc1",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "chat",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 10415,
+      "memory_projection_bytes": 1625,
+      "digest": "sha256:1b31a92a46c40c9f1952e8e97e18a9d2dea7163da425d681fb8cce858eb2cef4",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 12585,
+      "memory_projection_bytes": 1625,
+      "digest": "sha256:ac7edcad2840a609af0f88cc4845fabba3f576d9d25a3e41e7291860b87cd566",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "messages",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 2273,
+      "memory_projection_bytes": 1625,
+      "digest": "sha256:f28a236457fc0c6810deeec96e272d39825655dd776004ff737f73e395816eba",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    }
+  ],
+  "t3": [
+    {
+      "frontend": "chat",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 9615,
+      "memory_projection_bytes": 1018,
+      "digest": "sha256:28d8b28915c088d12767d2580e92eac031fc3ecc82c12851fe2a3aaf7a67ee76",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 11811,
+      "memory_projection_bytes": 1018,
+      "digest": "sha256:9202cf17a0ad10b506bb30410605ae6454c136fea86fbb7d71dc535444ae630a",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "messages",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 9613,
+      "memory_projection_bytes": 1018,
+      "digest": "sha256:6180c1eab5191ca520a744cb7d6e5c87bc59075009dd3f4f577edf489f70a001",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "chat",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 9712,
+      "memory_projection_bytes": 1018,
+      "digest": "sha256:162f7a3bc9a7e735c9ec68fee4b9e4f77570a0a1f2a50250bb8ee7297bf1d7e7",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 11882,
+      "memory_projection_bytes": 1018,
+      "digest": "sha256:7b2c1159d3a43bec91c60dd68a80b87bf5dbfc58db8d289c007e2dd7b87c3ad0",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "messages",
+      "provider": "anthropic",
+      "endpoint": "/v1/messages",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 1570,
+      "memory_projection_bytes": 1018,
+      "digest": "sha256:2c17051c04d1e0e375922e2977fb41282b10ee4bc16c5d21ea38f3be8f4797bd",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    }
+  ]
+}

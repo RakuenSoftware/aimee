@@ -1,3 +1,5 @@
+#include "json_int64.h"
+#include "json_wire.h"
 /* kb_client_memory.c: kb_client wrappers for the memory.* RPC family
  * (find_facts, list, get, insert, briefing, context_block, ask,
  * entity_profile, entity_edges, search_graph, get_episode).  Split
@@ -244,17 +246,13 @@ int64_t kbc_memory_response_id(const cJSON *object)
       int64_t id = 0;
       return kbc_memory_activation_integer(raw, &end, &id) && end && !*end ? id : 0;
    }
-   const cJSON *id = cJSON_GetObjectItemCaseSensitive(object, "id");
-   return cJSON_IsNumber(id) && isfinite(id->valuedouble) && id->valuedouble > 0 &&
-                  id->valuedouble <= 9007199254740991.0 && floor(id->valuedouble) == id->valuedouble
-              ? (int64_t)id->valuedouble
-              : 0;
+   int64_t id = 0;
+   return jo_read_i64_exact(cJSON_GetObjectItemCaseSensitive(object, "id"), &id) && id > 0 ? id : 0;
 }
 
 void kbc_memory_row_from_json(cJSON *f, memory_t *m)
 {
    memset(m, 0, sizeof(*m));
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(f, "id");
    cJSON *tier_j = cJSON_GetObjectItemCaseSensitive(f, "tier");
    cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(f, "kind");
    cJSON *key_j = cJSON_GetObjectItemCaseSensitive(f, "key");
@@ -267,8 +265,7 @@ void kbc_memory_row_from_json(cJSON *f, memory_t *m)
    cJSON *created_j = cJSON_GetObjectItemCaseSensitive(f, "created_at");
    cJSON *updated_j = cJSON_GetObjectItemCaseSensitive(f, "updated_at");
    cJSON *src_j = cJSON_GetObjectItemCaseSensitive(f, "source_session");
-   if (cJSON_IsNumber(id_j))
-      m->id = (int64_t)id_j->valuedouble;
+   m->id = kbc_memory_response_id(f);
    if (cJSON_IsString(tier_j))
       snprintf(m->tier, sizeof(m->tier), "%s", tier_j->valuestring);
    if (cJSON_IsString(kind_j))
@@ -341,13 +338,31 @@ char *kb_client_memory_assemble_context(const char *task_hint)
 
 char *kb_client_memory_assemble_typed_context(const char *query)
 {
+   return kb_client_memory_assemble_typed_context_with_limits(query, NULL);
+}
+
+char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSON *context_limits)
+{
    if (!query || !query[0])
       return NULL;
 
    cJSON *req = cJSON_CreateObject();
    kbc_memory_add_scope_context(req);
    cJSON_AddStringToObject(req, "query", query);
-   char *json = kb_v1_action_request("memory.assemble_typed_context", req);
+   cJSON *limits = context_limits ? cJSON_Duplicate(context_limits, 1) : NULL;
+   if (context_limits && (!limits || !cJSON_AddItemToObject(req, "context_limits", limits)))
+   {
+      cJSON_Delete(limits);
+      cJSON_Delete(req);
+      return NULL;
+   }
+   return kb_v1_action_request("memory.assemble_typed_context", req);
+}
+
+char *kb_client_memory_assemble_typed_context_with_limits(const char *query,
+                                                          const cJSON *context_limits)
+{
+   char *json = kb_client_memory_assemble_typed_context_json(query, context_limits);
    if (!json)
       return NULL;
    cJSON *resp = cJSON_Parse(json);
@@ -398,7 +413,8 @@ int kb_client_memory_compact_windows(int *summary_count, int *fact_count)
 /* The native host transports the scoped shared bundle to its local Go memory
  * owner. Selection, collision precedence and final budgeting belong to Go. */
 static char *memory_recall_json(const char *task_hint, int limit_tokens, int session_start,
-                                const char *graph_code_fusion_state, int include_user)
+                                const char *graph_code_fusion_state, int include_user,
+                                const size_t *native_bytes)
 {
    cJSON *req = cJSON_CreateObject();
    kbc_memory_add_scope_context(req);
@@ -435,10 +451,15 @@ static char *memory_recall_json(const char *task_hint, int limit_tokens, int ses
       }
       cJSON_AddStringToObject(request, "operation", "compose-recall");
       cJSON_AddStringToObject(request, "shared_json", j);
+      if (native_bytes)
+         cJSON_AddNumberToObject(request, "native_context_bytes", (double)*native_bytes);
       cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
       cJSON_AddBoolToObject(request, "session_start", session_start != 0);
       cJSON *reply = NULL;
-      int rc = aimee_module_commands_dispatch_internal("memory.runtime", request, &reply);
+      /* Match the private recall host's bound. The generic command default
+       * is 125 seconds and is intended for long-running module operations. */
+      int rc =
+          aimee_module_commands_dispatch_internal_timeout("memory.runtime", request, 60000, &reply);
       cJSON_Delete(request);
       free(j);
       const char *body =
@@ -461,14 +482,21 @@ static char *memory_recall_json(const char *task_hint, int limit_tokens, int ses
 char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,
                                           int session_start)
 {
-   return memory_recall_json(task_hint, limit_tokens, session_start, "on", 0);
+   return memory_recall_json(task_hint, limit_tokens, session_start, "on", 0, NULL);
 }
 
 /* Preserve the combined bundle for existing composed-context consumers. */
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
                                       const char *graph_code_fusion_state)
 {
-   return memory_recall_json(task_hint, limit_tokens, session_start, graph_code_fusion_state, 1);
+   return memory_recall_json(task_hint, limit_tokens, session_start, graph_code_fusion_state, 1,
+                             NULL);
+}
+
+char *kb_client_memory_recall_native_json(const char *task_hint, int limit_tokens,
+                                          int session_start, size_t native_bytes)
+{
+   return memory_recall_json(task_hint, limit_tokens, session_start, "on", 1, &native_bytes);
 }
 
 char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int session_start)
@@ -502,7 +530,7 @@ int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
 
    cJSON *req = cJSON_CreateObject();
    kb_client_memory_scope_context_apply(req);
-   cJSON_AddNumberToObject(req, "id", (double)id);
+   cJSON_AddItemToObject(req, "id", jo_i64_value_exact(id));
    /* Only sent when asked. aimee-kb emits as_of/valid_at exactly when it
     * receives a non-empty as_of, so an empty one here would be indistinguishable
     * from not asking -- and this omission is what left `memory get --as-of`
@@ -513,7 +541,7 @@ int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
    if (!json)
       return -1;
 
-   cJSON *resp = cJSON_Parse(json);
+   cJSON *resp = json_wire_parse_exact_integers(json);
    free(json);
    if (!resp)
       return -1;
@@ -557,7 +585,7 @@ int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_
       return rc;
    kbc_memory_row_from_json(mem_j, out);
    cJSON_Delete(mem_j);
-   return 0;
+   return out->id > 0 ? 0 : -1;
 }
 
 int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *role,
@@ -577,7 +605,7 @@ int kb_client_evidence_emit_retrieval_event_ex(const char *turn_id, const char *
       cJSON_AddStringToObject(req, "query_fingerprint", query_fingerprint);
    cJSON *arr = cJSON_AddArrayToObject(req, "surfaced_ids");
    for (int i = 0; arr && ids && i < n_ids; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateNumber((double)ids[i]));
+      cJSON_AddItemToArray(arr, jo_i64_value_exact(ids[i]));
 
    char *json = kb_v1_action_request("evidence.emit_retrieval_event", req);
    if (!json)
@@ -625,7 +653,7 @@ int kb_client_record_retrieval_outcome(const char *surface, const char *event_id
    for (int i = 0; rows && i < n; i++)
    {
       cJSON *row = cJSON_CreateObject();
-      cJSON_AddNumberToObject(row, "id", (double)ids[i]);
+      cJSON_AddItemToObject(row, "id", jo_i64_value_exact(ids[i]));
       cJSON_AddStringToObject(row, "verdict", verdict);
       cJSON_AddItemToArray(rows, row);
    }
@@ -654,7 +682,7 @@ int kb_client_ranker_emit_event(const int64_t *doc_ids, int n, const char *query
       cJSON_AddStringToObject(req, "query_fingerprint", query_fingerprint);
    cJSON *arr = cJSON_AddArrayToObject(req, "doc_ids");
    for (int i = 0; arr && i < n; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateNumber((double)doc_ids[i]));
+      cJSON_AddItemToArray(arr, jo_i64_value_exact(doc_ids[i]));
    char *json = kb_v1_action_request("ranker.emit_event", req);
    if (!json)
       return -1;

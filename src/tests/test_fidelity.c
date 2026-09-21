@@ -2,6 +2,7 @@
  * sqlite shim — answer-level reports + per-chunk attributions, and the structural
  * guarantee that neither is a scored (demotion) artifact. */
 #include <assert.h>
+#include "cJSON.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -64,7 +65,21 @@ int main(void)
    /* per-chunk attribution: stored as a non-scored kind with the judge operator,
     * and readable by turn via the count reader */
    assert(db2_fidelity_attribution_write("t1", 42, "accepted") == 0);
-   assert(db2_fidelity_attribution_write("t1", 99, "irrelevant") == 0);
+   assert(db2_fidelity_attribution_write("t1", INT64_C(9007199254740993), "irrelevant") == 0);
+   {
+      char e[256] = "";
+      aimee_pg_stmt_t *st =
+          aimee_pg_prepare(conn,
+                           "SELECT payload FROM artifacts WHERE kind='fidelity_attribution' AND "
+                           "CAST(payload AS TEXT) LIKE '%9007199254740993%'",
+                           e, sizeof(e));
+      assert(st && aimee_pg_step(st, e, sizeof(e)) == AIMEE_PG_ROW);
+      cJSON *record = cJSON_Parse(aimee_pg_column_text(st, 0));
+      cJSON *id = cJSON_GetObjectItemCaseSensitive(record, "surfaced_id");
+      assert(cJSON_IsString(id) && !strcmp(id->valuestring, "9007199254740993"));
+      cJSON_Delete(record);
+      aimee_pg_finalize(st);
+   }
    assert(db2_fidelity_attribution_count_by_turn("t1") == 2);
    assert(db2_fidelity_attribution_count_by_turn("nope") == 0);
    {

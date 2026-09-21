@@ -63,6 +63,11 @@ int aimee_module_commands_dispatch_internal(const char *method, const cJSON *arg
  * Discovery and route copying retain their normal behavior. */
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *args,
                                                     int timeout_ms, cJSON **result);
+/* The host may attach verified request context to the same internal fixed-module
+ * route. This does not publish the command or permit plugin context claims. */
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result);
 /* Verified request context stays separate from untrusted command arguments.
  * Only fixed modules receive the v2 frame; plugin invocation remains v1. */
 int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,

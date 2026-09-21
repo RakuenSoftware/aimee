@@ -89,12 +89,16 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
 	})
 	if tokens <= 0 {
 		tokens = 1500
+		if style == "evidence_heavy" {
+			tokens = 3000
+		}
 	}
 	factLimit, activityLimit, entityLimit := 30, 5, 20
 	if style == "compact" {
 		tokens = min(tokens, 1024)
 	} else {
-		tokens = max(tokens, 3000)
+		// A learned style may broaden the candidate pool, but cannot raise
+		// the caller's allocation. Only an unspecified budget uses its default.
 		factLimit, activityLimit, entityLimit = 60, 10, 40
 	}
 	b := briefingBundle{Facts: []briefingFact{}, Activity: []briefingActivity{}, Entities: []briefingEntity{}, Style: style, BriefingStyle: style, LimitTokens: min(max(tokens, 64), 8192)}

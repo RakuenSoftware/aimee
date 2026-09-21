@@ -554,10 +554,20 @@ native_provider_http:
    /* Build context-rich system prompt */
    /* Read, not derived: the permission was resolved when the run was configured. */
    int current_code_only = !agent_tools_knowledge_write_allowed();
-   char *assembled_sys = agent_build_exec_context_for_role(
+   char *assembled_sys = agent_build_exec_context_checked(
        agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, system_prompt,
-       current_code_only);
-   const char *sys = assembled_sys ? assembled_sys : system_prompt;
+       current_code_only, out->error, sizeof(out->error));
+   if (!assembled_sys)
+   {
+      snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+      if (has_ephemeral_ssh)
+         agent_ssh_cleanup(network, ephemeral_key, session_id);
+      if (has_tunnels && network && network->tunnel_mgr)
+         agent_tunnel_stop_all(network->tunnel_mgr);
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   int context_refused = 0;
+   const char *sys = assembled_sys;
    if (!sys || !sys[0])
       sys = current_code_only
                 ? "# Instructions\n"
@@ -803,9 +813,16 @@ native_provider_http:
             do_refresh = 0;
          if (do_refresh)
          {
-            char *refreshed = agent_build_exec_context_ex(
-                agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), system_prompt,
-                current_code_only);
+            char *refreshed = agent_build_exec_context_checked(
+                agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role,
+                system_prompt, current_code_only, out->error, sizeof(out->error));
+            if (!refreshed)
+            {
+               context_refused = 1;
+               out->success = 0;
+               snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+               break;
+            }
             if (refreshed)
             {
                free(assembled_sys);
@@ -1056,10 +1073,14 @@ native_provider_http:
                                                                   : WIRE_FENCE_OPENAI_CHAT;
       wire_fence_t *wire_snapshot = NULL;
       wire_fence_bytes_t wire_body;
-      if (wire_fence_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
-                            &wire_body) != 0)
+      int wire_rc = wire_fence_select(economizer_active, wire_route, body, strlen(body),
+                                      &wire_snapshot, &wire_body);
+      if (wire_rc != 0)
       {
-         snprintf(out->error, sizeof(out->error), "economizer wire fence unavailable");
+         context_refused = wire_rc == WIRE_FENCE_CONTEXT_REFUSED;
+         if (context_refused)
+            snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+         snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
          free(body);
          break;
       }
@@ -1109,11 +1130,14 @@ native_provider_http:
             }
             wire_fence_t *fb_snapshot = NULL;
             wire_fence_bytes_t fb_wire_body;
-            if (wire_fence_select(economizer_active, wire_route, fb_body, strlen(fb_body),
-                                  &fb_snapshot, &fb_wire_body) != 0)
+            wire_rc = wire_fence_select(economizer_active, wire_route, fb_body, strlen(fb_body),
+                                        &fb_snapshot, &fb_wire_body);
+            if (wire_rc != 0)
             {
-               snprintf(out->error, sizeof(out->error),
-                        "economizer wire fence unavailable for fallback");
+               context_refused = wire_rc == WIRE_FENCE_CONTEXT_REFUSED;
+               if (context_refused)
+                  snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+               snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
                free(fb_body);
                break;
             }
@@ -2161,5 +2185,5 @@ native_provider_http:
    /* Store execution outcome as feedback for future context */
    agent_store_feedback(out, "", user_prompt);
 
-   return out->success ? 0 : -1;
+   return context_refused ? AGENT_RC_CONTEXT_REFUSED : (out->success ? 0 : -1);
 }

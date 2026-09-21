@@ -227,14 +227,21 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
    int persona_inserted = 0;
    if (persona_instructions && persona_instructions[0])
       persona_inserted = aimee_ir_prepend_persona_instructions(ir, persona_instructions);
+   free(persona_instructions);
    int persona_delivered = persona_inserted || ir_persona_delivery_already_satisfied(ir);
    if (persona_first > 0)
       session_persona_delivery_finish(sid, persona_delivered);
+   /* The host-composed persona includes the standing guidance. Tell the module
+    * only when this assembly actually inserted it; caller text is not proof. */
+   const char *const persona_resources[] = {"guidance", NULL};
    aimee_ir_module_plan_t context_plan = {.method = "memory.runtime",
                                           .operation = "gateway-plan",
                                           .phase = "context",
                                           .provided_query = pristine_query,
+                                          .provided_resources =
+                                              persona_inserted ? persona_resources : NULL,
                                           .bindings = server_ir_plan_bindings,
+                                          .refuse = server_ir_plan_refuse,
                                           .resources = server_ir_plan_resources};
    aimee_ir_module_plan_t tools_plan = context_plan;
    tools_plan.phase = "tools";
@@ -375,9 +382,10 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
    if (stream_out)
       *stream_out = ir.stream;
 
-   aimee_ir_apply_request_stages(
-       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
-
+   /* This is an intermediate decode, not provider assembly. Both buffered and
+    * streaming Responses subsequently enter aimee_ir_build_from_chat, which
+    * applies request stages after routing. Applying them here too duplicates Go
+    * recall/guidance and makes the second recall query include the persona. */
    /* build the chat shape, then split leading system messages -> instructions */
    cJSON *chat = openai_backend_build(&ir);
    aimee_request_free(&ir);
@@ -487,9 +495,13 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
    aimee_ir_apply_request_stages(
        &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
 
-   cJSON *prov = is_responses_wire ? responses_backend_build(&ir) : openai_backend_build(&ir);
+   int is_anthropic_wire = driver_name && strcmp(driver_name, "anthropic") == 0;
+   cJSON *prov = is_responses_wire   ? responses_backend_build(&ir)
+                 : is_anthropic_wire ? anthropic_backend_build(&ir)
+                                     : openai_backend_build(&ir);
    aimee_request_free(&ir);
-   filter_openai_chat_tools(prov, is_responses_wire);
+   if (!is_anthropic_wire)
+      filter_openai_chat_tools(prov, is_responses_wire);
    if (!prov)
       aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_OPENAI_CHAT);
    else

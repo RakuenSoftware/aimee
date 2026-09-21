@@ -7,17 +7,33 @@ import (
 	"github.com/JBailes/aimee/server-go/bus"
 )
 
-func commandMutationRefusal(code *int) map[string]any {
+func commandMutationRefusal(code *int, proposals ...*correctionProposal) map[string]any {
 	if code == nil {
 		return nil
 	}
 	switch *code {
+	case MutationIdempotencyConflict:
+		result := commandError("conflict", errIdempotencyConflict.Error())
+		result["reason"] = "idempotency_conflict"
+		return result
+	case MutationReplayUnavailable:
+		result := commandError("conflict", errReplayUnavailable.Error())
+		result["reason"] = "idempotent_result_unavailable"
+		return result
+	case MutationVersionConflict:
+		result := commandError("conflict", errMutationVersionConflict.Error())
+		result["reason"] = "expected_version_conflict"
+		return result
 	case MutationImmutableExperience:
 		return commandError("conflict", errImmutableExperience.Error())
 	case MutationRequiresReplacement:
 		return commandError("conflict", errRequiresRevocation.Error())
 	case MutationReviewRequired:
-		return commandError("review_required", errMutationReviewRequired.Error())
+		result := commandError("review_required", errMutationReviewRequired.Error())
+		if len(proposals) > 0 && proposals[0] != nil {
+			result["proposal"] = proposals[0]
+		}
+		return result
 	}
 	return nil
 }
@@ -32,7 +48,7 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	}
 	// Asking for user authority never grants it. Only the host's independently
 	// authenticated context may raise the fail-closed model authority.
-	if args.stringOr("authority", "") == "user" && options.commandContext != nil && options.commandContext.UserAuthority {
+	if args.stringOr("authority", "") == "user" && options.commandContext != nil && options.commandContext.Authenticated && options.commandContext.UserAuthority && options.commandContext.Principal != "" {
 		request.Authority = AuthorityUser
 	}
 	scoped := false
@@ -44,8 +60,15 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 			return invalid("memory." + verb + " requires a positive integer id")
 		}
 		request.Operation = map[string]string{"delete": "delete-as", "update": "update-as", "touch": "touch", "reject": "reject", "restore": "restore"}[verb]
-		if verb == "update" {
+		if verb == "update" || verb == "delete" {
+			var refusal map[string]any
+			request.ExpectedVersion, request.IdempotencyKey, refusal = commandCorrectionOptions(args, request.ID, options.commandContext)
+			if refusal != nil {
+				return commandResult(refusal)
+			}
 			options.publicWrite = true
+		}
+		if verb == "update" {
 			request.Content = args.stringOr("content", "")
 			if request.Content == "" {
 				return invalid("missing content")
@@ -92,10 +115,13 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
-	if refusal := commandMutationRefusal(response.Code); refusal != nil {
+	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
 		return commandResult(refusal)
 	}
 	result := map[string]any{"status": "ok"}
+	if response.MutationReceipt != nil {
+		result["mutation_receipt"] = response.MutationReceipt
+	}
 	missing := false
 	switch verb {
 	case "delete":
@@ -147,12 +173,12 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 		if verb == "update" {
 			newID = response.IDs[0]
 		}
-		return mutationMCPResult(verb, request.ID, newID, "")
+		return mutationMCPResult(verb, request.ID, newID, "", response.MutationReceipt)
 	}
 	return commandResult(result)
 }
 
-func mutationMCPResult(verb string, id, newID int64, key string) ([]byte, bus.ModuleStatus) {
+func mutationMCPResult(verb string, id, newID int64, key string, receipts ...*MemoryMutationReceipt) ([]byte, bus.ModuleStatus) {
 	var text string
 	switch verb {
 	case "store":
@@ -173,5 +199,15 @@ func mutationMCPResult(verb string, id, newID int64, key string) ([]byte, bus.Mo
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	return commandResult(map[string]any{"status": "ok", "text": text, "audit_id": fmt.Sprint(newID)})
+	result := map[string]any{"status": "ok", "text": text, "audit_id": fmt.Sprint(newID)}
+	if len(receipts) > 0 && receipts[0] != nil {
+		result["mutation_receipt"] = receipts[0]
+		if verb == "delete" && receipts[0].Outcome == "destroyed" {
+			result["text"] = fmt.Sprintf("deleted memory id=%d (destroyed)", id)
+		}
+		if receipts[0].Replayed {
+			delete(result, "audit_id")
+		}
+	}
+	return commandResult(result)
 }

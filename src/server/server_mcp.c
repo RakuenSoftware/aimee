@@ -390,14 +390,7 @@ cJSON *tool_memory_mutate(cJSON *args)
          return json_result_content(memory_delete_command(args, ""));
       if (strcmp(verb, "update") != 0 && strcmp(verb, "supersede") != 0)
          return text_content("error: this mutation requires store=kb");
-      cJSON *reply = server_invoke_module_operation("memory.runtime", "user-mcp-supersede", args,
-                                                    "user memory unavailable");
-      const char *raw = jo_str(reply, "json", NULL);
-      if (!raw)
-         return json_result_content(reply);
-      cJSON *content = text_content(raw);
-      cJSON_Delete(reply);
-      return content;
+      return json_result_content(memory_user_mcp_supersede_command(args));
    }
 
    const char *method = NULL;
@@ -416,7 +409,16 @@ cJSON *tool_memory_mutate(cJSON *args)
    if (!method)
       return text_content("error: unknown memory mutation verb");
    cJSON *request = cJSON_CreateObject();
-   const char *fields[] = {"id", "key", "content", "tier", "kind", "confidence", "reason", NULL};
+   const char *fields[] = {"id",
+                           "key",
+                           "content",
+                           "tier",
+                           "kind",
+                           "confidence",
+                           "reason",
+                           "expected_version",
+                           "idempotency_key",
+                           NULL};
    for (int i = 0; fields[i]; i++)
    {
       const cJSON *value = cJSON_GetObjectItemCaseSensitive(args, fields[i]);
@@ -456,6 +458,8 @@ cJSON *tool_memory_mutate(cJSON *args)
          kb_client_memory_audit_note(!strcmp(verb, "store") ? "memory.insert" : method, audit_id,
                                      NULL, NULL, NULL, 0.0, NULL, 1);
    }
+   if (cJSON_HasObjectItem(reply, "mutation_receipt"))
+      return json_result_content(reply);
    const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "text"));
    cJSON *content = text_content(text ? text : "error: invalid memory mutation output");
    cJSON_Delete(reply);

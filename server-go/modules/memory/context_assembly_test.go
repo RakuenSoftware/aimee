@@ -42,3 +42,75 @@ func TestContextAssemblyExplainsRenderedRows(t *testing.T) {
 		t.Fatalf("%s: %v", raw, err)
 	}
 }
+
+func TestContextAssemblyWholeRowByteAllocation(t *testing.T) {
+	rows := []Record{{ID: math.MaxInt64, Key: "first", Content: "complete 界🦊 content"}, {ID: 2, Key: "second", Content: "second whole record"}}
+	full := renderMemoryContext(rows, "界")
+	for _, limit := range []int{0, 1, len(full) - 1, len(full), len(full) + 1} {
+		got := assembleMemoryContextWithBudget(rows, "", "界", &limit)
+		if len(got.Context) > limit || got.Budget.UsedBytes != len(got.Context) || *got.Budget.BudgetBytes != limit {
+			t.Fatal(got)
+		}
+		selected := 0
+		for _, c := range got.Candidates {
+			if c.Selected {
+				selected++
+			}
+		}
+		if selected+got.Budget.RejectedForBudget != len(rows) {
+			t.Fatal(got)
+		}
+		if limit >= len(full) && (selected != 2 || got.Context != full) {
+			t.Fatal("exact fit changed", got)
+		}
+		if limit == len(full)-1 && (selected != 1 || got.Context != renderMemoryContext(rows[:1], "界") || !strings.Contains(got.ExplainText(), "BUDGET")) {
+			t.Fatal("partial row retained", got)
+		}
+		if limit < 2 && (selected != 0 || got.Context != "") {
+			t.Fatal("zero allocation bypassed", got)
+		}
+	}
+}
+
+func TestDataAssemblyBudgetValidation(t *testing.T) {
+	for _, raw := range []string{"null", "-1", "1.5", `"12"`, "1048577"} {
+		if _, err := decodeDataRequest([]byte(`{"operation":"assemble-context","assembly_budget_bytes":` + raw + `}`)); err == nil {
+			t.Fatal(raw)
+		}
+	}
+	if _, err := decodeDataRequest([]byte(`{"operation":"get","assembly_budget_bytes":0}`)); err == nil {
+		t.Fatal("unsupported budget ignored")
+	}
+	for _, raw := range []string{"0", "1024"} {
+		got, err := decodeDataRequest([]byte(`{"operation":"assemble-context","assembly_budget_bytes":` + raw + `}`))
+		if err != nil || got.assemblyBytes == nil {
+			t.Fatal(got, err)
+		}
+	}
+}
+
+func BenchmarkContextAssemblyProjection(b *testing.B) {
+	rows := make([]Record, 12)
+	for i := range rows {
+		rows[i] = Record{ID: int64(i + 1), Key: "release", Content: strings.Repeat("release deployment with complete Unicode 界🦊 context. ", 80)}
+	}
+	limit := 8192
+	b.Run("with_diagnostics", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			r := assembleMemoryContextWithBudget(rows, "release deployment", "", &limit)
+			if r.Budget.UsedBytes == 0 {
+				b.Fatal("empty")
+			}
+		}
+	})
+	b.Run("projection_only", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			text, n := renderMemoryContextBounded(rows, "", &limit)
+			if len(text) == 0 || n == 0 {
+				b.Fatal("empty")
+			}
+		}
+	})
+}

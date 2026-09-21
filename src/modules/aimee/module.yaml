@@ -70,7 +70,8 @@
     "server-go/modules/aimee/peerwire/wire.go",
     "server-go/modules/aimee/serve.go",
     "server-go/modules/aimee/db_contract.go",
-    "server-go/modules/aimee/wire.go"
+    "server-go/modules/aimee/wire.go",
+    "server-go/modules/aimee/process/process.go"
   ],
   "go_tests": [
     "server-go/modules/aimee/db_contract_test.go",
@@ -117,9 +118,45 @@
     "server-go/modules/aimee/peerwire/cwire_test.go",
     "server-go/modules/aimee/peerwire/wire_test.go",
     "server-go/modules/aimee/unavailable_test.go",
-    "server-go/modules/aimee/families/trace_pagination_test.go"
+    "server-go/modules/aimee/families/trace_pagination_test.go",
+    "server-go/modules/aimee/process/directory_test.go"
   ],
   "docs": [
     "docs/modules/aimee.md"
+  ],
+  "go_assets": [
+    "server-go/modules/aimee/families/schema_agent_work.sql",
+    "server-go/modules/aimee/families/schema_cell_limits.sql",
+    "server-go/modules/aimee/families/schema_checkpoints.sql",
+    "server-go/modules/aimee/families/schema_client_devices.sql",
+    "server-go/modules/aimee/families/schema_convergence_blocker_sets.sql",
+    "server-go/modules/aimee/families/schema_conversation.sql",
+    "server-go/modules/aimee/families/schema_delegation.sql",
+    "server-go/modules/aimee/families/schema_economizer.sql",
+    "server-go/modules/aimee/families/schema_ensemble.sql",
+    "server-go/modules/aimee/families/schema_eval_candidates.sql",
+    "server-go/modules/aimee/families/schema_git.sql",
+    "server-go/modules/aimee/families/schema_guardrail.sql",
+    "server-go/modules/aimee/families/schema_identity.sql",
+    "server-go/modules/aimee/families/schema_jti.sql",
+    "server-go/modules/aimee/families/schema_jwks.sql",
+    "server-go/modules/aimee/families/schema_length_units.sql",
+    "server-go/modules/aimee/families/schema_lifecycle.sql",
+    "server-go/modules/aimee/families/schema_nonce.sql",
+    "server-go/modules/aimee/families/schema_personal_memory_acl.sql",
+    "server-go/modules/aimee/families/schema_personal_memory_authority.sql",
+    "server-go/modules/aimee/families/schema_personal_memory_changes.sql",
+    "server-go/modules/aimee/families/schema_personal_memory_creation_retries.sql",
+    "server-go/modules/aimee/families/schema_personal_memory_proposals.sql",
+    "server-go/modules/aimee/families/schema_personal_memory_retirement_retries.sql",
+    "server-go/modules/aimee/families/schema_personal_memory_retries.sql",
+    "server-go/modules/aimee/families/schema_personal_memory_versions.sql",
+    "server-go/modules/aimee/families/schema_pki.sql",
+    "server-go/modules/aimee/families/schema_roundtable.sql",
+    "server-go/modules/aimee/families/schema_runtime.sql",
+    "server-go/modules/aimee/families/schema_sessions.sql",
+    "server-go/modules/aimee/families/schema_subject_erasure.sql",
+    "server-go/modules/aimee/families/schema_telemetry.sql",
+    "server-go/modules/aimee/families/schema_workflow.sql"
   ]
 }

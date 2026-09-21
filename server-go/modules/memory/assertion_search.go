@@ -36,30 +36,33 @@ type assertionTrace struct {
 	Rank    int     `json:"rank"`
 }
 type assertionHit struct {
-	ID              int64               `json:"assertion_id"`
-	Version         int                 `json:"version"`
-	Subject         string              `json:"subject"`
-	Relation        string              `json:"relation"`
-	Object          string              `json:"object"`
-	Kind            string              `json:"assertion_kind"`
-	Lifecycle       string              `json:"lifecycle_state"`
-	Authority       int                 `json:"authority_rank"`
-	ConfidenceClass string              `json:"confidence_class"`
-	Confidence      float64             `json:"confidence"`
-	ValidFrom       string              `json:"valid_from"`
-	ValidUntil      string              `json:"valid_until"`
-	AssertedAt      string              `json:"asserted_at"`
-	SupersededAt    string              `json:"superseded_at"`
-	Historical      bool                `json:"historical"`
-	Support         int                 `json:"support_count"`
-	Contradiction   int                 `json:"contradiction_count"`
-	Evidence        []assertionEvidence `json:"evidence"`
-	Retrieval       []assertionTrace    `json:"retrieval"`
-	Hops            int                 `json:"hop_depth"`
-	Reason          string              `json:"inclusion_reason"`
-	StableID        string              `json:"stable_id"`
-	Rendered        string              `json:"rendered"`
-	raw, fused      float64
+	ID                    int64               `json:"assertion_id"`
+	Version               int                 `json:"version"`
+	Subject               string              `json:"subject"`
+	Relation              string              `json:"relation"`
+	Object                string              `json:"object"`
+	Kind                  string              `json:"assertion_kind"`
+	Lifecycle             string              `json:"lifecycle_state"`
+	Authority             int                 `json:"authority_rank"`
+	ConfidenceClass       string              `json:"confidence_class"`
+	Confidence            float64             `json:"confidence"`
+	ValidFrom             string              `json:"valid_from"`
+	ValidUntil            string              `json:"valid_until"`
+	AssertedAt            string              `json:"asserted_at"`
+	SupersededAt          string              `json:"superseded_at"`
+	Historical            bool                `json:"historical"`
+	Support               int                 `json:"support_count"`
+	Contradiction         int                 `json:"contradiction_count"`
+	Evidence              []assertionEvidence `json:"evidence"`
+	Retrieval             []assertionTrace    `json:"retrieval"`
+	Hops                  int                 `json:"hop_depth"`
+	Reason                string              `json:"inclusion_reason"`
+	StableID              string              `json:"stable_id"`
+	Rendered              string              `json:"rendered"`
+	raw, fused            float64
+	ownerID               string
+	memoryParents         []MemoryRecordVersion
+	memoryParentsObserved bool
 }
 
 func assertionTimestamp(value string) bool {
@@ -151,10 +154,7 @@ func handleAssertionSearch(options handlerOptions, invocation bus.ModuleInvocati
 // LEFT JOIN is intentional: RLS-hidden parents must deny the derived assertion,
 // including assertions with a second, visible source. Apply exact scope before
 // the candidate cap, even when the host has include-all authority.
-const assertionVisible = `NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN memories m
- ON f.source_id='memory:'||m.id::text AND m.lifecycle_state='active' AND m.activation_suppressed=0
- WHERE f.assertion_id=e.id AND f.source_kind='memory' AND f.invalidated_at=''
- AND (m.id IS NULL OR ($5<>'' AND (m.scope_type<>$5 OR m.scope_value<>$6))))`
+var assertionVisible = currentMemoryEvidenceSQL("e", `$5='' OR (m.scope_type=$5 AND m.scope_value=$6)`, true)
 
 // Belief time and world-valid time are independent half-open intervals. Do not
 // truncate stored fractions or discard offsets when comparing either axis.
@@ -171,11 +171,20 @@ var assertionFilter = `e.edge_class='semantic' AND e.suppressed=0 AND e.lifecycl
  AND ($1='' OR (` + assertionBeliefSQL(memoryTimeSQL("$1::text")) + `))
  AND ($2<>'' OR $3 OR e.assertion_kind<>'world_fact' OR (` + memoryValiditySQL("e.") + `))
  AND ($2='' OR (` + memoryValidityAtSQL("e.", memoryTimeSQL("$2::text")) + `)) AND ` + assertionVisible
-var assertionColumns = `e.id,e.version,e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
+var assertionColumns = `e.id,e.version,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
  e.authority_rank,e.confidence_class,e.confidence,e.valid_from,e.valid_until,e.asserted_at,e.superseded_at,
  NOT ` + assertionCurrent + `,
  (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' AND f.stance='supports'),
  (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' AND f.stance='contradicts')`
+
+// Observe dependencies in the same MVCC snapshot as the assertion. The extra
+// row detects overflow instead of silently certifying a prefix of the parents.
+var assertionMemoryVersions = `COALESCE((SELECT jsonb_agg(jsonb_build_object('record_id',p.id::text,
+ 'record_revision',p.record_revision::text) ORDER BY p.id) FROM (
+ SELECT DISTINCT m.id,m.record_revision FROM fact_evidence f CROSS JOIN LATERAL (
+ SELECT m.id,m.record_revision FROM memories m WHERE m.id=` + memoryLocatorIDSQL("f.source_id") + ` LIMIT 1) m
+ WHERE f.assertion_id=e.id AND f.source_kind='memory' AND f.invalidated_at=''
+ ORDER BY m.id LIMIT ` + strconv.Itoa(maxTypedMemoryParents+1) + `) p),'[]'::jsonb)::text`
 
 func assertionParams(request DataRequest, exact Scope, query string) []any {
 	return []any{request.Assertions.BelievedAt, request.Assertions.ValidAt, request.Assertions.Historical, strings.ToLower(query), exact.Type, exact.Value}
@@ -192,7 +201,11 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 		order = ` ORDER BY v.embedding <=> $8::vector,e.id DESC LIMIT $7`
 		params = append(params, vector)
 	}
-	rows, err := s.db.Query(ctx, `SELECT `+assertionColumns+`,`+score+` AS score`+from+order, params...)
+	parentsSQL := `'[]'::text`
+	if request.TypedContext != nil {
+		parentsSQL = assertionMemoryVersions
+	}
+	rows, err := s.db.Query(ctx, `SELECT `+assertionColumns+`,`+parentsSQL+`,`+score+` AS score`+from+order, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -200,8 +213,21 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 	hits := []assertionHit{}
 	for rows.Next() {
 		h := assertionHit{Evidence: []assertionEvidence{}, Retrieval: []assertionTrace{}}
-		if err = rows.Scan(&h.ID, &h.Version, &h.Subject, &h.Relation, &h.Object, &h.Kind, &h.Lifecycle, &h.Authority, &h.ConfidenceClass, &h.Confidence, &h.ValidFrom, &h.ValidUntil, &h.AssertedAt, &h.SupersededAt, &h.Historical, &h.Support, &h.Contradiction, &h.raw); err != nil {
+		var parents string
+		if err = rows.Scan(&h.ID, &h.Version, &h.ownerID, &h.Subject, &h.Relation, &h.Object, &h.Kind, &h.Lifecycle, &h.Authority, &h.ConfidenceClass, &h.Confidence, &h.ValidFrom, &h.ValidUntil, &h.AssertedAt, &h.SupersededAt, &h.Historical, &h.Support, &h.Contradiction, &parents, &h.raw); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal([]byte(parents), &h.memoryParents); err != nil || len(h.memoryParents) > maxTypedMemoryParents {
+			return nil, errors.New("memory: assertion dependency versions exceed the bounded projection capacity or are unavailable")
+		}
+		h.memoryParentsObserved = request.TypedContext != nil
+		for i := range h.memoryParents {
+			h.memoryParents[i].SchemaVersion = 1
+			h.memoryParents[i].OwnerID = h.ownerID
+			id, err := strconv.ParseInt(h.memoryParents[i].RecordID, 10, 64)
+			if err != nil || !h.memoryParents[i].validFor(id) {
+				return nil, errors.New("memory: assertion dependency version is unavailable")
+			}
 		}
 		h.StableID = strconv.FormatInt(h.ID, 10)
 		h.Rendered = h.Subject + " " + h.Relation + " " + h.Object

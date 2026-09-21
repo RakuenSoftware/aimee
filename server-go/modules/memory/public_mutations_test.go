@@ -88,6 +88,7 @@ UPDATE memories SET epistemic_kind='policy' WHERE id=8;`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	installProposalFixture(t, ctx, tx)
 	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
 	client := clientForHandler(t, handler)
 	caller := bus.CommandContext{Authenticated: true, Principal: "user:alice", TransportIdentity: "cert:server", UserAuthority: true}

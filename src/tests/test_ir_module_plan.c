@@ -10,6 +10,7 @@
 #include "ingress_preinject.h"
 #include "cJSON.h"
 #include "config.h"
+#include "request_context.h"
 #include "platform_test_util.h"
 #include "kb_client.h"
 #include "support/module_runtime_fixture.h"
@@ -41,6 +42,7 @@ static const char *fixture_remove_tools = "[]";
 static int fixture_transport_result = 1;
 static const char *fixture_gate;
 static int fixture_audits;
+static const char *const *fixture_provided_resources;
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
                                                     int timeout_ms, cJSON **result)
 {
@@ -56,6 +58,14 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    assert(strcmp(operation, "gateway-plan") == 0);
    const char *phase = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "phase"));
    assert(phase);
+   const cJSON *provided = cJSON_GetObjectItemCaseSensitive(request, "provided_resources");
+   if (fixture_provided_resources)
+   {
+      assert(cJSON_GetArraySize(provided) == 1);
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(provided, 0)), "guidance") == 0);
+   }
+   else
+      assert(!provided);
    if (strcmp(phase, "text") != 0)
    {
       const cJSON *roles = cJSON_GetObjectItemCaseSensitive(request, "roles");
@@ -123,7 +133,9 @@ static int apply_plan(aimee_request_t *ir, const char *query, const char *phase)
                                     .operation = "gateway-plan",
                                     .phase = phase,
                                     .provided_query = query,
+                                    .provided_resources = fixture_provided_resources,
                                     .bindings = server_ir_plan_bindings,
+                                    .refuse = server_ir_plan_refuse,
                                     .resources = server_ir_plan_resources};
    return aimee_ir_stage_module_plan(ir, &config);
 }
@@ -181,8 +193,11 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    cJSON_Delete(request);
    return strdup("{\"status\":\"ok\",\"facts\":\"\"}");
 }
-char *kb_client_memory_assemble_typed_context(const char *query)
+char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSON *context_limits)
 {
+   assert(cJSON_IsObject(context_limits));
+   assert(cJSON_GetObjectItemCaseSensitive(context_limits, "schema_version")->valueint == 1);
+   assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(context_limits, "max_context_bytes")));
    (void)query;
    return NULL;
 }
@@ -654,6 +669,39 @@ static void test_invalid_plans_have_no_effects(void)
    fixture_gate = NULL;
    aimee_request_free(&ir);
 }
+static void test_required_plan_failure_is_request_scoped(void)
+{
+   const char *plans[] = {
+       "{\"status\":\"error\",\"kind\":\"protected_context_overflow\"}",
+       "{\"status\":\"ok\",\"steps\":null}",
+       "{\"status\":\"ok\",\"steps\":[]}",
+   };
+   request_context_t context = {0};
+   for (int surface = 0; surface < 2; surface++)
+      for (int scenario = 0; scenario < 4; scenario++)
+      {
+         request_context_set(&context);
+         fixture_gate = plans[scenario < 3 ? scenario : 2];
+         fixture_transport_result = scenario == 3 ? -1 : 1;
+         if (surface == 0)
+            assert(render_text("deploy matrix") == NULL);
+         else
+         {
+            aimee_request_t ir;
+            mk_user_ir(&ir, "deploy matrix");
+            assert(apply_context(&ir, NULL) == 0 && ir.n_system == 0);
+            aimee_request_free(&ir);
+         }
+         assert(request_context_get()->context_refused == (scenario != 2));
+         if (scenario != 2)
+            assert(!strcmp(request_context_get()->context_refusal_kind,
+                           scenario == 0 ? "protected_context_overflow" : "unavailable"));
+         request_context_clear();
+      }
+   fixture_gate = NULL;
+   fixture_transport_result = 1;
+   puts("required plan failures preserve owner kind; successful empty plans remain valid");
+}
 static const char *opaque_payload;
 static cJSON *payload_binding(const cJSON *args, void *context)
 {
@@ -708,8 +756,13 @@ int main(void)
    printf("test_ir_module_plan:\n");
    test_system_prompt_raw_env();
    test_gate_reply_and_audit();
+   test_required_plan_failure_is_request_scoped();
    test_disabled_noop();
    test_ir_stage_appends_system_block();
+   const char *const provided[] = {"guidance", NULL};
+   fixture_provided_resources = provided;
+   test_ir_stage_appends_system_block();
+   fixture_provided_resources = NULL;
    test_ir_stage_prefers_supplied_query();
    test_ir_stage_no_recall_midsession_noop();
    test_ir_stage_session_start_guidance_without_recall();

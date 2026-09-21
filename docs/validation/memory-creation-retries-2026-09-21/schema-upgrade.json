@@ -1,0 +1,10 @@
+{
+  "baseline_revision": "cb01e3e7d5bd2d95530d5b18dcc44a8aed1d76db",
+  "source_revision": "8441e0e2a265027c987474af652b496067a32170",
+  "from_schema": 27,
+  "to_schema": 28,
+  "reapplied": true,
+  "old_schema_sha256": "6af2108db061b1ceb4806c327450c0e61f3dd6c862590b4e6b09faa8e5830c95",
+  "new_schema_sha256": "836df07a4efa7fc6ffe104626e7918d9d96610b18d542b4012d01cb9561a54b6",
+  "result": "PASS schema 27 -> 28 -> 28 preserves exact prior correction and retirement receipts and canonical record; verifier ACL remains restricted"
+}

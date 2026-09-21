@@ -8,15 +8,15 @@ import "net/http"
 // stay upstream failures rather than being guessed into a caller fault.
 func HTTPStatusForRPCFault(kind string) int {
 	switch kind {
-	case "invalid_argument":
+	case "invalid_argument", "unsupported_mode", "unsupported_version":
 		return http.StatusBadRequest
-	case "conflict":
+	case "conflict", "review_required", "stale_context":
 		return http.StatusConflict
 	case "not_found":
 		return http.StatusNotFound
 	case "permission_denied":
 		return http.StatusForbidden
-	case "payload_too_large":
+	case "payload_too_large", "protected_context_overflow":
 		return http.StatusRequestEntityTooLarge
 	case "unavailable":
 		return http.StatusServiceUnavailable

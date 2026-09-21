@@ -7,12 +7,14 @@ import (
 
 // Scope is pinned by handleData on the transaction. Parent RLS is an additional
 // bound; currentness applies even for all-scope and privileged reads.
-const domainVisibleParents = `SELECT id,CASE
+const domainScopeRankSQL = `CASE
  WHEN current_setting('aimee.memory_scope_all',true)='1' THEN 1
  WHEN scope_type='project' AND scope_value=current_setting('aimee.memory_project',true) THEN 3
  WHEN scope_type='workspace' AND scope_value=current_setting('aimee.memory_workspace',true) THEN 2
- ELSE 1 END AS scope_rank FROM memories
- WHERE lifecycle_state='active' AND activation_suppressed=0`
+ ELSE 1 END`
+
+var domainVisibleParents = `SELECT id,` + domainScopeRankSQL + ` AS scope_rank FROM memories
+ WHERE ` + currentMemorySQL("")
 
 const episodeColumns = `id,memory_id,episode_key,episode_text,source_session,reference_time,created_at`
 
@@ -123,10 +125,11 @@ SELECT
 (SELECT COUNT(*) FROM entity_edges e WHERE (lower(source)=lower($1) OR lower(target)=lower($1))
  AND edge_class='semantic' AND lifecycle_state IN ('persistent','promoted')
  AND suppressed=0 AND superseded_at='' AND invalidated_at=''
- AND (valid_from='' OR valid_from<=pg_now_text()) AND (valid_until='' OR valid_until>pg_now_text())
- AND (NOT EXISTS(SELECT 1 FROM fact_evidence fe WHERE fe.assertion_id=e.id AND fe.source_kind='memory')
- OR EXISTS(SELECT 1 FROM fact_evidence fe JOIN visible v ON fe.source_id='memory:'||v.id::text
-  WHERE fe.assertion_id=e.id AND fe.source_kind='memory' AND fe.invalidated_at='' AND fe.stance='supports'))),
+ AND `+memoryValiditySQL("e.")+`
+ AND `+currentMemoryEvidenceSQL("e", `$2='' OR (m.scope_type=$2 AND m.scope_value=$3)`, false)+`
+ AND (NOT EXISTS(SELECT 1 FROM fact_evidence f WHERE f.assertion_id=e.id AND f.source_kind='memory')
+ OR EXISTS(SELECT 1 FROM fact_evidence f WHERE f.assertion_id=e.id AND f.source_kind='memory'
+ AND f.invalidated_at='' AND f.stance='supports'))),
 COALESCE((SELECT me.episode_key FROM memory_episodes me JOIN visible_relations mr ON mr.episode_id=me.id
  WHERE (lower(mr.src_entity)=lower($1) OR lower(mr.dst_entity)=lower($1))
  AND me.memory_id IN (SELECT id FROM visible)

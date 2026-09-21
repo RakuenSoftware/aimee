@@ -35,11 +35,19 @@ extern "C"
    int wire_fence_create(wire_fence_route_t route, const void *pristine, size_t pristine_len,
                          wire_fence_t **out);
 
+   /* A refused required context operation is distinct from a provider failure. */
+#define WIRE_FENCE_CONTEXT_REFUSED (-2)
+
    /* OFF bypasses allocation and registry work, returning the caller's pristine
     * bytes directly. PROOF_GATED creates one immutable snapshot. */
    int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pristine,
                          size_t pristine_len, wire_fence_t **snapshot,
                          wire_fence_bytes_t *selected);
+
+   /* Stable failure kind for the current thread's last selection attempt. */
+   const char *wire_fence_last_error(void);
+   int wire_fence_error_http_status(const char *error);
+   const char *wire_fence_error_type(const char *error);
 
    wire_fence_route_t econ_wire_snapshot_route(const wire_fence_t *snapshot);
    wire_fence_bytes_t wire_fence_bytes(const wire_fence_t *snapshot);

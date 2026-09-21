@@ -2,12 +2,15 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
 )
 
@@ -63,6 +66,106 @@ func (*factRecallQueryer) Exec(context.Context, string, ...any) (store.Tag, erro
 func (q *factRecallQueryer) QueryRow(context.Context, string, ...any) store.Row { return q.row }
 
 type factRecallRow struct{ values []any }
+
+type countedFactQueryer struct {
+	evalQueryer
+	queries int
+}
+
+func (q *countedFactQueryer) Query(ctx context.Context, sql string, args ...any) (store.Rows, error) {
+	q.queries++
+	return q.evalQueryer.Query(ctx, sql, args...)
+}
+func (q *countedFactQueryer) QueryRow(ctx context.Context, sql string, args ...any) store.Row {
+	q.queries++
+	return q.evalQueryer.QueryRow(ctx, sql, args...)
+}
+
+// Compare the actual versioned recall implementation across revisions. The
+// fixture and RLS role are transaction-owned and do not alter durable records.
+func BenchmarkVersionedFactRecall(b *testing.B) {
+	benchmarkVersionedFacts(b, false)
+}
+
+func BenchmarkSourceRevalidation(b *testing.B) {
+	benchmarkVersionedFacts(b, true)
+}
+
+func benchmarkVersionedFacts(b *testing.B, revalidate bool) {
+	dsn := os.Getenv("AIMEE_MEMORY_EVAL_URL")
+	if dsn == "" {
+		b.Skip("set AIMEE_MEMORY_EVAL_URL")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,
+ lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '',
+ scope_type text DEFAULT 'project',scope_value text DEFAULT 'fact-bench');
+ CREATE TEMP TABLE memory_collection_owner(id int,owner_id uuid);
+ INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-0000-0000-000000000001');
+ INSERT INTO memories(id) SELECT n FROM generate_series(1,36)n;
+ CREATE TEMP TABLE entity_edges(id bigint PRIMARY KEY,source text,relation text,target text,confidence float8 DEFAULT .9,version int DEFAULT 1,
+ edge_class text DEFAULT 'semantic',assertion_kind text DEFAULT 'world_fact',lifecycle_state text DEFAULT 'persistent',suppressed int DEFAULT 0,
+ valid_from text DEFAULT '',valid_until text DEFAULT '',asserted_at text DEFAULT '',superseded_at text DEFAULT '',invalidated_at text DEFAULT '');
+ INSERT INTO entity_edges(id,source,relation,target) SELECT n,CASE WHEN n<=4 THEN 'user' ELSE 'Entity'||((n-1)/4)::text END,'role','engineer '||n::text FROM generate_series(1,36)n;
+ CREATE INDEX ON entity_edges(source,confidence DESC,id);
+ CREATE TEMP TABLE fact_evidence(assertion_id bigint,source_kind text,source_id text,invalidated_at text DEFAULT '',stance text DEFAULT 'supports');
+ INSERT INTO fact_evidence(assertion_id,source_kind,source_id) SELECT id,'memory','memory:'||id::text FROM memories;
+ CREATE INDEX ON fact_evidence(assertion_id);
+ CREATE TEMP TABLE entity_registry(canonical_id bigint,status text);
+ CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
+ CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
+ CREATE TEMP TABLE entity_aliases(id bigint,canonical_id bigint,name text,name_norm text,suppressed int,is_preferred int);
+ CREATE ROLE aimee_fact_benchmark NOINHERIT NOBYPASSRLS;
+ GRANT SELECT ON memories,memory_collection_owner,entity_edges,fact_evidence,entity_registry,entity_aliases,memory_episodes,memory_summaries TO aimee_fact_benchmark;
+ ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
+ CREATE POLICY fact_bench_scope ON memories USING(scope_type='project' AND scope_value=current_setting('aimee.memory_project',true));
+ SELECT set_config('aimee.memory_project','fact-bench',true);
+ ANALYZE memories; ANALYZE entity_edges; ANALYZE fact_evidence;
+ SET LOCAL ROLE aimee_fact_benchmark`)
+	if err != nil {
+		b.Fatal(err)
+	}
+	q := &countedFactQueryer{evalQueryer: evalQueryer{tx}}
+	backend := &postgresDataStore{db: q, placement: PlacementKB}
+	query := "Entity1 Entity2 Entity3 Entity4 Entity5 Entity6 Entity7 Entity8"
+	var sources []typedProjectionRef
+	for range 5 {
+		text, count, p, err := backend.RecallFactProjection(ctx, "", query, false, 2048)
+		if err != nil || count != 36 || !p.valid(text) {
+			b.Fatal(count, p, err)
+		}
+		sources = p.Retained
+	}
+	request := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("a", 32), Sources: sources}
+	q.queries = 0
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if revalidate {
+			ok, err := backend.revalidateSources(ctx, request, Scope{})
+			if err != nil || !ok {
+				b.Fatal(ok, err)
+			}
+			continue
+		}
+		_, count, p, err := backend.RecallFactProjection(ctx, "", query, false, 2048)
+		if err != nil || count != 36 || len(p.Retained) != 36 {
+			b.Fatal(count, p, err)
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(q.queries)/float64(b.N), "queries/op")
+}
 
 func (r factRecallRow) Scan(dest ...any) error {
 	rows := &factRecallRows{values: [][]any{r.values}, index: 0}
@@ -246,6 +349,67 @@ func exerciseCurrentFactRecallReplay(t *testing.T, ctx context.Context, tx pgx.T
 		}
 	}
 	check()
+	blockBefore, countBefore, projection, err := backend.RecallFactProjection(ctx, "CurrentFactEntity", "", false, 8192)
+	if err != nil || countBefore != 1 || !projection.valid(blockBefore) || len(projection.Retained) != 1 || projection.Retained[0].ID != fmt.Sprint(good) || projection.Retained[0].Source.MemoryParents[0].RecordID != fmt.Sprint(local) {
+		t.Fatal("fact source projection lost selected assertion or parent", projection, err)
+	}
+	exerciseSourceRevalidationReplay(t, ctx, tx, backend, projection.Retained)
+	public, status := invokeContextCommand(t, NewHandler(nil, WithDataStore(PlacementKB, backend)), 0, bus.CommandContext{}, "facts", `{"query":"CurrentFactEntity","project":"current-fact-project","scope_context":true}`)
+	if status != bus.ModuleStatusOK || public["status"] != "ok" {
+		t.Fatal("public fact projection unavailable", public, status)
+	}
+	encoded, _ := json.Marshal(public["fact_projection"])
+	var transported factProjection
+	if json.Unmarshal(encoded, &transported) != nil || !transported.valid(public["facts"].(string)) {
+		t.Fatal("public fact projection lost binding", public)
+	}
+	found := false
+	for _, ref := range transported.Retained {
+		if ref.ID == fmt.Sprint(good) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("public fact projection omitted selected assertion", public)
+	}
+	exec(`SAVEPOINT fact_batch_parity`)
+	exec(`WITH edge AS (INSERT INTO entity_edges(source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence,confidence_class,commit_id,ontology_version)
+ VALUES('ZuluFactEntity','role','x','semantic','world_fact','persistent',.9,'A','current-fact-replay',1) RETURNING id)
+ INSERT INTO fact_evidence(assertion_id,source_kind,source_id) SELECT id,'memory','memory:'||$1::bigint::text FROM edge`, local)
+	for _, capacity := range []int{1, 12, 26, 37, 200, 8192} {
+		legacy, legacyCount, err := backend.RecallFacts(ctx, "", "CurrentFactEntity ZuluFactEntity", false, capacity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		batched, batchedCount, metadata, err := backend.RecallFactProjection(ctx, "", "CurrentFactEntity ZuluFactEntity", false, capacity)
+		if err != nil || batched != legacy || batchedCount != legacyCount || !metadata.valid(batched) {
+			t.Fatal("batched fact query changed ordered per-entity selection", capacity, legacy, batched, metadata, err)
+		}
+		if capacity == 12 && !strings.Contains(batched, "role: x") {
+			t.Fatal("oversized entity displaced smaller later entity", batched)
+		}
+	}
+	exec(`ROLLBACK TO SAVEPOINT fact_batch_parity; RELEASE SAVEPOINT fact_batch_parity`)
+	exec(`SAVEPOINT fact_source_revision`)
+	exec(`UPDATE memories SET content=content||' changed supporting text' WHERE id=$1`, local)
+	blockAfter, _, changed, err := backend.RecallFactProjection(ctx, "CurrentFactEntity", "", false, 8192)
+	if err != nil || blockAfter != blockBefore || changed.ProjectionDigest != projection.ProjectionDigest || changed.SelectionDigest == projection.SelectionDigest || changed.Retained[0].Source.Version != projection.Retained[0].Source.Version || changed.Retained[0].Source.MemoryParents[0].RecordRevision == projection.Retained[0].Source.MemoryParents[0].RecordRevision {
+		t.Fatal("same rendered fact reused stale parent binding", changed, err)
+	}
+	blockAfter, countAfter, empty, err := backend.RecallFactProjection(ctx, "CurrentFactEntity", "", false, 1)
+	if err != nil || blockAfter != "" || countAfter != 0 || !empty.valid("") || len(empty.Retained) != 0 || empty.SourceVersionState != "unavailable" {
+		t.Fatal("omitted fact claims retained sources", empty, err)
+	}
+	// A selected assertion with an incomplete parent set must refuse its block.
+	exec(`WITH parents AS (INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+ SELECT 'L2','fact','fact-overflow-'||n,'source','project','current-fact-project' FROM generate_series(1,$1)n RETURNING id)
+ INSERT INTO fact_evidence(assertion_id,source_kind,source_id) SELECT $2,'memory','memory:'||id::text FROM parents`, maxTypedMemoryParents, good)
+	blockAfter, countAfter, overflow, err := backend.RecallFactProjection(ctx, "CurrentFactEntity", "", false, 8192)
+	if err == nil || blockAfter != "" || countAfter != 0 || overflow != nil {
+		t.Fatal("partial fact provenance presented as complete", overflow, err)
+	}
+	check() // Ordinary legacy recall still uses its existing selection contract.
+	exec(`ROLLBACK TO SAVEPOINT fact_source_revision; RELEASE SAVEPOINT fact_source_revision`)
 	// Malformed world time must refuse the result, never leave a plausible
 	// partial fact block. The caller can recover after its scoped rollback.
 	exec(`SAVEPOINT current_fact_malformed`)

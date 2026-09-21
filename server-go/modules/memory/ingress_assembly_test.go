@@ -2,6 +2,8 @@ package memory
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -129,5 +131,374 @@ func TestIngressAssemblyFactsFailureAndTaskConfidence(t *testing.T) {
 	}
 	if _, err := ingressAssemble(ingressAssemblyRequest{Memories: []ingressMemoryPreview{{ID: "9223372036854775808"}}}); err == nil {
 		t.Fatal("overflow identity accepted")
+	}
+}
+
+func TestVersionedIngressByteBudget(t *testing.T) {
+	for _, limit := range []int{0, 1, 384, 512, 1024} {
+		request := ingressAssemblyRequest{Budget: 9000,
+			ContextLimits: &ContextLimits{SchemaVersion: 1, MaxContextBytes: &limit},
+			Memories:      []ingressMemoryPreview{{ID: "9007199254740993", Key: "small", Content: "do not erase 界"}},
+			Code:          []ingressCodeHit{{FilePath: strings.Repeat("large", 500)}},
+		}
+		r, err := ingressAssemble(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		envelope := r["envelope"].(string)
+		a := r["context_accounting"].(ContextAccounting)
+		if len(envelope) > limit || a.RenderedBytes != len(envelope) || a.MaxContextBytes != limit || a.CountState != "exact" || a.Unit != "utf8_bytes" || a.Boundary != "memory_envelope" || a.TokenCountState != "unavailable" {
+			t.Fatal("serialized byte accounting mismatch", limit, r)
+		}
+		retained := r["retained_memory_ids"].([]string)
+		if limit <= 384 && (envelope != "" || len(retained) != 0) {
+			t.Fatal("literal zero/small byte limit inherited a larger legacy budget", r)
+		}
+		if limit == 1024 && (len(retained) != 1 || retained[0] != "9007199254740993" || !strings.Contains(envelope, "do not erase 界")) {
+			t.Fatal("oversized first item displaced small evidence", r)
+		}
+	}
+	for _, placement := range []Placement{PlacementKB, PlacementServer} {
+		handler := NewHandler(nil, WithDataStore(placement, nil))
+		for _, tt := range []struct{ limits, kind string }{
+			{`{"schema_version":2}`, "unsupported_version"},
+			{`{"schema_version":1,"max_context_tokens":0}`, "unsupported_mode"},
+			{`{"schema_version":1,"max_request_tokens":2000}`, "unsupported_mode"},
+			{`{"schema_version":1,"reserved_response_tokens":100}`, "unsupported_mode"},
+			{`{"schema_version":1,"max_context_bytes":-1}`, "invalid_argument"},
+		} {
+			r := runHostRuntime(t, handler, `{"operation":"ingress-assemble","context_limits":`+tt.limits+`}`)
+			if r["status"] != "error" || r["kind"] != tt.kind || r["envelope"] != nil {
+				t.Fatal("unsupported or invalid budget silently accepted", tt, r)
+			}
+		}
+		frame, _ := bus.EncodeCommand("runtime", []byte(`{"operation":"ingress-assemble","context_limits":{"schema_version":1,"max_context_byte":0}}`))
+		if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+			t.Fatal("unknown limit silently ignored", status)
+		}
+	}
+}
+
+func TestIngressLimitsCannotRaiseHostAllocation(t *testing.T) {
+	for _, tc := range []struct {
+		name, limits string
+		want         int
+	}{
+		{"absent", "", 700},
+		{"inherited", `,"context_limits":{"schema_version":1}`, 700},
+		{"larger", `,"context_limits":{"schema_version":1,"max_context_bytes":4000}`, 700},
+		{"equal", `,"context_limits":{"schema_version":1,"max_context_bytes":700}`, 700},
+		{"smaller", `,"context_limits":{"schema_version":1,"max_context_bytes":500}`, 500},
+		{"zero", `,"context_limits":{"schema_version":1,"max_context_bytes":0}`, 0},
+	} {
+		for _, placement := range []Placement{PlacementKB, PlacementServer} {
+			t.Run(fmt.Sprintf("%s/%s", tc.name, placement), func(t *testing.T) {
+				handler := NewHandler(nil, WithDataStore(placement, nil))
+				// The long optional fact fits only if the request improperly raises
+				// the operator's allocation. A small memory should still survive.
+				facts, _ := json.Marshal(strings.Repeat("optional 界 ", 120))
+				args := `{"operation":"ingress-assemble","budget":700,"memories":[{"id":"42","content":"retain this"}],"facts_requested":true,"facts_response":{"status":"ok","facts":` + string(facts) + `}` + tc.limits + `}`
+				result := runHostRuntime(t, handler, args)
+				accounting := result["context_accounting"].(map[string]any)
+				envelope := result["envelope"].(string)
+				if accounting["max_context_bytes"] != float64(tc.want) || len(envelope) > tc.want || strings.Contains(envelope, "optional") {
+					t.Fatal("request escaped host allocation", result)
+				}
+				if tc.want == 700 && (!strings.Contains(envelope, "retain this") || len(result["retained_memory_ids"].([]any)) != 1) {
+					t.Fatal("small retained evidence was lost", result)
+				}
+				plan := runHostRuntime(t, handler, `{"operation":"ingress-begin","query":"repair resolver","project":"p","session":"s","active_scope":true,"preview_enabled":true,"mode":"on","budget":700`+tc.limits+`}`)
+				if tc.want == 0 {
+					if plan["active"] != false {
+						t.Fatal("zero allocated retrieval work", plan)
+					}
+				} else if plan["assembly"].(map[string]any)["budget"] != float64(tc.want) {
+					t.Fatal("planner raised host allocation", plan)
+				}
+			})
+		}
+	}
+}
+
+func TestMemoryLimitsRejectAmbiguousWireValues(t *testing.T) {
+	malformed := []string{
+		`null`, `[]`, `{"schema_version":1,"MAX_CONTEXT_BYTES":0}`,
+		`{"schema_version":1,"max_context_bytes":0,"Max_Context_Bytes":700}`,
+		`{"schema_version":1,"max_context_bytes":0,"max_context_byt\u0065s":700}`,
+		`{"schema_version":1,"max_context_bytes":1.5}`,
+		`{"schema_version":1,"max_context_bytes":"700"}`,
+		`{"schema_version":1,"max_context_bytes":9223372036854775808}`,
+	}
+	for _, field := range []string{"schema_version", "max_context_bytes", "max_context_tokens", "max_request_tokens", "reserved_response_tokens", "reserved_tool_tokens"} {
+		prefix := `{"schema_version":1,`
+		if field == "schema_version" {
+			prefix = `{`
+		}
+		malformed = append(malformed, prefix+`"`+field+`":null}`, prefix+`"`+field+`":0,"`+field+`":1}`)
+	}
+	for _, placement := range []Placement{PlacementKB, PlacementServer} {
+		handler := NewHandler(nil, WithDataStore(placement, nil))
+		operations := []string{"ingress-begin", "ingress-assemble"}
+		if placement == PlacementKB {
+			operations = append(operations, "typed-context")
+		}
+		for _, operation := range operations {
+			for _, raw := range malformed {
+				frame, err := bus.EncodeCommand("runtime", []byte(`{"operation":"`+operation+`","query":"fixture","project":"p","active_scope":true,"preview_enabled":true,"context_limits":`+raw+`}`))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, status := handler(bus.ModuleInvocation{StageID: StageCommand}, frame); status != bus.ModuleStatusInvalidRequest {
+					t.Fatalf("%s/%s accepted ambiguous limit %s: %v", placement, operation, raw, status)
+				}
+			}
+		}
+	}
+	// Direct decoding must also reject bytes that encoding/json would repair.
+	var limits ContextLimits
+	if json.Unmarshal([]byte("{\"schema_version\":1,\"\xff\":0}"), &limits) == nil {
+		t.Fatal("invalid UTF-8 accepted")
+	}
+}
+
+func TestIngressRetainedEvidenceMatchesRenderedSelection(t *testing.T) {
+	request := ingressAssemblyRequest{Budget: 1100, TaskBlock: "task\n",
+		Code:     []ingressCodeHit{{FilePath: strings.Repeat("x", 2000)}, {FilePath: "retained.go", Snippet: "actual code"}},
+		Memories: []ingressMemoryPreview{{ID: "9223372036854775807", Headline: strings.Repeat("界", 100) + "OMITTED_SENTINEL"}},
+	}
+	r, err := ingressAssemble(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := r["retained_code_indices"].([]int)
+	memories := r["retained_memories"].([]ingressRetainedMemory)
+	if len(code) != 1 || code[0] != 1 || len(memories) != 1 || memories[0].ID != "9223372036854775807" {
+		t.Fatal("selected entry offsets confused with source indices", r)
+	}
+	preview := memories[0].Preview
+	if preview != ingressSingleLine(request.Memories[0].Headline, 220) || strings.Contains(preview, "OMITTED_SENTINEL") || !strings.Contains(r["envelope"].(string), preview) {
+		t.Fatal("evidence differs from rendered preview", r)
+	}
+	request.Budget = 384
+	r, err = ingressAssemble(request)
+	if err != nil || r["envelope"] != "" || len(r["retained_memories"].([]ingressRetainedMemory)) != 0 || len(r["retained_code_indices"].([]int)) != 0 {
+		t.Fatal("empty envelope emitted evidence", r, err)
+	}
+}
+
+func typedIngressFixture(t *testing.T) *typedContextResult {
+	t.Helper()
+	cfg := typedTestOptions(t, `{}`)
+	cfg.Flags["working_context"] = true
+	r := newTypedContext(DataRequest{TypedContext: cfg})
+	r.add("observations", typedItem{id: "9223372036854775807", text: "limit 7", value: json.RawMessage(`{"revision":9223372036854775807,"text":"limit 7 界"}`)})
+	r.add("working_context", typedItem{id: "turn:1", text: "large", value: map[string]any{"text": strings.Repeat("LARGE_ROW", 90)}})
+	if err := r.finish(); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Retained) != 2 {
+		t.Fatal(r)
+	}
+	return r
+}
+
+func TestIngressTypedProjectionRepackingAndIdentity(t *testing.T) {
+	source := typedIngressFixture(t)
+	raw, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, budget := range []int{0, 384, 700, 1100, 4096} {
+		t.Run(fmt.Sprint(budget), func(t *testing.T) {
+			request := ingressAssemblyRequest{TypedContextJSON: string(raw), ContextLimits: &ContextLimits{SchemaVersion: 1, MaxContextBytes: &budget},
+				Code: []ingressCodeHit{{FilePath: "retained.go", Snippet: "small code"}}}
+			result, err := ingressAssemble(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			envelope := result["envelope"].(string)
+			typed := result["typed_projection"].(map[string]any)
+			refs := typed["retained_items"].([]typedProjectionRef)
+			evidence := result["retained_typed_refs"].([]ingressProjectionEvidenceRef)
+			if len(evidence) != len(refs) {
+				t.Fatal("unselected items received evidence", result)
+			}
+			for i, ref := range refs {
+				if evidence[i].Type != "memory_projection_item" || evidence[i].Ref != "typed:v1:"+typed["selection_digest"].(string)+":"+ref.Channel+":"+ref.ID {
+					t.Fatal("evidence does not identify the accepted projection item", result)
+				}
+			}
+			if len(envelope) > budget || typed["source_projection_digest"] != source.ProjectionDigest || typed["source_selection_digest"] != source.SelectionDigest || typed["omitted_count"] != 2-len(refs) {
+				t.Fatal(result)
+			}
+			if budget <= 384 && (len(refs) != 0 || typed["rendered_bytes"] != 0 || envelope != "") {
+				t.Fatal(result)
+			}
+			if budget == 700 || budget == 1100 {
+				if len(refs) != 1 || refs[0].ID != "9223372036854775807" || !strings.Contains(envelope, `"revision":9223372036854775807`) || strings.Contains(envelope, "LARGE_ROW") || !strings.Contains(envelope, "small code") {
+					t.Fatal("outer repacking lost small evidence or numeric identity", result)
+				}
+			}
+			if budget == 4096 && (len(refs) != 2 || typed["selection_digest"] != source.SelectionDigest || !strings.Contains(envelope, source.Rendered)) {
+				t.Fatal(result)
+			}
+			accounting := typed["context_accounting"].(ContextAccounting)
+			if accounting.Digest != typed["projection_digest"] || accounting.RenderedBytes != typed["rendered_bytes"] || typed["selection_digest"] != typedSelectionDigest(accounting.Digest, refs) {
+				t.Fatal("final identity does not bind final selection", result)
+			}
+			// Exercise JSON transport on both supported host placements too.
+			args := map[string]any{"operation": "ingress-assemble", "typed_context_json": string(raw), "context_limits": request.ContextLimits, "code": request.Code}
+			wire, _ := json.Marshal(args)
+			for _, placement := range []Placement{PlacementKB, PlacementServer} {
+				got := runHostRuntime(t, NewHandler(nil, WithDataStore(placement, nil)), string(wire))
+				if got["envelope"] != envelope {
+					t.Fatal("host runtime changed projection", got)
+				}
+			}
+		})
+	}
+}
+
+func TestIngressFactSourceProjection(t *testing.T) {
+	const id = "9007199254743001"
+	const block = "- role: engineer 界\n"
+	makeSource := func() *factProjection {
+		version := MemoryRecordVersion{SchemaVersion: 1, OwnerID: "00000000-0000-0000-0000-000000000001", RecordID: id, RecordRevision: "7"}
+		return newFactProjection(block, []typedProjectionRef{{Channel: "facts", ID: id, Source: &typedSourceVersion{Kind: "semantic_assertion", Version: version, MemoryParentState: "observed"}}})
+	}
+	assemble := func(text string, source *factProjection, budget int) (map[string]any, error) {
+		raw, err := json.Marshal(map[string]any{"status": "ok", "facts": text, "fact_projection": source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ingressAssemble(ingressAssemblyRequest{Budget: budget, FactsRequested: true, FactsResponse: raw,
+			ContextLimits: &ContextLimits{SchemaVersion: 1, MaxContextBytes: &budget}})
+	}
+	source := makeSource()
+	got, err := assemble(block, source, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection := got["facts_projection"].(map[string]any)
+	refs := got["retained_fact_refs"].([]ingressProjectionEvidenceRef)
+	if projection["selection_digest"] != source.SelectionDigest || len(refs) != 1 || refs[0].Ref != "facts:v1:"+source.SelectionDigest+":semantic_assertion:"+id || !strings.Contains(got["envelope"].(string), "## Known facts\n"+block) {
+		t.Fatal(got)
+	}
+	got, err = assemble(block, source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection = got["facts_projection"].(map[string]any)
+	if len(got["retained_fact_refs"].([]ingressProjectionEvidenceRef)) != 0 || len(projection["retained_items"].([]typedProjectionRef)) != 0 || projection["source_version_state"] != "unavailable" || projection["source_selection_digest"] != source.SelectionDigest || projection["omitted_count"] != 1 || got["envelope"] != "" {
+		t.Fatal(got)
+	}
+	for _, change := range []string{"text", "revision", "parent", "channel", "id", "duplicate", "null", "count"} {
+		p, text := makeSource(), block
+		switch change {
+		case "text":
+			text = strings.Replace(block, "engineer", "operator", 1)
+		case "revision":
+			p.Retained[0].Source.Version.RecordRevision = "8"
+		case "parent":
+			p.Retained[0].Source.MemoryParentState = "unavailable"
+		case "channel":
+			p.Retained[0].Channel = "current_assertions"
+		case "id":
+			p.Retained[0].ID = "1"
+		case "duplicate":
+			p.Retained = append(p.Retained, p.Retained[0])
+			p.SelectionDigest = typedSelectionDigest(p.ProjectionDigest, p.Retained)
+		case "null":
+			p = nil
+		case "count":
+			p.RenderedBytes++
+		}
+		result, err := assemble(text, p, 4096)
+		var refusal *contextBudgetError
+		if result != nil || !errors.As(err, &refusal) || refusal.kind != "invalid_projection" {
+			t.Fatal("invalid fact binding accepted", change, result, err)
+		}
+	}
+}
+
+func TestIngressRejectsMismatchedTypedProjection(t *testing.T) {
+	for _, mutation := range []string{"rendered", "selection", "digest", "version", "channels", "accounting", "rows", "references"} {
+		t.Run(mutation, func(t *testing.T) {
+			source := typedIngressFixture(t)
+			switch mutation {
+			case "rendered":
+				source.Rendered = strings.Replace(source.Rendered, "limit 7", "limit 9", 1)
+			case "selection":
+				source.Retained[0].ID = "other"
+			case "digest":
+				source.ProjectionDigest = "sha256:wrong"
+			case "version":
+				source.ProjectionVersion = 2
+			case "channels":
+				source.Channels["invented"] = &typedChannel{}
+			case "accounting":
+				source.Accounting.RenderedBytes++
+			case "rows":
+				source.Channels["observations"].Items[0] = json.RawMessage(`{"revision":9223372036854775806,"text":"limit 7 界"}`)
+			case "references":
+				source.Retained = source.Retained[:1]
+			}
+			raw, _ := json.Marshal(source)
+			result, err := ingressAssemble(ingressAssemblyRequest{Budget: 4096, TypedContextJSON: string(raw)})
+			var refusal *contextBudgetError
+			if result != nil || !errors.As(err, &refusal) || refusal.kind != "invalid_projection" {
+				t.Fatal(result, err)
+			}
+		})
+	}
+}
+
+func TestIngressTypedProjectionEmptyDegradedAndUnavailable(t *testing.T) {
+	source := typedIngressFixture(t)
+	source.degraded = true
+	if err := source.fitProjectionBytes(0); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(source)
+	code := []ingressCodeHit{{FilePath: "available.go"}}
+	result, err := ingressAssemble(ingressAssemblyRequest{Budget: 1000, Code: code, TypedContextJSON: string(raw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	typed := result["typed_projection"].(map[string]any)
+	if len(typed["retained_items"].([]typedProjectionRef)) != 0 || typed["context_sufficiency"] != "unknown" || strings.Contains(result["envelope"].(string), "temporal learning") || result["omitted_count"] != 0 {
+		t.Fatal(result)
+	}
+	for _, failure := range []string{
+		"", `{"status":"error","kind":"unavailable"}`,
+		`{"status":"unavailable","dependency":"kb","retryable":true}`,
+		`{"status":"stale","dependency":"kb"}`, `{"status":"unauthorized"}`,
+		`{"status":"empty"}`, `{"status":"abstained"}`,
+	} {
+		result, err = ingressAssemble(ingressAssemblyRequest{Budget: 1000, Code: code, TypedRequested: true, TypedContextJSON: failure})
+		if err != nil || result["typed_unavailable"] != true || !strings.Contains(result["envelope"].(string), "available.go") || result["typed_projection"] != nil {
+			t.Fatal(result, err)
+		}
+	}
+}
+
+func TestIngressRefusesMalformedTypedOutcome(t *testing.T) {
+	for _, raw := range []string{`{`, `{}`, `{"status":"invented"}`, `{"status":"ok"}`} {
+		result, err := ingressAssemble(ingressAssemblyRequest{Budget: 1000, TypedRequested: true, TypedContextJSON: raw})
+		var refusal *contextBudgetError
+		if result != nil || !errors.As(err, &refusal) || refusal.kind != "invalid_projection" {
+			t.Fatal("invalid projection was mistaken for optional unavailability", raw, result, err)
+		}
+	}
+}
+
+func TestIngressRejectsAmbiguousTypedInputs(t *testing.T) {
+	source := typedIngressFixture(t)
+	raw, _ := json.Marshal(source)
+	for _, value := range []string{string(raw), `{"status":"error"}`} {
+		result, err := ingressAssemble(ingressAssemblyRequest{TypedContextJSON: value, Temporal: "unbound legacy text"})
+		if err == nil || result != nil {
+			t.Fatal("conflicting typed inputs accepted", result, err)
+		}
 	}
 }

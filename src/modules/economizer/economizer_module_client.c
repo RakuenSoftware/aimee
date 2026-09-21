@@ -9,6 +9,7 @@
 #include "module_json_call.h"
 
 #include <limits.h>
+#include <openssl/sha.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -511,4 +512,59 @@ cJSON *econ_module_stats_snapshot(void)
    return aimee_module_json_call(AIMEE_ECONOMIZER_EVENT_STATS, AIMEE_ECONOMIZER_STAGE_STATS,
                                  payload, ECON_MODULE_CALL_MAX_BODY, ECON_MODULE_CALL_TIMEOUT_MS,
                                  NULL);
+}
+
+/* The result commitment binds the complete metadata request, including limits.
+ * A stale reply for identical body bytes but a different cap cannot be reused. */
+econ_request_budget_result_t econ_module_request_budget(unsigned route, const void *body,
+                                                        size_t body_len, const char *limits)
+{
+   return econ_module_request_budget_with_policy(route, body, body_len, limits, NULL);
+}
+
+econ_request_budget_result_t
+econ_module_request_budget_with_policy(unsigned route, const void *body, size_t body_len,
+                                       const char *limits, const char *policy)
+{
+   size_t limits_len = limits ? strnlen(limits, 1025) : 0;
+   size_t policy_len = policy ? strnlen(policy, 1025) : 0;
+   if (policy && (!policy_len || policy_len > 1024))
+      return ECON_REQUEST_BUDGET_POLICY_INVALID;
+   if (route < 1 || route > 3 || (!policy && !limits_len) || limits_len > 1024 ||
+       (!body && body_len))
+      return ECON_REQUEST_BUDGET_INVALID;
+   size_t header = policy ? 56 : 52;
+   uint8_t request[56 + 2 * 1024] = {0};
+   put_u32(request, 0x54474442u);
+   put_u16(request + 4, policy ? 2 : ECON_AUX_WIRE_VERSION);
+   put_u16(request + 6, (uint16_t)route);
+   for (unsigned i = 0; i < 8; i++)
+      request[8 + i] = (uint8_t)((uint64_t)body_len >> (i * 8));
+   if (!SHA256(body ? body : "", body_len, request + 16))
+      return ECON_REQUEST_BUDGET_UNAVAILABLE;
+   put_u32(request + 48, (uint32_t)limits_len);
+   if (policy)
+      put_u32(request + 52, (uint32_t)policy_len);
+   if (limits_len)
+      memcpy(request + header, limits, limits_len);
+   if (policy_len)
+      memcpy(request + header + limits_len, policy, policy_len);
+   uint32_t request_len = (uint32_t)(header + limits_len + policy_len);
+   uint8_t commitment[SHA256_DIGEST_LENGTH];
+   if (!SHA256(request, request_len, commitment))
+      return ECON_REQUEST_BUDGET_UNAVAILABLE;
+   uint32_t response_len = 0;
+   uint8_t *response =
+       call_bytes(AIMEE_ECONOMIZER_EVENT_REQUEST_BUDGET, AIMEE_ECONOMIZER_STAGE_REQUEST_BUDGET,
+                  request, request_len, 44, &response_len);
+   uint16_t result = ECON_REQUEST_BUDGET_UNAVAILABLE;
+   const uint8_t *payload = NULL;
+   uint32_t payload_len = 0;
+   if (decode_aux(response, response_len, 0x54474442u, &result, &payload, &payload_len) != 0 ||
+       payload_len != sizeof(commitment) || memcmp(payload, commitment, sizeof(commitment)) ||
+       (result > ECON_REQUEST_BUDGET_TOKENS_UNAVAILABLE &&
+        result != ECON_REQUEST_BUDGET_POLICY_INVALID))
+      result = ECON_REQUEST_BUDGET_UNAVAILABLE;
+   free(response);
+   return (econ_request_budget_result_t)result;
 }

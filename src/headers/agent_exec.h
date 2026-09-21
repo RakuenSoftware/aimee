@@ -120,12 +120,17 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
  * provider-health fault. */
 #define AGENT_RC_AT_LIMIT (-2)
 
+/* Context assembly refused before the next provider request. Terminal for
+ * routing/fallback and not a provider-health failure. */
+#define AGENT_RC_CONTEXT_REFUSED (-3)
+
 /* THE single per-agent turn executor: the one place that enforces the per-agent
  * max_parallel concurrency cap and records provider-health for a model turn.
  * Acquires the agent's slot, runs the turn (use_tools -> the tool loop
  * agent_execute_with_tools_for_role, else a plain completion agent_execute),
  * releases, and records success/failure health. Returns 0 on success,
- * AGENT_RC_AT_LIMIT if the agent was at its ceiling (NO health recorded), or -1 on
+ * AGENT_RC_AT_LIMIT at its ceiling or AGENT_RC_CONTEXT_REFUSED on a context
+ * refusal (neither records a provider health failure), or -1 on
  * a run failure (health recorded). Agent RESOLUTION (by name/role/route),
  * retry/fallback loops, write_capable, and outcome/feedback/cache logging stay in
  * the callers — only the model turn itself goes through here.
@@ -213,6 +218,13 @@ const char *agent_exec_instructions(task_type_t task_type);
 char *agent_build_exec_context_for_role(const agent_t *agent, const agent_network_t *network,
                                         const char *role, const char *custom_prompt,
                                         int skip_kb_context);
+
+/* Returns NULL on refusal and copies the owner diagnostic into error.
+ * Callers must stop dispatch; neither the original prompt nor stale context
+ * is an admissible replacement. The caller owns the returned text. */
+char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
+                                       const char *role, const char *custom_prompt,
+                                       int skip_kb_context, char *error, size_t error_len);
 
 char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
                                   const char *custom_prompt, int skip_kb_context);

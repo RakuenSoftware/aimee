@@ -105,6 +105,22 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if json.Unmarshal(body, &args) != nil || args == nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if _, exists := args["read_policy"]; exists && verb != "get" && verb != "runtime" {
+		return commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get"))
+	}
+	if _, exists := args["idempotency_key"]; exists && !((options.placement == PlacementKB && (verb == "store" || verb == "supersede" || verb == "update" || verb == "delete")) || (options.placement == PlacementServer && (verb == "store" || verb == "supersede" || verb == "delete" || verb == "runtime"))) {
+		return commandResult(commandError("unsupported_mode", "idempotency_key is supported for store, conditional corrections and deletion"))
+	}
+	versionedMutation := (options.placement == PlacementKB && (verb == "supersede" || verb == "update" || verb == "delete" || verb == "review_correction")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "delete" || verb == "runtime"))
+	if _, exists := args["expected_version"]; exists && !versionedMutation {
+		return commandResult(commandError("unsupported_mode", "expected_version is supported for supersede, shared update, deletion and correction review"))
+	}
+	if _, exists := args["include_version"]; exists && verb != "get" && !(verb == "runtime" && options.placement == PlacementServer) {
+		return commandResult(commandError("unsupported_mode", "include_version is supported only for exact-ID get"))
+	}
+	if _, exists := args["at_version"]; exists && (options.placement != PlacementServer || (verb != "get" && verb != "runtime")) {
+		return commandResult(commandError("unsupported_mode", "at_version is supported only for personal exact-ID get"))
+	}
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
@@ -159,13 +175,42 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		return invalid("local memory commands require store=user")
 	}
 	request := DataRequest{Operation: verb, Scope: Scope{Type: ScopeUser}}
+	if caller := options.commandContext; caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+		request.Authority = AuthorityUser
+	}
+
+	if _, exists := args["idempotency_key"]; exists && verb != "store" && verb != "supersede" && verb != "delete" {
+		return commandResult(commandError("unsupported_mode", "private idempotency keys require store, conditional supersede or delete"))
+	}
 	confidence := 1.0
 	switch verb {
 	case "get", "delete":
 		var ok bool
+		if verb == "get" {
+			request.ReadPolicy, ok = commandReadPolicy(args)
+			if !ok {
+				return invalid("read_policy must be a versioned object with recognized fields")
+			}
+		}
 		request.ID, ok = args.decimalID("id")
 		if !ok {
 			return invalid("memory." + verb + " requires a positive integer id")
+		}
+		if verb == "delete" {
+			var refusal map[string]any
+			request.ExpectedVersion, request.IdempotencyKey, refusal = commandCorrectionOptions(args, request.ID, options.commandContext)
+			if refusal != nil {
+				return commandResult(refusal)
+			}
+		}
+		if verb == "get" {
+			if raw, exists := args["include_version"]; exists && (string(raw) == "null" || json.Unmarshal(raw, &request.IncludeVersion) != nil) {
+				return invalid("include_version must be boolean")
+			}
+			request.AtVersion, ok = commandRecordVersion(args, "at_version", request.ID)
+			if !ok || (request.AtVersion != nil && request.ReadPolicy != nil) {
+				return invalid("at_version requires a valid record version and cannot be combined with read_policy")
+			}
 		}
 		if _, exists := args["as_of"]; verb == "get" && exists {
 			return invalid("historical reads require store=kb")
@@ -190,11 +235,21 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 			}
 			request.Key, request.Content = args.stringOr("key", ""), args.stringOr("content", "")
 			request.Tier, request.Kind = args.stringOr("tier", "L2"), args.stringOr("kind", "fact")
+			var refusal map[string]any
+			request.IdempotencyKey, refusal = commandCreationKey(args, options.commandContext)
+			if refusal != nil {
+				return commandResult(refusal)
+			}
 		} else {
 			var ok bool
 			request.ID, ok = args.decimalID("old_id")
 			if !ok {
 				return invalid("memory.supersede requires a positive integer old_id")
+			}
+			var refusal map[string]any
+			request.ExpectedVersion, request.IdempotencyKey, refusal = commandCorrectionOptions(args, request.ID, options.commandContext)
+			if refusal != nil {
+				return commandResult(refusal)
 			}
 			request.Content = args.stringOr("new_content", "")
 			if request.Content == "" {
@@ -205,6 +260,7 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 				if string(raw) == "null" || json.Unmarshal(raw, &session) != nil {
 					return invalid("memory.supersede session_id must be a string")
 				}
+				request.SessionID = session
 			}
 		}
 	case "list":
@@ -244,6 +300,12 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
+	if response.Read != nil && response.Read.ErrorCode != "" {
+		return commandResult(commandError(response.Read.ErrorCode, response.Read.Message))
+	}
+	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
+		return commandResult(refusal)
+	}
 	result := map[string]any{"status": "ok", "store": "user"}
 	switch verb {
 	case "store", "get", "supersede":
@@ -257,24 +319,38 @@ func handleUserCommand(options handlerOptions, invocation bus.ModuleInvocation, 
 		switch verb {
 		case "store":
 			result["id"] = record.ID
+			if response.MutationReceipt != nil {
+				result["mutation_receipt"] = response.MutationReceipt
+			}
 		case "get":
 			result["memory"] = record
+			if response.Read != nil {
+				result["read"] = response.Read
+			}
 		case "supersede":
 			if args.stringOr("view", "") == "mcp" {
-				return commandResult(map[string]any{"status": "ok", "store": "user", "records": response.Records})
+				result["records"] = response.Records
+				if response.MutationReceipt != nil {
+					result["mutation_receipt"] = response.MutationReceipt
+				}
+				return commandResult(result)
 			}
 			// Supersede's established envelope contains the record at the root.
 			return commandResult(struct {
 				Record
-				Status string `json:"status"`
-				Store  string `json:"store"`
-			}{record, "ok", "user"})
+				Status          string                 `json:"status"`
+				Store           string                 `json:"store"`
+				MutationReceipt *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
+			}{record, "ok", "user", response.MutationReceipt})
 		}
 	case "delete":
 		if !response.Deleted {
 			return commandResult(commandError("not_found", "no such user memory, or the memory module refused"))
 		}
 		result["id"], result["deleted"], result["destroyed"] = request.ID, true, false
+		if response.MutationReceipt != nil {
+			result["mutation_receipt"] = response.MutationReceipt
+		}
 	case "list", "search":
 		if response.Records == nil {
 			return commandResult(commandError("unavailable", "user memory module unavailable"))
@@ -337,6 +413,12 @@ func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation
 	var response DataResponse
 	if json.Unmarshal(data, &response) != nil || len(response.Payload) == 0 {
 		return nil, bus.ModuleStatusInternal
+	}
+	var outcome struct {
+		Status string `json:"status"`
+	}
+	if json.Unmarshal(response.Payload, &outcome) == nil && outcome.Status == "error" {
+		return commandResult(response.Payload)
 	}
 	result := map[string]any{"status": "ok", "recall": response.Payload}
 	if options.placement == PlacementServer {

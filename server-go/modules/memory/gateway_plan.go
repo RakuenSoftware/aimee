@@ -43,6 +43,21 @@ func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, bus.Mo
 	if phase != "preview" && phase != "context" && phase != "tools" && phase != "text" {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	// These are host assembly facts, not labels parsed from user/model text.
+	// In particular a host-composed persona already contains standing guidance.
+	provided := []string{}
+	if raw, exists := args["provided_resources"]; exists {
+		if json.Unmarshal(raw, &provided) != nil || provided == nil || len(provided) > 64 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+	}
+	guidanceProvided := false
+	for _, name := range provided {
+		if name == "" || len(name) > 64 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		guidanceProvided = guidanceProvided || name == "guidance"
+	}
 	roles, tools := []string{}, []string{}
 	if phase != "text" {
 		if json.Unmarshal(args["roles"], &roles) != nil || roles == nil || json.Unmarshal(args["tools"], &tools) != nil || tools == nil {
@@ -66,7 +81,8 @@ func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, bus.Mo
 		}
 	}
 	steps := []gatewayStep{}
-	result := map[string]any{"status": "ok", "append_guidance": start, "remove_tools": remove}
+	appendGuidance := start && !guidanceProvided
+	result := map[string]any{"status": "ok", "append_guidance": appendGuidance, "remove_tools": remove}
 	if phase == "tools" {
 		if len(remove) > 0 {
 			steps = append(steps, gatewayStep{Kind: "remove_tools", Indices: remove})
@@ -104,7 +120,7 @@ func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, bus.Mo
 			}
 		}
 		if phase == "context" {
-			if start {
+			if appendGuidance {
 				steps = append(steps, gatewayStep{Kind: "append_context", Resource: "guidance", Context: map[string]any{"origin": "platform", "authority": "task_instruction", "trust": "verified", "sensitivity": "internal", "model_visible": true}})
 			}
 			steps = append(steps,

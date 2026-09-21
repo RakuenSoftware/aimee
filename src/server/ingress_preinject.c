@@ -81,7 +81,7 @@ static __thread char g_session_id[64] = "";
 
 /* Host transport only. The supplied request is consumed; all ingress policy
  * and state live in the shared Go owner. */
-static cJSON *ingress_command(cJSON *request)
+static cJSON *ingress_command(cJSON *request, int required_context)
 {
    cJSON *response = NULL;
    int rc =
@@ -90,10 +90,71 @@ static cJSON *ingress_command(cJSON *request)
    const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
    if (rc != 1 || !status || strcmp(status, "ok") != 0)
    {
+      if (required_context)
+      {
+         const char *kind =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "kind"));
+         (void)request_context_refuse_assembly(kind);
+      }
       cJSON_Delete(response);
       return NULL;
    }
    return response;
+}
+
+static void ingress_release_context(cJSON *request, const request_context_t *context)
+{
+   cJSON_AddStringToObject(request, "source_release_ticket", context->memory_source_release);
+   cJSON_AddStringToObject(request, "request_id", context->request_id);
+   cJSON_AddStringToObject(request, "principal", context->principal);
+   cJSON_AddStringToObject(request, "caller_subject", context->caller_subject);
+}
+
+/* The host carries opaque owner requests and responses. Source policy, version
+ * comparison, scope selection and response validation all remain in Go. */
+int ingress_preinject_revalidate_sources(void)
+{
+   const request_context_t *context = request_context_get();
+   if (!context || !context->memory_source_release[0])
+      return 0;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "source-release-plan");
+   ingress_release_context(request, context);
+   cJSON *plan = ingress_command(request, 1);
+   const cJSON *owner_request = cJSON_GetObjectItemCaseSensitive(plan, "request");
+   if (!cJSON_IsObject(owner_request))
+   {
+      (void)request_context_refuse_assembly("unavailable");
+      cJSON_Delete(plan);
+      return -1;
+   }
+   char *raw = kb_v1_action_request("memory.revalidate_sources", cJSON_Duplicate(owner_request, 1));
+   cJSON_Delete(plan);
+   cJSON *owner_response = raw ? cJSON_Parse(raw) : NULL;
+   free(raw);
+   request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "source-release-result");
+   ingress_release_context(request, context);
+   cJSON_AddItemToObject(request, "owner_response",
+                         owner_response ? owner_response : cJSON_CreateNull());
+   cJSON *response = ingress_command(request, 1);
+   int admitted = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "admitted"));
+   cJSON_Delete(response);
+   if (!admitted)
+      (void)request_context_refuse_assembly("unavailable");
+   return admitted ? 0 : -1;
+}
+
+void ingress_preinject_finish_sources(void)
+{
+   const request_context_t *context = request_context_get();
+   if (!context || !context->memory_source_release[0])
+      return;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "source-release-finish");
+   ingress_release_context(request, context);
+   cJSON_Delete(ingress_command(request, 0));
+   (void)request_context_set_source_release("");
 }
 
 void ingress_preinject_set_session_id(const char *session_id)
@@ -249,6 +310,40 @@ char *ingress_preinject_last_assistant_from_messages(const cJSON *messages)
    return out;
 }
 
+/* Forward only owner-selected references after the assembled envelope has
+ * passed the host integrity gate. Reference interpretation stays in Go. */
+static void ingress_emit_projection_refs(const cJSON *rows, const char *turn_id,
+                                         const char *fingerprint)
+{
+   int count = cJSON_GetArraySize(rows);
+   if (count <= 0)
+      return;
+   const char **types = calloc((size_t)count, sizeof(*types));
+   const char **refs = calloc((size_t)count, sizeof(*refs));
+   if (!types || !refs)
+   {
+      free(types);
+      free(refs);
+      return;
+   }
+   int retained = 0;
+   const cJSON *row;
+   cJSON_ArrayForEach(row, rows)
+   {
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "type"));
+      const char *ref = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "ref"));
+      if (!type || !type[0] || !ref || !ref[0])
+         continue;
+      types[retained] = type;
+      refs[retained++] = ref;
+   }
+   if (retained > 0)
+      (void)kb_client_evidence_merge_retrieval_event(turn_id, "Recall", fingerprint, types, refs,
+                                                     NULL, retained);
+   free(types);
+   free(refs);
+}
+
 char *ingress_preinject_build(const char *query, int request_disabled)
 {
    char active_workspace[512] = "";
@@ -271,15 +366,21 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    cJSON_AddBoolToObject(request, "compress", config_ingress_compress_enabled());
    cJSON_AddBoolToObject(request, "compress_disabled", rctx && rctx->compress_disabled);
    cJSON_AddNumberToObject(request, "compress_min", config_ingress_compress_min_chars());
-   cJSON *plan = ingress_command(request);
+   cJSON *plan = ingress_command(request, 1);
    if (!plan)
    {
-      LOG_WARN("memory", "Go ingress plan unavailable; omitting pre-injection envelope");
+      LOG_WARN("memory", "Go ingress plan failed");
       return NULL;
    }
    const char *warning = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "warning"));
    if (warning)
       LOG_WARN("ingress-context", "%s", warning);
+   if (!cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(plan, "active")))
+   {
+      (void)request_context_refuse_assembly("unavailable");
+      cJSON_Delete(plan);
+      return NULL;
+   }
    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "active")))
    {
       cJSON_Delete(plan);
@@ -289,6 +390,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    const char *planned_mode = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "mode"));
    if (!cJSON_IsObject(assembly_plan) || !planned_mode)
    {
+      (void)request_context_refuse_assembly("unavailable");
       cJSON_Delete(plan);
       return NULL;
    }
@@ -316,7 +418,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       cJSON *packet = raw ? cJSON_Parse(raw) : NULL;
       free(raw);
       cJSON_AddItemToObject(task, "packet", packet ? packet : cJSON_CreateNull());
-      cJSON *result = ingress_command(task);
+      cJSON *result = ingress_command(task, 0);
       const char *block = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "block"));
       const cJSON *confidence = cJSON_GetObjectItemCaseSensitive(result, "confidence");
       if (block && cJSON_IsNumber(confidence))
@@ -368,7 +470,12 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       const cJSON *rows = cJSON_GetObjectItemCaseSensitive(reply, "memories");
       if (cJSON_IsString(status) && !strcmp(status->valuestring, "ok") && cJSON_IsArray(rows) &&
           cJSON_GetArraySize(rows) <= 5)
+      {
          memories = cJSON_DetachItemFromObjectCaseSensitive(reply, "memories");
+         cJSON *projection = cJSON_DetachItemFromObjectCaseSensitive(reply, "memory_projection");
+         if (projection)
+            cJSON_AddItemToObject(assembly, "memory_projection", projection);
+      }
       cJSON_Delete(reply);
    }
    int mem_n = memories ? cJSON_GetArraySize(memories) : 0;
@@ -383,7 +490,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       cJSON_AddStringToObject(outcome, "project", active_project);
       cJSON_AddNumberToObject(outcome, "count", mem_n);
       cJSON_AddBoolToObject(outcome, "unavailable", memory_unavailable);
-      cJSON *result = ingress_command(outcome);
+      cJSON *result = ingress_command(outcome, 0);
       const char *message =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "warning"));
       if (message)
@@ -405,20 +512,89 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       free(raw);
       cJSON_AddItemToObject(assembly, "facts_response", response ? response : cJSON_CreateNull());
    }
-   char *temporal = temporal_on ? kb_client_memory_assemble_typed_context(query) : NULL;
-   cJSON_AddStringToObject(assembly, "temporal", temporal ? temporal : "");
+   char *temporal = temporal_on
+                        ? kb_client_memory_assemble_typed_context_json(
+                              query, cJSON_GetObjectItemCaseSensitive(assembly, "context_limits"))
+                        : NULL;
+   cJSON_AddStringToObject(assembly, "typed_context_json", temporal ? temporal : "");
    free(temporal);
 
-   /* Auditable-correctness P1: emit a single-writer, turn-keyed retrieval_event
-    * recording the memory rows surfaced into this turn's context. Default-off
-    * (kb_evidence_emit_enabled). Observation-only — the envelope and the answer
-    * are byte-identical whether or not this fires; the only added work is one
-    * synchronous KB write. The id is the one the HTTP layer minted (and surfaced
-    * to the client as X-Aimee-Retrieval-Event); if none was set (e.g. a direct
-    * build call) we mint one here so the event is still reconstructible. This is
-    * the dedicated single-writer foundation; P1.5 folds the emit into the
-    * retrieval handlers with the idempotent two-writer upsert. */
-   if (config_kb_evidence_emit_enabled() && (mem_n > 0 || n > 0))
+   char *audit = legacy_preview_on ? ingress_preinject_read_audit_context() : NULL;
+   cJSON_AddStringToObject(assembly, "audit", audit ? audit : "");
+   free(audit);
+
+   if (rctx)
+   {
+      cJSON_AddBoolToObject(assembly, "prepare_source_release", 1);
+      cJSON_AddStringToObject(assembly, "workspace", active_workspace);
+      cJSON_AddStringToObject(assembly, "project", active_project);
+      ingress_release_context(assembly, rctx);
+   }
+   cJSON *response = ingress_command(assembly, 1);
+   const char *envelope =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "envelope"));
+   if (!envelope)
+   {
+      (void)request_context_refuse_assembly("unavailable");
+      kb_client_memory_scope_context_clear();
+      cJSON_Delete(response);
+      LOG_WARN("memory", "Go ingress assembly failed");
+      return NULL;
+   }
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "facts_unavailable")))
+      LOG_WARN("ingress-memory",
+               "typed-fact recall unavailable or invalid; continuing without facts");
+   const cJSON *folded = cJSON_GetObjectItemCaseSensitive(response, "folded_count");
+   const cJSON *saved = cJSON_GetObjectItemCaseSensitive(response, "folded_saved");
+   if (cJSON_IsNumber(folded) && folded->valueint > 0 && cJSON_IsNumber(saved))
+      LOG_DEBUG("ingress-compress", "folded %d code %s, dropped ~%.0f snippet bytes",
+                folded->valueint, folded->valueint == 1 ? "hit" : "hits", saved->valuedouble);
+   char *result = NULL;
+   if (envelope[0])
+   {
+      integrity_result_t gate;
+      if (integrity_ingress_decide(envelope, INTEGRITY_SOURCE_DOCUMENT, "retrieval", 1, &gate))
+         LOG_WARN("integrity", "automatic retrieval parked (%s): %s",
+                  integrity_verdict_name(gate.verdict), gate.match_category);
+      else
+         result = strdup(envelope);
+   }
+   if (result && rctx)
+   {
+      const char *ticket =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "source_release_ticket"));
+      if (request_context_set_source_release(ticket) != 0)
+      {
+         (void)request_context_refuse_assembly("unavailable");
+         free(result);
+         result = NULL;
+      }
+   }
+   if (!result && rctx)
+   {
+      const char *ticket =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "source_release_ticket"));
+      if (ticket && ticket[0] && strcmp(ticket, rctx->memory_source_release) != 0)
+      {
+         cJSON *discard = cJSON_CreateObject();
+         ingress_release_context(discard, rctx);
+         cJSON_ReplaceItemInObjectCaseSensitive(discard, "source_release_ticket",
+                                                cJSON_CreateString(ticket));
+         cJSON_AddStringToObject(discard, "operation", "source-release-discard");
+         cJSON_Delete(ingress_command(discard, 0));
+      }
+   }
+   /* Assembly evidence is emitted only after packing and integrity acceptance.
+    * It does not assert provider admission, dispatch, or acknowledgement. */
+   const cJSON *retained_memories = cJSON_GetObjectItemCaseSensitive(response, "retained_memories");
+   const cJSON *retained_code = cJSON_GetObjectItemCaseSensitive(response, "retained_code_indices");
+   const cJSON *retained_typed = cJSON_GetObjectItemCaseSensitive(response, "retained_typed_refs");
+   const cJSON *retained_facts = cJSON_GetObjectItemCaseSensitive(response, "retained_fact_refs");
+   const cJSON *retained_memory_sources =
+       cJSON_GetObjectItemCaseSensitive(response, "retained_memory_source_refs");
+   if (result && config_kb_evidence_emit_enabled() &&
+       (cJSON_GetArraySize(retained_memories) > 0 || cJSON_GetArraySize(retained_code) > 0 ||
+        cJSON_GetArraySize(retained_typed) > 0 || cJSON_GetArraySize(retained_facts) > 0))
    {
       const char *tid = ingress_preinject_turn_id();
       char minted[40];
@@ -426,7 +602,8 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       {
          if (ingress_preinject_mint_turn_id(minted, sizeof(minted)) != 0)
          {
-            cJSON_Delete(assembly);
+            free(result);
+            cJSON_Delete(response);
             kb_client_memory_scope_context_clear();
             return NULL;
          }
@@ -435,15 +612,15 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       char fp[32];
       ingress_query_fingerprint(query, fp, sizeof(fp));
 
-      /* Memory surface (single-writer, P1): the owner returns the full set of memory
-       * previews surfaced into this turn (mem_n <= the diagnose cap of 5), so
-       * recording all of them is the complete memory evidence, not a truncation. */
+      /* Copy only previews retained by the Go packer. */
       int64_t ids[5];
       const char *snips[5];
       int n_ids = 0;
-      for (int i = 0; i < mem_n && n_ids < (int)(sizeof(ids) / sizeof(ids[0])); i++)
+      for (int i = 0;
+           i < cJSON_GetArraySize(retained_memories) && n_ids < (int)(sizeof(ids) / sizeof(ids[0]));
+           i++)
       {
-         const cJSON *row = cJSON_GetArrayItem(memories, i);
+         const cJSON *row = cJSON_GetArrayItem(retained_memories, i);
          const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "id"));
          const char *preview =
              cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "preview"));
@@ -473,13 +650,20 @@ char *ingress_preinject_build(const char *query, int request_disabled)
        * Runs after the memory emit: when memory also surfaced it JOINS that event
        * (idempotent two-writer); on a code-only turn the merge is the first writer
        * and creates the event itself. */
-      if (n > 0)
+      if (cJSON_GetArraySize(retained_code) > 0)
       {
          char refbuf[6][MAX_PATH_LEN + 160];
          const char *types[6], *refs[6], *versions[6];
          int cn = 0;
-         for (int i = 0; i < n && cn < (int)(sizeof(types) / sizeof(types[0])); i++)
+         for (int j = 0;
+              j < cJSON_GetArraySize(retained_code) && cn < (int)(sizeof(types) / sizeof(types[0]));
+              j++)
          {
+            const cJSON *index = cJSON_GetArrayItem(retained_code, j);
+            if (!cJSON_IsNumber(index) || index->valuedouble != index->valueint ||
+                index->valueint < 0 || index->valueint >= n)
+               continue;
+            int i = index->valueint;
             if (!hits[i].project[0] || !hits[i].file_path[0])
                continue;
             snprintf(refbuf[cn], sizeof(refbuf[cn]), "code:%s:%s", hits[i].project,
@@ -493,40 +677,13 @@ char *ingress_preinject_build(const char *query, int request_disabled)
             (void)kb_client_evidence_merge_retrieval_event(tid, "Recall", fp, types, refs, versions,
                                                            cn);
       }
+      /* Merge after the legacy memory writer, whose turn creation is first-wins. */
+      ingress_emit_projection_refs(retained_typed, tid, fp);
+      ingress_emit_projection_refs(retained_facts, tid, fp);
+      ingress_emit_projection_refs(retained_memory_sources, tid, fp);
    }
 
-   char *audit = legacy_preview_on ? ingress_preinject_read_audit_context() : NULL;
-   cJSON_AddStringToObject(assembly, "audit", audit ? audit : "");
-   free(audit);
    kb_client_memory_scope_context_clear();
-
-   cJSON *response = ingress_command(assembly);
-   const char *envelope =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "envelope"));
-   if (!envelope)
-   {
-      cJSON_Delete(response);
-      LOG_WARN("memory", "Go ingress assembly unavailable; omitting pre-injection envelope");
-      return NULL;
-   }
-   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "facts_unavailable")))
-      LOG_WARN("ingress-memory",
-               "typed-fact recall unavailable or invalid; continuing without facts");
-   const cJSON *folded = cJSON_GetObjectItemCaseSensitive(response, "folded_count");
-   const cJSON *saved = cJSON_GetObjectItemCaseSensitive(response, "folded_saved");
-   if (cJSON_IsNumber(folded) && folded->valueint > 0 && cJSON_IsNumber(saved))
-      LOG_DEBUG("ingress-compress", "folded %d code %s, dropped ~%.0f snippet bytes",
-                folded->valueint, folded->valueint == 1 ? "hit" : "hits", saved->valuedouble);
-   char *result = NULL;
-   if (envelope[0])
-   {
-      integrity_result_t gate;
-      if (integrity_ingress_decide(envelope, INTEGRITY_SOURCE_DOCUMENT, "retrieval", 1, &gate))
-         LOG_WARN("integrity", "automatic retrieval parked (%s): %s",
-                  integrity_verdict_name(gate.verdict), gate.match_category);
-      else
-         result = strdup(envelope);
-   }
    cJSON_Delete(response);
    return result;
 }

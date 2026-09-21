@@ -1475,9 +1475,18 @@ if [ "$DB1_SESSIONS_AVAILABLE" -eq 1 ]; then
     RESP=$(srv_auth_req '{"method":"memory.search","store":"user","keywords":["integ-private"],"limit":10}') || true
     check_output "private memory search through Go" 'integ-private' echo "$RESP"
     RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":29,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"store\":\"user\",\"verb\":\"update\",\"id\":\"${PRIVATE_ID:-missing}\",\"content\":\"private corrected value\"}}}") || true
-    check_output "private memory MCP update through Go" 'private corrected value' echo "$RESP"
+    check_output "private memory MCP cannot rewrite user authorship" 'review_required' echo "$RESP"
     RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"user\",\"id\":\"${PRIVATE_ID:-missing}\"}") || true
-    check_output "private memory HTTP observes MCP update" 'private corrected value' echo "$RESP"
+    check_output "private memory refused MCP edit preserves content" 'private integration value' echo "$RESP"
+    RESP=$(srv_auth_req "{\"method\":\"memory.supersede\",\"store\":\"user\",\"old_id\":\"${PRIVATE_ID:-missing}\",\"new_content\":\"private corrected value\"}") || true
+    check_output "private memory user correction through Go" 'private corrected value' echo "$RESP"
+    RESP=$(mcp_initialized_req '{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"mutate","arguments":{"store":"user","verb":"store","key":"integ-private-model","content":"private model value"}}}') || true
+    PRIVATE_MODEL_ID=$(printf '%s' "$RESP" | python3 -c "import sys,json; print(json.loads(json.load(sys.stdin)['result']['content'][0]['text'])['id'])" 2>/dev/null) || true
+    check_output "private memory MCP creates a model record" 'true' python3 -c 'import sys; value=sys.argv[1]; print("true" if value.isdigit() and int(value)>0 else "false")' "${PRIVATE_MODEL_ID:-missing}"
+    RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"store\":\"user\",\"verb\":\"update\",\"id\":\"${PRIVATE_MODEL_ID:-missing}\",\"content\":\"private corrected model value\"}}}") || true
+    check_output "private memory MCP corrects model content through Go" 'private corrected model value' echo "$RESP"
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"user\",\"id\":\"${PRIVATE_MODEL_ID:-missing}\"}") || true
+    check_output "private memory HTTP observes MCP model correction" 'private corrected model value' echo "$RESP"
     # Kill the owner, assert an explicit outage, then reconnect the same process
     # type and verify that persisted private data remains readable.
     stop_memory_module
@@ -1494,7 +1503,7 @@ if [ "$DB1_SESSIONS_AVAILABLE" -eq 1 ]; then
     check_output "private memory survives Go owner restart" 'private corrected value' echo "$RESP"
 else
     echo "SKIP: private memory persistence/restart (PostgreSQL store unavailable)"
-    SKIP=$((SKIP + 7))
+    SKIP=$((SKIP + 11))
 fi
 
 if [ "$KB_AVAILABLE" -eq 1 ]; then

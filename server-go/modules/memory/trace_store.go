@@ -98,6 +98,9 @@ func (s *postgresDataStore) applyTraceBatch(ctx context.Context, request DataReq
 				continue
 			}
 			record, err := s.InsertEpistemic(ctx, DataRequest{Tier: "L0", Kind: "procedure", Key: pattern.Key, Content: pattern.Content, Confidence: &pattern.Confidence, Scope: request.Scope, Authority: AuthorityModel, SessionID: request.SessionID})
+			if proposedCorrection(err) != nil {
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}

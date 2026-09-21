@@ -59,10 +59,24 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 		}
 	}
 	request.Confidence = &confidence
+	var refusal map[string]any
+	request.IdempotencyKey, refusal = commandCreationKey(args, options.commandContext)
+	if refusal != nil {
+		return commandResult(refusal)
+	}
 	if args.stringOr("authority", "") == "user" && options.commandContext != nil && options.commandContext.UserAuthority {
 		request.Authority = AuthorityUser
 	}
 	scoped := commandScope(args, &request)
+	writeContext := strings.TrimSpace(request.Project)
+	if writeContext == "" {
+		writeContext = strings.TrimSpace(request.Workspace)
+	}
+	if writeContext == missingScopeValue {
+		result := commandError("invalid_argument", "memory.store requires an active project/workspace or explicit scope=all")
+		result["reason"], result["active_context_missing"] = "active_context_missing", true
+		return commandResult(result)
+	}
 	options.publicWrite = true
 	encoded, err := json.Marshal(request)
 	if err != nil {
@@ -79,7 +93,7 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
-	if refusal := commandMutationRefusal(response.Code); refusal != nil {
+	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
 		return commandResult(refusal)
 	}
 	if len(response.PublicRecords) != 1 {
@@ -87,9 +101,12 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	}
 	r := response.PublicRecords[0]
 	if args.stringOr("view", "") == "mcp" {
-		return mutationMCPResult("store", r.ID, r.ID, r.Key)
+		return mutationMCPResult("store", r.ID, r.ID, r.Key, response.MutationReceipt)
 	}
 	result := map[string]any{"status": "ok", "id": r.ID, "memory": r}
+	if response.MutationReceipt != nil {
+		result["mutation_receipt"] = response.MutationReceipt
+	}
 	if args.stringOr("view", "") == "native" {
 		result["id_text"] = fmt.Sprint(r.ID)
 	}
@@ -115,7 +132,14 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 			return commandResult(commandError("invalid_argument", "confidence must be between 0 and 1"))
 		}
 	}
-	request := DataRequest{Operation: "supersede", ID: id, Content: content, Confidence: &confidence, SessionID: args.stringOr("session_id", ""), PublicView: true, IncludeAll: true}
+	expected, key, refusal := commandCorrectionOptions(args, id, options.commandContext)
+	if refusal != nil {
+		return commandResult(refusal)
+	}
+	request := DataRequest{IdempotencyKey: key, ExpectedVersion: expected, Operation: "supersede", ID: id, Content: content, Confidence: &confidence, SessionID: args.stringOr("session_id", ""), PublicView: true, IncludeAll: true}
+	if caller := options.commandContext; args.stringOr("authority", "") == "user" && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+		request.Authority = AuthorityUser
+	}
 	scoped := commandScope(args, &request)
 	options.publicWrite = true
 	encoded, err := json.Marshal(request)
@@ -133,7 +157,7 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 	if json.Unmarshal(data, &response) != nil {
 		return nil, bus.ModuleStatusInternal
 	}
-	if refusal := commandMutationRefusal(response.Code); refusal != nil {
+	if refusal := commandMutationRefusal(response.Code, response.Proposal); refusal != nil {
 		return commandResult(refusal)
 	}
 	if response.Code != nil {
@@ -153,14 +177,18 @@ func handleSupersedeCommand(options handlerOptions, invocation bus.ModuleInvocat
 	}
 	if args.stringOr("view", "") == "server" {
 		return commandResult(struct {
-			Status string `json:"status"`
-			Store  string `json:"store"`
+			Status          string                 `json:"status"`
+			Store           string                 `json:"store"`
+			MutationReceipt *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
 			publicMemoryRecord
-		}{"ok", "kb", response.PublicRecords[0]})
+		}{"ok", "kb", response.MutationReceipt, response.PublicRecords[0]})
 	}
 	result := map[string]any{"status": "ok", "memory": response.PublicRecords[0]}
+	if response.MutationReceipt != nil {
+		result["mutation_receipt"] = response.MutationReceipt
+	}
 	if args.stringOr("view", "") == "mcp" {
-		return mutationMCPResult("supersede", id, response.PublicRecords[0].ID, "")
+		return mutationMCPResult("supersede", id, response.PublicRecords[0].ID, "", response.MutationReceipt)
 	}
 	if scoped {
 		result["active_context_missing"] = request.Workspace == "" && request.Project == ""

@@ -196,12 +196,12 @@ CREATE TABLE IF NOT EXISTS memory_aliases (  id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS memory_entities (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  entity TEXT NOT NULL,  role TEXT NOT NULL DEFAULT 'mention',  weight REAL NOT NULL DEFAULT 1.0,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(memory_id, entity, role));
 CREATE TABLE IF NOT EXISTS memory_temporal_refs (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  ref_key TEXT NOT NULL,  granularity TEXT NOT NULL DEFAULT 'relative',  weight REAL NOT NULL DEFAULT 1.0,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(memory_id, ref_key, granularity));
 CREATE TABLE IF NOT EXISTS memory_event_frames (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  actor TEXT NOT NULL DEFAULT '',  action TEXT NOT NULL DEFAULT '',  object TEXT NOT NULL DEFAULT '',  location TEXT NOT NULL DEFAULT '',  event_time TEXT NOT NULL DEFAULT '',  evidence_kind TEXT NOT NULL DEFAULT 'derived',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
-CREATE TABLE IF NOT EXISTS memory_summaries (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  scope TEXT NOT NULL DEFAULT 'headline',  summary TEXT NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(memory_id, scope));
+CREATE TABLE IF NOT EXISTS memory_summaries (  id INTEGER PRIMARY KEY AUTOINCREMENT,  record_revision INTEGER NOT NULL DEFAULT 1,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  scope TEXT NOT NULL DEFAULT 'headline',  summary TEXT NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(memory_id, scope));
 CREATE TABLE IF NOT EXISTS retrieval_shortcuts (  normalized_query TEXT PRIMARY KEY,  target_ids TEXT NOT NULL DEFAULT '',  hit_count INTEGER NOT NULL DEFAULT 0,  promoted INTEGER NOT NULL DEFAULT 0,  last_used_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory_chunks (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  chunk_index INTEGER NOT NULL DEFAULT 0,  chunk_text TEXT NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(memory_id, chunk_index));
 CREATE TABLE IF NOT EXISTS memory_units (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  unit_type TEXT NOT NULL,  unit_key TEXT NOT NULL DEFAULT '',  unit_text TEXT NOT NULL,  weight REAL NOT NULL DEFAULT 1.0,  created_at TEXT NOT NULL DEFAULT (datetime('now')), memory_kind TEXT NOT NULL DEFAULT 'episodic', is_episode_card INTEGER NOT NULL DEFAULT 0,  UNIQUE(memory_id, unit_type, unit_key, unit_text));
 CREATE TABLE IF NOT EXISTS memory_unit_edges (  id INTEGER PRIMARY KEY AUTOINCREMENT,  src_unit_id INTEGER NOT NULL REFERENCES memory_units(id) ON DELETE CASCADE,  dst_unit_id INTEGER NOT NULL REFERENCES memory_units(id) ON DELETE CASCADE,  edge_type TEXT NOT NULL DEFAULT 'related',  weight REAL NOT NULL DEFAULT 1.0);
-CREATE TABLE IF NOT EXISTS memory_episodes (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  episode_key TEXT NOT NULL,  episode_text TEXT NOT NULL,  source_session TEXT NOT NULL DEFAULT '',  reference_time TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS memory_episodes (  id INTEGER PRIMARY KEY AUTOINCREMENT,  record_revision INTEGER NOT NULL DEFAULT 1,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  episode_key TEXT NOT NULL,  episode_text TEXT NOT NULL,  source_session TEXT NOT NULL DEFAULT '',  reference_time TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory_relations (  id INTEGER PRIMARY KEY AUTOINCREMENT,  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  episode_id INTEGER DEFAULT 0,  src_entity TEXT NOT NULL DEFAULT '',  relation TEXT NOT NULL DEFAULT '',  dst_entity TEXT NOT NULL DEFAULT '',  fact_text TEXT NOT NULL DEFAULT '',  valid_at TEXT NOT NULL DEFAULT '',  invalid_at TEXT NOT NULL DEFAULT '',  weight REAL NOT NULL DEFAULT 1.0,  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory_scopes (  memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,  scope_type TEXT NOT NULL,  scope_value TEXT NOT NULL,  PRIMARY KEY(memory_id, scope_type, scope_value));
 CREATE TABLE IF NOT EXISTS entity_profiles (  entity_id TEXT NOT NULL PRIMARY KEY,  canonical_name TEXT NOT NULL,  observation_count INTEGER NOT NULL DEFAULT 0,  card_json TEXT NOT NULL DEFAULT '{}',  last_refreshed TEXT NOT NULL,  created_at TEXT NOT NULL);
@@ -898,4 +898,34 @@ CREATE TABLE IF NOT EXISTS recall_trace_results (
   staleness_status TEXT NOT NULL DEFAULT 'not-computed', stale_input TEXT NOT NULL DEFAULT '',
   rejected INTEGER NOT NULL DEFAULT 0, rejection_gate TEXT NOT NULL DEFAULT '',
   UNIQUE(trace_id,subject_kind,subject_id,lane,rejected)
+);
+
+-- Shape parity only: durable memory invalidation runs in PostgreSQL.
+CREATE TABLE IF NOT EXISTS memory_collection_owner (id INTEGER PRIMARY KEY,owner_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS memory_collection_generations (scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,generation INTEGER NOT NULL,PRIMARY KEY(scope_type,scope_value));
+CREATE TABLE IF NOT EXISTS memory_invalidation_outbox (scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,generation INTEGER NOT NULL,memory_id INTEGER NOT NULL,record_revision INTEGER NOT NULL,operation TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(scope_type,scope_value,generation));
+
+-- Memory retry receipt shape; the shipping Go owner uses the Postgres transaction.
+CREATE TABLE IF NOT EXISTS memory_mutation_receipts (
+ owner_id TEXT NOT NULL, actor_principal TEXT NOT NULL,
+ key_hash TEXT NOT NULL, request_hash TEXT NOT NULL,
+ commit_id TEXT NOT NULL REFERENCES fact_graph_commits(commit_id),
+ result_id INTEGER NOT NULL, result_revision INTEGER NOT NULL,
+ proposal_id TEXT,
+ operation TEXT NOT NULL DEFAULT 'correction',target_revision INTEGER NOT NULL DEFAULT 0,
+ scope_type TEXT NOT NULL DEFAULT '',scope_value TEXT NOT NULL DEFAULT '',
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY(owner_id,actor_principal,key_hash)
+);
+
+CREATE TABLE IF NOT EXISTS memory_correction_proposals (
+ proposal_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
+ target_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+ target_revision INTEGER NOT NULL, actor_principal TEXT NOT NULL,
+ payload TEXT NOT NULL, payload_digest TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
+ reviewer_principal TEXT NOT NULL DEFAULT '', decision_id TEXT NOT NULL DEFAULT '',
+ review_commit_id TEXT REFERENCES fact_graph_commits(commit_id),
+ result_id INTEGER NOT NULL DEFAULT 0, result_revision INTEGER NOT NULL DEFAULT 0,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(owner_id,target_id,target_revision,payload_digest)
 );

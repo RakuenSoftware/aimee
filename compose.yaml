@@ -44,6 +44,7 @@ services:
     environment:
       AIMEE_HOME: /var/lib/aimee
       AIMEE_INSTANCE_ROLE: server
+      AIMEE_PROVIDER_CONTEXT_LIMITS: ${AIMEE_PROVIDER_CONTEXT_LIMITS:-}
       # Per-instance policy. Persist off here to disable graph fusion.
       AIMEE_GRAPH_FUSION: ${AIMEE_GRAPH_FUSION:-on}
       AIMEE_MODEL_SERVICES_ENABLED: '1'
