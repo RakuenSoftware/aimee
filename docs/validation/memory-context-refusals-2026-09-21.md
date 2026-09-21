@@ -114,6 +114,19 @@ combinations refuse with zero provider requests. Owner restart readiness now
 runs in cleanup even after an assertion fails. The initial fresh runs are failed
 receipts, not release evidence; corrected fresh validation is still required.
 
+## Briefing allocation follow-up
+
+The Go briefing owner's promoted `evidence_heavy` style previously raised every
+explicit allocation below 3,000 estimated tokens to 3,000. It now uses that value
+only for an unspecified allocation; explicit allocations in the existing legacy
+64–8,192 range remain upper bounds. Candidate limits and priority stay unchanged.
+The required PostgreSQL replay exercises promoted style at 64, 128, 1,024, 2,500,
+3,000 and 8,192, verifies the returned allocation and complete serialized size,
+and preserves the existing default and maximum tests. The full Go memory suite
+passes with required evaluation/replay enabled. These are legacy bytes/4
+estimates, not provider token counts. The fresh `9deb1efc14` deployment run
+predates this separate follow-up.
+
 ## Remaining acceptance
 
 This does not complete MR-03. CLI subprocess hosts, native absent/malformed transport replies,
