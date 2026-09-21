@@ -511,6 +511,9 @@ def main():
             command('python3', str(ROOT / 'tests/e2e/memory-provider-boundary-e2e.py'),
                 '--server', server.application, '--output', str(args.output / 'provider-boundary.json'), timeout=600)
             check('Provider-bound memory, constraints, tools and continuation gate', True)
+            command('python3', str(ROOT / 'tests/e2e/memory-native-async-e2e.py'),
+                '--server', server.application, '--output', str(args.output / 'native-async.json'), timeout=600)
+            check('Live asynchronous native memory refusal and recovery gate', True)
     except (RuntimeError, subprocess.SubprocessError, ValueError, OSError) as error:
         checks.append(dict(name='topology completed', passed=False, error=str(error)))
         print('FAIL ' + str(error), flush=True)
