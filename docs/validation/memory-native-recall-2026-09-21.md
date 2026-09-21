@@ -159,3 +159,45 @@ whole-request deadline: upstream transport and other stages have separate bounds
 A diagnostic standalone run with explicit disconnection verified complete Go
 memory, inherited refusal, owner refusal with no provider requests, and recovery.
 Corrected fresh-image validation is still required for these follow-ups.
+
+
+## Live refresh and asynchronous failure diagnostics
+
+Harness `3d43ebdbf7` extends the real asynchronous fixture through five distinct
+file reads. Before the fifth tool-call response is released, it commits another
+private identity; the sixth provider request must contain that complete new
+identity. A second conversation pauses the exact Go owner before that response
+and must terminate with an explicit refusal after five provider requests. The
+fixture then restarts the owner and checks both identities in a new run.
+
+The retained standalone `7ebee54d83` deployment passes all 33 checks in this
+extended fixture, including real file contents in the subsequent request. The
+shared placement is still pending at this checkpoint. These are synthetic-provider
+functional checks, not a real-model quality or P95 evaluation.
+
+A separate diagnostic against the same image reproduced malformed asynchronous
+error events: the worker interpolated an owner/provider diagnostic into JSON,
+so an ordinary JSON provider error containing quotes broke event parsing. The
+worker now serializes its complete diagnostic with cJSON. The live fixture adds
+a permanent HTTP 400 containing quotes, a newline, a backslash and Unicode; it
+requires a failed run, valid complete diagnostic events and exactly one provider
+request. The native application build and existing run-store/context-refusal
+regressions pass. Fresh-image acceptance of this serialization fix is pending.
+
+
+The corrected fresh `7ebee54d83` matrix completed in standalone T3, but enrolled
+T2 failed the native post-restart success assertion. This is not an owner recovery
+failure: the identity read recovered, and the final-wire gate correctly refused
+a 33,480-byte request under the unchanged 32,768-byte ceiling. Stored request
+trace lengths show growth from 32,253 to 32,879 to 33,480 bytes. The tool catalog
+was unchanged (32 tools); selected shared memory, recall and recent failure text
+grew between runs. No cap is raised to admit that request.
+
+The native fixture now declares an 8,192-token model window with an explicit
+4,096-token configured output reserve, reducing the host's allocation to the Go
+whole-row selector. It still uses the real tool catalog and requires complete
+private identities before/after refresh. Its receipts record actual provider
+request byte lengths. This isolates native lifecycle checks under the same
+operator ceiling. It does not implement automatic repacking against the complete
+serialized native request; that MR-03 work remains open. Fresh validation of the
+bounded fixture and error-event fix is pending.

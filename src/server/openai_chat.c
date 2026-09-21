@@ -1857,10 +1857,15 @@ static void *run_job_worker(void *arg)
 
    if (erc != 0 || !result.response)
    {
-      char errbuf[256];
-      snprintf(errbuf, sizeof(errbuf), "{\"error\":\"%s\"}",
-               result.error[0] ? result.error : "run failed");
-      openai_runs_store_append_event(j->run_id, "error", errbuf);
+      /* Owner/provider diagnostics can contain quotes, newlines and Unicode.
+       * Serialize the complete string rather than interpolating/truncating JSON. */
+      cJSON *failure = cJSON_CreateObject();
+      cJSON_AddStringToObject(failure, "error", result.error[0] ? result.error : "run failed");
+      char *failure_json = cJSON_PrintUnformatted(failure);
+      openai_runs_store_append_event(j->run_id, "error",
+                                     failure_json ? failure_json : "{\"error\":\"run failed\"}");
+      free(failure_json);
+      cJSON_Delete(failure);
       openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED,
                                  run_status_json(j, "failed", buf, RUN_JSON_CAP));
       free(result.response);

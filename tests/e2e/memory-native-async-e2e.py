@@ -34,13 +34,14 @@ def strings(value):
 def inside(output):
     if os.environ.get('AIMEE_NATIVE_ASYNC_FIXTURE') != '1':
         raise RuntimeError('requires the disposable-container launcher')
-    checks, captures, runs, provider_errors = [], [], [], []
+    checks, captures, runs, provider_errors, request_sizes = [], [], [], [], []
     lock = threading.Lock()
     prefix = 'native-memory-' + uuid.uuid4().hex[:10]
     content = 'Complete native Go memory fixture 界🦊; preserve LIMIT_7 and identifier ' + prefix
     owner_pid, memory_id = None, None
     refresh_id = None
     refreshed_content = 'New memory committed before turn-six context refresh 界🦊 ' + prefix
+    provider_failure = 'native fixture "quoted"; line\nbreak; path \\ evidence 界'
     scenario, scenario_start = 'single', 0
     previous_recall = None
     fixture_files = tempfile.TemporaryDirectory(prefix=prefix + '-')
@@ -85,12 +86,13 @@ def inside(output):
             body = json.loads(raw)
             with lock:
                 captures.append(body)
+                request_sizes.append(len(raw))
                 ordinal = len(captures) - scenario_start
             response = dict(id=prefix, object='chat.completion', model=body['model'],
                 choices=[dict(index=0, message=dict(role='assistant', content='NATIVE_MEMORY_OK'),
                               finish_reason='stop')],
                 usage=dict(prompt_tokens=11, completion_tokens=2, total_tokens=13))
-            if scenario != 'single' and ordinal <= 5:
+            if scenario in ('refresh-update', 'refresh-outage') and ordinal <= 5:
                 # Distinct real reads avoid repeated-call detection. The fifth
                 # reply is withheld until the memory state changes, so refresh
                 # and provider dispatch cannot race the test's intervention.
@@ -111,8 +113,10 @@ def inside(output):
                             os.kill(owner_pid, signal.SIGSTOP)
                     except Exception as exc:
                         provider_errors.append(type(exc).__name__ + ': ' + str(exc))
-            data = json.dumps(response).encode()
-            self.send_response(200)
+            if scenario == 'provider-error':
+                response = dict(error=dict(message=provider_failure))
+            data = json.dumps(response, ensure_ascii=False).encode()
+            self.send_response(400 if scenario == 'provider-error' else 200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
@@ -133,6 +137,7 @@ def inside(output):
                 _, events = api('/v1/runs/' + run_id + '/events')
                 runs.append(dict(name=name, run_id=run_id, status=result['status'],
                     elapsed_seconds=time.monotonic()-started, provider_requests=len(captures)-before,
+                    provider_request_bytes=request_sizes[before:],
                     refusal_kinds=[kind for kind in ('request_budget_exceeded', 'unavailable')
                                    if any(kind in text for text in strings(events))]))
                 return result, events
@@ -186,7 +191,12 @@ def inside(output):
         roster.write_text(json.dumps(dict(default_agent=prefix, default_delegate=prefix, fallback_chain=[],
             models=[dict(name=prefix, model='native-memory-fixture', provider='openai', auth_type='none',
                          endpoint=f'http://127.0.0.1:{provider.server_port}/v1', roles=['all'], enabled=True,
-                         tools_enabled=True, context_window=32768, max_output=4096, max_parallel=1, max_turns=8)])))
+                         # Leave room for the real tool catalog and conversation
+                         # under the fixture's unchanged 32 KiB operator ceiling.
+                         # Go must select whole memory rows within this smaller
+                         # model allocation, including both private identities.
+                         tools_enabled=True, context_window=8192, max_tokens=4096,
+                         max_output=4096, max_parallel=1, max_turns=8)])))
         status, stored = api('/v1/memory/store', dict(key='identity:' + prefix, content=content))
         check('native fixture stores complete private identity', status == 200 and stored.get('status') == 'ok')
         memory_id = stored['id']
@@ -244,6 +254,13 @@ def inside(output):
               len(captures) == before + 1)
         check('refresh recovery retains both committed identities', all(
             any(value in text for text in strings(captures[-1])) for value in (content, refreshed_content)))
+        before = len(captures)
+        result, events = run('native provider error', mode='provider-error')
+        check('provider failure terminates without a successful response', result.get('status') == 'failed')
+        check('provider error events retain complete escaped diagnostics', any(
+            json.dumps(dict(error=dict(message=provider_failure)), ensure_ascii=False) in text
+            for text in strings(events)))
+        check('permanent provider error is not retried', len(captures) == before + 1)
     finally:
         try:
             if owner_pid is not None:
