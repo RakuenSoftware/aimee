@@ -52,8 +52,9 @@ and provider caps were verified. Full MR-01 remains open.
 [Typed assertion source-version commitments](../../validation/memory-typed-source-versions-2026-09-21.md)
 now bind exact owner/assertion/revision observations into selection identity and
 preserve them through outer packing. Unversioned channels remain explicit. Local
-PostgreSQL/race checks pass; fresh execution is pending. This does not certify
-supporting-parent versions or owner revalidation at final release.
+PostgreSQL/race checks pass. Fresh application/harness `91a1f02969` passes
+**1,558/1,558 checks** (966 T2, 592 T3), with all images and actual caps verified.
+This does not certify supporting-parent versions or owner revalidation at final release.
 
 Delivery follows the program’s dependency order: eligibility/mutations and final
 payload budgets first, then evidence/receipts/coverage, views and indexing,

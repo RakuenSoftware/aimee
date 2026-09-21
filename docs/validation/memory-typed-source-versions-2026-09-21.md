@@ -32,10 +32,24 @@ Local validation:
 - Standalone Aimee export/build and all 17 S1 contract checks pass. The module
   descriptor includes the new Go source and tests.
 - All 77 lint checks, native build and memory routing pass. Fresh authenticated
-  KB execution remains pending. The fresh harness adds five checks for observed versions, digest binding,
-  stable replay, revision changes and omission. Earlier 1,553-check images do
-  not contain this implementation.
+  KB execution passes five checks for observed versions, digest binding,
+  stable replay, revision changes and omission, as recorded below.
 
 Remaining work includes episode/summary parent and collection versions, version
 contracts for learning-owned observations/procedures, and owner revalidation at
 final release. This is not completion of MR-01, MR-03, MR-04 or MR-06.
+
+Fresh application/harness `91a1f02969806adca232da8f50fa394dffe343fa` passes
+**1,558/1,558 checks**: **966 enrolled T2**, **592 standalone T3**. The five source
+version cases run against the authenticated KB action and Go owner. Existing
+derived-parent, mutation/restart, provider and native-worker cases all pass.
+
+- [T2 verdicts and provider/native receipts](memory-typed-source-versions-2026-09-21/fresh-t2-91a1f02969.json)
+- [T3 verdicts and provider/native receipts](memory-typed-source-versions-2026-09-21/fresh-t3-91a1f02969.json)
+- [Exact images and cleanup](memory-typed-source-versions-2026-09-21/image-identities-91a1f02969.json)
+
+Application image: `sha256:e34b71fd2c9bc41528a842bd3e875b5b05cb749ea78db1b2f537331899103143`.
+All nine images and the three actual 32 KiB provider caps were verified. The nine
+owned containers and nine empty networks were removed; images, volumes and raw
+receipts remain. Subsequent direct-parent version binding and lookup optimization
+are not covered by these images.

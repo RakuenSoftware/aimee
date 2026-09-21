@@ -177,6 +177,7 @@
     "server-go/modules/memory/process_test.go",
     "server-go/modules/memory/commands_test.go",
     "server-go/modules/memory/content_gate_test.go",
+    "server-go/modules/memory/creation_retry_test.go",
     "server-go/modules/memory/data_test.go",
     "server-go/modules/memory/embed_egress_test.go",
     "server-go/modules/memory/embed_test.go",
