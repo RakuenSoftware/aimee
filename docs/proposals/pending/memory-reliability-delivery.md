@@ -426,3 +426,12 @@ provider bytes, retries recheck, and request completion releases transient state
 Fresh validation is pending. This does not close unversioned channels, transitive
 or collection dependencies, the post-check race, or durable dispatch receipts;
 all 18 proposals remain uncertified against the frozen 123 acceptance clauses.
+
+[Memory preview source versions](../../validation/memory-preview-source-versions-2026-09-21.md)
+now cover canonical fallback previews and independently revised summaries under
+schema 31, with exact parent revisions and owner-formatted rendered scores.
+Ingress rehydrates source metadata in one scoped statement instead of one public
+metadata query plus unused per-row epistemic queries. Outer packing and final
+owner revalidation retain only accepted sources. Go/PostgreSQL, race, migration,
+native transport and lint checks pass; fresh deployment is pending. This advances
+MR-01/MR-06 source coverage without certifying either proposal or durable dispatch.

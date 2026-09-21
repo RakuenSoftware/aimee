@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -101,14 +100,17 @@ type ingressCodeHit struct {
 }
 
 type ingressMemoryPreview struct {
+	Source *typedSourceVersion `json:"source_version,omitempty"`
 	// Decimal text avoids losing native int64 IDs through cJSON's double.
-	ID       string  `json:"id"`
-	Key      string  `json:"key"`
-	Tier     string  `json:"tier"`
-	Kind     string  `json:"kind"`
-	Headline string  `json:"headline"`
-	Content  string  `json:"content"`
-	Score    float64 `json:"score"`
+	ID        string  `json:"id"`
+	Key       string  `json:"key"`
+	Tier      string  `json:"tier"`
+	Kind      string  `json:"kind"`
+	Headline  string  `json:"headline"`
+	Content   string  `json:"content"`
+	Score     float64 `json:"score"`
+	ScoreText string  `json:"score_text,omitempty"`
+	Preview   string  `json:"preview,omitempty"`
 }
 
 // Evidence at the assembled-envelope boundary, not a provider dispatch receipt.
@@ -135,6 +137,7 @@ type ingressAssemblyRequest struct {
 	TaskConfidence   float64                `json:"task_confidence"`
 	Code             []ingressCodeHit       `json:"code"`
 	Memories         []ingressMemoryPreview `json:"memories"`
+	MemoryProjection json.RawMessage        `json:"memory_projection,omitempty"`
 	FactsRequested   bool                   `json:"facts_requested"`
 	FactsResponse    json.RawMessage        `json:"facts_response"`
 	Temporal         string                 `json:"temporal"`
@@ -149,6 +152,19 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		request.Budget = 6144
 	}
 	var err error
+	var memoryProjection *previewProjection
+	if len(request.MemoryProjection) != 0 {
+		memoryProjection, err = decodePreviewProjection(request.MemoryProjection, request.Memories)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		for _, row := range request.Memories {
+			if row.Source != nil {
+				return nil, &contextBudgetError{"invalid_projection", "memory preview commitment missing"}
+			}
+		}
+	}
 	request.Budget, err = request.ContextLimits.byteLimit(request.Budget)
 	if err != nil {
 		return nil, err
@@ -158,6 +174,7 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 	}
 	entries := make([]ingressEntry, 0, 15)
 	memoryEntries := make(map[int]ingressRetainedMemory, len(request.Memories))
+	memorySourceEntries := make(map[int]ingressMemoryPreview, len(request.Memories))
 	codeEntries := make(map[int]int, len(request.Code))
 	score, missing, folded, saved := 0.0, 0, 0, 0
 	if request.TaskBlock != "" {
@@ -182,35 +199,18 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 	}
 	score = max(score, float64(len(request.Code))/6)
 	for _, row := range request.Memories {
-		id, err := strconv.ParseInt(row.ID, 10, 64)
+		body, preview, headlineMissing, err := renderMemoryPreview(row)
 		if err != nil {
-			return nil, fmt.Errorf("invalid memory preview identity")
+			return nil, err
 		}
-		if id <= 0 {
+		if body == "" {
 			continue
 		}
-		preview, headlineMissing := row.Headline, row.Headline == ""
 		if headlineMissing {
-			preview = row.Content
 			missing++
 		}
-		body := fmt.Sprintf("  - memory:%d", id)
-		if row.Key != "" {
-			body += " " + ingressSingleLine(row.Key, 80)
-		}
-		tier, kind := row.Tier, row.Kind
-		if tier == "" {
-			tier = "?"
-		}
-		if kind == "" {
-			kind = "memory"
-		}
-		body += fmt.Sprintf(" [%s/%s score=%.3f headline_missing=%t]\n", tier, kind, row.Score, headlineMissing)
-		preview = ingressSingleLine(preview, 220)
-		if preview != "" {
-			body += "    > " + preview + "\n"
-		}
 		memoryEntries[len(entries)] = ingressRetainedMemory{ID: row.ID, Preview: preview}
+		memorySourceEntries[len(entries)] = row
 		entries = append(entries, ingressEntry{"memory", "recommended (memory previews):\n", body})
 	}
 	if n := len(request.Memories); n > 0 {
@@ -294,6 +294,7 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 	}
 	retained := []string{}
 	retainedMemories := []ingressRetainedMemory{}
+	retainedMemorySources := []ingressMemoryPreview{}
 	retainedCode := []int{}
 	factsRetained := false
 	for _, index := range selected {
@@ -303,6 +304,7 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		if memory, ok := memoryEntries[index]; ok {
 			retained = append(retained, memory.ID)
 			retainedMemories = append(retainedMemories, memory)
+			retainedMemorySources = append(retainedMemorySources, memorySourceEntries[index])
 		}
 		if codeIndex, ok := codeEntries[index]; ok {
 			retainedCode = append(retainedCode, codeIndex)
@@ -313,6 +315,21 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		"retained_memories": retainedMemories, "retained_code_indices": retainedCode,
 		"omitted_count": omitted, "headline_missing_count": missing, "folded_count": folded,
 		"folded_saved": saved, "facts_unavailable": factsUnavailable, "typed_unavailable": typedUnavailable}
+	if memoryProjection != nil {
+		final, err := newPreviewProjection(retainedMemorySources)
+		if err != nil {
+			return nil, err
+		}
+		refs := make([]ingressProjectionEvidenceRef, 0, len(final.Retained))
+		for _, ref := range final.Retained {
+			refs = append(refs, ingressProjectionEvidenceRef{Type: "memory_projection_item", Ref: "previews:v1:" + final.SelectionDigest + ":" + ref.Source.Kind + ":" + ref.ID})
+		}
+		result["retained_memory_source_refs"] = refs
+		result["memory_projection"] = map[string]any{"schema_version": 1, "boundary": "ingress_envelope",
+			"source_projection_digest": memoryProjection.ProjectionDigest, "source_selection_digest": memoryProjection.SelectionDigest,
+			"projection_digest": final.ProjectionDigest, "selection_digest": final.SelectionDigest, "retained_items": final.Retained,
+			"rendered_bytes": final.RenderedBytes, "source_version_state": final.SourceVersionState, "omitted_count": len(memoryProjection.Retained) - len(final.Retained)}
+	}
 	if factSources != nil {
 		sourceProjection, sourceSelection, sourceCount := factSources.ProjectionDigest, factSources.SelectionDigest, len(factSources.Retained)
 		if !factsRetained {

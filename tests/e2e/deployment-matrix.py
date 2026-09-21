@@ -111,6 +111,70 @@ def application_metadata_is_private(stack):
     return not any(name in forbidden or name.endswith(('_PASSWORD', '_API_KEY', '_TOKEN', '_PRIVATE_KEY')) for name in names)
 
 
+def preview_source_version_gate(kb, check):
+    """Exact canonical and summary versions through the authenticated Go owner."""
+    key = 'preview-source-' + uuid.uuid4().hex
+    summary_id = 9007199254740993 + uuid.uuid4().int % 1000000000
+    def sql(query):
+        return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+    fixture = json.loads(sql(f"""BEGIN;
+        INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES
+          ('L2','fact','{key}-headline','canonical content','project','{key}'),
+          ('L2','fact','{key}-fallback','fallback content','project','{key}');
+        INSERT INTO memory_summaries(id,memory_id,scope,summary)
+          SELECT {summary_id},id,'headline','exact headline' FROM memories WHERE key='{key}-headline';
+        SELECT json_build_object('owner_id',(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
+          'parent_id',id::text,'parent_revision',record_revision::text) FROM memories WHERE key='{key}-headline';
+        COMMIT"""))
+    def previews():
+        return kb.kb_request('/v1/actions/memory.diagnose_scoped',
+                             dict(query=key, project=key, scope_context=True, format='ingress', limit=5))
+    def revalidate(refs, project=key):
+        return kb.kb_request('/v1/actions/memory.revalidate_sources',
+            dict(scope_context=True, project=project, include_all=False,
+                 revalidation=dict(schema_version=1, check_id=uuid.uuid4().hex, sources=refs)))
+    def matches(result):
+        p = result.get('memory_projection', {})
+        rows = result.get('memories', [])
+        rendered = ''.join(f"  - memory:{r['id']} {r['key']} [{r['tier']}/{r['kind']} score={r['score_text']} headline_missing={str(not bool(r['headline'])).lower()}]\n"
+                           f"    > {r['headline'] or r['content']}\n" for r in rows)
+        identity = dict(schema_version=1, projection_digest=p.get('projection_digest'), retained_items=p.get('retained_items'))
+        digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+        return p.get('projection_digest') == 'sha256:' + hashlib.sha256(rendered.encode()).hexdigest() and p.get('rendered_bytes') == len(rendered.encode()) and p.get('selection_digest') == 'sha256:' + digest
+    try:
+        code, before = previews()
+        refs = before.get('memory_projection', {}).get('retained_items', [])
+        summary = next((r.get('source_version', {}) for r in refs if r.get('stable_id') == str(summary_id)), {})
+        check('Preview commits exact rendered bytes and selected source versions', code == 200 and len(refs) == 2 and matches(before))
+        check('Preview preserves large summary ID and canonical parent revision', summary.get('record_kind') == 'memory_summary' and
+              summary.get('version') == dict(schema_version=1, owner_id=fixture['owner_id'], record_id=str(summary_id), record_revision='1') and
+              summary.get('memory_parents') == [dict(schema_version=1, owner_id=fixture['owner_id'], record_id=fixture['parent_id'], record_revision=fixture['parent_revision'])])
+        check('Preview fallback binds its canonical source', any(r.get('source_version', {}).get('record_kind') == 'memory_record' for r in refs))
+        code, result = revalidate(refs)
+        check('Preview final source check accepts current sources', code == 200 and result.get('eligible') is True)
+        code, result = revalidate(refs, key+'-hidden')
+        check('Preview final source check refuses hidden sources', code == 200 and result.get('eligible') is False)
+        sql(f"UPDATE memory_summaries SET summary=summary,record_revision=999 WHERE id={summary_id}")
+        code, result = revalidate(refs)
+        check('Preview no-op refresh cannot forge a source revision', code == 200 and result.get('eligible') is True)
+        sql(f"UPDATE memory_summaries SET summary='revised headline' WHERE id={summary_id}")
+        code, result = revalidate(refs)
+        check('Preview final source check refuses independently edited summary', code == 200 and result.get('eligible') is False)
+        code, after = previews()
+        fresh_refs = after.get('memory_projection', {}).get('retained_items', [])
+        fresh_summary = next((r.get('source_version', {}) for r in fresh_refs if r.get('stable_id') == str(summary_id)), {})
+        check('Preview refresh binds revised summary without inventing parent change', code == 200 and matches(after) and
+              fresh_summary.get('version', {}).get('record_revision') == '2' and fresh_summary.get('memory_parents') == summary.get('memory_parents'))
+        code, result = revalidate(fresh_refs)
+        check('Preview final source check accepts refreshed summary', code == 200 and result.get('eligible') is True)
+        sql(f"UPDATE memories SET content='revised fallback' WHERE key='{key}-fallback'")
+        code, result = revalidate(fresh_refs)
+        check('Preview final source check refuses changed canonical fallback', code == 200 and result.get('eligible') is False)
+    finally:
+        sql(f"DELETE FROM memories WHERE key IN ('{key}-headline','{key}-fallback')")
+
+
 def typed_source_version_gate(kb, check):
     """Observe real assertion versions through the authenticated KB/Go path."""
     key = 'typed-version-' + uuid.uuid4().hex
@@ -622,6 +686,7 @@ def main():
             check('KB graph and memory retrieval survives the deepest worker path', code == 200 and isinstance(body.get('facts'), list))
             typed_context_budget_gate(kb, check)
             typed_source_version_gate(kb, check)
+            preview_source_version_gate(kb, check)
             evidence_exact_identity_gate(kb, check)
         if args.topology in ('T2', 'T3'):
             server = Stack('server', env, args.output)

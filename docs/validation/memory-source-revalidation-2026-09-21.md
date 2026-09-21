@@ -53,7 +53,15 @@ silently evicts a live handle. These are process-local guards, not durable recei
   checks and documentation/link checks pass, including the final request cleanup.
 - Five authenticated deployment checks cover unchanged sources, scope loss,
   unauthenticated transport, parent changes after selection and refreshed bindings.
-  Fresh deployment of this change and latest-head CI are pending.
+  Fresh application/harness `f5688292b266b8cea5635f9491e36b6346eb3528` passes
+  **1,668/1,668 checks**: [93 T1](memory-source-revalidation-2026-09-21/fresh-t1-f5688292b2.json),
+  [983 T2](memory-source-revalidation-2026-09-21/fresh-t2-f5688292b2.json), and
+  [592 T3](memory-source-revalidation-2026-09-21/fresh-t3-f5688292b2.json).
+  All [12 images and four actual provider caps](memory-source-revalidation-2026-09-21/image-identities-f5688292b2.json)
+  were verified. Application image: `sha256:c11f762088c3314469048aa9f85d7755536eff9cf6c279a14d6689fd51bdd41a`.
+  The 12 owned containers and 12 empty networks were removed, preserving volumes,
+  images and raw receipts. [CI run 35589821082](https://github.com/RakuenSoftware/aimee/actions/runs/35589821082)
+  completed successfully, including T2-LUKS and upgrade/rollback.
 
 The preceding batched-fact image passes [1,570 fresh T2/T3 checks](memory-fact-query-batching-2026-09-21.md).
 Its CI T1 test compared whole-projection stability while testing one fixture's

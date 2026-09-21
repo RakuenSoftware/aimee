@@ -68,14 +68,21 @@ func buildSourceRevalidationSQL() string {
  SELECT 1 FROM entity_edges e WHERE e.id=(r.ref->>'stable_id')::bigint
  AND e.version::text=r.ref#>>'{source_version,version,record_revision}'
  AND ` + filter + ` AND (` + assertionMemoryVersions + `)::jsonb=` + expectedParents + `)
- WHEN 'memory_episode' THEN EXISTS (
- SELECT 1 FROM memory_episodes e JOIN memories m ON m.id=e.memory_id
- WHERE e.id=(r.ref->>'stable_id')::bigint
- AND e.record_revision::text=r.ref#>>'{source_version,version,record_revision}'
- AND m.id::text=r.ref#>>'{source_version,memory_parents,0,record_id}'
- AND m.record_revision::text=r.ref#>>'{source_version,memory_parents,0,record_revision}'
- AND ` + currentMemorySQL("m.") + ` AND ($2::text='' OR (m.scope_type=$2 AND m.scope_value=$3)))
- ELSE false END)`
+ ELSE EXISTS (
+ SELECT 1 FROM memories m WHERE
+ m.id=(CASE WHEN r.ref#>>'{source_version,record_kind}'='memory_record'
+ THEN r.ref->>'stable_id' ELSE r.ref#>>'{source_version,memory_parents,0,record_id}' END)::bigint
+ AND m.record_revision::text=CASE WHEN r.ref#>>'{source_version,record_kind}'='memory_record'
+ THEN r.ref#>>'{source_version,version,record_revision}' ELSE r.ref#>>'{source_version,memory_parents,0,record_revision}' END
+ AND ` + currentMemorySQL("m.") + ` AND ($2::text='' OR (m.scope_type=$2 AND m.scope_value=$3))
+ AND CASE r.ref#>>'{source_version,record_kind}'
+ WHEN 'memory_record' THEN true
+ WHEN 'memory_episode' THEN EXISTS (SELECT 1 FROM memory_episodes e WHERE e.id=(r.ref->>'stable_id')::bigint
+ AND e.memory_id=m.id AND e.record_revision::text=r.ref#>>'{source_version,version,record_revision}')
+ WHEN 'memory_summary' THEN EXISTS (SELECT 1 FROM memory_summaries s WHERE s.id=(r.ref->>'stable_id')::bigint
+ AND s.memory_id=m.id AND s.record_revision::text=r.ref#>>'{source_version,version,record_revision}')
+ ELSE false END)
+ END)`
 }
 
 func handleSourceRevalidation(options handlerOptions, invocation bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {

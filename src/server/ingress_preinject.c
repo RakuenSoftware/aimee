@@ -470,7 +470,12 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       const cJSON *rows = cJSON_GetObjectItemCaseSensitive(reply, "memories");
       if (cJSON_IsString(status) && !strcmp(status->valuestring, "ok") && cJSON_IsArray(rows) &&
           cJSON_GetArraySize(rows) <= 5)
+      {
          memories = cJSON_DetachItemFromObjectCaseSensitive(reply, "memories");
+         cJSON *projection = cJSON_DetachItemFromObjectCaseSensitive(reply, "memory_projection");
+         if (projection)
+            cJSON_AddItemToObject(assembly, "memory_projection", projection);
+      }
       cJSON_Delete(reply);
    }
    int mem_n = memories ? cJSON_GetArraySize(memories) : 0;
@@ -585,6 +590,8 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    const cJSON *retained_code = cJSON_GetObjectItemCaseSensitive(response, "retained_code_indices");
    const cJSON *retained_typed = cJSON_GetObjectItemCaseSensitive(response, "retained_typed_refs");
    const cJSON *retained_facts = cJSON_GetObjectItemCaseSensitive(response, "retained_fact_refs");
+   const cJSON *retained_memory_sources =
+       cJSON_GetObjectItemCaseSensitive(response, "retained_memory_source_refs");
    if (result && config_kb_evidence_emit_enabled() &&
        (cJSON_GetArraySize(retained_memories) > 0 || cJSON_GetArraySize(retained_code) > 0 ||
         cJSON_GetArraySize(retained_typed) > 0 || cJSON_GetArraySize(retained_facts) > 0))
@@ -673,6 +680,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       /* Merge after the legacy memory writer, whose turn creation is first-wins. */
       ingress_emit_projection_refs(retained_typed, tid, fp);
       ingress_emit_projection_refs(retained_facts, tid, fp);
+      ingress_emit_projection_refs(retained_memory_sources, tid, fp);
    }
 
    kb_client_memory_scope_context_clear();

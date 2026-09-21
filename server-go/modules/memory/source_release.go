@@ -69,7 +69,7 @@ func (s *sourceReleaseState) expire(now time.Time) {
 
 func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) (string, error) {
 	refs := []typedProjectionRef{}
-	for _, name := range []string{"facts_projection", "typed_projection"} {
+	for _, name := range []string{"facts_projection", "typed_projection", "memory_projection"} {
 		if projection, ok := assembly[name].(map[string]any); ok {
 			for _, ref := range projection["retained_items"].([]typedProjectionRef) {
 				// Unversioned channels remain explicitly outside this source check.

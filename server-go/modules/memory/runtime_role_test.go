@@ -340,6 +340,7 @@ FROM memories n JOIN memory_fact_actors a ON a.memory_id=n.id CROSS JOIN memorie
 	command("delete", fmt.Sprintf(`{"id":%d,"authority":"user"}`, newID), true)
 	exerciseMaintenanceReplay(t, ctx, tx, handler)
 	exerciseDiagnosticReplay(t, ctx, tx, handler)
+	exercisePreviewSourceReplay(t, ctx, tx, backend.(*postgresDataStore), handler)
 	exerciseAnswerReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseVectorMaintenanceReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseVectorRepairReplay(t, ctx, tx, backend.(*postgresDataStore))

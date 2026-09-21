@@ -19,6 +19,25 @@ static int g_evidence_enabled;
 static int g_assembly_budget = 1200;
 static int g_evidence_count, g_bridge_count, g_code_count, g_typed_count, g_fact_count;
 static int g_fact_projection;
+static int g_preview_projection, g_preview_count;
+static const char *preview_reply =
+    "{\"status\":\"ok\",\"memories\":[{\"id\":\"101\",\"key\":\"deploy "
+    "path\",\"tier\":\"L2\",\"kind\":\"fact\",\"headline\":\"Use the deploy "
+    "matrix.\",\"score\":0.12349999999999998,\"score_text\":\"0.123\",\"source_version\":{\"record_"
+    "kind\":\"memory_summary\",\"version\":{\"schema_version\":1,\"owner_id\":\"00000000-0000-4000-"
+    "8000-000000000001\",\"record_id\":\"9007199254745003\",\"record_revision\":\"4\"},\"memory_"
+    "parents\":[{\"schema_version\":1,\"owner_id\":\"00000000-0000-4000-8000-000000000001\","
+    "\"record_id\":\"101\",\"record_revision\":\"2\"}],\"memory_parent_state\":\"observed\"}}],"
+    "\"memory_projection\":{\"schema_version\":1,\"projection_digest\":\"sha256:"
+    "9673b9f69a559cce1b7a49e5a970eede11312bf575ca48798ab5a8b5432d72d5\",\"rendered_bytes\":101,"
+    "\"retained_items\":[{\"channel\":\"memory_previews\",\"stable_id\":\"9007199254745003\","
+    "\"source_version\":{\"record_kind\":\"memory_summary\",\"version\":{\"schema_version\":1,"
+    "\"owner_id\":\"00000000-0000-4000-8000-000000000001\",\"record_id\":\"9007199254745003\","
+    "\"record_revision\":\"4\"},\"memory_parents\":[{\"schema_version\":1,\"owner_id\":\"00000000-"
+    "0000-4000-8000-000000000001\",\"record_id\":\"101\",\"record_revision\":\"2\"}],\"memory_"
+    "parent_state\":\"observed\"}}],\"source_version_state\":\"record_versions_observed\","
+    "\"selection_digest\":\"sha256:"
+    "0c9d7a31ae090a4adc7956612a40b54b3c66f29b4526db3c9c684e8ddf5b1368\"}}";
 static int g_source_check_mode;
 static int g_source_check_calls;
 static char g_typed_first_ref[512];
@@ -127,7 +146,7 @@ char *kb_v1_action_request(const char *method, cJSON *request)
       assert(cJSON_GetArraySize(sources) == 1);
       assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
                         cJSON_GetArrayItem(sources, 0), "stable_id")),
-                    "9007199254743001") == 0);
+                    (g_preview_projection ? "9007199254745003" : "9007199254743001")) == 0);
       cJSON *reply = cJSON_CreateObject();
       cJSON_AddStringToObject(reply, "status", "ok");
       cJSON_AddBoolToObject(reply, "eligible", g_source_check_mode != 1);
@@ -136,8 +155,9 @@ char *kb_v1_action_request(const char *method, cJSON *request)
       cJSON_AddStringToObject(reply, "check_id", g_source_check_mode == 4 ? "wrong" : check);
       cJSON_AddStringToObject(
           reply, "sources_digest",
-          g_source_check_mode == 3
-              ? "wrong"
+          g_source_check_mode == 3 ? "wrong"
+          : g_preview_projection
+              ? "7dd66ce6ab8b80b7f42a748b3b72693b3bada60c99a197428b072c2685f5f26a"
               : "06fe9a94ed30e7076d78c8a4725912f68b196f2bd07253056b21be8b8d6a3f43");
       cJSON_Delete(request);
       char *raw = g_source_check_mode == 2 ? NULL : cJSON_PrintUnformatted(reply);
@@ -292,6 +312,8 @@ static char *diagnostic_reply(const cJSON *request)
 {
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "format")),
                   "ingress"));
+   if (g_preview_projection)
+      return strdup(preview_reply);
    if (g_memory_returns_none)
       return strdup(g_context_result == KB_CLIENT_RESULT_UNAVAILABLE
                         ? "{\"status\":\"unavailable\"}"
@@ -440,6 +462,12 @@ int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *ro
       {
          assert(n == 1 && strstr(refs[0], ":semantic_assertion:9007199254743001"));
          g_fact_count += n;
+         return 0;
+      }
+      if (!strncmp(refs[0], "previews:v1:sha256:", 18))
+      {
+         assert(n == 1 && strstr(refs[0], ":memory_summary:9007199254745003"));
+         g_preview_count += n;
          return 0;
       }
       for (int i = 0; i < n; i++)
@@ -1197,9 +1225,51 @@ static void test_source_revalidation_at_provider_fence(void)
    puts("source changes and owner failures refuse final provider bytes across all routes");
 }
 
+static void test_preview_sources_at_provider_fence(void)
+{
+   request_context_t context = {0};
+   strcpy(context.request_id, "preview-source-request");
+   strcpy(context.principal, "preview-source-user");
+   request_context_set(&context);
+   g_preview_projection = g_evidence_enabled = 1;
+   g_preview_count = 0;
+   char *envelope = ingress_preinject_build("deployment matrix", 0);
+   assert(envelope && strstr(envelope, "score=0.123") && g_preview_count == 1);
+   assert(strlen(request_context_get()->memory_source_release) == 32);
+   free(envelope);
+   context = *request_context_get();
+   for (int mode = 0; mode <= 4; mode++)
+      for (int gated = 0; gated <= 1; gated++)
+         for (unsigned route = 1; route <= 3; route++)
+         {
+            request_context_set(&context);
+            g_source_check_mode = mode;
+            wire_fence_t *snapshot = NULL;
+            wire_fence_bytes_t selected = {0};
+            int rc =
+                wire_fence_select(gated, (wire_fence_route_t)route, "{}", 2, &snapshot, &selected);
+            if (mode == 0)
+            {
+               assert(rc == 0 && selected.len == 2 && selected.data);
+               wire_fence_destroy(snapshot);
+            }
+            else
+            {
+               assert(rc == WIRE_FENCE_CONTEXT_REFUSED && !snapshot && !selected.data &&
+                      !selected.len);
+            }
+         }
+   request_context_set(&context);
+   ingress_preinject_finish_sources();
+   request_context_clear();
+   g_source_check_mode = g_preview_projection = g_evidence_enabled = 0;
+   puts("preview summary versions survive C transport and fence every provider route");
+}
+
 int main(void)
 {
    test_source_revalidation_at_provider_fence();
+   test_preview_sources_at_provider_fence();
    test_required_assembly_refusal_reaches_dispatch();
    test_fact_evidence_after_integrity_and_packing();
    test_typed_evidence_after_integrity_and_packing();

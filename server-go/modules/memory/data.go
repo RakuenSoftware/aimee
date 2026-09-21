@@ -45,6 +45,7 @@ type DataRequest struct {
 
 	CollectFactSources bool                `json:"collect_fact_sources,omitempty"`
 	Revalidation       *sourceRevalidation `json:"revalidation,omitempty"`
+	IngressPreview     bool                `json:"ingress_preview,omitempty"`
 
 	Changes        *MemoryChangesRequest `json:"changes,omitempty"`
 	ReadPolicy     *MemoryReadPolicy     `json:"read_policy,omitempty"`
@@ -185,9 +186,11 @@ type Record struct {
 }
 
 type DataResponse struct {
-	FactProjection  *factProjection        `json:"fact_projection,omitempty"`
-	Proposal        *correctionProposal    `json:"proposal,omitempty"`
-	MutationReceipt *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
+	MemoryPreviews    []ingressMemoryPreview `json:"memory_previews,omitempty"`
+	PreviewProjection *previewProjection     `json:"preview_projection,omitempty"`
+	FactProjection    *factProjection        `json:"fact_projection,omitempty"`
+	Proposal          *correctionProposal    `json:"proposal,omitempty"`
+	MutationReceipt   *MemoryMutationReceipt `json:"mutation_receipt,omitempty"`
 
 	Changes            *MemoryChangePage    `json:"changes,omitempty"`
 	Read               *MemoryReadResult    `json:"read,omitempty"`
@@ -1020,6 +1023,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if request.IncludeVersion && request.Operation != "get" {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if request.IngressPreview && (!request.PublicView || (request.Operation != "diagnose" && request.Operation != "explain")) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if request.AtVersion != nil && (options.placement != PlacementServer || request.Operation != "get" || !request.AtVersion.validFor(request.ID) || request.ReadPolicy != nil || request.AsOf != "") {
@@ -2887,13 +2893,24 @@ set_config('aimee.correlation_id',$9,true)`,
 			for i := range response.Diagnostics {
 				d := &response.Diagnostics[i]
 				response.Records = append(response.Records, d.Memory)
+				if request.IngressPreview {
+					continue
+				}
 				d.EpistemicKind, err = backend.EpistemicKind(ctx, d.Memory.ID)
 				if err != nil {
 					return nil, bus.ModuleStatusInternal
 				}
 			}
 		}
-		response.PublicRecords, err = backend.publicRecords(ctx, response.Records)
+		if request.IngressPreview {
+			exact := Scope{}
+			if explicitScope {
+				exact = request.Scope
+			}
+			response.MemoryPreviews, response.PreviewProjection, err = backend.ingressMemoryPreviews(ctx, response.Diagnostics, exact)
+		} else {
+			response.PublicRecords, err = backend.publicRecords(ctx, response.Records)
+		}
 		if err != nil {
 			return nil, bus.ModuleStatusInternal
 		}

@@ -57,6 +57,14 @@ func validTypedSource(ref typedProjectionRef) bool {
 		if ref.Channel != "episodes" || ref.Source.MemoryParentState != "observed" || len(ref.Source.MemoryParents) != 1 {
 			return false
 		}
+	case "memory_record":
+		if ref.Channel != "memory_previews" || len(ref.Source.MemoryParents) != 0 {
+			return false
+		}
+	case "memory_summary":
+		if ref.Channel != "memory_previews" || ref.Source.MemoryParentState != "observed" || len(ref.Source.MemoryParents) != 1 {
+			return false
+		}
 	default:
 		return false
 	}
