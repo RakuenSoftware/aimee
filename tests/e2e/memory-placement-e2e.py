@@ -770,10 +770,11 @@ class Gate:
         model = self.mcp_document(store+' keyed MCP creation', 'mutate', args)
         model_receipt = model.get('mutation_receipt', {})
         self.check(store+' MCP creation has a durable receipt', model.get('status') == 'ok' and
-            model_receipt.get('schema_version') == 2 and model_receipt.get('outcome') == 'stored')
+            model_receipt.get('schema_version') == 2 and model_receipt.get('outcome') == 'stored' and
+            str(model_receipt.get('version', {}).get('record_id', '')).isdigit())
         repeated = self.mcp_document(store+' MCP creation replay', 'mutate', args)
         self.check(store+' MCP retry identifies original commit', repeated.get('mutation_receipt') == dict(model_receipt, replayed=True))
-        observed = self.good(store+' model creation read', self.call('get', dict(context, id=model['id'])))
+        observed = self.good(store+' model creation read', self.call('get', dict(context, id=model_receipt['version']['record_id'])))
         self.check(store+' keyed MCP creation retains confidence ceiling', observed.get('memory', {}).get('confidence') == 0.8)
         # Human-created parent still requires a review proposal on model store.
         args.update(key=key, content='model replacement proposal', idempotency_key=key+'-proposal')
