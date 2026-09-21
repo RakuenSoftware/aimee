@@ -433,5 +433,7 @@ schema 31, with exact parent revisions and owner-formatted rendered scores.
 Ingress rehydrates source metadata in one scoped statement instead of one public
 metadata query plus unused per-row epistemic queries. Outer packing and final
 owner revalidation retain only accepted sources. Go/PostgreSQL, race, migration,
-native transport and lint checks pass; fresh deployment is pending. This advances
+native transport and lint checks pass. Fresh application/harness `d8154014bb` passes
+**1,688/1,688 checks** (103 T1, 993 T2, 592 T3), with all 12 images and four
+actual provider caps verified. This advances
 MR-01/MR-06 source coverage without certifying either proposal or durable dispatch.

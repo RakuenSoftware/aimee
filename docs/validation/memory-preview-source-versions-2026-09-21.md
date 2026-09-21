@@ -49,7 +49,23 @@ source kind. Legacy unversioned rows remain explicit compatibility inputs.
   proposal links and the memory/C ownership boundary pass.
 - Ten authenticated fresh-deployment checks exercise rendered commitments,
   summary/parent and fallback versions, scope changes, no-op revision preservation,
-  independently edited summaries and refreshed bindings. Fresh execution pending.
+  independently edited summaries and refreshed bindings. Fresh application/harness
+  `d8154014bb85f0bd62e130f5b5ecf1a328f4cc93` passes **1,688/1,688 checks**:
+  [103 T1](memory-preview-source-versions-2026-09-21/fresh-t1-d8154014bb.json),
+  [993 T2](memory-preview-source-versions-2026-09-21/fresh-t2-d8154014bb.json), and
+  [592 T3](memory-preview-source-versions-2026-09-21/fresh-t3-d8154014bb.json).
+  All [12 image identities and four actual provider caps](memory-preview-source-versions-2026-09-21/image-identities-d8154014bb.json)
+  were verified. The application image is
+  `sha256:5123280fcc4d8c501564e26cd9e77c434e45ba05aaf43973433091b33037d455`.
+  All [12 owned containers and 12 empty networks were removed](memory-preview-source-versions-2026-09-21/cleanup-d8154014bb.json),
+  preserving images, volumes and raw receipts.
+  Latest-push CI is pending; the preceding source-release commit has a complete
+  [green CI run](https://github.com/RakuenSoftware/aimee/actions/runs/35589821082).
+
+Local [Go suite](memory-preview-source-versions-2026-09-21/go-tests.txt),
+[race suite](memory-preview-source-versions-2026-09-21/race-tests.txt), and
+[schema-upgrade](memory-preview-source-versions-2026-09-21/schema-upgrade.txt)
+results are retained alongside the fresh receipts.
 
 The existing 36-assertion/36-parent source-check benchmark remains one query,
 16 allocations, with median **1.34 ms** and **56,682 allocated bytes** across three
