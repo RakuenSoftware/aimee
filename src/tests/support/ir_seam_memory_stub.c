@@ -172,3 +172,11 @@ void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls
 
 const aimee_ir_plan_binding_t server_ir_plan_bindings[] = {{NULL, NULL}};
 const aimee_ir_plan_resource_t server_ir_plan_resources[] = {{NULL, NULL}};
+
+/* These shape-only fixtures use inert plans and no HTTP request context.
+ * Production refusal propagation is covered by test_ir_module_plan. */
+void server_ir_plan_refuse(const char *kind, void *context)
+{
+   (void)kind;
+   (void)context;
+}
