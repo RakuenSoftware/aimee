@@ -83,6 +83,14 @@ serving context. Fresh T2/T3 deployments pass 1,100 checks. This closes the memo
 envelope inheritance gap; inherited limits on the complete provider request and
 task composition, provider token counting and protected packing remain open.
 
+[Deployment-owned final request limits](../../validation/memory-operator-request-limits-2026-09-21.md)
+extend the final serialization gate with an opaque operator policy forwarded to
+Go. Go combines it with the caller's policy in one admission call; an absent or
+larger caller limit cannot bypass the deployment byte ceiling. Fresh T2/T3 stacks
+with a 32 KiB cap pass 1,246 checks, including 273 provider checks per placement.
+Task-composition inheritance, provider token counting and protected packing remain
+open, along with the broader all-surface release/receipt gates.
+
 Row-count heuristics and summary-only token estimates do not bound serialized model context. Full JSON items, metadata, wrappers, directives and duplicated procedure text can be larger than the representation charged to the budget. The existing outer ingress byte envelope is a useful backstop, but dropping a complete typed channel after assembly defeats the intended allocation.
 
 Use a single model-facing projection and verify the final request budget after every provider-affecting transformation. Keep explanation metadata outside the prompt unless a small field is explicitly useful to the model.

@@ -20,8 +20,9 @@ Two properties shape the whole module:
   provider prompt cache goes cold. That is why the module carries a cJSON-compatible
   printer rather than using `encoding/json`, which reorders object keys and HTML-escapes.
 
-It does not decide *whether* to call a provider, does not talk to providers, and does not
-predict cache residency. The proof planner in `proof.go` produces cost EVIDENCE only;
+The host chooses provider calls and routes. The Go admission stage enforces declared
+limits on the final serialized request; the module does not call providers or predict
+cache residency. The proof planner in `proof.go` produces cost EVIDENCE only;
 authorization requires a signed registry entry, and the production registry is empty by
 design.
 
@@ -120,6 +121,9 @@ reach the provider, including streaming and native host calls without HTTP
 context. Invalid deployment policy (including unsupported token caps/reserves)
 fails with `request_budget_policy_invalid` / HTTP 503. Invalid caller limits keep
 their HTTP 400 contract. Reduction settings cannot disable this admission.
+
+This setting applies at the common serialization fence used by Server Chat,
+Responses and Messages, plus native agent primary/fallback calls.
 
 Stage 8 metadata version 2 carries independent caller/operator lengths followed
 by their opaque JSON values; an absent caller has length zero. The response
