@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import signal
 import subprocess
 import threading
 import time
@@ -176,6 +177,7 @@ def inside(output, budget_benchmark=False):
         context = '<memory_data trust="untrusted">' + projection + '</memory_data>'
         tool = dict(name='inspect_memory_boundary', description='Fixture schema with Unicode αβ🦊 and "quotes".',
                     parameters=dict(type='object', properties=dict(record_id=dict(type='string')), required=['record_id']))
+        outage_cases = []
         for protocol in ('openai', 'anthropic'):
             model = prefix + '-' + protocol
             cases = [
@@ -194,6 +196,9 @@ def inside(output, budget_benchmark=False):
             ]
             for frontend, path, body in cases:
                 name = frontend + ' to ' + protocol
+                for streaming in ([False, True] if frontend in ('chat', 'messages') else [body['stream']]):
+                    outage_cases.append((name + (' streaming' if streaming else ' buffered'),
+                                         path, dict(body, stream=streaming)))
                 with lock:
                     before = len(captures)
                 status, response = api(path, body)
@@ -333,6 +338,53 @@ def inside(output, budget_benchmark=False):
                   calls[0].get('name') == tool['name'] and calls[0].get('call_id') == 'memory-boundary-call')
             check(name + ' preserves returned call arguments',
                   json.loads(calls[0].get('arguments', 'null')) == dict(record_id='synthetic'))
+        # Stop the real memory owner, rather than replacing its policy with a
+        # canned response. The production gateway-plan timeout must reach final
+        # dispatch across every frontend/provider format. Always resume/restart
+        # this exact child before cleanup or another test can use the appliance.
+        memory_pids = []
+        for process in Path('/proc').iterdir():
+            if not process.name.isdigit():
+                continue
+            try:
+                executable = (process / 'cmdline').read_bytes().split(b'\0')[0]
+            except (FileNotFoundError, PermissionError, ProcessLookupError):
+                continue
+            if executable.endswith(b'/aimee-module-memory'):
+                memory_pids.append(int(process.name))
+        check('provider refusal fixture identifies one real memory owner', len(memory_pids) == 1)
+        owner_pid = memory_pids[0]
+        os.kill(owner_pid, signal.SIGSTOP)
+        try:
+            for name, path, body in outage_cases:
+                before_outage = len(captures)
+                status, response = api(path, body)
+                check(name + ' paused memory owner reports explicit failure',
+                      status == (200 if body['stream'] else 503) and
+                      'unavailable' in list(strings(response)) and
+                      not any('MEMORY_BOUNDARY_OK' in text for text in strings(response)) and
+                      not any(e.get('type') in ('message_stop', 'response.completed')
+                              for e in response.get('events', [])))
+                check(name + ' paused memory owner sends zero provider requests',
+                      len(captures) == before_outage)
+        finally:
+            os.kill(owner_pid, signal.SIGCONT)
+            os.kill(owner_pid, signal.SIGTERM)
+        deadline = time.monotonic() + 75
+        while True:
+            status, recovered = api('/v1/memory/get', dict(id=str(memory_id)))
+            if status == 200 and recovered.get('memory', {}).get('content') == content:
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError('memory owner failed to recover after provider refusal fixture')
+            time.sleep(0.25)
+        check('provider refusal fixture recovers committed memory after owner restart', True)
+        name, path, body = outage_cases[0]
+        before_recovery = len(captures)
+        status, response = api(path, body)
+        check('new request after memory owner recovery dispatches exactly once',
+              status == 200 and len(captures) == before_recovery + 1 and
+              any('MEMORY_BOUNDARY_OK' in text for text in strings(response)))
         if budget_benchmark:
             idle_cpu = admission_idle_cpu()
     finally:
