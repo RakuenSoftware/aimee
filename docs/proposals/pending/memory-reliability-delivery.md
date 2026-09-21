@@ -44,8 +44,10 @@ downstream consumer freshness.
 The [derived-parent eligibility repair](../../validation/memory-derived-eligibility-2026-09-21.md)
 extends current-state gates to episodes, relations, summaries, scenes, typed
 metadata and graph feedback. Mixed-source hybrid files and profile counts cannot
-use a visible parent to admit a hidden or expired one. Full Go/PostgreSQL tests
-pass; fresh MCP/image validation is pending. Full MR-01 remains open.
+use a visible parent to admit a hidden or expired one. Full Go/PostgreSQL and
+race tests pass. Fresh application/harness `1989160bdf` passes **1,553/1,553 checks**
+(961 T2, 592 T3), including all 24 new MCP boundary cases. All image identities
+and provider caps were verified. Full MR-01 remains open.
 
 Delivery follows the program’s dependency order: eligibility/mutations and final
 payload budgets first, then evidence/receipts/coverage, views and indexing,

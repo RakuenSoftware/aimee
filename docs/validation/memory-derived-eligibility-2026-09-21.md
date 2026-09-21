@@ -32,7 +32,22 @@ Local validation:
   checks and all 17 S1 contract checks pass. Targeted runtime-role and public command race checks pass.
 - Fresh MCP cases traverse the C host/bus and Go owner for episode lookup,
   graph search, profiles and edges across current/future/expired/suppressed/
-  retired/restored parents. Fresh execution and image evidence are pending.
+  retired/restored parents. All 24 cases pass in the fresh run below.
 
 This closes confirmed current-serving gaps. It does not certify historical
 reconstruction, final release/revocation checks or all MR-01–18 acceptance.
+
+Fresh application/harness `1989160bdfb697ffb891f4fd23eee38994d1c120` passes
+**1,553/1,553 checks**: **961 enrolled T2**, **592 standalone T3**. Shared memory
+passes 297 checks, including the 24 derived-parent cases. Both placements retain
+214 private-memory, 298 provider-boundary and 37 native asynchronous checks.
+
+- [T2 verdicts and provider/native receipts](memory-derived-eligibility-2026-09-21/fresh-t2-1989160bdf.json)
+- [T3 verdicts and provider/native receipts](memory-derived-eligibility-2026-09-21/fresh-t3-1989160bdf.json)
+- [Exact images and cleanup](memory-derived-eligibility-2026-09-21/image-identities-1989160bdf.json)
+
+Application image: `sha256:5d99f0520b84d5b25da1ffe63416c23a63ae6b133201e6538d5d445f574c2e10`.
+All nine container identities and all three application instances' actual 32 KiB
+provider caps were verified. The nine owned containers and nine empty networks
+were removed after collection; images, volumes and raw receipts remain.
+Subsequent source-version binding work is not covered by these images.
