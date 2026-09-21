@@ -318,7 +318,7 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
    agent_admission_release(admit_slot);
    if (rc == 0)
       provider_catalog_record_success(ag->name);
-   else
+   else if (rc != AGENT_RC_CONTEXT_REFUSED)
    {
       const char *ec = agent_error_is_registration_failure(out->error) ? "registration_error"
                        : agent_error_is_retryable(out->error)          ? "retryable"
@@ -448,6 +448,8 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
             db1_agent_cache_put(role, user_prompt, out->response);
          return 0;
       }
+      if (rc == AGENT_RC_CONTEXT_REFUSED)
+         return rc;
       if (cfg->route_pinned)
       {
          free(out->response);
@@ -743,7 +745,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                 "delegate agent '%s' retryable/at-limit, trying fallback chain (%d entries)",
                 ag->name, cfg->fallback_count);
 
-      for (int fi = 0; fi < cfg->fallback_count && rc != 0; fi++)
+      for (int fi = 0; fi < cfg->fallback_count && rc != 0 && rc != AGENT_RC_CONTEXT_REFUSED; fi++)
       {
          if (agent_request_cancelled())
             break; /* stop trying fallbacks once the turn is cancelled */
@@ -1585,6 +1587,16 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
                                         const char *role, const char *custom_prompt,
                                         int skip_kb_context)
 {
+   return agent_build_exec_context_checked(agent, network, role, custom_prompt, skip_kb_context,
+                                           NULL, 0);
+}
+
+char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
+                                       const char *role, const char *custom_prompt,
+                                       int skip_kb_context, char *error, size_t error_len)
+{
+   if (error && error_len)
+      error[0] = '\0';
    task_type_t task_type = agent_task_type_for_role(role);
    if (task_type != TASK_TYPE_GENERAL)
       aimee_log(LOG_DEBUG, "agent_context", "context assembly: task_type=%s",
@@ -1607,7 +1619,11 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
    size_t cap = content_budget + 4096; /* extra room for headers */
    char *buf = malloc(cap);
    if (!buf)
+   {
+      if (error && error_len)
+         snprintf(error, error_len, "context assembly allocation failed");
       return NULL;
+   }
    size_t pos = 0;
 
    /* Compute per-category budgets from the content budget.
@@ -1765,6 +1781,25 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
                 server_user_memory_recall_json(custom_prompt, limit_tokens, session_start);
          cJSON *envelope = recall_envelope ? cJSON_Parse(recall_envelope) : NULL;
          free(recall_envelope);
+         /* The Go owner decides whether recall is usable. Preserve explicit
+          * refusals instead of treating an absent recall member as empty memory.
+          * No host interpretation of memory policy or individual error kinds. */
+         const char *status =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "status"));
+         if (status && strcmp(status, "ok") != 0)
+         {
+            const char *kind =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "kind"));
+            const char *message =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "message"));
+            if (error && error_len)
+               snprintf(error, error_len, "memory context refused: %s%s%s", kind ? kind : status,
+                        message ? ": " : "", message ? message : "");
+            cJSON_Delete(envelope);
+            kb_client_memory_scope_context_clear();
+            free(buf);
+            return NULL;
+         }
          cJSON *recall_node =
              envelope ? cJSON_GetObjectItemCaseSensitive(envelope, "recall") : NULL;
          cJSON *recall = recall_node ? cJSON_DetachItemViaPointer(envelope, recall_node) : NULL;
@@ -2206,7 +2241,8 @@ void agent_print_context(const agent_config_t *cfg)
    agent_t *ag = &((agent_config_t *)cfg)->agents[0]; /* use first agent for context */
    const agent_network_t *net = cfg->network.ssh_entry[0] ? &cfg->network : NULL;
 
-   char *ctx = agent_build_exec_context(ag, net, NULL);
+   char error[512];
+   char *ctx = agent_build_exec_context_checked(ag, net, NULL, NULL, 0, error, sizeof(error));
    if (ctx)
    {
       printf("%s\n", ctx);
@@ -2214,7 +2250,7 @@ void agent_print_context(const agent_config_t *cfg)
    }
    else
    {
-      printf("Failed to assemble context.\n");
+      printf("Failed to assemble context: %s\n", error);
    }
 }
 

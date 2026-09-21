@@ -208,6 +208,14 @@ provider tokens and source-version/dispatch binding remain open.
 All 58 remote CI checks pass on `2269c6c1b9`, including sanitizers and encrypted
 upgrade/rollback; its sole follow-up change is the exact MCP source-review record.
 
+[Native context refusal propagation](../../validation/memory-context-refusals-2026-09-21.md)
+now preserves explicit Go recall failures through initial native assembly and
+refresh, stopping before the next provider call and preventing provider fallback.
+MCP also retains quarantine/degraded responses before session guidance. Local
+production-path fixtures cover zero initial dispatches, refusal after five turns
+and successful recovery on the same thread. HTTP ingress omission paths and the
+remaining MR-03 acceptance work remain open; fresh deployment evidence is pending.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

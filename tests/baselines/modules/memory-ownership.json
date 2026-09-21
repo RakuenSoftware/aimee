@@ -2073,7 +2073,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "7dfe5addbcf20b6ca74381ff2927279a77195ade663b8885a5235d897691ec0b"
+      "sha256": "666deaba8729764b4a53db84ad6f56fb737da4ddd8d532d03049bd32c99796bb"
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2176,7 +2176,7 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "41b75a41a3591337828fd473e26eaa339a9a40824151a1876d91a52cadc271f9"
+      "sha256": "8a8ef87ddd55c56ccfb14440ad4e10bb141e33aec98b13645caf21a6186cfb0d"
     },
     "src/server/server_memory.c": {
       "disposition": "host-transport",
@@ -2395,6 +2395,13 @@
         "memory_recall"
       ],
       "sha256": "cbace789f30dfb9b030e7acf16bc081cdd1f16a06d8395024f969f051cb7a119"
+    },
+    "src/tests/test_mcp_directive_transport.c": {
+      "disposition": "host-fixture",
+      "symbols": [
+        "kb_client_memory_recall_shared_json"
+      ],
+      "sha256": "46d3f78c321aa9111c3cdcf3b43e62792d25a2b1c3ef97031e02ec1e6d5358c9"
     },
     "src/tests/test_mcp_memory_answer.c": {
       "disposition": "host-fixture",

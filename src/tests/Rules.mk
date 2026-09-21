@@ -617,6 +617,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-model-provider \
                $(TESTPREFIX)/unit-test-delegate-driver \
                $(TESTPREFIX)/unit-test-agent-http \
+               $(TESTPREFIX)/unit-test-agent-context-refusal \
                $(TESTPREFIX)/unit-test-middleware \
                $(TESTPREFIX)/unit-test-verify-hook \
                $(TESTPREFIX)/unit-test-process-mgr \
@@ -5764,6 +5765,31 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
                                 $(OBJDIR)/server/agent_tools.o \
                                 $(OBJDIR)/modules/delegates/delegate_role.o \
                                 $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_context_refusal.o \
+                                 $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
+                                $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
+                                $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/ir/aimee_ir.o \
+                                $(OBJDIR)/modules/delegates/aimee_ir_rescue.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
+                                $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
+                                $(OBJDIR)/server/agent_request_shaping.o \
+                                $(OBJDIR)/modules/delegates/delegate_driver.o \
+                                $(OBJDIR)/modules/delegates/delegate_openai.o \
+                                $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
+                                $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o \
+                                $(OBJDIR)/server/agent_tools.o \
+                                $(OBJDIR)/modules/delegates/delegate_role.o \
+                                $(TEST_DATA_OBJS) $(filter-out $(OBJDIR)/server/http_retry.o,$(TEST_WORKSPACE_OBJS_EXTRA)) \
+                                $(DB1_CLIENT_OBJS) $(OBJDIR)/db1_store_ready.o \
+                                $(OBJDIR)/server/agent_fallback.o $(OBJDIR)/server/server_error_kind.o \
+                                $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/middleware.o \
+                                $(OBJDIR)/server/liveness.o $(OBJDIR)/server/otel.o \
+                                $(OBJDIR)/payload_rewrite.o $(OBJDIR)/server/execution_policy_bus.o \
+                                $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o \
+                                $(OBJDIR)/server/compact_prune.o $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+                                $(OBJDIR)/tests/support/role_template_toolset_stub.o \
+                                $(OBJDIR)/tests/support/delegate_role_seam_stub.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Links the real dispatch TU against the shared test object sets — no stubs needed

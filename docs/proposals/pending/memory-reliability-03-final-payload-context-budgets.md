@@ -134,6 +134,12 @@ No implicit “always include the first result” exception is permitted. Missin
 
 Preserve user constraints, negation, numerical bounds, deadlines, required identifiers and authority-bearing instructions through any condensation step. Bind transformed bytes to the request/attempt and require existing economizer admission before applying a cost-saving transform. Heuristic commitment extraction is a check, not proof of semantic equivalence. Failed validation falls back only if the original still fits; otherwise return an explicit overflow outcome.
 
+[Native refusal propagation](../../validation/memory-context-refusals-2026-09-21.md)
+now stops initial native dispatch and refresh on explicit Go recall refusal and
+preserves that result through routing/fallback. MCP retains non-success statuses
+before guidance. HTTP ingress omission paths and full protected-context rendering
+remain acceptance work.
+
 ## Implementation slices
 
 1. Introduce the projection/result types and provider-bound counting adapters. Add byte-accounting coverage for every component.

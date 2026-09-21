@@ -304,7 +304,7 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
     * An overflow must not become a successful empty recall or a generic error. */
    const char *recall_status =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "status"));
-   if (recall_status && strcmp(recall_status, "error") == 0)
+   if (recall_status && strcmp(recall_status, "ok") != 0)
    {
       cJSON *failure = text_content(envelope);
       free(envelope);
