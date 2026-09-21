@@ -491,13 +491,16 @@ int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Personal recall uses the same memory module as shared recall, with the
  * process's own data grant. No KB request is needed to create its envelope. */
-char *server_user_memory_recall_json(const char *hint, int limit_tokens, int session_start)
+static char *user_memory_recall_json(const char *hint, int limit_tokens, int session_start,
+                                     const size_t *native_bytes)
 {
    cJSON *request = cJSON_CreateObject();
    if (!request)
       return NULL;
    cJSON_AddStringToObject(request, "task_hint", hint ? hint : "");
    cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
+   if (native_bytes)
+      cJSON_AddNumberToObject(request, "native_context_bytes", (double)*native_bytes);
    cJSON_AddBoolToObject(request, "session_start", session_start != 0);
    cJSON *response = server_invoke_module_operation("memory.runtime", "personal-recall", request,
                                                     "user memory module unavailable");
@@ -513,4 +516,14 @@ char *server_user_memory_recall_json(const char *hint, int limit_tokens, int ses
                     "\"integrity_verdict\":\"quarantine\"}");
    }
    return json;
+}
+
+char *server_user_memory_recall_json(const char *hint, int limit_tokens, int session_start)
+{
+   return user_memory_recall_json(hint, limit_tokens, session_start, NULL);
+}
+char *server_user_memory_recall_native_json(const char *hint, int limit_tokens, int session_start,
+                                            size_t native_bytes)
+{
+   return user_memory_recall_json(hint, limit_tokens, session_start, &native_bytes);
 }

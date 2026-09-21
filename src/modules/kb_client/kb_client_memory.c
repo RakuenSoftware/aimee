@@ -413,7 +413,8 @@ int kb_client_memory_compact_windows(int *summary_count, int *fact_count)
 /* The native host transports the scoped shared bundle to its local Go memory
  * owner. Selection, collision precedence and final budgeting belong to Go. */
 static char *memory_recall_json(const char *task_hint, int limit_tokens, int session_start,
-                                const char *graph_code_fusion_state, int include_user)
+                                const char *graph_code_fusion_state, int include_user,
+                                const size_t *native_bytes)
 {
    cJSON *req = cJSON_CreateObject();
    kbc_memory_add_scope_context(req);
@@ -450,6 +451,8 @@ static char *memory_recall_json(const char *task_hint, int limit_tokens, int ses
       }
       cJSON_AddStringToObject(request, "operation", "compose-recall");
       cJSON_AddStringToObject(request, "shared_json", j);
+      if (native_bytes)
+         cJSON_AddNumberToObject(request, "native_context_bytes", (double)*native_bytes);
       cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
       cJSON_AddBoolToObject(request, "session_start", session_start != 0);
       cJSON *reply = NULL;
@@ -476,14 +479,21 @@ static char *memory_recall_json(const char *task_hint, int limit_tokens, int ses
 char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,
                                           int session_start)
 {
-   return memory_recall_json(task_hint, limit_tokens, session_start, "on", 0);
+   return memory_recall_json(task_hint, limit_tokens, session_start, "on", 0, NULL);
 }
 
 /* Preserve the combined bundle for existing composed-context consumers. */
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
                                       const char *graph_code_fusion_state)
 {
-   return memory_recall_json(task_hint, limit_tokens, session_start, graph_code_fusion_state, 1);
+   return memory_recall_json(task_hint, limit_tokens, session_start, graph_code_fusion_state, 1,
+                             NULL);
+}
+
+char *kb_client_memory_recall_native_json(const char *task_hint, int limit_tokens,
+                                          int session_start, size_t native_bytes)
+{
+   return memory_recall_json(task_hint, limit_tokens, session_start, "on", 1, &native_bytes);
 }
 
 char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int session_start)

@@ -508,6 +508,9 @@ char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int 
 /* Shared-store recall without the legacy personal-memory merge. */
 char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,
                                           int session_start);
+/* Ask the Go owner to render within the remaining native context allocation. */
+char *kb_client_memory_recall_native_json(const char *task_hint, int limit_tokens,
+                                          int session_start, size_t native_bytes);
 /* ABI-compatible legacy form; the fusion argument is ignored. The receiving
  * instance applies its own configuration. */
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,

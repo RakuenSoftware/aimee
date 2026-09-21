@@ -9,6 +9,7 @@
 #include "support/delegate_role_seam_stub.h"
 #include "http_retry.h"
 #include "request_context.h"
+#include "aimee_sha256.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,7 @@ static int recalls;
 static int refuse_after;
 static int provider_calls;
 static int final_response;
+static int malformed_projection;
 
 int http_retry_post_context_bytes(const char *url, const char *auth_header, const void *body,
                                   size_t body_len, char **response_buf, int timeout_ms,
@@ -88,10 +90,62 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
       recalls++;
       *result = cJSON_CreateObject();
       cJSON_AddStringToObject(*result, "status", "ok");
-      cJSON_AddStringToObject(*result, "json",
-                              refuse_after && recalls < refuse_after
-                                  ? "{\"status\":\"ok\",\"recall\":{}}"
-                                  : recall_reply);
+      const char *raw = refuse_after && recalls < refuse_after ? "{\"status\":\"ok\",\"recall\":{}}"
+                                                               : recall_reply;
+      cJSON *envelope = cJSON_Parse(raw);
+      const char *status =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "status"));
+      if (status && !strcmp(status, "ok"))
+      {
+         const cJSON *limit = cJSON_GetObjectItemCaseSensitive(args, "native_context_bytes");
+         assert(cJSON_IsNumber(limit) && limit->valuedouble > 0);
+         const char *text = "# Recall\nGo owner retained complete context.\n";
+         char digest[72] = "sha256:";
+         assert(aimee_sha256_hex(text, strlen(text), digest + 7) == 0);
+         cJSON *projection = cJSON_AddObjectToObject(envelope, "native_context");
+         cJSON_AddNumberToObject(projection, "schema_version", 1);
+         cJSON_AddStringToObject(projection, "text", text);
+         cJSON_AddNumberToObject(projection, "rendered_bytes", (double)strlen(text));
+         cJSON_AddItemToObject(projection, "max_context_bytes", cJSON_Duplicate(limit, 1));
+         cJSON_AddStringToObject(projection, "digest", digest);
+         cJSON *ids = cJSON_AddArrayToObject(projection, "retained_reminder_ids");
+         cJSON_AddItemToArray(ids, cJSON_CreateString("9223372036854775807"));
+         switch (malformed_projection)
+         {
+         case 1:
+            cJSON_ReplaceItemInObjectCaseSensitive(projection, "digest",
+                                                   cJSON_CreateString("sha256:bad"));
+            break;
+         case 2:
+            cJSON_ReplaceItemInObjectCaseSensitive(projection, "rendered_bytes",
+                                                   cJSON_CreateNumber(1));
+            break;
+         case 3:
+            cJSON_ReplaceItemInObjectCaseSensitive(projection, "max_context_bytes",
+                                                   cJSON_CreateNumber(0));
+            break;
+         case 4:
+            cJSON_ReplaceItemInObjectCaseSensitive(projection, "schema_version",
+                                                   cJSON_CreateNumber(2));
+            break;
+         case 5:
+            cJSON_AddItemToArray(ids, cJSON_CreateNumber(1));
+            break;
+         case 6:
+            cJSON_AddItemToArray(ids, cJSON_CreateString("9223372036854775808"));
+            break;
+         case 7:
+            cJSON_AddItemToArray(ids, cJSON_CreateString("0"));
+            break;
+         case 8:
+            cJSON_AddItemToArray(ids, cJSON_CreateString("01"));
+            break;
+         }
+      }
+      char *body = cJSON_PrintUnformatted(envelope);
+      cJSON_AddStringToObject(*result, "json", body);
+      free(body);
+      cJSON_Delete(envelope);
       return 1;
    }
    return 0;
@@ -159,7 +213,20 @@ int main(void)
                                                  error, sizeof(error));
    assert(text && !error[0]);
    assert(strstr(text, "original prompt"));
+   assert(strstr(text, "Go owner retained complete context."));
    free(text);
+   /* The host validates the complete projection before provider dispatch.
+    * In particular, one valid ID must not hide a later malformed identity. */
+   for (malformed_projection = 1; malformed_projection <= 8; malformed_projection++)
+   {
+      agent_result_t invalid_result;
+      int invalid_rc = agent_execute_with_tools_for_role(
+          &agent, &network, "review", "original prompt", "task", 128, 0, &invalid_result);
+      assert(invalid_rc == AGENT_RC_CONTEXT_REFUSED && provider_calls == 0);
+      assert(strstr(invalid_result.error, "invalid_projection"));
+      free(invalid_result.response);
+   }
+   malformed_projection = 0;
    /* Initial assembly succeeds; a new owner refusal arrives at turn-five
     * refresh. The native loop must not send request six with stale context. */
    recalls = 0;

@@ -93,6 +93,37 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	if !ok || !strings.Contains(personalJSON, `"id":9007199254740993`) || !strings.Contains(personalJSON, `"store":"user"`) || !strings.Contains(personalJSON, full) || strings.Contains(personalJSON, "shared name") {
 		t.Fatal("personal recall envelope lost", personal)
 	}
+	for _, operation := range []string{"personal-recall", "compose-recall"} {
+		request := map[string]any{"operation": operation, "limit_tokens": 8192, "native_context_bytes": 16384, "task_hint": "identity:name"}
+		if operation == "compose-recall" {
+			request["shared_json"] = string(sharedJSON)
+		}
+		encoded, _ := json.Marshal(request)
+		result := runHostRuntime(t, handler, string(encoded))
+		var projected struct {
+			Status     string                 `json:"status"`
+			Projection nativeRecallProjection `json:"native_context"`
+			Recall     recallBundle           `json:"recall"`
+		}
+		if json.Unmarshal([]byte(result["json"].(string)), &projected) != nil || projected.Status != "ok" || projected.Projection.Version != 1 || !strings.Contains(projected.Projection.Text, full) || projected.Recall.Identity[0].ID != 9007199254740993 {
+			t.Fatal("native projection lost personal identity", operation, result)
+		}
+		if operation == "compose-recall" && !strings.Contains(projected.Projection.Text, "hard policy") {
+			t.Fatal("native hard rule omitted", result)
+		}
+		request["native_context_bytes"] = 0
+		encoded, _ = json.Marshal(request)
+		result = runHostRuntime(t, handler, string(encoded))
+		if operation == "compose-recall" {
+			if !strings.Contains(result["json"].(string), "protected_context_overflow") {
+				t.Fatal("mandatory zero allocation accepted", result)
+			}
+		} else {
+			if json.Unmarshal([]byte(result["json"].(string)), &projected) != nil || projected.Status != "ok" || projected.Projection.Text != "" || len(projected.Recall.Identity) != 0 {
+				t.Fatal("personal zero allocation bypassed", result)
+			}
+		}
+	}
 	raw, status := call(string(sharedJSON), 8192)
 	if status != bus.ModuleStatusOK {
 		t.Fatal(status)

@@ -291,3 +291,12 @@ The shared-database bootstrap fixture now writes through the real Go memory
 handler so canonical KB mutations get their scoped transaction and Server writes
 use user scope. Both bootstrap orders and concurrent bootstrap pass with the
 existing rows preserved.
+
+
+[Native recall projection validation](../../validation/memory-native-recall-2026-09-21.md)
+moves native recall rendering, complete hard-rule reservation and retained
+reminder selection into the existing Go operation. The host forwards its remaining
+byte allocation and verifies the opaque result without another RPC. Exact int64
+reminder transport now survives public selection, marking and completion.
+Local Go/PostgreSQL and native refusal regressions cover this change; fresh-image
+native acceptance and the remaining MR-03/MR-06 clauses stay open.

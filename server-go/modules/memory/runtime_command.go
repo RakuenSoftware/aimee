@@ -15,6 +15,14 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	operation := args.stringOr("operation", "")
+	if _, exists := args["native_context_bytes"]; exists {
+		if operation != "personal-recall" && operation != "compose-recall" {
+			return runtimeJSONText(commandResult(commandError("unsupported_mode", "native projection requires recall")))
+		}
+		if _, err := nativeRecallLimit(args); err != nil {
+			return runtimeJSONText(commandResult(commandError("invalid_argument", err.Error())))
+		}
+	}
 	if _, exists := args["idempotency_key"]; exists && operation != "user-supersede" && operation != "user-mcp-supersede" {
 		return runtimeJSONText(commandResult(commandError("unsupported_mode", "idempotency_key requires a private correction")))
 	}
@@ -49,7 +57,15 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		if options.placement != PlacementServer {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
-		return runtimeJSONText(handleRecallCommand(options, invocation, args))
+		encoded, status := handleRecallCommand(options, invocation, args)
+		if status != bus.ModuleStatusOK {
+			return nil, status
+		}
+		raw, err := bus.DecodeCommandResult(encoded)
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		return nativeRecallText(raw, args)
 	case "compose-recall":
 		return handleRecallComposition(options, invocation, args)
 	case "maintenance-model-plan":

@@ -3,6 +3,8 @@
 #include "agent_admission.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
 #include "aimee_errors.h"
+#include "aimee_sha256.h"
+#include "json_int64.h"
 #include "db1_client/db1.h"
 #include "db1_client/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include <aimee/delegates/delegate_role.h>
@@ -1591,6 +1593,67 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
                                            NULL, 0);
 }
 
+static int append_native_memory_projection(const cJSON *envelope, size_t available, char *buf,
+                                           size_t cap, size_t *pos, int mark_reminders, char *error,
+                                           size_t error_len)
+{
+   /* The Go owner decides whether recall is usable. Preserve explicit
+    * refusals instead of treating an absent recall member as empty memory.
+    * No host interpretation of memory policy or individual error kinds. */
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "status"));
+   if (!status || strcmp(status, "ok") != 0)
+   {
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "kind"));
+      const char *message =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "message"));
+      if (error && error_len)
+         snprintf(error, error_len, "memory context refused: %s%s%s",
+                  kind ? kind : (status ? status : "unavailable"), message ? ": " : "",
+                  message ? message : "");
+      return -1;
+   }
+   const cJSON *projection = cJSON_GetObjectItemCaseSensitive(envelope, "native_context");
+   const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(projection, "text"));
+   const char *digest =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(projection, "digest"));
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(projection, "schema_version");
+   const cJSON *bytes = cJSON_GetObjectItemCaseSensitive(projection, "rendered_bytes");
+   const cJSON *limit = cJSON_GetObjectItemCaseSensitive(projection, "max_context_bytes");
+   const cJSON *reminders = cJSON_GetObjectItemCaseSensitive(projection, "retained_reminder_ids");
+   char actual[72] = "sha256:";
+   int valid = text && digest && cJSON_IsNumber(version) && version->valuedouble == 1 &&
+               cJSON_IsNumber(bytes) && bytes->valuedouble == (double)strlen(text) &&
+               cJSON_IsNumber(limit) && limit->valuedouble == (double)available &&
+               strlen(text) <= available && cJSON_IsArray(reminders) &&
+               aimee_sha256_hex(text, strlen(text), actual + 7) == 0 && !strcmp(actual, digest);
+   const cJSON *id;
+   cJSON_ArrayForEach(id, reminders)
+   {
+      int64_t parsed;
+      if (!cJSON_IsString(id) || !jo_read_i64_exact(id, &parsed) || parsed <= 0)
+         valid = 0;
+   }
+   if (!valid)
+   {
+      if (error && error_len)
+         snprintf(error, error_len, "memory context refused: invalid_projection");
+      return -1;
+   }
+   ctx_append_bytes(buf, cap, pos, text, strlen(text));
+   if (mark_reminders)
+   {
+      cJSON_ArrayForEach(id, reminders)
+      {
+         const char *decimal = cJSON_GetStringValue(id);
+         cJSON *trigger_args = cJSON_CreateObject();
+         cJSON_AddStringToObject(trigger_args, "id", decimal);
+         free(kb_v1_action_request("memory.prospective_mark_triggered", trigger_args));
+      }
+   }
+
+   return 0;
+}
+
 char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
                                        const char *role, const char *custom_prompt,
                                        int skip_kb_context, char *error, size_t error_len)
@@ -1772,98 +1835,25 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
          int limit_tokens = session_start ? config_memory_recall_limit_tokens_session()
                                           : config_memory_recall_limit_tokens_turn();
          /* Graph-code fusion is always on for recall. */
-         char *recall_envelope = skip_kb_client
-                                     ? NULL
-                                     : kb_client_memory_recall_json_ex(custom_prompt, limit_tokens,
-                                                                       session_start, "on");
-         if (!recall_envelope)
-            recall_envelope =
-                server_user_memory_recall_json(custom_prompt, limit_tokens, session_start);
+         size_t available = pos < cap ? cap - pos - 1 : 0;
+         char *recall_envelope =
+             skip_kb_client ? server_user_memory_recall_native_json(custom_prompt, limit_tokens,
+                                                                    session_start, available)
+                            : kb_client_memory_recall_native_json(custom_prompt, limit_tokens,
+                                                                  session_start, available);
          cJSON *envelope = recall_envelope ? cJSON_Parse(recall_envelope) : NULL;
          free(recall_envelope);
-         /* The Go owner decides whether recall is usable. Preserve explicit
-          * refusals instead of treating an absent recall member as empty memory.
-          * No host interpretation of memory policy or individual error kinds. */
-         const char *status =
-             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "status"));
-         if (status && strcmp(status, "ok") != 0)
+         if (append_native_memory_projection(envelope, available, buf, cap, &pos, !skip_kb_client,
+                                             error, error_len) != 0)
          {
-            const char *kind =
-                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "kind"));
-            const char *message =
-                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(envelope, "message"));
-            if (error && error_len)
-               snprintf(error, error_len, "memory context refused: %s%s%s", kind ? kind : status,
-                        message ? ": " : "", message ? message : "");
             cJSON_Delete(envelope);
             kb_client_memory_scope_context_clear();
             free(buf);
             return NULL;
          }
-         cJSON *recall_node =
-             envelope ? cJSON_GetObjectItemCaseSensitive(envelope, "recall") : NULL;
-         cJSON *recall = recall_node ? cJSON_DetachItemViaPointer(envelope, recall_node) : NULL;
+         /* Empty is still the owner's final selection; do not bypass its budget. */
+         recall_injected = 1;
          cJSON_Delete(envelope);
-         if (recall)
-         {
-            /* Flatten the six sections into the prompt exactly in
-             * priority order — identity first, directives last — so
-             * truncation downstream drops the least-valuable sections
-             * first. Each section emits an id+text line per item. */
-            static const char *sections[][2] = {{"identity", "Identity"},
-                                                {"preferences", "Preferences"},
-                                                {"active_context", "Active Context"},
-                                                {"open_commitments", "Open Commitments"},
-                                                {"reminders", "Reminders"},
-                                                {"directives", "Directives"},
-                                                {NULL, NULL}};
-            int any = 0;
-            for (int s = 0; sections[s][0] && pos < cap - 256; s++)
-            {
-               cJSON *arr = cJSON_GetObjectItemCaseSensitive(recall, sections[s][0]);
-               int n = cJSON_GetArraySize(arr);
-               if (n <= 0)
-                  continue;
-               if (!any)
-               {
-                  ctx_appendf(buf, cap, &pos, "# Recall\n");
-                  any = 1;
-               }
-               ctx_appendf(buf, cap, &pos, "## %s\n", sections[s][1]);
-               cJSON *it = NULL;
-               cJSON_ArrayForEach(it, arr)
-               {
-                  const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(it, "text"));
-                  const char *key = cJSON_GetStringValue(cJSON_GetObjectItem(it, "key"));
-                  if (pos >= cap - 128)
-                     break;
-                  ctx_appendf(buf, cap, &pos, "- %s%s%s\n", text ? text : "",
-                              key && key[0] ? " — " : "", key ? key : "");
-               }
-            }
-            if (any)
-            {
-               ctx_appendf(buf, cap, &pos, "\n");
-               recall_injected = 1;
-               /* Reminders surfaced in the recall block must still
-                * flip `once` reminders to `triggered` so they drop out
-                * on the next turn, matching prospective recall behavior. */
-               cJSON *rems = cJSON_GetObjectItemCaseSensitive(recall, "reminders");
-               cJSON *it = NULL;
-               cJSON_ArrayForEach(it, rems)
-               {
-                  long long id =
-                      (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
-                  if (id > 0)
-                  {
-                     cJSON *trigger_args = cJSON_CreateObject();
-                     cJSON_AddNumberToObject(trigger_args, "id", (double)id);
-                     free(kb_v1_action_request("memory.prospective_mark_triggered", trigger_args));
-                  }
-               }
-            }
-            cJSON_Delete(recall);
-         }
       }
    }
 
@@ -1881,33 +1871,18 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
          cJSON *match_args = cJSON_CreateObject();
          cJSON_AddStringToObject(match_args, "turn_text", custom_prompt ? custom_prompt : "");
          cJSON_AddNumberToObject(match_args, "max", cap_matches);
+         size_t available = pos < cap ? cap - pos - 1 : 0;
+         cJSON_AddNumberToObject(match_args, "native_context_bytes", (double)available);
          char *matches_json = kb_v1_action_request("memory.prospective_match", match_args);
          cJSON *response = matches_json ? cJSON_Parse(matches_json) : NULL;
          free(matches_json);
-         cJSON *matches = cJSON_GetObjectItemCaseSensitive(response, "matches");
-         cJSON *status = cJSON_GetObjectItemCaseSensitive(response, "status");
-         if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 &&
-             cJSON_IsArray(matches) && cJSON_GetArraySize(matches) > 0)
+         if (append_native_memory_projection(response, available, buf, cap, &pos, 1, error,
+                                             error_len) != 0)
          {
-            ctx_appendf(buf, cap, &pos, "# Reminders\n");
-            cJSON *item = NULL;
-            cJSON_ArrayForEach(item, matches)
-            {
-               if (pos >= cap - 256)
-                  break;
-               const char *action =
-                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "action_text"));
-               const char *trigger =
-                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "trigger_text"));
-               cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
-               if (!action || !trigger || !cJSON_IsNumber(id) || id->valuedouble <= 0)
-                  continue;
-               ctx_appendf(buf, cap, &pos, "- %s (when: %s)\n", action, trigger);
-               cJSON *trigger_args = cJSON_CreateObject();
-               cJSON_AddNumberToObject(trigger_args, "id", id->valuedouble);
-               free(kb_v1_action_request("memory.prospective_mark_triggered", trigger_args));
-            }
-            ctx_appendf(buf, cap, &pos, "\n");
+            cJSON_Delete(response);
+            kb_client_memory_scope_context_clear();
+            free(buf);
+            return NULL;
          }
          cJSON_Delete(response);
       }
