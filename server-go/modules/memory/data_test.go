@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	store "github.com/JBailes/aimee/server-go/db"
 )
 
 func TestRecallGatePolicyLivesInGo(t *testing.T) {
@@ -373,6 +374,11 @@ func TestMemoryFailureClassDoesNotExposeErrorDetails(t *testing.T) {
 		{context.Canceled, "cancelled"},
 		{fmt.Errorf("credential-bearing error"), "internal"},
 		{fmt.Errorf("private detail: %w", &pgconn.PgError{Code: "40P01", Message: "secret SQL", Detail: "private row"}), "sqlstate_40P01"},
+		{fmt.Errorf("private wire detail: %w", &store.StoreError{SQLState: "23503", Message: "private row", Op: "secret statement"}), "sqlstate_23503"},
+		{&store.StoreError{SQLState: "S\nSQL", Message: "private"}, "internal"},
+		{fmt.Errorf("private transport: %w", store.ErrStoreUnavailable), "store_unavailable"},
+		{store.ErrResultTooLarge, "result_capacity"},
+		{store.ErrTxClosed, "transaction_closed"},
 		{&pgconn.PgError{Code: "secret"}, "internal"},
 		{&pgconn.PgError{Code: "A\nBCD"}, "internal"},
 	} {

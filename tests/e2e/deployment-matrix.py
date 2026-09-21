@@ -607,7 +607,7 @@ def main():
         # Export only this fixed diagnostic grammar. Full Docker output may
         # contain bootstrap credentials, request bodies or SQL driver details.
         failures = []
-        pattern = re.compile(r'memory data failure operation="([a-z-]{1,64})" trace=([0-9]+) status=([0-9]+) class=(internal|deadline|cancelled|sqlstate_[0-9A-Z]{5})(?=\s|$)')
+        pattern = re.compile(r'memory data failure operation="([a-z-]{1,64})" trace=([0-9]+) status=([0-9]+) class=(internal|deadline|cancelled|store_unavailable|result_capacity|transaction_closed|sqlstate_[0-9A-Z]{5})(?=\s|$)')
         for stack in stacks:
             try:
                 logs = subprocess.run(['docker', 'logs', '--tail', '2000', stack.application],

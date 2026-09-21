@@ -2895,17 +2895,30 @@ func memoryFailureClass(err error) string {
 	if errors.Is(err, context.Canceled) {
 		return "cancelled"
 	}
+	var wireError *store.StoreError
 	var sqlError interface{ SQLState() string }
-	if errors.As(err, &sqlError) {
-		code := sqlError.SQLState()
-		if len(code) == 5 {
-			for _, c := range code {
-				if !(c >= '0' && c <= '9' || c >= 'A' && c <= 'Z') {
-					return "internal"
-				}
-			}
+	code := ""
+	if errors.As(err, &wireError) {
+		code = wireError.SQLState
+	} else if errors.As(err, &sqlError) {
+		code = sqlError.SQLState()
+	}
+	if len(code) == 5 {
+		valid := true
+		for _, c := range code {
+			valid = valid && (c >= '0' && c <= '9' || c >= 'A' && c <= 'Z')
+		}
+		if valid {
 			return "sqlstate_" + code
 		}
+	}
+	switch {
+	case errors.Is(err, store.ErrStoreUnavailable):
+		return "store_unavailable"
+	case errors.Is(err, store.ErrResultTooLarge):
+		return "result_capacity"
+	case errors.Is(err, store.ErrTxClosed):
+		return "transaction_closed"
 	}
 	return "internal"
 }

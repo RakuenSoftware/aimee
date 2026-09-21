@@ -55,6 +55,9 @@ curated episode key. The E2E fixture now uses separate parent and authored episo
 keys. The deletion failure's cause is still unresolved. This change retains failed
 MCP responses and exports only fixed
 memory failure categories/SQLSTATEs from logs, excluding SQL, request content,
-connection strings and driver messages. No retries or eligibility relaxations
+connection strings and driver messages. Classification covers the production
+store-bus `StoreError`, native PostgreSQL errors, unavailable store transport,
+closed transactions and result-capacity refusals; unit/race tests verify that
+wrapped private messages cannot enter the diagnostic output. No retries or eligibility relaxations
 were added. Fresh validation of this change must not be represented as a proven
 repair of the unresolved deletion failure.
