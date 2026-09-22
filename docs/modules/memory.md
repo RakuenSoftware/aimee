@@ -625,7 +625,7 @@ memory implementation. The C bus itself is unchanged by this cutover.
 |---|---|
 | `memory_data_bus.c` | Its only production callers are native benchmark hosts. Their request/response transport is now owned by `src/modules/benchmarks/agent_eval_memory_transport.c`; it calls the existing C bus and contains no memory storage, ranking or lifecycle implementation. Memory's producer and consumer remain Go. |
 | `include/aimee/memory/module_api.h` | Host stage identifiers live in `src/headers/memory_stage_contract.h`, outside the memory module. Go conformance tests compare every identifier with the owner; event durability coverage follows the host contract. |
-| `memory_ontology.h` | Persisted graph codes shared with native indexing belong to `src/modules/db2/c/graph_kinds.h`. They contain enum declarations only. Go conformance tests pin node and relation codes to the Go ontology. |
+| `memory_ontology.h` | Persisted graph codes shared with native indexing belong to `src/modules/db2/include/aimee/db2/graph_kinds.h`. They contain enum declarations only. Go conformance tests pin node and relation codes to the Go ontology. |
 | `memory_core_internal.h` | Deleted obsolete declarations for the removed native engine. The unregistered lane-outcome fixture is ported to Go and runs in the normal package tests. The native performance harness explicitly reports its retired memory cases unavailable. |
 
 `check_memory_c_boundary.py` also forbids database access from the benchmark

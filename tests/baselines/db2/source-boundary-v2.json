@@ -1,17 +1,17 @@
 {
   "schema_version": 2,
-  "source_revision": "0e6b6a6ab621ae66d37798e31dae86280d95398c",
+  "source_revision": "b6eac1378e53db1b7b28b9196e93a11005fd37c2",
   "source_boundary": "src/modules/db2/c",
   "summary": {
     "c_files": 115,
-    "headers": 126,
+    "headers": 125,
     "sql_files": 6,
-    "consumer_files": 271,
-    "production_consumers": 124,
-    "test_consumers": 147,
-    "include_directives": 782,
-    "outbound_dependency_rows": 142,
-    "outbound_include_directives": 142
+    "consumer_files": 269,
+    "production_consumers": 123,
+    "test_consumers": 146,
+    "include_directives": 776,
+    "outbound_dependency_rows": 144,
+    "outbound_include_directives": 144
   },
   "source_files": {
     "c": [
@@ -192,7 +192,6 @@
       "src/modules/db2/c/feature_rows.h",
       "src/modules/db2/c/feedback.h",
       "src/modules/db2/c/fidelity.h",
-      "src/modules/db2/c/graph_kinds.h",
       "src/modules/db2/c/kb_audit_worm.h",
       "src/modules/db2/c/kb_docs.h",
       "src/modules/db2/c/kb_maintenance.h",
@@ -360,16 +359,6 @@
       ]
     },
     {
-      "path": "src/headers/rel_types.h",
-      "classification": "host-generated-client",
-      "includes": [
-        {
-          "header": "modules/db2/c/graph_kinds.h",
-          "count": 1
-        }
-      ]
-    },
-    {
       "path": "src/index.c",
       "classification": "host-generated-client",
       "includes": [
@@ -383,10 +372,6 @@
         },
         {
           "header": "modules/db2/c/entity_edges.h",
-          "count": 1
-        },
-        {
-          "header": "modules/db2/c/graph_kinds.h",
           "count": 1
         },
         {
@@ -1584,10 +1569,6 @@
         {
           "header": "modules/db2/c/css_render.h",
           "count": 1
-        },
-        {
-          "header": "modules/db2/c/kb_service_backend.h",
-          "count": 1
         }
       ]
     },
@@ -2551,16 +2532,6 @@
         },
         {
           "header": "modules/db2/c/db_postgres.h",
-          "count": 1
-        }
-      ]
-    },
-    {
-      "path": "src/tests/test_assertion_transport.c",
-      "classification": "private-implementation-test",
-      "includes": [
-        {
-          "header": "modules/db2/c/kb_service_backend.h",
           "count": 1
         }
       ]
@@ -3574,10 +3545,6 @@
         {
           "header": "../modules/db2/c/fact_mutation.h",
           "count": 1
-        },
-        {
-          "header": "modules/db2/c/graph_kinds.h",
-          "count": 1
         }
       ]
     },
@@ -4342,10 +4309,6 @@
           "count": 1
         },
         {
-          "header": "modules/db2/c/graph_kinds.h",
-          "count": 1
-        },
-        {
           "header": "modules/db2/c/memory_lifecycle.h",
           "count": 1
         },
@@ -5104,6 +5067,13 @@
     },
     {
       "source": "src/modules/db2/c/canonical_index.c",
+      "header": "aimee/db2/graph_kinds.h",
+      "resolved": "src/modules/db2/include/aimee/db2/graph_kinds.h",
+      "classification": "module-public-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/canonical_index.c",
       "header": "index.h",
       "resolved": "src/headers/index.h",
       "classification": "host-api",
@@ -5219,6 +5189,13 @@
       "header": "aimee.h",
       "resolved": "src/headers/aimee.h",
       "classification": "host-api",
+      "count": 1
+    },
+    {
+      "source": "src/modules/db2/c/code_projection.c",
+      "header": "aimee/db2/graph_kinds.h",
+      "resolved": "src/modules/db2/include/aimee/db2/graph_kinds.h",
+      "classification": "module-public-api",
       "count": 1
     },
     {
@@ -6020,5 +5997,5 @@
       "count": 1
     }
   ],
-  "fingerprint": "44b0c313d328763686010c3274020dca253225b3a5d9b2056f3dd63328dd5507"
+  "fingerprint": "9857eda7d4091eba539f4f7919465c25431f551f0ac58bc1021ea4517320a4a4"
 }

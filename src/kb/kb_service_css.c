@@ -9,7 +9,7 @@
 #include "modules/db2/c/css_insights.h"
 #include "modules/db2/c/css_migration.h"
 #include "modules/db2/c/css_render.h"
-#include "modules/db2/c/kb_service_backend.h"
+#include "kb_service_css.h"
 
 #include <string.h>
 

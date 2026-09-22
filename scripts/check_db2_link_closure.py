@@ -108,6 +108,21 @@ REVIEWED_REFRESH_BASE_REVISIONS = {"ab3cf828b3acc5b1eb3ab6b06bdd903b8d373906"}
 # Only the validated pre-migration contract admits these retirements/imports.
 # Future comparisons retain the ordinary ratchet, including for these symbols.
 MEMORY_MIGRATION_BASE = "bc88c720134efbd3b18a737d5c6bba252a59fcbb1568bbae1ca6bebfae8bfb75"
+# 0.4.5 completes the Go cutover from the exact 0.4.4 release contract.
+# Once main advances, this admission cannot be reused for later retirements.
+MEMORY_GO_ONLY_BASE = "ee445f8cb4473d33730c42697efc1efeb1c29bd3cd461f494fcb1d796d0b76c3"
+MEMORY_GO_ONLY_RETIRED_UNITS = {
+    f"src/modules/db2/c/{name}.c" for name in (
+        "entity_registry", "epistemic_directives", "fact_ingest", "fact_lifecycle",
+        "fact_recall", "ontology_evolution", "pgvec_verify", "rel_types_store",
+        "trace_mining", "typed_facts",
+    )
+}
+MEMORY_GO_ONLY_SUPPORT_UPDATES = {
+    "src/modules/db2/support/log_primitives.c",
+    "src/modules/db2/support/rel_seed_primitives.c",
+    "src/modules/db2/support/rel_type_primitives.c",
+}
 MEMORY_RETIRED_UNITS = {
     "src/modules/db2/c/memory_briefing.c",
     "src/modules/db2/c/memory_conflicts.c",
@@ -1732,6 +1747,12 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
     )
     retired_units = MEMORY_RETIRED_UNITS if memory_migration else set()
     retired_support = MEMORY_RETIRED_SUPPORT if memory_migration else set()
+    memory_go_only = (
+        isinstance(previous, dict) and previous.get("fingerprint") == MEMORY_GO_ONLY_BASE
+    )
+    if memory_go_only:
+        retired_units = MEMORY_GO_ONLY_RETIRED_UNITS
+        retired_support = {"src/modules/db2/support/rel_enum_text_primitives.c"}
     refresh_allowed = (
         isinstance(previous, dict) and
         previous.get("source_revision") in REVIEWED_REFRESH_BASE_REVISIONS
@@ -1739,6 +1760,10 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
     reviewed_additions = set(REVIEWED_SOURCE_ADDITIONS) if refresh_allowed else set()
     reviewed_updates = set(REVIEWED_SOURCE_UPDATES) if refresh_allowed else set()
     reviewed_support_updates = set(REVIEWED_SUPPORT_UPDATES) if refresh_allowed else set()
+    if memory_go_only:
+        # The logger loses its retired caller; ontology support now binds the
+        # Go-generated seed and the remaining native mutation/identity callers.
+        reviewed_support_updates |= MEMORY_GO_ONLY_SUPPORT_UPDATES
     added_units = sorted(set(current_units) - set(previous_units))
     rejected_units = sorted(set(added_units) - reviewed_additions)
     if rejected_units:
@@ -1844,6 +1869,14 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
         before = set(previous_rows[symbol]["references"])
         after = set(current_rows[symbol]["references"])
         growth = after - before
+        if (memory_go_only and symbol == "_GLOBAL_OFFSET_TABLE_"
+                and growth <= {
+                    "src/modules/db2/c/demotion.c",
+                    "src/modules/db2/c/kb_service_backend.c",
+                }
+                and previous_rows[symbol]["disposition"] == "system-link"
+                and current_rows[symbol]["disposition"] == "system-link"):
+            continue
         if (memory_migration and symbol == "memchr" and
                 growth == {"src/modules/db2/c/fact_recall.c"} and
                 previous_rows[symbol]["disposition"] == "system-link" and
