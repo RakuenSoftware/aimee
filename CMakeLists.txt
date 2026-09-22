@@ -106,7 +106,6 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/runtime-web/include"
     "${AIMEE_SRC_DIR}/modules/control-web/include"
     "${AIMEE_SRC_DIR}/modules/postgres/include"
-    "${AIMEE_SRC_DIR}/modules/db2/include"
     # MODULES THAT KEEP THEIR HEADERS FLAT, beside their sources, rather than
     # under an include/ subdir. src/Makefile has carried -I for every one of
     # these all along; CMake had only the include/-style modules, so the
@@ -135,6 +134,17 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/benchmarks"
     "${AIMEE_SRC_DIR}/modules/aws"
     "${AIMEE_SRC_DIR}/pipeline")
+
+# Match the Makefile's per-consumer graph enum include path.
+set_property(SOURCE
+    "${AIMEE_SRC_DIR}/index.c"
+    "${AIMEE_SRC_DIR}/rel_types.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/canonical_index.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/code_projection.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/entity_edges.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/fact_identity.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c"
+    APPEND PROPERTY INCLUDE_DIRECTORIES "${AIMEE_SRC_DIR}/modules/db2/include")
 
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.

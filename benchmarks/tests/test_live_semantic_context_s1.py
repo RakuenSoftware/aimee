@@ -338,6 +338,11 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         )
         self.assertFalse(result["release_candidate_matched"])
 
+    def test_release_build_matches_frozen_candidate(self) -> None:
+        validator = load_release_validator()
+        self.assertTrue(validator.build_files_match(
+            "474bd69954237fca249eb44e942caeab4270ad5e"))
+
     def test_release_build_contract_tracks_flags_and_probe_dependencies(self) -> None:
         validator = load_release_validator()
         makefile = (ROOT / "src/Makefile").read_text()
