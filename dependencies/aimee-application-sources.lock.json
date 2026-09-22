@@ -92,7 +92,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "b19b0485220cf9db7ab522988604610c31b538a64766e61b5f5ca0b0b5694efa",
+      "source_sha256": "6f33befa4d453fa70e296abe58a700ff335d8ca6fd534d7e8236eff63408d3e7",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 7,
@@ -563,7 +563,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "df8b0f035552157d97547c75002def9c443c238ee29c75da376bf28596d94a56",
+      "source_sha256": "ed35dcd199c15ea5f1bd7600e66585461c9ecced57f9b08d17d6f13a0c0f4138",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 25,
