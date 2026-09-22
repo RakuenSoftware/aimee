@@ -63,12 +63,22 @@ HOST_ADAPTER_REHOMES = {
     "src/modules/db2/c/kb_service_backend_memory.c":
         "src/kb/db2_adapters/kb_service_backend_memory.c",
 }
+# These fixtures now exercise only the remaining native rollback contract.
+# Their Go-owned domain headers must disappear when fact_mutation replaces them.
+RETIRED_MEMORY_TEST_HEADERS = {
+    "src/tests/test_entity_registry.c": "../modules/db2/c/entity_registry.h",
+    "src/tests/test_fact_lifecycle.c": "../modules/db2/c/fact_lifecycle.h",
+    "src/tests/test_ontology_evolution.c": "../modules/db2/c/ontology_evolution.h",
+}
 ADMITTED_SUPPORT_TEST_INCLUDES = {
+    # Native retrieval-reference transport debt: this fixture calls the private
+    # writer to prove Go record versions survive, including unavailable records.
+    # Remove this admission when demotion.c's transport moves out of DB2.
+    ("src/tests/test_memory_reference_transport.c", "../modules/db2/c/demotion.c"),
     # These private regression tests exercise bounded host-provider results and
     # preserve unavailable-vs-empty memory responses at DB2's implementation ABI.
     ("src/tests/test_fact_recall.c", "modules/db2/c/fact_recall.h"),
     ("src/tests/test_fact_recall.c", "modules/db2/include/aimee/db2/host_contracts.h"),
-    ("src/tests/test_kb_memory_list.c", "modules/db2/c/memory_query.h"),
     (
         "src/tests/test_kb.c",
         "../modules/db2/c/db2_tenant.h",
@@ -590,8 +600,22 @@ def enforce_shrink_only(previous: object, current: object) -> None:
     for key, (count, classification) in current_rows.items():
         prior = previous_rows.get(key)
         if prior is None:
+            retired = RETIRED_MEMORY_TEST_HEADERS.get(key[0])
+            old_test = previous_rows.get((key[0], retired)) if retired else None
+            if (key[1] == "../modules/db2/c/fact_mutation.h"
+                    and classification == "private-implementation-test"
+                    and old_test is not None
+                    and old_test[1] == classification
+                    and count <= old_test[0]
+                    and (key[0], retired) not in current_rows):
+                continue
             if (key in ADMITTED_SUPPORT_TEST_INCLUDES and count <= 1 and
-                    classification == "private-implementation-test"):
+                    classification == "private-implementation-test"
+                    and (key != (
+                        "src/tests/test_memory_reference_transport.c",
+                        "../modules/db2/c/demotion.c",
+                    ) or "src/modules/db2/c/demotion.c" in
+                        current.get("source_files", {}).get("c", []))):
                 continue
             if (key in ADMITTED_HOST_ADAPTER_INCLUDES and count <= 1 and
                     classification == "kb-generated-client"):
@@ -646,6 +670,25 @@ def enforce_shrink_only(previous: object, current: object) -> None:
                 None,
             )
             if promoted is not None and count <= promoted[0]:
+                continue
+            # The Go memory cutover leaves persisted graph enum codes owned by
+            # DB2. These two storage writers replace memory's private ontology
+            # with DB2's public schema contract, without adding a dependency.
+            graph_codes_localized = previous_dependencies.get((
+                source,
+                "modules/memory/memory_ontology.h",
+                "src/modules/memory/memory_ontology.h",
+            ))
+            if (source in {
+                    "src/modules/db2/c/canonical_index.c",
+                    "src/modules/db2/c/code_projection.c",
+                }
+                    and header == "aimee/db2/graph_kinds.h"
+                    and resolved == "src/modules/db2/include/aimee/db2/graph_kinds.h"
+                    and classification == "module-public-api"
+                    and graph_codes_localized is not None
+                    and graph_codes_localized[1] == "module-private-api"
+                    and count <= graph_codes_localized[0]):
                 continue
             # The embedder dimension limit is a configuration-independent ABI
             # constant.  Promote that exact leaf header from config's private

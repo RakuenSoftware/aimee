@@ -2,7 +2,6 @@
 #define DEC_DB2_KB_SERVICE_BACKEND_H 1
 
 #include "vector_index_ops.h"
-#include "fact_lifecycle.h" /* fact_authority_t */
 #include "cJSON.h"
 
 #include <stddef.h>
@@ -12,40 +11,6 @@
 extern "C"
 {
 #endif
-
-   typedef struct
-   {
-      db2_vector_index_ops_summary_t ops;
-      db2_vector_index_op_failed_t failed_detail[20];
-      int failed_detail_count;
-      char stored_schema_ver[64];
-      int rebuild_lock_held;
-   } db2_kb_service_memory_verify_t;
-
-   typedef struct
-   {
-      int64_t mem_rows;
-      int64_t unit_rows;
-      int64_t kb_rows;
-      char active_ver[256];
-   } db2_kb_service_verify_snapshot_t;
-
-   typedef struct
-   {
-      char target_version[256];
-      int last_id;
-      int total;
-      int done;
-      char started_at[64];
-      char finished_at[64];
-      int have_job;
-   } db2_kb_service_reembed_status_t;
-
-   typedef struct
-   {
-      int total_count;
-      int resume_last_id;
-   } db2_kb_service_reembed_start_t;
 
    typedef struct
    {
@@ -82,35 +47,8 @@ extern "C"
       db2_kb_service_async_queue_stats_t queue;
    } db2_kb_service_project_status_t;
 
-   int db2_kb_service_reset_stuck_vector_ops(int max_attempts);
-
-   int db2_kb_service_collect_memory_verify(int include_failed_detail, int max_attempts,
-                                            db2_kb_service_memory_verify_t *out);
-   int db2_kb_service_collect_verify_snapshot(db2_kb_service_verify_snapshot_t *out);
-   int db2_kb_service_get_active_embedder_version(char *out, size_t out_len);
-   int db2_kb_service_set_active_embedder_version(const char *version, const char *updated_at);
-   int db2_kb_service_collect_reembed_status(db2_kb_service_reembed_status_t *out);
-   int db2_kb_service_mark_reembed_finished(const char *finished_at);
-   int db2_kb_service_prepare_reembed_start(const char *version, const char *started_at,
-                                            db2_kb_service_reembed_start_t *out);
-   int db2_kb_service_update_reembed_progress(int last_id, int done);
-   int db2_kb_service_list_unembedded_memory_ids(const char *version, int64_t *ids, int max_ids);
-   int db2_kb_service_list_pending_reembed_memory_ids(const char *version, int resume_last_id,
-                                                      int64_t *ids, int max_ids);
-   int db2_kb_service_count_embeddings_for_version(const char *version);
-   int db2_kb_service_list_memory_ids_by_updated(int limit, int64_t *ids, int max_ids);
    int db2_kb_service_memory_record_exists(int64_t record_id);
    int db2_kb_service_kb_document_exists(int64_t document_id);
-   int db2_kb_service_directive_create(const char *question, const char *topic,
-                                       const char *anchor_entity, const char *anchor_file,
-                                       const char *cause, int priority, int64_t memory_a_id,
-                                       int64_t memory_b_id, const char *evidence,
-                                       const char *source_session, const char *valid_until,
-                                       int *dedup_out, cJSON **directive_out);
-   int db2_kb_service_directive_resolve(int64_t id, int64_t resolution_memory_id, const char *note);
-   int db2_kb_service_directive_suppress(int64_t id);
-   int db2_kb_service_directive_sweep_expired(void);
-   cJSON *db2_kb_service_directive_list_json(const char *state, const char *cause, int max_rows);
    /* Graph-derived code-health audit: dead exports, import cycles, clones. */
    int db2_code_audit_edge_target_like(const char *relation, const char *project, char *out,
                                        size_t cap);
@@ -141,10 +79,6 @@ extern "C"
                                            const char *description, int weight);
    cJSON *db2_kb_service_tool_registry_snapshot_json(void);
    cJSON *db2_kb_service_tool_registry_lookup_json(const char *name);
-   cJSON *db2_kb_service_relations_schema_list_json(void);
-   cJSON *db2_kb_service_memory_export_jsonl_json(const char *path);
-   cJSON *db2_kb_service_memory_decisions_export_jsonl_json(const char *path);
-   cJSON *db2_kb_service_memory_key_exists_json(const char *key);
    cJSON *db2_kb_service_collab_rules_propose_json(const char *text, const char *reason,
                                                    const char *proposed_by);
    cJSON *db2_kb_service_collab_rules_list_json(void);
@@ -165,8 +99,6 @@ extern "C"
                                                    int64_t tokens_used,
                                                    const char *tool_error_pattern);
    cJSON *db2_kb_service_agent_hint_consume_json(const char *role, const char *prompt);
-   cJSON *db2_kb_service_memory_find_id_by_key_kind_json(const char *key, const char *kind);
-   cJSON *db2_kb_service_memory_search_facts_patterns_by_keyword_json(const char *keyword, int max);
    cJSON *db2_kb_service_task_list_json(const char *state, const char *session_id, int limit);
    cJSON *db2_kb_service_task_create_json(const char *title, const char *session_id,
                                           int64_t parent_id);
@@ -177,11 +109,7 @@ extern "C"
    /* Wrappers around memory_advanced.c maintenance routines so daemon
     * and CLI-fork callers run them inside aimee-kb where DB2 is
     * initialized.  Each returns {"status":"ok","count":N}. */
-   cJSON *db2_kb_service_anti_pattern_extract_from_feedback_json(void);
-   cJSON *db2_kb_service_anti_pattern_extract_from_failures_json(void);
-   cJSON *db2_kb_service_anti_pattern_escalate_json(int hit_threshold);
    cJSON *db2_kb_service_rules_decay_json(void);
-   cJSON *db2_kb_service_memory_learn_style_json(void);
    cJSON *db2_kb_service_decision_log_insert_json(int64_t task_id, const char *options,
                                                   const char *chosen, const char *rationale,
                                                   const char *assumptions);
@@ -194,35 +122,11 @@ extern "C"
    cJSON *db2_kb_service_anti_pattern_check_json(const char *file_path, const char *command,
                                                  int max);
    cJSON *db2_kb_service_anti_pattern_bump_json(int64_t id);
-   cJSON *db2_kb_service_memory_fold_session_json(const char *session_id);
    cJSON *db2_kb_service_rules_delete_json(int id);
    cJSON *db2_kb_service_rules_update_directive_type_json(int id, const char *directive_type);
    cJSON *db2_kb_service_feedback_record_json(const char *polarity, const char *title,
                                               const char *description, int weight);
-   cJSON *db2_kb_service_memory_supersede_json(int64_t old_id, const char *new_content,
-                                               double confidence, const char *session_id);
-   cJSON *db2_kb_service_memory_fact_history_json(const char *key, int max);
-   /* Typed-fact §4 correction surface. `target` NULL/empty retracts every current
-    * value of (source, relation); `authority` is "user" or "model" (anything else
-    * reads as model). Reports the number of edges affected, so a request that
-    * matched nothing is distinguishable from one that was refused. */
-   cJSON *db2_kb_service_facts_retract_json(const char *source, const char *relation,
-                                            const char *target, const char *authority);
-   /* §3 entity merge/unmerge. merge returns the audit id needed to reverse it. */
-   cJSON *db2_kb_service_entities_merge_json(int64_t from_id, int64_t into_id);
-   cJSON *db2_kb_service_entities_unmerge_json(int64_t merge_id);
-   cJSON *db2_kb_service_memory_check_drift_json(int64_t task_id, const char *file_path,
-                                                 const char *command);
-   cJSON *db2_kb_service_memory_list_session_scope_priority_json(int max);
-   cJSON *db2_kb_service_memory_list_session_scope_priority_like_json(const char *pattern, int max);
-   cJSON *db2_kb_service_memory_list_low_effectiveness_json(double threshold, int limit);
-   cJSON *db2_kb_service_memory_list_unused_l2_json(int days, int max);
-   cJSON *db2_kb_service_memory_list_superseded_keys_json(int min_versions, int max);
-   cJSON *db2_kb_service_memory_set_artifact_json(int64_t memory_id, const char *artifact_type,
-                                                  const char *artifact_ref,
-                                                  const char *artifact_hash);
    cJSON *db2_kb_service_directive_expire_session_json(void);
-   cJSON *db2_kb_service_memory_scan_conversations_json(const cJSON *dirs);
    /* Dashboard endpoints that walk DB2 tables.  Each returns
     * {"status":"ok","payload":<api_* output>}. */
    cJSON *db2_kb_service_dashboard_memory_stats_json(void);
@@ -230,121 +134,8 @@ extern "C"
    cJSON *db2_kb_service_dashboard_reminders_json(void);
    cJSON *db2_kb_service_dashboard_recall_json(void);
    cJSON *db2_kb_service_dashboard_directives_json(void);
-   cJSON *db2_kb_service_memory_find_facts_json(const char *query, int limit);
-   cJSON *db2_kb_service_memory_list_json(const char *tier, const char *kind, int limit);
-   cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of);
-   cJSON *db2_kb_service_memory_load_eval_corpus_json(int max);
-   cJSON *db2_kb_service_memory_top_l2_facts_json(int max);
    cJSON *db2_kb_service_session_briefing_commitments_json(int limit);
    cJSON *db2_kb_service_session_briefing_directives_json(int limit);
-   cJSON *db2_kb_service_memory_prospective_list_json(const char *state, int max);
-   cJSON *
-   db2_kb_service_memory_prospective_create_json(const char *trigger_text, const char *action_text,
-                                                 const char *anchor_entity, const char *anchor_file,
-                                                 const char *recurrence, const char *valid_until);
-   cJSON *db2_kb_service_memory_prospective_complete_json(int64_t id);
-   cJSON *db2_kb_service_memory_prospective_match_json(const char *turn_text,
-                                                       const char *active_entity,
-                                                       const char *active_file, int max);
-   cJSON *db2_kb_service_memory_get_provenance_json(int64_t memory_id, int max);
-   cJSON *db2_kb_service_memory_scope_visibility_rank_json(const int64_t *ids, int id_count,
-                                                           const char *workspace,
-                                                           const char *project);
-   cJSON *db2_kb_service_memory_episode_card_generate_json(const char *source_session);
-   cJSON *db2_kb_service_memory_tag_workspace_json(int64_t memory_id, const char *workspace);
-   cJSON *db2_kb_service_memory_tag_scope_json(int64_t memory_id, const char *scope_type,
-                                               const char *scope_value);
-   cJSON *db2_kb_service_memory_prospective_mark_triggered_json(int64_t id);
-   cJSON *db2_kb_service_memory_prospective_sweep_expired_json(void);
-   cJSON *db2_kb_service_memory_maintenance_run_json(unsigned int modes, int force, int dry_run);
-   cJSON *db2_kb_service_memory_alerts_json(const char *since);
-   struct memory_activation;
-   cJSON *db2_kb_service_memory_recall_json(const char *task_hint, int limit_tokens,
-                                            int session_start,
-                                            const struct memory_activation *activation);
-   cJSON *db2_kb_service_memory_upsert_workflow_json(const char *workspace, const char *signal_type,
-                                                     const char *rule, double observed_confidence,
-                                                     const char *session_id);
-   /* `authority` decides destructiveness, not permission — the caller's
-    * capability was already checked at the entry point. It carries a
-    * memory_authority_t value: 0 (MEMORY_AUTHORITY_MODEL, and the default for a
-    * request that omits the field) retires/versions the old value, 1
-    * (MEMORY_AUTHORITY_USER) destroys it.
-    *
-    * Spelled `int` rather than the enum deliberately: DB2's outbound dependency
-    * surface is frozen (scripts/check_db2_source_boundary.py), and naming the
-    * type here would add an edge from a DB2 header to src/headers for a
-    * parameter whose contract is two documented values. The enum lives in
-    * memory_authority.h and is used either side of this seam; only the frozen
-    * header spells it as int. Note that 0 is the SAFE value, so a caller that
-    * passes nothing meaningful still gets the non-destructive path. */
-   cJSON *db2_kb_service_memory_delete_json(int64_t id, int authority);
-   cJSON *db2_kb_service_memory_touch_json(int64_t id);
-   cJSON *db2_kb_service_memory_update_json(int64_t id, const char *content, int authority);
-   cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason);
-   cJSON *db2_kb_service_memory_restore_json(int64_t id, const char *actor);
-   cJSON *db2_kb_service_memory_review_list_json(const char *state, int limit);
-   cJSON *db2_kb_service_memory_stats_json(void);
-   cJSON *db2_kb_service_memory_list_conflicts_json(int max);
-   cJSON *db2_kb_service_memory_query_health_json(void);
-   cJSON *db2_kb_service_memory_effectiveness_stats_json(void);
-   cJSON *db2_kb_service_memory_query_edges_json(const char *entity, int max);
-   cJSON *db2_kb_service_memory_compact_windows_json(void);
-   cJSON *db2_kb_service_memory_assemble_context_json(const char *task_hint);
-   cJSON *db2_kb_service_memory_assemble_typed_context_json(const cJSON *req);
-   cJSON *db2_kb_service_memory_search_json(const cJSON *clusters_arr, int limit);
-   cJSON *db2_kb_service_memory_find_facts_visible_json(const char *query, const char *workspace,
-                                                        const char *project, int limit);
-   cJSON *db2_kb_service_memory_find_facts_scoped_json(const char *query, const char *scope_type,
-                                                       const char *scope_value, int limit);
-   cJSON *db2_kb_service_memory_diagnose_scoped_json(const char *query, const char *scope_type,
-                                                     const char *scope_value, int limit);
-   cJSON *db2_kb_service_memory_explain_match_json(const char *query, int64_t memory_id);
-   cJSON *db2_kb_service_memory_link_create_json(int64_t source_id, int64_t target_id,
-                                                 const char *relation);
-   cJSON *db2_kb_service_memory_link_query_json(int64_t memory_id, int max);
-   cJSON *db2_kb_service_memory_link_delete_json(int64_t link_id);
-   cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, const char *key,
-                                            const char *content, double confidence,
-                                            const char *session_id);
-   /* `authority` is persisted as the new row's provenance_category, which is what
-    * the typed-fact drain later reads to decide whether facts mined from this
-    * note may enter at Class A. The RPC handler derives it from the calling
-    * surface and the request's authentication — see memory.h's memory_insert_ex.
-    * Spelled `int` for the same frozen-boundary reason as the delete/update pair
-    * below, and with the same safe default: 0 is MEMORY_AUTHORITY_MODEL. */
-   cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, const char *key,
-                                               const char *content, const char *use_cases,
-                                               double confidence, const char *session_id,
-                                               int authority);
-   cJSON *db2_kb_service_memory_insert_epistemic_ex_json(const char *tier, const char *kind,
-                                                         const char *epistemic_kind,
-                                                         const char *key, const char *content,
-                                                         const char *use_cases, double confidence,
-                                                         const char *session_id, int authority);
-   cJSON *db2_kb_service_memory_briefing_json(int limit_tokens);
-   /* `authority` is the typed-fact write authority for the §4 retraction this
-    * turn may perform; the RPC handler derives it from the request's
-    * authenticated actor, never from the request body. See db2_typed_fact_ingress
-    * (fact_ingest.h). */
-   cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *block_type,
-                                                   int limit, fact_authority_t authority);
-   /* Read-only typed-fact recall for the turn: facts about entities named in the
-    * query, PII-gated. Returns {status, facts} (facts="" when off/none). Lets the
-    * server auto-inject facts without the full context-block assembly. */
-   cJSON *db2_kb_service_memory_facts_json(const char *query);
-   cJSON *db2_kb_service_memory_entity_profile_json(const char *entity);
-   cJSON *db2_kb_service_memory_entity_edges_json(const char *entity, int limit);
-   cJSON *db2_kb_service_memory_search_graph_json(const char *query, int limit);
-   cJSON *db2_kb_service_memory_search_graph_as_of_json(const char *query, const char *as_of,
-                                                        int limit);
-   cJSON *db2_kb_service_memory_search_assertions_json(const char *query, const char *valid_at,
-                                                       const char *believed_at,
-                                                       int include_historical, int max_hops,
-                                                       int limit);
-   cJSON *db2_kb_service_memory_get_episode_json(const char *episode_key);
-   cJSON *db2_kb_service_memory_ask_json(const char *query, const char *scope_type,
-                                         const char *scope_value, int limit);
    typedef struct
    {
       int64_t id;
@@ -420,11 +211,6 @@ extern "C"
    cJSON *db2_kb_service_learning_list_json(const char *state, const char *sink, int max_rows);
    cJSON *db2_kb_service_learning_get_json(int id);
    cJSON *db2_kb_service_learning_reject_json(int id);
-
-   cJSON *db2_kb_service_scene_list_json(int max_rows);
-   cJSON *db2_kb_service_scene_members_json(int64_t scene_id, int max_rows);
-
-   cJSON *db2_kb_service_memory_lint_json(void);
 
 #ifdef __cplusplus
 }

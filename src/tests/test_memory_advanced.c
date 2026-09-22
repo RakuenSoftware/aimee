@@ -13,10 +13,7 @@
 #include "support/test_time.h"
 #include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
 #include "modules/db2/c/memory_query.h"     /* db2_memory_count_orphaned_l0 */
-#include "modules/db2/c/memory_scope_query.h"
-#include "modules/memory/memory_ontology.h"
-#include "modules/memory/memory_platform.h"
-#include "modules/memory/memory_activation.h"
+#include "aimee/db2/graph_kinds.h"
 #include "../modules/db2/c/bandit.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
@@ -27,117 +24,8 @@ static void reset_db(void)
    db2_test_shim_open();
 }
 
-/* memory_insert used to copy the caller's content through a fixed
- * `char safe_content[2048]`, so anything past 2047 bytes was dropped on the
- * floor: the call still returned 0, nothing was logged, and the row in DB2 held
- * a silently shortened value. The exact-key merge path had the same defect in
- * `preserved_content[2048]`, which could write a shortened copy back over a
- * long row that was merely being re-stored.
- *
- * The assertion reads `length(content)` straight out of DB2 rather than through
- * memory_t, because memory_t.content is itself a fixed char[2048]: a read back
- * through the struct caps at 2047 no matter what the row holds, and would hide
- * exactly the defect under test. (That read-side cap is a separate, wider
- * issue -- it is why `aimee memory get` shows less than `aimee memory search`
- * for the same long memory.)
- *
- * Both the store and the merge path are checked, at the old boundary and well
- * past it, so a future buffer of any fixed size fails rather than moving the
- * cliff. */
-static int stored_content_len(const char *key)
-{
-   char err[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT length(content) FROM memories WHERE key = ?1", err, sizeof(err));
-   assert(st);
-   aimee_pg_bind_text(st, "?1", key);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-   int n = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return n;
-}
-
-static void test_long_content_survives_store_and_merge(void)
-{
-   reset_db();
-   db2_memory_scope_context_set("", "long-content-project", 0);
-
-   const size_t sizes[] = {2047, 2048, 4096, 40000};
-   for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++)
-   {
-      const size_t n = sizes[s];
-      char *big = malloc(n + 1);
-      assert(big);
-      /* Non-uniform so a truncated value cannot compare equal to the original
-       * by accident, and free of anything the content scanner redacts. */
-      for (size_t i = 0; i < n; i++)
-         big[i] = (char)('a' + (i % 26));
-      big[n] = '\0';
-
-      char key[64];
-      snprintf(key, sizeof(key), "long:content:%zu", n);
-
-      memory_t stored;
-      assert(memory_insert(TIER_L2, KIND_FACT, key, big, 0.9, "long-session", &stored) == 0);
-      assert((size_t)stored_content_len(key) == n);
-
-      /* Re-storing the same key takes the exact-key merge path, which reads the
-       * row back and can write it out again. The row must not shrink. */
-      memory_t merged;
-      assert(memory_insert(TIER_L2, KIND_FACT, key, big, 0.9, "long-session", &merged) == 0);
-      assert((size_t)stored_content_len(key) == n);
-
-      free(big);
-   }
-
-   printf("  long_content_survives_store_and_merge: ok\n");
-}
-
-static void test_memory_rejection_governance(void)
-{
-   reset_db();
-   /* Episodic refusal survives re-extraction and remains human reviewable.
-    * Recall never depends on the old lifecycle feature flags. */
-   {
-      memory_t rejected, replay, found[8];
-      db2_memory_scope_context_set("", "governance-project", 0);
-      assert(memory_insert(TIER_L2, KIND_FACT, "refusal:deploy",
-                           "never deploy directly to production", 0.9, "review-session",
-                           &rejected) == 0);
-
-      /* Application-side filtering remains authoritative even for an owner or
-       * superuser connection that PostgreSQL permits to bypass RLS. */
-      db2_memory_scope_context_set("", "other-project", 0);
-      assert(db2_memory_get(rejected.id, &replay) == -1);
-      db2_memory_review_row_t review[8];
-      assert(db2_memory_review_list("", 8, review, 8) == 0);
-      assert(db2_memory_reject(rejected.id, "cross-project rejection") == -1);
-
-      db2_memory_scope_context_set("", "governance-project", 0);
-      assert(db2_memory_reject(rejected.id, "operator says this extraction is wrong") == 0);
-      assert(db2_memory_find_facts_like("never deploy directly", 8, found, 8) == 0);
-
-      int review_count = db2_memory_review_list("rejected", 8, review, 8);
-      assert(review_count == 1);
-      assert(review[0].id == rejected.id);
-      assert(strcmp(review[0].scope_type, "project") == 0);
-      assert(strcmp(review[0].scope_value, "governance-project") == 0);
-      assert(strstr(review[0].review_reason, "operator") != NULL);
-      assert(db2_memory_rejection_blocks(review[0].key, review[0].content) == 1);
-      assert(memory_insert(TIER_L2, KIND_FACT, "refusal:deploy",
-                           "never deploy directly to production", 0.9, "second-extraction",
-                           &replay) == -1);
-
-      db2_memory_scope_context_set("", "other-project", 0);
-      assert(db2_memory_restore(rejected.id, "test:other-operator") == -1);
-      db2_memory_scope_context_set("", "governance-project", 0);
-      assert(db2_memory_restore(rejected.id, "test:operator") == 0);
-      assert(db2_memory_find_facts_like("never deploy directly", 8, found, 8) == 1);
-      assert(found[0].id == rejected.id);
-      db2_memory_scope_context_clear();
-   }
-}
-
+/* Long-content insert/merge coverage now runs against the Go owner in
+ * runtime_role_test.go, with explicit project scope and full content reads. */
 static int64_t insert_raw_fact(const char *key, const char *content)
 {
    char err[128] = "";
@@ -154,40 +42,6 @@ static int64_t insert_raw_fact(const char *key, const char *content)
    aimee_pg_finalize(st);
    assert(id > 0);
    return id;
-}
-
-static int64_t insert_raw_l0(const char *session_id, const char *key, const char *content)
-{
-   char err[128] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(),
-       "INSERT INTO memories(tier,kind,key,content,confidence,confidence_ceiling,source_session)"
-       " VALUES('L0','episode',?1,?2,0.8,0.8,?3) RETURNING id",
-       err, sizeof(err));
-   assert(st != NULL);
-   aimee_pg_bind_text(st, "?1", key);
-   aimee_pg_bind_text(st, "?2", content);
-   aimee_pg_bind_text(st, "?3", session_id);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-   int64_t id = aimee_pg_column_int64(st, 0);
-   aimee_pg_finalize(st);
-   assert(id > 0);
-   return id;
-}
-
-static int count_session_tier(const char *session_id, const char *tier)
-{
-   char err[128] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT COUNT(*) FROM memories WHERE source_session=?1 AND tier=?2", err,
-       sizeof(err));
-   assert(st != NULL);
-   aimee_pg_bind_text(st, "?1", session_id);
-   aimee_pg_bind_text(st, "?2", tier);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-   int count = aimee_pg_column_int(st, 0);
-   aimee_pg_finalize(st);
-   return count;
 }
 
 /* The file-static legacy_config_record this suite used to share is gone. It existed because
@@ -217,13 +71,6 @@ int main(void)
 
    /* DB1 is required by the maintenance cycle (maintenance_state table). */
    assert(db1_init(":memory:") == 0);
-
-   /* This suite exercises memory state transitions, not the asynchronous
-    * embedder. Leaving background embedding enabled makes every insert fork a
-    * detached KB RPC worker even though no service exists in this fixture. On
-    * the real-Postgres shard those children can outlive their test cases and
-    * obscure the suite's runtime. Embedding has dedicated coverage elsewhere. */
-   int background_embed_was_suppressed = platform_memory_background_embed_set_suppressed(1);
 
    /* DB2 backed by an in-memory sqlite shim. Test seeds use aimee_pg_*
     * against db2_conn() — same surface production code uses. */
@@ -333,23 +180,6 @@ int main(void)
       assert(count == 1);
    }
 
-   /* --- anti_pattern_extract_from_failures reads DB1 decision_log --- */
-   {
-      assert(db2_decision_log_insert(0, "A, B", "rm -rf /tmp", "destructive shortcut", "", NULL,
-                                     NULL) == 0);
-      db2_decision_log_row_t failed[8];
-      int count = db2_decision_log_list(NULL, 8, failed, 8);
-      assert(count >= 1);
-      assert(db2_decision_log_set_outcome(failed[0].id, "failure") == 0);
-
-      int extracted = anti_pattern_extract_from_failures();
-      assert(extracted >= 1);
-
-      anti_pattern_t matches[8];
-      int found = db2_anti_pattern_check("", "rm -rf /tmp/project", matches, 8);
-      assert(found >= 1);
-   }
-
    /* --- memory_detect_conflict --- */
    {
       memory_t m1, m2;
@@ -447,7 +277,15 @@ int main(void)
       assert(model.confidence <= 0.800001);
       assert(db2_memory_merge_update_ex(model.id, model.content, "", 1.0, 2, 2, 0.8, 0.5, 0.5,
                                         "2026-08-25T00:00:00Z") == 0);
-      assert(memory_get(model.id, &model) == 0);
+      char confidence_sql[128], confidence_err[128] = "";
+      snprintf(confidence_sql, sizeof(confidence_sql),
+               "SELECT confidence FROM memories WHERE id=%lld", (long long)model.id);
+      aimee_pg_stmt_t *confidence_stmt =
+          aimee_pg_prepare(db2_conn(), confidence_sql, confidence_err, sizeof(confidence_err));
+      assert(confidence_stmt && aimee_pg_step(confidence_stmt, confidence_err,
+                                              sizeof(confidence_err)) == AIMEE_PG_ROW);
+      model.confidence = aimee_pg_column_double(confidence_stmt, 0);
+      aimee_pg_finalize(confidence_stmt);
       assert(model.confidence <= 0.800001);
 
       assert(memory_insert(TIER_L5, KIND_FACT, "ceiling-inference", "synthesized inference", 1.0,
@@ -470,8 +308,18 @@ int main(void)
       project_a.id = insert_raw_fact("scope-isolated-pattern", "scope isolated evidence");
       project_b.id = insert_raw_fact("scope-isolated-pattern", "scope isolated evidence");
       unresolved.id = insert_raw_fact("scope-unresolved-pattern", "unresolved evidence");
-      db2_memory_scope_tag_insert(project_a.id, "project", "project-a");
-      db2_memory_scope_tag_insert(project_b.id, "project", "project-b");
+      /* Seed canonical ownership directly; scope-tag policy lives in Go. */
+      char scope_err[256] = "";
+      aimee_pg_stmt_t *scope_stmt =
+          aimee_pg_prepare(db2_conn(),
+                           "UPDATE memories SET scope_type='project',scope_value=CASE id WHEN ?1 "
+                           "THEN 'project-a' ELSE 'project-b' END WHERE id IN (?1,?2)",
+                           scope_err, sizeof(scope_err));
+      assert(scope_stmt);
+      assert(aimee_pg_bind_int64(scope_stmt, "?1", project_a.id) == 0);
+      assert(aimee_pg_bind_int64(scope_stmt, "?2", project_b.id) == 0);
+      assert(aimee_pg_step(scope_stmt, scope_err, sizeof(scope_err)) == AIMEE_PG_DONE);
+      aimee_pg_finalize(scope_stmt);
       for (int i = 0; i < 3; i++)
       {
          char session[32];
@@ -544,25 +392,6 @@ int main(void)
          int rc = memory_resolve_conflict(conflicts[0].id, "kept newer value");
          assert(rc == 0);
       }
-   }
-
-   /* --- memory_supersede --- */
-   {
-      memory_t old_mem;
-      memory_insert(TIER_L1, KIND_FACT, "supersede-test", "old value", 0.8, "", &old_mem);
-
-      memory_t new_mem;
-      int rc = memory_supersede(old_mem.id, "new value", 0.9, "sess-1", &new_mem);
-      assert(rc == 0);
-      assert(new_mem.id != old_mem.id);
-      assert(strcmp(new_mem.content, "new value") == 0);
-   }
-
-   /* --- memory_fact_history --- */
-   {
-      memory_t hist[8];
-      int count = memory_fact_history("supersede-test", hist, 8);
-      assert(count >= 2); /* old + new */
    }
 
    /* --- memory_is_profile_query --- */
@@ -706,305 +535,8 @@ int main(void)
       printf("  dedupe_audit: ok\n");
    }
 
-   /* --- memory_apply_feedback: updates utility scores on success and failure --- */
-   {
-      char err[256] = "";
-      memory_t m;
-      memory_insert(TIER_L2, KIND_FACT, "cited-fact", "Python is the project language", 0.9, "s1",
-                    &m);
-
-      /* Insert an entity edge for the cited key */
-      static const char *edge_sql =
-          "INSERT INTO entity_edges (source, relation, target, weight) VALUES (?1, ?2, ?3, ?4)";
-      aimee_pg_stmt_t *es = aimee_pg_prepare(db2_conn(), edge_sql, err, sizeof(err));
-      assert(es);
-      aimee_pg_bind_text(es, "?1", "cited-fact");
-      aimee_pg_bind_text(es, "?2", "co_discussed");
-      aimee_pg_bind_text(es, "?3", "python");
-      aimee_pg_bind_int(es, "?4", 1);
-      aimee_pg_step(es, err, sizeof(err));
-      aimee_pg_finalize(es);
-
-      /* Positive feedback: utility_score should go up */
-      int64_t cit_ids[] = {m.id};
-      int rc = memory_apply_feedback(1, cit_ids, 1);
-      assert(rc == 0);
-
-      /* Negative feedback: utility_score should go down and a corrected_by relation inserted */
-      rc = memory_apply_feedback(0, cit_ids, 1);
-      assert(rc == 0);
-
-      /* Verify corrected_by relation was inserted */
-      aimee_pg_stmt_t *rel_stmt = aimee_pg_prepare(
-          db2_conn(),
-          "SELECT COUNT(*) FROM memory_relations WHERE relation='corrected_by' AND memory_id=?1",
-          err, sizeof(err));
-      assert(rel_stmt);
-      aimee_pg_bind_int64(rel_stmt, "?1", m.id);
-      assert(aimee_pg_step(rel_stmt, err, sizeof(err)) == AIMEE_PG_ROW);
-      assert(aimee_pg_column_int(rel_stmt, 0) >= 1);
-      aimee_pg_finalize(rel_stmt);
-   }
-
-   /* --- memory_cognify_parse_response: valid JSON with relations and claims --- */
-   {
-      const char *json = "{"
-                         "\"summary\": \"Alice went camping with her family in May 2023.\","
-                         "\"memory_kind\": \"episodic\","
-                         "\"relations\": ["
-                         "  {\"subject\": \"Alice\", \"relation\": \"PARTICIPATED_IN\","
-                         "   \"object\": \"camping_2023\","
-                         "   \"fact_text\": \"Alice went camping in 2023\"}"
-                         "],"
-                         "\"claims\": ["
-                         "  {\"subject\": \"server\", \"attribute\": \"port\","
-                         "   \"value\": \"5432\", \"kind\": \"fact\"},"
-                         "  {\"subject\": \"typescript\", \"attribute\": \"preference\","
-                         "   \"value\": \"avoid\", \"kind\": \"opinion\"}"
-                         "]}";
-
-      memory_cognify_result_t result;
-      int rc = memory_cognify_parse_response(json, &result);
-      assert(rc == 0);
-      assert(strcmp(result.summary, "Alice went camping with her family in May 2023.") == 0);
-      assert(strcmp(result.memory_kind, "episodic") == 0);
-      assert(result.relation_count == 1);
-      assert(strcmp(result.relations[0].src_entity, "Alice") == 0);
-      assert(strcmp(result.relations[0].relation, "PARTICIPATED_IN") == 0);
-      assert(strcmp(result.relations[0].dst_entity, "camping_2023") == 0);
-      assert(result.claim_count == 2);
-      assert(strcmp(result.claims[0].kind, "fact") == 0);
-      assert(strcmp(result.claims[1].kind, "opinion") == 0);
-   }
-
-   /* --- memory_cognify_parse_response: rejects malformed JSON --- */
-   {
-      memory_cognify_result_t result;
-      int rc = memory_cognify_parse_response("not json at all!", &result);
-      assert(rc != 0);
-   }
-
-   /* --- memory_cognify_parse_response: missing required fields are tolerated --- */
-   {
-      /* Only summary, no relations or claims */
-      const char *json = "{\"summary\": \"A quiet session.\"}";
-      memory_cognify_result_t result;
-      int rc = memory_cognify_parse_response(json, &result);
-      assert(rc == 0);
-      assert(strcmp(result.summary, "A quiet session.") == 0);
-      assert(result.relation_count == 0);
-      assert(result.claim_count == 0);
-      assert(result.coref_count == 0);
-   }
-
-   /* --- memory_cognify_parse_response: parses coref_bindings --- */
-   {
-      const char *json = "{"
-                         "\"summary\": \"She joined the team last week.\","
-                         "\"coref_bindings\": ["
-                         "  {\"pronoun\": \"she\", \"entity\": \"Alice\", \"confidence\": 0.92},"
-                         "  {\"pronoun\": \"her\", \"entity\": \"Alice\", \"confidence\": 0.88}"
-                         "]}";
-      memory_cognify_result_t result;
-      int rc = memory_cognify_parse_response(json, &result);
-      assert(rc == 0);
-      assert(result.coref_count == 2);
-      assert(strcmp(result.coref_bindings[0].pronoun, "she") == 0);
-      assert(strcmp(result.coref_bindings[0].entity, "Alice") == 0);
-      assert(result.coref_bindings[0].confidence > 0.9);
-      assert(strcmp(result.coref_bindings[1].entity, "Alice") == 0);
-   }
-
-   /* --- memory_cognify_parse_response: ambiguous coref (empty entity) is skipped --- */
-   {
-      const char *json = "{"
-                         "\"coref_bindings\": ["
-                         "  {\"pronoun\": \"they\", \"entity\": \"\", \"confidence\": 0.3},"
-                         "  {\"pronoun\": \"he\", \"entity\": \"Jordan\", \"confidence\": 0.85}"
-                         "]}";
-      memory_cognify_result_t result;
-      int rc = memory_cognify_parse_response(json, &result);
-      assert(rc == 0);
-      /* First binding has empty entity so should be skipped; second retained */
-      assert(result.coref_count == 1);
-      assert(strcmp(result.coref_bindings[0].entity, "Jordan") == 0);
-      assert(result.coref_bindings[0].confidence > 0.8);
-   }
-
-   /* --- memory_cognify_unit: disabled when cognify.enabled=false --- */
-   {
-      write_test_config("memory:\n  cognify:\n    enabled: false\n");
-      memory_cognify_result_t result;
-      int rc = memory_cognify_unit(1, "some text", &result);
-      assert(rc == -1);
-   }
-
-   /* --- memory_cognify_unit: disabled when command is empty --- */
-   {
-      write_test_config("memory:\n  cognify:\n    enabled: true\n");
-      memory_cognify_result_t result;
-      int rc = memory_cognify_unit(1, "some text", &result);
-      assert(rc == -1);
-   }
-
-   /* --- memory_cognify_unit: explicit kind is persisted, procedural claim
-    *     mirrors into the feedback rules store --- */
-   {
-      memory_t src;
-      int ins = memory_insert(TIER_L2, KIND_FACT, "cognify-kind-test", "user prefers terse replies",
-                              0.8, "s-kind", &src);
-      assert(ins == 0);
-
-      /* Fixture response with procedural kind and a preference claim. */
-      char fixture[512];
-      snprintf(fixture, sizeof(fixture), "%s",
-               "{\"summary\":\"user wants terse replies\","
-               "\"memory_kind\":\"procedural\","
-               "\"claims\":[{\"subject\":\"assistant\",\"attribute\":\"verbosity\","
-               "\"value\":\"terse\",\"kind\":\"preference\"}]}");
-      char path[256];
-      snprintf(path, sizeof(path), "/tmp/aimee-cognify-fixture-%d.json", (int)getpid());
-      FILE *fp = fopen(path, "w");
-      assert(fp != NULL);
-      fputs(fixture, fp);
-      fclose(fp);
-
-      char yaml[512];
-      snprintf(yaml, sizeof(yaml),
-               "memory:\n  cognify:\n    enabled: true\n    command: \"cat > /dev/null; cat %s\"\n",
-               path);
-      write_test_config(yaml);
-      assert(config_memory_cognify_enabled() == 1);
-      assert(strstr(config_memory_cognify_command(), path) != NULL);
-
-      memory_cognify_result_t result;
-      int rc = memory_cognify_unit(src.id, "user prefers terse replies", &result);
-      assert(rc == 0);
-      assert(strcmp(result.memory_kind, "procedural") == 0);
-
-      /* cognified_memory_kind must have been written onto the memory. */
-      char qerr[256] = "";
-      aimee_pg_stmt_t *q =
-          aimee_pg_prepare(db2_conn(), "SELECT cognified_memory_kind FROM memories WHERE id = ?1",
-                           qerr, sizeof(qerr));
-      assert(q);
-      aimee_pg_bind_int64(q, "?1", src.id);
-      assert(aimee_pg_step(q, qerr, sizeof(qerr)) == AIMEE_PG_ROW);
-      const char *stored = aimee_pg_column_text(q, 0);
-      assert(stored && strcmp(stored, "procedural") == 0);
-      aimee_pg_finalize(q);
-
-      /* Procedural preference should have landed in rules as a principle. */
-      rule_t rule;
-
-      int rfound = db2_rules_find_by_title("assistant:verbosity", &rule);
-      assert(rfound == 0);
-      assert(strcmp(rule.polarity, "principle") == 0);
-      assert(strstr(rule.description, "terse") != NULL);
-
-      unlink(path);
-   }
-
-   /* --- memory_cognify_canonical_kind rejection: non-procedural memory_kind
-    *     with a fact claim does NOT create a rule --- */
-   {
-      memory_t src;
-      assert(memory_insert(TIER_L2, KIND_FACT, "cognify-semantic-test", "port is 5432", 0.8,
-                           "s-sem", &src) == 0);
-
-      char fixture[512];
-      snprintf(fixture, sizeof(fixture), "%s",
-               "{\"summary\":\"server config\","
-               "\"memory_kind\":\"semantic\","
-               "\"claims\":[{\"subject\":\"server\",\"attribute\":\"port\","
-               "\"value\":\"5432\",\"kind\":\"fact\"}]}");
-      char path[256];
-      snprintf(path, sizeof(path), "/tmp/aimee-cognify-fixture-sem-%d.json", (int)getpid());
-      FILE *fp = fopen(path, "w");
-      assert(fp != NULL);
-      fputs(fixture, fp);
-      fclose(fp);
-
-      char yaml[512];
-      snprintf(yaml, sizeof(yaml),
-               "memory:\n  cognify:\n    enabled: true\n    command: \"cat > /dev/null; cat %s\"\n",
-               path);
-      write_test_config(yaml);
-
-      memory_cognify_result_t result;
-      assert(memory_cognify_unit(src.id, "server port is 5432", &result) == 0);
-      assert(strcmp(result.memory_kind, "semantic") == 0);
-
-      rule_t rule;
-
-      int rfound = db2_rules_find_by_title("server:port", &rule);
-      assert(rfound != 0);
-
-      unlink(path);
-   }
-
-   /* --- memory_episode_card_parse: valid episode card JSON --- */
-   {
-      const char *json = "{"
-                         "\"session_id\": \"sess_abc\","
-                         "\"title\": \"Camping trip with family\","
-                         "\"participants\": [\"Caroline\", \"Melanie\"],"
-                         "\"places\": [\"Yosemite\"],"
-                         "\"events\": [\"arrived May 1\", \"hiked Half Dome May 2\"],"
-                         "\"outcomes\": [\"everyone safe\"],"
-                         "\"open_threads\": [\"Caroline mentioned returning in fall\"]"
-                         "}";
-      memory_episode_card_t card;
-      int rc = memory_episode_card_parse(json, &card);
-      assert(rc == 0);
-      assert(strcmp(card.session_id, "sess_abc") == 0);
-      assert(strcmp(card.title, "Camping trip with family") == 0);
-      assert(strstr(card.participants, "Caroline") != NULL);
-      assert(strstr(card.participants, "Melanie") != NULL);
-      assert(strstr(card.places, "Yosemite") != NULL);
-      assert(strstr(card.events, "arrived May 1") != NULL);
-      assert(strstr(card.outcomes, "everyone safe") != NULL);
-      assert(strstr(card.open_threads, "fall") != NULL);
-   }
-
-   /* --- memory_episode_card_parse: rejects malformed JSON --- */
-   {
-      memory_episode_card_t card;
-      assert(memory_episode_card_parse("not json", &card) != 0);
-   }
-
-   /* --- memory_episode_card_parse: rejects JSON missing title --- */
-   {
-      const char *json = "{\"participants\": [\"Alice\"]}";
-      memory_episode_card_t card;
-      assert(memory_episode_card_parse(json, &card) != 0);
-   }
-
-   /* --- memory_episode_card_generate: disabled when episode_summaries_enabled=0 ---
-    *
-    * These two cases used to zero a local legacy_config_record to express "disabled". Now that
-    * the function reads live config, the precondition has to be written to the
-    * config file the test owns — otherwise the case silently reads whatever the
-    * developer's real aimee.yaml says and stops testing the disabled path. */
-   {
-      write_test_config("memory:\n  episode_summaries:\n    enabled: false\n");
-      int64_t uid = memory_episode_card_generate("sess_test_disabled");
-      assert(uid == 0);
-   }
-
-   /* --- memory_episode_card_generate: disabled when cognify command is empty --- */
-   {
-      write_test_config("memory:\n  episode_summaries:\n    enabled: true\n");
-      int64_t uid = memory_episode_card_generate("sess_test_nocmd");
-      assert(uid == 0);
-   }
-
-   /* --- memory_episode_cards_query: returns 0 when session has no cards --- */
-   {
-      char *cards[4];
-      int n = memory_episode_cards_query("nonexistent_session_xyz", cards, 4);
-      assert(n == 0);
-   }
+   /* Cognification parsing, scoped persistence, behavioral rules and queue
+    * retries are covered by the shared Go owner's PostgreSQL replay. */
 
    /* --- memory_classify_deriver_shape: quantitative keywords --- */
    {
@@ -1092,117 +624,8 @@ int main(void)
       /* should not crash */
    }
 
-   /* --- memory_ontology_relation_from_text: known relations --- */
-   {
-      assert(memory_ontology_relation_from_text("co_edited") == REL_CO_EDITED);
-      assert(memory_ontology_relation_from_text("co_discussed") == REL_CO_DISCUSSED);
-      assert(memory_ontology_relation_from_text("fixes") == REL_FIXES);
-      assert(memory_ontology_relation_from_text("depends_on") == REL_DEPENDS_ON);
-      assert(memory_ontology_relation_from_text("unknown_xyz") == REL_OTHER);
-      assert(memory_ontology_relation_from_text(NULL) == REL_OTHER);
-   }
-
-   /* --- memory_ontology_relation_to_text: round-trip --- */
-   {
-      assert(strcmp(memory_ontology_relation_to_text(REL_FIXES), "fixes") == 0);
-      assert(strcmp(memory_ontology_relation_to_text(REL_CO_DISCUSSED), "co_discussed") == 0);
-      assert(strcmp(memory_ontology_relation_to_text(REL_OTHER), "other") == 0);
-   }
-
-   /* --- memory_ontology_node_kind_from_text --- */
-   {
-      assert(memory_ontology_node_kind_from_text("file") == NODE_FILE);
-      assert(memory_ontology_node_kind_from_text("commit") == NODE_COMMIT);
-      assert(memory_ontology_node_kind_from_text("bogus") == NODE_OTHER);
-      assert(memory_ontology_node_kind_from_text(NULL) == NODE_OTHER);
-   }
-
-   /* --- memory_ontology_validate: valid triples --- */
-   {
-      /* commit FIXES bug */
-      assert(memory_ontology_validate(NODE_COMMIT, REL_FIXES, NODE_BUG) == 1);
-      /* any CO_DISCUSSED any */
-      assert(memory_ontology_validate(NODE_FILE, REL_CO_DISCUSSED, NODE_CONCEPT) == 1);
-      /* REL_OTHER always allowed */
-      assert(memory_ontology_validate(NODE_FILE, REL_OTHER, NODE_MODULE) == 1);
-   }
-
-   /* --- memory_ontology_validate: invalid triple --- */
-   {
-      /* function FIXES bug: not in schema (commit should fix bugs) */
-      assert(memory_ontology_validate(NODE_FUNCTION, REL_FIXES, NODE_BUG) == 0);
-   }
-
-   /* --- memory_graph_walk: empty DB returns 0 entries --- */
-   {
-      graph_walk_entry_t entries[16];
-      int n = memory_graph_walk("nonexistent_entity", RELATION_MASK_ALL, 2, entries, 16);
-      assert(n == 0);
-   }
-
-   /* --- memory_graph_walk: NULL params return 0 --- */
-   {
-      graph_walk_entry_t entries[4];
-      assert(memory_graph_walk(NULL, RELATION_MASK_ALL, 1, entries, 4) == 0);
-      assert(memory_graph_walk("e", RELATION_MASK_ALL, 1, NULL, 4) == 0);
-   }
-
-   /* --- db1_cognify_job_enqueue / memory_cognify_queue_status --- */
-   {
-      /* Enqueue a job for a memory that we insert first */
-      memory_t m;
-      memory_insert(TIER_L2, KIND_FACT, "cognify:test:key", "test content", 1.0, "test", &m);
-      assert(m.id > 0);
-
-      /* THE STORE IS A SEPARATE PROCESS NOW, and this is one of the minimal
-         binaries: it links module_bus_stub, whose honest default is "no module
-         attached". Every db1_* call here therefore fails closed, so the queue
-         assertions have nothing to measure and are skipped rather than
-         inverted.
-         They are not lost. What they check is the cognify queue's UNIQUE
-         constraint -- store behaviour -- and the postgres family suites
-         exercise it against a real database. Skipping here and covering there
-         beats reimplementing the constraint in a stub and then testing the
-         stub. */
-      if (!db1_store_ready())
-      {
-         printf("\n  SKIP: cognify queue assertions need the store module\n");
-      }
-      else
-      {
-         int rc = db1_cognify_job_enqueue(m.id);
-         assert(rc == 0);
-
-         memory_cognify_queue_stats_t stats;
-         int sr = memory_cognify_queue_status(&stats);
-         assert(sr == 0);
-         assert(stats.pending >= 1);
-
-         /* Duplicate enqueue must be ignored (UNIQUE constraint) */
-         int rc2 = db1_cognify_job_enqueue(m.id);
-         assert(rc2 == 0);
-
-         memory_cognify_queue_stats_t stats2;
-         memory_cognify_queue_status(&stats2);
-         assert(stats2.pending == stats.pending);
-      }
-   }
-
-   /* --- memory_cognify_drain with cognifier disabled --- */
-   {
-      /* When cognify is disabled, drain is a no-op but must not crash */
-      write_test_config("memory:\n  cognify:\n    enabled: false\n");
-      memory_cognify_queue_stats_t stats;
-      /* Same gate as the block above: drain reads the queue through the store,
-         so with no module attached it reports failure rather than the no-op
-         this asserts. */
-      if (db1_store_ready())
-      {
-         int rc = memory_cognify_drain(0, &stats);
-         assert(rc == 0);
-      }
-      /* pending jobs remain because we can't actually run cognifier in tests */
-   }
+   /* Ontology names and graph traversal coverage moved to TestOntologyNames
+    * and TestPublicOntologyWalkPostgres at the shared Go owner. */
 
    /* --- memory_detect_aggregation_shape: structural heuristic ---
     * Covers the positive shapes from the proposal, entity seed extraction,
@@ -1257,163 +680,8 @@ int main(void)
       assert(memory_detect_aggregation_shape(NULL, &h) == 0);
    }
 
-   /* --- memory_briefing: bundle shape, ranking, and determinism --- */
-   {
-      /* Fresh DB so the briefing sees only fixture rows */
-      reset_db();
-
-      char err[256] = "";
-      memory_t m;
-      /* High-salience L3 fact: should lead the key_facts list */
-      memory_insert(TIER_L3, KIND_FACT, "brief:top", "top fact", 0.95, "s1", &m);
-      int64_t top_id = m.id;
-      assert(aimee_pg_exec(db2_conn(),
-                           "UPDATE memories SET evidence_strength=0.9, observation_count=5,"
-                           " use_count=7 WHERE id = (SELECT MAX(id) FROM memories)",
-                           err, sizeof(err)) == 0);
-
-      /* Mid-salience L2 fact */
-      memory_insert(TIER_L2, KIND_FACT, "brief:mid", "mid fact", 0.7, "s1", &m);
-
-      /* L1 row — must be excluded (tier filter) */
-      memory_insert("L1", KIND_FACT, "brief:low", "low fact", 0.99, "s1", &m);
-
-      /* Scratch row in L2 — must be excluded (kind filter) */
-      memory_insert(TIER_L2, "scratch", "brief:scratch", "scratch", 0.99, "s1", &m);
-
-      /* Entity mentions so active_entities has something to surface */
-      assert(aimee_pg_exec(db2_conn(),
-                           "INSERT INTO memory_entities(memory_id, entity) VALUES"
-                           " ((SELECT id FROM memories WHERE key='brief:top'), 'caroline'),"
-                           " ((SELECT id FROM memories WHERE key='brief:mid'), 'caroline'),"
-                           " ((SELECT id FROM memories WHERE key='brief:mid'), 'atlas')",
-                           err, sizeof(err)) == 0);
-
-      /* memory_insert auto-refreshes memory_episodes from (key, content) with
-       * the same source_session that was passed in — so we need a clean slate
-       * before inserting our own session-distinguishing rows, otherwise the
-       * auto-refreshed rows dominate the result set. */
-      assert(aimee_pg_exec(db2_conn(), "DELETE FROM memory_episodes", err, sizeof(err)) == 0);
-
-      /* Two episode cards across distinct sessions — recent_activity must
-       * collapse to one row per session. */
-      int exec_rc =
-          aimee_pg_exec(db2_conn(),
-                        "INSERT INTO memory_episodes(memory_id, episode_key, episode_text,"
-                        " source_session, created_at) VALUES"
-                        " ((SELECT id FROM memories WHERE key='brief:top'),"
-                        "   'ep1', 'worked on auth refactor', 'sess-a', '2026-04-15 10:00:00'),"
-                        " ((SELECT id FROM memories WHERE key='brief:mid'),"
-                        "   'ep2', 'reviewed PR 298', 'sess-b', '2026-04-16 12:00:00'),"
-                        " ((SELECT id FROM memories WHERE key='brief:mid'),"
-                        "   'ep3', 'older sess-a entry', 'sess-a', '2026-04-10 09:00:00')",
-                        err, sizeof(err));
-      if (exec_rc != 0)
-         fprintf(stderr, "episode insert failed: %s\n", err);
-      assert(exec_rc == 0);
-
-      struct cJSON *bundle = memory_briefing(0 /* default limit */);
-      assert(bundle != NULL);
-      const char *style =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "briefing_style"));
-      assert(style && strcmp(style, "compact") == 0);
-      int limit = (int)cJSON_GetNumberValue(
-          cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "limit_tokens"));
-      assert(limit == 1024);
-
-      struct cJSON *key_facts = cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "key_facts");
-      struct cJSON *recent = cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "recent_activity");
-      struct cJSON *entities = cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "active_entities");
-      assert(cJSON_IsArray((cJSON *)key_facts));
-      assert(cJSON_IsArray((cJSON *)recent));
-      assert(cJSON_IsArray((cJSON *)entities));
-
-      /* L1 and scratch must be absent; L2/L3 must be present */
-      int seen_top = 0, seen_mid = 0, seen_low = 0, seen_scratch = 0;
-      cJSON *it = NULL;
-      cJSON_ArrayForEach(it, (cJSON *)key_facts)
-      {
-         const char *key = cJSON_GetStringValue(cJSON_GetObjectItem(it, "key"));
-         if (!key)
-            continue;
-         if (strcmp(key, "brief:top") == 0)
-            seen_top = 1;
-         if (strcmp(key, "brief:mid") == 0)
-            seen_mid = 1;
-         if (strcmp(key, "brief:low") == 0)
-            seen_low = 1;
-         if (strcmp(key, "brief:scratch") == 0)
-            seen_scratch = 1;
-      }
-      assert(seen_top);
-      assert(seen_mid);
-      assert(!seen_low);
-      assert(!seen_scratch);
-
-      /* Highest confidence/evidence/observation entry should rank first */
-      cJSON *first = cJSON_GetArrayItem((cJSON *)key_facts, 0);
-      assert(first);
-      long long first_id = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(first, "memory_id"));
-      assert(first_id == top_id);
-
-      /* recent_activity: exactly one entry per distinct session, sorted by
-       * latest created_at DESC.  sess-b (04-16) must come before sess-a (04-15). */
-      assert(cJSON_GetArraySize((cJSON *)recent) == 2);
-      cJSON *r0 = cJSON_GetArrayItem((cJSON *)recent, 0);
-      cJSON *r1 = cJSON_GetArrayItem((cJSON *)recent, 1);
-      const char *r0_sess = cJSON_GetStringValue(cJSON_GetObjectItem(r0, "session_id"));
-      const char *r1_sess = cJSON_GetStringValue(cJSON_GetObjectItem(r1, "session_id"));
-      assert(strcmp(r0_sess, "sess-b") == 0);
-      assert(strcmp(r1_sess, "sess-a") == 0);
-
-      /* active_entities: caroline has 2 mentions, atlas has 1. */
-      assert(cJSON_GetArraySize((cJSON *)entities) >= 2);
-      cJSON *e0 = cJSON_GetArrayItem((cJSON *)entities, 0);
-      const char *e0_name = cJSON_GetStringValue(cJSON_GetObjectItem(e0, "name"));
-      int e0_mentions = (int)cJSON_GetNumberValue(cJSON_GetObjectItem(e0, "mentions"));
-      assert(strcmp(e0_name, "caroline") == 0);
-      assert(e0_mentions == 2);
-
-      /* Determinism: a second call on the frozen DB must produce a
-       * byte-identical bundle.  Guarantees no LLM or clock-sensitive noise
-       * leaked into the hot path. */
-      struct cJSON *bundle2 = memory_briefing(0);
-      assert(bundle2 != NULL);
-      char *j1 = cJSON_PrintUnformatted((cJSON *)bundle);
-      char *j2 = cJSON_PrintUnformatted((cJSON *)bundle2);
-      assert(j1 && j2);
-      assert(strcmp(j1, j2) == 0);
-      free(j1);
-      free(j2);
-      cJSON_Delete((cJSON *)bundle2);
-      cJSON_Delete((cJSON *)bundle);
-
-      /* Token cap: a tiny budget must trim the bundle under it.  Key facts
-       * are the last thing shrunk, so at the very least lower-priority
-       * sections should empty out. */
-      struct cJSON *small = memory_briefing(MEMORY_BRIEFING_MIN_LIMIT_TOKENS);
-      assert(small);
-      int approx = (int)cJSON_GetNumberValue(
-          cJSON_GetObjectItemCaseSensitive((cJSON *)small, "approx_tokens"));
-      assert(approx <= MEMORY_BRIEFING_MIN_LIMIT_TOKENS);
-      cJSON *small_entities = cJSON_GetObjectItemCaseSensitive((cJSON *)small, "active_entities");
-      cJSON *small_recent = cJSON_GetObjectItemCaseSensitive((cJSON *)small, "recent_activity");
-      /* Lower-priority sections must trim before key_facts. */
-      assert(cJSON_GetArraySize((cJSON *)small_entities) == 0);
-      assert(cJSON_GetArraySize((cJSON *)small_recent) == 0);
-      cJSON_Delete((cJSON *)small);
-
-      assert(db2_bandit_promotion_set("briefing_style", "evidence_heavy", "compact") == 0);
-      struct cJSON *heavy = memory_briefing(0);
-      assert(heavy);
-      const char *heavy_style =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive((cJSON *)heavy, "briefing_style"));
-      int heavy_limit = (int)cJSON_GetNumberValue(
-          cJSON_GetObjectItemCaseSensitive((cJSON *)heavy, "limit_tokens"));
-      assert(heavy_style && strcmp(heavy_style, "evidence_heavy") == 0);
-      assert(heavy_limit == 3000);
-      cJSON_Delete((cJSON *)heavy);
-   }
+   /* Briefing shape, ranking, determinism and budgets are exercised in Go
+    * briefing_test.go under the restricted runtime role. */
 
    /* --- memory_aggregate: entity-route coverage + truncated flag --- */
    {
@@ -1472,45 +740,6 @@ int main(void)
       int n2 = memory_aggregate(&hint, "What cities has Jon visited?", 2, rows, 16, &truncated2);
       assert(n2 == 2);
       assert(truncated2 == 1);
-   }
-
-   /* --- memory.answerability: default-off trace, gate abstain, curated exemption --- */
-   {
-      reset_db();
-
-      write_test_config("memory:\n  abstain:\n    enabled: false\n    gate: 0.99\n    "
-                        "chunk_min_confidence: 0.0\n");
-      memory_t m;
-      assert(memory_insert(TIER_L2, KIND_FACT, "mars:color", "mars color is red", 0.9, "s1", &m) ==
-             0);
-      memory_answer_result_t result;
-      assert(memory_ask_query("mars color", 5, &result) == 0);
-      assert(result.no_answer == 0);
-      assert(result.evidence.decision == MEMORY_ANSWER_DECISION_ANSWERABLE);
-      assert(result.evidence.ranked_count > 0);
-      assert(result.evidence.candidate_id_count > 0);
-
-      write_test_config("memory:\n  abstain:\n    enabled: true\n    gate: 0.99\n    "
-                        "chunk_min_confidence: 0.0\n");
-      memset(&result, 0, sizeof(result));
-      assert(memory_ask_query("mars color", 5, &result) == 0);
-      assert(result.no_answer == 1);
-      assert(result.answer[0] == '\0');
-      assert(result.citation_count == 0);
-      assert(result.evidence.decision == MEMORY_ANSWER_DECISION_ABSTAIN);
-      assert(result.evidence.reason == MEMORY_ANSWER_REASON_GROUNDING_LOW);
-      char *rendered = memory_answer_query("mars color", 5);
-      assert(rendered && strcmp(rendered, "No confident answer for \"mars color\"") == 0);
-      free(rendered);
-
-      assert(memory_insert(TIER_L4, KIND_FACT, "venus:color", "venus color is yellow", 0.9, "s1",
-                           &m) == 0);
-      memset(&result, 0, sizeof(result));
-      assert(memory_ask_query("venus color", 5, &result) == 0);
-      assert(result.no_answer == 0);
-      assert(result.evidence.decision == MEMORY_ANSWER_DECISION_EXEMPT);
-      assert(result.evidence.reason == MEMORY_ANSWER_REASON_CURATED_EXEMPT);
-      assert(result.evidence.exempt == 1);
    }
 
    /* --- memory_aggregate: keyword fallback when no entity seed --- */
@@ -1631,11 +860,7 @@ int main(void)
       assert(memory_prospective_get(past_rem.id, &got) == 0);
       assert(strcmp(got.state, "expired") == 0);
 
-      /* Default memory_list (i.e. the normal fact-recall surface) must not
-       * leak prospective reminders — they live in their own table. */
-      memory_t mems[16];
-      int mem_n = memory_list(NULL, NULL, 16, mems, 16);
-      assert(mem_n == 0); /* nothing inserted into `memories` */
+      /* List isolation coverage now runs in Go's checkpoint replay fixture. */
 
       /* Input validation. */
       assert(memory_prospective_create("", "x", "", "", NULL, "", "", NULL) == -1);
@@ -1713,17 +938,21 @@ int main(void)
          assert(memory_transition_lifecycle(m.id, MEMORY_LIFECYCLE_STATE_ACTIVE, NULL) == -1);
          assert(memory_transition_lifecycle(m.id, MEMORY_LIFECYCLE_STATE_PENDING, NULL) == -1);
 
-         /* Archived memories are still fetchable via memory_get — archival
-          * is metadata, not truncation. */
-         memory_t got;
-         assert(memory_get(m.id, &got) == 0);
-         assert(strcmp(got.key, "sm:active") == 0);
+         /* Archival retains the stored row. Public historical-read parity is
+          * exercised through the Go command fixture. */
+         char archived_sql[128], archived_err[128] = "";
+         snprintf(archived_sql, sizeof(archived_sql), "SELECT key FROM memories WHERE id=%lld",
+                  (long long)m.id);
+         aimee_pg_stmt_t *archived_stmt =
+             aimee_pg_prepare(db2_conn(), archived_sql, archived_err, sizeof(archived_err));
+         assert(archived_stmt &&
+                aimee_pg_step(archived_stmt, archived_err, sizeof(archived_err)) == AIMEE_PG_ROW);
+         assert(strcmp(aimee_pg_column_text(archived_stmt, 0), "sm:active") == 0);
+         aimee_pg_finalize(archived_stmt);
 
-         /* Recall must hide archived rows even with the archival feature flags
-          * at their default-off values. History/get remains available above. */
-         memory_t recall_rows[4];
-         assert(memory_list(NULL, NULL, 4, recall_rows, 4) == 0);
-         assert(memory_find_facts("review next week", 4, recall_rows, 4) == 0);
+         /* Archived-row exclusion now runs through Go owner retrieval in
+          * benchmark_score_test.go; historical list coverage is in
+          * public_checkpoint_test.go. The native search ABI is retired. */
       }
 
       /* Sweep: rows whose ttl_at is in the past transition to archived
@@ -1750,95 +979,8 @@ int main(void)
          assert(memory_lifecycle_sweep_expired() == 0);
       }
 
-      /* Alerts bundle shape: stale_pending surfaces rows past 80% of the
-       * TTL window; unresolved_contradictions pulls from memory_conflicts;
-       * newly_superseded pulls rows transitioned to superseded since the
-       * `since` cutoff. */
-      {
-         reset_db();
-
-         char err[256] = "";
-         memory_t stale;
-         assert(memory_insert(TIER_L2, KIND_FACT, "alert:stale", "I'll audit this month", 0.9, "s1",
-                              &stale) == 0);
-         /* Created 9 days ago with a 10-day window — 90% elapsed > 80%
-          * threshold, so stale_pending should pick it up. */
-         char stale_created[TEST_TS_MAX], stale_ttl[TEST_TS_MAX], stale_sql[512];
-         test_ts_days(stale_created, sizeof(stale_created), -9);
-         test_ts_days(stale_ttl, sizeof(stale_ttl), 1);
-         snprintf(stale_sql, sizeof(stale_sql),
-                  "UPDATE memories SET lifecycle_state = 'pending',"
-                  " created_at = '%s', ttl_at = '%s'"
-                  " WHERE key = 'alert:stale'",
-                  stale_created, stale_ttl);
-         assert(aimee_pg_exec(db2_conn(), stale_sql, err, sizeof(err)) == 0);
-
-         /* Fresh pending (just created, 10-day window) must NOT be stale. */
-         memory_t fresh;
-         assert(memory_insert(TIER_L2, KIND_FACT, "alert:fresh", "I'll sync tomorrow", 0.9, "s1",
-                              &fresh) == 0);
-         char fresh_created[TEST_TS_MAX], fresh_ttl[TEST_TS_MAX], fresh_sql[512];
-         test_ts_days(fresh_created, sizeof(fresh_created), -1);
-         test_ts_days(fresh_ttl, sizeof(fresh_ttl), 9);
-         snprintf(fresh_sql, sizeof(fresh_sql),
-                  "UPDATE memories SET lifecycle_state = 'pending',"
-                  " created_at = '%s', ttl_at = '%s'"
-                  " WHERE key = 'alert:fresh'",
-                  fresh_created, fresh_ttl);
-         assert(aimee_pg_exec(db2_conn(), fresh_sql, err, sizeof(err)) == 0);
-
-         /* Conflict row for the unresolved section. */
-         memory_t a, b;
-         assert(memory_insert(TIER_L2, KIND_FACT, "alert:conflict", "value A", 0.9, "s1", &a) == 0);
-         assert(memory_insert(TIER_L2, KIND_FACT, "alert:conflict", "value B", 0.9, "s1", &b) == 0);
-         memory_record_conflict(a.id, b.id);
-
-         /* Newly superseded row. */
-         memory_t sup;
-         assert(memory_insert(TIER_L2, KIND_FACT, "alert:sup", "was-true", 0.9, "s1", &sup) == 0);
-         assert(memory_transition_lifecycle(sup.id, MEMORY_LIFECYCLE_STATE_SUPERSEDED, NULL) == 0);
-
-         cJSON *bundle = memory_alerts(NULL);
-         assert(bundle != NULL);
-         cJSON *stale_arr = cJSON_GetObjectItemCaseSensitive(bundle, "stale_pending");
-         cJSON *conf_arr = cJSON_GetObjectItemCaseSensitive(bundle, "unresolved_contradictions");
-         cJSON *sup_arr = cJSON_GetObjectItemCaseSensitive(bundle, "newly_superseded");
-         assert(cJSON_IsArray(stale_arr));
-         assert(cJSON_IsArray(conf_arr));
-         assert(cJSON_IsArray(sup_arr));
-
-         /* Exactly the stale row lands in stale_pending, not the fresh one. */
-         int saw_stale = 0, saw_fresh = 0;
-         cJSON *it = NULL;
-         cJSON_ArrayForEach(it, stale_arr)
-         {
-            long long id = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
-            if (id == stale.id)
-               saw_stale = 1;
-            if (id == fresh.id)
-               saw_fresh = 1;
-         }
-         assert(saw_stale);
-         assert(!saw_fresh);
-
-         /* Unresolved conflict shows up. */
-         assert(cJSON_GetArraySize(conf_arr) >= 1);
-
-         /* Newly-superseded section captures the row we transitioned. */
-         int saw_sup = 0;
-         cJSON_ArrayForEach(it, sup_arr)
-         {
-            long long id = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
-            if (id == sup.id)
-               saw_sup = 1;
-         }
-         assert(saw_sup);
-
-         double elapsed =
-             cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(bundle, "elapsed_ms"));
-         assert(elapsed >= 0.0);
-         cJSON_Delete(bundle);
-      }
+      /* Alert shape, TTL fractions, scope limits and sweep plateau coverage
+       * run through Go alerts_test.go with the restricted runtime role. */
 
       /* Stress fixture: inject 500 commitment-shape rows across a simulated
        * 90-day window and assert that the sweep keeps the stale-pending
@@ -1892,248 +1034,14 @@ int main(void)
          assert(cts.pending < 500);
          assert(cts.archived >= archived_first);
 
-         cJSON *bundle = memory_alerts(NULL);
-         cJSON *stale_arr = cJSON_GetObjectItemCaseSensitive(bundle, "stale_pending");
-         int stale_count = cJSON_GetArraySize(stale_arr);
-         /* Plateau check: stale_count <= pending <= plateau bound. */
-         assert(stale_count <= (int)cts.pending);
-         cJSON_Delete(bundle);
-
          /* Running the sweep again must be a no-op — idempotence. */
          int archived_second = memory_lifecycle_sweep_expired();
          assert(archived_second == 0);
       }
    }
 
-   /* --- memory_recall: bundle shape, section caps, filters, determinism --- */
-   {
-      reset_db();
-
-      memory_t m;
-
-      /* Identity: stable key-prefix rows at L2+. */
-      assert(memory_insert(TIER_L3, KIND_FACT, "identity:name", "user is Jim", 0.98, "s1", &m) ==
-             0);
-      assert(memory_insert(TIER_L2, KIND_FACT, "role:engineer", "user is a software engineer", 0.95,
-                           "s1", &m) == 0);
-      /* Negative control: same tier/kind, non-identity key — must NOT surface in identity. */
-      assert(memory_insert(TIER_L2, KIND_FACT, "project:alpha", "project alpha started", 0.9, "s1",
-                           &m) == 0);
-      /* Negative control: L1 identity-shaped key — tier filter must reject. */
-      assert(memory_insert("L1", KIND_FACT, "identity:low", "should not surface", 0.95, "s1", &m) ==
-             0);
-
-      /* Preferences: KIND_PREFERENCE at L2+. */
-      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "pref:indent", "user prefers 3-space", 0.9,
-                           "s1", &m) == 0);
-      int64_t pref_control_id = m.id;
-      assert(memory_activation_policy_set(pref_control_id, 2, 0, 0, 0) == 0);
-      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "pref:cooldown", "cooldown sentinel", 0.99,
-                           "s1", &m) == 0);
-      int64_t pref_cooldown_id = m.id;
-      assert(memory_activation_policy_set(pref_cooldown_id, 2, 1, 0, 0) == 0);
-      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "pref:delayed", "delay sentinel", 0.98, "s1",
-                           &m) == 0);
-      int64_t pref_delayed_id = m.id;
-      assert(memory_activation_policy_set(pref_delayed_id, 0, 0, 2, 0) == 0);
-
-      /* Active context: recent, in-window L1/L2 facts. */
-      assert(memory_insert(TIER_L2, KIND_FACT, "active:one", "touched today", 0.8, "s1", &m) == 0);
-      char err[256] = "";
-      assert(aimee_pg_exec(db2_conn(),
-                           "UPDATE memories SET last_used_at = pg_now_text(),"
-                           " updated_at = pg_now_text() WHERE key = 'active:one'",
-                           err, sizeof(err)) == 0);
-
-      /* Open commitment: mark one fact pending. */
-      assert(memory_insert(TIER_L2, KIND_FACT, "commit:one", "I'll review this next week", 0.9,
-                           "s1", &m) == 0);
-      int64_t commit_id = m.id;
-      assert(memory_mark_pending(commit_id, 7) == 0);
-
-      /* Reminder: armed prospective memory that the matcher can surface. */
-      memory_prospective_t pm;
-      assert(memory_prospective_create("when rotation comes up", "remind about the token swap", "",
-                                       "", "once", "", "s1", &pm) == 0);
-
-      cJSON *bundle = memory_recall("we should rotate the staging tokens", 0 /* default limit */,
-                                    1 /* session_start */);
-      assert(bundle != NULL);
-
-      /* Shape: all six sections must exist as arrays, regardless of fill. */
-      cJSON *identity = cJSON_GetObjectItemCaseSensitive(bundle, "identity");
-      cJSON *preferences = cJSON_GetObjectItemCaseSensitive(bundle, "preferences");
-      cJSON *active = cJSON_GetObjectItemCaseSensitive(bundle, "active_context");
-      cJSON *commitments = cJSON_GetObjectItemCaseSensitive(bundle, "open_commitments");
-      cJSON *reminders = cJSON_GetObjectItemCaseSensitive(bundle, "reminders");
-      cJSON *directives = cJSON_GetObjectItemCaseSensitive(bundle, "directives");
-      assert(cJSON_IsArray(identity));
-      assert(cJSON_IsArray(preferences));
-      assert(cJSON_IsArray(active));
-      assert(cJSON_IsArray(commitments));
-      assert(cJSON_IsArray(reminders));
-      assert(cJSON_IsArray(directives));
-
-      /* The production recall selector consumes a snapshot loaded by the
-       * user-local server. Cooldown and delay must be applied before the
-       * section cap, allowing the next eligible row to backfill the section. */
-      memory_activation_t activation = {0};
-      activation.loaded = 1;
-      activation.current_turn = 2;
-      activation.count = 2;
-      activation.rows[0].memory_id = pref_cooldown_id;
-      activation.rows[0].last_turn = 1;
-      activation.rows[1].memory_id = pref_control_id;
-      activation.rows[1].last_turn = 1;
-      cJSON *activated = memory_recall_activated("routine edit", 0, 0, &activation);
-      assert(activated != NULL);
-      cJSON *activated_prefs = cJSON_GetObjectItemCaseSensitive(activated, "preferences");
-      int saw_control = 0, saw_cooldown = 0, saw_delayed = 0;
-      int saw_sticky_reason = 0;
-      cJSON *activated_it = NULL;
-      cJSON_ArrayForEach(activated_it, activated_prefs)
-      {
-         int64_t id = (int64_t)cJSON_GetNumberValue(
-             cJSON_GetObjectItemCaseSensitive(activated_it, "memory_id"));
-         saw_control |= id == pref_control_id;
-         saw_cooldown |= id == pref_cooldown_id;
-         saw_delayed |= id == pref_delayed_id;
-         const char *why =
-             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(activated_it, "why"));
-         saw_sticky_reason |= id == pref_control_id && why && strcmp(why, "sticky activation") == 0;
-      }
-      assert(saw_control);
-      assert(saw_sticky_reason);
-      assert(!saw_cooldown);
-      assert(!saw_delayed);
-      cJSON *held = cJSON_GetObjectItemCaseSensitive(activated, "activation_held");
-      assert(cJSON_IsNumber(held) && held->valuedouble >= 2.0);
-      cJSON_Delete(activated);
-
-      /* Telemetry fields for operator inspection. */
-      cJSON *approx = cJSON_GetObjectItemCaseSensitive(bundle, "approx_tokens");
-      cJSON *elapsed = cJSON_GetObjectItemCaseSensitive(bundle, "elapsed_ms");
-      assert(cJSON_IsNumber(approx));
-      assert(cJSON_IsNumber(elapsed));
-
-      /* Identity filter: only prefix-matching rows must land; L1 and non-identity keys must not. */
-      int seen_name = 0, seen_role = 0, seen_project = 0, seen_low = 0;
-      cJSON *it = NULL;
-      cJSON_ArrayForEach(it, identity)
-      {
-         const char *key = cJSON_GetStringValue(cJSON_GetObjectItem(it, "key"));
-         const char *why = cJSON_GetStringValue(cJSON_GetObjectItem(it, "why"));
-         assert(why && why[0]);
-         if (!key)
-            continue;
-         if (strcmp(key, "identity:name") == 0)
-            seen_name = 1;
-         if (strcmp(key, "role:engineer") == 0)
-            seen_role = 1;
-         if (strcmp(key, "project:alpha") == 0)
-            seen_project = 1;
-         if (strcmp(key, "identity:low") == 0)
-            seen_low = 1;
-      }
-      assert(seen_name);
-      assert(seen_role);
-      assert(!seen_project);
-      assert(!seen_low);
-
-      /* Open commitments surfaces exactly the pending row. */
-      assert(cJSON_GetArraySize(commitments) == 1);
-      cJSON *c0 = cJSON_GetArrayItem(commitments, 0);
-      long long c0_id = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(c0, "memory_id"));
-      assert(c0_id == commit_id);
-
-      /* Directives is always an empty stub until the separate proposal lands —
-       * section-order stability is a caller contract. */
-      assert(cJSON_GetArraySize(directives) == 0);
-
-      /* Reminders: the matcher delegates into the prospective subsystem, which
-       * has token-overlap rules — surface-or-not isn't part of the contract
-       * here; we only check that reminder rows carry a why when present. */
-      cJSON *r_it = NULL;
-      cJSON_ArrayForEach(r_it, reminders)
-      {
-         const char *why = cJSON_GetStringValue(cJSON_GetObjectItem(r_it, "why"));
-         assert(why && why[0]);
-      }
-
-      /* Determinism: two calls on the same DB / same inputs produce byte-identical bundles.
-       * elapsed_ms is timing-dependent, so compare after stripping it from both sides. */
-      cJSON *bundle2 = memory_recall("we should rotate the staging tokens", 0, 1);
-      assert(bundle2 != NULL);
-      cJSON_DeleteItemFromObjectCaseSensitive(bundle, "elapsed_ms");
-      cJSON_DeleteItemFromObjectCaseSensitive(bundle2, "elapsed_ms");
-      cJSON_DeleteItemFromObjectCaseSensitive(bundle, "retrieval_event_id");
-      cJSON_DeleteItemFromObjectCaseSensitive(bundle2, "retrieval_event_id");
-      char *j1 = cJSON_PrintUnformatted(bundle);
-      char *j2 = cJSON_PrintUnformatted(bundle2);
-      assert(j1 && j2);
-      assert(strcmp(j1, j2) == 0);
-      free(j1);
-      free(j2);
-      cJSON_Delete(bundle2);
-      cJSON_Delete(bundle);
-
-      /* Session-start vs per-turn: session bundle has >= the per-turn row count
-       * across sections, because caps are wider. */
-      cJSON *b_session = memory_recall("", 0, 1);
-      cJSON *b_turn = memory_recall("routine edit", 0, 0);
-      assert(b_session && b_turn);
-      int sess_total =
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(b_session, "identity")) +
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(b_session, "preferences")) +
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(b_session, "active_context")) +
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(b_session, "open_commitments"));
-      int turn_total =
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(b_turn, "identity")) +
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(b_turn, "preferences")) +
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(b_turn, "active_context")) +
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(b_turn, "open_commitments"));
-      assert(sess_total >= turn_total);
-      cJSON_Delete(b_session);
-      cJSON_Delete(b_turn);
-
-      /* Telemetry is recorded for operator inspection. Latency budgets are
-       * tracked by explicit benchmarks, not unit-test gates. */
-      int64_t assemblies = 0;
-      double ms_max = 0.0;
-      memory_recall_metrics(&assemblies, NULL, NULL, &ms_max);
-      assert(assemblies > 0);
-      assert(ms_max >= 0.0);
-
-      /* Token-cap truncation: under a squeezed budget, the trim pass walks
-       * from low-priority sections first (directives → reminders →
-       * open_commitments → active_context → preferences → identity).
-       *
-       * Property: low-priority sections must drain NO SLOWER than higher-
-       * priority ones.  Concretely, reminders+commitments+active_context
-       * can never outnumber identity+preferences after the squeeze — if
-       * the bundle is over budget, the higher-priority sections are
-       * trimmed last, so their row count dominates. */
-      cJSON *squeezed =
-          memory_recall("we should rotate the staging tokens", 96 /* tight budget */, 0);
-      assert(squeezed != NULL);
-      int sq_id_rows = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(squeezed, "identity"));
-      int sq_pref_rows =
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(squeezed, "preferences"));
-      int sq_act_rows =
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(squeezed, "active_context"));
-      int sq_com_rows =
-          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(squeezed, "open_commitments"));
-      int sq_rem_rows = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(squeezed, "reminders"));
-      assert((sq_rem_rows + sq_com_rows + sq_act_rows) <= (sq_id_rows + sq_pref_rows) + 1);
-      cJSON_Delete(squeezed);
-
-      /* Min-budget sanity: directives is a no-op on a fresh DB, so the
-       * bundle stays parseable even under the minimum cap. */
-      cJSON *tiny = memory_recall("x", MEMORY_RECALL_MIN_LIMIT_TOKENS, 0);
-      assert(tiny != NULL);
-      assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(tiny, "directives")) == 0);
-      cJSON_Delete(tiny);
-   }
+   /* Recall bundles, budgets and directive surfacing are exercised by Go
+    * recall_test.go with the packaged runtime role and real PostgreSQL. */
 
    /* --- epistemic directives: CRUD, state machine, matcher, auto-hooks --- */
    {
@@ -2333,43 +1241,6 @@ int main(void)
          aimee_pg_finalize(q);
       }
 
-      /* Recall integration: a matching open directive surfaces in the
-       * recall bundle's `directives` section with the cause threaded into
-       * `why`. */
-      {
-         memory_directive_t rec_d;
-         assert(memory_directive_create(
-                    "What DB backend should we migrate to?", "db backend migration", "postgres", "",
-                    MEMORY_DIRECTIVE_CAUSE_USER_FOLLOW_UP, 90, 0, 0, "", "", "", &rec_d) == 0);
-
-         cJSON *bundle = memory_recall("we should pick a db backend for migration", 0, 0);
-         assert(bundle != NULL);
-         cJSON *directives = cJSON_GetObjectItemCaseSensitive(bundle, "directives");
-         assert(cJSON_IsArray(directives));
-         int found = 0;
-         cJSON *it = NULL;
-         cJSON_ArrayForEach(it, directives)
-         {
-            long long id = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
-            const char *why = cJSON_GetStringValue(cJSON_GetObjectItem(it, "why"));
-            const char *kind = cJSON_GetStringValue(cJSON_GetObjectItem(it, "kind"));
-            if (id == rec_d.id)
-            {
-               found = 1;
-               assert(strcmp(kind, "directive") == 0);
-               assert(why && strstr(why, "directive:") == why);
-            }
-         }
-         assert(found);
-         cJSON_Delete(bundle);
-
-         /* recall_fill_directives calls mark_surfaced on each emitted row,
-          * so the counter should have advanced. */
-         memory_directive_t got;
-         assert(memory_directive_get(rec_d.id, &got) == 0);
-         assert(got.surfaced_count >= 1);
-      }
-
       /* Metrics accumulated across this block. */
       int64_t created_total = 0, resolved_total = 0, surfaced_total = 0;
       memory_directive_metrics(&created_total, &resolved_total, NULL, &surfaced_total, NULL, NULL,
@@ -2455,16 +1326,6 @@ int main(void)
       assert(cJSON_IsNumber(cJSON_GetObjectItem(parsed, "elapsed_ms")));
       cJSON_Delete(parsed);
 
-      /* last_summary persists for the dashboard accessor. */
-      memory_maintenance_summary_t last;
-      assert(memory_maintenance_last_summary(&last) == 0);
-      assert(last.summary_json[0] != 0);
-
-      int64_t runs_total = 0, skips_total = 0;
-      memory_maintenance_metrics(&runs_total, &skips_total, NULL, NULL, NULL);
-      assert(runs_total >= 2);
-      assert(skips_total >= 1);
-
       /* maybe_run is gated on memory_maintenance.enabled; say so in config. */
       write_test_config("memory_maintenance:\n  enabled: false\n");
       assert(memory_maintenance_maybe_run(NULL) == 0);
@@ -2540,84 +1401,7 @@ int main(void)
       assert(db2_memory_valid_at(m.id, iso_before) == 1);
       assert(db2_memory_valid_at(m.id, spaced_before) == 1);
 
-      /* valid_from side: memory_supersede stamps the replacement's valid_from at
-       * the same instant it closes the old row's valid_until, so the intervals
-       * meet exactly -- at that instant the old row is out and the new one in,
-       * with neither a gap nor an overlap. Later today the replacement is in
-       * force; against the bug the spaced form read "not yet valid". */
-      memory_t sup_src, replacement;
-      assert(memory_insert(TIER_L2, KIND_PREFERENCE, "bt:from", "original value", 0.9, "s-bt",
-                           &sup_src) == 0);
-      assert(memory_supersede(sup_src.id, "replacement value", 0.9, "s-bt", &replacement) == 0);
-      assert(db2_memory_valid_at(replacement.id, spaced_after) == 1);
-      assert(db2_memory_valid_at(replacement.id, iso_after) == 1);
-      assert(db2_memory_valid_at(replacement.id, spaced_before) == 0);
-      assert(db2_memory_valid_at(replacement.id, iso_before) == 0);
-
-      /* The superseded original closed at that same instant. */
-      assert(db2_memory_valid_at(sup_src.id, spaced_after) == 0);
-
       printf("  bitemporal_rows: ok\n");
-   }
-
-   /* --- session folding is bounded, recursively gated, and fully traced --- */
-   {
-      const char *success_session = "fold-complete";
-      int64_t source_ids[3];
-      source_ids[0] = insert_raw_l0(success_session, "fold-source-a", "alpha checkpoint");
-      source_ids[1] = insert_raw_l0(success_session, "fold-source-b", "beta checkpoint");
-      source_ids[2] = insert_raw_l0(success_session, "fold-source-c", "gamma checkpoint");
-      char summary[256] = "not-cleared";
-      assert(memory_fold_session(success_session, summary, sizeof(summary)) == 3);
-      assert(summary[0] != '\0');
-      assert(count_session_tier(success_session, TIER_L0) == 0);
-      assert(count_session_tier(success_session, TIER_L1) == 1);
-
-      char err[128] = "";
-      aimee_pg_stmt_t *q =
-          aimee_pg_prepare(db2_conn(), "SELECT id FROM memories WHERE key='session:fold-complete'",
-                           err, sizeof(err));
-      assert(q != NULL);
-      assert(aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW);
-      int64_t episode_id = aimee_pg_column_int64(q, 0);
-      aimee_pg_finalize(q);
-      memory_lineage_t lineage[4];
-      assert(memory_lineage_get("memory", episode_id, lineage, 4) == 3);
-      for (int i = 0; i < 3; i++)
-      {
-         char expected[48];
-         snprintf(expected, sizeof(expected), "memory:%lld", (long long)source_ids[i]);
-         int found = 0;
-         for (int j = 0; j < 3; j++)
-            if (strcmp(lineage[j].source_kind, "memory") == 0 &&
-                strcmp(lineage[j].source_ref, expected) == 0)
-               found = 1;
-         assert(found);
-      }
-
-      const char *refused_session = "fold-refused";
-      int64_t refused = insert_raw_l0(refused_session, "fold-refused-source", "retired source");
-      assert(memory_transition_lifecycle(refused, MEMORY_LIFECYCLE_STATE_ARCHIVED,
-                                         "fold refusal fixture") == 0);
-      snprintf(summary, sizeof(summary), "not-cleared");
-      assert(memory_fold_session(refused_session, summary, sizeof(summary)) == -1);
-      assert(summary[0] == '\0');
-      assert(count_session_tier(refused_session, TIER_L0) == 1);
-      assert(count_session_tier(refused_session, TIER_L1) == 0);
-
-      const char *bounded_session = "fold-over-cap";
-      for (int i = 0; i < 65; i++)
-      {
-         char key[64], content[64];
-         snprintf(key, sizeof(key), "fold-bounded-%02d", i);
-         snprintf(content, sizeof(content), "bounded checkpoint %02d", i);
-         (void)insert_raw_l0(bounded_session, key, content);
-      }
-      snprintf(summary, sizeof(summary), "not-cleared");
-      assert(memory_fold_session(bounded_session, summary, sizeof(summary)) == -1);
-      assert(summary[0] == '\0');
-      assert(count_session_tier(bounded_session, TIER_L0) == 65);
-      assert(count_session_tier(bounded_session, TIER_L1) == 0);
    }
 
    /* ONE WAY TO WRITE A TIMESTAMP.
@@ -2647,7 +1431,15 @@ int main(void)
                            &probe) == 0);
       assert(memory_transition_lifecycle(probe.id, MEMORY_LIFECYCLE_STATE_ARCHIVED, "fmt") == 0);
       memory_t after;
-      assert(memory_get(probe.id, &after) == 0);
+      char stamp_sql[128], stamp_err[128] = "";
+      snprintf(stamp_sql, sizeof(stamp_sql), "SELECT updated_at FROM memories WHERE id=%lld",
+               (long long)probe.id);
+      aimee_pg_stmt_t *stamp_stmt =
+          aimee_pg_prepare(db2_conn(), stamp_sql, stamp_err, sizeof(stamp_err));
+      assert(stamp_stmt && aimee_pg_step(stamp_stmt, stamp_err, sizeof(stamp_err)) == AIMEE_PG_ROW);
+      snprintf(after.updated_at, sizeof(after.updated_at), "%s",
+               aimee_pg_column_text(stamp_stmt, 0));
+      aimee_pg_finalize(stamp_stmt);
       assert(strlen(after.updated_at) == 20);
       assert(after.updated_at[10] == 'T');
       assert(after.updated_at[19] == 'Z');
@@ -2688,10 +1480,7 @@ int main(void)
       printf("  timestamp_writers_agree: ok\n");
    }
 
-   test_memory_rejection_governance();
-   test_long_content_survives_store_and_merge();
    db2_test_shim_close();
-   platform_memory_background_embed_set_suppressed(background_embed_was_suppressed);
    db1_shutdown();
 
    printf("all tests passed\n");

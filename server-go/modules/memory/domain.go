@@ -126,28 +126,40 @@ func (s *postgresDataStore) Touch(ctx context.Context, ids []int64) (int, error)
 		return 0, err
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE memories SET use_count=use_count+1,
-last_used_at=pg_now_text(), updated_at=pg_now_text() WHERE id=ANY($1)`, ids)
+last_used_at=pg_now_text(), updated_at=pg_now_text() WHERE id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 	if err != nil {
 		return 0, err
 	}
 	return int(tag.RowsAffected()), nil
 }
 
-func (s *postgresDataStore) UpdateContent(ctx context.Context, id int64, content string) (bool, error) {
-	if err := s.requireKBDomain(); err != nil {
-		return false, err
+// Legacy content edits use the canonical model transition and return its new
+// identity. They cannot mutate old content or bypass epistemic/author checks.
+func (s *postgresDataStore) UpdateContent(ctx context.Context, id int64, content string) (int64, error) {
+	code, next, err := s.UpdateAs(ctx, id, content, AuthorityModel)
+	if err != nil {
+		return 0, err
 	}
-	tag, err := s.db.Exec(ctx, `UPDATE memories SET content=$2, updated_at=pg_now_text()
-WHERE id=$1 AND lifecycle_state='active'`, id, content)
-	return err == nil && tag.RowsAffected() > 0, err
+	switch code {
+	case MutationImmutableExperience:
+		return 0, errImmutableExperience
+	case MutationRequiresReplacement:
+		return 0, errRequiresRevocation
+	case MutationReviewRequired:
+		return 0, errMutationReviewRequired
+	}
+	return next, nil
 }
 
-func (s *postgresDataStore) Reject(ctx context.Context, id int64, reason string) (bool, error) {
+func (s *postgresDataStore) Reject(ctx context.Context, id int64, reason string) (out bool, err error) {
+	defer func() {
+		s.recordMutation(DataRequest{Operation: "reject", ID: id}, DataResponse{Updated: out}, err, "")
+	}()
 	if err := s.requireKBDomain(); err != nil {
 		return false, err
 	}
 	var changed int
-	err := s.db.QueryRow(ctx, `WITH target AS (
+	err = s.db.QueryRow(ctx, `WITH target AS (
  SELECT key,content,scope_type,scope_value FROM memories WHERE id=$1
 ), tomb AS (
  INSERT INTO memory_rejection_tombstones(object_kind,memory_key,memory_content,scope_type,scope_value,reason)
@@ -172,7 +184,8 @@ func (s *postgresDataStore) LinkCreate(ctx context.Context, sourceID, targetID i
 	}
 	var item MemoryLink
 	err := scanLink(s.db.QueryRow(ctx, `INSERT INTO memory_links(source_id,target_id,relation)
-VALUES($1,$2,$3) RETURNING id,source_id,target_id,relation,weight,created_at`, sourceID, targetID, relation), &item)
+SELECT $1,$2,$3 WHERE $1 IN (SELECT id FROM memories) AND $2 IN (SELECT id FROM memories)
+RETURNING id,source_id,target_id,relation,weight,created_at`, sourceID, targetID, relation), &item)
 	return item, err
 }
 
@@ -181,7 +194,8 @@ func (s *postgresDataStore) LinkQuery(ctx context.Context, id int64, limit int) 
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,source_id,target_id,relation,weight,created_at
-FROM memory_links WHERE source_id=$1 OR target_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2`, id, limit)
+FROM memory_links WHERE (source_id=$1 OR target_id=$1)
+AND source_id IN (SELECT id FROM memories) AND target_id IN (SELECT id FROM memories) ORDER BY created_at DESC,id DESC LIMIT $2`, id, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +215,8 @@ func (s *postgresDataStore) LinkDelete(ctx context.Context, id int64) (bool, err
 	if err := s.requireKBDomain(); err != nil {
 		return false, err
 	}
-	tag, err := s.db.Exec(ctx, `DELETE FROM memory_links WHERE id=$1`, id)
+	tag, err := s.db.Exec(ctx, `DELETE FROM memory_links WHERE id=$1
+AND source_id IN (SELECT id FROM memories) AND target_id IN (SELECT id FROM memories)`, id)
 	return err == nil && tag.RowsAffected() > 0, err
 }
 
@@ -210,7 +225,7 @@ func (s *postgresDataStore) ProvenanceList(ctx context.Context, id int64, limit 
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,memory_id,session_id,action,COALESCE(details,''),created_at
-FROM memory_provenance WHERE memory_id=$1 ORDER BY id LIMIT $2`, id, limit)
+FROM memory_provenance WHERE memory_id=$1 AND memory_id IN (SELECT id FROM memories) ORDER BY id LIMIT $2`, id, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +264,8 @@ func (s *postgresDataStore) ConflictList(ctx context.Context, limit int) ([]Conf
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,memory_a,memory_b,detected_at,resolved,COALESCE(resolution,'')
-FROM memory_conflicts WHERE resolved=0 ORDER BY detected_at DESC,id DESC LIMIT $1`, limit)
+FROM memory_conflicts WHERE resolved=0
+AND memory_a IN (SELECT id FROM memories) AND memory_b IN (SELECT id FROM memories) ORDER BY detected_at DESC,id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -296,13 +312,23 @@ func (s *postgresDataStore) ScopeTag(ctx context.Context, id int64, scope Scope)
 	if err := s.requireKBDomain(); err != nil {
 		return false, err
 	}
-	tag, err := s.db.Exec(ctx, `UPDATE memories SET scope_type=$2,scope_value=$3,updated_at=pg_now_text() WHERE id=$1`, id, scope.Type, scope.Value)
-	if err != nil || tag.RowsAffected() == 0 {
+	scope, err := normalizeScope(PlacementKB, scope)
+	if err != nil {
 		return false, err
 	}
-	_, err = s.db.Exec(ctx, `INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
-VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, id, scope.Type, scope.Value)
-	return err == nil, err
+	// One statement keeps canonical ownership and compatibility projections
+	// atomic, including callers already inside a larger transaction.
+	var updated bool
+	err = s.db.QueryRow(ctx, `WITH changed AS (
+ UPDATE memories SET scope_type=$2,scope_value=$3,updated_at=pg_now_text() WHERE id=$1 RETURNING id
+), tags AS (
+ INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
+ SELECT id,$2,$3 FROM changed WHERE true ON CONFLICT DO NOTHING
+), workspaces AS (
+ INSERT INTO memory_workspaces(memory_id,workspace)
+ SELECT id,$3 FROM changed WHERE $2='workspace' ON CONFLICT DO NOTHING
+) SELECT EXISTS(SELECT 1 FROM changed)`, id, scope.Type, scope.Value).Scan(&updated)
+	return updated, err
 }
 
 func (s *postgresDataStore) ScopeCollect(ctx context.Context, id int64) ([]ScopeTag, error) {
@@ -311,8 +337,9 @@ func (s *postgresDataStore) ScopeCollect(ctx context.Context, id int64) ([]Scope
 	}
 	rows, err := s.db.Query(ctx, `SELECT scope_type,scope_value FROM (
  SELECT scope_type,scope_value,0 AS ordering FROM memories WHERE id=$1
- UNION SELECT scope_type,scope_value,1 FROM memory_scopes WHERE memory_id=$1
-) s ORDER BY ordering,scope_type,scope_value`, id)
+ UNION ALL SELECT scope_type,scope_value,1 FROM memory_scopes WHERE memory_id=$1
+ AND memory_id IN (SELECT id FROM memories)
+) s GROUP BY scope_type,scope_value ORDER BY MIN(ordering),scope_type,scope_value`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -333,25 +360,12 @@ func (s *postgresDataStore) PrimaryScope(ctx context.Context, id int64) (ScopeTa
 	if err != nil {
 		return ScopeTag{}, err
 	}
-	rank := func(kind string) int {
-		switch kind {
-		case "project":
-			return 3
-		case "workspace":
-			return 2
-		case "global":
-			return 1
-		default:
-			return 0
-		}
+	// Collection puts the canonical row first. Historical tags describe
+	// provenance; they cannot override current ownership after a scope change.
+	if len(tags) == 0 {
+		return ScopeTag{}, nil
 	}
-	primary := ScopeTag{}
-	for _, tag := range tags {
-		if rank(tag.Type) > rank(primary.Type) {
-			primary = tag
-		}
-	}
-	return primary, nil
+	return tags[0], nil
 }
 
 func (s *postgresDataStore) ScopeRanks(ctx context.Context, ids []int64, workspace, project string, includeAll bool) ([]ScopeRank, error) {
@@ -363,7 +377,7 @@ func (s *postgresDataStore) ScopeRanks(ctx context.Context, ids []int64, workspa
  WHEN $2<>'' AND scope_type='workspace' AND scope_value=$2 THEN 2
  WHEN (scope_type='global' AND scope_value='_global') OR
       (scope_type='workspace' AND scope_value='_shared') THEN 1 ELSE 0 END
-FROM memories WHERE id=ANY($1)`, ids, workspace, project, includeAll)
+FROM memories WHERE id=ANY($1::text::bigint[])`, memoryIDsParameter(ids), workspace, project, includeAll)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +446,8 @@ count(*) FILTER(WHERE embedding IS NOT NULL AND embedding_fingerprint=fingerprin
 	if s.placement == PlacementServer {
 		return result, nil
 	}
-	err = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0`).Scan(&result.Conflicts)
+	err = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0
+AND memory_a IN (SELECT id FROM memories) AND memory_b IN (SELECT id FROM memories)`).Scan(&result.Conflicts)
 	return result, err
 }
 
@@ -537,110 +552,6 @@ func (s *postgresDataStore) LifecycleCounts(ctx context.Context) (LifecycleCount
 COUNT(*) FILTER(WHERE lifecycle_state='pending'),COUNT(*) FILTER(WHERE lifecycle_state='fulfilled'),
 COUNT(*) FILTER(WHERE lifecycle_state='superseded'),COUNT(*) FILTER(WHERE lifecycle_state='archived')
 FROM memories`).Scan(&result.Active, &result.Pending, &result.Fulfilled, &result.Superseded, &result.Archived)
-	return result, err
-}
-
-const episodeColumns = `id,memory_id,episode_key,episode_text,source_session,reference_time,created_at`
-
-func scanEpisode(row store.Row, item *Episode) error {
-	return row.Scan(&item.ID, &item.MemoryID, &item.Key, &item.Text, &item.SourceSession, &item.ReferenceTime, &item.CreatedAt)
-}
-
-func (s *postgresDataStore) EpisodeList(ctx context.Context, query string, limit int) ([]Episode, error) {
-	if err := s.requireKBDomain(); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.Query(ctx, `SELECT `+episodeColumns+` FROM memory_episodes
-WHERE $1='' OR episode_key ILIKE '%'||$1||'%' OR episode_text ILIKE '%'||$1||'%'
-ORDER BY reference_time DESC,created_at DESC,id DESC LIMIT $2`, query, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]Episode, 0)
-	for rows.Next() {
-		var item Episode
-		if err := rows.Scan(&item.ID, &item.MemoryID, &item.Key, &item.Text, &item.SourceSession, &item.ReferenceTime, &item.CreatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (s *postgresDataStore) EpisodeGet(ctx context.Context, key string) (Episode, error) {
-	if err := s.requireKBDomain(); err != nil {
-		return Episode{}, err
-	}
-	var item Episode
-	err := scanEpisode(s.db.QueryRow(ctx, `SELECT `+episodeColumns+` FROM memory_episodes
-WHERE episode_key=$1 ORDER BY id DESC LIMIT 1`, key), &item)
-	if store.IsNoRows(err) {
-		return Episode{}, ErrMemoryNotFound
-	}
-	return item, err
-}
-
-const relationColumns = `id,memory_id,COALESCE(episode_id,0),src_entity,relation,dst_entity,
-fact_text,valid_at,invalid_at,weight,created_at`
-
-func scanRelationRows(rows store.Rows) ([]Relation, error) {
-	defer rows.Close()
-	items := make([]Relation, 0)
-	for rows.Next() {
-		var item Relation
-		if err := rows.Scan(&item.ID, &item.MemoryID, &item.EpisodeID, &item.Source, &item.Relation,
-			&item.Target, &item.Fact, &item.ValidAt, &item.InvalidAt, &item.Weight, &item.CreatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (s *postgresDataStore) RelationSearch(ctx context.Context, query, asOf string, limit int) ([]Relation, error) {
-	if err := s.requireKBDomain(); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.Query(ctx, `SELECT `+relationColumns+` FROM memory_relations
-WHERE ($1='' OR src_entity ILIKE '%'||$1||'%' OR relation ILIKE '%'||$1||'%' OR
-dst_entity ILIKE '%'||$1||'%' OR fact_text ILIKE '%'||$1||'%')
-AND ($2='' OR ((valid_at='' OR valid_at<=$2) AND (invalid_at='' OR invalid_at>$2)))
-ORDER BY weight DESC,CASE WHEN valid_at<>'' THEN 1 ELSE 0 END DESC,created_at DESC LIMIT $3`, query, asOf, limit)
-	if err != nil {
-		return nil, err
-	}
-	return scanRelationRows(rows)
-}
-
-func (s *postgresDataStore) EntityEdges(ctx context.Context, entity string, limit int) ([]Relation, error) {
-	if err := s.requireKBDomain(); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.Query(ctx, `SELECT `+relationColumns+` FROM memory_relations
-WHERE lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)
-ORDER BY weight DESC,created_at DESC LIMIT $2`, entity, limit)
-	if err != nil {
-		return nil, err
-	}
-	return scanRelationRows(rows)
-}
-
-func (s *postgresDataStore) EntityProfile(ctx context.Context, entity string) (EntityProfile, error) {
-	result := EntityProfile{Entity: entity}
-	if err := s.requireKBDomain(); err != nil {
-		return result, err
-	}
-	err := s.db.QueryRow(ctx, `SELECT
-(SELECT COUNT(*) FROM memory_relations WHERE lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)),
-(SELECT COUNT(DISTINCT relation) FROM memory_relations WHERE lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)),
-COALESCE((SELECT me.episode_key FROM memory_episodes me JOIN memory_relations mr ON mr.episode_id=me.id
- WHERE lower(mr.src_entity)=lower($1) OR lower(mr.dst_entity)=lower($1)
- ORDER BY me.reference_time DESC,me.created_at DESC LIMIT 1),''),
-COALESCE((SELECT string_agg(fact_text,'; ' ORDER BY weight DESC) FROM
- (SELECT DISTINCT fact_text,weight FROM memory_relations WHERE fact_text<>'' AND
-  (lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1)) ORDER BY weight DESC LIMIT 8) facts),'')`,
-		entity).Scan(&result.Mentions, &result.Relations, &result.LatestEpisode, &result.Summary)
 	return result, err
 }
 

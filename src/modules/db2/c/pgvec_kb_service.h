@@ -25,9 +25,6 @@ extern "C"
    int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn mem_exists,
                                           pgvec_kb_service_record_exists_fn kb_exists, int dry_run,
                                           pgvec_kb_service_reconcile_result_t *out);
-
-   int pgvec_kb_service_search_memory_points(const char *record_type, const float *vec, int dim,
-                                             int limit, int64_t *ids, double *scores, int max);
    int pgvec_kb_service_upsert_document_point(int64_t doc_id, const float *vec, int dim,
                                               const char *payload_json);
 

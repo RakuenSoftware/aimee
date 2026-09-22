@@ -49,6 +49,123 @@ int cli_index_investigate_response_is_failure(cJSON *resp)
    return 1;
 }
 
+/* The remote server cannot read a thin client's linked-worktree .git file.
+ * Recover the main checkout locally, then ask the existing registry for its
+ * name. Never invent a project from a basename or a remote URL: index names
+ * are operator supplied and need not equal either one. */
+char *cli_index_worktree_root(const char *method, const cJSON *req)
+{
+#if !defined(_WIN32) && !defined(_WIN64)
+   static const char *const methods[] = {"index.find",
+                                         "index.structure",
+                                         "index.blast_radius",
+                                         "index.span",
+                                         "index.hybrid",
+                                         "index.investigate",
+                                         "index.find_callers",
+                                         "index.find_callees",
+                                         "index.deps",
+                                         "kb.search",
+                                         NULL};
+   int eligible = 0;
+   for (int i = 0; methods[i]; i++)
+      if (strcmp(method, methods[i]) == 0)
+         eligible = 1;
+   const char *scope = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "scope"));
+   const char *cwd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "cwd"));
+   if (!eligible || cJSON_GetObjectItemCaseSensitive(req, "project") || !cwd || !cwd[0] ||
+       (scope && strcmp(scope, "current") != 0))
+      return NULL;
+
+   const char *argv[] = {
+       "git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir",
+       NULL};
+   char *output = NULL;
+   int rc = safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &output, 16384, 2000);
+   if (rc != 0 || !output)
+   {
+      free(output);
+      return NULL;
+   }
+   char *common = strchr(output, '\n');
+   char *root = NULL;
+   if (common)
+   {
+      *common++ = '\0';
+      size_t n = strlen(common);
+      if (n && common[n - 1] == '\n')
+         common[--n] = '\0';
+      /* Only the standard linked-worktree layout establishes this mapping.
+       * Bare repos, submodules and separate git directories keep the ordinary
+       * server fallback. A failed/truncated/multiline response is not a path. */
+      if (n > 5 && common[0] == '/' && !strchr(common, '\n') &&
+          strcmp(common + n - 5, "/.git") == 0 && strncmp(output, common, n) == 0 &&
+          strncmp(output + n, "/worktrees/", 10) == 0 && output[n + 10])
+      {
+         common[n - 5] = '\0';
+         root = strdup(common);
+      }
+   }
+   free(output);
+   return root;
+#else
+   /* The Windows thin client does not yet implement safe argv subprocesses. */
+   (void)method;
+   (void)req;
+   return NULL;
+#endif
+}
+
+/* Longest component-boundary root wins. Equal roots with different names are
+ * ambiguous; do not silently select whichever the service happened to list
+ * first. The caller's actual worktree registration takes precedence over the
+ * main checkout's, including when that registration is ambiguous. */
+static const char *cli_index_registered_project(const cJSON *projects, const char *cwd,
+                                                int *matched)
+{
+   const char *best = NULL;
+   size_t best_len = 0;
+   const cJSON *project;
+   *matched = 0;
+   if (!cwd || !cJSON_IsArray(projects))
+      return NULL;
+   cJSON_ArrayForEach(project, projects)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "name"));
+      const char *root = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(project, "root"));
+      if (!name || !name[0] || !root || root[0] != '/')
+         continue;
+      size_t n = strlen(root);
+      while (n > 1 && root[n - 1] == '/')
+         n--;
+      if (strncmp(root, cwd, n) != 0 || (n > 1 && cwd[n] && cwd[n] != '/'))
+         continue;
+      if (!*matched || n > best_len)
+      {
+         best = name;
+         best_len = n;
+         *matched = 1;
+      }
+      else if (n == best_len && best && strcmp(best, name) != 0)
+         best = NULL;
+   }
+   return best;
+}
+
+void cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *response)
+{
+   if (!root || cJSON_GetObjectItemCaseSensitive(req, "project"))
+      return;
+   const cJSON *projects = cJSON_GetObjectItemCaseSensitive(response, "projects");
+   const char *cwd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "cwd"));
+   int matched = 0;
+   const char *name = cli_index_registered_project(projects, cwd, &matched);
+   if (!matched)
+      name = cli_index_registered_project(projects, root, &matched);
+   if (name)
+      cJSON_AddStringToObject(req, "project", name);
+}
+
 void cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root,
                              char *out, size_t out_len)
 {
@@ -356,7 +473,7 @@ cJSON *marshal_memory_get(int argc, char **argv)
 
    cJSON *req = marshal_no_args("memory.get");
    if (opts.pos_count > 0)
-      cJSON_AddNumberToObject(req, "id", atoll(opts.positional[0]));
+      cJSON_AddStringToObject(req, "id", opts.positional[0]);
    const char *as_of = cli_args_get(&opts, "as-of");
    if (!as_of)
       as_of = cli_args_get(&opts, "as_of");
@@ -372,7 +489,7 @@ cJSON *marshal_memory_delete(int argc, char **argv)
    cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("memory.delete");
    if (opts.pos_count > 0)
-      cJSON_AddNumberToObject(req, "id", atoll(opts.positional[0]));
+      cJSON_AddStringToObject(req, "id", opts.positional[0]);
    marshal_add_memory_scope(req, &opts);
    return req;
 }
@@ -386,7 +503,7 @@ cJSON *marshal_memory_supersede(int argc, char **argv)
    cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("memory.supersede");
    if (opts.pos_count > 0)
-      cJSON_AddNumberToObject(req, "old_id", atoll(opts.positional[0]));
+      cJSON_AddStringToObject(req, "old_id", opts.positional[0]);
    char *content = positionals_joined(&opts, 1);
    if (content)
       cJSON_AddStringToObject(req, "new_content", content);
@@ -465,8 +582,11 @@ static void print_memory_row(cJSON *m)
    const char *kind = json_str(m, "kind");
    const char *key = json_str(m, "key");
    const char *content = json_str(m, "content");
-   printf("%lld  %-3s %-12s %s", cJSON_IsNumber(id) ? (long long)id->valuedouble : 0, tier, kind,
-          key[0] ? key : "(no key)");
+   if (cJSON_IsRaw(id))
+      printf("%s", id->valuestring);
+   else
+      printf("%lld", cJSON_IsNumber(id) ? (long long)id->valuedouble : 0);
+   printf("  %-3s %-12s %s", tier, kind, key[0] ? key : "(no key)");
    if (content[0])
       printf(": %s", content);
    putchar('\n');
@@ -564,7 +684,9 @@ void pt_print_memory_search(const char *method, cJSON *resp)
 void pt_print_memory_store(const char *method, cJSON *resp)
 {
    cJSON *id = cJSON_GetObjectItemCaseSensitive(resp, "id");
-   if (cJSON_IsNumber(id))
+   if (cJSON_IsRaw(id))
+      printf("stored memory %s\n", id->valuestring);
+   else if (cJSON_IsNumber(id))
       printf("stored memory %lld\n", (long long)id->valuedouble);
    else
       printf("stored memory\n");
@@ -575,7 +697,8 @@ void pt_print_memory_list(const char *method, cJSON *resp)
 }
 void pt_print_memory_get(const char *method, cJSON *resp)
 {
-   print_memory_row(resp);
+   cJSON *memory = cJSON_GetObjectItemCaseSensitive(resp, "memory");
+   print_memory_row(cJSON_IsObject(memory) ? memory : resp);
    /* Present only when --as-of was asked. "unknown" is a real third answer: the
     * server could not tell, which is not the same as "not in force". */
    cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "valid_at");

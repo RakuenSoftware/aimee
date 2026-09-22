@@ -12,11 +12,12 @@ import subprocess
 import time
 import uuid
 
+# The host bounds module dispatch at 60 seconds; observe its failure envelope.
 HTTP = '''import http.client,socket,json,sys
 class C(http.client.HTTPConnection):
  def connect(self):
-  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(40);self.sock.connect('/var/lib/aimee/aimee-http.sock')
-a=json.load(sys.stdin);c=C('localhost',timeout=40)
+  self.sock=socket.socket(socket.AF_UNIX);self.sock.settimeout(70);self.sock.connect('/var/lib/aimee/aimee-http.sock')
+a=json.load(sys.stdin);c=C('localhost',timeout=70)
 c.request(a['method'],a['path'],json.dumps(a['body']),{'Content-Type':'application/json'})
 r=c.getresponse();print(json.dumps([r.status,json.loads(r.read())]))
 '''
@@ -181,7 +182,9 @@ class Gate:
         self.good('KB-free recall recovers', self.wait('recall', dict(query=self.prefix)))
         self.good('KB-free local retirement', self.call('delete', dict(id=mid)))
         bundle = self.good('KB-free recall after retirement', self.call('recall', dict(query=self.prefix)))
-        self.check('retired personal record excluded from recall', bundle.get('recall', {}).get('active_context') == [])
+        self.check('retired personal record excluded from recall', all(
+            r.get('memory_id') != mid and r.get('handle') != 'user:memory:' + str(mid)
+            for r in bundle.get('recall', {}).get('active_context', [])))
         self.confidence_contract(('user',))
         return all(c['passed'] for c in self.checks)
 

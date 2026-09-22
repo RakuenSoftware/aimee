@@ -10,10 +10,13 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	store "github.com/JBailes/aimee/server-go/db"
+	"github.com/JBailes/aimee/server-go/modules/audit"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
 const (
@@ -28,7 +31,31 @@ const (
 )
 
 type DataRequest struct {
-	CodeIndex *CodeIndexRequest `json:"code_index,omitempty"`
+	pageRankConfig *pageRankConfig
+	requestedLimit int
+	PageRank       *pageRankRequest        `json:"pagerank,omitempty"`
+	lanes          recallLanes             // request-local attribution; never accepted from wire input
+	TypedContext   *typedContextOptions    `json:"typed_context,omitempty"`
+	Assertions     *assertionSearchRequest `json:"assertions,omitempty"`
+	TraceBatch     *traceMiningBatch       `json:"trace_batch,omitempty"`
+	Reflection     *reflectionOptions      `json:"reflection,omitempty"`
+	Hops           int                     `json:"hops,omitempty"`
+	Relations      []string                `json:"relations"`
+	FactWork       *MemoryFactWork         `json:"fact_work,omitempty"`
+	GraphPath      []GraphPathEntry        `json:"graph_path,omitempty"`
+	CodePointIDs   []int64                 `json:"code_point_ids,omitempty"`
+	AutomaticLimit bool                    `json:"automatic_limit,omitempty"`
+	Detail         bool                    `json:"detail,omitempty"`
+	Timings        bool                    `json:"timings,omitempty"`
+	FailedOnly     bool                    `json:"failed_only,omitempty"`
+	ResetStuck     bool                    `json:"reset_stuck,omitempty"`
+	TagScope       *Scope                  `json:"tag_scope,omitempty"`
+	PublicView     bool                    `json:"public_view,omitempty"`
+	SharedRecall   json.RawMessage         `json:"shared_recall,omitempty"`
+	Activation     json.RawMessage         `json:"activation,omitempty"`
+	FactWrite      *FactWriteRequest       `json:"fact_write,omitempty"`
+	CodeIndex      *CodeIndexRequest       `json:"code_index,omitempty"`
+	Demotion       *DemotionConfig         `json:"demotion,omitempty"`
 	// Accepted for old callers, but never used to override instance configuration.
 	GraphCodeFusionState  string    `json:"graph_code_fusion_state,omitempty"`
 	Operation             string    `json:"operation"`
@@ -78,6 +105,8 @@ type DataRequest struct {
 	Evidence              string    `json:"evidence,omitempty"`
 	Note                  string    `json:"note,omitempty"`
 	Relation              string    `json:"relation,omitempty"`
+	FactSource            string    `json:"fact_source,omitempty"`
+	FactTarget            string    `json:"fact_target,omitempty"`
 	SourceID              int64     `json:"source_id,omitempty"`
 	TargetID              int64     `json:"target_id,omitempty"`
 	Resolution            string    `json:"resolution,omitempty"`
@@ -119,16 +148,29 @@ type DataRequest struct {
 }
 
 type Record struct {
-	ID         int64   `json:"id"`
-	Scope      Scope   `json:"scope"`
-	Tier       string  `json:"tier"`
-	Kind       string  `json:"kind"`
-	Key        string  `json:"key"`
-	Content    string  `json:"content"`
-	Confidence float64 `json:"confidence"`
+	retrievalScore  float64
+	retrievalBase   float64
+	pageRankBonus   float64
+	pageRankApplied bool
+	graphScore      float64
+	codeProximity   float64
+	ID              int64   `json:"id"`
+	Scope           Scope   `json:"scope"`
+	Tier            string  `json:"tier"`
+	Kind            string  `json:"kind"`
+	Key             string  `json:"key"`
+	Content         string  `json:"content"`
+	Confidence      float64 `json:"confidence"`
 }
 
 type DataResponse struct {
+	ContextAssembly    *ContextAssembly     `json:"context_assembly,omitempty"`
+	Dimension          int                  `json:"dimension,omitempty"`
+	Embedding          *EmbedResponse       `json:"embedding,omitempty"`
+	Version            string               `json:"version,omitempty"`
+	PublicRecords      []publicMemoryRecord `json:"public_records,omitempty"`
+	Deduplicated       bool                 `json:"deduplicated,omitempty"`
+	FactWrite          *FactWriteDecision   `json:"fact_write,omitempty"`
 	Records            []Record             `json:"records"`
 	Deleted            bool                 `json:"deleted,omitempty"`
 	Allowed            *bool                `json:"allowed,omitempty"`
@@ -186,15 +228,14 @@ type DataResponse struct {
 	Maintenance        *MaintenanceSummary  `json:"maintenance,omitempty"`
 	ExportRecords      []ExportRecord       `json:"export_records,omitempty"`
 	Metrics            *RuntimeMetrics      `json:"metrics,omitempty"`
-	RecallRejections   []RecallRejection    `json:"recall_rejections,omitempty"`
-	LegacyResults      []LegacySearchResult `json:"legacy_results,omitempty"`
-	VectorHits         []VectorHit          `json:"vector_hits,omitempty"`
-	Drift              *DriftResult         `json:"drift,omitempty"`
-	SummaryCount       int                  `json:"summary_count,omitempty"`
-	FactCount          int                  `json:"fact_count,omitempty"`
-	Failed             int                  `json:"failed,omitempty"`
-	FactWork           *MemoryFactWork      `json:"fact_work,omitempty"`
-	FactCandidates     []FactCandidate      `json:"fact_candidates,omitempty"`
+
+	LegacyResults []LegacySearchResult `json:"legacy_results,omitempty"`
+	VectorHits    []VectorHit          `json:"vector_hits,omitempty"`
+	Drift         *DriftResult         `json:"drift,omitempty"`
+	SummaryCount  int                  `json:"summary_count,omitempty"`
+	FactCount     int                  `json:"fact_count,omitempty"`
+	Failed        int                  `json:"failed,omitempty"`
+	FactWork      *MemoryFactWork      `json:"fact_work,omitempty"`
 }
 
 // recallGateDecision owns the inexpensive turn-level recall policy. Keeping it
@@ -278,7 +319,7 @@ type directiveDataStore interface {
 
 type domainDataStore interface {
 	Touch(context.Context, []int64) (int, error)
-	UpdateContent(context.Context, int64, string) (bool, error)
+	UpdateContent(context.Context, int64, string) (int64, error)
 	Reject(context.Context, int64, string) (bool, error)
 	LinkCreate(context.Context, int64, int64, string) (MemoryLink, error)
 	LinkQuery(context.Context, int64, int) ([]MemoryLink, error)
@@ -351,6 +392,7 @@ type maintenanceDataStore interface {
 type exportDataStore interface {
 	ExportRecords(context.Context, int64, int) ([]ExportRecord, error)
 	ExportDecisionsJSONL(context.Context, string) (int, error)
+	ExportJSONL(context.Context, string, bool) (int, error)
 }
 
 type sessionDataStore interface {
@@ -381,8 +423,7 @@ type legacyDataStore interface {
 
 type memoryFactDataStore interface {
 	ClaimMemoryFact(context.Context) (*MemoryFactWork, error)
-	ParseMemoryFacts(context.Context, int64, string) ([]FactCandidate, error)
-	FinishMemoryFact(context.Context, int64, bool, string) error
+	CompleteMemoryFact(context.Context, MemoryFactWork, string, bool, string) (bool, error)
 }
 
 type DataStore interface {
@@ -395,11 +436,18 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
-	fusionEnabled bool
-	code          codeIndexState
-	personal      *personalVectors
-	db            store.Queryer
-	placement     Placement
+	pageRankSamples *[]pageRankResult
+	recallExecutor  egress.Executor
+	requireSemantic bool // standalone evaluation must not silently fall back to lexical recall
+	auditAction     func(context.Context, audit.Action) error
+	auditBatch      *mutationAuditBatch
+	episodeCommand  func(context.Context, string, []byte) ([]byte, error)
+	settings        func() (map[string]any, error)
+	fusionEnabled   bool
+	code            codeIndexState
+	personal        *personalVectors
+	db              store.Queryer
+	placement       Placement
 }
 
 func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, error) {
@@ -413,7 +461,18 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 	if err != nil {
 		return nil, err
 	}
-	return &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled}, nil
+	backend := &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled}
+	if publisher, ok := db.(interface {
+		MemoryAuditAction(context.Context, audit.Action) error
+	}); ok {
+		backend.auditAction = publisher.MemoryAuditAction
+	}
+	if configured, ok := db.(interface {
+		MemorySettings() (map[string]any, error)
+	}); ok {
+		backend.settings = configured.MemorySettings
+	}
+	return backend, nil
 }
 
 func (s *postgresDataStore) Get(ctx context.Context, scope Scope, id int64) (Record, error) {
@@ -434,9 +493,13 @@ WHERE id = $1 AND lifecycle_state = 'active'
 		}
 		return r, err
 	}
+	predicate := currentMemorySQL("")
+	if historical {
+		predicate = historicalMemoryInspectionSQL("")
+	}
 	err := s.db.QueryRow(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
 FROM memories
-WHERE id = $1 AND ($2 OR lifecycle_state='active')`, id, historical).
+WHERE id = $1 AND `+predicate, id).
 		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
@@ -444,7 +507,7 @@ WHERE id = $1 AND ($2 OR lifecycle_state='active')`, id, historical).
 	return r, err
 }
 
-func (s *postgresDataStore) UpsertEmbedding(ctx context.Context, record Record, vector []float32) error {
+func (s *postgresDataStore) upsertEmbedding(ctx context.Context, record Record, vector []float32) error {
 	if s.placement == PlacementServer {
 		return errors.New("personal vectors require the owner-selected serving identity")
 	}
@@ -484,14 +547,27 @@ ON CONFLICT (point_id) DO UPDATE SET
   project = EXCLUDED.project, kind = EXCLUDED.kind, payload_json = EXCLUDED.payload_json`,
 		record.ID, vectorText, primaryScope, workspace, project, record.Kind, string(payload))
 	if err == nil {
+		err = s.retainActiveEmbedding(ctx, record.ID, vector)
+	}
+	if err == nil {
 		_, err = s.db.Exec(ctx, `INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,indexed_at,updated_at)
-VALUES($1,'memory',$1,'indexed',0,'',pg_now_text(),pg_now_text()) ON CONFLICT(point_id) DO UPDATE SET
-status='indexed',last_error='',indexed_at=pg_now_text(),updated_at=pg_now_text()`, record.ID)
+VALUES($1,'memory',$1,'ok',0,'',pg_now_text(),pg_now_text()) ON CONFLICT(point_id) DO UPDATE SET
+status='ok',last_error='',indexed_at=pg_now_text(),updated_at=pg_now_text()`, record.ID)
 	}
 	return err
 }
 
-func (s *postgresDataStore) Supersede(ctx context.Context, scope Scope, id int64, content string, confidence float64) (Record, error) {
+func (s *postgresDataStore) Supersede(ctx context.Context, scope Scope, id int64, content string, confidence float64) (out Record, err error) {
+	defer func() {
+		if s.placement == PlacementServer {
+			s.recordMutation(DataRequest{Operation: "supersede", ID: id}, DataResponse{Records: []Record{out}}, err, "")
+		}
+	}()
+	var screenErr error
+	content, screenErr = screenMemoryText(content)
+	if screenErr != nil {
+		return Record{}, screenErr
+	}
 	if s.placement == PlacementServer {
 		// Personal memory has one row per (kind,key). Replace atomically: a
 		// failed write must not retire the only copy or touch the KB namespace.
@@ -507,18 +583,7 @@ RETURNING id,tier,kind,key,content,confidence`, id, content, confidence).
 		}
 		return r, err
 	}
-	old, err := s.Get(ctx, scope, id)
-	if err != nil {
-		return Record{}, err
-	}
-	if old.Scope.Type != "" {
-		scope = old.Scope
-	}
-	if _, err = s.Delete(ctx, scope, id); err != nil {
-		return Record{}, err
-	}
-	old.ID, old.Content, old.Confidence = 0, content, confidence
-	return s.Put(ctx, scope, old)
+	return s.supersedeKB(ctx, id, content, confidence, "")
 }
 
 func (s *postgresDataStore) Feedback(ctx context.Context, scope Scope, ids []int64, success bool) error {
@@ -533,9 +598,13 @@ func (s *postgresDataStore) Feedback(ctx context.Context, scope Scope, ids []int
 		if id <= 0 {
 			continue
 		}
-		_, err := s.db.Exec(ctx, `UPDATE entity_edges SET utility_score = GREATEST(-1.0, LEAST(1.0, COALESCE(utility_score, 0) + $1)), utility_touched_at = pg_now_text()
-WHERE source = (SELECT key FROM memories WHERE id = $2)
-   OR target = (SELECT key FROM memories WHERE id = $2)`, delta, id)
+		_, err := s.db.Exec(ctx, `WITH cited AS MATERIALIZED (
+ SELECT id,key FROM memories WHERE id=$2 AND lifecycle_state='active' AND activation_suppressed=0
+), edges AS (
+ UPDATE entity_edges SET utility_score=GREATEST(-5.0,LEAST(5.0,COALESCE(utility_score,0)+$1)),utility_touched_at=pg_now_text()
+ WHERE edge_class<>'semantic' AND (source IN (SELECT key FROM cited) OR target IN (SELECT key FROM cited)) RETURNING 1
+) INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text)
+ SELECT id,key,'corrected_by',key,'Feedback correction' FROM cited WHERE $1<0`, delta, id)
 		if err != nil {
 			return err
 		}
@@ -582,6 +651,11 @@ FROM prospective_memories`).Scan(&armed, &triggered, &completed, &expired)
 }
 
 func (s *postgresDataStore) Search(ctx context.Context, scope Scope, query, kind, tier string, limit int) ([]Record, error) {
+	req, planErr := s.planRecall(DataRequest{Scope: scope, Query: query, Kind: kind, Tier: tier, Limit: limit})
+	if planErr != nil {
+		return nil, planErr
+	}
+	limit = req.Limit
 	pattern := searchPattern(query)
 	var (
 		rows store.Rows
@@ -597,11 +671,11 @@ WHERE lifecycle_state = 'active'
   AND ($2 = '' OR kind = $2) AND ($3 = '' OR tier = $3)
 ORDER BY (lower(key)=lower($5)) DESC,
   ts_rank_cd(to_tsvector('english', key || ' ' || content), plainto_tsquery('english', $5)) DESC,
-  confidence DESC, updated_at DESC, id DESC LIMIT $4`, pattern, kind, tier, limit, query)
+  updated_at DESC, id DESC LIMIT $4`, pattern, kind, tier, limit, query)
 	} else {
 		rows, err = s.db.Query(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
 FROM memories
-WHERE lifecycle_state = 'active' AND scope_type = $1 AND scope_value = $2
+WHERE `+currentMemorySQL("")+` AND scope_type = $1 AND scope_value = $2
   AND ($7 = '' OR key ILIKE $3 OR content ILIKE $3 OR use_cases ILIKE $3
        OR to_tsvector('english', key || ' ' || content || ' ' || COALESCE(use_cases,''))
           @@ plainto_tsquery('english', $7))
@@ -609,7 +683,7 @@ WHERE lifecycle_state = 'active' AND scope_type = $1 AND scope_value = $2
 ORDER BY (lower(key)=lower($7)) DESC,
   ts_rank_cd(to_tsvector('english', key || ' ' || content || ' ' || COALESCE(use_cases,'')),
              plainto_tsquery('english', $7)) DESC,
-  confidence DESC, updated_at DESC, id DESC LIMIT $6`,
+  updated_at DESC, id DESC LIMIT $6`,
 			scope.Type, scope.Value, pattern, kind, tier, limit, query)
 	}
 	if err != nil {
@@ -635,6 +709,8 @@ ORDER BY (lower(key)=lower($7)) DESC,
 		return nil, err
 	}
 	rows.Close()
+	lanes := recallLanes{}
+	lanes.add(records, laneLexical)
 	if s.personal != nil && query != "" {
 		// Leave time to return the local lexical result when DNS or the model
 		// stalls. Consuming the bus deadline would discard that valid result.
@@ -646,10 +722,12 @@ ORDER BY (lower(key)=lower($7)) DESC,
 		semantic, err := s.personal.search(semanticCtx, query, kind, tier, limit)
 		cancel()
 		if err == nil {
+			lanes.add(semantic, laneSemantic)
 			records = fusePersonal(records, semantic, limit)
 		}
 	}
-	return s.fuseMemoryGraph(ctx, DataRequest{Scope: scope, Query: query, Kind: kind, Tier: tier, Limit: limit}, true, records)
+	req.lanes = lanes
+	return s.finalizeRecall(ctx, req, true, records)
 }
 
 // searchPattern keeps a multi-word query useful when callers supply keyword
@@ -663,7 +741,17 @@ func searchPattern(query string) string {
 	return "%" + strings.Join(terms, "%") + "%"
 }
 
-func (s *postgresDataStore) Put(ctx context.Context, scope Scope, r Record) (Record, error) {
+func (s *postgresDataStore) Put(ctx context.Context, scope Scope, r Record) (out Record, err error) {
+	defer func() {
+		if s.placement == PlacementServer {
+			s.recordMutation(DataRequest{Operation: "store"}, DataResponse{Records: []Record{out}}, err, "")
+		}
+	}()
+	var screenErr error
+	r.Content, screenErr = screenMemoryWrite(r.Key, r.Content)
+	if screenErr != nil {
+		return Record{}, screenErr
+	}
 	if r.Tier == "" {
 		r.Tier = "L2"
 	}
@@ -679,36 +767,38 @@ ON CONFLICT (kind, key) DO UPDATE SET
 RETURNING id`, r.Kind, r.Tier, r.Key, r.Content, r.Confidence).Scan(&r.ID)
 		return r, err
 	}
-	err := s.db.QueryRow(ctx, `WITH updated AS (
-  UPDATE memories SET tier = $2, content = $4, confidence = $5,
-    updated_at = pg_now_text()
-  WHERE kind = $1 AND key = $3 AND scope_type = $6 AND scope_value = $7
-    AND lifecycle_state = 'active'
-  RETURNING id
-), inserted AS (
-  INSERT INTO memories
-    (kind, tier, key, content, confidence, scope_type, scope_value, lifecycle_state)
-  SELECT $1, $2, $3, $4, $5, $6, $7, 'active'
-  WHERE NOT EXISTS (SELECT 1 FROM updated)
-  RETURNING id
-)
-SELECT id FROM updated UNION ALL SELECT id FROM inserted LIMIT 1`,
-		r.Kind, r.Tier, r.Key, r.Content, r.Confidence, scope.Type, scope.Value).Scan(&r.ID)
-	return r, err
+	return s.InsertEpistemic(ctx, DataRequest{Scope: scope, Tier: r.Tier, Kind: r.Kind, Key: r.Key, Content: r.Content, Confidence: &r.Confidence, Authority: AuthorityModel})
 }
 
-func (s *postgresDataStore) Delete(ctx context.Context, scope Scope, id int64) (bool, error) {
+func (s *postgresDataStore) Delete(ctx context.Context, scope Scope, id int64) (changed bool, err error) {
+	if s.placement == PlacementKB {
+		// Mutation admission is distinct from serving eligibility. An expired or
+		// suppressed active record can still be retired by its authorized author.
+		// Read only its identity here; DeleteAs owns the authority decision.
+		var currentScope Scope
+		err := s.db.QueryRow(ctx, `SELECT scope_type,scope_value FROM memories
+ WHERE id=$1 AND lifecycle_state='active'`, id).Scan(&currentScope.Type, &currentScope.Value)
+		if store.IsNoRows(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if currentScope != scope {
+			return false, nil
+		}
+		return s.DeleteAs(ctx, id, AuthorityModel)
+	}
+
+	defer func() {
+		s.recordMutation(DataRequest{Operation: "delete", ID: id}, DataResponse{Deleted: changed}, err, "memory.retire")
+	}()
 	var (
 		tag store.Tag
-		err error
 	)
 	if s.placement == PlacementServer {
 		tag, err = s.db.Exec(ctx, `UPDATE user_memories SET lifecycle_state = 'retired', updated_at = now()
 WHERE id = $1 AND lifecycle_state = 'active'`, id)
-	} else {
-		tag, err = s.db.Exec(ctx, `UPDATE memories SET lifecycle_state = 'retired', updated_at = pg_now_text()
-WHERE id = $1 AND scope_type = $2 AND scope_value = $3 AND lifecycle_state = 'active'`,
-			id, scope.Type, scope.Value)
 	}
 	if err != nil {
 		return false, err
@@ -717,8 +807,13 @@ WHERE id = $1 AND scope_type = $2 AND scope_value = $3 AND lifecycle_state = 'ac
 }
 
 type handlerOptions struct {
-	placement Placement
-	data      DataStore
+	dataContext    context.Context
+	gateway        *gatewayState
+	executor       egress.Executor
+	placement      Placement
+	data           DataStore
+	commandContext *bus.CommandContext
+	publicWrite    bool
 }
 
 type HandlerOption func(*handlerOptions)
@@ -788,13 +883,27 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	if request.Limit == 0 {
 		request.Limit = 20
 	}
-	if request.Limit < 1 || request.Limit > 100 || len(request.Kind) > 64 ||
+	maxLimit := 100
+	switch request.Operation {
+	case "ontology-walk":
+		maxLimit = 128
+	case "scene-members":
+		maxLimit = 512
+	case "vector-repair-prepare", "vector-embed-prepare":
+		maxLimit = 1024
+	case "rebuild-derived":
+		maxLimit = 100000
+	case "prospective-list", "directive-list", "prospective-current", "directive-current", "lint", "conflict-list", "low-effectiveness", "unused-l2", "superseded-keys", "entity-edges":
+		maxLimit = 256
+	}
+	if request.Limit < 1 || request.Limit > maxLimit || len(request.Kind) > 64 ||
 		len(request.Tier) > 16 || len(request.Key) > 4096 || len(request.Query) > 16384 ||
 		len(request.Content) > 512*1024 || len(request.Workspace) > 1024 ||
 		len(request.Project) > 1024 || len(request.SignalType) > 64 || len(request.Rule) > 512*1024 ||
 		len(request.SessionID) > 256 || len(request.Client) > 64 || len(request.Tool) > 64 ||
 		len(request.Path) > 4096 || len(request.Home) > 4096 || len(request.Command) > 65536 ||
 		len(request.ProjectsRoot) > 4096 || len(request.MemorySegment) > 256 ||
+		len(request.FactSource) > 1024 || len(request.FactTarget) > 1024 ||
 		len(request.Entity) > 512 || len(request.AsOf) > 64 || len(request.State) > 16 ||
 		len(request.TriggerText) > 511 || len(request.ActionText) > 1023 ||
 		len(request.AnchorEntity) > 127 || len(request.AnchorFile) > 127 ||
@@ -805,7 +914,7 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 		len(request.LifecycleState) > 31 || len(request.ArchiveReason) > 1024 ||
 		len(request.BlockType) > 64 || request.LimitTokens < 0 || request.LimitTokens > 8192 ||
 		len(request.ArtifactType) > 128 || len(request.ArtifactRef) > 4096 ||
-		len(request.ArtifactHash) > 256 || len(request.Actor) > 256 ||
+		len(request.ArtifactHash) > 256 || len(request.Actor) > 576 ||
 		len(request.Mode) > 64 || len(request.Pattern) > 16384 ||
 		len(request.EpistemicKind) > 32 || len(request.UseCases) > 65536 ||
 		len(request.RecordType) > 64 || len(request.Version) > 256 ||
@@ -823,7 +932,20 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	return request, nil
 }
 
-func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []byte) (result []byte, status bus.ModuleStatus) {
+	if backend, ok := options.data.(*postgresDataStore); ok {
+		bound := *backend
+		bound.recallExecutor = options.executor
+		bound.pageRankSamples = &[]pageRankResult{}
+		defer func() {
+			if status == bus.ModuleStatusOK {
+				for _, sample := range *bound.pageRankSamples {
+					pageRankMetricState.observe(sample)
+				}
+			}
+		}()
+		options.data = &bound
+	}
 	request, err := decodeDataRequest(body)
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -842,6 +964,17 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
+	}
+	if request.Operation == "fact-write-decision" {
+		if request.FactWrite == nil || len(request.FactWrite.Relation) > relTypeMax {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		decision := DecideFactWrite(*request.FactWrite)
+		encoded, err := json.Marshal(DataResponse{FactWrite: &decision})
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		return encoded, bus.ModuleStatusOK
 	}
 	if request.Operation == "recall-gate" {
 		enabled, enforce := recallGateMode()
@@ -933,20 +1066,6 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		}
 		return encoded, bus.ModuleStatusOK
 	}
-	if request.Operation == "recall-trace-begin" || request.Operation == "recall-trace-end" ||
-		request.Operation == "recall-trace-list" {
-		switch request.Operation {
-		case "recall-trace-begin":
-			recallTraceBegin()
-		case "recall-trace-end":
-			recallTraceEnd()
-		}
-		encoded, marshalErr := json.Marshal(DataResponse{RecallRejections: recallTraceSnapshot()})
-		if marshalErr != nil {
-			return nil, bus.ModuleStatusInternal
-		}
-		return encoded, bus.ModuleStatusOK
-	}
 	if request.Operation == "tier-name" || request.Operation == "scope-level-name" ||
 		request.Operation == "ontology-relation-name" || request.Operation == "ontology-relation-code" ||
 		request.Operation == "ontology-node-name" || request.Operation == "ontology-node-code" ||
@@ -982,11 +1101,28 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if options.data == nil {
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}
-	timeout := invocation.Remaining(dataTimeout)
+	budget := dataTimeout
+	if request.Operation == "demotion-run" || request.Operation == "demotion-check" {
+		budget = 120 * time.Second
+	}
+	if request.Operation == "cognify" || request.Operation == "cognify-drain" || request.Operation == "reflect" || request.Operation == "typed-context" {
+		budget = 60 * time.Second
+	}
+	if request.Operation == "vector-verify" || request.Operation == "assertion-search" {
+		budget = 30 * time.Second
+	}
+	if request.Operation == "vector-repair-record" || request.Operation == "episode-card-generate" {
+		budget = embedHTTPTimeout()
+	}
+	timeout := invocation.Remaining(budget)
 	if timeout <= 0 {
 		return nil, bus.ModuleStatusCancelled
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	parent := options.dataContext
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	if request.Operation == "code-index" {
 		code, ok := options.data.(*postgresDataStore)
@@ -1004,6 +1140,28 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return encoded, bus.ModuleStatusOK
 	}
 
+	response := DataResponse{}
+	// Pin policy to one lazy snapshot per request, including its error. A
+	// request must not mix settings from successive configuration generations;
+	// the next request still observes changes immediately.
+	if backend, ok := options.data.(*postgresDataStore); ok && backend.settings != nil {
+		bound := *backend
+		bound.settings = sync.OnceValues(backend.settings)
+		options.data = &bound
+	}
+	if backend, ok := options.data.(*postgresDataStore); ok && backend.auditAction != nil {
+		bound := *backend
+		bound.auditBatch = &mutationAuditBatch{}
+		options.data = &bound
+		defer func() {
+			if status == bus.ModuleStatusOK && len(bound.auditBatch.actions) > 0 {
+				bound.auditBatch.flush(bound.auditAction)
+			} else {
+				publishMutationAudit(bound.auditAction, request, response, status)
+			}
+		}()
+	}
+
 	// Request scope used to live on the C connection. Pin it to the Go store
 	// transaction now, so the non-owner runtime sees precisely this request's
 	// rows and pooled connections cannot retain another request's scope.
@@ -1014,15 +1172,33 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 			if err != nil {
 				return nil, bus.ModuleStatusInternal
 			}
+			transaction = backend.auditTransaction(transaction)
 			defer transaction.Rollback(context.Background())
+			principal, authority, transport := "system:model-inference", "model", "internal"
+			if caller := options.commandContext; caller != nil && caller.Authenticated {
+				principal, transport = caller.Principal, caller.TransportIdentity
+				if transport == "" {
+					transport = principal
+				}
+				// The initiator and the content's authority are separate. Merely
+				// authenticating a model request never upgrades its content.
+				if (request.Authority == AuthorityUser && caller.UserAuthority) || request.Operation == "restore" {
+					authority = "user"
+				}
+			}
 			_, err = transaction.Exec(ctx, `SELECT
 set_config('aimee.memory_scope_type',$1,true),
 set_config('aimee.memory_scope_value',$2,true),
 set_config('aimee.memory_workspace',$3,true),
 set_config('aimee.memory_project',$4,true),
-set_config('aimee.memory_scope_all',$5,true)`,
+set_config('aimee.memory_scope_all',$5,true),
+set_config('aimee.principal',$6,true),
+set_config('aimee.authority',$7,true),
+set_config('aimee.transport_identity',$8,true),
+set_config('aimee.correlation_id',$9,true)`,
 				string(scope.Type), scope.Value, request.Workspace, request.Project,
-				map[bool]string{false: "0", true: "1"}[request.IncludeAll])
+				map[bool]string{false: "0", true: "1"}[request.IncludeAll],
+				principal, authority, transport, strconv.FormatUint(invocation.TraceID, 10))
 			if err != nil {
 				return nil, bus.ModuleStatusInternal
 			}
@@ -1032,30 +1208,363 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		}
 	}
 
-	response := DataResponse{}
 	switch request.Operation {
-	case "memory-facts-claim", "memory-facts-parse", "memory-facts-finish":
-		if options.placement != PlacementKB {
+	case "css-convention-sync", "css-conventions":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Project == "" || len(request.Project) > 4096 || scope.Type != ScopeProject || scope.Value != request.Project {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		result := map[string]any{"status": "ok", "project": request.Project}
+		if request.Operation == "css-convention-sync" {
+			result["op"] = "assert-conventions"
+			result["asserted"], err = backend.syncCSSConventions(ctx, request.Project)
+		} else {
+			result["op"] = "conventions"
+			var items []cssConvention
+			items, err = backend.cssConventions(ctx, request.Project)
+			result["results"], result["count"] = items, len(items)
+		}
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+			if len(response.Payload) > maxDataBody {
+				err = errors.New("memory: CSS conventions exceed response capacity")
+			}
+		}
+	case "typed-context":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.TypedContext == nil || request.Assertions == nil || request.Query == "" || request.Limit != 32 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		for name := range typedBudgetDefaults {
+			n, ok := request.TypedContext.Budgets[name]
+			if !ok || n < 0 || n > 4096 {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+		}
+		if explicitScope {
+			request.Scope = scope
+		}
+		var result typedContextResult
+		result, err = backend.assembleTypedContext(ctx, invocation.TraceID, options.executor, request, explicitScope)
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+			if len(response.Payload) > maxDataBody {
+				err = errors.New("memory: typed context exceeds response capacity")
+			}
+		}
+	case "assertion-search":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Assertions == nil || request.Query == "" || request.Limit < 1 || request.Limit > 64 || request.Assertions.Hops < 0 || request.Assertions.Hops > 2 || !assertionTimestamp(request.Assertions.ValidAt) || !assertionTimestamp(request.Assertions.BelievedAt) {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if explicitScope {
+			request.Scope = scope
+		}
+		var result map[string]any
+		result, err = backend.searchAssertions(ctx, invocation.TraceID, options.executor, request, explicitScope)
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+			if len(response.Payload) > maxDataBody {
+				err = errors.New("memory: assertion response exceeds capacity")
+			}
+		}
+	case "pagerank":
+		if invocation.PrincipalRef != 0 || !validPageRankRequest(request.PageRank) {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var ranked pageRankResult
+		ranked, err = backend.pageRank(ctx, request, explicitScope)
+		if err == nil {
+			response.Payload, err = json.Marshal(ranked)
+			backend.recordPageRankSample(ranked)
+		}
+	case "trace-state", "trace-apply":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var result map[string]any
+		if request.Operation == "trace-state" {
+			var id int64
+			id, err = backend.traceCursor(ctx)
+			result = map[string]any{"status": "ok", "last_id": strconv.FormatInt(id, 10)}
+		} else {
+			if !validTraceBatch(request.TraceBatch) {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			request.Scope = scope
+			result, err = backend.applyTraceBatch(ctx, request)
+		}
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+		}
+	case "wiki-bundle":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.wiki(ctx, request)
+	case "reflect":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Reflection == nil || request.Query == "" || len(request.Query) > 2047 || request.Limit < 1 || request.Limit > 32 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var result reflectionResult
+		result, err = backend.reflectMemories(ctx, request, explicitScope)
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+		}
+	case "hybrid-context":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || invocation.PrincipalRef != 0 || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var result hybridMemoryResult
+		result, err = backend.hybridContext(ctx, request)
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+		}
+	case "convention-extract":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || invocation.PrincipalRef != 0 || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var count int
+		count, err = backend.extractConventions(ctx, request)
+		response.Count = &count
+	case "ontology-walk":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Entity == "" || len(request.Entity) > 1024 || request.Hops < 0 || request.Hops > 128 || len(request.Relations) > 32 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		for _, name := range request.Relations {
+			if name == "" || len(name) > 128 {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+		}
+		var entries []ontologyWalkEntry
+		entries, err = backend.ontologyWalk(ctx, request, explicitScope)
+		if err == nil {
+			response.Payload, err = json.Marshal(entries)
+		}
+	case "demotion-run", "demotion-check":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil || request.Demotion == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var summary any
+		if request.Operation == "demotion-check" {
+			summary, err = backend.previewDemotion(ctx, *request.Demotion)
+		} else {
+			summary, err = backend.runDemotion(ctx, *request.Demotion)
+		}
+		if err == nil {
+			response.Payload, err = json.Marshal(summary)
+		}
+
+	case "fact-retract":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		actor := modelFactActor()
+		if caller := options.commandContext; request.Authority == AuthorityUser && caller != nil && caller.Authenticated && caller.UserAuthority && caller.Principal != "" {
+			actor = FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "user", Rank: 30, Authenticated: 1}
+			if actor.TransportIdentity == "" {
+				actor.TransportIdentity = actor.Principal
+			}
+		}
+		var count int
+		count, err = backend.invalidateFacts(ctx, actor, request.FactSource, request.Relation, request.FactTarget)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "retracted": count, "authority": actor.Role})
+		}
+	case "entity-conflicts":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var result map[string]any
+		result, err = backend.entityConflicts(ctx, request)
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+		}
+	case "entity-review", "entity-mutate":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		actor := FactActor{Principal: "system:kb-maintenance", TransportIdentity: "internal", Role: "system", Rank: 20}
+		if request.Operation == "entity-review" {
+			caller := options.commandContext
+			if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			actor = FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "operator", Rank: 40, Authenticated: 1}
+			if actor.TransportIdentity == "" {
+				actor.TransportIdentity = actor.Principal
+			}
+		}
+		var result map[string]any
+		result, err = backend.mutateEntity(ctx, actor, request.State, request.SourceID, request.TargetID, request.ID)
+		if err == nil {
+			response.Updated = true
+			response.Payload, err = json.Marshal(result)
+		}
+	case "ontology-dashboard", "ontology-review":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var result map[string]any
+		if request.Operation == "ontology-review" {
+			caller := options.commandContext
+			if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			actor := FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "operator", Rank: 40, Authenticated: 1}
+			if actor.TransportIdentity == "" {
+				actor.TransportIdentity = actor.Principal
+			}
+			result, err = backend.reviewOntology(ctx, actor, request.State, request.Relation, request.FactTarget)
+		} else {
+			result, err = backend.ontologyDashboard(ctx)
+		}
+		if err == nil {
+			response.Payload, err = json.Marshal(result)
+			if len(response.Payload) > maxDataBody {
+				err = errors.New("memory: ontology result exceeds capacity")
+			}
+		}
+	case "fact-maintenance":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var count int
+		count, err = backend.maintainFacts(ctx, request.State, request.Days)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "changed": count})
+		}
+	case "fact-candidates":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var candidates []map[string]any
+		candidates, err = backend.factCandidates(ctx, request.Limit)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "candidates": candidates})
+		}
+	case "fact-review":
+		backend, ok := options.data.(*postgresDataStore)
+		caller := options.commandContext
+		if !ok || invocation.PrincipalRef != 0 || caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		actor := FactActor{Principal: caller.Principal, TransportIdentity: caller.TransportIdentity, Role: "operator", Rank: 40, Authenticated: 1}
+		if actor.TransportIdentity == "" {
+			actor.TransportIdentity = actor.Principal
+		}
+		var result factMutationResult
+		result, err = backend.reviewFact(ctx, actor, request.ID, request.State)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "ok": true, "assertion_id": result.AssertionID, "lifecycle": result.Lifecycle, "commit_id": result.CommitID})
+		}
+	case "cognify", "cognify-drain", "cognify-status":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.cognifyData(ctx, request)
+	case "reembed-prepare", "reembed-next", "reembed-point", "reembed-status", "reembed-cutover":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.reembedData(ctx, invocation.TraceID, options.executor, request)
+	case "episode-cards":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.SessionID == "" {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var cards []string
+		cards, err = backend.episodeCards(ctx, request.SessionID, request.Limit)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"cards": cards})
+		}
+
+	case "vector-verify":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.verifyVectors(ctx, invocation.TraceID, options.executor, request)
+
+	case "vector-repair-prepare", "vector-embed-prepare":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Operation == "vector-embed-prepare" {
+			response, err = backend.prepareVectorEmbed(ctx, request)
+		} else {
+			response, err = backend.prepareVectorRepair(ctx, request)
+		}
+	case "vector-repair-record":
+		if options.placement != PlacementKB || request.ID <= 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		embedded := EmbedRecord(ctx, invocation.TraceID, options.executor, options.data, request.ID, request.Command, request.Dimension)
+		response.Embedding = &embedded
+
+	case "maintenance-dashboard":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.maintenanceDashboard(ctx)
+
+	case "memory-facts-claim", "memory-facts-complete":
+		if options.placement != PlacementKB || invocation.PrincipalRef != 0 {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		facts, ok := options.data.(memoryFactDataStore)
 		if !ok {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
-		switch request.Operation {
-		case "memory-facts-claim":
+		if request.Operation == "memory-facts-claim" {
 			response.FactWork, err = facts.ClaimMemoryFact(ctx)
-		case "memory-facts-parse":
-			if request.ID <= 0 || request.Content == "" {
+		} else {
+			if request.FactWork == nil {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			response.FactCandidates, err = facts.ParseMemoryFacts(ctx, request.ID, request.Content)
-		case "memory-facts-finish":
-			if request.ID <= 0 {
-				return nil, bus.ModuleStatusInvalidRequest
-			}
-			err = facts.FinishMemoryFact(ctx, request.ID, request.Success, request.Reason)
-			response.Updated = err == nil
+			response.Updated, err = facts.CompleteMemoryFact(ctx, *request.FactWork, request.Content, request.Success, request.Reason)
 		}
 	case "rebuild-derived", "legacy-search", "compact-legacy", "scan-conversations", "check-drift",
 		"anti-pattern-feedback", "anti-pattern-failures", "anti-pattern-escalate", "learn-style",
@@ -1087,6 +1596,10 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			}
 			var drift DriftResult
 			drift, err = legacy.CheckDrift(ctx, request.ID, request.Path, request.Command)
+			if store.IsNoRows(err) {
+				err = nil
+				break
+			}
 			response.Drift = &drift
 		case "anti-pattern-feedback":
 			var count int
@@ -1106,8 +1619,26 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			response.Count = &count
 		case "episode-card-generate":
 			var id int64
+			if options.publicWrite && transaction == nil {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
 			id, err = legacy.GenerateEpisodeCard(ctx, request.SessionID)
-			response.IDs = []int64{id}
+			switch {
+			case errors.Is(err, ErrMemoryNotFound):
+				err = nil
+			case errors.Is(err, errEpisodeDisabled):
+				code := -3
+				response.Code, err = &code, nil
+			case errors.Is(err, errEpisodeCapacity):
+				code := -4
+				response.Code, err = &code, nil
+			case errors.Is(err, errEpisodeMixedScope):
+				code := -2
+				response.Code = &code
+				err = nil
+			default:
+				response.IDs = []int64{id}
+			}
 		case "vector-collection-exists":
 			var exists bool
 			exists, err = legacy.VectorCollectionExists(ctx)
@@ -1116,10 +1647,25 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			err = legacy.RecreateVectorCollection(ctx, request.Dimension)
 			response.Updated = err == nil
 		case "vector-search":
-			response.VectorHits, err = legacy.SearchVectors(ctx, request.Vector, request.RecordType,
-				request.Workspace, request.Project, request.IncludeAll, request.MaxResults)
+			if backend, ok := options.data.(*postgresDataStore); ok && explicitScope {
+				response.VectorHits, err = backend.searchVectors(ctx, request.Vector, request.RecordType,
+					request.Workspace, request.Project, request.IncludeAll, request.MaxResults, scope)
+			} else {
+				response.VectorHits, err = legacy.SearchVectors(ctx, request.Vector, request.RecordType,
+					request.Workspace, request.Project, request.IncludeAll, request.MaxResults)
+			}
 		case "vector-rebuild":
 			var rebuilt int
+			if request.Version == "" {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				if err := backend.db.QueryRow(ctx, `SELECT version FROM memory_active_embedder WHERE id=1`).Scan(&request.Version); err != nil || request.Version == "" {
+					return nil, bus.ModuleStatusInvalidRequest
+				}
+			}
+			response.Version = request.Version
 			rebuilt, response.Failed, err = legacy.RebuildVectorIndex(ctx, request.Version)
 			response.Count = &rebuilt
 		}
@@ -1135,7 +1681,7 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		var block string
 		count, block, err = sessions.FoldSession(ctx, request.SessionID)
 		response.Count, response.Block = &count, &block
-	case "export-records", "export-decisions-jsonl":
+	case "export-records", "export-decisions-jsonl", "export-jsonl":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
@@ -1150,7 +1696,7 @@ set_config('aimee.memory_scope_all',$5,true)`,
 				return nil, bus.ModuleStatusInvalidRequest
 			}
 			var count int
-			count, err = exporter.ExportDecisionsJSONL(ctx, request.Path)
+			count, err = exporter.ExportJSONL(ctx, request.Path, request.Operation == "export-decisions-jsonl")
 			response.Count = &count
 		}
 	case "effectiveness-stats", "lint", "scheduled-maintenance":
@@ -1187,18 +1733,38 @@ set_config('aimee.memory_scope_all',$5,true)`,
 				(request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
+			if options.publicWrite && transaction == nil {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
 			request.Scope = scope
 			var record Record
 			record, err = mutations.InsertEpistemic(ctx, request)
+			if err == nil && options.publicWrite {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				err = backend.captureStoredFactActor(ctx, record.ID, request.Authority, options.commandContext)
+			}
 			response.Records = []Record{record}
 		case "update-as":
 			if request.ID <= 0 || request.Content == "" ||
 				(request.Authority != AuthorityModel && request.Authority != AuthorityUser) {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
+			if options.publicWrite && transaction == nil {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
 			var code int
 			var newID int64
 			code, newID, err = mutations.UpdateAs(ctx, request.ID, request.Content, request.Authority)
+			if err == nil && code == MutationOK && options.publicWrite {
+				backend := options.data.(*postgresDataStore)
+				err = backend.captureStoredFactActor(ctx, newID, request.Authority, options.commandContext)
+			}
+			if errors.Is(err, ErrMemoryNotFound) {
+				code, err = -1, nil
+			}
 			response.Code = &code
 			response.IDs = []int64{newID}
 		case "delete-as":
@@ -1250,6 +1816,15 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		} else {
 			response.Records, err = options.data.Search(ctx, scope, query, request.Kind, request.Tier, request.Limit)
 		}
+	case "adaptive-search", "server-search":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Records, err = backend.adaptiveSearch(ctx, request)
+		if err == nil && request.Operation == "server-search" {
+			response.LegacyResults, err = backend.LegacySearch(ctx, request.Clusters, request.Limit)
+		}
 	case "visible-search":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusInvalidRequest
@@ -1285,6 +1860,12 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		if options.placement != PlacementKB || request.Workspace == "" || request.SignalType == "" || request.Rule == "" {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
+		if backend, ok := options.data.(*postgresDataStore); ok {
+			var record Record
+			record, err = backend.upsertWorkflow(ctx, request)
+			response.Records = []Record{record}
+			break
+		}
 		workflowScope := Scope{Type: ScopeWorkspace, Value: request.Workspace}
 		key := "workflow:" + request.Workspace + ":" + request.SignalType
 		confidence := 1.0
@@ -1315,14 +1896,38 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		if !ok {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
+		if options.publicWrite && transaction == nil {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
 		var record Record
-		record, err = advanced.Supersede(ctx, scope, request.ID, request.Content, *request.Confidence)
-		if errors.Is(err, ErrMemoryNotFound) {
+		if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB {
+			record, err = backend.supersedeKB(ctx, request.ID, request.Content, *request.Confidence, request.SessionID)
+			if err == nil && options.publicWrite {
+				err = backend.captureStoredFactActor(ctx, record.ID, AuthorityModel, nil)
+			}
+		} else {
+			record, err = advanced.Supersede(ctx, scope, request.ID, request.Content, *request.Confidence)
+		}
+		switch {
+		case errors.Is(err, ErrMemoryNotFound):
 			err = nil
 			response.Records = []Record{}
-		} else {
+		case errors.Is(err, errImmutableExperience), errors.Is(err, errRequiresRevocation):
+			code := MutationImmutableExperience
+			if errors.Is(err, errRequiresRevocation) {
+				code = MutationRequiresReplacement
+			}
+			response.Code, err = &code, nil
+		default:
 			response.Records = []Record{record}
 		}
+	case "feedback-path":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || invocation.PrincipalRef != 0 || options.placement != PlacementKB || transaction == nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		err = backend.feedbackPath(ctx, request)
+		response.Updated = err == nil
 	case "feedback":
 		if len(request.IDs) == 0 || len(request.IDs) > 64 {
 			return nil, bus.ModuleStatusInvalidRequest
@@ -1348,6 +1953,16 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		}
 		response.Armed, response.Triggered, response.Completed, response.ProspectiveExpired, err =
 			prospective.ProspectiveCounts(ctx)
+	case "prospective-current", "directive-current":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Operation == "prospective-current" {
+			response.Prospectives, err = backend.prospectiveCurrent(ctx, request.Limit)
+		} else {
+			response.Directives, err = backend.recallOpenDirectives(ctx, request.Limit)
+		}
 	case "prospective-create", "prospective-list", "prospective-get", "prospective-complete",
 		"prospective-sweep", "prospective-match", "prospective-mark-triggered":
 		if options.placement != PlacementKB {
@@ -1418,7 +2033,13 @@ set_config('aimee.memory_scope_all',$5,true)`,
 				return nil, bus.ModuleStatusInvalidRequest
 			}
 			var item Directive
-			item, err = directives.DirectiveCreate(ctx, request)
+			if creator, ok := directives.(interface {
+				DirectiveCreateWithOutcome(context.Context, DataRequest) (Directive, bool, error)
+			}); ok {
+				item, response.Deduplicated, err = creator.DirectiveCreateWithOutcome(ctx, request)
+			} else {
+				item, err = directives.DirectiveCreate(ctx, request)
+			}
 			response.Directives = []Directive{item}
 		case "directive-list":
 			response.Directives, err = directives.DirectiveList(ctx, request.State, request.Cause, request.Limit)
@@ -1484,7 +2105,12 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			if request.ID <= 0 {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			response.Updated, err = domain.UpdateContent(ctx, request.ID, request.Content)
+			var id int64
+			id, err = domain.UpdateContent(ctx, request.ID, request.Content)
+			response.Updated = err == nil && id > 0
+			if response.Updated {
+				response.IDs = []int64{id}
+			}
 		case "reject":
 			if request.ID <= 0 {
 				return nil, bus.ModuleStatusInvalidRequest
@@ -1534,10 +2160,17 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			}
 			response.Updated, err = domain.ConflictResolve(ctx, request.ID, request.Resolution)
 		case "scope-tag":
-			if request.ID <= 0 || request.Scope.Type == "" {
+			target := scope
+			if request.TagScope != nil {
+				target, err = normalizeScope(options.placement, *request.TagScope)
+				if err != nil {
+					return nil, bus.ModuleStatusInvalidRequest
+				}
+			}
+			if request.ID <= 0 || (request.TagScope == nil && request.Scope.Type == "") {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			response.Updated, err = domain.ScopeTag(ctx, request.ID, scope)
+			response.Updated, err = domain.ScopeTag(ctx, request.ID, target)
 		case "scope-collect":
 			if request.ID <= 0 {
 				return nil, bus.ModuleStatusInvalidRequest
@@ -1594,7 +2227,12 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			}
 			var item Episode
 			item, err = domain.EpisodeGet(ctx, request.Key)
-			response.Episodes = []Episode{item}
+			if errors.Is(err, ErrMemoryNotFound) {
+				err = nil
+				response.Episodes = []Episode{}
+			} else if err == nil {
+				response.Episodes = []Episode{item}
+			}
 		case "relation-search":
 			response.Relations, err = domain.RelationSearch(ctx, request.Query, request.AsOf, request.Limit)
 		case "entity-edges":
@@ -1608,7 +2246,11 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			}
 			var profile EntityProfile
 			profile, err = domain.EntityProfile(ctx, request.Entity)
-			response.EntityProfile = &profile
+			if errors.Is(err, ErrMemoryNotFound) {
+				err = nil
+			} else if err == nil {
+				response.EntityProfile = &profile
+			}
 		case "fact-history":
 			if request.Key == "" {
 				return nil, bus.ModuleStatusInvalidRequest
@@ -1626,6 +2268,14 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		var valid bool
 		valid, err = temporal.ValidAt(ctx, request.ID, request.AsOf)
 		response.ValidAt = &valid
+	case "stats-dashboard":
+		dashboard, ok := options.data.(interface {
+			DashboardStats(context.Context) (json.RawMessage, error)
+		})
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = dashboard.DashboardStats(ctx)
 	case "stats":
 		domain, ok := options.data.(domainDataStore)
 		if !ok {
@@ -1714,7 +2364,13 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		case "tier-kind-counts":
 			response.TierKindCounts, err = queries.TierKindCounts(ctx, request.Limit)
 		}
-	case "recall-bundle", "briefing-bundle", "alerts-bundle", "assemble-context", "context-block",
+	case "compose-recall":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementServer || invocation.PrincipalRef != 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		response.Payload, err = backend.ComposeRecall(ctx, request.SharedRecall, request.LimitTokens, request.SessionStart)
+	case "recall-bundle", "briefing-bundle", "alerts-bundle", "assemble-context", "context-block", "context-ingress",
 		"diagnose", "explain", "ask":
 		if options.placement != PlacementKB && request.Operation != "recall-bundle" {
 			return nil, bus.ModuleStatusInvalidRequest
@@ -1725,17 +2381,69 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		}
 		switch request.Operation {
 		case "recall-bundle":
-			response.Payload, err = retrieval.RecallBundle(ctx, request.Query, request.LimitTokens, request.SessionStart)
+			if activated, ok := retrieval.(interface {
+				RecallBundleWithActivation(context.Context, string, int, bool, json.RawMessage) (json.RawMessage, error)
+			}); ok {
+				response.Payload, err = activated.RecallBundleWithActivation(ctx, request.Query, request.LimitTokens, request.SessionStart, request.Activation)
+			} else {
+				if options.placement == PlacementKB && parseActivation(request.Activation) != nil {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				response.Payload, err = retrieval.RecallBundle(ctx, request.Query, request.LimitTokens, request.SessionStart)
+			}
 		case "briefing-bundle":
 			response.Payload, err = retrieval.BriefingBundle(ctx, request.LimitTokens)
 		case "alerts-bundle":
 			response.Payload, err = retrieval.AlertsBundle(ctx, request.AsOf)
-		case "assemble-context", "context-block":
+		case "assemble-context", "context-block", "context-ingress":
 			var block string
-			block, err = retrieval.AssembleContext(ctx, scope, request.Query, request.BlockType, request.Limit)
+			if request.Operation == "context-ingress" {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok || transaction == nil {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				response.Reason, err = backend.retractContextQuery(ctx, request.Query)
+				if err != nil {
+					break
+				}
+			}
+			if request.Operation == "assemble-context" {
+				var records []Record
+				if backend, ok := options.data.(*postgresDataStore); ok && !explicitScope {
+					records, err = backend.SearchVisible(ctx, request)
+				} else {
+					records, err = options.data.Search(ctx, scope, request.Query, "", "", request.Limit)
+				}
+				assembly := assembleMemoryContext(records, request.Query, request.BlockType)
+				block = assembly.Context
+				if request.Detail {
+					response.ContextAssembly = &assembly
+				}
+			} else if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
+				var records []Record
+				records, err = backend.SearchVisible(ctx, request)
+				block = renderMemoryContext(records, request.BlockType)
+			} else {
+				block, err = retrieval.AssembleContext(ctx, scope, request.Query, request.BlockType, request.Limit)
+			}
+			if err == nil && request.Operation == "context-ingress" && request.Query != "" {
+				var facts string
+				facts, _, err = options.data.(*postgresDataStore).RecallFacts(ctx, "", request.Query, false, 2048)
+				if facts != "" {
+					block += "\n## Known facts\n" + facts
+				}
+			}
 			response.Block = &block
 		case "diagnose":
-			response.Diagnostics, err = retrieval.Diagnose(ctx, scope, request.Query, request.Limit)
+			if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
+				var records []Record
+				records, err = backend.SearchVisible(ctx, request)
+				for _, record := range records {
+					response.Diagnostics = append(response.Diagnostics, diagnosticFor(record, request.Query))
+				}
+			} else {
+				response.Diagnostics, err = retrieval.Diagnose(ctx, scope, request.Query, request.Limit)
+			}
 		case "explain":
 			if request.ID <= 0 {
 				return nil, bus.ModuleStatusInvalidRequest
@@ -1745,7 +2453,14 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			response.Diagnostics = []Diagnostic{diagnostic}
 		case "ask":
 			var answer AnswerResult
-			answer, err = retrieval.Ask(ctx, scope, request.Query, request.Limit)
+			if backend, ok := options.data.(*postgresDataStore); ok {
+				if explicitScope {
+					request.Scope = scope
+				}
+				answer, err = backend.askRequest(ctx, request)
+			} else {
+				answer, err = retrieval.Ask(ctx, scope, request.Query, request.Limit)
+			}
 			response.Answer = &answer
 		}
 	case "delete":
@@ -1756,11 +2471,81 @@ set_config('aimee.memory_scope_all',$5,true)`,
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if code := mutationRefusal(err); code != 0 {
+		response = DataResponse{Code: &code}
+		err = nil
+	}
+
 	if err != nil {
 		if invocation.Cancelled() || ctx.Err() != nil {
 			return nil, bus.ModuleStatusCancelled
 		}
+
+		if request.Operation == "fact-retract" {
+			reason, message := "", ""
+			switch {
+			case errors.Is(err, errFactImmutable):
+				reason, message = "immutable", "immutable facts require verified user authority"
+			case errors.Is(err, errFactAnnotateOnly):
+				reason, message = "annotate_only", "historical facts may only be annotated"
+			case errors.Is(err, errFactOperatorOnly):
+				reason, message = "operator_required", "policy facts require operator authority"
+			}
+			if reason != "" {
+				payload, _ := json.Marshal(map[string]any{"status": "error", "kind": "conflict", "reason": reason, "message": message})
+				raw, _ := json.Marshal(DataResponse{Payload: payload})
+				return raw, bus.ModuleStatusOK
+			}
+		}
+		if (request.Operation == "entity-review" || request.Operation == "entity-mutate") && errors.Is(err, errEntityTransition) {
+			kind := "conflict"
+			if request.Operation == "entity-mutate" {
+				kind = "not_found"
+			}
+			payload, _ := json.Marshal(commandError(kind, "entity transition refused: unknown, inactive, already undone, or no longer current"))
+			raw, _ := json.Marshal(DataResponse{Payload: payload})
+			return raw, bus.ModuleStatusOK
+		}
+		if request.Operation == "fact-review" {
+			kind := ""
+			if errors.Is(err, ErrMemoryNotFound) {
+				kind = "not_found"
+			} else if errors.Is(err, errFactReviewConflict) || errors.Is(err, errFactTombstoned) {
+				kind = "conflict"
+			}
+			if kind != "" {
+				payload, _ := json.Marshal(commandError(kind, "fact review transition refused"))
+				raw, _ := json.Marshal(DataResponse{Payload: payload})
+				return raw, bus.ModuleStatusOK
+			}
+		}
 		return nil, bus.ModuleStatusInternal
+	}
+	if request.PublicView {
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.Operation == "diagnose" || request.Operation == "explain" {
+			for i := range response.Diagnostics {
+				d := &response.Diagnostics[i]
+				response.Records = append(response.Records, d.Memory)
+				d.EpistemicKind, err = backend.EpistemicKind(ctx, d.Memory.ID)
+				if err != nil {
+					return nil, bus.ModuleStatusInternal
+				}
+			}
+		}
+		response.PublicRecords, err = backend.publicRecords(ctx, response.Records)
+		if err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		if request.Operation == "get" && request.AsOf != "" && len(response.Records) > 0 {
+			valid, validErr := backend.ValidAt(ctx, request.ID, request.AsOf)
+			if validErr == nil {
+				response.ValidAt = &valid
+			}
+		}
 	}
 	encoded, err := json.Marshal(response)
 	if err != nil {

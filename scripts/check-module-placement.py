@@ -46,7 +46,9 @@ KNOWN_GAPS: set[tuple[str, str]] = set()
 
 def event_constants() -> dict[str, int]:
     found: dict[str, int] = {}
-    for header in ROOT.rglob("src/modules/**/include/**/*.h"):
+    headers = [*ROOT.rglob("src/modules/**/include/**/*.h"),
+               ROOT / "src/headers/memory_stage_contract.h"]
+    for header in headers:
         for name, value in EVENT_DEF.findall(header.read_text(encoding="utf-8", errors="replace")):
             found[name] = int(value)
     return found

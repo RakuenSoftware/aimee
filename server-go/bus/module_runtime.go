@@ -350,6 +350,8 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 	jobs := make(map[moduleCallKey]*moduleWork)
 	done := make(chan moduleResult, moduleMaxInFlight)
 	idleDelay := moduleIdle
+	idleTimer := time.NewTimer(idleDelay)
+	defer idleTimer.Stop()
 
 	for {
 		for {
@@ -392,8 +394,20 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 			return err
 		}
 		if !ok {
-			time.Sleep(idleDelay)
-			idleDelay = nextModuleIdle(idleDelay)
+			// A completed handler is local work: publish its reply immediately
+			// instead of waiting for the next shared-ring polling interval.
+			idleTimer.Reset(idleDelay)
+			select {
+			case result := <-done:
+				if err := finishModuleWork(ctx, client, jobs, result); err != nil {
+					return err
+				}
+				idleDelay = moduleIdle
+			case <-idleTimer.C:
+				idleDelay = nextModuleIdle(idleDelay)
+			case <-ctx.Done():
+				// The loop's shutdown path cancels and drains admitted handlers.
+			}
 			continue
 		}
 		idleDelay = moduleIdle

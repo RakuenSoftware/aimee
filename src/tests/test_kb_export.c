@@ -11,6 +11,25 @@
 #include "../kb_export_obsidian.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
+/* Import is a consumer of the module command contract. Exercise transport and
+ * command failures before accepting a row as imported. */
+static int dispatch_result = 1;
+static int dispatch_calls;
+int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
+{
+   assert(strcmp(method, "memory.store") == 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(args, "scope_context")));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "workspace")),
+                 "import-ws") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "session_id")),
+                 "test") == 0);
+   dispatch_calls++;
+   *result = dispatch_result < 0
+                 ? NULL
+                 : cJSON_Parse(dispatch_result ? "{\"status\":\"ok\"}" : "{\"status\":\"error\"}");
+   return dispatch_result < 0 ? -1 : 1;
+}
+
 static cJSON *sample_export(void)
 {
    cJSON *root = cJSON_CreateObject();
@@ -165,6 +184,15 @@ static void test_import_dry_run_parse_contract(void)
    int imported = -1;
    assert(db2_kb_service_memory_import_json(memories, "import-ws", 1, &imported) == 0);
    assert(imported == 1);
+   assert(dispatch_calls == 0);
+   assert(db2_kb_service_memory_import_json(memories, "import-ws", 0, &imported) == 0);
+   assert(imported == 1 && dispatch_calls == 1);
+   dispatch_result = 0;
+   assert(db2_kb_service_memory_import_json(memories, "import-ws", 0, &imported) == -1);
+   assert(imported == 0);
+   dispatch_result = -1;
+   assert(db2_kb_service_memory_import_json(memories, "import-ws", 0, &imported) == -1);
+   assert(imported == 0 && dispatch_calls == 3);
 
    cJSON_Delete(parsed);
    free(json);

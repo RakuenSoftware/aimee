@@ -9,7 +9,7 @@
 #include "modules/db2/c/css_insights.h"
 #include "modules/db2/c/css_migration.h"
 #include "modules/db2/c/css_render.h"
-#include "modules/db2/c/typed_facts.h"
+#include "kb_service_css.h"
 
 #include <string.h>
 
@@ -186,21 +186,13 @@ int kb_handle_css_signals(int fd, cJSON *req)
       cJSON_AddStringToObject(resp, "rules_doc", doc);
       return kb_send_response(fd, resp);
    }
-   if (strcmp(op, "assert-conventions") == 0)
+   if (strcmp(op, "assert-conventions") == 0 || strcmp(op, "conventions") == 0)
    {
-      /* #2-upgrade: promote the exemplar's machine-derivable conventions into
-       * typed facts. No-op (returns 0) unless css_style_graph_enabled is set;
-       * it also required the typed-fact master gate until that was retired. */
-      char now_iso[40];
-      now_utc(now_iso, sizeof(now_iso));
-      int n = db2_css_migration_assert_conventions(project, now_iso);
-      if (n < 0)
-      {
-         cJSON_Delete(resp);
-         return kb_send_error(fd, "css assert-conventions failed");
-      }
-      cJSON_AddNumberToObject(resp, "asserted", n);
-      return kb_send_response(fd, resp);
+      cJSON_Delete(resp);
+      cJSON *result =
+          db2_kb_service_css_conventions_json(project, !strcmp(op, "assert-conventions"));
+      return result ? kb_send_response(fd, result)
+                    : kb_send_error(fd, "css conventions unavailable");
    }
    if (strcmp(op, "token-candidates") == 0)
    {
@@ -399,27 +391,6 @@ int kb_handle_css_signals(int fd, cJSON *req)
       cJSON_AddNumberToObject(resp, "diff_count", v.diff_count);
       cJSON_AddStringToObject(resp, "summary", v.summary);
       cJSON_AddStringToObject(resp, "limitation", css_render_oracle_limitation_banner());
-      return kb_send_response(fd, resp);
-   }
-   if (strcmp(op, "conventions") == 0)
-   {
-      /* Recall the project's active convention facts (naming_convention,
-       * token_strategy, ...) — every typed fact whose subject is the project. */
-      cJSON *arr = cJSON_CreateArray();
-      typed_fact_t tf[64];
-      int n = db2_typed_fact_recall(project, NULL, tf, 64);
-      for (int i = 0; i < n; i++)
-      {
-         cJSON *o = cJSON_CreateObject();
-         cJSON_AddStringToObject(o, "relation", tf[i].relation);
-         cJSON_AddStringToObject(o, "value", tf[i].object);
-         cJSON_AddNumberToObject(o, "confidence", tf[i].confidence);
-         cJSON_AddStringToObject(o, "source", tf[i].source);
-         cJSON_AddStringToObject(o, "asserted_at", tf[i].asserted_at);
-         cJSON_AddItemToArray(arr, o);
-      }
-      cJSON_AddItemToObject(resp, "results", arr);
-      cJSON_AddNumberToObject(resp, "count", n);
       return kb_send_response(fd, resp);
    }
 

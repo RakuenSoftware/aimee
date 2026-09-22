@@ -16,7 +16,6 @@
 #include "modules/db2/c/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
 #include "modules/db2/c/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
 #include "modules/db2/c/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
-#include "modules/db2/c/ontology_evolution.h" /* db2_ontology_eval_candidates/_approve (§7.2 auto-promote) */
 #include "kb_curator_drain.h"
 #include "kb_curator_extract.h"
 #include "kb_curator_resolve_entities.h"

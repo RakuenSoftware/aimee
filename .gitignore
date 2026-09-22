@@ -259,3 +259,7 @@ benchmarks/compaction-quality/.cache-ab/
 
 # transient build/test logs written by local verification runs
 .*.log
+
+# Standalone Go memory corpus evaluator
+/aimee-memory-eval
+/aimee-memory-eval.exe

@@ -26,13 +26,15 @@ requiring a daemon bus.
 
 ## Public contracts
 
-The module directory `src/modules/benchmarks/` owns four production C sources: `agent_eval.c` (shared eval
-machinery: case scoring, latency buckets, temp-db bootstrap, progress files), `agent_eval_baseline.c`
-(regression baseline load/compare/save), `agent_eval_benchmarks.c` (LoCoMo and LongMemEval dataset
-runners), and `agent_eval_memory_support.c` (memory-retrieval eval support), plus the process
-wire-parity fixture `module_adapter.c`. Two module-root
-headers: `agent_eval.h`, the public contract consumed by CLI, server, and test callers through
-`-Imodules/benchmarks`, and `agent_eval_internal.h`, the private seam shared across the four sources.
+The native module retains `agent_eval.c` (agent harness and live scoring transport),
+`agent_eval_baseline.c` (baseline files), `agent_eval_memory_support.c` (external
+host support), `agent_eval_memory_transport.c` (memory bus transport), and
+`module_adapter.c` (wire-parity fixture). `agent_eval.h` and
+`agent_eval_internal.h` expose retained host contracts. Native dataset runners,
+QA orchestration and scratch-store hooks are retired. Memory dataset adapters
+use the [shared Go module evaluation setup](../MEMORY.md#isolated-go-evaluation-transport), with isolated storage and
+injected embedding dependencies. The CLI's plain-completion adapter reuses the
+existing C agent executor; it contains no memory implementation.
 This code was relocated from the former non-descriptor `src/modules/agent_eval/` directory, whose
 name the canonical taxonomy forbids; the `agent_eval_` symbol prefix is retained as the framework's
 API identity. `memory.benchmark` and `eval.run` route handlers, benchmark scripts/catalogs, and CI
@@ -42,7 +44,7 @@ smoke gates remain owned elsewhere and consume this module rather than belonging
 
 - `config`: supplies benchmark provider, corpus, arm, threshold, and execution settings.
 - `ir`: supplies canonical inputs/results suitable for comparable scoring and attribution.
-- `memory`: exposes retrieval behavior and benchmark-only scratch seams without transferring ownership.
+- `memory`: exposes normal module operations and an evaluation constructor accepting isolated storage.
 - `module-runtime`: supplies optional lifecycle, capability, and readiness contracts.
 - `routing`: selects benchmarked providers/arms without allowing benchmark code to change live routing.
 
@@ -115,6 +117,20 @@ Suite/task schemas, CLI/API aliases, metric definitions, thresholds, arm names, 
 baseline/result formats, provenance, and exit semantics are compatibility contracts. Legacy `eval.run`
 and `agent_eval_*` names may be transitional aliases, but they cannot preserve a separate `evals` module
 or imply runtime evaluation authority.
+
+### Native memory callers
+
+`agent_eval_memory_transport.c` owns the native benchmark host's legacy memory
+request/response adapter. It uses the existing C bus; the shared memory process
+and its producer/consumer remain pure Go. This ownership move does not fix the
+legacy dataset runners' scratch-store isolation: their C connection cannot
+redirect the Go owner. Use the explicit disposable store in `aimee-memory-eval`
+for the supported Go corpus path.
+
+The separate native `bench-perf` harness keeps retired memory case names as
+`unavailable` with null timings and exits 2 without saving or certifying a
+baseline. Its deleted in-process memory calls are not a valid benchmark of the
+Go service.
 
 ## Extension and removal
 

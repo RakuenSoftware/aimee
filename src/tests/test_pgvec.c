@@ -18,10 +18,8 @@
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/lifecycle.h" /* db2_set_embedding_dim */
 #include "../modules/db2/c/pgvec_transport.h"
-#include "../modules/db2/c/pgvec_scope_query.h"
 #include "../modules/db2/c/memory_vectors.h"
 #include "../modules/db2/c/kb_vectors.h"
-#include "../modules/db2/c/vector_verify.h"
 
 static void test_collection_names(void)
 {
@@ -74,13 +72,6 @@ static void test_collection_readiness_accepts_supported_ann_indexes(void)
    assert(pgvec_ensure_index(PGVEC_MEMORY_TABLE, 4, 0) == 0);
    assert(pgvec_ensure_index(PGVEC_KB_TABLE, 4, 0) == 0);
    printf("pgvec: HNSW and DiskANN both satisfy collection readiness OK\n");
-}
-
-static void test_schema_version_nonempty(void)
-{
-   const char *v = pgvec_schema_version();
-   assert(v && v[0]);
-   printf("pgvec: schema version '%s' non-empty OK\n", v);
 }
 
 static void test_upsert_graceful_on_no_db(void)
@@ -148,8 +139,8 @@ static void test_search_graceful_on_no_db(void)
    double scores[8];
    int n;
 
-   n = pgvec_memory_search(vec, 4, "memory", NULL, 0, "", "", 5, ids, scores, 8);
-   assert(n <= 0);
+   /* Memory vector success, scope and unavailable-storage behavior are covered
+    * by the Go owner in vector_search_test.go against PostgreSQL. */
 
    n = pgvec_kb_search("test", vec, 4, 5, ids, scores, 8);
    assert(n <= 0);
@@ -309,7 +300,6 @@ int main(void)
 
    test_collection_names();
    test_collection_readiness_accepts_supported_ann_indexes();
-   test_schema_version_nonempty();
    test_upsert_graceful_on_no_db();
    test_search_graceful_on_no_db();
    test_scroll_graceful_on_no_db();

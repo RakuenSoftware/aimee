@@ -16,14 +16,14 @@
  * validation, and ontology self-validation. It links without libpq so it is unit-
  * testable in isolation.
  *
- * Entity kinds reuse memory_node_kind_t (memory_ontology.h); NODE_OTHER is the
+ * Entity kinds reuse memory_node_kind_t (DB2 graph_kinds.h); NODE_OTHER is the
  * ANY wildcard (matching the existing schema-rule convention) and NODE_SCALAR is
  * a value-typed object (age=30). */
 #ifndef DEC_REL_TYPES_H
 #define DEC_REL_TYPES_H 1
 
 #include <stddef.h>
-#include "modules/memory/memory_ontology.h"
+#include "aimee/db2/graph_kinds.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -98,7 +98,7 @@ extern "C"
     * pass through normalized and unchanged, so a genuinely new predicate is
     * still distinguishable and still stages as provisional (§7.2).
     *
-    * This mirrors what entities already have. db2_entity_alias_bind() maps an
+    * The Go memory owner also maps an
     * alias to a canonical node so aliased facts share one entity; relations had
     * no equivalent, so a model's reasonable synonym for a relation we already
     * model was staged as a provisional rel_type on a Class-C edge instead of

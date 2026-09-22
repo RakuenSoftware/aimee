@@ -89,7 +89,6 @@ REVIEWED_SOURCE_UPDATES = {
         "src/modules/db2/c/fact_lifecycle.c",
         "src/modules/db2/c/learning.c",
         "src/modules/db2/c/notes.c",
-        "src/modules/db2/c/typed_facts.c",
     )
 }
 REVIEWED_SUPPORT_UPDATES = {
@@ -109,6 +108,21 @@ REVIEWED_REFRESH_BASE_REVISIONS = {"ab3cf828b3acc5b1eb3ab6b06bdd903b8d373906"}
 # Only the validated pre-migration contract admits these retirements/imports.
 # Future comparisons retain the ordinary ratchet, including for these symbols.
 MEMORY_MIGRATION_BASE = "bc88c720134efbd3b18a737d5c6bba252a59fcbb1568bbae1ca6bebfae8bfb75"
+# 0.4.5 completes the Go cutover from the exact 0.4.4 release contract.
+# Once main advances, this admission cannot be reused for later retirements.
+MEMORY_GO_ONLY_BASE = "ee445f8cb4473d33730c42697efc1efeb1c29bd3cd461f494fcb1d796d0b76c3"
+MEMORY_GO_ONLY_RETIRED_UNITS = {
+    f"src/modules/db2/c/{name}.c" for name in (
+        "entity_registry", "epistemic_directives", "fact_ingest", "fact_lifecycle",
+        "fact_recall", "ontology_evolution", "pgvec_verify", "rel_types_store",
+        "trace_mining", "typed_facts",
+    )
+}
+MEMORY_GO_ONLY_SUPPORT_UPDATES = {
+    "src/modules/db2/support/log_primitives.c",
+    "src/modules/db2/support/rel_seed_primitives.c",
+    "src/modules/db2/support/rel_type_primitives.c",
+}
 MEMORY_RETIRED_UNITS = {
     "src/modules/db2/c/memory_briefing.c",
     "src/modules/db2/c/memory_conflicts.c",
@@ -145,8 +159,7 @@ MEMORY_ADAPTER_IMPORTS = {
         "src/modules/db2/c/kb_service_backend.c"
     ],
     "db2_memory_scope_bind_current": [
-        "src/modules/db2/c/pgvec_transport.c",
-        "src/modules/db2/c/typed_facts.c"
+        "src/modules/db2/c/pgvec_transport.c"
     ],
     "db2_memory_scope_context_get": [
         "src/modules/db2/c/pgvec_transport.c"
@@ -159,9 +172,6 @@ MEMORY_ADAPTER_IMPORTS = {
     ],
     "memory_pii_turn_requests_sensitive": [
         "src/modules/db2/c/fact_ingest.c"
-    ],
-    "pgvec_memory_vector_search_record_type": [
-        "src/modules/db2/c/pgvec_kb_service.c"
     ]
 }
 CJSON_DEFINES = [
@@ -692,7 +702,6 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
             "src/modules/db2/c/db2_reembed.c",
             "src/modules/db2/c/db2_tenant.c",
             "src/modules/db2/c/enrollments.c",
-            "src/modules/db2/c/fact_ingest.c",
             "src/modules/db2/c/kb_payload.c",
             "src/modules/db2/c/learning.c",
             "src/modules/db2/c/pgvec_transport.c",
@@ -700,7 +709,7 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
         ],
     },
     "provenance": "The monolithic logger is replaced by a process-startup-installed sink; all "
-                  "seventeen DB2 logging translation units are pinned to this bounded surface.",
+                  "sixteen DB2 logging translation units are pinned to this bounded surface.",
     "evidence": "One formatting export and one startup installer preserve DB2 log level, module, "
                 "and message semantics with a bounded message buffer and only vsnprintf imported. "
                 "The sink carries no KB logger state, database, bus, provider, or allocation edge.",
@@ -783,44 +792,23 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "bounded system I/O and formatting surface. It has no DB, "
                 "event-bus, provider, pgvector, DB3, config, logging, or heap dependency.",
 }, {
-    "path": "src/modules/db2/support/rel_enum_text_primitives.c",
-    "source_sha256": "231f5255d1350c752317529e2d0b2bab3528dbc6e0186e4fec780c3319bb8884",
-    "header": "src/modules/db2/support/db2_rel_enum_text.h",
-    "header_sha256": "169b08838b6425976afd817ad315b12db51a86df655b1d8a3dfb1c3ee7f23773",
-    "defines": ["correction_behavior_to_text", "rel_sensitivity_to_text"],
-    "resolves": ["correction_behavior_to_text", "rel_sensitivity_to_text"],
-    "allowed_includes": ["db2_rel_enum_text.h"],
-    "allowed_header_includes": [],
-    "allowed_undefined": [],
-    "base_references": {
-        "correction_behavior_to_text": ["src/modules/db2/c/rel_types_store.c"],
-        "rel_sensitivity_to_text": ["src/modules/db2/c/rel_types_store.c"],
-    },
-    "provenance": "Definitions promoted from the DB-free enum text core in src/rel_types.c; both "
-                  "DB2 calls audited in src/modules/db2/c/rel_types_store.c.",
-    "evidence": "Two deterministic three-value switches with descriptor-owned numeric ABI and no "
-                "imports, shared ontology header, allocation, I/O, DB, event-bus, provider, "
-                "platform, pgvector, DB3, or logging dependency; enum ABI and parity tested.",
-}, {
     "path": "src/modules/db2/support/rel_seed_primitives.c",
-    "source_sha256": "2794ca2836bcd26f6849165750abb8c6689f65b6073e7df602dafff7d892241c",
+    "source_sha256": "4044739d1f0b90760f35f9935bbf7b04efbd7fb6b4008ff31698290420f27828",
     "header": "src/modules/db2/support/db2_rel_seed.h",
     "header_sha256": "a9fdcb84c1dca6d8fa295fe0586be5e2ac43eb1ba17e53bb2197d47175307423",
     "defines": ["rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup"],
-    "resolves": ["rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup"],
+    "resolves": ["rel_types_seed_lookup"],
     "allowed_includes": ["db2_rel_seed.h", "db2_rel_type_helpers.h", "string.h"],
     "allowed_header_includes": [],
     "allowed_undefined": ["rel_type_normalize", "strcmp"],
     "base_references": {
-        "rel_types_seed_at": ["src/modules/db2/c/rel_types_store.c"],
-        "rel_types_seed_count": ["src/modules/db2/c/rel_types_store.c"],
         "rel_types_seed_lookup": [
-            "src/modules/db2/c/entity_edges.c", "src/modules/db2/c/fact_ingest.c",
-            "src/modules/db2/c/fact_lifecycle.c",
+            "src/modules/db2/c/entity_edges.c",
+            "src/modules/db2/c/fact_mutation.c",
         ],
     },
-    "provenance": "Full relationship seed rows generated by walking the compiled canonical "
-                  "SEED_ONTOLOGY in src/rel_types.c; all five DB2 references are pinned.",
+    "provenance": "Temporary relationship ABI data generated from the Go memory seed "
+                  "in server-go/modules/memory/ontology_seed.go; remaining DB2 entity and fact storage callers are pinned.",
     "evidence": "The descriptor owns the generated database-free table and a private ABI mirror; "
                 "size, offsets, enum widths, every field, iteration bounds, pointer identity, "
                 "normalization, misses, and sanitizer behavior are compared with the monolith. "
@@ -831,23 +819,18 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "header": "src/modules/db2/support/db2_rel_type_helpers.h",
     "header_sha256": "cd1b904cb2fe0ff443ab94d1044ce6eefd71aa4e004ddca4641de27be9a391a2",
     "defines": ["rel_type_is_functional", "rel_type_kind_allowed", "rel_type_normalize"],
-    "resolves": ["rel_type_is_functional", "rel_type_kind_allowed", "rel_type_normalize"],
+    "resolves": ["rel_type_is_functional", "rel_type_normalize"],
     "allowed_includes": [
         "ctype.h", "db2_rel_seed.h", "db2_rel_type_helpers.h", "string.h",
     ],
     "allowed_header_includes": ["stddef.h"],
     "allowed_undefined": ["__ctype_b_loc", "__ctype_tolower_loc", "strcmp"],
     "base_references": {
-        "rel_type_is_functional": ["src/modules/db2/c/entity_edges.c"],
-        "rel_type_kind_allowed": ["src/modules/db2/c/fact_ingest.c"],
-        "rel_type_normalize": [
-            "src/modules/db2/c/fact_lifecycle.c",
-            "src/modules/db2/c/ontology_evolution.c",
-            "src/modules/db2/c/rel_types_store.c",
-        ],
+        "rel_type_is_functional": ["src/modules/db2/c/entity_edges.c", "src/modules/db2/c/fact_mutation.c"],
+        "rel_type_normalize": ["src/modules/db2/c/fact_identity.c"],
     },
     "provenance": "Definitions promoted from the DB-free core in src/rel_types.c; all DB2 calls "
-                  "audited in entity_edges.c, fact_ingest.c, fact_lifecycle.c, "
+                  "audited in entity_edges.c, fact_lifecycle.c, "
                   "ontology_evolution.c, and rel_types_store.c.",
     "evidence": "Relation normalization, functional classification, and seed endpoint-kind "
                 "matching preserve legacy behavior; only ctype and strcmp are imported. No DB, "
@@ -1429,25 +1412,13 @@ def descriptor_support_policy(root: Path, descriptor: object) -> list[dict[str, 
 
 def _verify_generated_rel_seed(root: Path, checked_in: Path) -> None:
     """Regenerate the DB2 ontology copy inside the closure gate itself."""
-    generator_source = _safe_file(
-        root, "scripts/gen-memory-ontology-seed.c", Path("scripts")
-    )
-    canonical_source = _safe_file(root, "src/rel_types.c", Path("src"))
+    _safe_file(root, "server-go/modules/memory/ontology_seed.go", Path("server-go"))
     with tempfile.TemporaryDirectory(prefix="db2-rel-seed-generate-") as raw_tmp:
-        tmp = Path(raw_tmp)
-        generator = tmp / "gen-memory-ontology-seed"
-        _run([
-            "cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
-            f"-I{root / 'src'}", f"-I{root / 'src/headers'}",
-            "-o", str(generator), str(generator_source), str(canonical_source),
-        ], root)
-        generated = tmp / "rel_seed_primitives.c"
-        _run([
-            str(generator), str(tmp / "ontology_seed.go"),
-            str(tmp / "ontology_seed.tsv"), str(generated),
-        ], root)
+        generated = Path(raw_tmp) / "rel_seed_primitives.c"
+        _run(["env", "CGO_ENABLED=0", "go", "-C", str(root / "server-go"), "run",
+              "./modules/memory/cmd/aimee-memory-seed", "--db2-output", str(generated)], root)
         if generated.read_bytes() != checked_in.read_bytes():
-            fail("support-generated-drift", f"{GENERATED_REL_SEED}: compiled canonical seed "
+            fail("support-generated-drift", f"{GENERATED_REL_SEED}: Go seed "
                  "does not reproduce the checked-in source")
 
 
@@ -1776,6 +1747,12 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
     )
     retired_units = MEMORY_RETIRED_UNITS if memory_migration else set()
     retired_support = MEMORY_RETIRED_SUPPORT if memory_migration else set()
+    memory_go_only = (
+        isinstance(previous, dict) and previous.get("fingerprint") == MEMORY_GO_ONLY_BASE
+    )
+    if memory_go_only:
+        retired_units = MEMORY_GO_ONLY_RETIRED_UNITS
+        retired_support = {"src/modules/db2/support/rel_enum_text_primitives.c"}
     refresh_allowed = (
         isinstance(previous, dict) and
         previous.get("source_revision") in REVIEWED_REFRESH_BASE_REVISIONS
@@ -1783,6 +1760,10 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
     reviewed_additions = set(REVIEWED_SOURCE_ADDITIONS) if refresh_allowed else set()
     reviewed_updates = set(REVIEWED_SOURCE_UPDATES) if refresh_allowed else set()
     reviewed_support_updates = set(REVIEWED_SUPPORT_UPDATES) if refresh_allowed else set()
+    if memory_go_only:
+        # The logger loses its retired caller; ontology support now binds the
+        # Go-generated seed and the remaining native mutation/identity callers.
+        reviewed_support_updates |= MEMORY_GO_ONLY_SUPPORT_UPDATES
     added_units = sorted(set(current_units) - set(previous_units))
     rejected_units = sorted(set(added_units) - reviewed_additions)
     if rejected_units:
@@ -1888,6 +1869,14 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
         before = set(previous_rows[symbol]["references"])
         after = set(current_rows[symbol]["references"])
         growth = after - before
+        if (memory_go_only and symbol == "_GLOBAL_OFFSET_TABLE_"
+                and growth <= {
+                    "src/modules/db2/c/demotion.c",
+                    "src/modules/db2/c/kb_service_backend.c",
+                }
+                and previous_rows[symbol]["disposition"] == "system-link"
+                and current_rows[symbol]["disposition"] == "system-link"):
+            continue
         if (memory_migration and symbol == "memchr" and
                 growth == {"src/modules/db2/c/fact_recall.c"} and
                 previous_rows[symbol]["disposition"] == "system-link" and

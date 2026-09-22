@@ -22,8 +22,15 @@ const (
 	// Vector tables are discovered from the catalog rather than assumed, so a
 	// table the schema grew without this list knowing appears here and is
 	// refused rather than silently left at the old width.
-	sqlDiscoverVectorTables = `SELECT DISTINCT table_name FROM information_schema.columns` +
-		` WHERE table_schema = 'public' AND udt_name = 'vector' ORDER BY table_name`
+	// Unconstrained vectors carry their own dimensions (including Go memory's
+	// versioned embeddings); a global width reset must leave them with their owner.
+	sqlDiscoverVectorTables = `SELECT DISTINCT c.relname FROM pg_catalog.pg_attribute a` +
+		` JOIN pg_catalog.pg_class c ON c.oid=a.attrelid` +
+		` JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace` +
+		` JOIN pg_catalog.pg_type t ON t.oid=a.atttypid` +
+		` WHERE n.nspname='public' AND t.typname='vector' AND a.atttypmod>0` +
+		` AND a.attnum>0 AND NOT a.attisdropped AND c.relkind IN ('r','p','f','v','m')` +
+		` ORDER BY c.relname`
 
 	sqlInboundForeignKeys = `SELECT count(*) FROM information_schema.constraint_column_usage ccu` +
 		` JOIN information_schema.table_constraints tc ON tc.constraint_name = ccu.constraint_name` +

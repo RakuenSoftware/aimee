@@ -1,5 +1,6 @@
 /* test_json_fluent.c: unit tests for the json_fluent helpers */
 #include "json_fluent.h"
+#include "json_wire.h"
 #include "cJSON.h"
 #include <stdio.h>
 #include <string.h>
@@ -94,9 +95,53 @@ static int test_response_builders(void)
    return 0;
 }
 
+static int test_numeric_arrays(void)
+{
+   float out[4] = {9, 9, 9, 9};
+   const char *invalid[] = {"null", "[1,2,3,4,5]", "[1,null]", "[1,1e39]", "[1,1e999]"};
+   for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+   {
+      cJSON *array = cJSON_Parse(invalid[i]);
+      CHECK(jo_float_array(array, out, 4) == 0);
+      CHECK(out[0] == 9 && out[1] == 9 && out[2] == 9 && out[3] == 9);
+      cJSON_Delete(array);
+   }
+   cJSON *matrix = cJSON_Parse("[[1,2],[3,1e39]]");
+   CHECK(jo_float_matrix(matrix, out, 2, 2) == 0 && out[0] == 9 && out[2] == 9);
+   cJSON_Delete(matrix);
+   matrix = cJSON_Parse("[[1,2],[3,4]]");
+   CHECK(jo_float_matrix(matrix, out, 1, 2) == 0 && out[0] == 9);
+   CHECK(jo_float_matrix(matrix, out, 2, 3) == 0 && out[0] == 9);
+   CHECK(jo_float_matrix(matrix, out, 2, 2) == 2 && out[0] == 1 && out[3] == 4);
+   CHECK(jo_float_array(cJSON_GetArrayItem(matrix, 0), out, 4) == 2 && out[1] == 2);
+   cJSON_Delete(matrix);
+   return 0;
+}
+
+static int test_exact_integer_wire(void)
+{
+   const char *wire = "{\"text\":\"123 \\\" -9007199254740995\",\"9007199254740997\":"
+                      "[42,9007199254740993,-9223372036854775808,1.25,1e20],"
+                      "\"nested\":{\"id\":9223372036854775807}}";
+   cJSON *doc = json_wire_parse_exact_integers(wire);
+   CHECK(doc);
+   char *rendered = cJSON_PrintUnformatted(doc);
+   CHECK(rendered && strstr(rendered, "[42,9007199254740993,-9223372036854775808,1.25,"));
+   CHECK(strstr(rendered, "\"id\":9223372036854775807"));
+   cJSON_free(rendered);
+   cJSON_Delete(doc);
+   doc = json_wire_parse_exact_integers("9007199254740993");
+   CHECK(cJSON_IsRaw(doc) && !strcmp(doc->valuestring, "9007199254740993"));
+   cJSON_Delete(doc);
+   CHECK(!json_wire_parse_exact_integers("{\"id\":1} trailing"));
+   CHECK(!json_wire_parse_exact_integers("{\"id\":9223372036854775807"));
+   return 0;
+}
+
 int main(void)
 {
-   int failed = 0;
+   int failed = test_exact_integer_wire();
+   failed += test_numeric_arrays();
    failed += test_optional_getters();
    failed += test_required_getters();
    failed += test_null_safe_adds();

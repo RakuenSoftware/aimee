@@ -676,7 +676,7 @@ export default function EditWorkflows() {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <ProjectPicker
         key={wfSession?.id}
-        storageKey={`aimee_session_project_${wfSession?.id ?? ""}`}
+        value={wfSession?.projectRoot ?? ""}
         onChange={(sel: ProjectSelection | null) => {
           const r = sel ? `${sel.root}/${sel.project}` : "";
           if (wfSession) wfPatch(wfSession.id, { projectRoot: r, projectName: sel?.project ?? "" });

@@ -1,3 +1,5 @@
+#include "json_fluent.h"
+#include "module_commands.h"
 /* dashboard_kb.c: dashboard JSON helpers that touch only DB2 + audit.log.
  *
  * These are the dashboard endpoints the kb sidecar's request handlers
@@ -16,9 +18,7 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "modules/db2/c/decision_log.h"
-#include "modules/db2/c/memory_conflicts.h"
 #include "modules/db2/c/memory_query.h"
-#include <aimee/memory/module_api.h>
 #include "dashboard.h"
 #include "lifecycle.h"
 #include "headers/memory.h"
@@ -154,84 +154,20 @@ static int dashboard_log_row_compare_desc(const void *lhs, const void *rhs)
 
 char *api_memory_stats(void)
 {
-   if (!db2_is_initialized())
-      return NULL;
-   memory_stats_t stats;
-   if (memory_stats(&stats) != 0)
-      return strdup("[]");
-
-   cJSON *root = cJSON_CreateObject();
-   cJSON *tiers = cJSON_AddArrayToObject(root, "tiers");
-   cJSON *tier_kinds = cJSON_AddArrayToObject(root, "tier_kinds");
-   const char *tier_names[] = {TIER_L0, TIER_L1, TIER_L2, TIER_L3, TIER_L4, TIER_L5};
-
-   for (int i = 0; i < 6; i++)
+   cJSON *req = cJSON_CreateObject();
+   cJSON *resp = NULL;
+   cJSON_AddStringToObject(req, "operation", "stats-dashboard");
+   int rc = aimee_module_commands_dispatch_internal_timeout("memory.runtime", req, 60000, &resp);
+   if (rc <= 0 || !cJSON_IsObject(resp) || strcmp(jo_cstr(resp, "status"), "ok") != 0)
    {
-      cJSON *obj = cJSON_CreateObject();
-      cJSON_AddStringToObject(obj, "tier", tier_names[i]);
-      cJSON_AddStringToObject(obj, "functional_name", memory_functional_tier_name(tier_names[i]));
-      cJSON_AddNumberToObject(obj, "count", stats.tier_counts[i]);
-      cJSON_AddItemToArray(tiers, obj);
+      cJSON_Delete(resp);
+      resp = NULL;
    }
-
-   db2_memory_tier_kind_count_t tk_rows[256];
-   int n_tk = db2_memory_count_by_tier_kind(tk_rows, (int)(sizeof(tk_rows) / sizeof(tk_rows[0])));
-   for (int i = 0; i < n_tk; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      cJSON_AddStringToObject(obj, "tier", tk_rows[i].tier);
-      cJSON_AddStringToObject(obj, "functional_name", memory_functional_tier_name(tk_rows[i].tier));
-      cJSON_AddStringToObject(obj, "kind", tk_rows[i].kind);
-      cJSON_AddNumberToObject(obj, "count", tk_rows[i].count);
-      cJSON_AddItemToArray(tier_kinds, obj);
-   }
-
-   cJSON *scopes = cJSON_AddArrayToObject(root, "scopes");
-   int scope_counts[4] = {0};
-   int scope_conflicts[4] = {0};
-
-   /* Materialize id list before calling memory_primary_scope() — that helper
-    * issues its own DB2 queries, and the DB2 connection only supports one
-    * active result at a time. */
-   int64_t *mem_ids = NULL;
-   size_t mem_count = 0;
-   db2_memory_alloc_all_ids(&mem_ids, &mem_count);
-   for (size_t i = 0; i < mem_count; i++)
-   {
-      memory_scope_level_t level = memory_primary_scope(mem_ids[i], NULL, 0);
-      if (level >= MEMORY_SCOPE_GLOBAL && level <= MEMORY_SCOPE_PROJECT)
-         scope_counts[level]++;
-   }
-   free(mem_ids);
-
-   /* Pull the unresolved-conflict pair list through the typed db2 helper so
-    * we don't issue a second concurrent DB2 query against the same connection
-    * (memory_primary_scope below issues its own). */
-   conflict_t conflicts[256];
-   int conf_count =
-       db2_memory_conflict_list(conflicts, (int)(sizeof(conflicts) / sizeof(conflicts[0])));
-   for (int i = 0; i < conf_count; i++)
-   {
-      memory_scope_level_t a_level = memory_primary_scope(conflicts[i].memory_a, NULL, 0);
-      memory_scope_level_t b_level = memory_primary_scope(conflicts[i].memory_b, NULL, 0);
-      if (a_level >= MEMORY_SCOPE_GLOBAL && a_level <= MEMORY_SCOPE_PROJECT)
-         scope_conflicts[a_level]++;
-      if (b_level >= MEMORY_SCOPE_GLOBAL && b_level <= MEMORY_SCOPE_PROJECT)
-         scope_conflicts[b_level]++;
-   }
-
-   for (int level = MEMORY_SCOPE_GLOBAL; level <= MEMORY_SCOPE_PROJECT; level++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      cJSON_AddStringToObject(obj, "scope", memory_scope_level_name((memory_scope_level_t)level));
-      cJSON_AddNumberToObject(obj, "count", scope_counts[level]);
-      cJSON_AddNumberToObject(obj, "conflicted_memories", scope_conflicts[level]);
-      cJSON_AddItemToArray(scopes, obj);
-   }
-
-   char *json = cJSON_PrintUnformatted(root);
-   cJSON_Delete(root);
-   return json ? json : strdup("{\"tiers\":[],\"tier_kinds\":[],\"scopes\":[]}");
+   cJSON_Delete(req);
+   cJSON *data = resp ? cJSON_GetObjectItemCaseSensitive(resp, "dashboard") : NULL;
+   char *json = data ? cJSON_PrintUnformatted(data) : NULL;
+   cJSON_Delete(resp);
+   return json;
 }
 
 char *api_logs(void)
@@ -301,142 +237,63 @@ char *api_dashboard_reminders(void)
 {
    if (!db2_is_initialized())
       return NULL;
-   cJSON *obj = cJSON_CreateObject();
-   if (!obj)
-      return strdup("{}");
-
-   /* Counts by state — the dashboard card wants an at-a-glance summary
-    * that answers "are there pending reminders?" without a second query. */
-   cJSON *counts = cJSON_AddObjectToObject(obj, "counts");
-   int armed = 0, triggered = 0, completed = 0, expired = 0;
-   (void)memory_prospective_count_by_state(&armed, &triggered, &completed, &expired);
-   cJSON_AddNumberToObject(counts, "armed", armed);
-   cJSON_AddNumberToObject(counts, "triggered", triggered);
-   cJSON_AddNumberToObject(counts, "completed", completed);
-   cJSON_AddNumberToObject(counts, "expired", expired);
-   cJSON_AddNumberToObject(counts, "total", armed + triggered + completed + expired);
-
-   /* Process-local counters from memory_prospective_metrics() — trigger/
-    * complete/expire totals since process start plus match latency.
-    * Dashboard surfaces them so operators can judge whether the matcher
-    * is firing more / less than they expect. */
-   cJSON *metrics = cJSON_AddObjectToObject(obj, "metrics");
-   int64_t triggered_total = 0, completed_total = 0, expired_total = 0, match_calls = 0;
-   double match_avg = 0.0, match_max = 0.0;
-   memory_prospective_metrics(&triggered_total, &completed_total, &expired_total, &match_calls,
-                              &match_avg, &match_max);
-   cJSON_AddNumberToObject(metrics, "triggered_since_start", (double)triggered_total);
-   cJSON_AddNumberToObject(metrics, "completed_since_start", (double)completed_total);
-   cJSON_AddNumberToObject(metrics, "expired_since_start", (double)expired_total);
-   cJSON_AddNumberToObject(metrics, "match_calls_since_start", (double)match_calls);
-   cJSON_AddNumberToObject(metrics, "match_ms_avg", match_avg);
-   cJSON_AddNumberToObject(metrics, "match_ms_max", match_max);
-
-   /* Top-N armed reminders, newest-first, so the card can surface the
-    * active ones without the dashboard client having to paginate. */
-   cJSON *items = cJSON_AddArrayToObject(obj, "recent");
-   memory_prospective_t rows[20];
-   int n = memory_prospective_list(NULL, rows, 20);
-   for (int i = 0; i < n; i++)
+   cJSON *args = cJSON_CreateObject();
+   if (!args)
+      return NULL;
+   cJSON *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "prospective-dashboard");
+   int rc =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
+   if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
    {
-      cJSON *j = cJSON_CreateObject();
-      if (!j)
-         continue;
-      cJSON_AddNumberToObject(j, "id", (double)rows[i].id);
-      cJSON_AddStringToObject(j, "trigger_text", rows[i].trigger_text);
-      cJSON_AddStringToObject(j, "action_text", rows[i].action_text);
-      cJSON_AddStringToObject(j, "state", rows[i].state);
-      cJSON_AddStringToObject(j, "recurrence", rows[i].recurrence);
-      cJSON_AddStringToObject(j, "anchor_entity", rows[i].anchor_entity);
-      cJSON_AddStringToObject(j, "anchor_file", rows[i].anchor_file);
-      cJSON_AddStringToObject(j, "valid_until", rows[i].valid_until);
-      cJSON_AddNumberToObject(j, "trigger_count", rows[i].trigger_count);
-      cJSON_AddStringToObject(j, "last_triggered_at", rows[i].last_triggered_at);
-      cJSON_AddStringToObject(j, "created_at", rows[i].created_at);
-      cJSON_AddItemToArray(items, j);
+      cJSON_Delete(response);
+      response = NULL;
    }
-
-   char *json = cJSON_PrintUnformatted(obj);
-   cJSON_Delete(obj);
-   return json ? json : strdup("{}");
+   cJSON_Delete(args);
+   const cJSON *dashboard =
+       response ? cJSON_GetObjectItemCaseSensitive(response, "dashboard") : NULL;
+   char *result = dashboard ? cJSON_PrintUnformatted(dashboard) : NULL;
+   cJSON_Delete(response);
+   return result;
 }
 
 char *api_dashboard_recall(void)
 {
-   if (!db2_is_initialized())
+   cJSON *args = cJSON_CreateObject(), *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "recall-dashboard");
+   int rc =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
+   cJSON_Delete(args);
+   if (rc <= 0 || !cJSON_IsObject(response))
+   {
+      cJSON_Delete(response);
       return NULL;
-   /* Assemble a fresh session-start bundle so the dashboard shows what
-    * the agent would see on first turn right now.  Cheap — pure DB. */
-   cJSON *bundle = memory_recall(NULL, 0, 1);
-   if (!bundle)
-      return strdup("{}");
-
-   /* Augment with cumulative metrics so operators can spot a runaway
-    * assembly count or latency regression. */
-   cJSON *metrics = cJSON_AddObjectToObject(bundle, "metrics");
-   int64_t total = 0, session_starts = 0;
-   double avg = 0.0, max = 0.0;
-   memory_recall_metrics(&total, &session_starts, &avg, &max);
-   cJSON_AddNumberToObject(metrics, "assemblies_total", (double)total);
-   cJSON_AddNumberToObject(metrics, "session_start_assemblies", (double)session_starts);
-   cJSON_AddNumberToObject(metrics, "ms_avg", avg);
-   cJSON_AddNumberToObject(metrics, "ms_max", max);
-
-   char *json = cJSON_PrintUnformatted(bundle);
-   cJSON_Delete(bundle);
-   return json ? json : strdup("{}");
+   }
+   char *json = cJSON_PrintUnformatted(response);
+   cJSON_Delete(response);
+   return json;
 }
 
 char *api_dashboard_directives(void)
 {
    if (!db2_is_initialized())
       return NULL;
-   memory_directive_counts_t counts;
-   memory_directive_counts(&counts);
-
-   int64_t created_total = 0, resolved_total = 0, expired_total = 0, surfaced_total = 0;
-   int64_t match_calls = 0;
-   double ms_avg = 0.0, ms_max = 0.0;
-   memory_directive_metrics(&created_total, &resolved_total, &expired_total, &surfaced_total,
-                            &match_calls, &ms_avg, &ms_max);
-
-   cJSON *obj = cJSON_CreateObject();
-   cJSON *counts_obj = cJSON_AddObjectToObject(obj, "counts");
-   cJSON_AddNumberToObject(counts_obj, "open", (double)counts.open);
-   cJSON_AddNumberToObject(counts_obj, "suppressed", (double)counts.suppressed);
-   cJSON_AddNumberToObject(counts_obj, "resolved", (double)counts.resolved);
-   cJSON_AddNumberToObject(counts_obj, "expired", (double)counts.expired);
-   cJSON_AddNumberToObject(
-       counts_obj, "total",
-       (double)(counts.open + counts.suppressed + counts.resolved + counts.expired));
-
-   cJSON *metrics = cJSON_AddObjectToObject(obj, "metrics");
-   cJSON_AddNumberToObject(metrics, "created_total", (double)created_total);
-   cJSON_AddNumberToObject(metrics, "resolved_total", (double)resolved_total);
-   cJSON_AddNumberToObject(metrics, "expired_total", (double)expired_total);
-   cJSON_AddNumberToObject(metrics, "surfaced_total", (double)surfaced_total);
-   cJSON_AddNumberToObject(metrics, "match_calls", (double)match_calls);
-   cJSON_AddNumberToObject(metrics, "match_ms_avg", ms_avg);
-   cJSON_AddNumberToObject(metrics, "match_ms_max", ms_max);
-
-   /* Recent open directives (top-20 by priority DESC) for operator triage. */
-   cJSON *recent = cJSON_AddArrayToObject(obj, "recent");
-   memory_directive_t rows[20];
-   int n = memory_directive_list(MEMORY_DIRECTIVE_STATE_OPEN, NULL, rows, 20);
-   for (int i = 0; i < n; i++)
+   cJSON *args = cJSON_CreateObject();
+   if (!args)
+      return NULL;
+   cJSON *response = NULL;
+   cJSON_AddStringToObject(args, "operation", "directive-dashboard");
+   int rc =
+       aimee_module_commands_dispatch_internal_timeout("memory.runtime", args, 60000, &response);
+   if (rc <= 0 || !cJSON_IsObject(response) || strcmp(jo_cstr(response, "status"), "ok") != 0)
    {
-      cJSON *r = cJSON_CreateObject();
-      cJSON_AddNumberToObject(r, "id", (double)rows[i].id);
-      cJSON_AddStringToObject(r, "question", rows[i].question);
-      cJSON_AddStringToObject(r, "topic", rows[i].topic);
-      cJSON_AddStringToObject(r, "cause", rows[i].cause);
-      cJSON_AddNumberToObject(r, "priority", rows[i].priority);
-      cJSON_AddNumberToObject(r, "surfaced_count", rows[i].surfaced_count);
-      cJSON_AddStringToObject(r, "created_at", rows[i].created_at);
-      cJSON_AddItemToArray(recent, r);
+      cJSON_Delete(response);
+      response = NULL;
    }
-
-   char *json = cJSON_PrintUnformatted(obj);
-   cJSON_Delete(obj);
-   return json ? json : strdup("{}");
+   cJSON_Delete(args);
+   const cJSON *dashboard =
+       response ? cJSON_GetObjectItemCaseSensitive(response, "dashboard") : NULL;
+   char *result = dashboard ? cJSON_PrintUnformatted(dashboard) : NULL;
+   cJSON_Delete(response);
+   return result;
 }

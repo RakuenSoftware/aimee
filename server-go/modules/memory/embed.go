@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	store "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
@@ -138,14 +139,15 @@ func (b *embedBreaker) reportFailure(nowMS int64) {
 // the same reason): a breaker tested against the wall clock can only be tested
 // by sleeping.
 type EmbedRequest struct {
-	Operation string `json:"operation,omitempty"`
-	MemoryID  int64  `json:"memory_id,omitempty"`
-	BaseURL   string `json:"base_url"`
-	InputType string `json:"input_type"`
-	Text      string `json:"text"`
-	MaxDim    int    `json:"max_dim"`
-	Limit     int    `json:"limit,omitempty"`
-	NowMS     int64  `json:"now_ms,omitempty"`
+	Operation string   `json:"operation,omitempty"`
+	MemoryID  int64    `json:"memory_id,omitempty"`
+	BaseURL   string   `json:"base_url"`
+	InputType string   `json:"input_type"`
+	Text      string   `json:"text"`
+	Texts     []string `json:"texts,omitempty"`
+	MaxDim    int      `json:"max_dim"`
+	Limit     int      `json:"limit,omitempty"`
+	NowMS     int64    `json:"now_ms,omitempty"`
 }
 
 // EmbedResponse separates the ways this can decline, because they are different
@@ -159,20 +161,19 @@ type EmbedRequest struct {
 // as a failure — and it closes an earlier outage, or a half-open breaker would
 // turn the next authorization result back into "unavailable".
 type EmbedResponse struct {
-	Vector       []float32 `json:"vector,omitempty"`
-	Dim          int       `json:"dim"`
-	Truncated    bool      `json:"truncated,omitempty"`
-	Unavailable  bool      `json:"unavailable,omitempty"`
-	RetryAfterMS int64     `json:"retry_after_ms,omitempty"`
-	Unauthorized bool      `json:"unauthorized,omitempty"`
-	Error        string    `json:"error,omitempty"`
-	ServingID    string    `json:"serving_id,omitempty"`
-	Embedded     bool      `json:"embedded,omitempty"`
-	Repaired     int       `json:"repaired,omitempty"`
-	Failed       int       `json:"failed,omitempty"`
+	Vectors      [][]float32 `json:"vectors,omitempty"`
+	Vector       []float32   `json:"vector,omitempty"`
+	Dim          int         `json:"dim"`
+	Truncated    bool        `json:"truncated,omitempty"`
+	Unavailable  bool        `json:"unavailable,omitempty"`
+	RetryAfterMS int64       `json:"retry_after_ms,omitempty"`
+	Unauthorized bool        `json:"unauthorized,omitempty"`
+	Error        string      `json:"error,omitempty"`
+	ServingID    string      `json:"serving_id,omitempty"`
+	Embedded     bool        `json:"embedded,omitempty"`
+	Repaired     int         `json:"repaired,omitempty"`
+	Failed       int         `json:"failed,omitempty"`
 }
-
-var embedLastUnauthorized atomic.Bool
 
 // EmbedIsHTTP reports whether a configured embedder command names an HTTP
 // endpoint rather than a program to run.
@@ -190,7 +191,6 @@ func nowOr(nowMS int64) int64 {
 // Embed performs one embedding, owning the breaker around it.
 func Embed(ctx context.Context, traceID uint64, executor egress.Executor,
 	request EmbedRequest) EmbedResponse {
-	embedLastUnauthorized.Store(false)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -236,7 +236,6 @@ func Embed(ctx context.Context, traceID uint64, executor egress.Executor,
 		}
 		if response.Status == 401 || response.Status == 403 {
 			breaker.reportSuccess(now)
-			embedLastUnauthorized.Store(true)
 			return EmbedResponse{Unauthorized: true,
 				Error: fmt.Sprintf("embed: not authorized (HTTP %d)", response.Status)}
 		}
@@ -258,7 +257,7 @@ func Embed(ctx context.Context, traceID uint64, executor egress.Executor,
 		}
 		rawBody = output
 	}
-	var raw []float64
+	var raw []*float64
 	if json.Unmarshal(rawBody, &raw) != nil {
 		breaker.reportFailure(now)
 		return EmbedResponse{Error: "embed: response is not a JSON array of numbers"}
@@ -273,7 +272,16 @@ func Embed(ctx context.Context, traceID uint64, executor egress.Executor,
 		raw = raw[:request.MaxDim]
 	}
 	out.Vector = make([]float32, len(raw))
-	for i, v := range raw {
+	for i, value := range raw {
+		if value == nil {
+			breaker.reportFailure(now)
+			return EmbedResponse{Error: "embed: null vector component"}
+		}
+		v := *value
+		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) > math.MaxFloat32 {
+			breaker.reportFailure(now)
+			return EmbedResponse{Error: "embed: non-finite vector component"}
+		}
 		out.Vector[i] = float32(v)
 	}
 	out.Dim = len(out.Vector)
@@ -338,6 +346,36 @@ func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, 
 	if data == nil || memoryID <= 0 {
 		return EmbedResponse{Error: "embed: memory store or id is unavailable"}
 	}
+	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB && memoryID >= unitPointOffset {
+		return backend.embedUnit(ctx, traceID, executor, memoryID, command, maxDim)
+	}
+	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB {
+		if db, ok := backend.db.(store.DB); ok {
+			tx, err := db.Begin(ctx)
+			if err != nil {
+				return EmbedResponse{Error: "embed: transaction unavailable"}
+			}
+			tx = backend.auditTransaction(tx)
+			defer tx.Rollback(context.Background())
+			bound := *backend
+			bound.db = tx
+			response := EmbedRecord(ctx, traceID, executor, &bound, memoryID, command, maxDim)
+			if err = tx.Commit(ctx); err != nil {
+				return EmbedResponse{Error: "embed: transaction failed"}
+			}
+			return response
+		}
+		if _, ok := backend.db.(store.Tx); !ok {
+			return EmbedResponse{Error: "embed: transaction required"}
+		}
+		if err := backend.activeEmbeddingGuard(ctx, command, maxDim); err != nil {
+			return EmbedResponse{Error: err.Error()}
+		}
+		var locked int64
+		if err := backend.db.QueryRow(ctx, `SELECT id FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, memoryID).Scan(&locked); err != nil {
+			return EmbedResponse{Error: "embed: memory record unavailable"}
+		}
+	}
 	record, err := data.Get(ctx, Scope{}, memoryID)
 	if err != nil {
 		return EmbedResponse{Error: "embed: memory record unavailable"}
@@ -349,11 +387,21 @@ func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, 
 	if record.Key != "" {
 		text = record.Key + "\n" + record.Content
 	}
-	response := Embed(ctx, traceID, executor, EmbedRequest{
-		BaseURL: command, InputType: "document", Text: text, MaxDim: maxDim,
-	})
+	request := EmbedRequest{BaseURL: command, InputType: "document", Text: text, MaxDim: maxDim}
+	var response EmbedResponse
+	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB {
+		response = backend.embedActiveVersion(ctx, traceID, executor, request)
+	} else {
+		response = Embed(ctx, traceID, executor, request)
+	}
+
 	if response.Error != "" || response.Unavailable || response.Unauthorized || response.Truncated {
 		return failed(response)
+	}
+	if backend, ok := data.(*postgresDataStore); ok && backend.placement == PlacementKB {
+		if err := backend.checkActiveEmbeddingIdentity(ctx, response.ServingID); err != nil {
+			return failed(EmbedResponse{Error: err.Error()})
+		}
 	}
 	embeddings, ok := data.(embeddingDataStore)
 	if !ok {
@@ -397,17 +445,23 @@ func handleEmbed(executor egress.Executor, options handlerOptions, invocation bu
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(embedHTTPTimeout()))
+	defer cancel()
 	var response EmbedResponse
-	if decoded.Operation == "serving-id" {
-		response = EmbedServingID(context.Background(), invocation.TraceID, executor, decoded.BaseURL)
+	if decoded.Operation == "dimension" {
+		response = EmbedDimension(ctx, invocation.TraceID, executor, decoded)
+	} else if decoded.Operation == "serving-id" {
+		response = EmbedServingID(ctx, invocation.TraceID, executor, decoded.BaseURL)
 	} else if decoded.Operation == "record" {
-		response = EmbedRecord(context.Background(), invocation.TraceID, executor, options.data,
+		response = EmbedRecord(ctx, invocation.TraceID, executor, options.data,
 			decoded.MemoryID, decoded.BaseURL, decoded.MaxDim)
 	} else if decoded.Operation == "repair-failed" {
-		response = RepairFailedEmbeddings(context.Background(), invocation.TraceID, executor,
+		response = RepairFailedEmbeddings(ctx, invocation.TraceID, executor,
 			options.data, decoded.BaseURL, decoded.MaxDim, decoded.Limit)
+	} else if decoded.Operation == "batch" {
+		response = EmbedBatch(ctx, invocation.TraceID, executor, decoded)
 	} else {
-		response = Embed(context.Background(), invocation.TraceID, executor, decoded)
+		response = Embed(ctx, invocation.TraceID, executor, decoded)
 	}
 	encoded, err := json.Marshal(response)
 	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {

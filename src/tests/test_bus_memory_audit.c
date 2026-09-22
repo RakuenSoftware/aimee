@@ -13,6 +13,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <signal.h>
 
 #include <aimee/audit/audit_action.h> /* audit_ensure_key */
 #include "cJSON.h"
@@ -49,7 +53,75 @@ static cJSON *find_row(cJSON *rows, const char *tool, int64_t task_id)
    return NULL;
 }
 
-int main(void)
+/* A Go producer uses the daemon's authenticated socket and the production
+ * ACTION codec. The parent acknowledges only after the real ledger sees it. */
+static int go_publisher_fixture(const char *executable, const char *home)
+{
+   char socket[512], policy[512], grant[600], ack[512];
+   snprintf(socket, sizeof socket, "%s/action.sock", home);
+   snprintf(policy, sizeof policy, "%s/grants", home);
+   snprintf(grant, sizeof grant, "%s/go.grant", policy);
+   snprintf(ack, sizeof ack, "%s/delivered", home);
+   assert(mkdir(policy, 0700) == 0);
+   FILE *f = fopen(grant, "w");
+   assert(f);
+   fprintf(f,
+           "version=1\nprincipal_class=1\nprincipal_ref=73\nuid=self\nexecutable=%s\npublish="
+           "3000\nsubscribe=\nrequest=\nserve=\n",
+           executable);
+   assert(fclose(f) == 0);
+   assert(obs_bus_configure_module_runtime(socket, policy) == 0);
+   assert(obs_bus_start() == 0);
+   pid_t child = fork();
+   assert(child >= 0);
+   if (child == 0)
+   {
+      assert(setenv("AIMEE_AUDIT_FIXTURE_SOCKET", socket, 1) == 0);
+      assert(setenv("AIMEE_AUDIT_FIXTURE_ACK", ack, 1) == 0);
+      execl(executable, executable, "-test.run=^TestActionPublisherProcess$", (char *)NULL);
+      _exit(127);
+   }
+   int found = 0, status = 0;
+   for (int i = 0; i < 500; i++)
+   {
+      cJSON *rows = audit_ledger_read(NULL, NULL);
+      cJSON *row = rows ? find_row(rows, "go.action.fixture", 101) : NULL;
+      if (row)
+      {
+         assert(strcmp(sval(row, "actor"), "go?producer") == 0);
+         assert(strcmp(sval(row, "command"), "mk:0123456789ab") == 0);
+         assert(strcmp(sval(row, "reason_code"), "conf=0.88") == 0);
+         assert(strcmp(sval(row, "mode"), "L2") == 0);
+         assert(strcmp(sval(row, "verdict"), "ok") == 0);
+         found = 1;
+         cJSON_Delete(rows);
+         break;
+      }
+      cJSON_Delete(rows);
+      if (waitpid(child, &status, WNOHANG) == child)
+      {
+         child = -1;
+         break;
+      }
+      usleep(10000);
+   }
+   if (found)
+   {
+      f = fopen(ack, "w");
+      assert(f);
+      assert(fclose(f) == 0);
+   }
+   else if (child > 0)
+      kill(child, SIGKILL);
+   if (child > 0)
+      assert(waitpid(child, &status, 0) == child);
+   obs_bus_stop();
+   assert(found && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   puts("Go ACTION publisher -> authenticated daemon bus -> ledger: ok");
+   return 0;
+}
+
+int main(int argc, char **argv)
 {
    printf("test_bus_memory_audit:\n");
 
@@ -63,10 +135,11 @@ int main(void)
    setenv("AIMEE_HOME", home, 1);
    audit_log_open();
    audit_ensure_key();
+   if (argc == 3 && strcmp(argv[1], "--go-publisher") == 0)
+      return go_publisher_fixture(argv[2], home);
 
-   /* Directly pin the shared PII fingerprint (used by BOTH the server and aimee-kb
-    * memory bridges): "mk:" prefix, never the raw PII identity, deterministic, and
-    * distinct for distinct identities. */
+   /* Pin the Server bridge fingerprint; the Go producer has matching wire tests: "mk:" prefix,
+    * never the raw PII identity, deterministic, and distinct for distinct identities. */
    {
       char fp1[32], fp2[32], fp3[32];
       obs_bus_key_fingerprint("fact", "email:alice@example.com", fp1, sizeof fp1);

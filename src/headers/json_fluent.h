@@ -7,6 +7,8 @@
 
 #include "cJSON.h"
 #include <stdint.h>
+#include <float.h>
+#include <math.h>
 
 /* ---- Optional getters with defaults ---- */
 /* All tolerate NULL obj. Return defval if the key is missing or has the wrong
@@ -44,6 +46,40 @@ static inline const char *jo_type_name(const cJSON *item)
    if (cJSON_IsNull(item))
       return "null";
    return "unknown";
+}
+
+/* Decode bounded numeric arrays atomically: an invalid member leaves output
+ * untouched. Zero denotes an empty or invalid array. */
+static inline int jo_float_array(const cJSON *array, float *out, int capacity)
+{
+   int n = cJSON_GetArraySize(array);
+   if (!cJSON_IsArray(array) || !out || n <= 0 || n > capacity)
+      return 0;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, array) if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) ||
+                                       fabs(item->valuedouble) > FLT_MAX) return 0;
+   int i = 0;
+   cJSON_ArrayForEach(item, array) out[i++] = (float)item->valuedouble;
+   return n;
+}
+
+static inline int jo_float_matrix(const cJSON *array, float *out, int rows, int columns)
+{
+   if (!cJSON_IsArray(array) || !out || rows <= 0 || columns <= 0 ||
+       cJSON_GetArraySize(array) != rows ||
+       (size_t)rows > SIZE_MAX / sizeof(float) / (size_t)columns)
+      return 0;
+   const cJSON *row, *item;
+   cJSON_ArrayForEach(row, array)
+   {
+      if (!cJSON_IsArray(row) || cJSON_GetArraySize(row) != columns)
+         return 0;
+      cJSON_ArrayForEach(item, row) if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) ||
+                                        fabs(item->valuedouble) > FLT_MAX) return 0;
+   }
+   size_t i = 0;
+   cJSON_ArrayForEach(row, array) cJSON_ArrayForEach(item, row) out[i++] = (float)item->valuedouble;
+   return rows;
 }
 
 /* ---- Required getters. Return 0 on success, -1 on missing/wrong type. ---- */

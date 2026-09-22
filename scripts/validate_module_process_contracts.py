@@ -208,11 +208,14 @@ def validate() -> dict[str, dict[str, object]]:
                             f"{component_id}/{name}: sample_rate must use ppm precision")
                 # Carved from the DECLARED ref, so a module's event kinds move only
                 # when its identity does -- which is never.
-                expected_kind = 4096 + principal_ref * 256 + stage_ordinal
+                discovery = stage_id == 255 and name == "public-command-discovery"
+                expected_stage = 255 if discovery else stage_ordinal
+                expected_kind = 4096 + principal_ref * 256 + expected_stage
                 if expected_kind >= PROTOCOL_KIND_FLAG:
                     raise ContractError(
                         f"{component_id}/{name}: module stage enters protocol event namespace")
-                if type(stage_id) is not int or stage_id != stage_ordinal:
+                if (type(stage_id) is not int or stage_id != expected_stage or
+                        (discovery and (stage_ordinal != len(stages) or durability != "capture"))):
                     raise ContractError(f"{component_id}: stage IDs must be dense from one")
                 if not isinstance(name, str) or not STAGE_RE.fullmatch(name) or name in stage_names:
                     raise ContractError(f"{component_id}: invalid or duplicate stage name {name!r}")
@@ -285,7 +288,7 @@ def validate() -> dict[str, dict[str, object]]:
 
 
 def validate_clients(clients: object, served_kinds: set[int], module_refs: set[int]) -> None:
-    """Bus principals that only request stages.
+    """Bus principals that request stages and may publish declared audit actions.
 
     A client is not a module: it serves nothing and has no inventory ordinal, so
     its principal_ref cannot be derived from one. Refs are therefore explicit and
@@ -298,7 +301,7 @@ def validate_clients(clients: object, served_kinds: set[int], module_refs: set[i
     seen_ids: set[str] = set()
     seen_refs: set[int] = set()
     for ordinal, client in enumerate(clients, start=1):
-        if not isinstance(client, dict) or set(client) != {
+        if not isinstance(client, dict) or set(client) - {"publish"} != {
                 "id", "principal_ref", "executable", "placements", "request"}:
             raise ContractError(f"client {ordinal}: keys differ from v3")
         identifier = client["id"]
@@ -327,6 +330,14 @@ def validate_clients(clients: object, served_kinds: set[int], module_refs: set[i
         for kind in request:
             if type(kind) is not int or kind not in served_kinds:
                 raise ContractError(f"{identifier}: requests kind {kind}, which no module serves")
+        # ACTION is a daemon-owned notification, not an AMOD request stage.
+        # Keep publication separate from request grants and limited to the
+        # existing content-free observability wire (obs_bus.h).
+        publish = client.get("publish", [])
+        if (not isinstance(publish, list) or
+                any(type(kind) is not int or kind != 3000 for kind in publish) or
+                len(publish) != len(set(publish))):
+            raise ContractError(f"{identifier}: publish may only contain audit ACTION kind 3000")
 
 
 def main() -> int:

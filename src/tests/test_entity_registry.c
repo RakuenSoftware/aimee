@@ -1,183 +1,43 @@
-/* test_entity_registry.c: surrogate-id entity canonicalization (typed-fact §3 /
- * P2a), against the sqlite shim. */
+/* Go owns entity identity and mutation. Retain the native rollback consumer's
+ * external merge record contract until graph rollback also moves to Go. */
 #include "../headers/aimee.h"
-#include "../modules/db2/c/entity_registry.h"
+#include "../modules/db2/c/fact_mutation.h"
 #include "../modules/db2/c/db2_test_shim.h"
 #include "../modules/db2/c/db2_internal.h"
 #include "../modules/db2/c/db_postgres.h"
-#include "modules/memory/memory_ontology.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
-static void merge_commit(int64_t merge_id, char out[FACT_COMMIT_ID_MAX])
-{
-   char key[32], err[256] = "";
-   snprintf(key, sizeof(key), "%lld", (long long)merge_id);
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
-                        "SELECT commit_id FROM fact_graph_changes WHERE object_kind='entity_merge'"
-                        " AND object_key=?1 AND action='merge' LIMIT 1",
-                        err, sizeof(err));
-   assert(st);
-   aimee_pg_bind_text(st, "?1", key);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-   snprintf(out, FACT_COMMIT_ID_MAX, "%s", aimee_pg_column_text(st, 0));
-   aimee_pg_finalize(st);
-}
-
-static void assert_commit_actor(const char *commit_id, const char *principal, int rank)
-{
-   char err[256] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(db2_conn(),
-                        "SELECT actor_principal,authority_rank FROM fact_graph_commits"
-                        " WHERE commit_id=?1 LIMIT 1",
-                        err, sizeof(err));
-   assert(st);
-   aimee_pg_bind_text(st, "?1", commit_id);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
-   assert(strcmp(aimee_pg_column_text(st, 0), principal) == 0);
-   assert(aimee_pg_column_int(st, 1) == rank);
-   aimee_pg_finalize(st);
-}
-
-static void test_normalize(void)
-{
-   char out[64];
-   entity_name_normalize("  DevBox  ", out, sizeof(out));
-   assert(strcmp(out, "devbox") == 0);
-   entity_name_normalize("My   Main   Box", out, sizeof(out));
-   assert(strcmp(out, "my main box") == 0);
-   entity_name_normalize("192.168.1.254", out, sizeof(out));
-   assert(strcmp(out, "192.168.1.254") == 0); /* punctuation preserved */
-   entity_name_normalize(NULL, out, sizeof(out));
-   assert(out[0] == '\0');
-   entity_name_normalize("", out, sizeof(out));
-   assert(out[0] == '\0');
-   printf("  PASS: test_normalize\n");
-}
-
 int main(void)
 {
    db2_test_shim_open();
-   test_normalize();
-
-   /* get-or-create + resolve */
-   int64_t cid = db2_entity_register_named("DevBox", NODE_DEVICE);
-   assert(cid > 0);
-   assert(db2_entity_register_named("DevBox", NODE_DEVICE) == cid); /* idempotent */
-   assert(db2_entity_resolve("devbox") == cid);                     /* normalized */
-   assert(db2_entity_resolve("  DEVBOX ") == cid);
-   assert(db2_entity_kind(cid) == NODE_DEVICE);
-
-   /* a second alias for the same entity resolves to the same canonical id */
-   assert(db2_entity_alias_bind("the workstation", cid, 0) == 0);
-   assert(db2_entity_resolve("The Workstation") == cid);
-
-   /* first binding wins: binding an already-bound name to a different id is a
-    * no-op (the name keeps resolving to the original entity). */
-   int64_t other = db2_entity_register_named("acme corp", NODE_ORG);
-   assert(other > 0 && other != cid);
-   assert(db2_entity_alias_bind("DevBox", other, 0) == 0); /* ON CONFLICT DO NOTHING */
-   assert(db2_entity_resolve("DevBox") == cid);            /* unchanged */
-
-   /* aliases_for returns the bound names (preferred first). */
-   char names[8][128];
-   int n = db2_entity_aliases_for(cid, names, 8);
-   assert(n == 2);
-   assert(strcmp(names[0], "DevBox") == 0); /* is_preferred */
-
-   /* unknown name resolves to 0 (not an error). */
-   assert(db2_entity_resolve("never seen this") == 0);
-   assert(db2_entity_kind(999999) == -1);
-
-   /* merged_into is followed exactly one hop on resolve. */
-   int64_t a = db2_entity_register_named("alpha box", NODE_DEVICE);
-   int64_t b = db2_entity_register_named("beta box", NODE_DEVICE);
-   int64_t cc = db2_entity_register_named("gamma box", NODE_DEVICE);
-   assert(a > 0 && b > 0 && cc > 0);
-   assert(db2_entity_mark_merged(a, b) == 0);
-   assert(db2_entity_resolve("alpha box") == b); /* A -> B */
-   assert(db2_entity_mark_merged(b, cc) == 0);
-   assert(db2_entity_resolve("alpha box") == b); /* single hop: B, not C */
-   assert(db2_entity_resolve("beta box") == cc); /* B -> C */
-   assert(db2_entity_mark_merged(0, b) == -1);   /* bad args */
-   assert(db2_entity_mark_merged(b, b) == -1);   /* self-merge rejected */
-
-   /* NULL / empty / dangling input. */
-   assert(db2_entity_register_named(NULL, NODE_DEVICE) == -1);
-   assert(db2_entity_resolve("") == 0);
-   assert(db2_entity_alias_bind("", cid, 1) == -1);
-   assert(db2_entity_alias_bind("dangle", 999999, 1) == -1); /* target must exist */
-
-   /* first-class merge / unmerge (reversible via the merged_into follow). */
-   int64_t m_from = db2_entity_register_named("oldname box", NODE_DEVICE);
-   int64_t m_into = db2_entity_register_named("newname box", NODE_DEVICE);
-   assert(m_from > 0 && m_into > 0);
-   int64_t mid = db2_entity_merge(m_from, m_into);
-   assert(mid > 0);
-   assert(db2_entity_resolve("oldname box") == m_into); /* merged -> follows */
-   char cid_commit[FACT_COMMIT_ID_MAX], rollback_commit[FACT_COMMIT_ID_MAX];
-   merge_commit(mid, cid_commit);
-   fact_actor_t operator_actor = {.rank = FACT_ACTOR_OPERATOR, .authenticated = 1};
-   snprintf(operator_actor.principal, sizeof(operator_actor.principal), "test:operator");
-   snprintf(operator_actor.role, sizeof(operator_actor.role), "operator");
-   assert(db2_fact_commit_rollback(&operator_actor, cid_commit, rollback_commit) == 1);
-   assert(db2_entity_resolve("oldname box") == m_from); /* batch rollback restored merge */
-   char direct_commit[FACT_COMMIT_ID_MAX], unmerge_commit[FACT_COMMIT_ID_MAX];
-   mid = db2_entity_merge_as(&operator_actor, m_from, m_into, direct_commit);
-   assert(mid > 0);
-   assert(direct_commit[0] != '\0');
-   assert_commit_actor(direct_commit, "test:operator", FACT_ACTOR_OPERATOR);
-   entity_summary_t summaries[32];
-   entity_merge_summary_t merge_summaries[32];
-   assert(db2_entity_summaries(summaries, 32) > 0);
-   assert(db2_entity_merge_summaries(merge_summaries, 32) > 0);
-   assert(db2_entity_unmerge_as(&operator_actor, mid, unmerge_commit) == 0);
-   assert(unmerge_commit[0] != '\0');
-   assert_commit_actor(unmerge_commit, "test:operator", FACT_ACTOR_OPERATOR);
-   assert(db2_entity_resolve("oldname box") == m_from); /* restored */
-   assert(db2_entity_unmerge(mid) == -1);               /* already undone */
-   assert(db2_entity_merge(m_from, m_from) == -1);      /* self-merge rejected */
-   assert(db2_entity_merge(m_from, 999999) == -1);      /* missing target rejected */
-
-   /* entity_name_conflicts queue. */
-   int64_t conf = db2_entity_conflict_record("ambiguous theo");
-   assert(conf > 0);
-   assert(db2_entity_conflict_priority("ambiguous theo") == 1);
-   assert(db2_entity_conflict_record("ambiguous theo") == conf); /* idempotent on name */
-   assert(db2_entity_conflict_priority("ambiguous theo") == 2);  /* repeat bumps priority */
-   assert(db2_entity_conflict_count("open") == 1);
-   assert(db2_entity_conflict_set_status(conf, ENTITY_CONFLICT_RESOLVED) == 0);
-   assert(db2_entity_conflict_count("open") == 0);
-   assert(db2_entity_conflict_count(NULL) == 1);
-   /* re-recording a resolved conflict bumps priority but does NOT reopen it. */
-   assert(db2_entity_conflict_record("ambiguous theo") == conf);
-   assert(db2_entity_conflict_priority("ambiguous theo") == 3);
-   assert(db2_entity_conflict_count("open") == 0);
-   assert(db2_entity_conflict_priority("never recorded") == -1);
-
-   /* merge state machine: cycle, already-merged, and single-hop after a chain. */
-   int64_t x = db2_entity_register_named("xenon box", NODE_DEVICE);
-   int64_t y = db2_entity_register_named("yttrium box", NODE_DEVICE);
-   int64_t z = db2_entity_register_named("zinc box", NODE_DEVICE);
-   assert(x > 0 && y > 0 && z > 0);
-   int64_t mxy = db2_entity_merge(x, y); /* X -> Y */
-   assert(mxy > 0);
-   assert(db2_entity_resolve("xenon box") == y);
-   assert(db2_entity_merge(y, x) == -1);         /* cycle: target X no longer active */
-   assert(db2_entity_resolve("xenon box") == y); /* X still merged into Y */
-   assert(db2_entity_merge(x, z) == -1);         /* X already merged -> not active */
-   int64_t myz = db2_entity_merge(y, z);         /* Y -> Z (Y still active) */
-   assert(myz > 0);
-   assert(db2_entity_resolve("xenon box") == y); /* single hop: Y, not Z */
-   assert(db2_entity_resolve("yttrium box") == z);
-   /* unmerging X->Y restores X even though Y is itself now merged. */
-   assert(db2_entity_unmerge(mxy) == 0);
-   assert(db2_entity_resolve("xenon box") == x);
-
+   char err[256] = "";
+   assert(aimee_pg_exec(
+              db2_conn(),
+              "INSERT INTO entity_registry(canonical_id,kind,status) "
+              "VALUES(1001,2,'active'),(1002,2,'active');"
+              "BEGIN;INSERT INTO entity_merges(id,from_id,into_id) VALUES(4321,1001,1002);"
+              "UPDATE entity_registry SET status='merged',merged_into=1002 WHERE canonical_id=1001",
+              err, sizeof(err)) == 0);
+   fact_actor_t actor = {.rank = FACT_ACTOR_OPERATOR, .authenticated = 1};
+   snprintf(actor.principal, sizeof(actor.principal), "test:operator");
+   snprintf(actor.role, sizeof(actor.role), "operator");
+   char commit[FACT_COMMIT_ID_MAX], rollback[FACT_COMMIT_ID_MAX];
+   assert(db2_fact_graph_record_external_in_txn(&actor, "entity.merge", "entity_merge", "4321",
+                                                "merge", "active", "merged", 1, commit) == 0);
+   assert(aimee_pg_exec(db2_conn(), "COMMIT", err, sizeof(err)) == 0);
+   assert(db2_fact_commit_rollback(&actor, commit, rollback) == 1);
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT r.status,r.merged_into,m.undone FROM entity_registry r JOIN "
+                        "entity_merges m ON m.from_id=r.canonical_id WHERE m.id=4321",
+                        err, sizeof(err));
+   assert(st && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   assert(!strcmp(aimee_pg_column_text(st, 0), "active"));
+   assert(aimee_pg_column_int64(st, 1) == 0 && aimee_pg_column_int(st, 2) == 1);
+   aimee_pg_finalize(st);
    db2_test_shim_close();
-   printf("entity_registry: all tests passed\n");
+   puts("entity merge rollback contract: passed");
    return 0;
 }

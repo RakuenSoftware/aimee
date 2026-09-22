@@ -103,43 +103,6 @@ extern "C"
                                                 int64_t surfaced_row_id, const char *verdict,
                                                 double weight);
 
-   /* Compute a time-decayed demotion score for a memory row from its recent
-    * attribution window.  Only DEMOTION_VERDICT_* verdicts affect the score;
-    * accepted contributes positively, negative verdicts negatively, irrelevant
-    * is zero-weight.  The scorer reads only attributed outcome evidence — not
-    * source tags, declared confidence, author id, or retrieval frequency.
-    * window_size: max attribution rows (most recent first).
-    * half_life_days: exponential decay half-life.
-    * n_min: minimum rows before scoring; returns NAN if fewer are found.
-    * Returns the score on success, NAN on insufficient data or error. */
-   double db2_demotion_score(int64_t row_id, int window_size, double half_life_days, int n_min);
-
-   /* Write a demotion_profile artifact for (memory_class, scope_kind, scope_id).
-    * memory_class: memory kind this profile covers (e.g. "preference").
-    * payload_json: the full JSON profile blob.
-    * id_out: receives the new UUID (>= 37 bytes); may be NULL.
-    * Returns 0 on success, -1 on error. */
-   int db2_demotion_profile_write(const char *memory_class, const char *scope_kind,
-                                  const char *scope_id, const char *payload_json, char *id_out,
-                                  int id_out_len);
-
-   /* Read the most recently committed demotion_profile for (memory_class,
-    * scope_kind, scope_id) with narrowest-scope fallback.
-    * Returns 0 on success, -1 if not found or error. */
-   int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
-                                 const char *scope_id, char *buf, size_t len);
-
-   typedef struct
-   {
-      int64_t row_id;
-      int attribution_n;
-   } db2_demotion_candidate_t;
-
-   /* Enumerate memory rows that have at least n_min retrieval_attribution rows.
-    * Used to select candidates for demotion scoring at maintenance time.
-    * Returns count filled (>= 0) or -1 on error. */
-   int db2_demotion_candidates(int n_min, db2_demotion_candidate_t *out, int max);
-
 #ifdef __cplusplus
 }
 #endif

@@ -1,3 +1,6 @@
+#include "module_commands.h"
+#include "json_fluent.h"
+#include <assert.h>
 /* test_curator_pipeline.c: end-to-end curator chain over the sqlite shim. Drives
  * the REAL passes in sequence — resolve_entities -> index_code_unit ->
  * link_artifacts -> /v1/implements — proving a doc-concept resolves through to
@@ -18,14 +21,13 @@
 #include "../kb_curator_serve.h"
 
 /* ── stubs: embedding + vector sinks (return "unavailable"/no-op) ─────────── */
-int memory_embed_text(const char *t, const char *c, embed_input_type_t it, float *o, int d)
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   (void)t;
-   (void)c;
-   (void)it;
-   (void)o;
-   (void)d;
-   return 0;
+   assert(strcmp(method, "memory.embed_text") == 0);
+   *result = cJSON_CreateObject();
+   int max_dim = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(args, "max_dim"));
+   (void)max_dim;
+   return 1;
 }
 int pgvec_curator_entity_upsert(int64_t p, const float *v, int d, const char *sk, const char *si,
                                 const char *cn, const char *aid, const char *pl)

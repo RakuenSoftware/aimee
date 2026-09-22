@@ -984,6 +984,38 @@ func TestReconcileRejectsNonFiniteCost(t *testing.T) {
 	}
 }
 
+func TestRunnerFailurePreservesManualPauseAndAccountsForSpend(t *testing.T) {
+	for _, known := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cost_known_%v", known), func(t *testing.T) {
+			store, _ := newTestStore(t)
+			ctx := t.Context()
+			item := workflowstore.CreateWorkItem{ID: "wi_cancel_cost", Repo: "r", ProposalPath: "p", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
+			if err := store.CreateWorkItem(ctx, item); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner"); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Pause(ctx, item.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.ParkRunnerFailure(ctx, item.ID, "work", "owner", "runner_unavailable", "cancelled", true, known, 0.25); err != nil {
+				t.Fatal(err)
+			}
+			got, err := store.WorkItem(ctx, item.ID)
+			if err != nil || got.State != "active" || got.PauseReason != "manual" || got.Stage != "work" {
+				t.Fatalf("manual pause lost: %+v err=%v", got, err)
+			}
+			if known && (got.CumulativeCostUSD != 0.25 || got.ReservationState != "") {
+				t.Fatalf("measured spend not reconciled: %+v", got)
+			}
+			if !known && got.ReservationState != "unresolved" {
+				t.Fatalf("ambiguous spend not retained: %+v", got)
+			}
+		})
+	}
+}
+
 // A replay whose durable result is gone recovers per reservation state: an
 // 'unresolved' (interrupted) reservation is released for a fresh dispatch; an
 // 'actual' (measured, reconciled) reservation commits its cost and parks for a

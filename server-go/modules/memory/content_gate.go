@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"errors"
+	"github.com/JBailes/aimee/server-go/bus"
 	"regexp"
 )
 
@@ -41,22 +43,25 @@ func scanContent(content string, capacity int) contentGateResult {
 	}
 	result.Evidence = evidencePattern.MatchString(content)
 
+	// Redact every matching span. Returning a prefix after the first match could
+	// transmit a second credential; truncating a replacement could corrupt text.
+	redacted := content
 	for _, pattern := range sensitivePatterns {
-		match := pattern.FindStringIndex(content)
-		if match == nil {
-			continue
-		}
-		redacted := content[:match[0]] + "[REDACTED]" + content[match[1]:]
-		if capacity <= 0 || len(content[:match[0]])+len("[REDACTED]")+1 > capacity {
-			result.SensitiveStatus = 2
-		} else {
-			if len(redacted) >= capacity {
-				redacted = redacted[:capacity-1]
-			}
+		redacted = pattern.ReplaceAllString(redacted, "[REDACTED]")
+	}
+	redacted = githubTokenPattern.ReplaceAllString(redacted, "[REDACTED]")
+	redacted = ssnPattern.ReplaceAllString(redacted, "[REDACTED]")
+	if redacted != content {
+		result.SensitiveStatus = 2
+		if capacity > 0 && len(redacted) < capacity {
 			result.SensitiveStatus = 1
 			result.Redacted = redacted
 		}
-		break
+	}
+	// Removing a PEM header does not remove its body. Reject the entire input.
+	if privateKeyPattern.MatchString(content) {
+		result.SensitiveStatus = 2
+		result.Redacted = ""
 	}
 
 	if privateKeyPattern.MatchString(content) || sensitivePatterns[1].MatchString(content) ||
@@ -70,4 +75,43 @@ func scanContent(content string, capacity int) contentGateResult {
 		result.Classification = "sensitive"
 	}
 	return result
+}
+
+// Screening is stateless and shared by both placements. Callers consume this
+// command through generic routing; they do not implement a native gate.
+func handleScreenCommand(_ handlerOptions, _ bus.ModuleInvocation, _ string, args commandArgs) ([]byte, bus.ModuleStatus) {
+	content, ok := args.stringValue("content")
+	if !ok {
+		return commandResult(commandError("invalid_argument", "content must be a string"))
+	}
+	capacity := args.integer("capacity", len(content)+32)
+	if capacity < 0 || capacity > maxDataBody {
+		return commandResult(commandError("invalid_argument", "invalid redaction capacity"))
+	}
+	result := scanContent(content, capacity)
+	verdict := map[int]string{0: "allow", 1: "redact", 2: "reject"}[result.SensitiveStatus]
+	return commandResult(map[string]any{"status": "ok", "verdict": verdict, "redacted": result.Redacted})
+}
+
+// Apply the same policy at the owning store as at the pre-transmission gate.
+// Keys are identities: redacting one could overwrite a different memory.
+var errSensitiveMemory = errors.New("memory: sensitive content refused")
+
+func screenMemoryText(text string) (string, error) {
+	gate := scanContent(text, maxDataBody)
+	switch gate.SensitiveStatus {
+	case 1:
+		return gate.Redacted, nil
+	case 2:
+		return "", errSensitiveMemory
+	default:
+		return text, nil
+	}
+}
+
+func screenMemoryWrite(key, content string) (string, error) {
+	if scanContent(key, 0).SensitiveStatus != 0 {
+		return "", errSensitiveMemory
+	}
+	return screenMemoryText(content)
 }

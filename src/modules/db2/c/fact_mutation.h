@@ -48,25 +48,6 @@ extern "C"
     * nominated by an ingest payload.  OPERATOR is intentionally refused. */
    int db2_fact_actor_internal(fact_actor_rank_t rank, fact_actor_t *out);
 
-   /* Capture the verifier-derived actor beside a stored memory before its
-    * asynchronous fact job is enqueued, then restore that exact principal in
-    * the worker.  Missing request context is recorded as model authority.
-    *
-    * `user_authority` is the authority the WRITE itself claims (nonzero for
-    * MEMORY_AUTHORITY_USER), and it CAPS the captured actor. The caller's
-    * identity may lower the recorded authority but never raise it above what the
-    * note claims: a person storing agent-composed text is still storing
-    * agent-composed text.
-    *
-    * Without the cap the actor came from the request alone, so an authenticated
-    * person storing a note with provenance `agent_message` recorded a USER actor
-    * -- and the drain, which reads this row rather than the provenance, then
-    * minted Class-A facts from model-composed text. That is the same hazard
-    * §5 exists to prevent, reached from the store side instead of the write
-    * side. The two derivations of one fact must not be able to disagree. */
-   int db2_fact_actor_capture_memory(int64_t memory_id, int user_authority);
-   int db2_fact_actor_for_memory(int64_t memory_id, fact_actor_t *out);
-
 #define FACT_KIND_WORLD_FACT   "world_fact"
 #define FACT_KIND_EPISODE      "episode"
 #define FACT_KIND_EXPERIENCE   "experience"
@@ -133,15 +114,7 @@ extern "C"
    int db2_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_input_t *input,
                                 fact_mutation_result_t *out);
 
-   /* Ordinary removal contract: reversible invalidation.  Empty target matches
-    * every current value for source+relation.  Lower authority cannot invalidate
-    * a higher-authority assertion. Returns rows changed, or -1. */
-   int db2_fact_mutation_invalidate(const fact_actor_t *actor, const char *source,
-                                    const char *relation, const char *target,
-                                    fact_mutation_result_t *out);
-
-   /* Episode/experience correction is annotation, never retraction.  Returns
-    * -2 from invalidate when this route must be offered to the caller. */
+   /* Episode/experience correction annotates the original assertion. */
    int db2_fact_mutation_annotate(const fact_actor_t *actor, int64_t assertion_id,
                                   const char *annotation, fact_mutation_result_t *out);
 
@@ -200,26 +173,6 @@ extern "C"
    int db2_fact_erasure_execute(const fact_actor_t *actor, const char *source, const char *relation,
                                 const char *target, fact_erasure_impact_t *out,
                                 char commit_id[FACT_COMMIT_ID_MAX]);
-
-   typedef struct
-   {
-      int64_t id;
-      char source[128];
-      char relation[128];
-      char target[128];
-      char assertion_kind[24];
-      char lifecycle[24];
-      int authority_rank;
-      int evidence_count;
-      char commit_id[FACT_COMMIT_ID_MAX];
-   } fact_candidate_t;
-
-   int db2_fact_candidates(fact_candidate_t *out, int max);
-
-   /* Maintenance transitions also use one commit/diff/audit batch.  Recurrent
-    * candidates become persistent; stale unsupported candidates are invalidated. */
-   int db2_fact_mutation_promote_supported(const fact_actor_t *actor, int threshold);
-   int db2_fact_mutation_expire_candidates(const fact_actor_t *actor, const char *cutoff_iso);
 
    /* Register a non-assertion graph mutation (ontology decision/entity merge)
     * inside the caller's already-open DB transaction.  This keeps its commit id,

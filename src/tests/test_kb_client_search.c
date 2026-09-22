@@ -5,6 +5,7 @@
 #include "kb_client.h"
 #include "kb_client_internal.h"
 #include "support/mock_agent_http.h"
+#include "support/module_runtime_fixture.h"
 #include "cJSON.h"
 #include "runtime_secret.h"
 
@@ -12,6 +13,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* The generic client also carries the memory screening transport. Keep its
+ * dependency on the real Go owner even when sanitizer instrumentation retains
+ * paths that an optimized search-only binary can discard. */
+int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
+{
+   assert(strcmp(method, "memory.screen_content") == 0);
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "fixture_command", "screen_content");
+   cJSON_AddItemToObject(request, "fixture_arguments", cJSON_Duplicate(args, 1));
+   int rc = module_runtime_fixture_call(request, result);
+   cJSON_Delete(request);
+   return rc;
+}
 
 static int g_post_seen = 0;
 static int g_get_seen = 0;
@@ -1204,7 +1219,7 @@ static void test_action_wrappers_use_v1_api_when_configured(void)
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
 
    g_route_case = 33;
-   char *resp = kb_client_memory_directive_sweep_expired_json();
+   char *resp = kb_v1_action_request("memory.directive_sweep_expired", cJSON_CreateObject());
    assert(resp);
    assert(strstr(resp, "\"expired\":1") != NULL);
    free(resp);

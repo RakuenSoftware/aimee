@@ -27,7 +27,7 @@ type LegacySearchResult struct {
 	EndLine   int      `json:"end_line"`
 	Summary   string   `json:"summary"`
 	Score     float64  `json:"score"`
-	Files     []string `json:"files,omitempty"`
+	Files     []string `json:"files"`
 }
 
 type VectorHit struct {
@@ -42,31 +42,6 @@ type DriftResult struct {
 	Message   string `json:"message"`
 }
 
-func (s *postgresDataStore) RebuildDerivedIndexes(ctx context.Context, limit int) (int, error) {
-	if s.placement != PlacementKB {
-		return 0, errors.New("memory: derived indexes belong to KB placement")
-	}
-	if limit <= 0 || limit > 100000 {
-		limit = 100000
-	}
-	var count int
-	err := s.db.QueryRow(ctx, `WITH candidates AS (
- SELECT id,scope_type,scope_value FROM memories ORDER BY id LIMIT $1
-), scopes AS (
- INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
- SELECT id,scope_type,scope_value FROM candidates
- ON CONFLICT DO NOTHING RETURNING 1
-), queued AS (
- INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
- SELECT c.id,'memory',c.id,'pending',0,'',pg_now_text() FROM candidates c
- WHERE NOT EXISTS (SELECT 1 FROM memory_embeddings e WHERE e.point_id=c.id)
- ON CONFLICT (point_id) DO UPDATE SET status='pending',last_error='',updated_at=pg_now_text()
- RETURNING 1
-)
-SELECT (SELECT count(*) FROM scopes)+(SELECT count(*) FROM queued)`, limit).Scan(&count)
-	return count, err
-}
-
 func (s *postgresDataStore) LegacySearch(ctx context.Context, clusters []string, limit int) ([]LegacySearchResult, error) {
 	query := strings.TrimSpace(strings.Join(clusters, " "))
 	if limit <= 0 || limit > 64 {
@@ -74,7 +49,7 @@ func (s *postgresDataStore) LegacySearch(ctx context.Context, clusters []string,
 	}
 	rows, err := s.db.Query(ctx, `SELECT COALESCE(source_session,''),0,COALESCE(artifact_ref,''),0,0,
  content,confidence FROM memories
-WHERE lifecycle_state='active' AND ($1='' OR
+WHERE `+currentMemorySQL("")+` AND ($1='' OR
  to_tsvector('simple',key||' '||content) @@ plainto_tsquery('simple',$1))
 ORDER BY CASE WHEN $1='' THEN 0 ELSE ts_rank_cd(to_tsvector('simple',key||' '||content),
  plainto_tsquery('simple',$1)) END DESC, confidence DESC, id DESC LIMIT $2`, query, limit)
@@ -263,7 +238,11 @@ func (s *postgresDataStore) CheckDrift(ctx context.Context, taskID int64, filePa
 		}
 		terms = append(terms, driftTokens(sub)...)
 	}
+	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return DriftResult{}, err
+	}
 	target := strings.ToLower(filePath + " " + command)
 	inScope := filePath == "" && command == ""
 	for _, term := range terms {
@@ -367,6 +346,10 @@ WHERE polarity IN ('positive','negative') ORDER BY id DESC LIMIT 256`)
 			}
 		}
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
 	rows.Close()
 	learned := 0
 	for i, dimension := range styleDimensions {
@@ -389,64 +372,127 @@ WHERE polarity IN ('positive','negative') ORDER BY id DESC LIMIT 256`)
 	return learned, nil
 }
 
+var errEpisodeMixedScope = errors.New("memory: episode sources have incompatible scopes; select one scope")
+
 func (s *postgresDataStore) GenerateEpisodeCard(ctx context.Context, session string) (int64, error) {
 	if strings.TrimSpace(session) == "" {
 		return 0, errors.New("memory: episode card needs a session")
 	}
-	rows, err := s.db.Query(ctx, `SELECT id,key,content FROM memories
-WHERE source_session=$1 AND lifecycle_state='active' ORDER BY id LIMIT 64`, session)
+	command, err := s.episodeCognifier()
+	if err != nil {
+		return 0, err
+	}
+	rows, err := s.db.Query(ctx, `SELECT id,key,content,scope_type,scope_value FROM memories m
+WHERE source_session=$1 AND lifecycle_state='active'
+ AND NOT EXISTS (SELECT 1 FROM memory_units u WHERE u.memory_id=m.id AND u.is_episode_card=1)
+ORDER BY id LIMIT 201`, session)
 	if err != nil {
 		return 0, err
 	}
 	type source struct {
 		id           int64
 		key, content string
+		scope        Scope
 	}
 	var sources []source
 	for rows.Next() {
 		var item source
-		if err := rows.Scan(&item.id, &item.key, &item.content); err != nil {
+		if err := rows.Scan(&item.id, &item.key, &item.content, &item.scope.Type, &item.scope.Value); err != nil {
 			rows.Close()
 			return 0, err
 		}
 		sources = append(sources, item)
 	}
+	err = rows.Err()
 	rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	if len(sources) > episodeMaxSources {
+		return 0, errEpisodeCapacity
+	}
 	if len(sources) == 0 {
 		return 0, ErrMemoryNotFound
 	}
-	events := make([]string, 0, len(sources))
+	// Shared/global inputs may contribute to a private card. Different private
+	// scopes cannot be combined into one card without widening disclosure.
+	scope := Scope{Type: ScopeGlobal, Value: "_global"}
 	for _, item := range sources {
-		events = append(events, item.key+": "+item.content)
+		if item.scope.Type == ScopeGlobal {
+			continue
+		}
+		if scope.Type != ScopeGlobal && scope != item.scope {
+			return 0, errEpisodeMixedScope
+		}
+		scope = item.scope
 	}
-	card, _ := json.Marshal(map[string]any{
-		"session_id": session, "title": "Session " + session, "events": events,
-		"participants": []string{}, "places": []string{}, "outcomes": []string{}, "open_threads": []string{},
-	})
+	turns := make([]episodeTurn, 0, len(sources))
+	size := 0
+	for _, item := range sources {
+		size += len(item.content)
+		if size > episodeMaxInput {
+			return 0, errEpisodeCapacity
+		}
+		turns = append(turns, episodeTurn{ID: item.id, Text: item.content})
+	}
+	input, err := json.Marshal(map[string]any{"task": "episode_card", "session_id": session, "turns": turns})
+	if err != nil || len(input) > episodeMaxInput {
+		return 0, errEpisodeCapacity
+	}
+	run := s.episodeCommand
+	if run == nil {
+		run = runEpisodeCommand
+	}
+	raw, err := run(ctx, command, input)
+	if err != nil {
+		return 0, err
+	}
+	card, err := parseEpisodeCard(raw)
+	if err != nil {
+		return 0, err
+	}
 	var unitID int64
+	var created bool
 	err = s.db.QueryRow(ctx, `WITH existing AS (
  SELECT u.id FROM memory_units u JOIN memories m ON m.id=u.memory_id
  WHERE m.key=$1 AND m.source_session=$3 AND m.lifecycle_state='active'
    AND u.unit_type='episode_card' AND u.unit_key=$3 AND u.is_episode_card=1
+ AND m.scope_type=$4 AND m.scope_value=$5
  ORDER BY u.id LIMIT 1
 ), parent AS (
- INSERT INTO memories(tier,kind,key,content,confidence,source_session,scope_type,scope_value,lifecycle_state)
- SELECT 'L1','episode',$1,$2,0.8,$3,'global','_global','active'
+ INSERT INTO memories(tier,kind,epistemic_kind,key,content,confidence,source_session,scope_type,scope_value,lifecycle_state)
+ SELECT 'L1','episode','episode',$1,$2,0.8,$3,$4,$5,'active'
  WHERE NOT EXISTS(SELECT 1 FROM existing) RETURNING id
 ), created AS (
  INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text,weight,memory_kind,is_episode_card)
  SELECT id,'episode_card',$3,$2,1.0,'episodic',1 FROM parent RETURNING id
 )
-SELECT id FROM existing UNION ALL SELECT id FROM created LIMIT 1`,
-		"episode-card:"+session, string(card), session).Scan(&unitID)
+SELECT id,false FROM existing UNION ALL SELECT id,true FROM created LIMIT 1`,
+		"episode-card:"+session, card.text(), session, scope.Type, scope.Value).Scan(&unitID, &created)
 	if err != nil {
 		return 0, err
 	}
+	if !created {
+		return unitID, nil
+	}
 	for _, item := range sources {
-		_, _ = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref,confidence)
+		_, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref,confidence)
 SELECT 'memory_unit',$1,'memory',$2,0.8 WHERE NOT EXISTS(
  SELECT 1 FROM memory_lineage WHERE object_type='memory_unit' AND object_id=$1
    AND source_kind='memory' AND source_ref=$2)`, unitID, fmt.Sprintf("memory:%d", item.id))
+		if err != nil {
+			return 0, err
+		}
+		if _, err := s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref,confidence)
+ SELECT 'memory',u.memory_id,'memory',$2,0.8 FROM memory_units u WHERE u.id=$1
+ AND NOT EXISTS(SELECT 1 FROM memory_lineage l WHERE l.object_type='memory' AND l.object_id=u.memory_id AND l.source_kind='memory' AND l.source_ref=$2)`, unitID, fmt.Sprintf("memory:%d", item.id)); err != nil {
+			return 0, err
+		}
+		if _, err := s.db.Exec(ctx, `INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text)
+ SELECT m.id,m.key,'REL_SUMMARISES',$2,$3 FROM memories m JOIN memory_units u ON u.memory_id=m.id WHERE u.id=$1
+ AND NOT EXISTS(SELECT 1 FROM memory_relations r WHERE r.memory_id=m.id AND r.relation='REL_SUMMARISES' AND r.dst_entity=$2)`, unitID, fmt.Sprintf("memory:%d", item.id), card.Title); err != nil {
+			return 0, err
+		}
 	}
 	return unitID, nil
 }
@@ -462,27 +508,13 @@ func vectorText(vector []float64) (string, error) {
 	return "[" + strings.Join(parts, ",") + "]", nil
 }
 
-func (s *postgresDataStore) VectorCollectionExists(ctx context.Context) (bool, error) {
-	var exists bool
-	err := s.db.QueryRow(ctx, `SELECT to_regclass('memory_embeddings') IS NOT NULL AND EXISTS(
- SELECT 1 FROM pg_indexes WHERE tablename='memory_embeddings' AND indexdef ILIKE '%hnsw%')`).Scan(&exists)
-	return exists, err
-}
-
-func (s *postgresDataStore) RecreateVectorCollection(ctx context.Context, dim int) error {
-	if dim < 1 || dim > 4000 {
-		return errors.New("memory: invalid vector dimension")
-	}
-	if _, err := s.db.Exec(ctx, `TRUNCATE TABLE memory_embeddings`); err != nil {
-		return err
-	}
-	_, err := s.db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_memory_embeddings_hnsw
-ON memory_embeddings USING hnsw (embedding vector_cosine_ops)`)
-	return err
-}
-
 func (s *postgresDataStore) SearchVectors(ctx context.Context, vector []float64, recordType,
 	workspace, project string, includeAll bool, limit int) ([]VectorHit, error) {
+	return s.searchVectors(ctx, vector, recordType, workspace, project, includeAll, limit, Scope{})
+}
+
+func (s *postgresDataStore) searchVectors(ctx context.Context, vector []float64, recordType,
+	workspace, project string, includeAll bool, limit int, exact Scope) ([]VectorHit, error) {
 	encoded, err := vectorText(vector)
 	if err != nil {
 		return nil, err
@@ -493,8 +525,11 @@ func (s *postgresDataStore) SearchVectors(ctx context.Context, vector []float64,
 	rows, err := s.db.Query(ctx, `SELECT e.point_id,1-(e.embedding <=> $1::vector) AS score
 FROM memory_embeddings e WHERE e.record_type=$2 AND ($5 OR
  e.primary_scope='global' OR e.workspace='_shared' OR ($3<>'' AND e.workspace=$3) OR
- ($4<>'' AND e.project=$4)) ORDER BY e.embedding <=> $1::vector LIMIT $6`,
-		encoded, recordType, workspace, project, includeAll, limit)
+ ($4<>'' AND e.project=$4))
+ AND ($7='' OR (e.primary_scope=$7 AND
+ (($7='global' AND $8='_global') OR ($7='workspace' AND e.workspace=$8) OR ($7='project' AND e.project=$8))))
+ ORDER BY e.embedding <=> $1::vector,e.point_id LIMIT $6`,
+		encoded, recordType, workspace, project, includeAll, limit, exact.Type, exact.Value)
 	if err != nil {
 		return nil, err
 	}
@@ -510,32 +545,12 @@ FROM memory_embeddings e WHERE e.record_type=$2 AND ($5 OR
 	return hits, rows.Err()
 }
 
-func (s *postgresDataStore) RebuildVectorIndex(ctx context.Context, version string) (int, int, error) {
-	if version == "" {
-		return 0, 0, errors.New("memory: embedder version is required")
-	}
-	if err := s.RecreateVectorCollection(ctx, 1); err != nil {
-		return 0, 0, err
-	}
-	if _, err := s.db.Exec(ctx, `INSERT INTO kb_meta(key,value) VALUES('vector_schema_version',$1)
-ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, version); err != nil {
-		return 0, 0, err
-	}
-	var queued int
-	err := s.db.QueryRow(ctx, `WITH q AS (
- INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
- SELECT id,'memory',id,'pending',0,'',pg_now_text() FROM memories WHERE lifecycle_state='active'
- ON CONFLICT(point_id) DO UPDATE SET status='pending',attempts=0,last_error='',updated_at=pg_now_text()
- RETURNING 1) SELECT count(*) FROM q`).Scan(&queued)
-	return queued, 0, err
-}
-
 func (s *postgresDataStore) FailedEmbeddingIDs(ctx context.Context, limit int) ([]int64, error) {
 	if limit <= 0 || limit > 256 {
 		limit = 256
 	}
-	rows, err := s.db.Query(ctx, `SELECT DISTINCT memory_id FROM vector_index_ops
-WHERE status='failed' AND attempts < 8 AND memory_id IS NOT NULL ORDER BY memory_id LIMIT $1`, limit)
+	rows, err := s.db.Query(ctx, `SELECT v.point_id FROM vector_index_ops v JOIN memories m ON m.id=v.memory_id
+WHERE v.status='failed' AND v.attempts < $2 AND m.lifecycle_state='active' ORDER BY v.point_id LIMIT $1`, limit, vectorRetryLimit())
 	if err != nil {
 		return nil, err
 	}
@@ -556,10 +571,13 @@ func (s *postgresDataStore) MarkEmbeddingFailure(ctx context.Context, id int64, 
 		return errors.New("memory: vector maintenance belongs to KB placement")
 	}
 	if len(detail) > 1024 {
-		detail = detail[:1024]
+		detail = textBound(detail, 1024)
 	}
+	// Backoff starts when the attempt fails, even after a long transaction.
 	_, err := s.db.Exec(ctx, `INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
-VALUES($1,'memory',$1,'failed',1,$2,pg_now_text()) ON CONFLICT(point_id) DO UPDATE SET
-status='failed',attempts=vector_index_ops.attempts+1,last_error=EXCLUDED.last_error,updated_at=pg_now_text()`, id, detail)
+SELECT $1,'memory',id,'failed',1,$2,clock_timestamp()::text FROM memories WHERE id=CASE WHEN $1::bigint >= $3::bigint
+ THEN (SELECT memory_id FROM memory_units WHERE id=$1::bigint-$3::bigint) ELSE $1::bigint END AND lifecycle_state='active'
+ ON CONFLICT(point_id) DO UPDATE SET
+status='failed',attempts=vector_index_ops.attempts+1,last_error=EXCLUDED.last_error,updated_at=clock_timestamp()::text`, id, detail, unitPointOffset)
 	return err
 }

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -21,10 +22,7 @@ const (
 	memoryFactMaxTriples  = 16
 )
 
-// FactActor is the authority captured when a memory was written.  It is sent
-// back to the KB connection adapter verbatim; the adapter may use it to invoke
-// the transactional fact-mutation connection, but it does not derive or raise
-// authority itself.
+// FactActor is authority captured by the verified memory write boundary.
 type FactActor struct {
 	Principal         string `json:"principal"`
 	TransportIdentity string `json:"transport_identity"`
@@ -44,10 +42,7 @@ type FactEvidence struct {
 	Stance         string `json:"stance"`
 }
 
-// FactCandidate is a fully policy-resolved fact mutation.  C only translates
-// this structure to the existing DB connection ABI; extraction, grounding,
-// relation canonicalisation, endpoint-kind selection, provenance, and actor
-// selection all live here.
+// FactCandidate carries a grounded extraction into the Go transactional writer.
 type FactCandidate struct {
 	Subject       string       `json:"subject"`
 	Relation      string       `json:"relation"`
@@ -62,12 +57,14 @@ type FactCandidate struct {
 }
 
 type MemoryFactWork struct {
-	JobID        int64           `json:"job_id"`
-	MemoryID     int64           `json:"memory_id"`
-	Attempts     int             `json:"attempts"`
-	Content      string          `json:"content"`
-	SystemPrompt string          `json:"system_prompt"`
-	Candidates   []FactCandidate `json:"candidates,omitempty"`
+	Generation   int64  `json:"generation"`
+	SourceHash   string `json:"source_hash"`
+	LeaseToken   string `json:"lease_token"`
+	JobID        int64  `json:"job_id"`
+	MemoryID     int64  `json:"memory_id"`
+	Attempts     int    `json:"attempts"`
+	Content      string `json:"content"`
+	SystemPrompt string `json:"system_prompt"`
 }
 
 type memoryFactRaw struct {
@@ -304,7 +301,7 @@ func parseModelFactCandidates(response, content, observedAt string, memoryID, jo
 		out = append(out, FactCandidate{Subject: fact.Subject, Relation: relation, Object: fact.Object,
 			SubjectKind: subjectKind, ObjectKind: objectKind, Actor: modelActor,
 			Evidence:      memoryFactEvidence(content, startOffset, endOffset, sourceActor, observedAt, memoryID, jobID),
-			AssertionKind: "observation", ValidFrom: observedAt})
+			AssertionKind: "world_fact", ValidFrom: observedAt})
 	}
 	return out, nil
 }
@@ -320,92 +317,154 @@ WHERE j.id=$1 AND j.kind='memory_facts'`, jobID).Scan(&content, &observedAt, &me
 	return
 }
 
+func factWorkHash(content, observed string, actor FactActor) string {
+	raw, _ := json.Marshal(struct {
+		Content, Observed string
+		Actor             FactActor
+	}{content, observed, actor})
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:])
+}
+
 func (s *postgresDataStore) ClaimMemoryFact(ctx context.Context) (*MemoryFactWork, error) {
-	if s.placement != PlacementKB {
-		return nil, errors.New("memory: typed-fact extraction belongs to KB placement")
+	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB {
+		return nil, errors.New("memory: fact claim requires KB transaction")
 	}
-	_, err := s.db.Exec(ctx, `UPDATE kb_async_jobs
-SET status=CASE WHEN attempts >= $1 THEN 'failed' ELSE 'pending' END,
- claimed_by='',claimed_at='',
- last_error=CASE WHEN attempts >= $1 AND last_error='' THEN 'stale running lease reclaimed after max attempts' ELSE last_error END,
- updated_at=pg_now_text()
-WHERE kind='memory_facts' AND status='running' AND claimed_at<>''
- AND rtrim(replace(claimed_at,'T',' '),'Z') < rtrim(replace(pg_now_text('-15 minutes'),'T',' '),'Z')`, memoryFactMaxAttempts)
+	_, err := s.db.Exec(ctx, `UPDATE kb_async_jobs j SET status=CASE WHEN attempts >= $1 THEN 'failed' ELSE 'pending' END,
+ claimed_by='',claimed_at='',last_error='expired extraction lease',updated_at=pg_now_text()
+ WHERE kind='memory_facts' AND status='running' AND claimed_at<>'' AND claimed_at::timestamptz<clock_timestamp()-interval '15 minutes'
+ AND EXISTS(SELECT 1 FROM memories m WHERE m.id=j.document_id)`, memoryFactMaxAttempts)
 	if err != nil {
 		return nil, err
 	}
 	for discarded := 0; discarded < 32; discarded++ {
 		var work MemoryFactWork
-		err = s.db.QueryRow(ctx, `UPDATE kb_async_jobs SET status='running',claimed_by='kb.memory.facts',
- claimed_at=pg_now_text(),attempts=attempts+1,updated_at=pg_now_text()
-WHERE id=(SELECT id FROM kb_async_jobs WHERE kind='memory_facts' AND status='pending'
- AND (next_attempt_at='' OR next_attempt_at<=pg_now_text()) ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
-RETURNING id,document_id,attempts`).Scan(&work.JobID, &work.MemoryID, &work.Attempts)
+		err = s.db.QueryRow(ctx, `SELECT m.id FROM memories m JOIN kb_async_jobs j ON j.document_id=m.id
+ WHERE j.kind='memory_facts' AND j.status='pending' AND (j.next_attempt_at='' OR j.next_attempt_at::timestamptz<=clock_timestamp())
+ ORDER BY j.id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`).Scan(&work.MemoryID)
 		if store.IsNoRows(err) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		var observedAt string
-		var actor FactActor
-		work.Content, observedAt, work.MemoryID, actor, err = s.memoryFactSource(ctx, work.JobID)
-		if store.IsNoRows(err) || work.Content == "" {
-			if finishErr := s.FinishMemoryFact(ctx, work.JobID, true, ""); finishErr != nil {
-				return nil, finishErr
-			}
+		var nonce [16]byte
+		if _, err = cryptorand.Read(nonce[:]); err != nil {
+			return nil, err
+		}
+		work.LeaseToken = hex.EncodeToString(nonce[:])
+		err = s.db.QueryRow(ctx, `UPDATE kb_async_jobs SET status='running',claimed_by=$2,claimed_at=pg_now_text(),attempts=attempts+1,updated_at=pg_now_text()
+ WHERE id=(SELECT id FROM kb_async_jobs WHERE kind='memory_facts' AND document_id=$1 AND status='pending'
+ AND (next_attempt_at='' OR next_attempt_at::timestamptz<=clock_timestamp()) FOR UPDATE SKIP LOCKED)
+ RETURNING id,generation,attempts`, work.MemoryID, work.LeaseToken).Scan(&work.JobID, &work.Generation, &work.Attempts)
+		if store.IsNoRows(err) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
+		var observed string
+		var actor FactActor
+		work.Content, observed, work.MemoryID, actor, err = s.memoryFactSource(ctx, work.JobID)
+		if err != nil {
+			return nil, err
+		}
+		sourceErr := s.derivedSourcesAllowed(ctx, work.MemoryID)
+		if sourceErr != nil && !errors.Is(sourceErr, errDerivedSource) {
+			return nil, sourceErr
+		}
+		if sourceErr != nil || work.Content == "" {
+			if _, err = s.db.Exec(ctx, `UPDATE kb_async_jobs SET status='done',claimed_by='',claimed_at='',last_error='',next_attempt_at='',updated_at=pg_now_text() WHERE id=$1`, work.JobID); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if !validCapturedFactActor(actor) {
 			actor = modelFactActor()
 		}
+		work.SourceHash = factWorkHash(work.Content, observed, actor)
 		work.SystemPrompt = memoryFactPrompt()
-		work.Candidates = patternFactCandidates(work.Content, observedAt, work.MemoryID, work.JobID, actor)
 		return &work, nil
 	}
-	return nil, errors.New("memory facts: too many stale jobs without source memories")
+	return nil, errors.New("memory: stale extraction queue bound reached")
 }
 
-func (s *postgresDataStore) ParseMemoryFacts(ctx context.Context, jobID int64, response string) ([]FactCandidate, error) {
-	if s.placement != PlacementKB || jobID <= 0 {
-		return nil, errors.New("memory: invalid typed-fact parse request")
+// CompleteMemoryFact validates the exact lease and source before deriving or
+// writing anything. A late provider response can neither acknowledge a newer
+// generation nor attach its claims to edited text.
+func (s *postgresDataStore) CompleteMemoryFact(ctx context.Context, work MemoryFactWork, response string, success bool, reason string) (bool, error) {
+	if _, ok := s.db.(store.Tx); !ok || s.placement != PlacementKB || work.JobID <= 0 || work.Generation <= 0 || len(work.LeaseToken) != 32 || len(work.SourceHash) != 64 {
+		return false, errors.New("memory: invalid extraction completion")
 	}
-	content, observedAt, memoryID, actor, err := s.memoryFactSource(ctx, jobID)
+	var memoryID int64
+	err := s.db.QueryRow(ctx, `SELECT m.id FROM memories m JOIN kb_async_jobs j ON j.document_id=m.id
+ WHERE j.id=$1 AND j.kind='memory_facts' FOR UPDATE OF m`, work.JobID).Scan(&memoryID)
+	if store.IsNoRows(err) {
+		return false, nil
+	}
 	if err != nil {
-		return nil, err
+		return false, err
+	}
+	var generation int64
+	var token, status string
+	var attempts int
+	err = s.db.QueryRow(ctx, `SELECT generation,claimed_by,status,attempts FROM kb_async_jobs WHERE id=$1 FOR UPDATE`, work.JobID).Scan(&generation, &token, &status, &attempts)
+	if err != nil {
+		return false, err
+	}
+	if generation != work.Generation || token != work.LeaseToken || status != "running" {
+		return false, nil
+	}
+	content, observed, _, actor, err := s.memoryFactSource(ctx, work.JobID)
+	if err != nil {
+		return false, err
 	}
 	if !validCapturedFactActor(actor) {
 		actor = modelFactActor()
 	}
-	return parseModelFactCandidates(response, content, observedAt, memoryID, jobID, actor)
-}
-
-func (s *postgresDataStore) FinishMemoryFact(ctx context.Context, jobID int64, success bool, reason string) error {
-	if s.placement != PlacementKB || jobID <= 0 {
-		return errors.New("memory: invalid typed-fact finish request")
+	if factWorkHash(content, observed, actor) != work.SourceHash {
+		_, err = s.db.Exec(ctx, `UPDATE kb_async_jobs SET status='pending',generation=generation+1,attempts=0,claimed_by='',claimed_at='',last_error='',next_attempt_at='',updated_at=pg_now_text() WHERE id=$1`, work.JobID)
+		return false, err
+	}
+	sourceErr := s.derivedSourcesAllowed(ctx, memoryID)
+	if sourceErr != nil && !errors.Is(sourceErr, errDerivedSource) {
+		return false, sourceErr
+	}
+	if sourceErr == nil {
+		candidates := patternFactCandidates(content, observed, memoryID, work.JobID, actor)
+		if success {
+			model, err := parseModelFactCandidates(response, content, observed, memoryID, work.JobID, actor)
+			if err != nil {
+				return false, err
+			}
+			candidates = append(candidates, model...)
+		}
+		for _, candidate := range candidates {
+			decision := DecideFactWrite(FactWriteRequest{Head: candidate.SubjectKind, Relation: candidate.Relation, Tail: candidate.ObjectKind})
+			if !decision.CommitAllowed {
+				continue
+			}
+			if _, _, err := s.commitFactCandidate(ctx, candidate); err != nil {
+				if errors.Is(err, errFactTombstoned) {
+					continue
+				}
+				return false, err
+			}
+		}
+	} else {
+		success = true
 	}
 	if success {
-		_, err := s.db.Exec(ctx, `UPDATE kb_async_jobs SET status='done',last_error='',next_attempt_at='',
- claimed_by='',claimed_at='',updated_at=pg_now_text() WHERE id=$1 AND kind='memory_facts'`, jobID)
-		return err
+		_, err = s.db.Exec(ctx, `UPDATE kb_async_jobs SET status='done',last_error='',next_attempt_at='',claimed_by='',claimed_at='',updated_at=pg_now_text() WHERE id=$1`, work.JobID)
+		return err == nil, err
 	}
-	var attempts int
-	if err := s.db.QueryRow(ctx, `SELECT attempts FROM kb_async_jobs WHERE id=$1 AND kind='memory_facts'`, jobID).Scan(&attempts); err != nil {
-		return err
+	unavailable := memoryFactProviderUnavailable(reason)
+	nextStatus := "pending"
+	if attempts >= memoryFactMaxAttempts && !unavailable {
+		nextStatus = "failed"
 	}
-	providerUnavailable := memoryFactProviderUnavailable(reason)
-	status := "pending"
-	if attempts >= memoryFactMaxAttempts && !providerUnavailable {
-		status = "failed"
-	}
-	delay := memoryFactRetryDelay(attempts)
-	next := time.Now().UTC().Add(delay).Format("2006-01-02 15:04:05")
-	_, err := s.db.Exec(ctx, `UPDATE kb_async_jobs SET status=$2,last_error=$3,next_attempt_at=$4,
- attempts=CASE WHEN $5 AND attempts>0 THEN attempts-1 ELSE attempts END,
- claimed_by='',claimed_at='',updated_at=pg_now_text() WHERE id=$1 AND kind='memory_facts'`,
-		jobID, status, reason, next, providerUnavailable)
-	return err
+	next := time.Now().UTC().Add(memoryFactRetryDelay(attempts)).Format("2006-01-02 15:04:05")
+	_, err = s.db.Exec(ctx, `UPDATE kb_async_jobs SET status=$2,last_error='typed-fact provider attempt failed',next_attempt_at=$3,
+ attempts=CASE WHEN $4 AND attempts>0 THEN attempts-1 ELSE attempts END,claimed_by='',claimed_at='',updated_at=pg_now_text() WHERE id=$1`, work.JobID, nextStatus, next, unavailable)
+	return err == nil, err
 }

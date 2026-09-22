@@ -1,310 +1,48 @@
-/* server_memory_benchmark.c: the memory.benchmark RPC handler.
- *
- * The code-vector-graph fusion rollout eval ships its harness in mem_benchmark
- * / agent_eval, but the `aimee` CLI is a thin RPC client and never links it, so
- * `aimee memory benchmark code-graph-fusion` had no runnable entrypoint.
- *
- * The shared harness (mem_eval_run_with_latency) retrieves via the in-process
- * memory_find_facts, which is a no-op stub in aimee-server (this target is built
- * without DB2 — see the $(SERVER) Makefile rule). So this handler runs the
- * corpus against the LIVE store the way the server reaches it: per query through
- * kb_client_memory_find_facts_ex(), which forwards the arm's
- * graph_code_fusion_state to aimee-kb, where the graph-code fusion rerank runs.
- * Recall/MRR/nDCG and latency summaries are requested from the separately
- * supervised benchmarks process over the event bus. Raw latency is measured
- * around the kb RPC so it includes the kb hop, as the latency-budget AC
- * requires.
- *
- * Split into its own file so server_state.c stays under the 2000-line cap. */
+/* Server host transport for the shared Go memory benchmark owner. */
 #include "aimee.h"
 #include "server.h"
+#include "server_state_internal.h"
 #include "json_fluent.h"
-#include "cJSON.h"
-#include "kb_client.h"  /* kb_client_memory_find_facts_ex, memory_t */
-#include "agent_eval.h" /* mem_eval_* corpus loader */
-#include "module_stage_adapters.h"
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#include "kb_client.h"
+#include <aimee/core/event_bus/module_protocol.h>
 
-static int send_and_free(server_conn_t *conn, cJSON *resp)
-{
-   return server_send_ok(conn, resp);
-}
-
-static double bench_elapsed_ms(const struct timespec *a, const struct timespec *b)
-{
-   return (double)(b->tv_sec - a->tv_sec) * 1000.0 + (double)(b->tv_nsec - a->tv_nsec) / 1.0e6;
-}
-
-static void bench_add_metrics(cJSON *resp, double mrr, double ndcg5, double ndcg10, double recall5,
-                              double recall10, int n_cases)
-{
-   cJSON *metrics = cJSON_CreateObject();
-   jo_add_num(metrics, "mrr", mrr);
-   jo_add_num(metrics, "ndcg_5", ndcg5);
-   jo_add_num(metrics, "ndcg_10", ndcg10);
-   jo_add_num(metrics, "recall_5", recall5);
-   jo_add_num(metrics, "recall_10", recall10);
-   jo_add_i64(metrics, "cases", n_cases);
-   cJSON_AddItemToObject(resp, "metrics", metrics);
-}
-
-static void bench_add_latency(cJSON *resp, const aimee_benchmarks_latency_summary_t *summary)
-{
-   cJSON *lat = cJSON_CreateObject();
-   jo_add_num(lat, "p50_ms", summary->p50_ms);
-   jo_add_num(lat, "p95_ms", summary->p95_ms);
-   jo_add_num(lat, "p99_ms", summary->p99_ms);
-   jo_add_num(lat, "min_ms", summary->min_ms);
-   jo_add_num(lat, "max_ms", summary->max_ms);
-   jo_add_i64(lat, "queries", summary->queries);
-   cJSON_AddItemToObject(resp, "latency", lat);
-}
-
-static int bench_run_live_cases(const char *suite, mem_eval_case_t *cases, int n_cases,
-                                const char *fstate, cJSON *resp, const char **error_out)
-{
-   if (error_out)
-      *error_out = NULL;
-   double *latencies = calloc((size_t)n_cases, sizeof(double));
-   if (!latencies)
-   {
-      if (error_out)
-         *error_out = "out of memory";
-      return -1;
-   }
-
-   double total_mrr = 0, total_ndcg5 = 0, total_ndcg10 = 0, total_recall5 = 0, total_recall10 = 0;
-   int labelled = 0, errors = 0, n_lat = 0;
-   for (int c = 0; c < n_cases; c++)
-   {
-      if (cases[c].n_expected > 0)
-         labelled++;
-
-      struct timespec t0, t1;
-      memory_t results[20];
-      clock_gettime(CLOCK_MONOTONIC, &t0);
-      int n_results = kb_client_memory_find_facts_ex(cases[c].query, 20, results, 20, fstate);
-      clock_gettime(CLOCK_MONOTONIC, &t1);
-      if (n_results < 0)
-      {
-         errors++;
-         continue;
-      }
-      latencies[n_lat++] = bench_elapsed_ms(&t0, &t1);
-
-      int64_t retrieved[20];
-      memset(retrieved, 0, sizeof(retrieved));
-      for (int i = 0; i < n_results && i < 20; i++)
-         retrieved[i] = results[i].id;
-
-      aimee_benchmarks_ir_scores_t at5, at10;
-      if (server_module_benchmark_score(retrieved, (uint32_t)n_results, cases[c].expected_ids,
-                                        (uint32_t)cases[c].n_expected, 5, &at5) != 0 ||
-          server_module_benchmark_score(retrieved, (uint32_t)n_results, cases[c].expected_ids,
-                                        (uint32_t)cases[c].n_expected, 10, &at10) != 0)
-      {
-         free(latencies);
-         if (error_out)
-            *error_out = "benchmarks scoring module unavailable or returned an invalid response";
-         return -1;
-      }
-      total_mrr += at5.mrr;
-      total_ndcg5 += at5.ndcg;
-      total_ndcg10 += at10.ndcg;
-      total_recall5 += at5.recall;
-      total_recall10 += at10.recall;
-   }
-
-   if (n_lat == 0)
-   {
-      free(latencies);
-      if (error_out)
-         *error_out = "all benchmark queries failed (is aimee-kb reachable for memory.find_facts?)";
-      return -1;
-   }
-
-   aimee_benchmarks_latency_summary_t latency_summary;
-   if (server_module_benchmark_latency(latencies, (uint32_t)n_lat, &latency_summary) != 0)
-   {
-      free(latencies);
-      if (error_out)
-         *error_out = "benchmarks latency module unavailable or returned an invalid response";
-      return -1;
-   }
-
-   jo_add_str(resp, "suite", suite);
-   jo_add_i64(resp, "queries", n_cases);
-   jo_add_i64(resp, "labelled", labelled);
-   jo_add_i64(resp, "errors", errors);
-   bench_add_metrics(resp, total_mrr / n_cases, total_ndcg5 / n_cases, total_ndcg10 / n_cases,
-                     total_recall5 / n_cases, total_recall10 / n_cases, n_cases);
-   bench_add_latency(resp, &latency_summary);
-   free(latencies);
-   return 0;
-}
-
-static int bench_live_eval_corpus(server_conn_t *conn, const char *suite, const char *fstate,
-                                  int max_cases)
-{
-   if (max_cases <= 0 || max_cases > 512)
-      max_cases = 100;
-
-   memory_t *rows = calloc((size_t)max_cases, sizeof(*rows));
-   mem_eval_case_t *cases = calloc((size_t)max_cases, sizeof(*cases));
-   if (!rows || !cases)
-   {
-      free(rows);
-      free(cases);
-      return server_send_error(conn, "out of memory loading benchmark corpus", NULL);
-   }
-
-   char basis[128] = "";
-   int n_rows = kb_client_memory_load_eval_corpus(rows, max_cases, basis, sizeof(basis));
-   if (n_rows <= 0)
-   {
-      free(rows);
-      free(cases);
-      return server_send_error(conn, "failed to load live memory eval corpus from aimee-kb", NULL);
-   }
-
-   int n_cases = 0;
-   for (int i = 0; i < n_rows && n_cases < max_cases; i++)
-   {
-      const char *key = rows[i].key;
-      const char *content = rows[i].content;
-      snprintf(cases[n_cases].query, sizeof(cases[n_cases].query), "%s",
-               key && key[0] ? key : (content ? content : ""));
-      if (!cases[n_cases].query[0])
-         continue;
-      cases[n_cases].expected_ids[0] = rows[i].id;
-      cases[n_cases].n_expected = 1;
-      n_cases++;
-   }
-   free(rows);
-   if (n_cases <= 0)
-   {
-      free(cases);
-      return server_send_error(conn, "live memory eval corpus had no queryable rows", NULL);
-   }
-
-   cJSON *resp = jo_ok();
-   jo_add_str(resp, "corpus", basis[0] ? basis : "live-memory-eval-corpus");
-   const char *error = NULL;
-   int rc = bench_run_live_cases(suite, cases, n_cases, fstate, resp, &error);
-   free(cases);
-   if (rc != 0)
-   {
-      cJSON_Delete(resp);
-      return server_send_error(conn, error ? error : "benchmark scoring failed", NULL);
-   }
-   return send_and_free(conn, resp);
-}
-
-static int bench_async_only(server_conn_t *conn, const char *suite, const char *run_via,
-                            const char *reason)
-{
-   cJSON *resp = jo_ok();
-   cJSON_ReplaceItemInObject(resp, "status", cJSON_CreateString("async-only"));
-   jo_add_str(resp, "suite", suite);
-   jo_add_str(resp, "run_via", run_via);
-   jo_add_str(resp, "reason", reason);
-   return send_and_free(conn, resp);
-}
-
-static int bench_code_graph_fusion(server_conn_t *conn, cJSON *req)
-{
-   const char *suite = "code-graph-fusion";
-
-   const char *corpus =
-       jo_str(req, "corpus", "benchmarks/code-vector-graph/production-corpus.json");
-   /* A benchmark observes the configured instance. Comparing on/off requires
-    * separate instance configurations; an arm cannot change live policy. */
-   const char *fstate = NULL;
-
-   enum
-   {
-      MAX_BENCH_CASES = 256
-   };
-   mem_eval_case_t *cases = calloc(MAX_BENCH_CASES, sizeof(*cases));
-   if (!cases)
-      return server_send_error(conn, "out of memory loading benchmark corpus", NULL);
-   int n_cases = mem_eval_load_production_corpus(corpus, cases, MAX_BENCH_CASES);
-   if (n_cases <= 0)
-   {
-      free(cases);
-      return server_send_error(conn, "failed to load benchmark corpus", NULL);
-   }
-   cJSON *resp = jo_ok();
-   jo_add_str(resp, "fusion_state", "instance");
-   const char *error = NULL;
-   int rc = bench_run_live_cases(suite, cases, n_cases, fstate, resp, &error);
-   free(cases);
-   if (rc != 0)
-   {
-      cJSON_Delete(resp);
-      return server_send_error(conn, error ? error : "benchmark scoring failed", NULL);
-   }
-
-   return send_and_free(conn, resp);
-}
-
-/* Run a memory benchmark suite.
- *
- * Synchronous retrieval suites:
- * - code-graph-fusion: committed production corpus + live KB retrieval.
- * - memory/corpus/memory-retrieval/live: KB-provided eval corpus + live KB retrieval.
- *
- * Dataset and judge-style suites stay out of the synchronous RPC and return an
- * async-only envelope with the CLI/delegate path that owns scratch DB setup and
- * model/provider work. */
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-
-   if (cJSON_HasObjectItem(req, "fusion_state") || cJSON_HasObjectItem(req, "arm"))
-      return server_send_error(conn,
-                               "fusion is configured per instance with AIMEE_GRAPH_FUSION=on|off; "
-                               "request overrides and ablation arms are not supported",
-                               NULL);
-   const char *suite = jo_str(req, "suite", "code-graph-fusion");
-   if (strcmp(suite, "code-graph-fusion") == 0)
-      return bench_code_graph_fusion(conn, req);
-
-   if (strcmp(suite, "memory") == 0 || strcmp(suite, "corpus") == 0 ||
-       strcmp(suite, "memory-retrieval") == 0 || strcmp(suite, "live") == 0)
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return server_send_error(conn, "memory benchmark request unavailable", NULL);
+   const char *fields[] = {"suite", "corpus", "max_cases", "limit", "fusion_state", "arm", NULL};
+   for (int i = 0; fields[i]; ++i)
    {
-      /* These suites evaluate the LIVE stored memory (per query through the real
-       * retrieval path); they do NOT ingest a labelled corpus FILE. The `corpus`
-       * request field is honored only by the code-graph-fusion suite. Historically
-       * `--corpus` was accepted here and silently dropped, which is a footgun: the
-       * caller thinks they benchmarked their file when they benchmarked live memory.
-       * Fail loudly instead, and point at the harness that does read a corpus file. */
-      const char *corpus_file = jo_str(req, "corpus", NULL);
-      if (corpus_file && corpus_file[0])
-         return server_send_error(
-             conn,
-             "the memory/corpus/memory-retrieval/live benchmark suites evaluate the LIVE stored "
-             "memory and do not accept a --corpus file (only the code-graph-fusion suite does). "
-             "To evaluate a labelled corpus FILE, use the retrieval-eval harness: "
-             "`make memory-retrieval-eval-check` or "
-             "`unit-test-memory-retrieval-eval --corpus <path> --baseline <path>`.",
-             NULL);
-      const char *fstate = jo_str(req, "fusion_state", NULL);
-      int max_cases = jo_int(req, "max_cases", jo_int(req, "limit", 100));
-      return bench_live_eval_corpus(conn, suite, fstate, max_cases);
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);
+      if (value)
+         cJSON_AddItemToObject(request, fields[i], cJSON_Duplicate(value, 1));
    }
-
-   if (strcmp(suite, "locomo") == 0 || strcmp(suite, "longmemeval") == 0 ||
-       strcmp(suite, "locomo-qa") == 0 || strcmp(suite, "longmemeval-qa") == 0)
-      return bench_async_only(
-          conn, suite, "aimee memory benchmark <suite>",
-          "dataset or judge-style memory suites run through the CLI/delegate benchmark path");
-
-   return server_send_error(
-       conn,
-       "unsupported benchmark suite (known: code-graph-fusion, memory, corpus, "
-       "memory-retrieval, live; async-only: locomo, longmemeval, locomo-qa, longmemeval-qa)",
-       NULL);
+   const char *suite = jo_str(req, "suite", "code-graph-fusion");
+   const char *path =
+       !strcmp(suite, "code-graph-fusion")
+           ? jo_str(req, "corpus", "benchmarks/code-vector-graph/production-corpus.json")
+           : NULL;
+   server_memory_scope_begin(req);
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_client_memory_benchmark_json(request, path);
+   kb_client_memory_scope_context_clear();
+   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+                       ? cJSON_ParseWithOpts(raw, NULL, 1)
+                       : NULL;
+   const char *status = jo_cstr(parsed, "status");
+   int valid = cJSON_IsObject(parsed) &&
+               ((!strcmp(status, "ok") &&
+                 cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parsed, "case_results"))) ||
+                (!strcmp(status, "error") &&
+                 cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "kind"))) ||
+                (!strcmp(status, "async-only") &&
+                 cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "run_via"))));
+   cJSON *response = valid ? cJSON_CreateRaw(raw) : NULL;
+   cJSON_Delete(parsed);
+   free(raw);
+   if (!response)
+      return server_send_error(conn, "memory benchmark owner or corpus file unavailable", NULL);
+   return send_and_free(conn, response);
 }

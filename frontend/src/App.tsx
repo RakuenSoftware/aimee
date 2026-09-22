@@ -1,6 +1,6 @@
 import { Component, useEffect, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
-import { Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Toast, ThemeToggle } from '@rakuensoftware/smoothgui';
 import Chat from './pages/Chat';
 import Dashboard from './pages/Dashboard';
@@ -81,6 +81,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
  * in; every tool operates on the active session's project. */
 function SessionTabBar() {
   const { sessions, activeId, addSession, closeSession, selectSession, renameSession } = useSessions();
+  const navigate = useNavigate();
   const [editing, setEditing] = useState<string>('');
   const editRef = useRef<HTMLInputElement>(null);
 
@@ -93,7 +94,7 @@ function SessionTabBar() {
         return (
           <div
             key={s.id}
-            onClick={() => selectSession(s.id)}
+            onClick={() => { selectSession(s.id); navigate('/chat'); }}
             onDoubleClick={() => setEditing(s.id)}
             title={s.projectName ? `${s.name} · ${s.projectName}` : s.name}
             style={{
@@ -131,7 +132,7 @@ function SessionTabBar() {
         );
       })}
       <button
-        onClick={() => addSession()}
+        onClick={() => { addSession(); navigate('/chat'); }}
         title="New session"
         style={{ background: 'transparent', color: 'var(--sg-primary)', border: '1px dashed var(--sg-dark-surface-alt)', borderRadius: 6, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 9px' }}
       >+</button>

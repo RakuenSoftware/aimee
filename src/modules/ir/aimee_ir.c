@@ -188,6 +188,38 @@ void aimee_response_free(aimee_response_t *r)
    memset(r, 0, sizeof *r);
 }
 
+/* Execute a module's tool-index patch. Validate the whole patch first so a
+ * malformed or stale plan cannot partially mutate the request. */
+int aimee_ir_remove_tools(aimee_request_t *request, const cJSON *indices)
+{
+   if (!request || !cJSON_IsArray(indices) || request->n_tools < 0)
+      return -1;
+   int upper = request->n_tools;
+   const cJSON *index = NULL;
+   cJSON_ArrayForEach(index, indices)
+   {
+      if (!cJSON_IsNumber(index) || index->valuedouble < 0 || index->valuedouble >= upper ||
+          index->valuedouble != (double)index->valueint)
+         return -1;
+      upper = index->valueint;
+   }
+   int removed = 0;
+   cJSON_ArrayForEach(index, indices)
+   {
+      int i = index->valueint;
+      free(request->tools[i].name);
+      free(request->tools[i].description);
+      cJSON_Delete(request->tools[i].schema);
+      free(request->tools[i].cache_control);
+      cJSON_Delete(request->tools[i].raw);
+      memmove(&request->tools[i], &request->tools[i + 1],
+              (size_t)(request->n_tools - i - 1) * sizeof(request->tools[0]));
+      request->n_tools--;
+      removed++;
+   }
+   return removed;
+}
+
 size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n)
 {
    if (buf && n)

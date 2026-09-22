@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 )
 
 type ExportRecord struct {
@@ -42,40 +43,74 @@ COALESCE(source_session,''),created_at,updated_at FROM memories WHERE id>$1 ORDE
 	return items, rows.Err()
 }
 
-func (s *postgresDataStore) ExportDecisionsJSONL(ctx context.Context, path string) (count int, err error) {
+func (s *postgresDataStore) ExportDecisionsJSONL(ctx context.Context, path string) (int, error) {
+	return s.ExportJSONL(ctx, path, true)
+}
+
+// Stage output beside its destination, then publish only after every read and
+// write succeeds. Failed exports leave an existing destination intact.
+func (s *postgresDataStore) ExportJSONL(ctx context.Context, path string, decisions bool) (count int, err error) {
 	if err = s.requireKBDomain(); err != nil {
 		return 0, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT id,tier,kind,key,content,confidence,use_count,
-COALESCE(source_session,''),created_at,updated_at FROM memories WHERE kind='decision' ORDER BY id`)
+	file, err := os.CreateTemp(filepath.Dir(path), ".aimee-memory-export-*")
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		return 0, err
-	}
+	defer func() { file.Close(); os.Remove(file.Name()) }()
 	writer := bufio.NewWriter(file)
-	defer func() {
-		if flushErr := writer.Flush(); err == nil {
-			err = flushErr
-		}
-		if closeErr := file.Close(); err == nil {
-			err = closeErr
-		}
-	}()
 	encoder := json.NewEncoder(writer)
-	for rows.Next() {
-		var item ExportRecord
-		if err = rows.Scan(&item.ID, &item.Tier, &item.Kind, &item.Key, &item.Content,
-			&item.Confidence, &item.UseCount, &item.SourceSession, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	var afterID int64
+	for {
+		if err = ctx.Err(); err != nil {
 			return count, err
 		}
-		if err = encoder.Encode(item); err != nil {
-			return count, err
+		records, readErr := s.ExportRecords(ctx, afterID, 128)
+		if readErr != nil {
+			return count, readErr
 		}
-		count++
+		if len(records) == 0 {
+			break
+		}
+		for _, record := range records {
+			afterID = record.ID
+			if decisions && record.Kind != "decision" {
+				continue
+			}
+			var value any = record
+			if !decisions {
+				scopes, scopeErr := s.ScopeCollect(ctx, record.ID)
+				if scopeErr != nil {
+					return count, scopeErr
+				}
+				primary, scopeErr := s.PrimaryScope(ctx, record.ID)
+				if scopeErr != nil {
+					return count, scopeErr
+				}
+				value = struct {
+					ExportRecord
+					Scopes       []ScopeTag `json:"scopes"`
+					PrimaryScope ScopeTag   `json:"primary_scope"`
+				}{record, scopes, primary}
+			}
+			if err = encoder.Encode(value); err != nil {
+				return count, err
+			}
+			count++
+		}
 	}
-	return count, rows.Err()
+	if err = writer.Flush(); err != nil {
+		return count, err
+	}
+	if err = file.Sync(); err != nil {
+		return count, err
+	}
+	if err = file.Close(); err != nil {
+		return count, err
+	}
+	if err = ctx.Err(); err != nil {
+		return count, err
+	}
+	err = os.Rename(file.Name(), path)
+	return count, err
 }

@@ -193,19 +193,6 @@ void guardrails_policy_reset(void);
 /* Check if a tool is a shell/bash provider. */
 int is_shell_tool(const char *tool);
 
-/* Parse a Bash command for a learnable workflow signal.
- *
- * Inspects the command for patterns that describe how a project is built,
- * tested, merged, or deployed (e.g. `gh pr create --base testing`, `make
- * test`, `npm test`). On match, writes a compact signal_type ("pr-target",
- * "test-command", "active-branch") and a human-readable rule sentence, then
- * returns 1. Returns 0 when no pattern matches.
- *
- * signal_type_out is bounded by stsize; rule_out by rsize. Both must be
- * non-NULL and non-zero length. */
-int workflow_parse_bash_signal(const char *command, char *signal_type_out, size_t stsize,
-                               char *rule_out, size_t rsize);
-
 /* Normalize a relative path against cwd. Result written to buf. */
 char *normalize_path(const char *path, const char *cwd, char *buf, size_t buf_len);
 

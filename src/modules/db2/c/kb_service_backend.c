@@ -5,7 +5,6 @@
 #include "aimee.h"
 #include "../support/db2_runtime_config.h"
 #include "curiosity.h"
-#include "epistemic_directives.h"
 #include "notes.h"
 #include "db2_internal.h"
 #include "kb_payload.h"
@@ -14,12 +13,16 @@
 #include "vector_index_ops.h"
 #include "code_index_ops.h"
 #include "db_postgres.h"
-#include "memory_scenes.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+/* The standalone DB2 process has no host command registry. Without a Go
+ * memory owner, leave the curiosity item pending for a later attempt. */
+extern int aimee_module_commands_dispatch_internal(const char *, const cJSON *, cJSON **)
+    __attribute__((weak));
 
 #define KBS_ERRBUF 256
 
@@ -45,22 +48,10 @@ static int db2_worker_identity_valid(const char *claimed_by)
    return 0;
 }
 
-static const char *DB2_KB_DIRECTIVE_SELECT_COLS =
-    "id, question, topic, anchor_entity, anchor_file, cause, priority, state,"
-    " memory_a_id, memory_b_id, resolution_memory_id, evidence, source_session,"
-    " surfaced_count, last_surfaced_at, resolved_at, valid_until, created_at, updated_at";
 static const char *DB2_KB_LEARNING_SELECT_COLS =
     "id, signal_id, sink, state, target_key, target_memory_id, action_json,"
     " evidence_refs, corroboration_count, expires_at, committed_at, archive_reason,"
     " created_at, updated_at";
-
-static int db2_kb_directive_cause_valid(const char *cause)
-{
-   if (!cause)
-      return 0;
-   return strcmp(cause, "contradiction") == 0 || strcmp(cause, "retrieval_failure") == 0 ||
-          strcmp(cause, "missing_config") == 0 || strcmp(cause, "user_follow_up") == 0;
-}
 
 static void db2_kb_resolve_project(const char *project, char *out, size_t out_len)
 {
@@ -75,76 +66,6 @@ static const char *col_text_or_empty(aimee_pg_stmt_t *stmt, int col)
 {
    const char *t = aimee_pg_column_text(stmt, col);
    return t ? t : "";
-}
-
-static cJSON *db2_kb_directive_json_from_stmt(aimee_pg_stmt_t *stmt)
-{
-   cJSON *j = cJSON_CreateObject();
-   if (!j)
-      return NULL;
-
-   cJSON_AddNumberToObject(j, "id", (double)aimee_pg_column_int64(stmt, 0));
-   cJSON_AddStringToObject(j, "question", col_text_or_empty(stmt, 1));
-   cJSON_AddStringToObject(j, "topic", col_text_or_empty(stmt, 2));
-   cJSON_AddStringToObject(j, "anchor_entity", col_text_or_empty(stmt, 3));
-   cJSON_AddStringToObject(j, "anchor_file", col_text_or_empty(stmt, 4));
-   cJSON_AddStringToObject(j, "cause", col_text_or_empty(stmt, 5));
-   cJSON_AddNumberToObject(j, "priority", aimee_pg_column_int(stmt, 6));
-   cJSON_AddStringToObject(j, "state", col_text_or_empty(stmt, 7));
-   cJSON_AddNumberToObject(j, "memory_a_id", (double)aimee_pg_column_int64(stmt, 8));
-   cJSON_AddNumberToObject(j, "memory_b_id", (double)aimee_pg_column_int64(stmt, 9));
-   cJSON_AddNumberToObject(j, "resolution_memory_id", (double)aimee_pg_column_int64(stmt, 10));
-   cJSON_AddStringToObject(j, "evidence", col_text_or_empty(stmt, 11));
-   cJSON_AddNumberToObject(j, "surfaced_count", aimee_pg_column_int(stmt, 13));
-   cJSON_AddStringToObject(j, "last_surfaced_at", col_text_or_empty(stmt, 14));
-   cJSON_AddStringToObject(j, "resolved_at", col_text_or_empty(stmt, 15));
-   cJSON_AddStringToObject(j, "valid_until", col_text_or_empty(stmt, 16));
-   cJSON_AddStringToObject(j, "created_at", col_text_or_empty(stmt, 17));
-   return j;
-}
-
-static cJSON *db2_kb_service_directive_get_json(int64_t id)
-{
-   void *conn = db2_conn();
-   if (!conn)
-      return NULL;
-
-   char sql[512];
-   snprintf(sql, sizeof(sql), "SELECT %s FROM epistemic_directives WHERE id = ?1",
-            DB2_KB_DIRECTIVE_SELECT_COLS);
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!stmt)
-      return NULL;
-
-   aimee_pg_bind_int64(stmt, "?1", id);
-   cJSON *row = NULL;
-   if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
-      row = db2_kb_directive_json_from_stmt(stmt);
-   aimee_pg_finalize(stmt);
-   return row;
-}
-
-static int db2_kb_service_directive_state_is_open(int64_t id)
-{
-   void *conn = db2_conn();
-   if (!conn)
-      return 0;
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(
-       conn, "SELECT state FROM epistemic_directives WHERE id = ?1", err, sizeof(err));
-   if (!stmt)
-      return 0;
-
-   aimee_pg_bind_int64(stmt, "?1", id);
-   int is_open = 0;
-   if (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *s = aimee_pg_column_text(stmt, 0);
-      is_open = (s && strcmp(s, "open") == 0);
-   }
-   aimee_pg_finalize(stmt);
-   return is_open;
 }
 
 static cJSON *db2_kb_learning_json_from_stmt(aimee_pg_stmt_t *stmt)
@@ -183,36 +104,6 @@ static void db2_kb_learning_archive_expired(void)
        " SET state = 'archived', archive_reason = 'expired', updated_at = pg_now_text()"
        " WHERE state = 'pending' AND expires_at != '' AND expires_at < pg_now_text()",
        err, sizeof(err));
-}
-
-int db2_kb_service_reset_stuck_vector_ops(int max_attempts)
-{
-   /* Reset both the memory/evidence vector ops and the code-chunk ops so a
-    * single `memory repair --reset-stuck` retries orphaned code embeds too. */
-   return db2_vector_index_ops_reset_stuck(max_attempts) +
-          db2_code_index_ops_reset_stuck(max_attempts);
-}
-
-int db2_kb_service_collect_memory_verify(int include_failed_detail, int max_attempts,
-                                         db2_kb_service_memory_verify_t *out)
-{
-   if (!out)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-
-   if (db2_vector_index_ops_summary(max_attempts, &out->ops) != 0)
-      return -1;
-
-   if (include_failed_detail)
-      out->failed_detail_count = db2_vector_index_ops_list_failed(
-          out->failed_detail, (int)(sizeof(out->failed_detail) / sizeof(out->failed_detail[0])));
-
-   (void)db2_kb_runtime_state_get("vector_schema_version", out->stored_schema_ver,
-                                  sizeof(out->stored_schema_ver));
-   out->rebuild_lock_held = db2_kb_runtime_state_vector_rebuild_lock_held();
-
-   return 0;
 }
 
 int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out)
@@ -810,351 +701,6 @@ int db2_kb_service_clear_current_project(const char *project)
    return rc == AIMEE_PG_DONE ? deleted : -1;
 }
 
-int db2_kb_service_collect_verify_snapshot(db2_kb_service_verify_snapshot_t *out)
-{
-   if (!out)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *s = aimee_pg_prepare(conn, "SELECT COUNT(*) FROM memories", err, sizeof(err));
-   if (s && aimee_pg_step(s, err, sizeof(err)) == AIMEE_PG_ROW)
-      out->mem_rows = aimee_pg_column_int64(s, 0);
-   aimee_pg_finalize(s);
-
-   s = aimee_pg_prepare(conn, "SELECT COUNT(*) FROM memory_units", err, sizeof(err));
-   if (s && aimee_pg_step(s, err, sizeof(err)) == AIMEE_PG_ROW)
-      out->unit_rows = aimee_pg_column_int64(s, 0);
-   aimee_pg_finalize(s);
-
-   s = aimee_pg_prepare(conn, "SELECT COUNT(*) FROM kb_documents", err, sizeof(err));
-   if (s && aimee_pg_step(s, err, sizeof(err)) == AIMEE_PG_ROW)
-      out->kb_rows = aimee_pg_column_int64(s, 0);
-   aimee_pg_finalize(s);
-
-   aimee_pg_stmt_t *avs = aimee_pg_prepare(
-       conn, "SELECT version FROM memory_active_embedder WHERE id = 1", err, sizeof(err));
-   if (avs && aimee_pg_step(avs, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *v = aimee_pg_column_text(avs, 0);
-      if (v)
-         snprintf(out->active_ver, sizeof(out->active_ver), "%s", v);
-   }
-   aimee_pg_finalize(avs);
-
-   return 0;
-}
-
-int db2_kb_service_get_active_embedder_version(char *out, size_t out_len)
-{
-   if (!out || out_len == 0)
-      return -1;
-
-   out[0] = '\0';
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *avs = aimee_pg_prepare(
-       conn, "SELECT version FROM memory_active_embedder WHERE id = 1", err, sizeof(err));
-   if (!avs)
-      return -1;
-
-   int found = 0;
-   if (aimee_pg_step(avs, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *v = aimee_pg_column_text(avs, 0);
-      if (v)
-      {
-         snprintf(out, out_len, "%s", v);
-         found = 1;
-      }
-   }
-   aimee_pg_finalize(avs);
-   return found ? 0 : -1;
-}
-
-int db2_kb_service_set_active_embedder_version(const char *version, const char *updated_at)
-{
-   if (!version || !version[0] || !updated_at || !updated_at[0])
-      return -1;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *us = aimee_pg_prepare(
-       conn,
-       "INSERT INTO memory_active_embedder(id, version, updated_at) VALUES (1, ?1, ?2)"
-       " ON CONFLICT (id) DO UPDATE SET"
-       "   version = EXCLUDED.version,"
-       "   updated_at = EXCLUDED.updated_at",
-       err, sizeof(err));
-   if (!us)
-      return -1;
-
-   aimee_pg_bind_text(us, "?1", version);
-   aimee_pg_bind_text(us, "?2", updated_at);
-   aimee_pg_step_t rc = aimee_pg_step(us, err, sizeof(err));
-   aimee_pg_finalize(us);
-   return rc == AIMEE_PG_DONE ? 0 : -1;
-}
-
-int db2_kb_service_collect_reembed_status(db2_kb_service_reembed_status_t *out)
-{
-   if (!out)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *ps =
-       aimee_pg_prepare(conn,
-                        "SELECT target_version, last_id, total, done, started_at, finished_at"
-                        " FROM memory_reembed_progress WHERE id = 1",
-                        err, sizeof(err));
-   if (!ps)
-      return -1;
-
-   if (aimee_pg_step(ps, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *target = aimee_pg_column_text(ps, 0);
-      const char *started = aimee_pg_column_text(ps, 4);
-      const char *finished = aimee_pg_column_text(ps, 5);
-      if (target)
-         snprintf(out->target_version, sizeof(out->target_version), "%s", target);
-      if (started)
-         snprintf(out->started_at, sizeof(out->started_at), "%s", started);
-      if (finished)
-         snprintf(out->finished_at, sizeof(out->finished_at), "%s", finished);
-      out->last_id = aimee_pg_column_int(ps, 1);
-      out->total = aimee_pg_column_int(ps, 2);
-      out->done = aimee_pg_column_int(ps, 3);
-      out->have_job = 1;
-   }
-
-   aimee_pg_finalize(ps);
-   return 0;
-}
-
-int db2_kb_service_mark_reembed_finished(const char *finished_at)
-{
-   if (!finished_at || !finished_at[0])
-      return -1;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *fs = aimee_pg_prepare(conn,
-                                          "UPDATE memory_reembed_progress SET finished_at = ?1"
-                                          " WHERE id = 1 AND finished_at IS NULL",
-                                          err, sizeof(err));
-   if (!fs)
-      return -1;
-
-   aimee_pg_bind_text(fs, "?1", finished_at);
-   aimee_pg_step_t rc = aimee_pg_step(fs, err, sizeof(err));
-   aimee_pg_finalize(fs);
-   return rc == AIMEE_PG_DONE ? 0 : -1;
-}
-
-int db2_kb_service_prepare_reembed_start(const char *version, const char *started_at,
-                                         db2_kb_service_reembed_start_t *out)
-{
-   if (!version || !version[0] || !started_at || !started_at[0] || !out)
-      return -1;
-
-   memset(out, 0, sizeof(*out));
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *ts_stmt = aimee_pg_prepare(
-       conn, "SELECT COUNT(*) FROM memories WHERE tier IN ('L1', 'L2')", err, sizeof(err));
-   if (ts_stmt)
-   {
-      if (aimee_pg_step(ts_stmt, err, sizeof(err)) == AIMEE_PG_ROW)
-         out->total_count = aimee_pg_column_int(ts_stmt, 0);
-      aimee_pg_finalize(ts_stmt);
-   }
-
-   aimee_pg_stmt_t *rp = aimee_pg_prepare(conn,
-                                          "SELECT last_id FROM memory_reembed_progress"
-                                          " WHERE id = 1 AND target_version = ?1"
-                                          "   AND finished_at IS NULL",
-                                          err, sizeof(err));
-   if (rp)
-   {
-      aimee_pg_bind_text(rp, "?1", version);
-      if (aimee_pg_step(rp, err, sizeof(err)) == AIMEE_PG_ROW)
-         out->resume_last_id = aimee_pg_column_int(rp, 0);
-      aimee_pg_finalize(rp);
-   }
-
-   aimee_pg_stmt_t *up = aimee_pg_prepare(
-       conn,
-       "INSERT INTO memory_reembed_progress(id, target_version, last_id, total, done, started_at)"
-       " VALUES (1, ?1, ?2, ?3, 0, ?4)"
-       " ON CONFLICT (id) DO UPDATE SET"
-       "   target_version = EXCLUDED.target_version,"
-       "   total = EXCLUDED.total,"
-       "   last_id = CASE WHEN memory_reembed_progress.target_version = EXCLUDED.target_version"
-       "                  THEN memory_reembed_progress.last_id ELSE 0 END,"
-       "   done = CASE WHEN memory_reembed_progress.target_version = EXCLUDED.target_version"
-       "               THEN memory_reembed_progress.done ELSE 0 END,"
-       "   started_at = EXCLUDED.started_at,"
-       "   finished_at = NULL",
-       err, sizeof(err));
-   if (!up)
-      return -1;
-
-   aimee_pg_bind_text(up, "?1", version);
-   aimee_pg_bind_int(up, "?2", out->resume_last_id);
-   aimee_pg_bind_int(up, "?3", out->total_count);
-   aimee_pg_bind_text(up, "?4", started_at);
-   aimee_pg_step_t rc = aimee_pg_step(up, err, sizeof(err));
-   aimee_pg_finalize(up);
-   return rc == AIMEE_PG_DONE ? 0 : -1;
-}
-
-int db2_kb_service_update_reembed_progress(int last_id, int done)
-{
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *u = aimee_pg_prepare(
-       conn, "UPDATE memory_reembed_progress SET last_id = ?1, done = ?2 WHERE id = 1", err,
-       sizeof(err));
-   if (!u)
-      return -1;
-
-   aimee_pg_bind_int(u, "?1", last_id);
-   aimee_pg_bind_int(u, "?2", done);
-   aimee_pg_step_t rc = aimee_pg_step(u, err, sizeof(err));
-   aimee_pg_finalize(u);
-   return rc == AIMEE_PG_DONE ? 0 : -1;
-}
-
-int db2_kb_service_list_unembedded_memory_ids(const char *version, int64_t *ids, int max_ids)
-{
-   if (!version || !version[0] || !ids || max_ids < 1)
-      return -1;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   static const char *sql = "SELECT m.id FROM memories m"
-                            " WHERE m.tier IN ('L1', 'L2')";
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!stmt)
-      return -1;
-
-   int count = 0;
-   while (count < max_ids && aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
-      ids[count++] = aimee_pg_column_int64(stmt, 0);
-   aimee_pg_finalize(stmt);
-   return count;
-}
-
-int db2_kb_service_list_pending_reembed_memory_ids(const char *version, int resume_last_id,
-                                                   int64_t *ids, int max_ids)
-{
-   if (!version || !version[0] || !ids || max_ids < 1)
-      return -1;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn,
-                                            "SELECT m.id FROM memories m"
-                                            " WHERE m.tier IN ('L1', 'L2')"
-                                            "   AND m.id > ?1"
-                                            " ORDER BY m.id",
-                                            err, sizeof(err));
-   if (!stmt)
-      return -1;
-
-   aimee_pg_bind_int(stmt, "?1", resume_last_id);
-   int count = 0;
-   while (count < max_ids && aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
-      ids[count++] = aimee_pg_column_int64(stmt, 0);
-   aimee_pg_finalize(stmt);
-   return count;
-}
-
-int db2_kb_service_count_embeddings_for_version(const char *version)
-{
-   if (!version || !version[0])
-      return -1;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *cs = aimee_pg_prepare(conn,
-                                          "SELECT COUNT(*) FROM vector_index_ops"
-                                          " WHERE collection = 'memory_units'"
-                                          "   AND status = 'ok'"
-                                          "   AND memory_id IS NOT NULL",
-                                          err, sizeof(err));
-   if (!cs)
-      return -1;
-
-   int count = -1;
-   if (aimee_pg_step(cs, err, sizeof(err)) == AIMEE_PG_ROW)
-      count = aimee_pg_column_int(cs, 0);
-   aimee_pg_finalize(cs);
-   return count;
-}
-
-int db2_kb_service_list_memory_ids_by_updated(int limit, int64_t *ids, int max_ids)
-{
-   if (!ids || max_ids < 1)
-      return -1;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char sql[256];
-   snprintf(sql, sizeof(sql), "SELECT id FROM memories ORDER BY updated_at DESC%s",
-            (limit > 0) ? " LIMIT ?1" : "");
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!stmt)
-      return -1;
-
-   if (limit > 0)
-      aimee_pg_bind_int(stmt, "?1", limit);
-
-   int count = 0;
-   while (count < max_ids && aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
-      ids[count++] = aimee_pg_column_int64(stmt, 0);
-   aimee_pg_finalize(stmt);
-   return count;
-}
-
 int db2_kb_service_memory_record_exists(int64_t record_id)
 {
    void *conn = db2_conn();
@@ -1196,239 +742,6 @@ int db2_kb_service_kb_document_exists(int64_t document_id)
       exists = aimee_pg_column_int(stmt, 0);
    aimee_pg_finalize(stmt);
    return exists;
-}
-
-int db2_kb_service_directive_create(const char *question, const char *topic,
-                                    const char *anchor_entity, const char *anchor_file,
-                                    const char *cause, int priority, int64_t memory_a_id,
-                                    int64_t memory_b_id, const char *evidence,
-                                    const char *source_session, const char *valid_until,
-                                    int *dedup_out, cJSON **directive_out)
-{
-   if (!question || !question[0] || !db2_kb_directive_cause_valid(cause))
-      return -1;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   if (priority < 0)
-      priority = 0;
-   if (priority > 100)
-      priority = 100;
-   if (dedup_out)
-      *dedup_out = 0;
-   if (directive_out)
-      *directive_out = NULL;
-
-   char err[KBS_ERRBUF] = "";
-   /* epistemic_directives has UNIQUE partial indexes (idx_directives_dedup_*).
-    * ON CONFLICT DO NOTHING plus RETURNING id tells us whether the row was
-    * inserted or deduped. */
-   aimee_pg_stmt_t *stmt =
-       aimee_pg_prepare(conn,
-                        "INSERT INTO epistemic_directives"
-                        " (question, topic, anchor_entity, anchor_file, cause, priority, state,"
-                        "  memory_a_id, memory_b_id, evidence, source_session, valid_until)"
-                        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'open', ?7, ?8, ?9, ?10, ?11)"
-                        " ON CONFLICT DO NOTHING"
-                        " RETURNING id",
-                        err, sizeof(err));
-   if (!stmt)
-      return -1;
-
-   aimee_pg_bind_text(stmt, "?1", question);
-   aimee_pg_bind_text(stmt, "?2", topic ? topic : "");
-   aimee_pg_bind_text(stmt, "?3", anchor_entity ? anchor_entity : "");
-   aimee_pg_bind_text(stmt, "?4", anchor_file ? anchor_file : "");
-   aimee_pg_bind_text(stmt, "?5", cause);
-   aimee_pg_bind_int(stmt, "?6", priority);
-   aimee_pg_bind_int64(stmt, "?7", memory_a_id);
-   aimee_pg_bind_int64(stmt, "?8", memory_b_id);
-   aimee_pg_bind_text(stmt, "?9", evidence ? evidence : "");
-   aimee_pg_bind_text(stmt, "?10", source_session ? source_session : "");
-   aimee_pg_bind_text(stmt, "?11", valid_until ? valid_until : "");
-
-   int64_t new_id = 0;
-   int inserted = 0;
-   aimee_pg_step_t rc = aimee_pg_step(stmt, err, sizeof(err));
-   if (rc == AIMEE_PG_ROW)
-   {
-      new_id = aimee_pg_column_int64(stmt, 0);
-      inserted = 1;
-   }
-   else if (rc != AIMEE_PG_DONE)
-   {
-      aimee_pg_finalize(stmt);
-      return -1;
-   }
-   aimee_pg_finalize(stmt);
-
-   if (!inserted)
-   {
-      if (dedup_out)
-         *dedup_out = 1;
-      return 0;
-   }
-
-   if (directive_out)
-      *directive_out = db2_kb_service_directive_get_json(new_id);
-   return directive_out && !*directive_out ? -1 : 0;
-}
-
-int db2_kb_service_directive_resolve(int64_t id, int64_t resolution_memory_id, const char *note)
-{
-   (void)note;
-   if (id <= 0 || !db2_kb_service_directive_state_is_open(id))
-      return -1;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt =
-       aimee_pg_prepare(conn,
-                        "UPDATE epistemic_directives SET state = 'resolved',"
-                        " resolution_memory_id = ?1, resolved_at = pg_now_text(),"
-                        " updated_at = pg_now_text() WHERE id = ?2",
-                        err, sizeof(err));
-   if (!stmt)
-      return -1;
-
-   aimee_pg_bind_int64(stmt, "?1", resolution_memory_id);
-   aimee_pg_bind_int64(stmt, "?2", id);
-   aimee_pg_step_t rc = aimee_pg_step(stmt, err, sizeof(err));
-   aimee_pg_finalize(stmt);
-   return rc == AIMEE_PG_DONE ? 0 : -1;
-}
-
-int db2_kb_service_directive_suppress(int64_t id)
-{
-   if (id <= 0 || !db2_kb_service_directive_state_is_open(id))
-      return -1;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn,
-                                            "UPDATE epistemic_directives SET state = 'suppressed',"
-                                            " updated_at = pg_now_text() WHERE id = ?1",
-                                            err, sizeof(err));
-   if (!stmt)
-      return -1;
-
-   aimee_pg_bind_int64(stmt, "?1", id);
-   aimee_pg_step_t rc = aimee_pg_step(stmt, err, sizeof(err));
-   aimee_pg_finalize(stmt);
-   return rc == AIMEE_PG_DONE ? 0 : -1;
-}
-
-int db2_kb_service_directive_sweep_expired(void)
-{
-   void *conn = db2_conn();
-   if (!conn)
-      return 0;
-
-   char err[KBS_ERRBUF] = "";
-   /* pg_now_text() matches the DB2 canonical UTC text format used by
-    * valid_until. */
-   int affected = 0;
-   if (aimee_pg_exec_with_changes(
-           conn,
-           "UPDATE epistemic_directives SET state = 'expired', updated_at = pg_now_text()"
-           " WHERE state = 'open' AND valid_until != ''"
-           "   AND valid_until < pg_now_text()",
-           err, sizeof(err), &affected) != 0)
-      return -1;
-   return affected;
-}
-
-cJSON *db2_kb_service_directive_list_json(const char *state, const char *cause, int max_rows)
-{
-   if (max_rows < 1)
-      return NULL;
-
-   void *conn = db2_conn();
-   if (!conn)
-      return NULL;
-
-   char sql[1024];
-   int have_state = state && state[0];
-   int have_cause = cause && cause[0];
-   if (have_state && have_cause)
-      snprintf(sql, sizeof(sql),
-               "SELECT %s FROM epistemic_directives WHERE state = ?1 AND cause = ?2"
-               " ORDER BY priority DESC, created_at DESC, id DESC LIMIT ?3",
-               DB2_KB_DIRECTIVE_SELECT_COLS);
-   else if (have_state)
-      snprintf(sql, sizeof(sql),
-               "SELECT %s FROM epistemic_directives WHERE state = ?1"
-               " ORDER BY priority DESC, created_at DESC, id DESC LIMIT ?2",
-               DB2_KB_DIRECTIVE_SELECT_COLS);
-   else if (have_cause)
-      snprintf(sql, sizeof(sql),
-               "SELECT %s FROM epistemic_directives WHERE cause = ?1"
-               " ORDER BY priority DESC, created_at DESC, id DESC LIMIT ?2",
-               DB2_KB_DIRECTIVE_SELECT_COLS);
-   else
-      snprintf(sql, sizeof(sql),
-               "SELECT %s FROM epistemic_directives"
-               " ORDER BY priority DESC, created_at DESC, id DESC LIMIT ?1",
-               DB2_KB_DIRECTIVE_SELECT_COLS);
-
-   char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(conn, sql, err, sizeof(err));
-   if (!stmt)
-      return NULL;
-
-   if (have_state && have_cause)
-   {
-      aimee_pg_bind_text(stmt, "?1", state);
-      aimee_pg_bind_text(stmt, "?2", cause);
-      aimee_pg_bind_int(stmt, "?3", max_rows);
-   }
-   else if (have_state)
-   {
-      aimee_pg_bind_text(stmt, "?1", state);
-      aimee_pg_bind_int(stmt, "?2", max_rows);
-   }
-   else if (have_cause)
-   {
-      aimee_pg_bind_text(stmt, "?1", cause);
-      aimee_pg_bind_int(stmt, "?2", max_rows);
-   }
-   else
-   {
-      aimee_pg_bind_int(stmt, "?1", max_rows);
-   }
-
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "directives") : NULL;
-   if (!resp || !arr)
-   {
-      aimee_pg_finalize(stmt);
-      cJSON_Delete(resp);
-      return NULL;
-   }
-
-   cJSON_AddStringToObject(resp, "status", "ok");
-   while (aimee_pg_step(stmt, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      cJSON *row = db2_kb_directive_json_from_stmt(stmt);
-      if (!row)
-      {
-         aimee_pg_finalize(stmt);
-         cJSON_Delete(resp);
-         return NULL;
-      }
-      cJSON_AddItemToArray(arr, row);
-   }
-
-   aimee_pg_finalize(stmt);
-   return resp;
 }
 
 cJSON *db2_kb_service_curiosity_list_json(const char *state, int max_rows)
@@ -1661,12 +974,25 @@ cJSON *db2_kb_service_curiosity_route_top_json(int limit, const char *source_ses
       if (priority > 100)
          priority = 100;
 
-      int64_t new_id = 0;
-      int existed = 0;
-      int rc = db2_directive_insert_ignore(
-          question, it->target_topic, it->target_entity, "", cause, priority, 0, 0, it->evidence,
-          source_session ? source_session : "", "", &new_id, &existed);
-      /* rc == 0 means inserted; existed != 0 means deduped. Both
+      cJSON *args = cJSON_CreateObject(), *response = NULL;
+      cJSON_AddStringToObject(args, "operation", "directive-create");
+      cJSON_AddStringToObject(args, "question", question);
+      cJSON_AddStringToObject(args, "topic", it->target_topic);
+      cJSON_AddStringToObject(args, "entity", it->target_entity);
+      cJSON_AddStringToObject(args, "cause", cause);
+      cJSON_AddNumberToObject(args, "priority", priority);
+      cJSON_AddStringToObject(args, "evidence", it->evidence);
+      cJSON_AddStringToObject(args, "session", source_session ? source_session : "");
+      int dispatched =
+          aimee_module_commands_dispatch_internal
+              ? aimee_module_commands_dispatch_internal("memory.runtime", args, &response)
+              : 0;
+      cJSON_Delete(args);
+      const char *status =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+      int rc = dispatched == 1 && status && strcmp(status, "ok") == 0 ? 0 : -1;
+      cJSON_Delete(response);
+      /* A successful Go result may be inserted or deduplicated. Both
        * count as successfully routed for the purposes of moving
        * the curiosity item along. */
       if (rc == 0)
@@ -1935,88 +1261,4 @@ cJSON *db2_kb_service_learning_reject_json(int id)
    }
 
    return db2_kb_service_learning_get_json(id);
-}
-
-cJSON *db2_kb_service_scene_list_json(int max_rows)
-{
-   if (max_rows < 1)
-      return NULL;
-
-   db2_memory_scene_row_t rows[100];
-   if (max_rows > (int)(sizeof(rows) / sizeof(rows[0])))
-      max_rows = (int)(sizeof(rows) / sizeof(rows[0]));
-
-   int n = db2_memory_scenes_list_recent(rows, max_rows);
-   if (n < 0)
-      return NULL;
-
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON *arr = cJSON_AddArrayToObject(resp, "scenes");
-   if (!arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      if (!obj)
-      {
-         cJSON_Delete(resp);
-         return NULL;
-      }
-      cJSON_AddNumberToObject(obj, "id", (double)rows[i].id);
-      cJSON_AddStringToObject(obj, "workspace_id", rows[i].workspace_id);
-      cJSON_AddNumberToObject(obj, "turn_count", rows[i].turn_count);
-      cJSON_AddStringToObject(obj, "created_at", rows[i].created_at);
-      cJSON_AddItemToArray(arr, obj);
-   }
-
-   return resp;
-}
-
-cJSON *db2_kb_service_scene_members_json(int64_t scene_id, int max_rows)
-{
-   if (max_rows < 1)
-      return NULL;
-
-   db2_memory_scene_member_t rows[512];
-   if (max_rows > (int)(sizeof(rows) / sizeof(rows[0])))
-      max_rows = (int)(sizeof(rows) / sizeof(rows[0]));
-
-   int n = db2_memory_scene_members(scene_id, rows, max_rows);
-   if (n < 0)
-      return NULL;
-
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "scene_id", (double)scene_id);
-   cJSON *arr = cJSON_AddArrayToObject(resp, "members");
-   if (!arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      if (!obj)
-      {
-         cJSON_Delete(resp);
-         return NULL;
-      }
-      cJSON_AddNumberToObject(obj, "memory_id", (double)rows[i].memory_id);
-      cJSON_AddStringToObject(obj, "key", rows[i].key);
-      cJSON_AddNumberToObject(obj, "membership_strength", rows[i].membership_strength);
-      cJSON_AddItemToArray(arr, obj);
-   }
-
-   return resp;
 }

@@ -524,8 +524,15 @@ func wfeParkRunnerFailure(ctx context.Context, db store.DB, f []string) (uint32,
 		}
 	}
 
+	// Cancellation can arrive after an operator has paused or stopped the run.
+	// Reconcile the runner's spend, but preserve the lifecycle decision that
+	// won that race. Replacing a manual pause with a transient failure would
+	// allow the scheduler to resume work without the operator's consent.
 	if _, err := tx.Exec(ctx, `UPDATE lifecycle_work_item
-	                              SET pause_reason = $1, paused_state = $2,
+	                              SET pause_reason = CASE WHEN state = 'active' AND pause_reason = ''
+	                                                      THEN $1 ELSE pause_reason END,
+	                                  paused_state = CASE WHEN state = 'active' AND pause_reason = ''
+	                                                      THEN $2 ELSE paused_state END,
 	                                  cum_cost_usd = cum_cost_usd + $3,
 	                                  reserved_cost_usd = $4, reservation_state = $5,
 	                                  reservation_owner = CASE WHEN $5 = '' THEN ''

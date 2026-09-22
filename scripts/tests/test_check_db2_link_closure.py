@@ -757,7 +757,7 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 149)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 140)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
@@ -766,7 +766,7 @@ class LinkClosureTest(unittest.TestCase):
             contract["summary"]["dispositions"]["portable-core-promotion"], 0
         )
         self.assertEqual(
-            contract["summary"]["dispositions"]["injected-module-contract"], 9
+            contract["summary"]["dispositions"]["injected-module-contract"], 0
         )
         self.assertFalse(any(
             row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
@@ -804,11 +804,15 @@ class LinkClosureTest(unittest.TestCase):
             row["symbol"] == "code_match_line" for row in contract["unresolved"]
         ))
         unresolved = {row["symbol"]: row["disposition"] for row in contract["unresolved"]}
+        self.assertNotIn("memory_pii_rel_sensitivity", unresolved)
+        self.assertNotIn("memory_pii_turn_requests_sensitive", unresolved)
         for symbol in {
-            "memory_ontology_node_kind_to_text", "memory_pii_rel_sensitivity",
-            "memory_pii_turn_requests_sensitive",
+            "memory_ontology_node_kind_to_text", "db2_memory_provenance_by_id",
+            "db2_memory_scene_members", "db2_memory_scenes_list_recent",
         }:
-            self.assertEqual(unresolved[symbol], "injected-module-contract")
+            self.assertNotIn(symbol, unresolved)
+        for symbol in {"db2_memory_scope_bind_current", "db2_memory_scope_context_get"}:
+            self.assertNotIn(symbol, unresolved)
         self.assertNotIn("memory_pii_should_inject", unresolved)
         self.assertNotIn("memory_pii_rel_sensitivity_batch", unresolved)
         self.assertFalse(any(
@@ -840,7 +844,7 @@ class LinkClosureTest(unittest.TestCase):
         self.assertEqual(seed_support["defines"], [
             "rel_types_seed_at", "rel_types_seed_count", "rel_types_seed_lookup",
         ])
-        self.assertEqual(seed_support["resolves"], seed_support["defines"])
+        self.assertEqual(seed_support["resolves"], ["rel_types_seed_lookup"])
         code_match_support = next(
             unit for unit in contract["descriptor_support_units"]
             if unit["path"] == "src/modules/db2/support/code_match_primitives.c"
@@ -899,11 +903,79 @@ class LinkClosureTest(unittest.TestCase):
         )
 
 
+class MemoryGoOnlyComparisonTest(unittest.TestCase):
+    def setUp(self):
+        self.current = json.loads((REPO / checker.CONTRACT).read_text())
+        self.previous = copy.deepcopy(self.current)
+        self.previous["fingerprint"] = checker.MEMORY_GO_ONLY_BASE
+        self.previous["translation_units"] += sorted(checker.MEMORY_GO_ONLY_RETIRED_UNITS)
+        self.previous["descriptor_support_units"].append(
+            {"path": "src/modules/db2/support/rel_enum_text_primitives.c"})
+        for row in self.previous["unresolved"]:
+            if row["symbol"] == "_GLOBAL_OFFSET_TABLE_":
+                row["references"] = [p for p in row["references"] if p not in {
+                    "src/modules/db2/c/demotion.c", "src/modules/db2/c/kb_service_backend.c",
+                }]
+
+    def compare(self):
+        def validated(root, contract, **kwargs):
+            return (contract["translation_units"], contract["descriptor_support_units"],
+                    {row["symbol"]: row for row in contract["unresolved"]})
+        with mock.patch.object(checker, "validate_contract", side_effect=validated):
+            checker.compare_contracts(REPO, self.previous, self.current)
+
+    def test_exact_go_only_retirement_passes(self):
+        self.compare()
+
+    def test_unreviewed_base_and_retirements_fail(self):
+        for mutation in ("base", "source", "support"):
+            with self.subTest(mutation=mutation):
+                self.setUp()
+                if mutation == "base":
+                    self.previous["fingerprint"] = "0" * 64
+                elif mutation == "source":
+                    self.previous["translation_units"].append("src/modules/db2/c/unreviewed.c")
+                else:
+                    self.previous["descriptor_support_units"].append(
+                        {"path": "src/modules/db2/support/unreviewed.c"})
+                with self.assertRaisesRegex(checker.ClosureError, "previous-.*-removal"):
+                    self.compare()
+
+    def test_unreviewed_got_reference_fails(self):
+        row = next(r for r in self.current["unresolved"] if r["symbol"] == "_GLOBAL_OFFSET_TABLE_")
+        row["references"].append("src/modules/db2/c/unreviewed.c")
+        with self.assertRaisesRegex(checker.ClosureError, "previous-reference-growth"):
+            self.compare()
+
+    def test_unreviewed_support_change_fails(self):
+        row = next(r for r in self.current["descriptor_support_units"]
+                   if r["path"] not in checker.MEMORY_GO_ONLY_SUPPORT_UPDATES)
+        row["provenance"] = "unreviewed"
+        with self.assertRaisesRegex(checker.ClosureError, "previous-support-change"):
+            self.compare()
+
+
 class MemoryMigrationComparisonTest(unittest.TestCase):
     """Exercise the exact release admission independently of schema/probe tests."""
 
     def setUp(self):
         self.current = json.loads((REPO / checker.CONTRACT).read_text())
+        # Reconstruct the reviewed migration boundary independently of later
+        # retirements in the live contract. Every admission remains exercised.
+        self.current["unresolved"] = [
+            row for row in self.current["unresolved"]
+            if row["symbol"] not in checker.MEMORY_ADAPTER_IMPORTS
+        ]
+        self.current["unresolved"] += [
+            {"symbol": symbol, "references": list(references),
+             "disposition": "injected-module-contract"}
+            for symbol, references in checker.MEMORY_ADAPTER_IMPORTS.items()
+        ]
+        for row in self.current["unresolved"]:
+            if row["symbol"] == "memchr":
+                row["references"] = sorted(set(row["references"]) | {
+                    "src/modules/db2/c/fact_recall.c",
+                })
         self.previous = copy.deepcopy(self.current)
         self.previous["fingerprint"] = checker.MEMORY_MIGRATION_BASE
         self.previous["translation_units"] += sorted(checker.MEMORY_RETIRED_UNITS)

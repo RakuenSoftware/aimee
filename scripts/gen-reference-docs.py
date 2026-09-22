@@ -906,7 +906,6 @@ ENV_DESC = {
         "statement bound.",
     ),
     "EMBEDDER_DIMS": ("Database & vectors", "Embedding dimension (drives halfvec column sizing)."),
-    "AIMEE_PGVEC_SLOW_QUERY_MS": ("Database & vectors", "Slow-query log threshold (ms) for the pgvector transport."),
     # Memory
     "AIMEE_MEMORY_CITATIONS_MODE": ("Memory", "Citation rendering mode for memory recall."),
     "AIMEE_MEMORY_CITATIONS_STRIP_UNVERIFIED": ("Memory", "Strip unverified citations from recall output."),

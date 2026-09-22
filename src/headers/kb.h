@@ -144,8 +144,8 @@ char *kb_search_json(const char *project, const char *query, const char *embeddi
  * fusion_mode_override: "rrf" | "static_alpha" | "dynamic_alpha"; NULL = use config. */
 char *kb_search_json_ex(const char *project, const char *query, const char *embedding_cmd,
                         int max_results, const char *fusion_mode_override);
-char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects,
-                               const char *query, const char *embedding_cmd, int max_results,
+char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects, const char *query,
+                               const char *embedding_cmd, int max_results,
                                const char *fusion_mode_override);
 
 /* Resolve the project name: if project is non-NULL/non-empty, use it.
@@ -153,12 +153,5 @@ char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects,
 void kb_resolve_project(const char *project, const char *root_path, char *out, size_t out_len);
 
 int kb_async_enabled(void);
-
-/* Scan kb_documents for convention-source files (CONTRIBUTING.md,
- * AGENTS.md, STYLE/CODING guides, .aimee-rules, ADRs) and emit low-
- * confidence L3 candidate memories from each chunk.  Idempotent; skips
- * keys that already exist at L3 or higher.  Returns number of candidates
- * emitted, or -1 on DB error. */
-int kb_extract_convention_candidates(void);
 
 #endif /* DEC_KB_H */

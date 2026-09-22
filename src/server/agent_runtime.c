@@ -870,7 +870,16 @@ void agent_store_feedback(const agent_result_t *result, const char *role,
 
          int64_t task_id = kb_client_memory_find_id_by_key_kind(norm_task_key, "task");
          if (task_id > 0)
-            kb_client_memory_link_create(mem.id, task_id, "fixes");
+         {
+            char source_id[32], target_id[32];
+            snprintf(source_id, sizeof(source_id), "%lld", (long long)mem.id);
+            snprintf(target_id, sizeof(target_id), "%lld", (long long)task_id);
+            cJSON *request = cJSON_CreateObject();
+            cJSON_AddStringToObject(request, "source_id", source_id);
+            cJSON_AddStringToObject(request, "target_id", target_id);
+            cJSON_AddStringToObject(request, "relation", "fixes");
+            free(kb_v1_action_request("memory.link_create", request));
+         }
       }
    }
 }
@@ -1691,38 +1700,27 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
     * Otherwise fall back to the generic context assembly. */
    if (!skip_kb_client && custom_prompt && custom_prompt[0])
    {
-      /* Extract keywords from the prompt for targeted search */
-      memory_t mems[8];
-      int mcount = 0;
-
-      /* Search L2/L3/L5 facts and patterns matching keywords from the prompt.
-       * L3 holds slow-changing project/environment facts; L5 holds synthesised
-       * patterns across sessions.  Both should flow into the injected context
-       * alongside L2 facts. */
-      char keyword[64] = {0};
-      const char *p = custom_prompt;
-      while (*p && (*p == ' ' || !strncmp(p, "Check ", 6) || !strncmp(p, "Deploy ", 7) ||
-                    !strncmp(p, "Verify ", 7) || !strncmp(p, "List ", 5)))
-      {
-         while (*p && *p != ' ')
-            p++;
-         while (*p == ' ')
-            p++;
-      }
-      snprintf(keyword, sizeof(keyword), "%.*s", 60, p);
-      const char *search = keyword[0] ? keyword : custom_prompt;
-      mcount = kb_client_memory_search_facts_patterns_by_keyword(search, mems, 5);
-
-      if (mcount > 0)
-      {
-         size_t arch_start = pos;
-         ctx_appendf(buf, cap, &pos, "# Relevant Context\n");
-         for (int i = 0; i < mcount && pos < cap - 256 && (pos - arch_start) < budget_arch; i++)
-         {
-            ctx_appendf(buf, cap, &pos, "- %s: %s\n", mems[i].key, mems[i].content);
-         }
-         ctx_appendf(buf, cap, &pos, "\n");
-      }
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "keyword", custom_prompt);
+      cJSON_AddStringToObject(request, "view", "session");
+      cJSON_AddStringToObject(request, "section", "relevant");
+      cJSON_AddNumberToObject(request, "max", 5);
+      size_t available = pos < cap ? cap - pos - 1 : 0;
+      if (available > budget_arch)
+         available = budget_arch;
+      cJSON_AddNumberToObject(request, "budget_bytes", (double)available);
+      char *raw = kb_v1_action_request("memory.search_facts_patterns_by_keyword", request);
+      cJSON *reply = raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+      free(raw);
+      const cJSON *status = cJSON_GetObjectItemCaseSensitive(reply, "status");
+      const cJSON *text = cJSON_GetObjectItemCaseSensitive(reply, "text");
+      if (cJSON_IsString(status) && !strcmp(status->valuestring, "ok") && cJSON_IsString(text) &&
+          strlen(text->valuestring) <= available)
+         ctx_appendf(buf, cap, &pos, "%s", text->valuestring);
+      else
+         ctx_appendf(buf, cap, &pos, "[Memory context unavailable]\n");
+      cJSON_Delete(reply);
    }
    else if (!skip_kb_client)
    {
@@ -1744,7 +1742,7 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
       {
          if (!skip_kb_client && config_memory_maintenance_enabled())
          {
-            char *resp = kb_client_memory_maintenance_run_json(0, 0, 0);
+            char *resp = kb_v1_action_request("memory.maintenance_run", cJSON_CreateObject());
             free(resp);
          }
       }
@@ -1822,7 +1820,11 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
                   long long id =
                       (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(it, "memory_id"));
                   if (id > 0)
-                     kb_client_memory_prospective_mark_triggered((int64_t)id);
+                  {
+                     cJSON *trigger_args = cJSON_CreateObject();
+                     cJSON_AddNumberToObject(trigger_args, "id", (double)id);
+                     free(kb_v1_action_request("memory.prospective_mark_triggered", trigger_args));
+                  }
                }
             }
             cJSON_Delete(recall);
@@ -1841,22 +1843,38 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
          int cap_matches = config_memory_prospective_max_matches() > 0
                                ? config_memory_prospective_max_matches()
                                : 3;
-         if (cap_matches > MEMORY_PROSPECTIVE_MAX_MATCHES)
-            cap_matches = MEMORY_PROSPECTIVE_MAX_MATCHES;
-         memory_prospective_t triggered[MEMORY_PROSPECTIVE_MAX_MATCHES];
-         int n =
-             kb_client_memory_prospective_match(custom_prompt, NULL, NULL, triggered, cap_matches);
-         if (n > 0)
+         cJSON *match_args = cJSON_CreateObject();
+         cJSON_AddStringToObject(match_args, "turn_text", custom_prompt ? custom_prompt : "");
+         cJSON_AddNumberToObject(match_args, "max", cap_matches);
+         char *matches_json = kb_v1_action_request("memory.prospective_match", match_args);
+         cJSON *response = matches_json ? cJSON_Parse(matches_json) : NULL;
+         free(matches_json);
+         cJSON *matches = cJSON_GetObjectItemCaseSensitive(response, "matches");
+         cJSON *status = cJSON_GetObjectItemCaseSensitive(response, "status");
+         if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 &&
+             cJSON_IsArray(matches) && cJSON_GetArraySize(matches) > 0)
          {
             ctx_appendf(buf, cap, &pos, "# Reminders\n");
-            for (int i = 0; i < n && pos < cap - 256; i++)
+            cJSON *item = NULL;
+            cJSON_ArrayForEach(item, matches)
             {
-               ctx_appendf(buf, cap, &pos, "- %s (when: %s)\n", triggered[i].action_text,
-                           triggered[i].trigger_text);
-               kb_client_memory_prospective_mark_triggered(triggered[i].id);
+               if (pos >= cap - 256)
+                  break;
+               const char *action =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "action_text"));
+               const char *trigger =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "trigger_text"));
+               cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
+               if (!action || !trigger || !cJSON_IsNumber(id) || id->valuedouble <= 0)
+                  continue;
+               ctx_appendf(buf, cap, &pos, "- %s (when: %s)\n", action, trigger);
+               cJSON *trigger_args = cJSON_CreateObject();
+               cJSON_AddNumberToObject(trigger_args, "id", id->valuedouble);
+               free(kb_v1_action_request("memory.prospective_mark_triggered", trigger_args));
             }
             ctx_appendf(buf, cap, &pos, "\n");
          }
+         cJSON_Delete(response);
       }
    }
 

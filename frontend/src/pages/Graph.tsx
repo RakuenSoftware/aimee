@@ -71,16 +71,16 @@ export default function Graph() {
   useEffect(() => { loadHubs(); setLinks([]); }, [loadHubs]);
 
   /* The picker binds the project to the ACTIVE SESSION — the same binding (and
-   * the same storage key) Chat / Editor / Edit Workflows use, so choosing a
+   * the same session binding) Chat / Editor / Edit Workflows use, so choosing a
    * project here selects it everywhere for this session rather than giving the
    * graph its own private selection. Rendered above the empty state too: this
    * page used to dead-end on "bind this session to a project" with no control to
    * do it with. */
   const picker = (
     <ProjectPicker
-      storageKey={`aimee_session_project_${active?.id ?? ''}`}
+      value={active?.projectRoot ?? ''}
       onChange={sel => {
-        if (active) patchSession(active.id, { projectRoot: sel?.root ?? '', projectName: sel?.project ?? '' });
+        if (active) patchSession(active.id, { projectRoot: sel ? `${sel.root}/${sel.project}` : '', projectName: sel?.project ?? '' });
       }}
     />
   );

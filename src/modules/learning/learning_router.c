@@ -9,6 +9,7 @@
 #include "integrity.h"
 #include <aimee/learning/learning.h>
 #include "log.h"
+#include "module_commands.h"
 #include <aimee/learning/module_api.h>
 #include <time.h>
 
@@ -127,42 +128,23 @@ static int learning_apply_sink(const learning_proposal_t *proposal)
       return -1;
 
    int rc = 0;
-   if (strcmp(proposal->sink, "reranker") == 0)
+   if (strcmp(proposal->sink, "reranker") == 0 || strcmp(proposal->sink, "supersede") == 0 ||
+       strcmp(proposal->sink, "workflow") == 0)
    {
-      cJSON *js = cJSON_GetObjectItemCaseSensitive(action, "success");
-      cJSON *jc = cJSON_GetObjectItemCaseSensitive(action, "citation_ids");
-      int success =
-          cJSON_IsBool(js) ? (cJSON_IsTrue(js) ? 1 : 0) : (cJSON_IsNumber(js) ? js->valueint : 0);
-      int64_t ids[32];
-      int n = 0;
-      if (cJSON_IsArray(jc))
-      {
-         cJSON *item = NULL;
-         cJSON_ArrayForEach(item, jc)
-         {
-            if (n >= (int)(sizeof(ids) / sizeof(ids[0])))
-               break;
-            if (cJSON_IsNumber(item))
-               ids[n++] = (int64_t)item->valuedouble;
-         }
-      }
-      if (n == 0 && proposal->target_memory_id > 0)
-         ids[n++] = proposal->target_memory_id;
-      if (n > 0)
-         rc = memory_apply_feedback(success, ids, n);
-   }
-   else if (strcmp(proposal->sink, "supersede") == 0)
-   {
-      cJSON *jold = cJSON_GetObjectItemCaseSensitive(action, "old_memory_id");
-      cJSON *jnew = cJSON_GetObjectItemCaseSensitive(action, "new_content");
-      if (!cJSON_IsNumber(jold) || !cJSON_IsString(jnew) || !jnew->valuestring[0])
-         rc = -1;
-      else
-      {
-         memory_t out;
-         rc = memory_supersede((int64_t)jold->valuedouble, jnew->valuestring, 1.0, session_id(),
-                               &out);
-      }
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request, "operation", "learning-apply");
+      cJSON_AddStringToObject(request, "sink", proposal->sink);
+      cJSON_AddNumberToObject(request, "target_memory_id", (double)proposal->target_memory_id);
+      cJSON_AddStringToObject(request, "session_id", session_id());
+      cJSON_AddItemToObject(request, "action", cJSON_Duplicate(action, 1));
+      cJSON *response = NULL;
+      int dispatched =
+          aimee_module_commands_dispatch_internal("memory.runtime", request, &response);
+      const cJSON *status = cJSON_GetObjectItemCaseSensitive(response, "status");
+      rc = dispatched == 1 && cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 ? 0
+                                                                                               : -1;
+      cJSON_Delete(response);
+      cJSON_Delete(request);
    }
    else if (strcmp(proposal->sink, "rule") == 0)
    {
@@ -174,20 +156,6 @@ static int learning_apply_sink(const learning_proposal_t *proposal)
          rc = db2_collab_rules_propose(jtext->valuestring,
                                        cJSON_IsString(jreason) ? jreason->valuestring : "",
                                        "learning_router") >= 0
-                  ? 0
-                  : -1;
-   }
-   else if (strcmp(proposal->sink, "workflow") == 0)
-   {
-      cJSON *jp = cJSON_GetObjectItemCaseSensitive(action, "project");
-      cJSON *js = cJSON_GetObjectItemCaseSensitive(action, "signal_type");
-      cJSON *jr = cJSON_GetObjectItemCaseSensitive(action, "rule");
-      if (!cJSON_IsString(jp) || !cJSON_IsString(js) || !cJSON_IsString(jr) ||
-          !jp->valuestring[0] || !js->valuestring[0] || !jr->valuestring[0])
-         rc = -1;
-      else
-         rc = memory_upsert_workflow(jp->valuestring, js->valuestring, jr->valuestring, 1.0,
-                                     session_id()) > 0
                   ? 0
                   : -1;
    }
@@ -414,9 +382,18 @@ static void learning_fill_target_key(learning_signal_input_t *input)
    if (input->target_key[0] || input->target_memory_id <= 0)
       return;
 
-   memory_t memory;
-   if (memory_get(input->target_memory_id, &memory) == 0)
-      snprintf(input->target_key, sizeof(input->target_key), "%s", memory.key);
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "record");
+   cJSON_AddNumberToObject(args, "id", (double)input->target_memory_id);
+   if (aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) == 1)
+   {
+      const cJSON *record = cJSON_GetObjectItemCaseSensitive(reply, "memory");
+      const char *key = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "key"));
+      if (key)
+         snprintf(input->target_key, sizeof(input->target_key), "%s", key);
+   }
+   cJSON_Delete(reply);
+   cJSON_Delete(args);
 }
 
 int learning_router_record_signal(const learning_signal_input_t *raw_input,

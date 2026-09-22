@@ -2,6 +2,36 @@
 
 ## Purpose and non-goals
 
+The [memory behavior guide](../MEMORY.md) details Go ownership, retrieval validity,
+mutation admission, evaluation and caller migration.
+
+Shared KB searches admit semantic-only whole-record and derived-unit matches
+from the active versioned embedding catalog. The Go owner holds the rebuild lock
+while it checks the model identity, embeds the query and reads candidates. Current input hashes,
+parent visibility, exact scope, lifecycle, suppression, kind and tier are checked
+before limiting candidates. Wrong-width and zero vectors cannot enter the result.
+The channel retains the former whole-record cosine floor and dimension-dependent
+scale, including the `memory_semantic_floor_scale` configuration override, then
+fuses lexical and semantic ranks while preserving scope priority. Unit similarity
+adds the retired native type/kind intent boosts and weight contribution, with
+separate temporal/event/summary floors scaled to the deployed dimension. Intent
+matching uses whole terms, so `candidate` and `Chicago` do not imply a date query.
+
+Each semantic channel filters current input hashes, parent visibility, lifecycle,
+suppression, kind, tier and vector validity before its parent budget. Unit inputs
+include the source content, so editing a parent or unit invalidates stale unit
+vectors. Non-finite unit weights are excluded. Units group by parent using their
+best qualifying similarity; copies cannot add votes. Whole-record and unit hits
+then deduplicate by parent using the stronger score. Both channels use one query
+embedding and the same pinned serving identity. Unit and temporal lane counters
+identify their actual contributions.
+
+Model outages, identity changes and invalid query embeddings leave lexical recall
+available; a required SQL failure remains an operation failure. This path requires
+a pinned active version and a governed executor. Unversioned-vector admission and legacy semantic query expansion are deliberately
+retired from this path under the compatibility decisions above; this does not
+certify historical retrieval quality.
+
 Memory is one Go module deployed in two placements. `AIMEE_MODULE_PLACEMENT` is
 required for a running process:
 
@@ -12,7 +42,86 @@ The placement is validated before every data operation. The server's C bus
 adapter also replaces any supplied scope with `user`, so a client cannot use the
 server placement to address KB memory. The KB placement rejects user scope.
 
+The Go owner stores embedding generations in an unconstrained `vector` column,
+with dimensions recorded per version. Global DB2 dimension reset only discovers
+columns declared with a fixed vector dimension, so it cannot drop these Go-owned
+generations. Unknown dimension-bound tables still refuse the reset, including
+with force enabled. Rebuild/cutover of memory generations stays with Go.
+
 ## Public contracts
+
+Server KB store, list and supersede forward complete Go-rendered responses through
+the authenticated KB transport. The Go owner owns validation and server response
+shape; native callers no longer reconstruct these records through `memory_t`.
+The transport preserves numeric tokens and extra receipt fields, forwards owner
+`review_required`/`conflict` errors, and rejects missing/malformed owner envelopes.
+It copies command data fields, reconstructs host scope, and supplies authority
+from the verified host context; caller-supplied actor/authority/operation and scope
+control fields do not pass through. Supersede keeps its flat server envelope,
+while the ordinary KB command retains its nested memory response. Missing private
+memory still cannot trigger a KB fallback.
+
+
+Private store/get/list/search/delete/supersede/stats commands also forward complete
+Go envelopes through the Server placement. Their runtime transport quotes the
+JSON so the native parser cannot round record IDs or error receipts. Private
+get/delete/supersede accept canonical positive decimal-string int64 IDs;
+unsafe numeric IDs remain rejected. Supersede retains a typed integer in its flat
+Go response. The host adds HTTP error classification through its existing
+runtime-web provider without rewriting owner tokens. This transport change does
+not implement personal version history or durable mutation receipts.
+
+Personal review-list rendering now belongs to the Go owner through the private
+`user-review-list` runtime operation. It retains the Server envelope, both
+`lifecycle_state` and `lifecycle` fields, complete content and integer IDs. The
+Server only selects local-user versus explicit KB transport. KB review responses
+pass through as complete JSON, and restore returns its `id` and `restored` receipt
+from Go. The retired `kb_client_memory_review_list_json` and
+`kb_client_memory_restore` APIs are forbidden by the native boundary guard.
+Server restore still records its content-free transport audit; KB publishes the
+authoritative mutation audit. Owner refusals retain their error kinds, while
+missing or malformed responses are unavailable rather than successful empty
+reviews or a fabricated not-found result.
+
+Memory statistics and health console views are rendered by the Go owner through
+`view=console` on the existing public commands. Statistics optionally include
+effectiveness for JSON output; failures of the primary query remain failures.
+The CLI forwards Go's display/text fields and search timing view. Server KB stats
+forward the complete validated owner envelope, preserving integer tokens and
+error kinds. Missing or malformed replies never become healthy zero statistics.
+The four native stats, raw-stats, effectiveness and health client APIs are retired.
+PageRank timing fields use one process-local snapshot of successful Go scoring
+calls. The console timing envelope labels zero samples `unmeasured`, identifies
+its source as `go-pagerank`, and separates recall and explicit candidate-scoring
+sample counts. Timings publish only after the owner request commits; recall
+timing includes neighbor expansion, graph loading and reranking. These are not
+end-to-end retrieval or write-to-readable latency measurements.
+
+The same console view owns maintenance mode parsing, summary rendering and the
+vector-maintenance handoff indicator. The CLI passes mode names and watch timing;
+Go retains the comma/space mode vocabulary, numeric API modes, default-mode
+sentinel, force and dry-run behavior. Skipped cycles use the owner's boolean
+receipt, and failed maintenance cannot be rendered as a successful empty cycle.
+MCP also uses the Go-rendered summary and prune-removal notice, which distinguishes
+completed, skipped and dry-run outcomes. The private `maintenance-model-plan`
+runtime operation now owns MCP mode parsing, default expansion, prune removal,
+capability selection and no-op text. It ignores caller-supplied actor/capability
+fields and emits a new bounded request. Server enforces the selected capability
+against the authenticated connection and forwards only that request. The KB Go
+owner reapplies `model_policy` before execution: a prune-only request returns a
+no-op before reaching SQL, and zero/default modes become replay plus compact.
+Operator and scheduler maintenance retain their existing unrestricted path.
+The retired native mode-policy functions are forbidden by the boundary guard;
+MCP mutation-verb routing and other native clients still await migration.
+
+History and stale-memory inspection also render in Go. CLI history preserves its
+12-field record shape, MCP history preserves its six-field rows and empty/count
+envelope, and both carry complete content and int64 IDs as rendered text through
+native transport. The low-effectiveness console retains its 0.3 threshold and
+limit behavior. Stale provenance combines the 14-day unused-L2 and three-version
+queries with a 256-row cap each; a failed query never becomes an empty half of
+the report. JSON field filtering now handles top-level arrays while retaining
+number tokens. Four native history/stale reader APIs are retired and guarded.
 
 The supervised `aimee-module-memory` process is pure Go. It owns extraction,
 write gating, embedding, retrieval safety, reranking, command declaration, and
@@ -27,6 +136,7 @@ the scoped memory data API.
 | `reranking` | 5893 | confidence-band decision |
 | `command-declaration` | 5894 | canonical command inventory |
 | `memory-data` | 5895 | scoped CRUD/search, typed-fact extraction and recall, temporal checks, feedback, and maintenance |
+| `command-execution` | 5896 | public private-memory get, store, list, search, delete, supersede, and stats |
 
 The data stage reaches PostgreSQL over the module bus with the storage-only
 principal 73. It owns neither a DSN nor a database connection. Both placements
@@ -39,6 +149,9 @@ The descriptor declares these dependencies. Server and KB adapters consume the
 same `memory` process contract, while scoped database operations use the shared
 PostgreSQL bus service rather than a caller-owned connection.
 
+- `audit`: records governed memory actions through the audit publisher.
+- `egress`: supplies governed access to external memory providers.
+- `postgres`: executes owner-scoped storage operations over the module bus.
 - `config`: validated memory, embedding, and retrieval policy configuration.
 - `ir`: gateway request/response integration for the memory stages.
 - `module-runtime`: process attachment, principal identity, and bounded event calls.
@@ -119,19 +232,33 @@ phases for claim, parse, and finish. See the published testing qualification in
 Required policy stages do not silently run a second implementation. Extraction
 returns an error, write gating defers, and PII injection fails closed when the
 Go module is unavailable. The cheap recall gate fails open because omitting that
-optimization must not suppress a valid recall. Every linker-live legacy ABI
-operation now crosses the Go data stage; there is no unavailable shim.
+optimization must not suppress a valid recall. Supported production memory data operations cross the Go owner. The ownership ledger classifies every original native file/API and each external
+native-name finding; native fixtures prove transport, while the Go owner tests
+prove memory behavior.
 
 The Go package tests cover placement isolation, scope expansion, CRUD,
 maintenance, workflow identity, recall gating, extraction, ontology, embedding,
-typed-fact planning/grounding, and PII behavior. C tests cover only message
-framing and host/connection integration.
+typed-fact planning/grounding, and PII behavior. Active C transport tests cover message framing and host/connection integration;
+retired-engine fixtures are not substitutes for Go owner regressions.
+The required `db2-process-replay` CI job initializes the packaged DB2 owner,
+then runs `make -C src memory-owner-replay-check` with separate packaged-replay
+and empty scratch connections. `AIMEE_DB2_URL`, `AIMEE_MEMORY_EVAL_URL` and
+`AIMEE_DB_TEST_URL` are required; the evaluator provisions isolated databases.
+The target runs the full memory, isolated evaluator and module race suites with
+required PostgreSQL variables, including the restricted-role replay. Missing
+DSNs fail instead of skipping. The existing cross-language conformance gate
+now also kills and restarts the
+Go memory process in both placements while retaining its C host/callers. It
+checks unavailable discovery after reaping and reruns host and Go-client parity
+after restart. This store-free process test does not prove durable database
+recovery, real-provider quality or the complete surface/restart/failure matrix.
+
 Descriptor validation enforces the source inventory, and both `aimee-server`
 and `aimee-kb` must link without any retired C memory implementation.
 
 ## Operational diagnostics
 
-Check module attachment, placement, PostgreSQL readiness, and embedding health
+Check `memory` module attachment, placement, PostgreSQL readiness, and embedding health
 when recall is unavailable. Personal data calls receive a bounded five-second
 budget through the Server adapter; the regression holds a real database lock
 for 1.5 seconds and requires a successful `recall` with the exact canary.
@@ -139,31 +266,89 @@ An expired call still fails rather than retrying indefinitely or changing stores
 
 ## Compatibility
 
-C is restricted to transport and host integration:
+The final native-file dispositions separate external protocol consumers from
+memory implementation. The C bus itself is unchanged by this cutover.
 
-- `memory_data_bus.c`, `memory_domain_bus.c`, `memory_domain_runtime_bus.c`, `memory_embed_bus.c`,
-  `memory_extract_patterns.c`, `memory_content_gate_bus.c`,
-  `memory_fact_gate.c`, and `memory_pii_gate.c` encode/decode bounded event-bus
-  messages. `memory_scope_connection.c` only binds caller scope to an already
-  prepared connection request.
-- `gw_stage_memory.c` connects the gateway IR stage to the module.
-- `server_hooks.c` connects retired local memory-file writes to the Go policy over
-  memory stage 7; classification and shell-write detection live in `redirect.go`.
-- `fact_recall.c` preserves the old DB2 ABI but is now only a stage-7 JSON
-  adapter. Typed-fact SQL, entity matching, ordering, formatting, and PII
-  decisions live in `fact_recall.go`.
-- `kb_memory_facts.c` connects the KB drain to its existing curator provider and
-  transactional fact-commit connection. Job leasing/reclaim, retry policy,
-  exponential jittered backoff, prompt construction, deterministic extraction, model-output parsing,
-  grounding, relation canonicalization, kind selection, and provenance are in
-  `memory_facts.go`.
+| Retired memory-tree file | Disposition |
+|---|---|
+| `memory_data_bus.c` | Its only production callers are native benchmark hosts. Their request/response transport is now owned by `src/modules/benchmarks/agent_eval_memory_transport.c`; it calls the existing C bus and contains no memory storage, ranking or lifecycle implementation. Memory's producer and consumer remain Go. |
+| `include/aimee/memory/module_api.h` | Host stage identifiers live in `src/headers/memory_stage_contract.h`, outside the memory module. Go conformance tests compare every identifier with the owner; event durability coverage follows the host contract. |
+| `memory_ontology.h` | Persisted graph codes shared with native indexing belong to `src/modules/db2/include/aimee/db2/graph_kinds.h`. They contain enum declarations only. Go conformance tests pin node and relation codes to the Go ontology. |
+| `memory_core_internal.h` | Deleted obsolete declarations for the removed native engine. The unregistered lane-outcome fixture is ported to Go and runs in the normal package tests. The native performance harness explicitly reports its retired memory cases unavailable. |
 
-`scripts/check_memory_c_boundary.py` freezes that boundary: only the ten named
-bus/integration translation units may exist under the memory module, none may
-include a DB client, and DB2 may not regain a `memory_*.c` implementation.
-The same check prevents the former POSIX/Windows regex-policy files and the
-retired in-process C query rewriter from returning; those gates now use
-`content_gate.go` through the bus adapter.
+`check_memory_c_boundary.py` also forbids database access from the benchmark
+transport and rejects restored native memory policy in other owners. Existing
+external C transport callers may remain; they cannot replace an unavailable Go
+owner with local memory behavior. There are no forwarding memory headers or
+native memory include roots in Make/CMake.
+
+The historical `check_memory_go_only.py --report` inventory remains available
+with its original all-native-callers criterion and immutable baseline. It still
+reports external C callers and shared types, so its total is not the module's
+native-file count. The default audit has not been weakened or made to pass by
+renaming retained host interfaces.
+
+Recall lane counters now live in Go and are exposed by `recall-metrics` as
+`lane_counters`. They count unique eligible candidates and the final store
+selection for lexical, semantic and graph lanes, including overlapping sources
+and a shutout when a populated lane supplies no selected record. Empty lanes
+emit no keys. Counters are process-local, concurrency-safe and diagnostic only;
+they are not evidence of final context packing, transaction commit or provider
+delivery. Route-qualified counts distinguish lexical from hybrid contributions.
+
+The native `bench-perf` memory cases depended on deleted in-process functions.
+They now emit null timings with `status=unavailable`, exit 2, and cannot save or
+certify a baseline. Use `aimee-memory-eval` for isolated Go corpus measurements;
+its results are not interchangeable with the old in-process timing baseline.
+The private, host-only `runtime` operation `pagerank` now scores an explicit
+candidate set in Go. Supply `ids`, optional `iterations` (default 6, range 1–16),
+`weight` (default 0.35, range greater than zero through 10), and `relations`
+(default `depends_on`, `related_to`, `co_edited`, `fixes`; an empty list accepts
+all nonempty relation labels). Normal project/workspace or exact-scope filtering
+applies before graph work; suppressed and inactive records cannot contribute.
+The work budget is 128 unique positive IDs and 8192 links. Oversized graphs and
+SQL errors fail instead of producing partial scores. IDs retain int64 precision.
+
+The Go kernel matches captured output from the retired C implementation:
+undirected adjacency, parallel-edge multiplicity, damping 0.85, uniform dangling
+mass, and maximum-normalized bonuses. Successful owner calls record graph-query
+plus kernel time only after the request transaction commits. Measurements are
+process-local, not an end-to-end retrieval latency or a replacement for the old
+native baseline. `BenchmarkPageRankKernel50` measures CPU work alone. This private
+operation makes scoring available to the isolated evaluator.
+
+PageRank recall is disabled by default. The KB owner honors the existing
+`memory_pagerank_enabled`, `memory_pagerank_iterations`, `memory_pagerank_weight`
+and comma-separated `memory_pagerank_relations` settings, with the corresponding
+`AIMEE_MEMORY_PAGERANK_*` environment overrides. Defaults match the private scorer.
+Environment integers clamp to the existing enable/iteration bounds; malformed
+numbers, non-finite/out-of-range weights and invalid relation filters fail the
+request. A settings-provider failure also fails the lookup. Caller JSON cannot
+activate or override the deployment policy. Personal memory bypasses KB graph
+configuration entirely.
+
+When enabled, retrieval collects up to four times the requested result count
+(minimum 16, maximum 128), applies its existing semantic/graph/negation fusion,
+and adds eligible one-hop memory-link neighbors while space remains. Both ends
+must satisfy scope, kind, tier, lifecycle and suppression checks before links can
+consume the 8192-link neighbor budget. Candidate scoring has a separate 8192-link
+budget. Overflow and required SQL failures fail the lookup, without successful
+fallback metrics. Candidate visibility is checked again before graph scoring.
+Project/workspace/global priority precedes the final score and result limit.
+
+The versioned `rrf60-pagerank-v1` integration adds the kernel bonus divided by 61
+to the existing Go reciprocal-rank/negation score. Link-only neighbors start with
+zero base contribution. Diagnostics and traces report the actual `retrieval_base`,
+`pagerank` contribution and total used in that decision, rather than recomputing
+a text score. The answer-support gate still uses its existing text-support scale;
+graph popularity is not corroborating evidence. Disabling PageRank restores the
+previous retrieval path and does not query memory links for this feature.
+
+This integration preserves the native PageRank kernel and its opt-in setting,
+but does not reproduce the retired C ranker's different score units. Historical
+end-to-end ranking parity, legacy query/candidate expansion and unversioned-vector
+admission remain separate work. No production enablement or quality improvement
+is claimed without paired evaluation.
 
 There is no C memory engine and no C DB2 `memory_*.c` implementation. A legacy
 operation must be added to the Go data handler before its adapter may report

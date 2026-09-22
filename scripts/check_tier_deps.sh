@@ -209,7 +209,7 @@ path_scan 'sqlite db postgres storage sql|"postgres"' \
 path_scan 'legacy no-gate behaviour|legacy DBs may|legacy edge|legacy rows|/\* legacy \*/' \
   "memory source comments expose legacy compatibility labels" \
   src/modules/memory/memory_core_tiers.inc src/modules/memory/memory_core_crud.inc src/modules/memory/memory_episodes.c \
-  src/modules/memory/memory_ontology.h
+  src/modules/db2/include/aimee/db2/graph_kinds.h
 path_scan 'Untagged memories \(legacy\)|legacy promote/demote cycle|legacy hybrid|legacy `symbols` table' \
   "source comments expose legacy storage/route labels" \
   src/modules/memory/memory_assemble.c src/modules/memory/memory_maintenance.c src/headers/config.h src/cmd_doctor.c

@@ -53,7 +53,8 @@ class DeclarationLedgerTests(unittest.TestCase):
         )
         pgvector = [row for row in value["declarations"] if row["symbol"].startswith("pgvec_")
                     and row["status"] == "reviewed"]
-        self.assertEqual(len(pgvector), 61)
+        # Thirteen memory pgvector declarations retired with the Go owner.
+        self.assertEqual(len(pgvector), 48)
         self.assertTrue(all(row["review"]["disposition"] == "private-db2"
                             for row in pgvector))
         health = next(row for row in value["declarations"]

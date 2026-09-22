@@ -19,9 +19,7 @@
 #include "modules/db2/c/db2_internal.h"
 #include "modules/db2/c/db_postgres.h"
 #include "modules/db2/c/entity_edges.h"
-#include "modules/memory/memory_ontology.h"
 #include "modules/db2/c/db2_learning.h"
-#include "modules/learning/learning_evidence.h" /* learning_evidence_write_event — session_summary emission */
 #include "modules/learning/learning_implicit.h"
 #include "memory.h"
 #include "modules/db2/c/mining.h"
@@ -128,38 +126,6 @@ cJSON *db2_kb_service_tool_registry_lookup_json(const char *name)
       cJSON_AddStringToObject(resp, "input_schema", entry.input_schema);
       cJSON_AddStringToObject(resp, "side_effect", entry.side_effect);
       cJSON_AddBoolToObject(resp, "enabled", entry.enabled ? 1 : 0);
-   }
-   return resp;
-}
-
-cJSON *db2_kb_service_relations_schema_list_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON *rows = cJSON_AddArrayToObject(resp, "rows");
-   /* Served from the ontology's static table, which is what
-    * memory_ontology_validate() actually enforces.  This used to read
-    * `memory_relation_schema`: a table with DDL and an index but no writer
-    * anywhere in the tree, so the surface returned an empty list on every
-    * deployment and the client quietly omitted the section rather than
-    * reporting it had nothing.  Reading the enforcing table means the
-    * published schema cannot drift from the enforced one. */
-   const memory_ontology_rule_t *rules = NULL;
-   int n = memory_ontology_rules(&rules);
-   for (int i = 0; i < n && rules; i++)
-   {
-      cJSON *row = cJSON_CreateObject();
-      if (!row)
-         break;
-      cJSON_AddNumberToObject(row, "relation_id", (double)rules[i].rel);
-      cJSON_AddNumberToObject(row, "subject_kind", (double)rules[i].sk);
-      cJSON_AddNumberToObject(row, "object_kind", (double)rules[i].ok);
-      cJSON_AddStringToObject(row, "relation", memory_ontology_relation_to_text(rules[i].rel));
-      cJSON_AddStringToObject(row, "subject", memory_ontology_node_kind_to_text(rules[i].sk));
-      cJSON_AddStringToObject(row, "object", memory_ontology_node_kind_to_text(rules[i].ok));
-      cJSON_AddItemToArray(rows, row);
    }
    return resp;
 }
@@ -755,56 +721,12 @@ cJSON *db2_kb_service_learning_record_application_json(const cJSON *req)
    return resp;
 }
 
-cJSON *db2_kb_service_anti_pattern_extract_from_feedback_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int n = anti_pattern_extract_from_feedback();
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", n);
-   return resp;
-}
-
-cJSON *db2_kb_service_anti_pattern_extract_from_failures_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int n = anti_pattern_extract_from_failures();
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", n);
-   return resp;
-}
-
-cJSON *db2_kb_service_anti_pattern_escalate_json(int hit_threshold)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int n = anti_pattern_escalate(hit_threshold);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", n);
-   return resp;
-}
-
 cJSON *db2_kb_service_rules_decay_json(void)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
    int n = db2_rules_decay();
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", n);
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_learn_style_json(void)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   int n = memory_learn_style();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddNumberToObject(resp, "count", n);
    return resp;
@@ -1012,31 +934,6 @@ cJSON *db2_kb_service_anti_pattern_delete_json(int64_t id)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_fold_session_json(const char *session_id)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   char summary[256] = "";
-   int rc = memory_fold_session(session_id ? session_id : "", summary, sizeof(summary));
-
-   /* Surface the folded session digest as a `session_summary` evidence artifact
-    * so the idle-reflection scheduler and the evidence-synth drain have a real
-    * candidate stream to work over — this is the producer that was otherwise
-    * missing. Cheap (one artifact write from the digest already computed, no LLM
-    * on this path), idempotent via content-hash dedup, and emitted unconditionally
-    * like other evidence capture; the LLM-heavy consumers are separately gated. */
-   if (rc >= 0 && summary[0])
-      learning_evidence_write_event("session_summary", "session", session_id ? session_id : "",
-                                    summary, "kb.fold_session", NULL, 0);
-
-   cJSON_AddStringToObject(resp, "status", rc < 0 ? "error" : "ok");
-   if (rc < 0)
-      cJSON_AddStringToObject(resp, "message", "session fold was refused or incomplete");
-   cJSON_AddNumberToObject(resp, "count", rc < 0 ? 0 : rc);
-   return resp;
-}
-
 cJSON *db2_kb_service_rules_delete_json(int id)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -1095,33 +992,6 @@ cJSON *db2_kb_service_directive_expire_session_json(void)
       return NULL;
    (void)db2_rules_delete_by_directive_type("session");
    cJSON_AddStringToObject(resp, "status", "ok");
-   return resp;
-}
-
-cJSON *db2_kb_service_memory_scan_conversations_json(const cJSON *dirs)
-{
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   if (!cJSON_IsArray(dirs))
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "missing dirs array");
-      return resp;
-   }
-   char buf[8][MAX_PATH_LEN];
-   int n = 0;
-   const cJSON *d;
-   cJSON_ArrayForEach(d, dirs)
-   {
-      if (n >= 8)
-         break;
-      if (cJSON_IsString(d))
-         snprintf(buf[n++], MAX_PATH_LEN, "%s", d->valuestring);
-   }
-   int rc = memory_scan_conversations(buf, n);
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", rc);
    return resp;
 }
 

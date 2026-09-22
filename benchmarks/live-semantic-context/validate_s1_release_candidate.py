@@ -77,6 +77,12 @@ def build_plan(makefile: str, rules: str) -> list[str]:
 def build_files_match(candidate_commit: str) -> bool:
     candidate = [git_output("show", f"{candidate_commit}:{path}") for path in BUILD_PATHS]
     current = [(ROOT / path).read_text() for path in BUILD_PATHS]
+    # The retired memory include directory is absent and supplied no LSP
+    # inputs. Remove only that exact obsolete flag from the frozen recipe;
+    # every remaining compiler argument, dependency and command must match.
+    if any(p.is_file() for p in (ROOT / "src/modules/memory/include").rglob("*")):
+        return False
+    candidate[0] = candidate[0].replace(" -Imodules/memory/include", "")
     return build_plan(*candidate) == build_plan(*current)
 # The proxy adds a thin-client source and a separate test prerequisite. Neither
 # changes the LSP probe's inputs or recipe. Do not exempt entire Makefiles:

@@ -22,7 +22,8 @@
     "server-go/modules/postgres/storage/unlock_linux.go",
     "server-go/modules/postgres/storage/unlock_other.go",
     "server-go/modules/postgres/storage/volume_linux.go",
-    "server-go/modules/postgres/credentials.go"
+    "server-go/modules/postgres/credentials.go",
+    "server-go/modules/postgres/evaluation.go"
   ],
   "go_tests": [
     "server-go/modules/postgres/checksum_test.go",
@@ -34,7 +35,8 @@
     "server-go/modules/postgres/storage/migration_linux_test.go",
     "server-go/modules/postgres/storage/plain_linux_test.go",
     "server-go/modules/postgres/storage/storage_linux_test.go",
-    "server-go/modules/postgres/credentials_test.go"
+    "server-go/modules/postgres/credentials_test.go",
+    "server-go/modules/postgres/evaluation_test.go"
   ],
   "public_headers": [
     "src/modules/postgres/include/aimee/postgres/module_api.h"

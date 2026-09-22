@@ -35,7 +35,6 @@
  * which is the property the fix depends on.
  */
 #include "../modules/db2/c/lifecycle.h"
-#include "../modules/memory/memory_core_internal.h"
 #include "embedder_probe.h"
 #include <assert.h>
 #include <stdio.h>

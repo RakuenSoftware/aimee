@@ -1,0 +1,9 @@
+{
+  "reference_receipt_sha256": "c12592cce7feebd0d64078977e4e85a27ed5eaead2cbe411c9b6ac696bef9de8",
+  "candidate_receipt_sha256": "9a7d6197d3e6e98d088a41f158a23c57a7a10fff86f7e456c078934dc5f52659",
+  "comparison": "Complete ordered corpus IDs returned at limit=20; no truncation or set-only comparison",
+  "queries": 105,
+  "rounds_including_warmup": 4,
+  "ranked_lists_compared": 420,
+  "identical": 420
+}

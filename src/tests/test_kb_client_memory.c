@@ -12,8 +12,8 @@
 #endif
 
 #include "kb_client.h"
+#include "kb_client_pii.h"
 #include "runtime_secret.h"
-#include "db1_client/user_memory.h"
 #include "db1_client/caches.h"
 #include "support/mock_agent_http.h"
 #include "cJSON.h"
@@ -22,14 +22,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* The classifier itself belongs to the memory module. This suite exercises the
  * client-side no-transmit boundary with a deterministic module answer. */
-int gate_check_sensitive(const char *content, char *redacted, size_t redacted_cap)
+static const char *screen_reply;
+static int screen_transport = 1;
+int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
 {
-   (void)redacted;
-   (void)redacted_cap;
-   return content && (strstr(content, "password") || strstr(content, "hunter2trustno1")) ? 2 : 0;
+   assert(strcmp(method, "memory.screen_content") == 0);
+   if (screen_reply || screen_transport != 1)
+   {
+      *result = screen_reply ? cJSON_Parse(screen_reply) : NULL;
+      return screen_transport;
+   }
+   const char *content = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "content"));
+   *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(*result, "status", "ok");
+   cJSON_AddStringToObject(
+       *result, "verdict",
+       content && (strstr(content, "password") || strstr(content, "hunter2trustno1")) ? "reject"
+                                                                                      : "allow");
+   return 1;
 }
 
 static int activation_writes;
@@ -58,11 +72,15 @@ int db1_context_snapshot_activation(const char *session_id_arg,
                                     char (*out)[DB1_CONTEXT_ACTIVATION_ROW_LEN], int max)
 {
    assert(strcmp(session_id_arg, "activation-client-session") == 0);
-   assert(max >= 3);
+   assert(max >= 7);
    snprintf(out[0], DB1_CONTEXT_ACTIVATION_ROW_LEN, "0 7");
    snprintf(out[1], DB1_CONTEXT_ACTIVATION_ROW_LEN, "41 6");
    snprintf(out[2], DB1_CONTEXT_ACTIVATION_ROW_LEN, "52 3");
-   return 3;
+   snprintf(out[3], DB1_CONTEXT_ACTIVATION_ROW_LEN, "9007199254740993 6");
+   snprintf(out[4], DB1_CONTEXT_ACTIVATION_ROW_LEN, "9223372036854775808 1");
+   snprintf(out[5], DB1_CONTEXT_ACTIVATION_ROW_LEN, "12 3junk");
+   snprintf(out[6], DB1_CONTEXT_ACTIVATION_ROW_LEN, "13 9223372036854775808");
+   return 7;
 }
 
 int db1_context_snapshot_insert_turn(const char *session_id_arg, int64_t memory_id,
@@ -76,17 +94,24 @@ int db1_context_snapshot_insert_turn(const char *session_id_arg, int64_t memory_
    return 0;
 }
 
-int db1_user_memory_any(void)
+static int composition_calls;
+static int composition_transport = 1;
+static const char *composition_reply;
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
-   return 0;
-}
-
-void db1_user_memory_merge_into_array(cJSON *arr, db1_user_recall_section_t section,
-                                      const char *why)
-{
-   (void)arr;
-   (void)section;
-   (void)why;
+   assert(strcmp(method, "memory.runtime") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
+                 "compose-recall") == 0);
+   const char *shared = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "shared_json"));
+   assert(shared != NULL);
+   composition_calls++;
+   *result = NULL;
+   if (composition_transport != 1)
+      return composition_transport;
+   *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(*result, "status", "ok");
+   cJSON_AddStringToObject(*result, "json", composition_reply ? composition_reply : shared);
+   return 1;
 }
 
 /* Transport failure: no response body, sub-100 status. kb_v1_action_request
@@ -118,6 +143,52 @@ static int empty_ok_post_handler(const char *url, const char *auth_header, const
       *response_buf = strdup("{\"status\":\"ok\",\"memories\":[],\"facts\":[],\"results\":[],"
                              "\"conflicts\":[],\"edges\":[],\"relations\":[],\"links\":[]}");
    return 200;
+}
+
+static int expected_action_timeout;
+static const char *expected_action;
+static int action_refused;
+static int budgeted_action_post(const char *url, const char *auth_header, const char *body,
+                                char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)extra_headers;
+   assert(strstr(url, expected_action));
+   assert(auth_header && strstr(auth_header, "test-token"));
+   assert(timeout_ms == expected_action_timeout);
+   cJSON *request = cJSON_Parse(body);
+   assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(request, "limit")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "scope_context")));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "project")),
+                 "budget-test") == 0);
+   cJSON_Delete(request);
+   *response_buf = strdup(action_refused ? "{\"status\":\"error\",\"message\":\"scope refused\"}"
+                                         : "{\"status\":\"ok\",\"rebuilt\":12}");
+   return action_refused ? 403 : 200;
+}
+
+static void test_generic_action_preserves_budget_auth_and_refusal(void)
+{
+   const char *actions[] = {"memory.reindex", "memory.rebuild", "memory.repair"};
+   mock_agent_http_set_post_handler(budgeted_action_post);
+   kb_client_memory_scope_context_set("", "budget-test", 0);
+   for (int i = 0; i < 3; i++)
+   {
+      expected_action = actions[i];
+      expected_action_timeout = (i == 0 ? 5 : 10) * 60 * 1000;
+      for (action_refused = 0; action_refused <= 1; action_refused++)
+      {
+         cJSON *request = cJSON_CreateObject();
+         cJSON_AddNumberToObject(request, "limit", 12);
+         kb_client_memory_scope_context_apply(request);
+         char *response =
+             kb_v1_action_request_with_timeout(expected_action, request, expected_action_timeout);
+         assert(response);
+         assert(strstr(response, action_refused ? "scope refused" : "rebuilt"));
+         free(response);
+      }
+   }
+   kb_client_memory_scope_context_clear();
+   mock_agent_http_reset();
 }
 
 static int single_miss_post_handler(const char *url, const char *auth_header, const char *body,
@@ -200,9 +271,12 @@ static int activation_recall_post_handler(const char *url, const char *auth_head
    (void)timeout_ms;
    (void)extra_headers;
    assert(url && strstr(url, "/v1/actions/memory.recall") != NULL);
-   assert(body && strstr(body, "\"current_turn\":7") != NULL);
-   assert(strstr(body, "\"memory_id\":41") != NULL);
-   assert(strstr(body, "\"last_turn\":6") != NULL);
+   assert(body && strstr(body, "\"current_turn\":\"7\"") != NULL);
+   assert(strstr(body, "\"memory_id\":\"41\"") != NULL);
+   assert(strstr(body, "\"last_turn\":\"6\"") != NULL);
+   assert(strstr(body, "\"memory_id\":\"9007199254740993\"") != NULL);
+   assert(strstr(body, "9223372036854775808") == NULL);
+   assert(strstr(body, "3junk") == NULL);
    if (response_buf)
       *response_buf =
           strdup("{\"status\":\"ok\",\"recall\":{\"identity\":[{\"memory_id\":73,"
@@ -226,26 +300,61 @@ static void test_recall_carries_and_records_production_activation(void)
    assert(activation_writes == 1);
    assert(activation_write_id == 73);
    assert(activation_write_turn == 7);
+   int calls = composition_calls;
+   json = kb_client_memory_recall_shared_json("shared only", 128, 0);
+   assert(json != NULL && composition_calls == calls);
+   free(json);
+   composition_reply = "{\"status\":\"ok\",\"recall\":{\"identity\":[{\"memory_id\":"
+                       "9007199254740993,\"text\":\"個人\"}]}}";
+   json = kb_client_memory_recall_json("composed", 128, 0);
+   assert(json != NULL && strcmp(json, composition_reply) == 0);
+   free(json);
+   composition_reply = "{\"status\":\"error\",\"kind\":\"unavailable\"}";
+   int writes = activation_writes;
+   json = kb_client_memory_recall_json("failed composition", 128, 0);
+   assert(json != NULL && strcmp(json, composition_reply) == 0 && activation_writes == writes);
+   free(json);
+   composition_reply =
+       "{\"status\":\"ok\",\"recall\":{\"identity\":["
+       "{\"memory_id\":9007199254740993,\"handle\":\"kb:memory:9007199254740993\",\"activation_"
+       "managed\":true},"
+       "{\"memory_id\":9007199254740993,\"handle\":\"kb:memory:9007199254740993\",\"activation_"
+       "managed\":true},"
+       "{\"memory_id\":9007199254740993,\"activation_managed\":true},"
+       "{\"memory_id\":73.5,\"activation_managed\":true},"
+       "{\"memory_id\":73,\"handle\":\"user:memory:73\",\"activation_managed\":true},"
+       "{\"memory_id\":73,\"handle\":\"kb:memory:9223372036854775808\",\"activation_managed\":true}"
+       ","
+       "{\"memory_id\":73,\"handle\":\"kb:memory:073\",\"activation_managed\":true}]}}";
+   json = kb_client_memory_recall_json("exact activation receipts", 128, 0);
+   assert(json && strcmp(json, composition_reply) == 0);
+   free(json);
+   assert(activation_writes == writes + 1 && activation_write_id == INT64_C(9007199254740993));
+   writes = activation_writes;
+   composition_reply = NULL;
+   composition_transport = -1;
+   assert(kb_client_memory_recall_json("missing local owner", 128, 0) == NULL);
+   assert(activation_writes == writes);
+   composition_transport = 1;
    mock_agent_http_reset();
    printf("  PASS: test_recall_carries_and_records_production_activation\n");
 }
 
 static void test_readers_distinguish_unreachable_from_empty(void)
 {
-   memory_t mems[8];
-   search_result_t windows[8];
-   conflict_t conflicts[8];
-   char *clusters[] = {"hello"};
 
    /* --- kb unreachable: every count-returning reader reports < 0 --- */
    kb_client_dependency_reset_for_tests();
    mock_agent_http_set_post_handler(unreachable_post_handler);
-   assert(kb_client_memory_list(NULL, NULL, 8, mems, 8) < 0);
-   assert(kb_client_memory_find_facts("q", 8, mems, 8) < 0);
-   assert(kb_client_memory_find_facts_scoped("q", NULL, NULL, 8, mems, 8) < 0);
-   assert(kb_client_memory_find_facts_visible("q", NULL, NULL, 8, mems, 8) < 0);
-   assert(kb_client_memory_search(clusters, 1, 8, windows, 8) < 0);
-   assert(kb_client_memory_list_conflicts(conflicts, 8) < 0);
+   char *failed = kb_v1_action_request("memory.find_facts_visible",
+                                       cJSON_Parse("{\"query\":\"q\",\"limit\":8}"));
+   cJSON *failure = failed ? cJSON_Parse(failed) : NULL;
+   assert(failure &&
+          strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(failure, "status")),
+                 "unavailable") == 0);
+   assert(!cJSON_GetObjectItemCaseSensitive(failure, "facts"));
+   cJSON_Delete(failure);
+   free(failed);
 
    /* --- healthy but empty: same readers report exactly 0 (not < 0) --- */
    /* Model dependency recovery between the two independent fixtures. Without
@@ -254,12 +363,16 @@ static void test_readers_distinguish_unreachable_from_empty(void)
     * classification. Breaker recovery itself is covered by kb-client-search. */
    kb_client_dependency_reset_for_tests();
    mock_agent_http_set_post_handler(empty_ok_post_handler);
-   assert(kb_client_memory_list(NULL, NULL, 8, mems, 8) == 0);
-   assert(kb_client_memory_find_facts("q", 8, mems, 8) == 0);
-   assert(kb_client_memory_find_facts_scoped("q", NULL, NULL, 8, mems, 8) == 0);
-   assert(kb_client_memory_find_facts_visible("q", NULL, NULL, 8, mems, 8) == 0);
-   assert(kb_client_memory_search(clusters, 1, 8, windows, 8) == 0);
-   assert(kb_client_memory_list_conflicts(conflicts, 8) == 0);
+   char *raw = kb_v1_action_request("memory.find_facts_visible",
+                                    cJSON_Parse("{\"query\":\"q\",\"limit\":8}"));
+   cJSON *visible = raw ? cJSON_Parse(raw) : NULL;
+   assert(visible &&
+          strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(visible, "status")), "ok") ==
+              0);
+   const cJSON *facts = cJSON_GetObjectItemCaseSensitive(visible, "facts");
+   assert(cJSON_IsArray(facts) && cJSON_GetArraySize(facts) == 0);
+   cJSON_Delete(visible);
+   free(raw);
 
    mock_agent_http_reset();
    printf("  PASS: test_readers_distinguish_unreachable_from_empty\n");
@@ -267,60 +380,67 @@ static void test_readers_distinguish_unreachable_from_empty(void)
 
 static void test_ordered_readers_propagate_active_project_context(void)
 {
-   memory_t mems[8];
-   memory_diagnostic_t diagnostics[2];
-   memory_relation_t relations[8];
-   memory_entity_profile_t profile;
-   memory_answer_result_t answer;
 
    scoped_request_count = 0;
    mock_agent_http_set_post_handler(scoped_ok_post_handler);
    kb_client_memory_scope_context_set("active-workspace", "active-project", 0);
 
-   (void)kb_client_memory_find_facts("q", 8, mems, 8);
-   (void)kb_client_memory_find_facts_ex("q", 8, mems, 8, "on");
-   (void)kb_client_memory_list(NULL, NULL, 8, mems, 8);
-   char *clusters[] = {"q"};
-   search_result_t windows[2];
-   (void)kb_client_memory_search(clusters, 1, 2, windows, 2);
-   (void)kb_client_memory_find_facts_visible("q", NULL, NULL, 8, mems, 8);
+   cJSON *visible = cJSON_Parse("{\"query\":\"q\",\"limit\":8}");
+   kb_client_memory_scope_context_apply(visible);
+   free(kb_v1_action_request("memory.find_facts_visible", visible));
    char *json = kb_client_memory_assemble_context("q");
    free(json);
    json = kb_client_memory_assemble_typed_context("q");
    free(json);
    json = kb_client_memory_recall_json("q", 128, 0);
    free(json);
-   json = kb_client_memory_alerts_json(NULL);
+   cJSON *alerts = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(alerts);
+   free(kb_v1_action_request("memory.alerts", alerts));
+   cJSON *briefing = cJSON_Parse("{\"limit_tokens\":128}");
+   kb_client_memory_scope_context_apply(briefing);
+   free(kb_v1_action_request("memory.briefing", briefing));
+   const char *graph_commands[] = {"memory.entity_profile", "memory.entity_edges",
+                                   "memory.search_graph", "memory.search_graph_as_of"};
+   for (size_t i = 0; i < sizeof(graph_commands) / sizeof(graph_commands[0]); i++)
+   {
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "entity", "entity");
+      cJSON_AddStringToObject(request, "query", "entity");
+      cJSON_AddStringToObject(request, "as_of", "2026-07-29");
+      json = kb_v1_action_request(graph_commands[i], request);
+      free(json);
+   }
+   cJSON *ask = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(ask);
+   cJSON_AddStringToObject(ask, "query", "q");
+   json = kb_v1_action_request("memory.ask", ask);
    free(json);
-   cJSON *briefing = kb_client_memory_briefing(128);
-   cJSON_Delete(briefing);
-   (void)kb_client_memory_get_entity_profile("entity", &profile);
-   (void)kb_client_memory_get_entity_edges("entity", 8, relations, 8);
-   (void)kb_client_memory_search_graph("entity", 8, relations, 8);
-   (void)kb_client_memory_search_graph_as_of("entity", "2026-07-29", 8, relations, 8);
-   (void)kb_client_memory_ask("q", NULL, NULL, 8, &answer);
-   json = kb_client_memory_context_block("q", "general", 8);
-   free(json);
-   (void)kb_client_memory_diagnose("q", 2, diagnostics, 2);
-   json = kb_client_memory_facts("q");
-   free(json);
-   (void)kb_client_memory_top_l2_facts(mems, 8);
-   (void)kb_client_memory_list_session_scope_priority(mems, 8);
-   (void)kb_client_memory_list_session_scope_priority_like("%q%", mems, 8);
+
+   const char *context_commands[] = {"memory.context_block", "memory.facts"};
+   for (size_t i = 0; i < sizeof(context_commands) / sizeof(context_commands[0]); i++)
+   {
+      cJSON *request = cJSON_CreateObject();
+      kb_client_memory_scope_context_apply(request);
+      cJSON_AddStringToObject(request, "query", "q");
+      json = kb_v1_action_request(context_commands[i], request);
+      free(json);
+   }
+   cJSON *diagnostics = cJSON_Parse("{\"query\":\"q\",\"limit\":2}");
+   kb_client_memory_scope_context_apply(diagnostics);
+   free(kb_v1_action_request("memory.diagnose_scoped", diagnostics));
+
    (void)kb_client_memory_insert("L2", "fact", "scoped-key", "scoped-content", 0.8, NULL, NULL);
    (void)kb_client_memory_find_id_by_key_kind("scoped-key", "fact");
-   (void)kb_client_memory_supersede(42, "replacement", 0.9, NULL, NULL);
-   (void)kb_client_memory_update_as(42, "replacement", MEMORY_AUTHORITY_MODEL, NULL);
-   (void)kb_client_memory_delete_as(42, MEMORY_AUTHORITY_MODEL);
-   (void)kb_client_memory_touch(42);
-   (void)kb_client_memory_reject(42, "wrong");
-   (void)kb_client_memory_restore(42);
-   json = kb_client_memory_review_list_json(NULL, 8);
-   free(json);
-   (void)kb_client_memory_get(42, &mems[0]);
+   cJSON *reject = cJSON_Parse("{\"id\":42,\"reason\":\"wrong\"}");
+   kb_client_memory_scope_context_apply(reject);
+   free(kb_v1_action_request("memory.reject", reject));
+   memory_t memory;
+   (void)kb_client_memory_get(42, &memory);
 
    kb_client_memory_scope_context_clear();
-   assert(scoped_request_count == 31);
+   assert(scoped_request_count == 18);
    mock_agent_http_reset();
    printf("  PASS: test_ordered_readers_propagate_active_project_context\n");
 }
@@ -328,16 +448,10 @@ static void test_ordered_readers_propagate_active_project_context(void)
 static void test_single_record_miss_is_not_dependency_failure(void)
 {
    memory_t memory;
-   memory_entity_profile_t profile;
-   memory_episode_t episode;
 
    kb_client_dependency_reset_for_tests();
    mock_agent_http_set_post_handler(single_miss_post_handler);
    assert(kb_client_memory_get(42, &memory) == 1);
-   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
-   assert(kb_client_memory_get_entity_profile("missing", &profile) == 1);
-   assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
-   assert(kb_client_memory_get_episode("missing", &episode) == 1);
    assert(kb_client_last_result_status() == KB_CLIENT_RESULT_EMPTY);
 
    kb_client_dependency_reset_for_tests();
@@ -351,11 +465,14 @@ static void test_single_record_miss_is_not_dependency_failure(void)
 
 static void test_explicit_scope_overrides_ambient_context(void)
 {
-   memory_t mems[2];
    mock_agent_http_set_post_handler(explicit_scope_post_handler);
    kb_client_memory_scope_context_set("active-workspace", "active-project", 0);
-   assert(kb_client_memory_find_facts_visible("q", "explicit-workspace", "explicit-project", 2,
-                                              mems, 2) == 0);
+   cJSON *request = cJSON_Parse("{\"query\":\"q\",\"limit\":2,\"workspace\":\"explicit-workspace\","
+                                "\"project\":\"explicit-project\"}");
+   kb_client_memory_scope_context_apply(request);
+   char *raw = kb_v1_action_request("memory.find_facts_visible", request);
+   assert(raw);
+   free(raw);
    kb_client_memory_scope_context_clear();
    mock_agent_http_reset();
    printf("  PASS: test_explicit_scope_overrides_ambient_context\n");
@@ -532,6 +649,22 @@ static void test_pii_never_reaches_kb(void)
       assert(g_pii_posts == 0);
    }
 
+   /* The direct action path used by HTTP/MCP has the same no-transmit gate. */
+   const char *methods[] = {"memory.store", "memory.update", "memory.supersede", "memory.reject"};
+   for (int i = 0; i < 4; i++)
+   {
+      g_pii_posts = 0;
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request,
+                              i == 2   ? "new_content"
+                              : i == 3 ? "reason"
+                                       : "content",
+                              secret);
+      char *raw = kb_v1_action_request(methods[i], request);
+      assert(raw && g_pii_posts == 0 && !strstr(raw, "hunter2trustno1"));
+      free(raw);
+   }
+
    /* 3. A sensitive KEY withholds the whole write: the key is the lookup handle
     *    and cannot be redacted in place. Nothing is transmitted. */
    mock_agent_http_reset();
@@ -540,27 +673,6 @@ static void test_pii_never_reaches_kb(void)
    rc = kb_client_memory_insert(TIER_L1, KIND_FACT, secret, "benign body", 1.0, "s", NULL);
    assert(rc == KB_CLIENT_MEMORY_WITHHELD_PII);
    assert(g_pii_posts == 0);
-
-   /* 4. The same screen guards update and supersede, not just insert. */
-   mock_agent_http_reset();
-   mock_agent_http_set_post_handler(recording_post_handler);
-   g_pii_posts = 0;
-   g_pii_last_body[0] = '\0';
-   rc = kb_client_memory_update(42, secret);
-   if (rc == KB_CLIENT_MEMORY_WITHHELD_PII)
-      assert(g_pii_posts == 0);
-   else
-      assert(strstr(g_pii_last_body, "hunter2trustno1") == NULL);
-
-   mock_agent_http_reset();
-   mock_agent_http_set_post_handler(recording_post_handler);
-   g_pii_posts = 0;
-   g_pii_last_body[0] = '\0';
-   rc = kb_client_memory_supersede(42, secret, 1.0, "s", NULL);
-   if (rc == KB_CLIENT_MEMORY_WITHHELD_PII)
-      assert(g_pii_posts == 0);
-   else
-      assert(strstr(g_pii_last_body, "hunter2trustno1") == NULL);
 
    mock_agent_http_reset();
    printf("  PASS: test_pii_never_reaches_kb\n");
@@ -614,18 +726,6 @@ static void test_every_content_wrapper_screens(void)
    free(json);
    PII_CASE("notes.create(title)", json = kb_client_note_create_json(secret, "c", "tag", "a"));
    free(json);
-   PII_CASE("memory.prospective_create",
-            json = kb_client_memory_prospective_create_json(secret, "do it", "", "", "", ""));
-   free(json);
-   PII_CASE("memory.prospective_create(action)",
-            json = kb_client_memory_prospective_create_json("when", secret, "", "", "", ""));
-   free(json);
-   PII_CASE("memory.directive_create", json = kb_client_memory_directive_create_json(
-                                           secret, "topic", "", "", "cause", 1, "s", ""));
-   free(json);
-   PII_CASE("memory.directive_resolve",
-            json = kb_client_memory_directive_resolve_json(7, 0, secret));
-   free(json);
    PII_CASE("curiosity.create",
             json = kb_client_curiosity_create_json("gap", "", "topic", secret, 1.0, 1.0, "s"));
    free(json);
@@ -640,9 +740,6 @@ static void test_every_content_wrapper_screens(void)
             (void)kb_client_decision_log_insert(1, "opts", "chosen", secret, "assume", &dec));
    PII_CASE("collab_rules.propose", (void)kb_client_collab_rules_propose(secret, "why", "me"));
    PII_CASE("task.create", (void)kb_client_task_create(secret, "s", 0, &task));
-   PII_CASE("memory.upsert_workflow",
-            (void)kb_client_memory_upsert_workflow("ws", "sig", secret, 1.0, "s"));
-   PII_CASE("memory.reject", (void)kb_client_memory_reject(42, secret));
 
    /* And the screen must not have turned these into blanket refusals: clean
     * content still reaches the kb. */
@@ -659,13 +756,127 @@ static void test_every_content_wrapper_screens(void)
    printf("  PASS: test_every_content_wrapper_screens\n");
 }
 
+static void test_screen_failures(void)
+{
+   const char *replies[] = {"{}", "{\"status\":\"error\",\"verdict\":\"allow\"}",
+                            "{\"status\":\"ok\",\"verdict\":\"unknown\"}",
+                            "{\"status\":\"ok\",\"verdict\":\"redact\"}"};
+   for (size_t i = 0; i < sizeof(replies) / sizeof(replies[0]); i++)
+   {
+      screen_reply = replies[i];
+      char *out = NULL;
+      assert(kb_client_pii_screen("fixture", &out) == -1 && out == NULL);
+      assert(kb_client_pii_identifier_sensitive("fixture") == 1);
+   }
+   screen_reply = NULL;
+   screen_transport = -1;
+   char *out = NULL;
+   assert(kb_client_pii_screen("fixture", &out) == -1 && out == NULL);
+   screen_transport = 0;
+   assert(kb_client_pii_screen("fixture", &out) == -1 && out == NULL);
+   screen_transport = 1;
+   screen_reply = "{\"status\":\"ok\",\"verdict\":\"redact\",\"redacted\":\"[REDACTED]\"}";
+   assert(kb_client_pii_screen("fixture", &out) == 0 && strcmp(out, "[REDACTED]") == 0);
+   free(out);
+   assert(kb_client_pii_identifier_sensitive("fixture") == 1);
+   screen_reply = NULL;
+}
+
+static int benchmark_posts;
+static int benchmark_post(const char *url, const char *auth, const char *body, char **response,
+                          int timeout, const char *headers)
+{
+   (void)headers;
+   assert(strstr(url, "memory.benchmark") && auth && strstr(auth, "test-token"));
+   assert(timeout == 120000);
+   cJSON *request = cJSON_Parse(body);
+   const char *corpus =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "corpus_json"));
+   assert(corpus && strstr(corpus, "9007199254740993") && strstr(corpus, "完整"));
+   cJSON_Delete(request);
+   ++benchmark_posts;
+   *response = strdup("{\"status\":\"ok\",\"case_results\":[]}");
+   return 200;
+}
+static void test_benchmark_file_transport(void)
+{
+   const char *tmp = getenv("TMPDIR");
+   if (!tmp || !tmp[0])
+      tmp = "/tmp";
+   char path[4096];
+   int length = snprintf(path, sizeof(path), "%s/aimee-benchmark-transport-XXXXXX", tmp);
+   assert(length > 0 && (size_t)length < sizeof(path));
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   FILE *fp = fdopen(fd, "wb");
+   assert(fp);
+   const char *raw = "{\"queries\":[{\"query\":\"完整\",\"expected_ids\":[9007199254740993]}]}";
+   assert(fwrite(raw, 1, strlen(raw), fp) == strlen(raw));
+   assert(fclose(fp) == 0);
+   mock_agent_http_set_post_handler(benchmark_post);
+   char *reply = kb_client_memory_benchmark_json(cJSON_CreateObject(), path);
+   assert(reply && benchmark_posts == 1);
+   free(reply);
+   fp = fopen(path, "wb");
+   assert(fp && fwrite("x\0y", 1, 3, fp) == 3);
+   assert(fclose(fp) == 0);
+   assert(!kb_client_memory_benchmark_json(cJSON_CreateObject(), path));
+   fp = fopen(path, "wb");
+   assert(fp);
+   for (int i = 0; i < 1048577; i++)
+      assert(fputc('x', fp) != EOF);
+   assert(fclose(fp) == 0);
+   assert(!kb_client_memory_benchmark_json(cJSON_CreateObject(), path));
+   assert(unlink(path) == 0);
+   assert(!kb_client_memory_benchmark_json(cJSON_CreateObject(), path));
+   assert(benchmark_posts == 1);
+   mock_agent_http_reset();
+}
+
+static const char *exact_reply;
+static int exact_id_post(const char *url, const char *auth, const char *body, char **reply,
+                         int timeout, const char *headers)
+{
+   (void)url;
+   (void)auth;
+   (void)timeout;
+   (void)headers;
+   cJSON *request = cJSON_Parse(body);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "view")), "native"));
+   cJSON_Delete(request);
+   *reply = strdup(exact_reply);
+   return 200;
+}
+static void test_exact_mutation_identity(void)
+{
+   kb_client_dependency_reset_for_tests();
+   mock_agent_http_set_post_handler(exact_id_post);
+   exact_reply = "{\"status\":\"ok\",\"id_text\":\"9007199254740993\",\"id\":9007199254740993,"
+                 "\"memory\":{\"id\":9007199254740993}}";
+   memory_t out;
+   assert(kb_client_memory_insert("L2", "fact", "key", "content", .8, NULL, &out) == 0 &&
+          out.id == INT64_C(9007199254740993));
+   assert(kb_client_memory_find_id_by_key_kind("key", "fact") == INT64_C(9007199254740993));
+   exact_reply = "{\"status\":\"ok\",\"id_text\":\"9223372036854775808\",\"id\":42}";
+   assert(kb_client_memory_find_id_by_key_kind("key", "fact") == 0);
+   exact_reply = "{\"status\":\"ok\",\"id\":9007199254740993}";
+   assert(kb_client_memory_insert("L2", "fact", "key", "content", .8, NULL, &out) < 0);
+   assert(kb_client_memory_find_id_by_key_kind("key", "fact") == 0);
+   mock_agent_http_reset();
+}
+
 int main(void)
 {
+   test_screen_failures();
    /* A configured kb URL routes kb_client_v1_post_json through agent_http_post
     * (mocked) rather than the unix-socket / spawn path. */
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
    assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
 
+   test_exact_mutation_identity();
+   test_benchmark_file_transport();
+   test_generic_action_preserves_budget_auth_and_refusal();
    test_readers_distinguish_unreachable_from_empty();
    test_single_record_miss_is_not_dependency_failure();
    test_ordered_readers_propagate_active_project_context();

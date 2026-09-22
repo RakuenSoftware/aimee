@@ -89,7 +89,6 @@ include_directories(
     ${AIMEE_PROTOCOLS_INCLUDE_DIR}
     ${AIMEE_CORE_CONNECTION_INCLUDE_DIR}
     ${AIMEE_CORE_EVENT_BUS_INCLUDE_DIR}
-    "${AIMEE_SRC_DIR}/modules/memory/include"
     "${AIMEE_SRC_DIR}/modules/learning/include"
     "${AIMEE_SRC_DIR}/modules/tools/include"
     "${AIMEE_SRC_DIR}/modules/workspace/include"
@@ -205,7 +204,6 @@ if(WIN32)
     )
     set(PLATFORM_DATA_SRCS
         ${AIMEE_SRC_DIR}/windows/history.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/windows/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -249,7 +247,6 @@ elseif(APPLE)
     )
     set(PLATFORM_DATA_SRCS
         ${AIMEE_SRC_DIR}/posix/history.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -310,7 +307,6 @@ else()
     )
     set(PLATFORM_DATA_SRCS
         ${AIMEE_SRC_DIR}/posix/history.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -380,7 +376,6 @@ if(WIN32)
     )
     set(KB_PLATFORM_EXTRA_SRCS
         ${AIMEE_SRC_DIR}/windows/cli_client.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/windows/agent_bridge.c
         ${AIMEE_SRC_DIR}/windows/web_egress.c
     )
@@ -404,7 +399,6 @@ elseif(APPLE)
     )
     set(KB_PLATFORM_EXTRA_SRCS
         ${AIMEE_SRC_DIR}/posix/cli_client.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
     )
 else()
@@ -427,7 +421,6 @@ else()
     )
     set(KB_PLATFORM_EXTRA_SRCS
         ${AIMEE_SRC_DIR}/posix/cli_client.c
-        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
     )
 endif()
@@ -470,7 +463,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c
     ${AIMEE_SRC_DIR}/modules/db2/c/evidence_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/db2/c/entity_profiles.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/epistemic_directives.c
     ${AIMEE_SRC_DIR}/modules/db2/c/failed_queries.c
     ${AIMEE_SRC_DIR}/modules/db2/c/feedback.c
     ${AIMEE_SRC_DIR}/modules/db2/c/notes.c
@@ -478,7 +470,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/stopwords.c
     ${AIMEE_SRC_DIR}/modules/db2/c/tasks.c
     ${AIMEE_SRC_DIR}/modules/db2/c/tool_registry.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/trace_mining.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kind_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_payload.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_runtime_state.c
@@ -490,7 +481,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/code_index.c
     ${AIMEE_SRC_DIR}/modules/db2/c/code_project_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/db2/c/css_graph.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/typed_facts.c
     ${AIMEE_SRC_DIR}/modules/db2/c/css_migration.c
     ${AIMEE_SRC_DIR}/modules/db2/c/css_render.c
     ${AIMEE_SRC_DIR}/modules/db2/c/css_insights.c
@@ -521,7 +511,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_transport.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_vectors.c
     ${AIMEE_SRC_DIR}/modules/db2/c/vector_status.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_verify.c
     ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_kb_service.c
 )
 
@@ -665,11 +654,9 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/kb/kb.c
     ${AIMEE_SRC_DIR}/kb/kb_fusion.c
     ${AIMEE_SRC_DIR}/kb/kb_neardup.c
-    ${AIMEE_SRC_DIR}/kb/kb_conventions.c
     ${AIMEE_SRC_DIR}/sketch.c
     ${AIMEE_SRC_DIR}/modules/learning/learning_evidence.c
     ${AIMEE_SRC_DIR}/kb/kb_calibrate.c
-    ${AIMEE_SRC_DIR}/kb/kb_demote.c
     ${AIMEE_SRC_DIR}/kb/kb_features.c
     ${AIMEE_SRC_DIR}/kb/kb_ranker.c
     ${AIMEE_SRC_DIR}/kb/kb_detect.c
@@ -701,7 +688,6 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_support.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_baseline.c
-    ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_benchmarks.c
     ${AIMEE_SRC_DIR}/server/agent_coord.c
     ${AIMEE_SRC_DIR}/server/agent_tools.c
     ${AIMEE_SRC_DIR}/server/computer_use.c
@@ -776,11 +762,6 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_capabilities.c
     ${AIMEE_SRC_DIR}/cmd_session_lifecycle.c
     ${AIMEE_SRC_DIR}/cmd_ensemble.c
-    ${AIMEE_SRC_DIR}/cmd_memory.c
-    ${AIMEE_SRC_DIR}/cmd_memory_core.c
-    ${AIMEE_SRC_DIR}/cmd_memory_curiosity.c
-    ${AIMEE_SRC_DIR}/cmd_memory_embed.c
-    ${AIMEE_SRC_DIR}/cmd_memory_vector.c
     ${AIMEE_SRC_DIR}/cmd_index.c
     ${AIMEE_SRC_DIR}/cmd_rules.c
     ${AIMEE_SRC_DIR}/cmd_learning.c
@@ -908,12 +889,9 @@ set(CLI_SRCS
 
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
-    ${AIMEE_SRC_DIR}/modules/memory/gw_stage_memory.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_embed_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_extract_patterns.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_fact_gate.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_pii_gate.c
+    ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
+    ${AIMEE_SRC_DIR}/server/ir_host_bindings.c
+    ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_transport.c
     ${AIMEE_SRC_DIR}/server/obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/server/module_routing_adapter.c
     ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
@@ -1041,9 +1019,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_agent.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_dashboard.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_tasks.c
-    ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_data.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_tool_registry.c
-    ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_prospective.c
     ${AIMEE_SRC_DIR}/cmd_session_lifecycle.c
     ${AIMEE_SRC_DIR}/cmd_hooks_scope.c
     ${AIMEE_SRC_DIR}/server/server_session_start_stubs.c
@@ -1066,12 +1042,6 @@ list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c)
 
 set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_main.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_embed_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_pii_gate.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_domain_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_domain_runtime_bus.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_scope_connection.c
     ${AIMEE_SRC_DIR}/kb/kb_document_inspector.c
     ${AIMEE_SRC_DIR}/kb/kb_obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/kb/kb_background.c
@@ -1145,7 +1115,6 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/http/kb_http_releases.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_reflections.c
     ${AIMEE_SRC_DIR}/kb/kb_ingest_normalize.c
-    ${AIMEE_SRC_DIR}/kb/kb_memory_embed.c
 )
 set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/integrity_ingress.c
@@ -1168,11 +1137,9 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/kb/kb.c
     ${AIMEE_SRC_DIR}/kb/kb_fusion.c
     ${AIMEE_SRC_DIR}/kb/kb_neardup.c
-    ${AIMEE_SRC_DIR}/kb/kb_conventions.c
     ${AIMEE_SRC_DIR}/sketch.c
     ${AIMEE_SRC_DIR}/modules/learning/learning_evidence.c
     ${AIMEE_SRC_DIR}/kb/kb_calibrate.c
-    ${AIMEE_SRC_DIR}/kb/kb_demote.c
     ${AIMEE_SRC_DIR}/kb/kb_features.c
     ${AIMEE_SRC_DIR}/kb/kb_ranker.c
     ${AIMEE_SRC_DIR}/kb/kb_detect.c
@@ -1221,6 +1188,17 @@ set(AIMEE_PROJECT_INCLUDE_DIRS
     ${AIMEE_SRC_DIR}/modules/webuser
     ${AIMEE_SRC_DIR}/pipeline
     ${AIMEE_SRC_DIR}/vendor/headers)
+
+# Match the Makefile's per-consumer graph enum include path.
+set_property(SOURCE
+    "${AIMEE_SRC_DIR}/index.c"
+    "${AIMEE_SRC_DIR}/rel_types.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/canonical_index.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/code_projection.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/entity_edges.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/fact_identity.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c"
+    APPEND PROPERTY INCLUDE_DIRECTORIES "${AIMEE_SRC_DIR}/modules/db2/include")
 
 add_library(aimee-core STATIC
     ${CORE_SRCS}
@@ -1576,6 +1554,23 @@ add_custom_target(agent_help_header DEPENDS "${AGENT_HELP_HEADER}")
 # depend on its generator — otherwise a client-only build (e.g. Windows, which
 # builds only the `aimee` target) races the generated header.
 add_dependencies(aimee agent_help_header)
+
+# Optional local corpus evaluation helper. It owns the isolated PostgreSQL
+# session and shared Go memory implementation; it is not a second memory daemon.
+find_program(AIMEE_EVAL_GO_EXECUTABLE go)
+if(AIMEE_EVAL_GO_EXECUTABLE)
+    file(GLOB_RECURSE AIMEE_EVAL_GO_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/server-go/*.go")
+    set(AIMEE_EVAL_BINARY "${CMAKE_CURRENT_BINARY_DIR}/aimee-memory-eval${CMAKE_EXECUTABLE_SUFFIX}")
+    add_custom_command(OUTPUT "${AIMEE_EVAL_BINARY}"
+        COMMAND "${CMAKE_COMMAND}" -E env CGO_ENABLED=0 "${AIMEE_EVAL_GO_EXECUTABLE}" build
+            -o "${AIMEE_EVAL_BINARY}" ./modules/memory/cmd/aimee-memory-eval
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/server-go"
+        DEPENDS ${AIMEE_EVAL_GO_SOURCES}
+            "${CMAKE_CURRENT_SOURCE_DIR}/server-go/go.mod"
+            "${CMAKE_CURRENT_SOURCE_DIR}/server-go/go.sum")
+    add_custom_target(memory_eval_helper ALL DEPENDS "${AIMEE_EVAL_BINARY}")
+endif()
 
 # --- Non-thin-client targets ------------------------------------------------
 # CMake builds ONLY the `aimee` thin client (+ the unit-test suite below).

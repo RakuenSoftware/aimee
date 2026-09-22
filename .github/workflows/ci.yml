@@ -508,6 +508,14 @@ jobs:
             done
           done
           GOPROXY='https://proxy.golang.org|direct' make -C src go-unit-tests
+      - name: Build memory process and Go client without cgo
+        working-directory: server-go
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go build -o "$RUNNER_TEMP/aimee-module-memory" ./cmd/aimee-module
+          go build -o "$RUNNER_TEMP/aimee-memory-bus-probe" ./modules/memory/cmd/aimee-memory-bus-probe
+          test -z "$(go list -deps -f '{{if .CgoFiles}}{{.ImportPath}}{{end}}' ./cmd/aimee-module ./modules/memory/cmd/aimee-memory-bus-probe)"
       - name: Routing live-gate contract
         run: python3 -I scripts/tests/test_live_routing.py
       - name: Install govulncheck
@@ -912,9 +920,17 @@ jobs:
     timeout-minutes: 30
     env:
       AIMEE_DB2_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_db2_process_ci
+      # Temp-table tests must not fall through to packaged owner relations when
+      # they deliberately drop a relation to exercise unavailable storage.
+      AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/postgres
+      AIMEE_DB_TEST_URL: postgres://aimee:aimee@127.0.0.1:5432/postgres
       EMBEDDER_DIMS: "384"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -948,6 +964,11 @@ jobs:
           exit 1
       - name: Replay packaged DB2 operations through the event bus
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 db2-replay
+      - name: Replay Go memory ownership and isolated evaluator contracts
+        # Report memory independently when an earlier DB2 assertion fails.
+        # Failed setup still fails this required job; no checks are waived.
+        if: ${{ !cancelled() }}
+        run: make -C src GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 memory-owner-replay-check
       - name: Verify durable schema effect
         run: |
           test "$(psql -XAt "$AIMEE_DB2_URL" -c "select value from kb_meta where key='schema_embedding_dim'")" = "384"

@@ -1,6 +1,6 @@
 /* db2/fidelity.c: answer-level fidelity reports + per-chunk attributions
  * (auditable-correctness P3 storage substrate). These are NON-SCORED artifact
- * kinds, structurally invisible to db2_demotion_score (which reads only
+ * kinds, structurally invisible to Go memory demotion scoring (which reads only
  * kind='retrieval_attribution') — fidelity is an answer-level quality signal,
  * never a demotion lever. The LLM entailment judge that produces these rows is a
  * later, default-off increment; this file is storage + read only. */

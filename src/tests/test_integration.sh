@@ -155,6 +155,30 @@ stop_providers_module() {
     fi
 }
 
+# Memory admission and validation are provided by the same Go process used in
+# production. A missing owner is an outage, not native validation fallback.
+MEMORY_MODULE="$AIMEE_HOME/aimee-module-memory"
+MEMORY_MODULE_PID=""
+install_memory_module() {
+    cp "$DB1_MODULE_BUILT" "$MEMORY_MODULE"
+    chmod 0755 "$MEMORY_MODULE"
+    install_generated_grant memory "$MEMORY_MODULE"
+    install_generated_grant memory-postgres "$MEMORY_MODULE"
+    install_generated_grant memory-egress "$MEMORY_MODULE"
+}
+start_memory_module() {
+    stop_memory_module
+    AIMEE_MODULE_PLACEMENT=server "$MEMORY_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-memory.log" 2>&1 &
+    MEMORY_MODULE_PID=$!
+}
+stop_memory_module() {
+    if [ -n "$MEMORY_MODULE_PID" ]; then
+        kill "$MEMORY_MODULE_PID" 2>/dev/null || true
+        wait "$MEMORY_MODULE_PID" 2>/dev/null || true
+        MEMORY_MODULE_PID=""
+    fi
+}
+
 install_db1_module() {
     # Missing module: stop, do not degrade. This used to return 0 and let the
     # run continue, from a time when the daemon still had an in-process store to
@@ -406,6 +430,7 @@ stop_workflow_module() {
 install_db1_module
 install_config_module
 install_providers_module
+install_memory_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
 # server is started even though the module itself is not launched until the
 # workflow section. Installing it later produced a module that ran, attached to
@@ -553,7 +578,7 @@ srv_auth_req() {
 # Content-Length regardless of verb, so dispatch routes get their params.)
 http_rpc() {
     python3 -c "
-import socket, sys, json
+import socket, sys, json, os
 body = sys.argv[1]
 method = (json.loads(body).get('method') or '')
 routes = {
@@ -576,7 +601,7 @@ req = ('%s %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n'
        'Content-Length: %d\r\nConnection: close\r\n\r\n%s' % (verb, path, len(body), body))
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.connect('$HTTP_SOCK')
-s.settimeout(10)
+s.settimeout(float(os.environ.get('AIMEE_TEST_HTTP_TIMEOUT', '10')))
 s.sendall(req.encode())
 data = b''
 while True:
@@ -731,6 +756,7 @@ start_server() {
         if [ "$config_started" -eq 0 ] && [ -S "$MODULE_BUS_SOCK" ]; then
             start_config_module
             start_providers_module
+            start_memory_module
             config_started=1
         fi
         [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
@@ -770,6 +796,7 @@ cleanup() {
     stop_pg_module
     stop_config_module
     stop_providers_module
+    stop_memory_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
@@ -1123,7 +1150,7 @@ check_output "mcp get_help topic index" 'Aimee delegate reference' echo "$RESP"
 # and the Docker deploy matrix. Keep the local transport checks useful on hosts
 # without Postgres instead of reporting an expected dependency absence as a
 # server regression.
-RESP=$(srv_req '{"method":"memory.list","limit":1}') || true
+RESP=$(srv_req '{"method":"memory.list","store":"kb","limit":1}') || true
 if echo "$RESP" | grep -qF '"status":"ok"'; then
     KB_AVAILABLE=1
     PASS=$((PASS + 1))
@@ -1436,21 +1463,55 @@ else
     SKIP=$((SKIP + 1))
 fi
 
+
+# Server/private memory uses the real Go owner even without a KB service. This
+# must not be mistaken for KB availability or inherit shared history semantics.
+if [ "$DB1_SESSIONS_AVAILABLE" -eq 1 ]; then
+    RESP=$(srv_auth_req '{"method":"memory.store","store":"user","key":"integ-private","content":"private integration value","tier":"L2","kind":"fact"}') || true
+    check_output "private memory store through Go" '"status":"ok"' echo "$RESP"
+    PRIVATE_ID=$(printf '%s' "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null) || true
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"user\",\"id\":\"${PRIVATE_ID:-missing}\"}") || true
+    check_output "private memory get retains content" 'private integration value' echo "$RESP"
+    RESP=$(srv_auth_req '{"method":"memory.search","store":"user","keywords":["integ-private"],"limit":10}') || true
+    check_output "private memory search through Go" 'integ-private' echo "$RESP"
+    RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":29,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"store\":\"user\",\"verb\":\"update\",\"id\":\"${PRIVATE_ID:-missing}\",\"content\":\"private corrected value\"}}}") || true
+    check_output "private memory MCP update through Go" 'private corrected value' echo "$RESP"
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"user\",\"id\":\"${PRIVATE_ID:-missing}\"}") || true
+    check_output "private memory HTTP observes MCP update" 'private corrected value' echo "$RESP"
+    # Kill the owner, assert an explicit outage, then reconnect the same process
+    # type and verify that persisted private data remains readable.
+    stop_memory_module
+    # The existing host call has a 60s deadline if departure races dispatch.
+    # Wait for that classified reply instead of timing out this test at 10s.
+    RESP=$(AIMEE_TEST_HTTP_TIMEOUT=70 srv_auth_req "{\"method\":\"memory.get\",\"store\":\"user\",\"id\":\"${PRIVATE_ID:-missing}\"}") || true
+    check_output "private memory owner outage is explicit" '"kind":"unavailable"' echo "$RESP"
+    start_memory_module
+    for attempt in $(seq 1 100); do
+        RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"user\",\"id\":\"${PRIVATE_ID:-missing}\"}") || true
+        if echo "$RESP" | grep -q 'private corrected value'; then break; fi
+        sleep 0.1
+    done
+    check_output "private memory survives Go owner restart" 'private corrected value' echo "$RESP"
+else
+    echo "SKIP: private memory persistence/restart (PostgreSQL store unavailable)"
+    SKIP=$((SKIP + 7))
+fi
+
 if [ "$KB_AVAILABLE" -eq 1 ]; then
-    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}') || true
+    RESP=$(srv_auth_req '{"method":"memory.store","store":"kb","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}') || true
     check_output "memory.store" '"status":"ok"' echo "$RESP"
     MEM_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null) || true
 
-    RESP=$(srv_auth_req '{"method":"memory.list","tier":"L0","limit":10}') || true
+    RESP=$(srv_auth_req '{"method":"memory.list","store":"kb","tier":"L0","limit":10}') || true
     check_output "memory.list has stored entry" "integ-test" echo "$RESP"
 
     # An explicit all-project search is a complete scope, even when the caller
     # supplies no cwd/project/workspace. Reporting active_context_missing=true
     # here made a real KB outage falsely blame the caller's project context.
-    RESP=$(srv_auth_req '{"method":"memory.search","keywords":["integ-test"],"scope":"all","limit":10}') || true
+    RESP=$(srv_auth_req '{"method":"memory.search","store":"kb","keywords":["integ-test"],"scope":"all","limit":10}') || true
     check_output "memory.search scope=all is not missing context" '"active_context_missing":false' echo "$RESP"
 
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}") || true
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"kb\",\"id\":$MEM_ID}") || true
     check_output "memory.get by ID" "integration test value" echo "$RESP"
 
     # `memory get --as-of` crosses client -> aimee-server -> aimee-kb, and it was
@@ -1460,11 +1521,11 @@ if [ "$KB_AVAILABLE" -eq 1 ]; then
     # it passed, because each end was checked against a hand-written payload that
     # already contained the field. Only the real wire shows the gap, so assert it
     # here: the verdict must come back, and must NOT appear when nobody asked.
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID,\"as_of\":\"2020-01-01 00:00:00\"}") || true
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"kb\",\"id\":$MEM_ID,\"as_of\":\"2020-01-01 00:00:00\"}") || true
     check_output "memory.get --as-of echoes the timestamp" '"as_of"' echo "$RESP"
     check_output "memory.get --as-of returns an event-time verdict" '"valid_at"' echo "$RESP"
 
-    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}") || true
+    RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"kb\",\"id\":$MEM_ID}") || true
     if echo "$RESP" | grep -q '"valid_at"'; then
         check_output "memory.get without --as-of emits no verdict" "no valid_at" echo "found valid_at"
     else
@@ -1484,18 +1545,18 @@ if [ "$KB_AVAILABLE" -eq 1 ]; then
     # server shows the thing that actually matters: after the model forgets it,
     # the memory is still there. Assert it on the real wire.
     # ------------------------------------------------------------------
-    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-forget","content":"value that must survive forget","tier":"L2","kind":"fact"}') || true
+    RESP=$(srv_auth_req '{"method":"memory.store","store":"kb","key":"integ-forget","content":"value that must survive forget","tier":"L2","kind":"fact"}') || true
     check_output "memory.store (mcp forget subject)" '"status":"ok"' echo "$RESP"
     FORGET_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null) || true
 
     if [ -n "${FORGET_ID:-}" ]; then
-        RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"verb\":\"forget\",\"id\":$FORGET_ID}}}") || true
+        RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"store\":\"kb\",\"verb\":\"forget\",\"id\":$FORGET_ID}}}") || true
         check_output "mcp mutate forget is allowed for an authorized caller" '"content"' echo "$RESP"
         check_output "mcp mutate forget retires rather than destroys" 'retired, not destroyed' echo "$RESP"
 
         # The row survives with its content intact -- a mistaken forget is
         # recoverable. This is the assertion the whole change exists for.
-        RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$FORGET_ID}") || true
+        RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"kb\",\"id\":$FORGET_ID}") || true
         check_output "a forgotten memory still exists" '"status":"ok"' echo "$RESP"
         check_output "a forgotten memory kept its content" "value that must survive forget" echo "$RESP"
     else
@@ -1503,16 +1564,16 @@ if [ "$KB_AVAILABLE" -eq 1 ]; then
         SKIP=$((SKIP + 4))
     fi
 
-    RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-update","content":"the original value","tier":"L2","kind":"fact"}') || true
+    RESP=$(srv_auth_req '{"method":"memory.store","store":"kb","key":"integ-update","content":"the original value","tier":"L2","kind":"fact"}') || true
     UPDATE_ID=$(echo "$RESP" | python3 -c "import sys,json; print(int(json.load(sys.stdin)['id']))" 2>/dev/null) || true
 
     if [ -n "${UPDATE_ID:-}" ]; then
-        RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"verb\":\"update\",\"id\":$UPDATE_ID,\"content\":\"the corrected value\"}}}") || true
+        RESP=$(mcp_initialized_req "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\",\"params\":{\"name\":\"mutate\",\"arguments\":{\"store\":\"kb\",\"verb\":\"update\",\"id\":$UPDATE_ID,\"content\":\"the corrected value\"}}}") || true
         check_output "mcp mutate update versions the previous value" 'previous content kept as a version' echo "$RESP"
 
         # The row the model edited still holds the OLD content; the new value
         # lives on a new row. An overwrite would have lost the original.
-        RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$UPDATE_ID}") || true
+        RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"store\":\"kb\",\"id\":$UPDATE_ID}") || true
         check_output "the superseded row kept the original content" "the original value" echo "$RESP"
     else
         echo "SKIP: mcp update round-trip (no id from memory.store)"

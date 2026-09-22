@@ -95,12 +95,6 @@ int pgvec_kb_service_reconcile_orphans(pgvec_kb_service_record_exists_fn mem_exi
    return 0;
 }
 
-int pgvec_kb_service_search_memory_points(const char *record_type, const float *vec, int dim,
-                                          int limit, int64_t *ids, double *scores, int max)
-{
-   return pgvec_memory_vector_search_record_type(record_type, vec, dim, limit, ids, scores, max);
-}
-
 int pgvec_kb_service_upsert_document_point(int64_t doc_id, const float *vec, int dim,
                                            const char *payload_json)
 {

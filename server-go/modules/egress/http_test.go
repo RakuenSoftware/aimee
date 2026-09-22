@@ -60,3 +60,22 @@ func TestHTTPStageRejectsRequestDigestDrift(t *testing.T) {
 		t.Fatalf("tampered bytes status=%d", status)
 	}
 }
+
+func TestProviderOAuthHeadersStayWithinProviderBoundary(t *testing.T) {
+	for _, name := range []string{"ChatGPT-Account-ID", "originator", "anthropic-version"} {
+		headers := map[string]string{name: "fixture"}
+		if !validHTTPHeaders("provider", headers, true) {
+			t.Fatal("provider header refused", name)
+		}
+		if validHTTPHeaders("embedding", headers, true) {
+			t.Fatal("provider header escaped purpose", name)
+		}
+		headers[name] = "fixture\r\nAuthorization: secret"
+		if validHTTPHeaders("provider", headers, true) {
+			t.Fatal("header injection accepted", name)
+		}
+	}
+	if validHTTPHeaders("provider", map[string]string{"Authorization": "Bearer secret"}, true) {
+		t.Fatal("plaintext authorization accepted")
+	}
+}

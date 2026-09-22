@@ -4,6 +4,8 @@
 #include "kb_http_console.h"
 
 #include "aimee.h" /* now_utc */
+#include "module_commands.h"
+#include "json_fluent.h"
 #include "cJSON.h"
 #include "config.h"
 #include "config_client.h"
@@ -12,14 +14,10 @@
 #include "kb_reqctx.h"                        /* verifier-derived trace scope */
 #include "kb_service_kb.h"                    /* kb_service_health_json */
 #include "modules/db2/c/kb_service_backend.h" /* async queue status */
-#include "modules/db2/c/ontology_evolution.h" /* db2_ontology_* (§8 observe + act) */
 #include "modules/db2/c/fact_mutation.h"      /* assertion review/rollback/removal */
-#include "modules/db2/c/memory_query.h"       /* human memory review/restore */
-#include "modules/db2/c/memory_scope_query.h" /* operator all-scope review */
 #include "modules/db2/c/evidence_lifecycle.h" /* P1-P9 operator evidence surface */
-#include "modules/db2/c/entity_registry.h"    /* entity merge/unmerge review */
-#include "rel_types.h"                        /* REL_TYPE_NAME_MAX */
 #include "runtime_secret.h"
+#include <math.h>
 #include <openssl/crypto.h> /* wipe transient credential request copies */
 
 #include <stdio.h>
@@ -164,131 +162,44 @@ static int console_overview(char *out_buf, int out_cap)
    return 200;
 }
 
-/* GET /v1/console/typed_facts — the Typed Facts panel's observe surface (§8):
- * the KB-owned config knobs plus the provisional-relation promotion review queue
- * (what the §7.2 auto-promote sweep will act on, and what an operator can act on
- * by hand). Read-only. */
+/* Preserve the Go owner's JSON text, including full names and int64 IDs. */
+static int console_memory_owner_response(int rc, cJSON *reply, char *out_buf, int out_cap)
+{
+   const char *body = jo_cstr(reply, "json");
+   cJSON *code = cJSON_GetObjectItemCaseSensitive(reply, "http_status");
+   int status = 503;
+   if (rc == 1 && !strcmp(jo_cstr(reply, "status"), "ok") && cJSON_IsNumber(code) &&
+       (code->valuedouble == 200 || code->valuedouble == 400 || code->valuedouble == 403 ||
+        code->valuedouble == 409 || code->valuedouble == 500 || code->valuedouble == 503) &&
+       strlen(body) <= 1048576)
+   {
+      cJSON *parsed = cJSON_ParseWithOpts(body, NULL, 1);
+      if (cJSON_IsObject(parsed))
+      {
+         if (strlen(body) < (size_t)out_cap)
+         {
+            memcpy(out_buf, body, strlen(body) + 1);
+            status = (int)code->valuedouble;
+            cJSON_Delete(parsed);
+            cJSON_Delete(reply);
+            return status;
+         }
+         status = 500;
+      }
+      cJSON_Delete(parsed);
+   }
+   cJSON_Delete(reply);
+   snprintf(out_buf, (size_t)out_cap, "{\"error\":\"typed facts response unavailable\"}");
+   return status;
+}
+
 static int console_typed_facts(char *out_buf, int out_cap)
 {
-   int thr = config_kb_typed_facts_promote_threshold() > 0
-                 ? config_kb_typed_facts_promote_threshold()
-                 : 3;
-
-   cJSON *root = cJSON_CreateObject();
-   if (!root)
-   {
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"typed_facts alloc failed\"}");
-      return 500;
-   }
-   cJSON_AddStringToObject(root, "schema", "console.typed_facts.v1");
-   char ts[32];
-   now_utc(ts, sizeof(ts));
-   cJSON_AddStringToObject(root, "generated_at", ts);
-
-   cJSON *c = cJSON_AddObjectToObject(root, "config");
-   cJSON_AddBoolToObject(c, "typed_facts_enabled", 1); /* unconditional; no master gate */
-   cJSON_AddBoolToObject(c, "auto_promote", config_kb_typed_facts_auto_promote_enabled() ? 1 : 0);
-   cJSON_AddNumberToObject(c, "promote_threshold", thr);
-
-   /* Promotion review queue: every pending provisional relation (threshold 1 lists
-    * the whole queue), with its observation count and whether it has cleared the
-    * auto-promote bar. */
-   cJSON *cands = cJSON_AddArrayToObject(root, "promotion_candidates");
-   char names[32][REL_TYPE_NAME_MAX];
-   int nc = db2_ontology_eval_candidates(1, names, 32);
-   for (int i = 0; i < nc && cands; i++)
-   {
-      cJSON *o = cJSON_CreateObject();
-      if (!o)
-         continue;
-      cJSON_AddStringToObject(o, "relation", names[i]);
-      long cnt = db2_ontology_eval_count(names[i]);
-      cJSON_AddNumberToObject(o, "observations", cnt < 0 ? 0 : (double)cnt);
-      cJSON_AddBoolToObject(o, "ready", (cnt >= thr) ? 1 : 0);
-      char st[32] = "";
-      db2_ontology_eval_status(names[i], st, sizeof(st));
-      cJSON_AddStringToObject(o, "status", st);
-      cJSON_AddItemToArray(cands, o);
-   }
-   cJSON_AddNumberToObject(root, "candidate_count", nc < 0 ? 0 : nc);
-
-   /* Assertion candidates are quarantined from recall until this queue approves
-    * them.  Evidence count is independent of the graph weight. */
-   cJSON *assertions = cJSON_AddArrayToObject(root, "assertion_candidates");
-   fact_candidate_t fc[64];
-   int nfc = db2_fact_candidates(fc, 64);
-   for (int i = 0; i < nfc && assertions; i++)
-   {
-      cJSON *o = cJSON_CreateObject();
-      if (!o)
-         continue;
-      cJSON_AddNumberToObject(o, "id", (double)fc[i].id);
-      cJSON_AddStringToObject(o, "subject", fc[i].source);
-      cJSON_AddStringToObject(o, "relation", fc[i].relation);
-      cJSON_AddStringToObject(o, "object", fc[i].target);
-      cJSON_AddStringToObject(o, "assertion_kind", fc[i].assertion_kind);
-      cJSON_AddStringToObject(o, "lifecycle", fc[i].lifecycle);
-      cJSON_AddNumberToObject(o, "authority_rank", fc[i].authority_rank);
-      cJSON_AddNumberToObject(o, "evidence_count", fc[i].evidence_count);
-      cJSON_AddStringToObject(o, "commit_id", fc[i].commit_id);
-      cJSON_AddItemToArray(assertions, o);
-   }
-   cJSON_AddNumberToObject(root, "assertion_candidate_count", nfc < 0 ? 0 : nfc);
-
-   /* Canonical entities and merge history share the typed-fact operator surface:
-    * merge is a graph mutation with the same commit/rollback/audit contract. */
-   cJSON *entities = cJSON_AddArrayToObject(root, "entities");
-   entity_summary_t es[128];
-   int nes = db2_entity_summaries(es, 128);
-   for (int i = 0; i < nes && entities; i++)
-   {
-      cJSON *o = cJSON_CreateObject();
-      if (!o)
-         continue;
-      cJSON_AddNumberToObject(o, "canonical_id", (double)es[i].canonical_id);
-      cJSON_AddNumberToObject(o, "kind", es[i].kind);
-      cJSON_AddStringToObject(o, "status", es[i].status);
-      cJSON_AddNumberToObject(o, "merged_into", (double)es[i].merged_into);
-      cJSON_AddStringToObject(o, "name", es[i].name);
-      cJSON_AddItemToArray(entities, o);
-   }
-   cJSON_AddNumberToObject(root, "entity_count", nes < 0 ? 0 : nes);
-
-   cJSON *merges = cJSON_AddArrayToObject(root, "entity_merges");
-   entity_merge_summary_t ms[64];
-   int nms = db2_entity_merge_summaries(ms, 64);
-   for (int i = 0; i < nms && merges; i++)
-   {
-      cJSON *o = cJSON_CreateObject();
-      if (!o)
-         continue;
-      cJSON_AddNumberToObject(o, "merge_id", (double)ms[i].merge_id);
-      cJSON_AddNumberToObject(o, "from_id", (double)ms[i].from_id);
-      cJSON_AddNumberToObject(o, "into_id", (double)ms[i].into_id);
-      cJSON_AddBoolToObject(o, "undone", ms[i].undone ? 1 : 0);
-      cJSON_AddStringToObject(o, "from_name", ms[i].from_name);
-      cJSON_AddStringToObject(o, "into_name", ms[i].into_name);
-      cJSON_AddStringToObject(o, "commit_id", ms[i].commit_id);
-      cJSON_AddItemToArray(merges, o);
-   }
-   cJSON_AddNumberToObject(root, "entity_merge_count", nms < 0 ? 0 : nms);
-
-   char *s = cJSON_PrintUnformatted(root);
-   cJSON_Delete(root);
-   if (!s)
-   {
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"typed_facts render failed\"}");
-      return 500;
-   }
-   if (strlen(s) >= (size_t)out_cap)
-   {
-      free(s);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"typed_facts too large\"}");
-      return 500;
-   }
-   snprintf(out_buf, (size_t)out_cap, "%s", s);
-   free(s);
-   return 200;
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "ontology-dashboard");
+   int rc = args ? aimee_module_commands_dispatch_internal("memory.runtime", args, &reply) : -1;
+   cJSON_Delete(args);
+   return console_memory_owner_response(rc, reply, out_buf, out_cap);
 }
 
 /* Memory rows are reviewable independently of recall.  This history surface is
@@ -297,42 +208,16 @@ static int console_typed_facts(char *out_buf, int out_cap)
  * constrained by row RLS and the canonical scope filter. */
 static int console_memories(char *out_buf, int out_cap)
 {
-   db2_memory_review_row_t rows[32];
-   db2_memory_scope_context_set("", "", 1);
-   int n = db2_memory_review_list("", 32, rows, 32);
-   db2_memory_scope_context_clear();
-   if (n < 0)
+   cJSON *req = cJSON_CreateObject();
+   cJSON *root = NULL;
+   int rc = aimee_module_commands_dispatch_internal("memory.review_console", req, &root);
+   cJSON_Delete(req);
+   if (rc != 1 || !root || strcmp(jo_cstr(root, "status"), "ok") != 0)
    {
+      cJSON_Delete(root);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory review unavailable\"}");
       return 500;
    }
-   cJSON *root = cJSON_CreateObject();
-   cJSON *items = root ? cJSON_AddArrayToObject(root, "memories") : NULL;
-   if (!root || !items)
-   {
-      cJSON_Delete(root);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory review alloc failed\"}");
-      return 500;
-   }
-   cJSON_AddStringToObject(root, "schema", "console.memories.v1");
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *o = cJSON_CreateObject();
-      cJSON_AddNumberToObject(o, "id", (double)rows[i].id);
-      cJSON_AddStringToObject(o, "tier", rows[i].tier);
-      cJSON_AddStringToObject(o, "kind", rows[i].kind);
-      cJSON_AddStringToObject(o, "key", rows[i].key);
-      cJSON_AddStringToObject(o, "content", rows[i].content);
-      cJSON_AddNumberToObject(o, "confidence", rows[i].confidence);
-      cJSON_AddStringToObject(o, "lifecycle", rows[i].lifecycle_state);
-      cJSON_AddStringToObject(o, "review_reason", rows[i].review_reason);
-      cJSON_AddStringToObject(o, "scope_type", rows[i].scope_type);
-      cJSON_AddStringToObject(o, "scope_value", rows[i].scope_value);
-      cJSON_AddStringToObject(o, "created_at", rows[i].created_at);
-      cJSON_AddStringToObject(o, "updated_at", rows[i].updated_at);
-      cJSON_AddItemToArray(items, o);
-   }
-   cJSON_AddNumberToObject(root, "count", n);
    return console_send(root, 200, "{\"schema\":\"console.memories.v1\",\"memories\":[]}", out_buf,
                        out_cap);
 }
@@ -345,7 +230,11 @@ static int console_memory_review(const char *body, char *out_buf, int out_cap)
    const char *reason =
        req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "reason")) : NULL;
    cJSON *idj = req ? cJSON_GetObjectItemCaseSensitive(req, "memory_id") : NULL;
-   int64_t id = cJSON_IsNumber(idj) && idj->valuedouble > 0 ? (int64_t)idj->valuedouble : 0;
+   int64_t id = cJSON_IsNumber(idj) && isfinite(idj->valuedouble) && idj->valuedouble > 0 &&
+                        idj->valuedouble <= 9007199254740991.0 &&
+                        trunc(idj->valuedouble) == idj->valuedouble
+                    ? (int64_t)idj->valuedouble
+                    : 0;
    if (!id || !action || (strcmp(action, "reject") != 0 && strcmp(action, "restore") != 0))
    {
       cJSON_Delete(req);
@@ -362,16 +251,38 @@ static int console_memory_review(const char *body, char *out_buf, int out_cap)
    }
    char action_copy[16];
    snprintf(action_copy, sizeof(action_copy), "%s", action);
-   db2_memory_scope_context_set("", "", 1);
-   int rc = strcmp(action, "reject") == 0 ? db2_memory_reject(id, reason)
-                                          : db2_memory_restore(id, actor.principal);
-   db2_memory_scope_context_clear();
+   /* The console route has authenticated the operator. Preserve that verified
+    * identity separately from the untrusted action body on the generic bus. */
+   cJSON *args = cJSON_CreateObject();
+   cJSON *context = cJSON_CreateObject();
+   cJSON_AddNumberToObject(args, "id", (double)id);
+   cJSON_AddStringToObject(args, "reason", reason ? reason : "");
+   cJSON_AddBoolToObject(context, "authenticated", 1);
+   cJSON_AddBoolToObject(context, "user_authority", 1);
+   cJSON_AddStringToObject(context, "principal", actor.principal);
+   cJSON_AddStringToObject(context, "transport_identity", actor.transport_identity);
+   cJSON *reply = NULL;
+   int rc = args && context
+                ? aimee_module_commands_dispatch_context(
+                      strcmp(action, "reject") == 0 ? "memory.reject" : "memory.restore", args,
+                      context, &reply)
+                : -1;
+   cJSON_Delete(args);
+   cJSON_Delete(context);
    cJSON_Delete(req);
-   if (rc != 0)
+   if (rc != 1 || !cJSON_IsObject(reply) || strcmp(jo_cstr(reply, "status"), "ok") != 0)
    {
+      int status = rc == 1 && !strcmp(jo_cstr(reply, "kind"), "not_found") ? 404
+                   : rc == 1 && (!strcmp(jo_cstr(reply, "kind"), "unauthorized") ||
+                                 !strcmp(jo_cstr(reply, "kind"), "forbidden"))
+                       ? 403
+                   : rc == 1 && !strcmp(jo_cstr(reply, "kind"), "conflict") ? 409
+                                                                            : 503;
+      cJSON_Delete(reply);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"memory review transition failed\"}");
-      return 409;
+      return status;
    }
+   cJSON_Delete(reply);
    snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"memory_id\":%lld,\"action\":\"%s\"}",
             (long long)id, action_copy);
    return 200;
@@ -436,96 +347,50 @@ static int console_typed_facts_config(const char *body, char *out_buf, int out_c
    return 200;
 }
 
-/* A relation name is safe iff it is a non-empty lower snake_case token within
- * REL_TYPE_NAME_MAX (the ontology's canonical form). Rejects oversized/malformed
- * input at the route boundary before it reaches the ontology helpers. */
-static int tf_relation_name_ok(const char *s)
+/* The verified operator context is separate from the untrusted request. */
+static int console_graph_mutation(const char *body, const char *operation,
+                                  const char *const *fields, size_t field_count, char *out_buf,
+                                  int out_cap)
 {
-   if (!s || !s[0])
-      return 0;
-   size_t n = strlen(s);
-   if (n >= REL_TYPE_NAME_MAX)
-      return 0;
-   for (size_t i = 0; i < n; i++)
+   cJSON *req = body && body[0] ? cJSON_ParseWithOpts(body, NULL, 1) : NULL;
+   if (!cJSON_IsObject(req))
    {
-      char c = s[i];
-      if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
-         return 0;
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"JSON object required\"}");
+      return 400;
    }
-   return 1;
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(1, &actor) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
+      return 403;
+   }
+   cJSON *args = cJSON_CreateObject(), *context = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", operation);
+   for (size_t i = 0; i < field_count; i++)
+   {
+      cJSON *value = cJSON_GetObjectItemCaseSensitive(req, fields[i]);
+      if (value)
+         cJSON_AddItemToObject(args, fields[i], cJSON_Duplicate(value, 1));
+   }
+   cJSON_AddBoolToObject(context, "authenticated", 1);
+   cJSON_AddBoolToObject(context, "user_authority", 1);
+   cJSON_AddStringToObject(context, "principal", actor.principal);
+   cJSON_AddStringToObject(context, "transport_identity", actor.transport_identity);
+   int rc = args && context
+                ? aimee_module_commands_dispatch_context("memory.runtime", args, context, &reply)
+                : -1;
+   cJSON_Delete(args);
+   cJSON_Delete(context);
+   cJSON_Delete(req);
+   return console_memory_owner_response(rc, reply, out_buf, out_cap);
 }
 
-/* POST /v1/console/typed_facts/relation — operator action on a provisional
- * relation (§8): {action: "approve"|"map"|"reject", relation, target?}. Wires to
- * the shipped ontology-evolution verbs. */
 static int console_typed_facts_relation(const char *body, char *out_buf, int out_cap)
 {
-   cJSON *req = (body && body[0]) ? cJSON_Parse(body) : NULL;
-   const char *action =
-       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
-   const char *rel =
-       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "relation")) : NULL;
-   const char *target =
-       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "target")) : NULL;
-   if (!action || !rel || !rel[0])
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action and relation are required\"}");
-      return 400;
-   }
-   if (!tf_relation_name_ok(rel) || (target && target[0] && !tf_relation_name_ok(target)))
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":\"relation/target must be lower snake_case within REL_TYPE_NAME_MAX\"}");
-      return 400;
-   }
-   int rc;
-   const char *did;
-   if (strcmp(action, "approve") == 0)
-   {
-      rc = db2_ontology_approve(rel);
-      did = "approved";
-   }
-   else if (strcmp(action, "reject") == 0)
-   {
-      rc = db2_ontology_reject(rel);
-      did = "rejected";
-   }
-   else if (strcmp(action, "map") == 0)
-   {
-      if (!target || !target[0])
-      {
-         cJSON_Delete(req);
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"map action requires a target\"}");
-         return 400;
-      }
-      rc = db2_ontology_map(rel, target);
-      did = "mapped";
-   }
-   else
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be approve, map, or reject\"}");
-      return 400;
-   }
-   cJSON *resp = cJSON_CreateObject();
-   cJSON_AddBoolToObject(resp, "ok", rc == 0 ? 1 : 0);
-   cJSON_AddStringToObject(resp, "action", did);
-   cJSON_AddStringToObject(resp, "relation", rel);
-   cJSON_Delete(req);
-   char *s = cJSON_PrintUnformatted(resp);
-   cJSON_Delete(resp);
-   int status = rc == 0 ? 200 : 500;
-   if (!s || strlen(s) >= (size_t)out_cap)
-   {
-      free(s);
-      snprintf(out_buf, (size_t)out_cap, rc == 0 ? "{\"ok\":true}" : "{\"ok\":false}");
-      return status;
-   }
-   snprintf(out_buf, (size_t)out_cap, "%s", s);
-   free(s);
-   return status;
+   const char *fields[] = {"action", "relation", "target"};
+   return console_graph_mutation(body, "ontology-review", fields, 3, out_buf, out_cap);
 }
 
 /* POST /v1/console/typed_facts/assertion
@@ -534,27 +399,18 @@ static int console_typed_facts_relation(const char *body, char *out_buf, int out
 static int console_typed_facts_assertion(const char *body, char *out_buf, int out_cap)
 {
    cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
-   const char *action =
-       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
-   cJSON *idj = req ? cJSON_GetObjectItemCaseSensitive(req, "assertion_id") : NULL;
-   int64_t id = cJSON_IsNumber(idj) && idj->valuedouble > 0 ? (int64_t)idj->valuedouble : 0;
-   fact_review_action_t review;
-   if (action && strcmp(action, "approve") == 0)
-      review = FACT_REVIEW_APPROVE;
-   else if (action && strcmp(action, "reject") == 0)
-      review = FACT_REVIEW_REJECT;
-   else if (action && strcmp(action, "undo") == 0)
-      review = FACT_REVIEW_UNDO;
-   else
+   const char *action = jo_cstr(req, "action");
+   cJSON *idj = cJSON_GetObjectItemCaseSensitive(req, "assertion_id");
+   int64_t id = cJSON_IsNumber(idj) && isfinite(idj->valuedouble) && idj->valuedouble > 0 &&
+                        idj->valuedouble <= 9007199254740991.0 &&
+                        trunc(idj->valuedouble) == idj->valuedouble
+                    ? (int64_t)idj->valuedouble
+                    : 0;
+   if (!id || (strcmp(action, "approve") && strcmp(action, "reject") && strcmp(action, "undo")))
    {
       cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be approve, reject, or undo\"}");
-      return 400;
-   }
-   if (!id)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"positive assertion_id required\"}");
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"positive assertion_id and approve/reject/undo action required\"}");
       return 400;
    }
    fact_actor_t actor;
@@ -564,19 +420,39 @@ static int console_typed_facts_assertion(const char *body, char *out_buf, int ou
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
       return 403;
    }
-   fact_mutation_result_t result;
-   int rc = db2_fact_mutation_review(&actor, id, review, &result);
+   cJSON *args = cJSON_CreateObject(), *context = cJSON_CreateObject(), *reply = NULL;
+   cJSON_AddStringToObject(args, "operation", "fact-review");
+   cJSON_AddStringToObject(args, "action", action);
+   cJSON_AddNumberToObject(args, "id", (double)id);
+   cJSON_AddBoolToObject(context, "authenticated", 1);
+   cJSON_AddBoolToObject(context, "user_authority", 1);
+   cJSON_AddStringToObject(context, "principal", actor.principal);
+   cJSON_AddStringToObject(context, "transport_identity", actor.transport_identity);
+   int rc = args && context
+                ? aimee_module_commands_dispatch_context("memory.runtime", args, context, &reply)
+                : -1;
+   cJSON_Delete(args);
+   cJSON_Delete(context);
    cJSON_Delete(req);
-   if (rc != 0)
+   if (rc != 1 || !cJSON_IsObject(reply) || strcmp(jo_cstr(reply, "status"), "ok"))
    {
+      int status = rc == 1 && !strcmp(jo_cstr(reply, "kind"), "not_found")      ? 404
+                   : rc == 1 && !strcmp(jo_cstr(reply, "kind"), "conflict")     ? 409
+                   : rc == 1 && !strcmp(jo_cstr(reply, "kind"), "unauthorized") ? 403
+                                                                                : 503;
+      cJSON_Delete(reply);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fact review transition failed\"}");
-      return 409;
+      return status;
    }
-   snprintf(out_buf, (size_t)out_cap,
-            "{\"ok\":true,\"assertion_id\":%lld,\"lifecycle\":\"%s\","
-            "\"commit_id\":\"%s\"}",
-            (long long)result.assertion_id, result.lifecycle, result.commit_id);
-   return 200;
+   if (!cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(reply, "assertion_id")) ||
+       !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "lifecycle")) ||
+       !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "commit_id")))
+   {
+      cJSON_Delete(reply);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid fact review response\"}");
+      return 503;
+   }
+   return console_send(reply, 200, "{\"error\":\"fact review render failed\"}", out_buf, out_cap);
 }
 
 /* POST /v1/console/typed_facts/entity
@@ -585,68 +461,8 @@ static int console_typed_facts_assertion(const char *body, char *out_buf, int ou
  * exclusively from the verified console request context. */
 static int console_typed_facts_entity(const char *body, char *out_buf, int out_cap)
 {
-   cJSON *req = body && body[0] ? cJSON_Parse(body) : NULL;
-   const char *action =
-       req ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "action")) : NULL;
-   fact_actor_t actor;
-   if (!action || (strcmp(action, "merge") != 0 && strcmp(action, "unmerge") != 0))
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"action must be merge or unmerge\"}");
-      return 400;
-   }
-   if (db2_fact_actor_from_request(1, &actor) != 0)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated operator required\"}");
-      return 403;
-   }
-   char cid[FACT_COMMIT_ID_MAX];
-   if (strcmp(action, "merge") == 0)
-   {
-      cJSON *fj = cJSON_GetObjectItemCaseSensitive(req, "from_id");
-      cJSON *tj = cJSON_GetObjectItemCaseSensitive(req, "into_id");
-      int64_t from = cJSON_IsNumber(fj) && fj->valuedouble > 0 ? (int64_t)fj->valuedouble : 0;
-      int64_t into = cJSON_IsNumber(tj) && tj->valuedouble > 0 ? (int64_t)tj->valuedouble : 0;
-      if (!from || !into || from == into || fj->valuedouble != (double)from ||
-          tj->valuedouble != (double)into)
-      {
-         cJSON_Delete(req);
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"distinct positive integer from_id and into_id required\"}");
-         return 400;
-      }
-      int64_t mid = db2_entity_merge_as(&actor, from, into, cid);
-      cJSON_Delete(req);
-      if (mid <= 0)
-      {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"entities are not both active or merge would be invalid\"}");
-         return 409;
-      }
-      snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
-               (long long)mid, cid);
-      return 200;
-   }
-   cJSON *mj = cJSON_GetObjectItemCaseSensitive(req, "merge_id");
-   int64_t mid = cJSON_IsNumber(mj) && mj->valuedouble > 0 ? (int64_t)mj->valuedouble : 0;
-   if (!mid || mj->valuedouble != (double)mid)
-   {
-      cJSON_Delete(req);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"positive integer merge_id required\"}");
-      return 400;
-   }
-   int rc = db2_entity_unmerge_as(&actor, mid, cid);
-   cJSON_Delete(req);
-   if (rc != 0)
-   {
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":\"merge is unknown, already undone, or no longer current\"}");
-      return 409;
-   }
-   snprintf(out_buf, (size_t)out_cap, "{\"ok\":true,\"merge_id\":%lld,\"commit_id\":\"%s\"}",
-            (long long)mid, cid);
-   return 200;
+   const char *fields[] = {"action", "from_id", "into_id", "merge_id"};
+   return console_graph_mutation(body, "entity-review", fields, 4, out_buf, out_cap);
 }
 
 /* POST /v1/console/typed_facts/commit

@@ -593,7 +593,9 @@ cJSON *marshal_index_ast_grep(int argc, char **argv)
  * project the question is about, how wide to look, and where the caller stands.
  * A launcher or session exports AIMEE_PROJECT_ID, so an agent moved into a
  * hidden worktree still scopes its first lookup correctly without having to
- * discover a --project flag first. An explicit flag always wins over it. */
+ * discover a --project flag first. An explicit flag always wins over it.
+ * Worktrees created outside the launcher are resolved after marshalling in
+ * cli_v1_forward, using local Git metadata and the registered index roots. */
 static void marshal_add_index_context(cJSON *req, const cli_args_t *opts)
 {
    if (!cJSON_GetObjectItemCaseSensitive(req, "project"))

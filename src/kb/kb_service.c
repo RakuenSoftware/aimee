@@ -1,4 +1,9 @@
+#include "module_commands.h"
+#include "json_fluent.h"
 #include "aimee.h"
+#include "module_commands.h"
+#include "kb_reqctx.h"
+#include "kb/kb_login_throttle.h"
 #include "config.h" /* legacy_config_read — reembed default embedder */
 #include "kb_background.h"
 #include "kb_service.h"
@@ -10,7 +15,6 @@
 #include "modules/db2/c/kb_service_backend.h"
 #include "modules/db2/c/db2_internal.h"
 #include "modules/db2/c/pgvec_kb_service.h"
-#include "modules/db2/c/vector_verify.h"
 #include <aimee/learning/learning.h>
 #include "curiosity_resolve.h"
 #include "kb_bandit.h"
@@ -137,298 +141,6 @@ int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg)
    return rc;
 }
 
-static int kb_handle_memory_rebuild(int fd, cJSON *req)
-{
-   cJSON *version_j = cJSON_GetObjectItemCaseSensitive(req, "version");
-   const char *requested_version =
-       (cJSON_IsString(version_j) && version_j->valuestring[0]) ? version_j->valuestring : NULL;
-
-   char active_ver[256] = "";
-   const char *version = requested_version;
-   if (!version)
-   {
-      (void)db2_kb_service_get_active_embedder_version(active_ver, sizeof(active_ver));
-      if (!active_ver[0])
-         return kb_send_error(fd,
-                              "no active embedder version; pass a version or run memory reembed");
-      version = active_ver;
-   }
-
-   int failed = 0;
-   int rebuilt = memory_rebuild_vector_index_for_version(version, &failed);
-
-   if (rebuilt < 0)
-      return kb_send_error(
-          fd, "memory rebuild failed (another rebuild may be running; check rebuild_lock_held)");
-
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "version", version);
-   cJSON_AddNumberToObject(resp, "rebuilt", rebuilt);
-   cJSON_AddNumberToObject(resp, "failed", failed);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-static int kb_handle_reindex(int fd, cJSON *req)
-{
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 0;
-
-   if (!db2_is_initialized())
-      return kb_send_error(fd, "failed to open knowledge service store");
-   int rebuilt = memory_rebuild_derived_indexes(limit);
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "rebuilt", rebuilt);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-static int kb_handle_memory_repair(int fd, cJSON *req)
-{
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   cJSON *failed_only_j = cJSON_GetObjectItemCaseSensitive(req, "failed_only");
-   cJSON *reset_stuck_j = cJSON_GetObjectItemCaseSensitive(req, "reset_stuck");
-   cJSON *memory_id_j = cJSON_GetObjectItemCaseSensitive(req, "memory_id");
-   cJSON *embed_j = cJSON_GetObjectItemCaseSensitive(req, "embedding_command");
-
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 0;
-   int failed_only = cJSON_IsTrue(failed_only_j) ? 1 : 0;
-   int reset_stuck = cJSON_IsTrue(reset_stuck_j) ? 1 : 0;
-   int64_t memory_id = cJSON_IsNumber(memory_id_j) ? (int64_t)memory_id_j->valuedouble : 0;
-   const char *embed_cmd = config_embedder_command_current(
-       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
-
-   if (reset_stuck)
-   {
-      int reset = db2_kb_service_reset_stuck_vector_ops(8);
-
-      cJSON *resp = jo_ok();
-      cJSON_AddStringToObject(resp, "mode", "reset_stuck");
-      cJSON_AddNumberToObject(resp, "reset_stuck", reset);
-      int srv_rc = kb_send_response(fd, resp);
-      cJSON_Delete(resp);
-      return srv_rc;
-   }
-
-   if (!db2_is_initialized())
-      return kb_send_error(fd, "failed to open knowledge service store");
-   /* Size the memory retrieval index at the deployment's embedding dimension —
-    * the same runtime dim the vector memory_embeddings column was created at
-    * (db2_set_embedding_dim at startup: 2560 GPU / 1024 CPU / external cap 4000).
-    * A hardcoded 384 never matched the vector column, so the index was wrong. */
-   int mem_embed_dim = db2_embedding_dim();
-   if (mem_embed_dim <= 0 || mem_embed_dim > EMBED_MAX_DIM)
-      mem_embed_dim = 1024;
-   if (pgvec_kb_service_ensure_memory_collection(mem_embed_dim) != 0)
-   {
-      return kb_send_error(fd, "failed to initialize the memory retrieval index");
-   }
-
-   int repaired = 0;
-   int failed = 0;
-   const char *mode = "all";
-
-   if (memory_id > 0)
-   {
-      mode = "single";
-      if (memory_repair_vector_index(memory_id, embed_cmd) == 0)
-         repaired = 1;
-      else
-         failed = 1;
-   }
-   else if (failed_only)
-   {
-      mode = "failed_only";
-      repaired = memory_repair_vector_index_failed_only(embed_cmd, limit, &failed);
-      if (repaired < 0)
-      {
-         return kb_send_error(fd, "failed to enumerate failed index ops");
-      }
-   }
-   else
-   {
-      int64_t ids[1024];
-      int id_count = db2_kb_service_list_memory_ids_by_updated(limit, ids, 1024);
-      if (id_count < 0)
-      {
-         return kb_send_error(fd, "failed to enumerate memories");
-      }
-
-      for (int i = 0; i < id_count; i++)
-      {
-         if (memory_repair_vector_index(ids[i], embed_cmd) == 0)
-            repaired++;
-         else
-            failed++;
-      }
-   }
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "mode", mode);
-   cJSON_AddNumberToObject(resp, "repaired", repaired);
-   cJSON_AddNumberToObject(resp, "failed", failed);
-   if (memory_id > 0)
-      cJSON_AddNumberToObject(resp, "memory_id", (double)memory_id);
-   if (limit > 0)
-      cJSON_AddNumberToObject(resp, "limit", limit);
-   if (failed_only)
-      cJSON_AddBoolToObject(resp, "failed_only", 1);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-/* Verify collection + DB2 state for `aimee memory verify`. Fetches the pgvector
- * snapshot, DB2 row counts for memories/units/kb_documents, index_ops summary
- * (and optional failed detail), probes the embedder, and optionally runs a
- * synthetic search timing.  DB1 reads (schema version / rebuild lock) stay on
- * the CLI side — the caller computes overall_ok from the returned data plus
- * those local reads, and separately calls memory.repair / memory.rebuild if
- * --repair surfaced problems. */
-static int kb_handle_memory_verify(int fd, cJSON *req)
-{
-   cJSON *detail_j = cJSON_GetObjectItemCaseSensitive(req, "detail");
-   cJSON *timings_j = cJSON_GetObjectItemCaseSensitive(req, "timings");
-   cJSON *embed_j = cJSON_GetObjectItemCaseSensitive(req, "embedding_command");
-   int do_detail = cJSON_IsTrue(detail_j) ? 1 : 0;
-   int do_timings = cJSON_IsTrue(timings_j) ? 1 : 0;
-   const char *embed_cmd = config_embedder_command_current(
-       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
-
-   pgvec_verify_snapshot_t snap;
-   memset(&snap, 0, sizeof(snap));
-   (void)pgvec_verify_snapshot(&snap);
-
-   db2_kb_service_memory_verify_t db2_verify;
-   memset(&db2_verify, 0, sizeof(db2_verify));
-   (void)db2_kb_service_collect_memory_verify(do_detail, 8, &db2_verify);
-   db2_kb_service_verify_snapshot_t db2_snapshot;
-   memset(&db2_snapshot, 0, sizeof(db2_snapshot));
-   (void)db2_kb_service_collect_verify_snapshot(&db2_snapshot);
-
-   float probe_vec[EMBED_MAX_DIM];
-   int embedder_dim =
-       memory_embed_text("probe", embed_cmd, EMBED_INPUT_DOCUMENT, probe_vec, EMBED_MAX_DIM);
-
-   int timings_trials = 0;
-   int64_t timings_total_us = 0;
-   int64_t timings_max_us = 0;
-   if (do_timings && snap.memory_exists > 0)
-   {
-      const int trials = 10;
-      for (int i = 0; i < trials; i++)
-      {
-         float qvec[EMBED_MAX_DIM];
-         char probe[64];
-         snprintf(probe, sizeof(probe), "probe query %d", i);
-         int qdim = memory_embed_text(probe, "builtin", EMBED_INPUT_QUERY, qvec, EMBED_MAX_DIM);
-         if (qdim <= 0)
-            continue;
-         int64_t ids[8];
-         double scores[8];
-         struct timespec t_start, t_end;
-         clock_gettime(CLOCK_MONOTONIC, &t_start);
-         int hits = pgvec_kb_service_search_memory_points("memory", qvec, qdim, 5, ids, scores, 8);
-         clock_gettime(CLOCK_MONOTONIC, &t_end);
-         if (hits < 0)
-            continue;
-         int64_t us =
-             (t_end.tv_sec - t_start.tv_sec) * 1000000 + (t_end.tv_nsec - t_start.tv_nsec) / 1000;
-         timings_total_us += us;
-         if (us > timings_max_us)
-            timings_max_us = us;
-         timings_trials++;
-      }
-   }
-
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "server_version", snap.server_version);
-   cJSON_AddStringToObject(resp, "active_embedder_version", db2_snapshot.active_ver);
-
-   cJSON *sch = cJSON_AddObjectToObject(resp, "schema");
-   cJSON_AddStringToObject(sch, "expected", pgvec_schema_version());
-   cJSON_AddStringToObject(sch, "stored", db2_verify.stored_schema_ver);
-
-   cJSON_AddBoolToObject(resp, "rebuild_lock_held", db2_verify.rebuild_lock_held);
-
-   cJSON *emb = cJSON_AddObjectToObject(resp, "embedder");
-   cJSON_AddNumberToObject(emb, "dim", embedder_dim);
-
-   cJSON *mem = cJSON_AddObjectToObject(resp, "memory");
-   cJSON_AddStringToObject(mem, "collection", snap.memory_collection);
-   cJSON_AddBoolToObject(mem, "collection_exists", snap.memory_exists > 0);
-   cJSON_AddNumberToObject(mem, "db2_memories", (double)db2_snapshot.mem_rows);
-   cJSON_AddNumberToObject(mem, "db2_units", (double)db2_snapshot.unit_rows);
-   cJSON_AddNumberToObject(mem, "vector_points", (double)snap.memory_points);
-   if (snap.memory_indexed_fields)
-      cJSON_AddStringToObject(mem, "indexed_fields", snap.memory_indexed_fields);
-
-   cJSON *kb = cJSON_AddObjectToObject(resp, "kb");
-   cJSON_AddStringToObject(kb, "collection", snap.kb_collection);
-   cJSON_AddBoolToObject(kb, "collection_exists", snap.kb_exists > 0);
-   cJSON_AddNumberToObject(kb, "db2_chunks", (double)db2_snapshot.kb_rows);
-   cJSON_AddNumberToObject(kb, "vector_points", (double)snap.kb_points);
-   if (snap.kb_indexed_fields)
-      cJSON_AddStringToObject(kb, "indexed_fields", snap.kb_indexed_fields);
-
-   cJSON *ops_j = cJSON_AddObjectToObject(resp, "index_ops");
-   cJSON_AddNumberToObject(ops_j, "ok", (double)db2_verify.ops.ok_ops);
-   cJSON_AddNumberToObject(ops_j, "pending", (double)db2_verify.ops.pending_ops);
-   cJSON_AddNumberToObject(ops_j, "failed", (double)db2_verify.ops.failed_ops);
-   cJSON_AddNumberToObject(ops_j, "stuck", (double)db2_verify.ops.stuck_ops);
-
-   /* Write-to-readable lag: how long a just-stored memory stays unrecallable
-    * while its embed is queued. Reported as unmeasured rather than zero when
-    * nothing has landed in the window, so an absent signal is not read as a
-    * fast one. */
-   {
-      cJSON *lag = cJSON_AddObjectToObject(ops_j, "write_to_readable_lag");
-      cJSON_AddNumberToObject(lag, "samples", (double)db2_verify.ops.lag_samples);
-      if (db2_verify.ops.lag_samples > 0)
-      {
-         cJSON_AddNumberToObject(lag, "p50_secs", db2_verify.ops.lag_p50_secs);
-         cJSON_AddNumberToObject(lag, "p90_secs", db2_verify.ops.lag_p90_secs);
-         cJSON_AddNumberToObject(lag, "p95_secs", db2_verify.ops.lag_p95_secs);
-         cJSON_AddNumberToObject(lag, "p99_secs", db2_verify.ops.lag_p99_secs);
-         cJSON_AddNumberToObject(lag, "max_secs", db2_verify.ops.lag_max_secs);
-      }
-      else
-      {
-         cJSON_AddStringToObject(lag, "state", "unmeasured");
-      }
-   }
-
-   if (do_detail)
-   {
-      cJSON *fails = cJSON_AddArrayToObject(resp, "failed_ops");
-      for (int i = 0; i < db2_verify.failed_detail_count; i++)
-      {
-         cJSON *row = cJSON_CreateObject();
-         cJSON_AddNumberToObject(row, "point_id", (double)db2_verify.failed_detail[i].point_id);
-         cJSON_AddStringToObject(row, "collection", db2_verify.failed_detail[i].collection);
-         cJSON_AddNumberToObject(row, "memory_id", (double)db2_verify.failed_detail[i].memory_id);
-         cJSON_AddNumberToObject(row, "attempts", db2_verify.failed_detail[i].attempts);
-         cJSON_AddStringToObject(row, "last_error", db2_verify.failed_detail[i].last_error);
-         cJSON_AddStringToObject(row, "updated_at", db2_verify.failed_detail[i].updated_at);
-         cJSON_AddItemToArray(fails, row);
-      }
-   }
-
-   if (do_timings)
-   {
-      cJSON *tim = cJSON_AddObjectToObject(resp, "timings");
-      cJSON_AddNumberToObject(tim, "trials", timings_trials);
-      cJSON_AddNumberToObject(tim, "total_us", (double)timings_total_us);
-      cJSON_AddNumberToObject(tim, "max_us", (double)timings_max_us);
-   }
-
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   pgvec_verify_snapshot_cleanup(&snap);
-   return srv_rc;
-}
-
 /* memory.embed: single (memory_id>0) or batch (--all) re-embed at the
  * active embedder version.  For batch mode the caller passes the active
  * version so server-side config state is out of the loop. */
@@ -490,240 +202,6 @@ static int kb_handle_code_embeddings_refresh(int fd, cJSON *req)
    int srv_rc = kb_send_response(fd, resp);
    cJSON_Delete(resp);
    return srv_rc;
-}
-
-static int kb_handle_memory_embed(int fd, cJSON *req)
-{
-   cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(req, "memory_id");
-   cJSON *all_j = cJSON_GetObjectItemCaseSensitive(req, "all");
-   cJSON *ver_j = cJSON_GetObjectItemCaseSensitive(req, "version");
-   cJSON *embed_j = cJSON_GetObjectItemCaseSensitive(req, "embedding_command");
-   int64_t memory_id = cJSON_IsNumber(mem_j) ? (int64_t)mem_j->valuedouble : 0;
-   int all = cJSON_IsTrue(all_j) ? 1 : 0;
-   const char *version = (cJSON_IsString(ver_j) && ver_j->valuestring[0]) ? ver_j->valuestring : "";
-   const char *embed_cmd = config_embedder_command_current(
-       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
-
-   if (!all && memory_id <= 0)
-      return kb_send_error(fd, "memory.embed requires memory_id>0 or all=true");
-
-   if (memory_id > 0)
-   {
-      int rc = memory_embed(memory_id, embed_cmd);
-      if (rc != 0)
-         return kb_send_error(fd, "memory embed failed");
-      cJSON *resp = jo_ok();
-      cJSON_AddStringToObject(resp, "mode", "single");
-      cJSON_AddNumberToObject(resp, "memory_id", (double)memory_id);
-      int srv_rc = kb_send_response(fd, resp);
-      cJSON_Delete(resp);
-      return srv_rc;
-   }
-
-   if (!version[0])
-      return kb_send_error(fd, "memory.embed all=true requires version");
-
-   int64_t ids[1024];
-   int id_count = db2_kb_service_list_unembedded_memory_ids(version, ids, 1024);
-   if (id_count < 0)
-      return kb_send_error(fd, "failed to query memories");
-
-   int success = 0, fail = 0;
-   for (int i = 0; i < id_count; i++)
-   {
-      if (memory_embed(ids[i], embed_cmd) == 0)
-         success++;
-      else
-         fail++;
-   }
-
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "mode", "all");
-   cJSON_AddNumberToObject(resp, "embedded", success);
-   cJSON_AddNumberToObject(resp, "failed", fail);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-static int kb_handle_memory_reembed_status(int fd, cJSON *req)
-{
-   (void)req;
-   char active_ver[256] = "";
-   (void)db2_kb_service_get_active_embedder_version(active_ver, sizeof(active_ver));
-
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "active_version", active_ver);
-
-   db2_kb_service_reembed_status_t st;
-   memset(&st, 0, sizeof(st));
-   (void)db2_kb_service_collect_reembed_status(&st);
-   if (st.have_job)
-   {
-      cJSON *job = cJSON_AddObjectToObject(resp, "job");
-      cJSON_AddStringToObject(job, "target_version", st.target_version);
-      cJSON_AddNumberToObject(job, "last_id", st.last_id);
-      cJSON_AddNumberToObject(job, "total", st.total);
-      cJSON_AddNumberToObject(job, "done", st.done);
-      cJSON_AddStringToObject(job, "started_at", st.started_at);
-      cJSON_AddStringToObject(job, "finished_at", st.finished_at);
-   }
-   cJSON_AddBoolToObject(resp, "has_job", st.have_job);
-
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-static int kb_handle_memory_reembed_rollback(int fd, cJSON *req)
-{
-   cJSON *ver_j = cJSON_GetObjectItemCaseSensitive(req, "version");
-   if (!cJSON_IsString(ver_j) || !ver_j->valuestring[0])
-      return kb_send_error(fd, "missing version");
-   const char *version = ver_j->valuestring;
-
-   int count = db2_kb_service_count_embeddings_for_version(version);
-   if (count < 0)
-      return kb_send_error(fd, "rollback: prepare failed");
-   if (count == 0)
-   {
-      char msg[128];
-      snprintf(msg, sizeof(msg), "rollback: no embeddings found for version '%s'", version);
-      return kb_send_error(fd, msg);
-   }
-
-   char ts[32];
-   now_utc(ts, sizeof(ts));
-   if (db2_kb_service_set_active_embedder_version(version, ts) != 0)
-      return kb_send_error(fd, "rollback: update failed");
-
-   int rebuild_failed = 0;
-   int rebuilt = memory_rebuild_vector_index_for_version(version, &rebuild_failed);
-   if (rebuilt < 0)
-      return kb_send_error(fd,
-                           "rollback: failed to rebuild the vector index for requested version");
-
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "version", version);
-   cJSON_AddNumberToObject(resp, "embedding_count", count);
-   cJSON_AddNumberToObject(resp, "rebuilt", rebuilt);
-   cJSON_AddNumberToObject(resp, "rebuild_failed", rebuild_failed);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-static int kb_handle_memory_reembed_cutover(int fd, cJSON *req)
-{
-   (void)req;
-   db2_kb_service_reembed_status_t st;
-   memset(&st, 0, sizeof(st));
-   (void)db2_kb_service_collect_reembed_status(&st);
-   if (!st.target_version[0])
-      return kb_send_error(fd, "cutover: no completed job found — run reembed_start first");
-   if (st.done == 0)
-      return kb_send_error(fd, "cutover: job has zero embeddings — re-embed may not have run");
-
-   char ts[32];
-   now_utc(ts, sizeof(ts));
-   if (db2_kb_service_set_active_embedder_version(st.target_version, ts) != 0)
-      return kb_send_error(fd, "cutover: update failed");
-
-   (void)db2_kb_service_mark_reembed_finished(ts);
-
-   int rebuild_failed = 0;
-   int rebuilt = memory_rebuild_vector_index_for_version(st.target_version, &rebuild_failed);
-   if (rebuilt < 0)
-      return kb_send_error(fd, "cutover: failed to rebuild the retrieval index for target version");
-
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "version", st.target_version);
-   cJSON_AddNumberToObject(resp, "done", st.done);
-   cJSON_AddNumberToObject(resp, "rebuilt", rebuilt);
-   cJSON_AddNumberToObject(resp, "rebuild_failed", rebuild_failed);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-static int kb_handle_memory_reembed_start(int fd, cJSON *req)
-{
-   cJSON *ver_j = cJSON_GetObjectItemCaseSensitive(req, "version");
-   cJSON *embed_j = cJSON_GetObjectItemCaseSensitive(req, "embedding_command");
-   if (!cJSON_IsString(ver_j) || !ver_j->valuestring[0])
-      return kb_send_error(fd, "missing version");
-   const char *version = ver_j->valuestring;
-   /* Resolve via the shared policy: request override, then the server's
-    * CONFIGURED embedder, then builtin. Never silently builtin in production:
-    * builtin emits 384-dim vectors that a real vector(1024)/(2560) column
-    * rejects, leaving memory_embeddings empty. */
-   const char *embed_cmd = config_embedder_command_current(
-       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
-
-   char ts_now[32];
-   now_utc(ts_now, sizeof(ts_now));
-   db2_kb_service_reembed_start_t start;
-   memset(&start, 0, sizeof(start));
-   if (db2_kb_service_prepare_reembed_start(version, ts_now, &start) != 0)
-      return kb_send_error(fd, "reembed_start: progress upsert prepare failed");
-
-   int success = 0, fail = 0, last_id = start.resume_last_id;
-   for (;;)
-   {
-      int64_t ids[1024];
-      int id_count = db2_kb_service_list_pending_reembed_memory_ids(version, last_id, ids, 1024);
-      if (id_count < 0)
-         return kb_send_error(fd, "reembed_start: id query failed");
-      if (id_count == 0)
-         break;
-
-      for (int i = 0; i < id_count; i++)
-      {
-         int64_t mid = ids[i];
-         if (memory_embed(mid, embed_cmd) == 0)
-            success++;
-         else
-            fail++;
-         last_id = (int)mid;
-
-         if ((success + fail) % 50 == 0)
-            (void)db2_kb_service_update_reembed_progress(last_id, success);
-      }
-   }
-
-   (void)db2_kb_service_update_reembed_progress(last_id, success);
-
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "version", version);
-   cJSON_AddNumberToObject(resp, "total", start.total_count);
-   cJSON_AddNumberToObject(resp, "resume_last_id", start.resume_last_id);
-   cJSON_AddNumberToObject(resp, "embedded", success);
-   cJSON_AddNumberToObject(resp, "failed", fail);
-   cJSON_AddNumberToObject(resp, "last_id", last_id);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-#define KB_SCENE_LIST_MAX    100
-#define KB_SCENE_MEMBERS_MAX 512
-
-static int kb_handle_memory_scene_list(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_scene_list_json(KB_SCENE_LIST_MAX);
-   return kb_reply_or_error(fd, resp, "failed to query scenes");
-}
-
-static int kb_handle_memory_scene_show(int fd, cJSON *req)
-{
-   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "scene_id");
-   if (!cJSON_IsNumber(id_j))
-      return kb_send_error(fd, "missing scene_id");
-   int64_t scene_id = (int64_t)id_j->valuedouble;
-
-   cJSON *resp = db2_kb_service_scene_members_json(scene_id, KB_SCENE_MEMBERS_MAX);
-   return kb_reply_or_error(fd, resp, "failed to query scene members");
 }
 
 static int kb_handle_curiosity_list(int fd, cJSON *req)
@@ -948,7 +426,12 @@ static curiosity_evidence_t kb_curiosity_probe(const char *gap_type, const char 
    if (!subject || !subject[0])
       return CURIOSITY_EVIDENCE_UNKNOWN;
 
-   cJSON *found = db2_kb_service_memory_search_graph_json(subject, 3);
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "query", subject);
+   cJSON_AddNumberToObject(args, "limit", 3);
+   cJSON *found = NULL;
+   (void)aimee_module_commands_dispatch("memory.search_graph", args, &found);
+   cJSON_Delete(args);
    if (!found)
       return CURIOSITY_EVIDENCE_UNKNOWN;
 
@@ -1163,23 +646,7 @@ static const struct
     {"kb.maintenance.run", kb_handle_maintenance_run},
     {"kb.export", kb_handle_kb_export},
     {"kb.import", kb_handle_kb_import},
-    {"memory.reindex", kb_handle_reindex},
-    {"memory.rebuild", kb_handle_memory_rebuild},
-    {"memory.repair", kb_handle_memory_repair},
-    {"memory.verify", kb_handle_memory_verify},
-    {"memory.embed", kb_handle_memory_embed},
     {"code_embeddings_refresh", kb_handle_code_embeddings_refresh},
-    {"memory.reembed_start", kb_handle_memory_reembed_start},
-    {"memory.reembed_status", kb_handle_memory_reembed_status},
-    {"memory.reembed_cutover", kb_handle_memory_reembed_cutover},
-    {"memory.reembed_rollback", kb_handle_memory_reembed_rollback},
-    {"memory.scene_list", kb_handle_memory_scene_list},
-    {"memory.scene_show", kb_handle_memory_scene_show},
-    {"memory.directive_create", kb_handle_directive_create},
-    {"memory.directive_resolve", kb_handle_directive_resolve},
-    {"memory.directive_suppress", kb_handle_directive_suppress},
-    {"memory.directive_sweep_expired", kb_handle_directive_sweep_expired},
-    {"memory.directive_list", kb_handle_directive_list},
     {"curiosity.list", kb_handle_curiosity_list},
     {"curiosity.create", kb_handle_curiosity_create},
     {"curiosity.sweep", kb_handle_curiosity_sweep},
@@ -1203,18 +670,14 @@ static const struct
     {"learning.record_application", kb_handle_learning_record_application},
     {"agent.outcome_record", kb_handle_agent_outcome_record},
     {"agent.hint_consume", kb_handle_agent_hint_consume},
-    {"maintenance.anti_pattern_extract_from_feedback",
-     kb_handle_anti_pattern_extract_from_feedback},
-    {"maintenance.anti_pattern_extract_from_failures",
-     kb_handle_anti_pattern_extract_from_failures},
-    {"maintenance.anti_pattern_escalate", kb_handle_anti_pattern_escalate},
+
     {"maintenance.rules_decay", kb_handle_rules_decay},
     {"maintenance.calibrate_promotions", kb_handle_maintenance_calibrate_promotions},
     {"maintenance.compute_demotions", kb_handle_maintenance_compute_demotions},
     {"memory.record_retrieval_outcome", kb_handle_memory_record_retrieval_outcome},
     {"ranker.emit_event", kb_handle_ranker_emit_event},
     {"ranker.record_outcome", kb_handle_ranker_record_outcome},
-    {"maintenance.memory_learn_style", kb_handle_memory_learn_style},
+
     {"decision_log.insert", kb_handle_decision_log_insert},
     {"decision_log.list", kb_handle_decision_log_list},
     {"anti_pattern.list", kb_handle_anti_pattern_list},
@@ -1222,111 +685,40 @@ static const struct
     {"anti_pattern.delete", kb_handle_anti_pattern_delete},
     {"anti_pattern.check", kb_handle_anti_pattern_check},
     {"anti_pattern.bump", kb_handle_anti_pattern_bump},
-    {"maintenance.fold_session", kb_handle_memory_fold_session},
     {"rules.delete", kb_handle_rules_delete},
     {"rules.update_directive_type", kb_handle_rules_update_directive_type},
     {"feedback.record", kb_handle_feedback_record},
     {"maintenance.expire_session_directives", kb_handle_directive_expire_session},
-    {"maintenance.scan_conversations", kb_handle_memory_scan_conversations},
+
     {"dashboard.memory_stats", kb_handle_dashboard_memory_stats},
     {"dashboard.logs", kb_handle_dashboard_logs},
     {"dashboard.reminders", kb_handle_dashboard_reminders},
     {"dashboard.recall", kb_handle_dashboard_recall},
     {"dashboard.directives", kb_handle_dashboard_directives},
-    {"memory.find_facts", kb_handle_memory_find_facts},
-    {"memory.list", kb_handle_memory_list},
-    {"memory.get", kb_handle_memory_get},
-    {"memory.load_eval_corpus", kb_handle_memory_load_eval_corpus},
-    {"memory.top_l2_facts", kb_handle_memory_top_l2_facts},
     {"session_briefing.commitments", kb_handle_session_briefing_commitments},
     {"session_briefing.directives", kb_handle_session_briefing_directives},
-    {"memory.prospective_list", kb_handle_memory_prospective_list},
-    {"memory.prospective_create", kb_handle_memory_prospective_create},
-    {"memory.prospective_complete", kb_handle_memory_prospective_complete},
-    {"memory.prospective_match", kb_handle_memory_prospective_match},
-    {"memory.prospective_mark_triggered", kb_handle_memory_prospective_mark_triggered},
-    {"memory.get_provenance", kb_handle_memory_get_provenance},
-    {"memory.tag_workspace", kb_handle_memory_tag_workspace},
-    {"memory.scope_visibility_rank", kb_handle_memory_scope_visibility_rank},
-    {"memory.episode_card_generate", kb_handle_memory_episode_card_generate},
-    {"memory.tag_scope", kb_handle_memory_tag_scope},
-    {"memory.prospective_sweep_expired", kb_handle_memory_prospective_sweep_expired},
-    {"memory.maintenance_run", kb_handle_memory_maintenance_run},
-    {"memory.lint", kb_handle_memory_lint},
-    {"memory.alerts", kb_handle_memory_alerts},
-    {"memory.recall", kb_handle_memory_recall},
-    {"memory.upsert_workflow", kb_handle_memory_upsert_workflow},
-    {"memory.delete", kb_handle_memory_delete},
-    {"memory.touch", kb_handle_memory_touch},
-    {"memory.update", kb_handle_memory_update},
-    {"memory.reject", kb_handle_memory_reject},
-    {"memory.restore", kb_handle_memory_restore},
-    {"memory.review_list", kb_handle_memory_review_list},
-    {"memory.stats", kb_handle_memory_stats},
-    {"memory.list_conflicts", kb_handle_memory_list_conflicts},
-    {"memory.query_health", kb_handle_memory_query_health},
-    {"memory.effectiveness_stats", kb_handle_memory_effectiveness_stats},
-    {"memory.query_edges", kb_handle_memory_query_edges},
-    {"memory.compact_windows", kb_handle_memory_compact_windows},
-    {"memory.assemble_context", kb_handle_memory_assemble_context},
-    {"memory.assemble_typed_context", kb_handle_memory_assemble_typed_context},
-    {"memory.search", kb_handle_memory_search},
-    {"memory.export_jsonl", kb_handle_memory_export_jsonl},
-    {"memory.decisions_export_jsonl", kb_handle_memory_decisions_export_jsonl},
-    {"memory.key_exists", kb_handle_memory_key_exists},
     {"rules.export_jsonl", kb_handle_rules_export_jsonl},
     {"rules.insert", kb_handle_rules_insert},
     {"tool_registry.snapshot", kb_handle_tool_registry_snapshot},
     {"tool_registry.lookup", kb_handle_tool_registry_lookup},
     {"mcp.call", kb_handle_mcp_call},
-    {"relations.schema_list", kb_handle_relations_schema_list},
-    {"memory.find_facts_visible", kb_handle_memory_find_facts_visible},
-    {"memory.find_facts_scoped", kb_handle_memory_find_facts_scoped},
-    {"memory.diagnose_scoped", kb_handle_memory_diagnose_scoped},
-    {"memory.explain_match", kb_handle_memory_explain_match},
     {"graph.sync_code", kb_handle_graph_sync_code},
     {"graph.explain", kb_handle_graph_explain},
     {"code.audit", kb_handle_code_audit},
-    {"memory.link_create", kb_handle_memory_link_create},
-    {"memory.link_query", kb_handle_memory_link_query},
-    {"memory.link_delete", kb_handle_memory_link_delete},
-    {"memory.store", kb_handle_memory_store},
-    {"memory.find_id_by_key_kind", kb_handle_memory_find_id_by_key_kind},
-    {"memory.search_facts_patterns_by_keyword", kb_handle_memory_search_facts_patterns_by_keyword},
-    {"memory.supersede", kb_handle_memory_supersede},
-    {"memory.fact_history", kb_handle_memory_fact_history},
-    {"facts.retract", kb_handle_facts_retract},
     {"entities.merge", kb_handle_entities_merge},
     {"entities.unmerge", kb_handle_entities_unmerge},
-    {"memory.check_drift", kb_handle_memory_check_drift},
-    {"memory.list_session_scope_priority", kb_handle_memory_list_session_scope_priority},
-    {"memory.list_session_scope_priority_like", kb_handle_memory_list_session_scope_priority_like},
-    {"memory.list_low_effectiveness", kb_handle_memory_list_low_effectiveness},
-    {"memory.list_unused_l2", kb_handle_memory_list_unused_l2},
-    {"memory.list_superseded_keys", kb_handle_memory_list_superseded_keys},
-    {"memory.set_artifact", kb_handle_memory_set_artifact},
     {"task.list", kb_handle_task_list},
     {"task.create", kb_handle_task_create},
     {"task.update_state", kb_handle_task_update_state},
     {"task.delete", kb_handle_task_delete},
     {"task.add_edge", kb_handle_task_add_edge},
     {"task.get_edges", kb_handle_task_get_edges},
-    {"memory.briefing", kb_handle_memory_briefing},
-    {"memory.context_block", kb_handle_memory_context_block},
-    {"memory.facts", kb_handle_memory_facts},
     {"evidence.emit_retrieval_event", kb_handle_evidence_emit_retrieval_event},
     {"evidence.merge_retrieval_event", kb_handle_evidence_merge_retrieval_event},
     {"evidence.trace_retrieval_event", kb_handle_evidence_trace_retrieval_event},
     {"evidence.provenance_retrieval_event", kb_handle_evidence_provenance},
     {"evidence.fidelity_retrieval_event", kb_handle_evidence_fidelity},
     {"css.signals", kb_handle_css_signals},
-    {"memory.entity_profile", kb_handle_memory_entity_profile},
-    {"memory.entity_edges", kb_handle_memory_entity_edges},
-    {"memory.search_graph", kb_handle_memory_search_graph},
-    {"memory.search_graph_as_of", kb_handle_memory_search_graph_as_of},
-    {"memory.search_assertions", kb_handle_memory_search_assertions},
-    {"memory.get_episode", kb_handle_memory_get_episode},
-    {"memory.ask", kb_handle_memory_ask},
     {"artifacts.list_proposed", kb_handle_artifacts_list_proposed},
     {"artifacts.set_state", kb_handle_artifacts_set_state},
     {"roadmap.create_from_decomposition", kb_handle_roadmap_create_from_decomposition},
@@ -1341,6 +733,37 @@ static const struct
     {"learning.resolve", kb_handle_learning_resolve},
     {"learning.policy_select", kb_handle_learning_policy_select},
 };
+
+/* Only verifier-owned request state becomes command context. User arguments
+ * remain a separate field on the wire and cannot replace this identity. */
+static cJSON *kb_command_context(void)
+{
+   cJSON *context = cJSON_CreateObject();
+   if (!context)
+      return NULL;
+   const kb_principal_t *actor = kb_reqctx_actor();
+   char principal[577] = "", transport[577] = "";
+   int authenticated =
+       actor && actor->authenticated && kb_identity_key(actor, principal, sizeof(principal)) == 0;
+   int user_authority =
+       authenticated && (actor->kind != KB_PRIN_OWNER || kb_login_throttle_peer_is_loopback());
+   const kb_request_context_t *resolved = kb_reqctx_resolved();
+   if (authenticated && resolved && resolved->has_transport)
+      (void)kb_identity_key(&resolved->transport, transport, sizeof(transport));
+   if (!transport[0])
+      snprintf(transport, sizeof(transport), "%s", principal);
+   cJSON_AddBoolToObject(context, "authenticated", authenticated);
+   cJSON_AddBoolToObject(context, "user_authority", user_authority);
+   cJSON_AddStringToObject(context, "principal", authenticated ? principal : "");
+   cJSON_AddStringToObject(context, "transport_identity", authenticated ? transport : "");
+   const char *scope_kind = NULL, *scope_id = NULL;
+   if (authenticated && kb_reqctx_verified_scope(&scope_kind, &scope_id))
+   {
+      cJSON_AddStringToObject(context, "scope_kind", scope_kind ? scope_kind : "");
+      cJSON_AddStringToObject(context, "scope_id", scope_id ? scope_id : "");
+   }
+   return context;
+}
 
 static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
 {
@@ -1376,6 +799,16 @@ static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
    for (size_t i = 0; i < sizeof(kb_rpc_table) / sizeof(kb_rpc_table[0]); i++)
       if (strcmp(method->valuestring, kb_rpc_table[i].method) == 0)
          return kb_rpc_table[i].fn(fd, req);
+
+   cJSON *module_response = NULL;
+   cJSON *command_context = kb_command_context();
+   if (!command_context)
+      return kb_send_error(fd, "command context unavailable");
+   int dispatched = aimee_module_commands_dispatch_raw_context(method->valuestring, req,
+                                                               command_context, &module_response);
+   cJSON_Delete(command_context);
+   if (dispatched)
+      return kb_reply_or_error(fd, module_response, "command module unavailable");
 
    if (strcmp(method->valuestring, "learning.get_proposal") == 0)
       return kb_handle_learning_mutate(fd, req, "get");

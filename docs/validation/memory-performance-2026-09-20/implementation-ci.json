@@ -1,0 +1,419 @@
+{
+  "revision": "ec6b0309268fbd128fe81bbdc19491bd24e15fac",
+  "recorded_utc": "2026-09-20T09:02:03.510468+00:00",
+  "checks": [
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106051787954",
+      "name": "unit-tests",
+      "started_at": "2026-09-20T08:50:54Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106051433962",
+      "name": "Static analysis and secret scanning",
+      "started_at": "2026-09-20T08:47:59Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050857169",
+      "name": "e2e-docker (T2-luks)",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050857119",
+      "name": "e2e-adoption",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050857113",
+      "name": "memory-retrieval-eval",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050857053",
+      "name": "p1-rls-gate",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050857048",
+      "name": "e2e-docker (T3)",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050857037",
+      "name": "integration-tests",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050857027",
+      "name": "lsp-real-providers (ubuntu-24.04, linux)",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050857026",
+      "name": "unit-tests-pg (2/3)",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050857022",
+      "name": "e2e-docker (T2)",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050857020",
+      "name": "e2e-docker (T1)",
+      "started_at": "2026-09-20T08:43:28Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856997",
+      "name": "oidc-login-live",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856989",
+      "name": "init-migrate-service-test",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856985",
+      "name": "unit-tests-pg (3/3)",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856958",
+      "name": "lsp-real-providers (macos-latest, macos)",
+      "started_at": "2026-09-20T08:43:22Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856949",
+      "name": "identity-mint-e2e",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856938",
+      "name": "db2-process-replay",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856936",
+      "name": "treesitter",
+      "started_at": "2026-09-20T08:43:23Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856930",
+      "name": "windows-build",
+      "started_at": "2026-09-20T08:43:18Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856929",
+      "name": "pam-login-live",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856925",
+      "name": "windows-cmake",
+      "started_at": "2026-09-20T08:43:18Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856923",
+      "name": "unit-tests-pg (1/3)",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856921",
+      "name": "macos-build",
+      "started_at": "2026-09-20T08:43:23Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856910",
+      "name": "authz-residual-live",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856909",
+      "name": "vault-pkcs11-token",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856906",
+      "name": "unit-tests (2/2)",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856894",
+      "name": "unit-tests (1/2)",
+      "started_at": "2026-09-20T08:43:15Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856882",
+      "name": "write-tier-enforce-live",
+      "started_at": "2026-09-20T08:43:21Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856875",
+      "name": "frontend-tests",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856830",
+      "name": "go-unit-tests",
+      "started_at": "2026-09-20T08:43:15Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856820",
+      "name": "build-integrity",
+      "started_at": "2026-09-20T08:43:15Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856818",
+      "name": "lint",
+      "started_at": "2026-09-20T08:43:15Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050856801",
+      "name": "build",
+      "started_at": "2026-09-20T08:43:16Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809373",
+      "name": "Cppcheck (0/8)",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809371",
+      "name": "Cppcheck (7/8)",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809346",
+      "name": "Cppcheck (2/8)",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809338",
+      "name": "Cppcheck (5/8)",
+      "started_at": "2026-09-20T08:42:54Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809335",
+      "name": "Clang-tidy (4/8)",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809332",
+      "name": "Clang-tidy (5/8)",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809331",
+      "name": "Clang-tidy (7/8)",
+      "started_at": "2026-09-20T08:43:29Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809330",
+      "name": "Clang-tidy (1/8)",
+      "started_at": "2026-09-20T08:42:54Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809329",
+      "name": "Cppcheck (1/8)",
+      "started_at": "2026-09-20T08:42:54Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809323",
+      "name": "Cppcheck (6/8)",
+      "started_at": "2026-09-20T08:42:54Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809316",
+      "name": "Clang-tidy (6/8)",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809308",
+      "name": "change-scope",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809296",
+      "name": "Secret scanning",
+      "started_at": "2026-09-20T08:42:54Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809286",
+      "name": "Clang-tidy (0/8)",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809282",
+      "name": "no-coauthor-trailers",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809261",
+      "name": "Clang-tidy (3/8)",
+      "started_at": "2026-09-20T08:42:57Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809250",
+      "name": "Cppcheck (3/8)",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809249",
+      "name": "Address and undefined-behavior sanitizers",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809247",
+      "name": "Clang-tidy (2/8)",
+      "started_at": "2026-09-20T08:42:54Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809242",
+      "name": "Cppcheck (4/8)",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291572/job/106050809162",
+      "name": "Complete script regression suite",
+      "started_at": "2026-09-20T08:42:53Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291640/job/106050761489",
+      "name": "release-policy",
+      "started_at": "2026-09-20T08:42:30Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291579/job/106050761291",
+      "name": "pins",
+      "started_at": "2026-09-20T08:42:31Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291599/job/106050761288",
+      "name": "fuzz",
+      "started_at": "2026-09-20T08:42:30Z",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "html_url": "https://github.com/RakuenSoftware/aimee/actions/runs/35500291577/job/106050761184",
+      "name": "smoke",
+      "started_at": "2026-09-20T08:42:31Z",
+      "status": "completed"
+    }
+  ]
+}

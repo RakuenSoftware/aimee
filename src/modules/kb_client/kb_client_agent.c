@@ -561,15 +561,6 @@ int kb_client_anti_pattern_delete(int64_t id)
    return rc;
 }
 
-int kb_client_memory_fold_session(const char *session_id)
-{
-   if (!session_id || !session_id[0])
-      return -1;
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "session_id", session_id);
-   return kb_client_v1_simple_count_request("maintenance.fold_session", req);
-}
-
 int kb_client_rules_delete(int id)
 {
    cJSON *req = cJSON_CreateObject();
@@ -831,41 +822,4 @@ int kb_client_anti_pattern_bump(int64_t id)
    int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
    cJSON_Delete(resp);
    return rc;
-}
-
-int kb_client_relations_schema_list(db2_relation_schema_row_t *out, int max)
-{
-   if (!out || max <= 0)
-      return 0;
-   cJSON *req = cJSON_CreateObject();
-   char *json = kb_v1_action_request("relations.schema_list", req);
-   if (!json)
-      return 0;
-   cJSON *resp = cJSON_Parse(json);
-   free(json);
-   if (!resp)
-      return 0;
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "rows");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0 || !cJSON_IsArray(rows))
-   {
-      cJSON_Delete(resp);
-      return 0;
-   }
-   int n = 0;
-   cJSON *r;
-   cJSON_ArrayForEach(r, rows)
-   {
-      if (n >= max)
-         break;
-      cJSON *rid = cJSON_GetObjectItemCaseSensitive(r, "relation_id");
-      cJSON *sk = cJSON_GetObjectItemCaseSensitive(r, "subject_kind");
-      cJSON *ok = cJSON_GetObjectItemCaseSensitive(r, "object_kind");
-      out[n].relation_id = cJSON_IsNumber(rid) ? (int)rid->valuedouble : 0;
-      out[n].subject_kind = cJSON_IsNumber(sk) ? (int)sk->valuedouble : 0;
-      out[n].object_kind = cJSON_IsNumber(ok) ? (int)ok->valuedouble : 0;
-      n++;
-   }
-   cJSON_Delete(resp);
-   return n;
 }
