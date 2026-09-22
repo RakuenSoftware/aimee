@@ -1,7 +1,7 @@
 # Memory migration history
 
 Historical checkpoints in implementation order. These are not current status or
-release certification; see [the maintained module guide](memory.md).
+release certification; see [the maintained module guide](../modules/memory.md).
 
 KB record reads, history, session-priority queries, scope ranks and tagging also
 execute at stage 8. Public record responses preserve full content, headlines and
