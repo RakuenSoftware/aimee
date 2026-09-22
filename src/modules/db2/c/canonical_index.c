@@ -19,10 +19,10 @@
 #include "db2.h"
 #include "db2_bounded_text.h"
 #include "db2_internal.h"
-#include "entity_edges.h"              /* co_edited backfill: edge upsert / co_targets read */
-#include "index.h"                     /* cochange_pairs_for_commit / cochange_is_hex_sha */
-#include "kb_runtime_state.h"          /* db2_kb_purge_fence_active: commit-point fence check */
-#include "modules/db2/c/graph_kinds.h" /* REL_CO_EDITED / NODE_FILE */
+#include "entity_edges.h"          /* co_edited backfill: edge upsert / co_targets read */
+#include "index.h"                 /* cochange_pairs_for_commit / cochange_is_hex_sha */
+#include "kb_runtime_state.h"      /* db2_kb_purge_fence_active: commit-point fence check */
+#include "aimee/db2/graph_kinds.h" /* REL_CO_EDITED / NODE_FILE */
 
 #include "aimee.h"
 #include "db_postgres.h"

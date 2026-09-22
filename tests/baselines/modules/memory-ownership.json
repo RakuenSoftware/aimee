@@ -247,7 +247,7 @@
       "disposition": "go-owner",
       "replacement_files": [
         "server-go/modules/memory/ontology.go",
-        "src/modules/db2/c/graph_kinds.h"
+        "src/modules/db2/include/aimee/db2/graph_kinds.h"
       ]
     },
     "src/modules/memory/memory_pii_gate.c": {
@@ -1299,7 +1299,7 @@
       "disposition": "storage-protocol",
       "external_occurrences": [
         "src/headers/rel_types.h",
-        "src/modules/db2/c/graph_kinds.h",
+        "src/modules/db2/include/aimee/db2/graph_kinds.h",
         "src/rel_types.c",
         "src/tests/test_db2_rel_seed_support.c",
         "src/tests/test_db2_rel_type_support.c"
@@ -1548,7 +1548,7 @@
     "memory_relation_kind_t": {
       "disposition": "storage-protocol",
       "external_occurrences": [
-        "src/modules/db2/c/graph_kinds.h"
+        "src/modules/db2/include/aimee/db2/graph_kinds.h"
       ]
     },
     "memory_repair_vector_index": {
@@ -1830,7 +1830,7 @@
       "symbols": [
         "memory_node_kind_t"
       ],
-      "sha256": "30ab6901aeb1d5b7f2253df87144759132e42bbb73748bcd32d776b28e232610"
+      "sha256": "770c49491bc20c4cfdf777bc7088a6eed41774ff7617e25df353b805f9eb50a8"
     },
     "src/kb/kb.c": {
       "disposition": "host-transport",
@@ -1882,7 +1882,7 @@
       ],
       "sha256": "092c35cde685ac1430e4dcacc178d9ee4e345de61f2f50cdcb6e2220f7ec053b"
     },
-    "src/modules/db2/c/graph_kinds.h": {
+    "src/modules/db2/include/aimee/db2/graph_kinds.h": {
       "disposition": "storage-protocol",
       "symbols": [
         "memory_node_kind_t",
@@ -2440,7 +2440,7 @@
         "memory_resolve_conflict",
         "memory_transition_lifecycle"
       ],
-      "sha256": "59ce537a82ee4450e56e09bdac09d0b5a3b49a5a8b0ddc00c7a71e5c071ec83d"
+      "sha256": "8a471dd30fb403f02c79c573c5c041d707e3a140e42eca80606c6e50e0f40289"
     },
     "src/tests/test_memory_checkpoint_transport.c": {
       "disposition": "host-fixture",

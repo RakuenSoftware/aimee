@@ -4,7 +4,7 @@
 #include "db2_internal.h"
 #include "db_postgres.h"
 #include "entity_nodes.h"
-#include "modules/db2/c/graph_kinds.h"
+#include "aimee/db2/graph_kinds.h"
 
 #include <stdio.h>
 #include <stdlib.h>

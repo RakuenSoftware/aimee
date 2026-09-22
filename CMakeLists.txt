@@ -1189,6 +1189,17 @@ set(AIMEE_PROJECT_INCLUDE_DIRS
     ${AIMEE_SRC_DIR}/pipeline
     ${AIMEE_SRC_DIR}/vendor/headers)
 
+# Match the Makefile's per-consumer graph enum include path.
+set_property(SOURCE
+    "${AIMEE_SRC_DIR}/index.c"
+    "${AIMEE_SRC_DIR}/rel_types.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/canonical_index.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/code_projection.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/entity_edges.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/fact_identity.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c"
+    APPEND PROPERTY INCLUDE_DIRECTORIES "${AIMEE_SRC_DIR}/modules/db2/include")
+
 add_library(aimee-core STATIC
     ${CORE_SRCS}
     ${DB1_SRCS}
