@@ -662,7 +662,9 @@ DB2_GRAPH_KIND_UNITS = index rel_types \
 DB2_GRAPH_KIND_OBJS = $(foreach prefix,$(OBJDIR) $(OBJDIR)/kb $(OBJDIR)/server,\
     $(addprefix $(prefix)/,$(addsuffix .o,$(DB2_GRAPH_KIND_UNITS)))) \
     $(addprefix $(OBJDIR)/db2/,canonical_index.o code_projection.o entity_edges.o fact_identity.o fact_mutation.o) \
-    $(addprefix $(OBJDIR)/tests/,test_fact_lifecycle.o test_memory_advanced.o test_rel_types.o test_db2_rel_type_support.o test_db2_rel_seed_support.o)
+    $(addprefix $(OBJDIR)/tests/,test_fact_lifecycle.o test_memory_advanced.o test_rel_types.o test_db2_rel_type_support.o test_db2_rel_seed_support.o db2_rel_type_monolith.o \
+        db2-rel-type-support-sanitize/test.o db2-rel-type-support-sanitize/monolith.o \
+        db2-rel-seed-support-sanitize/test.o)
 $(DB2_GRAPH_KIND_OBJS): C_FLAGS += -Imodules/db2/include
 KB_SRCS += kb/managed_server_identity.c kb/managed_server_identity_install.c
 KB_SRCS += kb/http/kb_http_content_policy.c

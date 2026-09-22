@@ -135,17 +135,6 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/aws"
     "${AIMEE_SRC_DIR}/pipeline")
 
-# Match the Makefile's per-consumer graph enum include path.
-set_property(SOURCE
-    "${AIMEE_SRC_DIR}/index.c"
-    "${AIMEE_SRC_DIR}/rel_types.c"
-    "${AIMEE_SRC_DIR}/modules/db2/c/canonical_index.c"
-    "${AIMEE_SRC_DIR}/modules/db2/c/code_projection.c"
-    "${AIMEE_SRC_DIR}/modules/db2/c/entity_edges.c"
-    "${AIMEE_SRC_DIR}/modules/db2/c/fact_identity.c"
-    "${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c"
-    APPEND PROPERTY INCLUDE_DIRECTORIES "${AIMEE_SRC_DIR}/modules/db2/include")
-
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.
 # Previously this block lived further down the file, which meant the static
@@ -1199,6 +1188,17 @@ set(AIMEE_PROJECT_INCLUDE_DIRS
     ${AIMEE_SRC_DIR}/modules/webuser
     ${AIMEE_SRC_DIR}/pipeline
     ${AIMEE_SRC_DIR}/vendor/headers)
+
+# Match the Makefile's per-consumer graph enum include path.
+set_property(SOURCE
+    "${AIMEE_SRC_DIR}/index.c"
+    "${AIMEE_SRC_DIR}/rel_types.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/canonical_index.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/code_projection.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/entity_edges.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/fact_identity.c"
+    "${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c"
+    APPEND PROPERTY INCLUDE_DIRECTORIES "${AIMEE_SRC_DIR}/modules/db2/include")
 
 add_library(aimee-core STATIC
     ${CORE_SRCS}
