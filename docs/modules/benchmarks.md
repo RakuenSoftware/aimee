@@ -32,7 +32,7 @@ host support), `agent_eval_memory_transport.c` (memory bus transport), and
 `module_adapter.c` (wire-parity fixture). `agent_eval.h` and
 `agent_eval_internal.h` expose retained host contracts. Native dataset runners,
 QA orchestration and scratch-store hooks are retired. Memory dataset adapters
-use the [shared Go module evaluation setup](memory.md), with isolated storage and
+use the [shared Go module evaluation setup](../MEMORY.md#isolated-go-evaluation-transport), with isolated storage and
 injected embedding dependencies. The CLI's plain-completion adapter reuses the
 existing C agent executor; it contains no memory implementation.
 This code was relocated from the former non-descriptor `src/modules/agent_eval/` directory, whose
@@ -118,15 +118,7 @@ baseline/result formats, provenance, and exit semantics are compatibility contra
 and `agent_eval_*` names may be transitional aliases, but they cannot preserve a separate `evals` module
 or imply runtime evaluation authority.
 
-## Extension and removal
-
-New suites register offline harness/data/metric contracts without adding runtime decision hooks.
-`src/modules/agent_eval`, `server_eval.c`, benchmark routes, and distributed scripts are `relocate` or
-compatibility-alias candidates for a later source slice. Stale corpora, duplicate runners, committed
-sample results, and self-tested-only harnesses are candidates, not confirmed dead; removal requires
-consumer, CI, reproducibility, licensing, and liveness evidence.
-
-## Native memory callers
+### Native memory callers
 
 `agent_eval_memory_transport.c` owns the native benchmark host's legacy memory
 request/response adapter. It uses the existing C bus; the shared memory process
@@ -139,3 +131,11 @@ The separate native `bench-perf` harness keeps retired memory case names as
 `unavailable` with null timings and exits 2 without saving or certifying a
 baseline. Its deleted in-process memory calls are not a valid benchmark of the
 Go service.
+
+## Extension and removal
+
+New suites register offline harness/data/metric contracts without adding runtime decision hooks.
+`src/modules/agent_eval`, `server_eval.c`, benchmark routes, and distributed scripts are `relocate` or
+compatibility-alias candidates for a later source slice. Stale corpora, duplicate runners, committed
+sample results, and self-tested-only harnesses are candidates, not confirmed dead; removal requires
+consumer, CI, reproducibility, licensing, and liveness evidence.

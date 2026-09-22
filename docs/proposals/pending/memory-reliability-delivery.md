@@ -92,7 +92,7 @@ worktree without `--project` against the existing remote service.
 | MR-18 release gates | Go owner tests, live C bus with process restart, isolated evaluators, frozen corpus and manifest-bound per-case baselines | Complete adversarial manifests, temporal reproducibility and full surface/restart/failure gates beyond the recorded initial paired run and fresh-environment matrix; owner/evaluator PostgreSQL replay is now wired into required CI |
 
 Historical notes are preserved in the [program migration history](memory-reliability-migration-history.md)
-and [module migration history](../../modules/memory-migration-history.md). Their
+and [module migration history](../../validation/memory-migration-history.md). Their
 counts and pending statements are dated checkpoints, not current certification.
 
 The full cross-language bus conformance suite passes locally, including memory
