@@ -502,3 +502,20 @@ func TestIngressRejectsAmbiguousTypedInputs(t *testing.T) {
 		}
 	}
 }
+
+func TestIngressPropagatesTypedOwnerRefusal(t *testing.T) {
+	for _, kind := range []string{"protected_context_overflow", "context_budget_overflow", "unsupported_mode", "invalid_projection", "invalid_timestamp"} {
+		for _, field := range []string{"kind", "error_type"} {
+			for _, placement := range []Placement{PlacementServer, PlacementKB} {
+				args := map[string]any{"operation": "ingress-assemble", "budget": 1000, "typed_requested": true,
+					"code":               []ingressCodeHit{{FilePath: "available.go"}},
+					"typed_context_json": fmt.Sprintf(`{"status":"error",%q:%q}`, field, kind)}
+				raw, _ := json.Marshal(args)
+				got := runHostRuntime(t, NewHandler(nil, WithDataStore(placement, nil)), string(raw))
+				if got["status"] != "error" || got["kind"] != kind || got["envelope"] != nil {
+					t.Fatalf("owner refusal omitted: %s %s %v", field, kind, got)
+				}
+			}
+		}
+	}
+}

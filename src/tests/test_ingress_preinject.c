@@ -224,6 +224,8 @@ char *kb_client_memory_assemble_typed_context_json(const char *query, const cJSO
    assert(cJSON_GetObjectItemCaseSensitive(context_limits, "schema_version")->valueint == 1);
    assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(context_limits, "max_context_bytes")));
    (void)query;
+   if (g_typed_unavailable == 2)
+      return strdup("{\"status\":\"error\",\"kind\":\"protected_context_overflow\"}");
    if (g_typed_unavailable)
       return strdup("{\"status\":\"unavailable\",\"dependency\":\"kb\",\"retryable\":true}");
    g_temporal_calls++;
@@ -1162,6 +1164,9 @@ static void test_required_assembly_refusal_reaches_dispatch(void)
    text = ingress_preinject_build("deployment matrix", 0);
    assert(text && !request_context_get()->context_refused);
    free(text);
+   g_typed_unavailable = 2;
+   assert(!ingress_preinject_build("deployment matrix", 0));
+   assert_context_dispatch_refused("protected_context_overflow");
    g_typed_unavailable = 0;
    request_context_clear();
    puts("required assembly failure reaches provider fence and clears on new request");

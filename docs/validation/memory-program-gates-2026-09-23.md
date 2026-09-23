@@ -82,3 +82,18 @@ Raw [export](memory-program-gates-2026-09-23/export-tests.txt),
 [descriptor](memory-program-gates-2026-09-23/descriptor-tests.txt) and
 [ranking benchmark](memory-program-gates-2026-09-23/ranking-benchmark.txt)
 results accompany this record.
+
+## MR-03: explicit typed-owner refusals survive HTTP assembly
+
+The ingress assembler previously classified every typed `status:error` response
+as optional unavailability. It now preserves an explicit owner refusal (including
+`protected_context_overflow`, unsupported counting mode and invalid projection)
+as an assembly error. Both owner `kind` and typed `error_type` are accepted;
+a missing refusal type fails as `invalid_projection`. Optional dependency
+`unavailable` retains its existing degraded success behavior.
+
+Both placements pass the Go command regression. The actual native ingress/Go
+fixture additionally proves that a protected-context refusal selects no bytes
+for any of the three provider routes. The full ingress test set passes. Released
+0.4.5 remains healthy with capture active. This closes refusal propagation for
+the typed lane, not complete protected rendering or provider token accounting.

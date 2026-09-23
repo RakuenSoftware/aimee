@@ -249,9 +249,24 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 			return nil, fmt.Errorf("ambiguous typed projection inputs")
 		}
 		var outcome struct {
-			Status string `json:"status"`
+			Status    string `json:"status"`
+			Kind      string `json:"kind"`
+			ErrorType string `json:"error_type"`
 		}
 		if json.Unmarshal([]byte(request.TypedContextJSON), &outcome) == nil {
+			// An owner refusal is authoritative. Only dependency unavailability
+			// may omit this optional lane; a rejected projection must never
+			// become permission to dispatch without its required context.
+			if outcome.Status == "error" && outcome.Kind != "unavailable" {
+				kind := outcome.Kind
+				if kind == "" {
+					kind = outcome.ErrorType
+				}
+				if kind == "" {
+					kind = "invalid_projection"
+				}
+				return nil, &contextBudgetError{kind, "typed memory owner refused context assembly"}
+			}
 			// The optional KB transport uses typed non-success statuses as well
 			// as the owner's error envelope. They carry no usable projection.
 			// In particular a standalone Server has no shared KB to query.
