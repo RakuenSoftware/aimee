@@ -647,3 +647,16 @@ source contracts and full MR-04 closure remain open.
 now excludes suppressed and temporally inapplicable inputs before the model call.
 The public PostgreSQL regression covers all unavailable source states and an
 eligible positive case. Later invalidation of generated cards remains open.
+
+The [generated episode input fence](../../validation/memory-episode-inputs-2026-09-23.md)
+passes **1,693/1,693** fresh checks (1,079 T2 and 614 T3) on matching
+application/harness `74ed997e7`. All nine image identities and three provider
+limits are verified. This covers generated episode observations and source-release
+refusal after parent changes; full MR-04 remains open.
+
+[Legacy query and coreference eligibility](../../validation/memory-query-coref-eligibility-2026-09-23.md)
+applies current-state filtering before the five query-mode limits and the prior
+context window, and blocks suppressed coreference targets from the resolver.
+Explicit evaluation-corpus scope narrowing is preserved. Local packaged race,
+public-scope and export checks pass; fresh deployment evidence remains pending.
+These repairs do not certify the remaining MR-01 release-race and parity gates.

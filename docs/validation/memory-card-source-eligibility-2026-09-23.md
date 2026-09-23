@@ -17,3 +17,8 @@ versioned lineage or revalidate previously generated cards after later source
 changes. Those MR-04 requirements remain open. The [export build](memory-card-source-eligibility-2026-09-23/export.txt),
 ownership and documentation checks pass. Fresh-image validation is pending;
 the released CT100 deployment remains on 0.4.5.
+
+The combined [unit/card candidate validation](memory-unit-inputs-2026-09-23.md)
+uses matching application/harness `76be02a42`. T3 passes **614/614** checks;
+full T2 remains pending. The card-source model-input regression is the targeted
+PostgreSQL fixture above, not a dedicated fresh-image model invocation.

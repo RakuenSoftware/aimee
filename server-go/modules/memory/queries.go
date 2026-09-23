@@ -114,28 +114,28 @@ func (s *postgresDataStore) QueryRecords(ctx context.Context, mode, pattern stri
 	switch mode {
 	case "like":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE lifecycle_state='active' AND (key ILIKE '%'||$1||'%' OR content ILIKE '%'||$1||'%')
+WHERE `+currentMemorySQL("")+` AND (key ILIKE '%'||$1||'%' OR content ILIKE '%'||$1||'%')
 ORDER BY `+queryScopeOrder+`,
  CASE WHEN lower(key)=lower($1) THEN 0 WHEN lower(content)=lower($1) THEN 1
  WHEN lower(key) LIKE lower($1)||'%' THEN 2 ELSE 3 END,tier DESC,use_count DESC LIMIT $2`, pattern, limit)
 	case "top-l2":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE lifecycle_state='active' AND tier='L2' AND kind='fact'
+WHERE `+currentMemorySQL("")+` AND tier='L2' AND kind='fact'
 ORDER BY `+queryScopeOrder+`,use_count DESC,confidence DESC,id DESC LIMIT $1`, limit)
 	case "session-priority":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE lifecycle_state='active' AND tier IN ('L1','L2','L3') AND
+WHERE `+currentMemorySQL("")+` AND tier IN ('L1','L2','L3') AND
 ($1='' OR key ILIKE $1 OR content ILIKE $1)
 ORDER BY `+queryScopeOrder+`,CASE kind WHEN 'workflow' THEN 0 WHEN 'decision' THEN 1 ELSE 2 END,
 CASE tier WHEN 'L3' THEN 0 WHEN 'L2' THEN 1 ELSE 2 END,use_count DESC,id DESC LIMIT $2`, pattern, limit)
 	case "facts-patterns":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE lifecycle_state='active' AND tier IN ('L2','L3','L5') AND kind IN ('fact','pattern')
+WHERE `+currentMemorySQL("")+` AND tier IN ('L2','L3','L5') AND kind IN ('fact','pattern')
 AND (key ILIKE '%'||$1||'%' OR content ILIKE '%'||$1||'%')
 ORDER BY confidence DESC,use_count DESC,id DESC LIMIT $2`, pattern, limit)
 	case "eval":
 		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
-WHERE lifecycle_state='active' AND tier IN ('L1','L2','L3') AND kind<>'scratch'
+WHERE `+currentMemorySQL("")+` AND tier IN ('L1','L2','L3') AND kind<>'scratch'
 ORDER BY CASE WHEN tier='L2' AND kind='fact' THEN 0 WHEN kind='fact' THEN 1 ELSE 2 END,
 confidence DESC,id DESC LIMIT $1`, limit)
 	default:

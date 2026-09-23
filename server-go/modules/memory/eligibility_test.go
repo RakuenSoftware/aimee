@@ -86,6 +86,24 @@ SET LOCAL ROLE aimee_store_runtime`)
 		}
 		check(verb, args)
 	}
+	// Legacy session/query modes must apply the same gate before their limit.
+	// Ineligible rows have equal priority and later IDs; filtering after LIMIT
+	// would starve the three eligible fixtures rather than returning them.
+	exec(`UPDATE memories SET confidence=1,use_count=1000000 WHERE key LIKE 'eligibility-%'`)
+	for _, mode := range []string{"like", "top-l2", "session-priority", "facts-patterns", "eval"} {
+		records, err := bound.QueryRecords(ctx, mode, "%eligibilityneedle%", 0, 3)
+		if err != nil {
+			t.Fatal(mode, err)
+		}
+		got := []string{}
+		for _, record := range records {
+			got = append(got, record.Key)
+		}
+		sort.Strings(got)
+		if strings.Join(got, ",") != "eligibility-offset-boundary,eligibility-open,eligibility-utc-boundary" {
+			t.Fatal("query mode current eligibility", mode, got)
+		}
+	}
 	// An exact ID must not bypass the same current-state gates as a search.
 	// Legacy as_of is a labeled inspection of an old version, but never grants
 	// access to erased, revoked, quarantined, rejected or cross-scope content.

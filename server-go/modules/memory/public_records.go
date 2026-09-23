@@ -199,9 +199,7 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 				request.Pattern = sessionSearchKeyword(request.Pattern)
 			}
 		}
-		if verb != "load_eval_corpus" {
-			scoped = commandScope(args, &request)
-		}
+		scoped = commandScope(args, &request)
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}

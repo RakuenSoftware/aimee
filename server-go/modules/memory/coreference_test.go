@@ -71,10 +71,33 @@ func exerciseCoreferenceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	}
 	seed("Alice visited office.", "coref-visible", "coref-session")
 	seed("Mallory visited office.", "coref-hidden", "coref-session")
+	// These newer rows must not crowd the eligible antecedent out of the bounded
+	// context window or reach the optional model resolver.
+	for _, state := range []string{"future", "expired", "suppressed", "superseded", "archived", "quarantined", "deleted", "revoked"} {
+		id := seed("Nadia ineligible antecedent visited office.", "coref-visible", "coref-session")
+		query := `UPDATE memories SET lifecycle_state=$2 WHERE id=$1`
+		value := state
+		switch state {
+		case "future":
+			query = `UPDATE memories SET valid_from=(CURRENT_TIMESTAMP+interval '1 hour')::text WHERE id=$1 AND $2<>''`
+		case "expired":
+			query = `UPDATE memories SET valid_until=CURRENT_TIMESTAMP::text WHERE id=$1 AND $2<>''`
+		case "suppressed":
+			query = `UPDATE memories SET activation_suppressed=1 WHERE id=$1 AND $2<>''`
+		}
+		if _, err := tx.Exec(ctx, query, id, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	target := seed("She traveled yesterday.", "coref-visible", "coref-session")
 	seed("Alice met Bob.", "coref-visible", "ambiguous-session")
 	ambiguous := seed("She called yesterday.", "coref-visible", "ambiguous-session")
 	unbound := seed("He traveled.", "coref-visible", "unknown-session")
+	suppressedTarget := seed("She target-suppressed-needle traveled.", "coref-visible", "coref-session")
+	if _, err := tx.Exec(ctx, `UPDATE memories SET activation_suppressed=1 WHERE id=$1`, suppressedTarget); err != nil {
+		t.Fatal(err)
+	}
 	originalSettings, originalRunner := backend.settings, backend.episodeCommand
 	defer func() { backend.settings, backend.episodeCommand = originalSettings, originalRunner }()
 	mode := "heuristic"
@@ -102,6 +125,7 @@ func exerciseCoreferenceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	check(target, "alice", "bound")
 	check(ambiguous, "", "ambiguous")
 	check(unbound, "", "unbound")
+	check(suppressedTarget, "", "")
 	// Disabling the resolver clears old inferred bindings rather than retaining
 	// an antecedent from an older version of the note.
 	mode = "off"
@@ -122,8 +146,11 @@ func exerciseCoreferenceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 		if err := json.Unmarshal(input, &request); err != nil || request.Task != "coref" {
 			t.Fatal(string(input), err)
 		}
+		if request.ID == suppressedTarget || strings.Contains(request.Content, "target-suppressed-needle") {
+			t.Fatal("suppressed target sent to cognifier")
+		}
 		for _, text := range request.Context {
-			if strings.Contains(text, "Mallory") {
+			if strings.Contains(text, "Mallory") || strings.Contains(text, "ineligible antecedent") {
 				t.Fatal("hidden context sent to cognifier")
 			}
 		}

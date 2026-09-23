@@ -310,6 +310,24 @@ SET LOCAL ROLE memory_record_test;`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, tc := range []struct {
+		args string
+		keys map[string]bool
+	}{
+		{`{"scope_context":true,"max":100}`, map[string]bool{"global-key": true}},
+		{`{"scope_context":true,"project":"private","max":100}`, map[string]bool{"global-key": true, "private-key": true}},
+	} {
+		result := run("load_eval_corpus", tc.args)
+		rows := result["memories"].([]any)
+		if len(rows) != len(tc.keys) {
+			t.Fatal("evaluation corpus ignored explicit scope", result)
+		}
+		for _, row := range rows {
+			if !tc.keys[row.(map[string]any)["key"].(string)] {
+				t.Fatal("evaluation corpus widened scope", row)
+			}
+		}
+	}
 	if r := runPublicCommand(t, client, "get", `{"id":3,"scope_context":true,"project":"app"}`); r["kind"] != "not_found" {
 		t.Fatal(r)
 	}

@@ -19,8 +19,7 @@ passed in 250.535 seconds, and the [export build](memory-episode-inputs-2026-09-
 passed. The final profile-path check and intermediate-summary regressions pass in the
 [224.057-second runtime-role/domain race replay](memory-episode-inputs-2026-09-23/final-runtime-race.txt).
 The [final export](memory-episode-inputs-2026-09-23/final-export.txt), ownership,
-boundary, descriptor, route, API and documentation checks pass. Fresh deployment
-evidence is pending.
+boundary, descriptor, route, API and documentation checks pass. Fresh deployment results are recorded below.
 The released 0.4.5 deployment on CT100 remains unchanged. Full MR-04 independent
 family accounting, arbitrary derivation closure and restore-resistant erasure
 remain open.
@@ -28,5 +27,8 @@ remain open.
 Matching application/harness `74ed997e7` passes **614/614** fresh T3 checks;
 [raw results](memory-episode-inputs-2026-09-23/fresh/T3/topology.json) and
 [nine verified image identities](memory-episode-inputs-2026-09-23/fresh/image-identities.json)
-are retained. All three provider request byte limits are 32,768. T2 has passed
-all four new generated-episode HTTP checks; its complete run remains pending.
+are retained. All three provider request byte limits are 32,768. T2 completed **1,079/1,079 checks**, including all four new generated-episode
+HTTP checks. The [T2 receipt](memory-episode-inputs-2026-09-23/fresh/T2/topology.json)
+and [shared-memory cases](memory-episode-inputs-2026-09-23/fresh/T2/shared-memory.json)
+bring the full fresh result to **1,693/1,693**. Both topologies also pass native
+asynchronous release, outage and restart coverage.

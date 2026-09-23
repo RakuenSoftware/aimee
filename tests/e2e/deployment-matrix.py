@@ -118,6 +118,45 @@ def application_metadata_is_private(stack):
     return not any(name in forbidden or name.endswith(('_PASSWORD', '_API_KEY', '_TOKEN', '_PRIVATE_KEY')) for name in names)
 
 
+def legacy_query_eligibility_gate(kb, check):
+    key = 'legacy-current-' + uuid.uuid4().hex
+    def sql(query):
+        return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+    sql(f"""BEGIN;
+      INSERT INTO memories(key,content,tier,kind,scope_type,scope_value,confidence,use_count)
+        SELECT '{key}-'||name,'{key} current source','L2','fact','project','{key}',1,1000000
+        FROM (VALUES('open'),('utc'),('offset')) x(name);
+      UPDATE memories SET valid_from=to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.US') WHERE key='{key}-utc';
+      UPDATE memories SET valid_from=CURRENT_TIMESTAMP::text WHERE key='{key}-offset';
+      INSERT INTO memories(key,content,tier,kind,scope_type,scope_value,confidence,use_count,lifecycle_state,activation_suppressed,valid_from,valid_until)
+        SELECT '{key}-'||name,'{key} unavailable source','L2','fact','project','{key}',1,1000000,state,suppressed,starts,ends
+        FROM (VALUES
+          ('future','active',0,(CURRENT_TIMESTAMP+interval '1 hour')::text,''),
+          ('expired','active',0,'',CURRENT_TIMESTAMP::text),
+          ('suppressed','active',1,'',''),('superseded','superseded',0,'',''),
+          ('archived','archived',0,'',''),('quarantined','quarantined',0,'',''),
+          ('deleted','deleted',0,'',''),('revoked','revoked',0,'','')) x(name,state,suppressed,starts,ends);
+      INSERT INTO memories(key,content,tier,kind,scope_type,scope_value,confidence,use_count)
+        VALUES('{key}-private','{key} hidden source','L2','fact','project','{key}-private',1,1000000);
+      COMMIT""")
+    try:
+        expected = {key+'-open', key+'-utc', key+'-offset'}
+        for verb, extra in [
+            ('top_l2_facts', {}), ('list_session_scope_priority', {}),
+            ('list_session_scope_priority_like', dict(pattern=key+'%')),
+            ('search_facts_patterns_by_keyword', dict(keyword=key)),
+            ('load_eval_corpus', {}),
+        ]:
+            code, result = kb.kb_request('/v1/actions/memory.'+verb,
+                dict(scope_context=True, project=key, max=3, **extra))
+            rows = result.get('memories', [])
+            check('Legacy query current eligibility before limits: '+verb, code == 200 and
+                  result.get('status') == 'ok' and len(rows) == 3 and {r.get('key') for r in rows} == expected)
+    finally:
+        sql(f"DELETE FROM memories WHERE key LIKE '{key}-%'")
+
+
 def preview_source_version_gate(kb, check):
     """Exact canonical and summary versions through the authenticated Go owner."""
     key = 'preview-source-' + uuid.uuid4().hex
@@ -1008,6 +1047,7 @@ def main():
             linked_relation_input_gate(kb, check)
             relation_consumer_rebuild_gate(kb, check)
             future_index_admission_gate(kb, check)
+            legacy_query_eligibility_gate(kb, check)
             preview_source_version_gate(kb, check)
             evidence_exact_identity_gate(kb, check)
         if args.topology in ('T2', 'T3'):
