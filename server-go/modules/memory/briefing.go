@@ -117,6 +117,7 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
 		var f briefingFact
 		r := &f.Record
 		r.Version = &MemoryRecordVersion{SchemaVersion: 1}
+		r.currentRead = true
 		if err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &f.EvidenceStrength, &f.ObservationCount, &f.LastSeenAt, &r.Version.OwnerID, &r.Version.RecordRevision); err != nil {
 			rows.Close()
 			return nil, err

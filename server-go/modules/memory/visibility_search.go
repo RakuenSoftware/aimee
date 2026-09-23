@@ -16,7 +16,7 @@ func (s *postgresDataStore) SearchVisible(ctx context.Context, req DataRequest) 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
+	rows, err := s.db.Query(ctx, `SELECT `+queryRecordColumns+`
 FROM memories
 WHERE `+currentMemorySQL("")+`
  AND ($1 OR scope_type='global' OR (scope_type='workspace' AND scope_value='_shared')
@@ -37,18 +37,9 @@ ORDER BY CASE WHEN scope_type='project' AND scope_value=$2 THEN 1
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	records := make([]Record, 0)
-	for rows.Next() {
-		var r Record
-		if err := rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence); err != nil {
-			return nil, err
-		}
-		records = append(records, r)
-	}
-	if err := rows.Err(); err != nil {
+	records, err := scanRecordRows(rows, true)
+	if err != nil {
 		return nil, err
 	}
-	rows.Close()
 	return s.finalizeRecall(ctx, req, false, records)
 }

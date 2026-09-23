@@ -135,8 +135,9 @@ def legacy_query_eligibility_gate(kb, check):
           ('future','active',0,(CURRENT_TIMESTAMP+interval '1 hour')::text,''),
           ('expired','active',0,'',CURRENT_TIMESTAMP::text),
           ('suppressed','active',1,'',''),('superseded','superseded',0,'',''),
-          ('archived','archived',0,'',''),('quarantined','quarantined',0,'',''),
-          ('deleted','deleted',0,'',''),('revoked','revoked',0,'','')) x(name,state,suppressed,starts,ends);
+          ('archived','archived',0,'',''),('retired','retired',1,'',''),
+          ('quarantined','quarantined',0,'',''),('rejected','rejected',0,'',''),
+          ('unknown','unknown',0,'',''),('deleted','deleted',0,'',''),('revoked','revoked',0,'','')) x(name,state,suppressed,starts,ends);
       INSERT INTO memories(key,content,tier,kind,scope_type,scope_value,confidence,use_count)
         VALUES('{key}-private','{key} hidden source','L2','fact','project','{key}-private',1,1000000);
       COMMIT""")
@@ -153,8 +154,22 @@ def legacy_query_eligibility_gate(kb, check):
             rows = result.get('memories', [])
             check('Legacy query current eligibility before limits: '+verb, code == 200 and
                   result.get('status') == 'ok' and len(rows) == 3 and {r.get('key') for r in rows} == expected)
+        # History admits retained old versions, but not suppressed active,
+        # erased, revoked, rejected, quarantined, unknown or cross-scope rows.
+        sql(f"UPDATE memories SET key=replace(key,'{key}-','{key}#v') WHERE key LIKE '{key}-%'")
+        expected_history = {key+'#v'+name for name in
+                            ('open', 'utc', 'offset', 'future', 'expired', 'superseded', 'archived', 'retired')}
+        for limit in (64, 3):
+            code, result = kb.kb_request('/v1/actions/memory.fact_history',
+                dict(key=key, scope_context=True, project=key, max=limit))
+            rows = result.get('history', [])
+            keys = {r.get('key') for r in rows}
+            check('Historical eligibility and explicit scope before limit '+str(limit),
+                  code == 200 and result.get('status') == 'ok' and
+                  len(rows) == min(limit, len(expected_history)) and keys <= expected_history and
+                  (limit < len(expected_history) or keys == expected_history))
     finally:
-        sql(f"DELETE FROM memories WHERE key LIKE '{key}-%'")
+        sql(f"DELETE FROM memories WHERE key LIKE '{key}%'")
 
 
 def preview_source_version_gate(kb, check):

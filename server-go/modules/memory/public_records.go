@@ -49,7 +49,8 @@ COALESCE(m.provenance_category,''),COALESCE((SELECT summary FROM
  (SELECT id,scope,summary FROM memory_summaries summary WHERE summary.memory_id=m.id AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY id LIMIT 4) summaries
  ORDER BY CASE WHEN scope='headline' AND summary<>'' THEN 0 ELSE 1 END,id LIMIT 1),''),
 m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,
-m.record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
+m.record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
+(`+currentMemorySQL("m.")+`),(`+historicalMemoryInspectionSQL("m.")+`)
 FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 	if err != nil {
 		return nil, err
@@ -59,11 +60,13 @@ FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 		publicMemoryRecord
 		scope           Scope
 		revision, owner string
+		current         bool
+		historical      bool
 	}
 	metadata := make(map[int64]observedMetadata, len(records))
 	for rows.Next() {
 		var r observedMetadata
-		if err = rows.Scan(&r.ID, &r.UseCases, &r.UseCount, &r.LastUsedAt, &r.CreatedAt, &r.UpdatedAt, &r.SourceSession, &r.ProvenanceCategory, &r.Headline, &r.scope.Type, &r.scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.revision, &r.owner); err != nil {
+		if err = rows.Scan(&r.ID, &r.UseCases, &r.UseCount, &r.LastUsedAt, &r.CreatedAt, &r.UpdatedAt, &r.SourceSession, &r.ProvenanceCategory, &r.Headline, &r.scope.Type, &r.scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.revision, &r.owner, &r.current, &r.historical); err != nil {
 			return nil, err
 		}
 		metadata[r.ID] = r
@@ -79,7 +82,17 @@ FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 		if r.scope != record.Scope || r.Tier != record.Tier || r.Kind != record.Kind || r.Key != record.Key || r.Content != record.Content || r.Confidence != record.Confidence {
 			return nil, fmt.Errorf("memory: record %d changed during public enrichment", record.ID)
 		}
-		if v := record.Version; v != nil && (!v.validFor(record.ID) || v.RecordRevision != r.revision || v.OwnerID != r.owner) {
+		if record.currentRead && !r.current {
+			return nil, fmt.Errorf("memory: record %d is no longer current during public enrichment", record.ID)
+		}
+		if record.historicalRead && !r.historical {
+			return nil, fmt.Errorf("memory: record %d is no longer inspectable during public enrichment", record.ID)
+		}
+		v := record.Version
+		if v == nil {
+			v = record.observedVersion
+		}
+		if v != nil && (!v.validFor(record.ID) || v.RecordRevision != r.revision || v.OwnerID != r.owner) {
 			return nil, fmt.Errorf("memory: record %d version changed during public enrichment", record.ID)
 		}
 		r.Version = record.Version
@@ -183,6 +196,7 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			return invalid("memory.fact_history requires key")
 		}
 		request.Operation, request.Limit = "fact-history", args.limit("max", 16, 64)
+		scoped = commandScope(args, &request)
 	case "top_l2_facts", "load_eval_corpus", "list_session_scope_priority", "list_session_scope_priority_like", "search_facts_patterns_by_keyword":
 		request.Operation = "query-records"
 		switch verb {

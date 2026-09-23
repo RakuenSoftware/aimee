@@ -104,6 +104,37 @@ SET LOCAL ROLE aimee_store_runtime`)
 			t.Fatal("query mode current eligibility", mode, got)
 		}
 	}
+	// History is a retained-version view, not an escape hatch for erased or
+	// unauthorized content. Exercise explicit scope on the public command.
+	for key := range ids {
+		allowed := key == "open" || key == "utc-boundary" || key == "offset-boundary" || key == "expired" || key == "future" || key == "superseded" || key == "archived" || key == "retired"
+		args, _ := json.Marshal(map[string]any{"key": "eligibility-" + key, "max": 1, "scope_context": true, "project": "eligibility-local"})
+		result := runPublicCommand(t, client, "fact_history", string(args))
+		if result["status"] != "ok" {
+			t.Fatal("history eligibility", key, result)
+		}
+		rows, ok := result["history"].([]any)
+		if !ok || (len(rows) == 1) != allowed || len(rows) > 1 {
+			t.Fatal("history eligibility or scope", key, result)
+		}
+	}
+	exec(`SAVEPOINT historical_limit; UPDATE memories SET key='historical-eligibility#v'||id::text WHERE key LIKE 'eligibility-%'`)
+	args, _ := json.Marshal(map[string]any{"key": "historical-eligibility", "max": 3, "scope_context": true, "project": "eligibility-local"})
+	result := runPublicCommand(t, client, "fact_history", string(args))
+	if result["status"] != "ok" {
+		t.Fatal(result)
+	}
+	rows, ok := result["history"].([]any)
+	if !ok || len(rows) != 3 {
+		t.Fatal("excluded history crowded out retained versions", result)
+	}
+	expected := map[int64]bool{ids["retired"]: true, ids["archived"]: true, ids["superseded"]: true}
+	for _, row := range rows {
+		if !expected[int64(row.(map[string]any)["id"].(float64))] {
+			t.Fatal("history limit preceded eligibility", result)
+		}
+	}
+	exec(`ROLLBACK TO SAVEPOINT historical_limit; RELEASE SAVEPOINT historical_limit`)
 	// An exact ID must not bypass the same current-state gates as a search.
 	// Legacy as_of is a labeled inspection of an old version, but never grants
 	// access to erased, revoked, quarantined, rejected or cross-scope content.

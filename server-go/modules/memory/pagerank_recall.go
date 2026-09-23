@@ -154,6 +154,7 @@ func (s *postgresDataStore) pageRankNeighbors(ctx context.Context, req DataReque
 		}
 		var r Record
 		r.Version = &MemoryRecordVersion{SchemaVersion: 1}
+		r.currentRead = true
 		if err := rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.Version.OwnerID, &r.Version.RecordRevision); err != nil {
 			return nil, err
 		}

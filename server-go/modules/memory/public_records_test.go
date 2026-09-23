@@ -311,6 +311,62 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT unversioned_enrichment"); err != nil {
 		t.Fatal(err)
 	}
+	// Legacy JSON omits versions, but the in-process read still captures the
+	// owner/revision used for selection. Identical payloads do not excuse a
+	// revision or lifecycle transition before enrichment.
+	loaders := map[string]func() ([]Record, error){
+		"get": func() ([]Record, error) { r, e := backend.Get(ctx, Scope{}, 1); return []Record{r}, e },
+		"visible": func() ([]Record, error) {
+			return backend.SearchVisible(ctx, DataRequest{Query: "release", Project: "app", Limit: 5})
+		},
+		"scoped": func() ([]Record, error) {
+			return backend.Search(ctx, Scope{Type: "project", Value: "app"}, "release", "", "", 5)
+		},
+		"legacy-query": func() ([]Record, error) { return backend.QueryRecords(ctx, "like", "release", 0, 5) },
+	}
+	for name, load := range loaders {
+		for _, mutation := range []string{
+			"UPDATE memories SET record_revision=record_revision+1 WHERE id=1",
+			"UPDATE memories SET activation_suppressed=1 WHERE id=1",
+			"UPDATE memories SET valid_until=(now()-interval '1 second')::text WHERE id=1",
+		} {
+			if _, err := tx.Exec(ctx, "SAVEPOINT observed_enrichment"); err != nil {
+				t.Fatal(err)
+			}
+			records, err := load()
+			if err != nil || len(records) != 1 || records[0].ID != 1 || records[0].Version != nil || records[0].observedVersion == nil {
+				t.Fatal("missing private read observation", name, records, err)
+			}
+			if rows, err := backend.publicRecords(ctx, records); err != nil || len(rows) != 1 {
+				t.Fatal("current observation refused", name, rows, err)
+			}
+			if _, err := tx.Exec(ctx, mutation); err != nil {
+				t.Fatal(err)
+			}
+			if rows, err := backend.publicRecords(ctx, records); err == nil || rows != nil {
+				t.Fatal("stale private observation admitted", name, mutation, rows, err)
+			}
+			if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT observed_enrichment"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	historical, err := backend.FactHistory(ctx, "release", 5)
+	if err != nil || len(historical) != 2 {
+		t.Fatal("history selection", historical, err)
+	}
+	if rows, err := backend.publicRecords(ctx, historical); err != nil || len(rows) != 2 {
+		t.Fatal("historical enrichment imposed current eligibility", rows, err)
+	}
+	if _, err := tx.Exec(ctx, "SAVEPOINT historical_enrichment; UPDATE memories SET lifecycle_state='revoked' WHERE id=2"); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := backend.publicRecords(ctx, historical); err == nil || rows != nil {
+		t.Fatal("revocation during historical enrichment admitted", rows, err)
+	}
+	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT historical_enrichment"); err != nil {
+		t.Fatal(err)
+	}
 	// Metadata loss must not silently produce partial success.
 	if _, err := (&postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}).publicRecords(ctx, []Record{{ID: 9223372036854775807}}); err == nil {
 		t.Fatal("missing metadata accepted")

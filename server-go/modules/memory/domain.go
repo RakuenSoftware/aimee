@@ -559,22 +559,16 @@ func (s *postgresDataStore) FactHistory(ctx context.Context, key string, limit i
 	if err := s.requireKBDomain(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
-FROM memories WHERE key=$1 OR key LIKE $1||'#v%' ORDER BY created_at DESC,id DESC LIMIT $2`, key, limit)
+	rows, err := s.db.Query(ctx, `SELECT `+queryRecordColumns+`
+FROM memories WHERE (key=$1 OR key LIKE $1||'#v%') AND `+historicalMemoryInspectionSQL("")+` ORDER BY created_at DESC,id DESC LIMIT $2`, key, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	items := make([]Record, 0)
-	for rows.Next() {
-		var item Record
-		if err := rows.Scan(&item.ID, &item.Scope.Type, &item.Scope.Value, &item.Tier,
-			&item.Kind, &item.Key, &item.Content, &item.Confidence); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
+	records, err := scanRecordRows(rows, false)
+	for i := range records {
+		records[i].historicalRead = true
 	}
-	return items, rows.Err()
+	return records, err
 }
 
 func normalizeMatchText(value string) string { return strings.ToLower(strings.TrimSpace(value)) }

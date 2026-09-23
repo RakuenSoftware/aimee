@@ -120,6 +120,7 @@ func (s *postgresDataStore) readRecallRecords(ctx context.Context, query string,
 	for rows.Next() {
 		var item Record
 		item.Version = &MemoryRecordVersion{SchemaVersion: 1}
+		item.currentRead = true
 		if err := rows.Scan(&item.ID, &item.Scope.Type, &item.Scope.Value, &item.Tier,
 			&item.Kind, &item.Key, &item.Content, &item.Confidence, &item.Version.OwnerID, &item.Version.RecordRevision); err != nil {
 			return nil, err

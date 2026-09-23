@@ -171,6 +171,9 @@ type Record struct {
 	Version    *MemoryRecordVersion `json:"version,omitempty"`
 	Historical bool                 `json:"historical,omitempty"`
 
+	observedVersion *MemoryRecordVersion
+	currentRead     bool
+	historicalRead  bool
 	rankingSteps    []rankingStep
 	retrievalScore  float64
 	retrievalBase   float64
@@ -557,10 +560,12 @@ WHERE id = $1 AND lifecycle_state = 'active'
 	}
 	columns := "id, scope_type, scope_value, tier, kind, key, content, confidence"
 	destinations := []any{&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence}
+	r.observedVersion = &MemoryRecordVersion{SchemaVersion: 1, RecordID: strconv.FormatInt(id, 10)}
+	r.currentRead, r.historicalRead = !historical, historical
+	columns += s.recallVersionColumns()
+	destinations = append(destinations, &r.observedVersion.OwnerID, &r.observedVersion.RecordRevision)
 	if includeVersion {
-		r.Version = &MemoryRecordVersion{SchemaVersion: 1, RecordID: strconv.FormatInt(id, 10)}
-		columns += ",(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),record_revision::text"
-		destinations = append(destinations, &r.Version.OwnerID, &r.Version.RecordRevision)
+		r.Version = r.observedVersion
 	}
 	err := s.db.QueryRow(ctx, "SELECT "+columns+" FROM memories WHERE id=$1 AND "+predicate, parameters...).Scan(destinations...)
 	if store.IsNoRows(err) {
@@ -748,7 +753,7 @@ ORDER BY (lower(key)=lower($5)) DESC,
   ts_rank_cd(to_tsvector('english', key || ' ' || content), plainto_tsquery('english', $5)) DESC,
   updated_at DESC, id DESC LIMIT $4`, pattern, kind, tier, limit, query)
 	} else {
-		rows, err = s.db.Query(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
+		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+`
 FROM memories
 WHERE `+currentMemorySQL("")+` AND scope_type = $1 AND scope_value = $2
   AND ($7 = '' OR key ILIKE $3 OR content ILIKE $3 OR use_cases ILIKE $3
@@ -772,8 +777,11 @@ ORDER BY (lower(key)=lower($7)) DESC,
 			r.Scope = scope
 			err = rows.Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
 		} else {
+			r.observedVersion = &MemoryRecordVersion{SchemaVersion: 1}
+			r.currentRead = true
 			err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind,
-				&r.Key, &r.Content, &r.Confidence)
+				&r.Key, &r.Content, &r.Confidence, &r.observedVersion.OwnerID, &r.observedVersion.RecordRevision)
+			r.observedVersion.RecordID = strconv.FormatInt(r.ID, 10)
 		}
 		if err != nil {
 			return nil, err

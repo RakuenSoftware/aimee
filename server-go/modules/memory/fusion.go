@@ -213,6 +213,7 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	for rows.Next() {
 		var r Record
 		r.Version = &MemoryRecordVersion{SchemaVersion: 1}
+		r.currentRead = true
 		if err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.graphScore, &r.codeProximity, &r.Version.OwnerID, &r.Version.RecordRevision); err != nil {
 			rows.Close()
 			return nil, err

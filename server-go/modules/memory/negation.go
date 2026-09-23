@@ -133,7 +133,7 @@ func (s *postgresDataStore) collectRecall(ctx context.Context, req DataRequest, 
 	}
 	candidates := append([]Record{}, base...)
 	if s.placement == PlacementKB {
-		rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM memories
+		rows, err := s.db.Query(ctx, `SELECT `+queryRecordColumns+` FROM memories
  WHERE `+currentMemorySQL("")+` AND
  CASE WHEN $1 THEN scope_type=$2 AND scope_value=$3 ELSE $4 OR scope_type='global' OR (scope_type='workspace' AND scope_value='_shared')
  OR (scope_type='project' AND scope_value=$5) OR (scope_type='workspace' AND scope_value=$6) END
@@ -146,7 +146,7 @@ func (s *postgresDataStore) collectRecall(ctx context.Context, req DataRequest, 
 		if err != nil {
 			return nil, err
 		}
-		extra, err := scanRecordRows(rows)
+		extra, err := scanRecordRows(rows, true)
 		if err != nil {
 			return nil, err
 		}

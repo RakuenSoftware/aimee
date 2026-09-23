@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	store "github.com/JBailes/aimee/server-go/db"
 )
@@ -82,21 +83,25 @@ ORDER BY id LIMIT 1`, key, kind).Scan(&id)
 	return id, err
 }
 
-func scanRecordRows(rows store.Rows) ([]Record, error) {
+func scanRecordRows(rows store.Rows, current bool) ([]Record, error) {
 	defer rows.Close()
 	items := make([]Record, 0)
 	for rows.Next() {
 		var item Record
+		item.observedVersion = &MemoryRecordVersion{SchemaVersion: 1}
+		item.currentRead = current
 		if err := rows.Scan(&item.ID, &item.Scope.Type, &item.Scope.Value, &item.Tier,
-			&item.Kind, &item.Key, &item.Content, &item.Confidence); err != nil {
+			&item.Kind, &item.Key, &item.Content, &item.Confidence, &item.observedVersion.OwnerID, &item.observedVersion.RecordRevision); err != nil {
 			return nil, err
 		}
+		item.observedVersion.RecordID = strconv.FormatInt(item.ID, 10)
 		items = append(items, item)
 	}
 	return items, rows.Err()
 }
 
-const queryRecordColumns = `id,scope_type,scope_value,tier,kind,key,content,confidence`
+const queryRecordColumns = `id,scope_type,scope_value,tier,kind,key,content,confidence,
+(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),record_revision::text`
 
 // Scope priority belongs ahead of relevance and LIMIT on scoped session reads.
 // The transaction installs these values alongside RLS; missing context promotes
@@ -144,7 +149,7 @@ confidence DESC,id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
-	return scanRecordRows(rows)
+	return scanRecordRows(rows, true)
 }
 
 func (s *postgresDataStore) LowEffectiveness(ctx context.Context, threshold float64, limit int) ([]LowEffectiveness, error) {
@@ -175,7 +180,7 @@ ORDER BY created_at,id LIMIT $2`, days, limit)
 	if err != nil {
 		return nil, err
 	}
-	return scanRecordRows(rows)
+	return scanRecordRows(rows, false)
 }
 
 func (s *postgresDataStore) SupersededKeys(ctx context.Context, minVersions, limit int) ([]SupersededKey, error) {

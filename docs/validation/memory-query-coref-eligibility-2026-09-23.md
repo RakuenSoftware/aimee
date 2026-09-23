@@ -20,5 +20,12 @@ The evaluation-corpus command now honors explicit scope narrowing, with its
 [public PostgreSQL regression](memory-query-coref-eligibility-2026-09-23/scope-race.txt)
 passing in 3.177 seconds; calls without a supplied scope retain their existing
 contract. The [export build](memory-query-coref-eligibility-2026-09-23/export.txt)
-and ownership/boundary/descriptor checks pass. Fresh-image evidence is pending. These repairs do not certify all MR-01
+and ownership/boundary/descriptor checks pass.
+
+Matching application/harness `b1692776e` passes **1,699/1,699** fresh checks:
+[1,085 T2 checks](memory-query-coref-eligibility-2026-09-23/fresh/T2/topology.json)
+and [614 T3 checks](memory-query-coref-eligibility-2026-09-23/fresh/T3/topology.json),
+with both runners exiting zero. All [nine actual image identities](memory-query-coref-eligibility-2026-09-23/fresh/image-identities.json)
+and three 32,768-byte provider caps are verified. The five added authenticated
+HTTP legacy-query eligibility checks pass. These repairs do not certify all MR-01
 acceptance gates or complete derivation lineage. CT100 remains on released 0.4.5.

@@ -50,10 +50,12 @@ func TestPersonalMemoryPrivacyRegression(t *testing.T) {
 		t.Fatal("user memory schema missing")
 	}
 	_, err = tx.Exec(ctx, text[a:b]+`
+CREATE TEMP TABLE memory_collection_owner(id integer PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
 CREATE TEMP TABLE memories (
- id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,
+ id bigint PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,scope_type text,scope_value text,tier text,kind text,key text,
  content text,confidence double precision,lifecycle_state text,activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
-INSERT INTO memories VALUES(42,'global','_global','L0','fact','kb-fixture','shared knowledge',1,'active',0);
+INSERT INTO memories(id,scope_type,scope_value,tier,kind,key,content,confidence,lifecycle_state,activation_suppressed) VALUES(42,'global','_global','L0','fact','kb-fixture','shared knowledge',1,'active',0);
 INSERT INTO user_memories(id,key,content) VALUES(42,'private-fixture','PII fixture: local only');`)
 	if err != nil {
 		t.Fatal(err)

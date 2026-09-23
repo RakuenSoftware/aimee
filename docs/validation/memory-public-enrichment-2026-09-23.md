@@ -22,3 +22,7 @@ pass in 3.615 seconds. The [module export build](memory-public-enrichment-2026-0
 passes in 4.326 seconds; ownership, boundary and documentation checks pass.
 Fresh-image validation of this repair remains pending. CT100's three released
 0.4.5 containers remain healthy and unchanged.
+
+The [read-observation follow-up](memory-read-observations-2026-09-23.md) extends
+this fence to legacy in-process selections and repeats current/historical
+admission during enrichment. Its full packaged race and export checks pass.

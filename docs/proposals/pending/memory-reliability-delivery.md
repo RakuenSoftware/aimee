@@ -659,7 +659,9 @@ refusal after parent changes; full MR-04 remains open.
 applies current-state filtering before the five query-mode limits and the prior
 context window, and blocks suppressed coreference targets from the resolver.
 Explicit evaluation-corpus scope narrowing is preserved. Local packaged race,
-public-scope and export checks pass; fresh deployment evidence remains pending.
+public-scope and export checks pass; matching application/harness `b1692776e`
+passes all 1,699 fresh deployment checks (1,085 T2 and 614 T3), with nine
+actual image identities and three provider limits verified.
 These repairs do not certify the remaining MR-01 release-race and parity gates.
 
 [Public enrichment consistency](../../validation/memory-public-enrichment-2026-09-23.md)
@@ -667,3 +669,10 @@ refuses changed payloads and mismatched observed owner/revisions across metadata
 reads. Historical selection remains separate. Packaged runtime replay, corrected
 restricted-role fixtures and export checks pass; fresh-image validation and
 unchanged-payload unversioned observation coverage remain open.
+
+[Legacy read observations and history admission](../../validation/memory-read-observations-2026-09-23.md)
+retain internal same-statement owner/revisions without changing legacy JSON.
+Public enrichment rechecks current or historical eligibility as appropriate.
+Fact history applies retained-history exclusions before limits and honors explicit
+scope narrowing. The full packaged race suite passes in 254.529 seconds and
+export passes; fresh deployment validation remains pending.
