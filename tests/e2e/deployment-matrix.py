@@ -935,11 +935,13 @@ def main():
                   and preview.get('canonical_writes') == 0 and preview.get('proposal_writes') == 0)
             code, rejected = kb.kb_request('/v1/actions/memory.hygiene', dict(
                 dry_run=True, scope=dict(type='global', value='_global'), operation='delete'))
+            # The KB action bridge returns HTTP 200 for domain refusal envelopes.
             check('Direct KB hygiene still rejects domain mutation arguments',
-                  code == 400 and rejected.get('kind') == 'invalid_argument')
+                  code == 200 and rejected.get('status') == 'error' and rejected.get('kind') == 'invalid_argument')
             code, rejected = kb.kb_request('/v1/actions/memory.verify_receipt', dict(prepared_receipt={}))
             check('Direct KB receipt verification reaches strict receipt validation',
-                  code == 400 and rejected.get('message') == 'prepared receipt does not match the supported schema')
+                  code == 200 and rejected.get('status') == 'error'
+                  and rejected.get('message') == 'prepared receipt does not match the supported schema')
 
             for confidence in (-1, 1.01, False, None, 'invalid', [], {}):
                 code, body = kb.kb_request('/v1/actions/memory.store', dict(
