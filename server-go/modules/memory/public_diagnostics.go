@@ -83,7 +83,7 @@ func handleDiagnosticCommand(options handlerOptions, invocation bus.ModuleInvoca
 			return commandResult(commandError("not_found", "memory not found"))
 		}
 		m, p := rows[0].Memory, rows[0].Parts
-		result := map[string]any{"status": "ok", "memory": map[string]any{"id": m.ID, "tier": m.Tier, "kind": m.Kind, "headline": m.Headline, "content": m.Content}, "scores": map[string]any{"lexical": p.Lexical, "semantic": p.Semantic, "entity": p.Entity, "temporal": p.Temporal, "evidence": p.Evidence, "confidence": p.Confidence, "salience": p.Salience, "graph_score": p.GraphScore, "hybrid_total": p.HybridTotal, "blended_total": p.BlendedTotal, "total": p.Total}}
+		result := map[string]any{"status": "ok", "memory": map[string]any{"id": m.ID, "tier": m.Tier, "kind": m.Kind, "headline": m.Headline, "content": m.Content}, "score_evidence": p.ScoreEvidence, "ranking_steps": p.RankingSteps, "scores": map[string]any{"lexical": p.Lexical, "semantic": p.Semantic, "entity": p.Entity, "temporal": p.Temporal, "evidence": p.Evidence, "confidence": p.Confidence, "salience": p.Salience, "graph_score": p.GraphScore, "hybrid_total": p.HybridTotal, "blended_total": p.BlendedTotal, "total": p.Total}}
 		output, err := json.Marshal(result)
 		if err != nil {
 			return nil, bus.ModuleStatusInternal
@@ -148,13 +148,39 @@ func diagnosticTraceRows(diagnostics []Diagnostic, rows []publicDiagnostic) []ma
 			explained += contributions[feature]
 		}
 		values["post_rank_residual"], weights["post_rank_residual"], contributions["post_rank_residual"] = final-explained, 1, final-explained
+		if p.ScoreEvidence == "observed_ranking_steps" || p.ScoreEvidence == "observed_final_score" {
+			values, weights, contributions = map[string]float64{}, map[string]float64{}, map[string]float64{}
+			put := func(name string, value, weight float64) {
+				values[name], weights[name], contributions[name] = value, weight, value*weight
+			}
+			if len(p.RankingSteps) == 0 {
+				put("observed_final_score", p.Total, 1)
+			} else {
+				put("ranking_trace_schema", 1, 0)
+				last := p.RankingSteps[len(p.RankingSteps)-1]
+				// Only the final stage's contributions sum to the final score.
+				// Earlier ranks/scores are observed metadata, never another vote.
+				for _, c := range last.Contributions {
+					put("final."+c.Arm, c.Value, 1)
+				}
+				for j, step := range p.RankingSteps {
+					prefix := fmt.Sprintf("stage.%d.%s.", j, step.Operation)
+					put(prefix+"score", step.Score, 0)
+					for _, c := range step.Contributions {
+						put(prefix+c.Arm+".rank", float64(c.Rank), 0)
+						put(prefix+c.Arm+".contribution", c.Value, 0)
+					}
+				}
+			}
+		}
 		kind := epistemic[m.ID]
 		if kind == "" {
 			kind = "world_fact"
 		}
 		results = append(results, map[string]any{
 			"subject_kind": "memory", "subject_id": strconv.FormatInt(m.ID, 10), "lane": "hybrid",
-			"ranking_policy": p.RankingPolicy, "lane_rank": i + 1, "final_rank": i + 1, "scope_decision": "allowed",
+			"trace_scope": "returned_candidates", "native_score_state": "not_captured",
+			"ranking_policy": p.RankingPolicy, "score_evidence": p.ScoreEvidence, "ranking_steps": p.RankingSteps, "lane_rank": i + 1, "final_rank": i + 1, "scope_decision": "allowed",
 			"semantic_value": p.Semantic, "semantic_weight": 1, "keyword_value": p.Lexical + p.Coverage, "keyword_weight": 1,
 			"graph_value": p.GraphScore, "graph_weight": p.GraphWeight, "temporal_value": p.Temporal, "temporal_weight": 1,
 			"outcome_value": p.Outcome, "outcome_weight": 1, "final_score": final,

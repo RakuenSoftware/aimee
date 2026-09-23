@@ -1,6 +1,6 @@
 # MR-06: Actual ranking traces, context receipts and evidence states
 
-- **State:** In progress; legacy ingress assembly evidence corrected
+- **State:** In progress; observed diagnostic ranking steps and corrected ingress evidence
 - **Priority:** P0 for receipt correctness; P1 for complete diagnostics
 - **Owner:** Go memory traces, with host/provider dispatch and audit receipts
 - **Depends on:** [MR-03](memory-reliability-03-final-payload-context-budgets.md); joins [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) and [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) outputs
@@ -37,6 +37,20 @@ Carry a request-scoped trace object through the call chain. Avoid process-global
 Each candidate includes stable ID/version, arm ranks and native score semantics, actual fusion contribution, prior effects, eligibility decision, source-family projection and final disposition. Dispositions include selected, duplicate, insufficient relevance, scope/lifecycle/policy exclusion, type/coverage displacement, caller limit, budget drop and unavailable evidence. Record the candidate-universe bounds and trace truncation; a bounded trace is not proof that the entire database was searched.
 
 `memory explain` reads this trace. It must not reconstruct lexical/dense scores from content substring checks after the search.
+
+The [observed diagnostic ranking slice](../../validation/memory-program-gates-2026-09-23.md)
+captures the actual deduplicated RRF arm ranks/contributions, candidate-order
+resets, negation boost and optional PageRank addition for returned candidates.
+Each stage describes its resulting score; prior stage scores are not summed as
+extra votes. Public diagnostic parts expose the steps, and existing trace
+feature JSON retains their numeric evidence. Ordinary recall and automatic
+preview packing do not enable diagnostic capture or change their score contract.
+
+This remains a bounded returned-candidate trace, not the full candidate universe.
+Native lexical/dense scores, excluded-candidate dispositions, source versions and
+durable provider stages are not certified by these rank observations. Exact-ID
+explain_match text matching is explicitly labeled text_match_estimate; it does
+not pretend to replay a retrieval decision.
 
 ## Receipt contract
 

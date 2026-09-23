@@ -137,7 +137,7 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 		return nil, err
 	}
 	semantic := mergeSemanticCandidates(req, exact, whole, units)
-	combined := fusePersonal(base, semantic, len(base)+len(semantic))
+	combined := fuseRanked(ctx, base, semantic, len(base)+len(semantic), "prior_candidates", "semantic_parent")
 	if !exact {
 		scopeRank := func(r Record) int {
 			switch {

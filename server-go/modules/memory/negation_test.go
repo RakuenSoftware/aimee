@@ -130,6 +130,77 @@ func exerciseNegationReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backen
 			t.Fatal("exact negation scope widened", exact)
 		}
 	}
+	// The optional lane must gate validity before its own 64-row cap. A
+	// post-filter would let newer invalid rows starve the older eligible match.
+	forbidden := map[int64]bool{hidden: true, retired: true}
+	for i := 0; i < 70; i++ {
+		var id int64
+		if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,negation_tokens,valid_until)
+ VALUES('L2','fact',$1,'deployment never writes disk','project','neg-visible','not_disk','2000-01-01') RETURNING id`,
+			fmt.Sprintf("expired negation %d", i)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		forbidden[id] = true
+	}
+	for _, clause := range []string{
+		"valid_from='2999-01-01'", "valid_until=CURRENT_TIMESTAMP::text",
+		"activation_suppressed=1", "lifecycle_state='superseded'",
+		"lifecycle_state='quarantined'", "lifecycle_state='deleted'",
+		"lifecycle_state='revoked'", "lifecycle_state='rejected'",
+	} {
+		var id int64
+		if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,negation_tokens)
+ VALUES('L2','fact',$1,'deployment never writes disk','project','neg-visible','not_disk') RETURNING id`, clause).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, "UPDATE memories SET "+clause+" WHERE id=$1", id); err != nil {
+			t.Fatal(err)
+		}
+		forbidden[id] = true
+	}
+	ids = search("sentinelRedis not disk")
+	found, foundShared = false, false
+	for _, id := range ids {
+		if forbidden[id] {
+			t.Fatal("negation validity leak", id, ids)
+		}
+		found = found || id == extra
+		foundShared = foundShared || id == shared
+	}
+	if !found || !foundShared {
+		t.Fatal("ineligible negation candidates consumed lane cap", ids)
+	}
+	exact, err = backend.finalizeRecall(ctx, DataRequest{Query: "sentinelRedis not disk", Scope: Scope{Type: ScopeProject, Value: "neg-visible"}, Project: "neg-visible", Limit: 8}, true, nil)
+	if err != nil || len(exact) == 0 {
+		t.Fatal(exact, err)
+	}
+	for _, row := range exact {
+		if forbidden[row.ID] || row.ID == shared {
+			t.Fatal("exact negation eligibility leak", row)
+		}
+	}
+	// Both normalized endpoint spellings use the request's stable database
+	// clock. Malformed nonempty endpoints fail closed instead of reopening.
+	if _, err := tx.Exec(ctx, "UPDATE memories SET valid_from=CURRENT_TIMESTAMP::text,valid_until=(CURRENT_TIMESTAMP+interval '1 hour')::text WHERE id=$1", extra); err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, id := range search("sentinelRedis not disk") {
+		found = found || id == extra
+	}
+	if !found {
+		t.Fatal("valid lower endpoint excluded")
+	}
+	if _, err := tx.Exec(ctx, "UPDATE memories SET valid_until='tomorrow' WHERE id=$1", extra); err != nil {
+		t.Fatal(err)
+	}
+	malformed, status := invokeContextCommand(t, handler, 0, bus.CommandContext{}, "find_facts_visible", `{"query":"sentinelRedis not disk","project":"neg-visible","limit":8}`)
+	if status != bus.ModuleStatusOK || malformed["kind"] != "unavailable" {
+		t.Fatal("malformed validity accepted", malformed, status)
+	}
+	if _, err := tx.Exec(ctx, "UPDATE memories SET valid_from='',valid_until='' WHERE id=$1", extra); err != nil {
+		t.Fatal(err)
+	}
 	enabled = false
 	for _, id := range search("sentinelRedis not disk") {
 		if id == extra {

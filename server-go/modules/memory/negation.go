@@ -90,6 +90,9 @@ func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest,
 	}
 	for i := range base {
 		base[i].retrievalScore = 1 / (recallRankK + float64(i) + 1)
+		if rankingTraceEnabled(ctx) {
+			recordRankingStep(ctx, &base[i], "candidate_order", rankingContribution{Arm: "candidate_order", Rank: i + 1, Value: base[i].retrievalScore})
+		}
 	}
 	result, resultErr = s.collectRecall(ctx, req, exact, base)
 	if resultErr == nil {
@@ -131,7 +134,7 @@ func (s *postgresDataStore) collectRecall(ctx context.Context, req DataRequest, 
 	candidates := append([]Record{}, base...)
 	if s.placement == PlacementKB {
 		rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM memories
- WHERE lifecycle_state='active' AND activation_suppressed=0 AND
+ WHERE `+currentMemorySQL("")+` AND
  CASE WHEN $1 THEN scope_type=$2 AND scope_value=$3 ELSE $4 OR scope_type='global' OR (scope_type='workspace' AND scope_value='_shared')
  OR (scope_type='project' AND scope_value=$5) OR (scope_type='workspace' AND scope_value=$6) END
  AND ($7='' OR kind=$7) AND ($8='' OR tier=$8)
@@ -177,6 +180,9 @@ func (s *postgresDataStore) collectRecall(ctx context.Context, req DataRequest, 
 		}
 		score := 1/float64(60+i+1) + negationOverlap(query, negationTokens(textBound(r.Key+" "+r.Content, 3071)))
 		r.retrievalScore = score
+		if rankingTraceEnabled(ctx) {
+			recordRankingStep(ctx, &r, "negation", rankingContribution{Arm: "candidate_order", Rank: i + 1, Value: 1 / float64(60+i+1)}, rankingContribution{Arm: "negation_overlap", Value: score - 1/float64(60+i+1)})
+		}
 		ordered = append(ordered, scored{r, score, scope})
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {

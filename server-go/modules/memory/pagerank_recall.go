@@ -203,6 +203,9 @@ func (s *postgresDataStore) rerankPageRank(ctx context.Context, req DataRequest,
 		r.pageRankBonus = bonuses[r.ID]
 		r.retrievalBase = r.retrievalScore
 		r.retrievalScore += r.pageRankBonus
+		if rankingTraceEnabled(ctx) {
+			recordRankingStep(ctx, &r, "pagerank", rankingContribution{Arm: "retrieval_base", Value: r.retrievalBase}, rankingContribution{Arm: "pagerank", Value: r.pageRankBonus})
+		}
 		out = append(out, r)
 	}
 	sort.SliceStable(out, func(i, j int) bool {

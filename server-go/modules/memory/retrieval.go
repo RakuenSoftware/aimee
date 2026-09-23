@@ -13,6 +13,9 @@ type Diagnostic struct {
 }
 
 type DiagnosticParts struct {
+	ScoreEvidence string        `json:"score_evidence,omitempty"`
+	RankingSteps  []rankingStep `json:"ranking_steps,omitempty"`
+
 	RankingPolicy string  `json:"ranking_policy,omitempty"`
 	RetrievalBase float64 `json:"retrieval_base,omitempty"`
 	Entity        float64 `json:"entity"`
@@ -182,17 +185,31 @@ func rankText(input rankingInput, query string) DiagnosticParts {
 }
 
 func diagnosticFor(record Record, query string) Diagnostic {
-	parts := rankText(rankingInput{record.Key, record.Content}, query)
+	parts := DiagnosticParts{}
+	if len(record.rankingSteps) == 0 && !record.pageRankApplied {
+		parts = rankText(rankingInput{record.Key, record.Content}, query)
+		parts.ScoreEvidence = "text_match_estimate"
+	}
+	if len(record.rankingSteps) > 0 {
+		parts = DiagnosticParts{ScoreEvidence: "observed_final_score", RankingPolicy: "ordered-rrf60-v1",
+			Total: record.retrievalScore, HybridTotal: record.retrievalScore, BlendedTotal: record.retrievalScore}
+	}
 	parts.Confidence = record.Confidence
 	parts.GraphScore, parts.CodeProximity = record.graphScore, record.codeProximity
 	if record.pageRankApplied {
 		parts = DiagnosticParts{RankingPolicy: pageRankRecallPolicy, RetrievalBase: record.retrievalBase, PageRank: record.pageRankBonus, Confidence: record.Confidence, Total: record.retrievalScore, HybridTotal: record.retrievalScore, BlendedTotal: record.retrievalScore}
 	}
+	if len(record.rankingSteps) > 0 {
+		parts.ScoreEvidence = "observed_ranking_steps"
+		parts.RankingSteps = record.rankingSteps
+	} else if record.pageRankApplied {
+		parts.ScoreEvidence = "observed_final_score"
+	}
 	return Diagnostic{Memory: record, Parts: parts}
 }
 
 func (s *postgresDataStore) Diagnose(ctx context.Context, scope Scope, query string, limit int) ([]Diagnostic, error) {
-	records, err := s.Search(ctx, scope, query, "", "", limit)
+	records, err := s.Search(withRankingTrace(ctx), scope, query, "", "", limit)
 	if err != nil {
 		return nil, err
 	}

@@ -453,3 +453,12 @@ extend conditional reject/restore with caller-scoped durable outcomes in shared
 schema 32. Restricted-role rollback/replay, migration reapplication and real
 concurrent commit/disconnect checks cover this slice. It does not certify the
 remaining frozen clauses or deploy the draft PR onto the released 0.4.5 service.
+
+
+[MR-01/MR-06/MR-18 follow-up](../../validation/memory-program-gates-2026-09-23.md)
+closes optional negation validity re-entry before the lane cap, records actual
+returned-candidate ranking contributions in request-local diagnostics, and repairs
+standalone export inventory for lifecycle mutations. The existing ownership
+validator and an actual independent memory export build cover packaging.
+These are additional acceptance dependencies; all 18 proposals remain open
+against their frozen clauses.

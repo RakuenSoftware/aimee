@@ -177,7 +177,10 @@
     "server-go/modules/memory/deletion_retry.go",
     "server-go/modules/memory/source_release.go",
     "server-go/modules/memory/source_revalidation.go",
-    "server-go/modules/memory/preview_projection.go"
+    "server-go/modules/memory/preview_projection.go",
+    "server-go/modules/memory/lifecycle_version.go",
+    "server-go/modules/memory/lifecycle_retry.go",
+    "server-go/modules/memory/ranking_trace.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -314,7 +317,10 @@
     "server-go/modules/memory/personal_versions_test.go",
     "server-go/modules/memory/deletion_retry_test.go",
     "server-go/modules/memory/source_release_test.go",
-    "server-go/modules/memory/preview_projection_test.go"
+    "server-go/modules/memory/preview_projection_test.go",
+    "server-go/modules/memory/lifecycle_version_test.go",
+    "server-go/modules/memory/lifecycle_retry_test.go",
+    "server-go/modules/memory/ranking_trace_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

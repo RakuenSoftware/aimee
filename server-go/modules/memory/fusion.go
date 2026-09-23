@@ -216,7 +216,7 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 		return nil, err
 	}
 	req.lanes.add(graph, laneGraph)
-	out := fusePersonal(base, graph, len(base)+len(graph))
+	out := fuseRanked(ctx, base, graph, len(base)+len(graph), "prior_candidates", "graph")
 	for i := range out {
 		if signal, ok := signals[out[i].ID]; ok {
 			out[i].graphScore = signal.graphScore

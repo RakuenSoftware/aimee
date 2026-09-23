@@ -806,3 +806,18 @@ chronological record. Counts and pending statements there describe their origina
 checkpoint, not the current inventory. Current scope and validation limits appear
 above; the [delivery tracker](../proposals/pending/memory-reliability-delivery.md)
 tracks remaining program work.
+
+
+### Observed diagnostic ranking
+
+The diagnose_scoped response returns parts.score_evidence: observed_ranking_steps
+and parts.ranking_steps for the selected candidates. Stages retain actual RRF arm
+ranks and votes, candidate-order resets, negation overlap and PageRank additions.
+Each stage replaces or transforms the preceding score; only the last stage's
+contributions sum to the final score. Earlier ranks and contributions are retained
+as zero-weight metadata in persisted feature_values, with ranking_trace_schema: 1.
+This does not supply native SQL/cosine scores or a complete excluded-candidate trace.
+
+Exact-ID explain_match labels its legacy text-match estimate separately.
+Its MCP scores map remains numeric; score_evidence is an adjacent field.
+Automatic ingress previews retain their established score and byte commitments.

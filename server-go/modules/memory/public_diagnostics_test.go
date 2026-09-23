@@ -79,8 +79,21 @@ func exerciseDiagnosticReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		t.Fatal(traced)
 	}
 	rows := traced["rows"].([]any)
-	if len(rows) != 1 || len(rows[0].(map[string]any)["memory"].(map[string]any)) != 16 || len(rows[0].(map[string]any)["parts"].(map[string]any)) != 21 {
+	if len(rows) != 1 || len(rows[0].(map[string]any)["memory"].(map[string]any)) != 16 {
 		t.Fatal(rows)
+	}
+	parts := rows[0].(map[string]any)["parts"].(map[string]any)
+	if parts["score_evidence"] != "observed_ranking_steps" || parts["ranking_steps"] == nil {
+		t.Fatal("diagnostic lost actual ranking evidence", parts)
+	}
+	var features string
+	if err := tx.QueryRow(ctx, `SELECT r.feature_values FROM recall_traces t JOIN recall_trace_results r USING(trace_id)
+ WHERE t.retrieval_event_id='runtime-diagnostic' AND t.scope_id='runtime-project-b'`).Scan(&features); err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]float64
+	if err := json.Unmarshal([]byte(features), &decoded); err != nil || decoded["ranking_trace_schema"] != 1 || decoded["stage.0.candidate_order.candidate_order.rank"] != 1 {
+		t.Fatal("durable trace omitted observed rank", features, err)
 	}
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM recall_traces t JOIN recall_trace_results r USING(trace_id) WHERE t.retrieval_event_id='runtime-diagnostic' AND t.scope_id='runtime-project-b' AND r.epistemic_kind='world_fact'`).Scan(&count); err != nil || count != 1 {

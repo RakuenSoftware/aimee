@@ -1,0 +1,15 @@
+goos: linux
+goarch: amd64
+pkg: github.com/JBailes/aimee/server-go/modules/memory
+cpu: AMD Ryzen 7 7840HS w/ Radeon 780M Graphics     
+BenchmarkRankingTrace/baseline-16         	    2640	     41508 ns/op	   58552 B/op	     136 allocs/op
+BenchmarkRankingTrace/baseline-16         	    2878	     42763 ns/op	   58552 B/op	     136 allocs/op
+BenchmarkRankingTrace/baseline-16         	    2763	     41667 ns/op	   58552 B/op	     136 allocs/op
+BenchmarkRankingTrace/disabled-16         	    2827	     41055 ns/op	   58552 B/op	     136 allocs/op
+BenchmarkRankingTrace/disabled-16         	    2942	     45192 ns/op	   58552 B/op	     136 allocs/op
+BenchmarkRankingTrace/disabled-16         	    2533	     41554 ns/op	   58552 B/op	     136 allocs/op
+BenchmarkRankingTrace/enabled-16          	    2654	     52371 ns/op	   75776 B/op	     337 allocs/op
+BenchmarkRankingTrace/enabled-16          	    2632	     51985 ns/op	   75776 B/op	     337 allocs/op
+BenchmarkRankingTrace/enabled-16          	    2198	     50639 ns/op	   75776 B/op	     337 allocs/op
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	1.104s

@@ -170,6 +170,7 @@ type Record struct {
 	Version    *MemoryRecordVersion `json:"version,omitempty"`
 	Historical bool                 `json:"historical,omitempty"`
 
+	rankingSteps    []rankingStep
 	retrievalScore  float64
 	retrievalBase   float64
 	pageRankBonus   float64
@@ -796,7 +797,7 @@ ORDER BY (lower(key)=lower($7)) DESC,
 		cancel()
 		if err == nil {
 			lanes.add(semantic, laneSemantic)
-			records = fusePersonal(records, semantic, limit)
+			records = fuseRanked(ctx, records, semantic, limit, "lexical", "semantic")
 		}
 	}
 	req.lanes = lanes
@@ -2807,6 +2808,7 @@ set_config('aimee.correlation_id',$9,true)`,
 			}
 			response.Block = &block
 		case "diagnose":
+			ctx = context.WithValue(ctx, rankingTraceKey{}, !request.IngressPreview)
 			if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
 				var records []Record
 				records, err = backend.SearchVisible(ctx, request)

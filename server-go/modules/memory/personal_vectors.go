@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -254,37 +253,5 @@ ORDER BY CASE WHEN vector_dims(v.embedding)=vector_dims($2::vector) THEN v.embed
 	return records, rows.Err()
 }
 func fusePersonal(lexical, semantic []Record, limit int) []Record {
-	scores := map[int64]float64{}
-	records := map[int64]Record{}
-	for _, list := range [][]Record{lexical, semantic} {
-		seen := map[int64]bool{}
-		rank := 0
-		for _, r := range list {
-			if seen[r.ID] {
-				continue
-			}
-			seen[r.ID] = true
-			scores[r.ID] += 1 / float64(60+rank+1)
-			if _, exists := records[r.ID]; !exists {
-				records[r.ID] = r
-			}
-			rank++
-		}
-	}
-	out := make([]Record, 0, len(records))
-	for _, r := range records {
-		r.retrievalScore = scores[r.ID]
-		out = append(out, r)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := scores[out[i].ID], scores[out[j].ID]
-		if a == b {
-			return out[i].ID < out[j].ID
-		}
-		return a > b
-	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out
+	return fuseRanked(context.Background(), lexical, semantic, limit, "lexical", "semantic")
 }

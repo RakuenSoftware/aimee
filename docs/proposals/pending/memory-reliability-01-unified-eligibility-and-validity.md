@@ -18,7 +18,7 @@ Implement the shared eligibility decision in `server-go/modules/memory` and use 
 
 ## Implemented foundation
 
-The Go `current-validity-v7` predicate now applies active lifecycle, explicit
+The Go `current-validity-v8` predicate now applies active lifecycle, explicit
 suppression and half-open valid time before lexical, active-version whole-record
 semantic, unit/temporal semantic, graph/PageRank parent, compatibility-window,
 recall-bundle, activation and briefing limits. Pending commitments use the same
@@ -114,3 +114,9 @@ Compare old/new decisions on authorized fixtures and sampled shadow requests. Sh
 This proposal does not change canonical taxonomy, turn confidence into probability or make all stores share one database. No numeric relevance boost can override an ineligible decision.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+
+The [negation-lane follow-up](../../validation/memory-program-gates-2026-09-23.md)
+applies this same predicate before the optional negation candidate cap. Its
+restricted-role fixture reproduces expired/future re-entry and verifies that
+invalid candidates cannot crowd out eligible evidence.

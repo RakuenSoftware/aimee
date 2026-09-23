@@ -81,6 +81,26 @@ class CProcessBuildTests(unittest.TestCase):
                 exporter.process_contracts.validate_clients(
                     [{**client, "publish": publish}], {11266}, {7})
 
+    @unittest.skipUnless(shutil.which("go"), "go is not installed")
+    def test_memory_export_builds_with_all_owner_sources(self) -> None:
+        contract = exporter.process_contracts.validate()["memory"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exporter.export_module(root, "memory", "required", contract,
+                                   exporter.source_timestamp(),
+                                   exporter.CORE_VERSION_FILE.read_text().strip())
+            module = root / "aimee-module-memory"
+            for source in (REPO_ROOT / "server-go/modules/memory").rglob("*.go"):
+                relative = source.relative_to(REPO_ROOT)
+                self.assertEqual((module / relative).read_bytes(), source.read_bytes())
+            build = subprocess.run(["go", "build", "-o", str(module / "memory"), "./runtime"],
+                                   cwd=module, capture_output=True, text=True, timeout=180)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            tests = subprocess.run(["go", "test", "./server-go/modules/memory",
+                                    "-run", "TestLifecycleVersionValidation|TestObservedRankingTrace", "-count=1"],
+                                   cwd=module, capture_output=True, text=True, timeout=180)
+            self.assertEqual(tests.returncode, 0, tests.stdout + tests.stderr)
+
     def test_discovery_stage_keeps_its_reserved_slot(self) -> None:
         contract = json.loads(exporter.process_contracts.CONTRACTS.read_text())
         exporter.process_contracts.validate()
