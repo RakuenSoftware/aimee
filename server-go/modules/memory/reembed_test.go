@@ -95,6 +95,32 @@ func exerciseReembedReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
 	if executor.calls != calls {
 		t.Fatal("completed drafts regenerated")
 	}
+	// Suppression after backfill must fence retained drafts at direct admission
+	// and cutover, for the record and its units. Future validity alone must not.
+	execSQL(`SAVEPOINT suppressed_reembed`)
+	execSQL(`UPDATE memories SET activation_suppressed=1 WHERE id=$1`, first)
+	for _, point := range []int64{first, unitPointOffset + unit} {
+		r, err := backend.reembedPoint(ctx, 0, executor, "replay-v1", point)
+		if err != nil || r.Embedded {
+			t.Fatal("suppressed retained draft admitted", point, r, err)
+		}
+	}
+	if executor.calls != calls {
+		t.Fatal("suppressed backfill reached model")
+	}
+	call("reembed_cutover", `{"version":"replay-v1"}`, true)
+	var suppressedCount int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_embeddings WHERE point_id IN($1,$2)`, first, unitPointOffset+unit).Scan(&suppressedCount); err != nil || suppressedCount != 0 {
+		t.Fatal("cutover restored suppressed vectors", suppressedCount, err)
+	}
+	execSQL(`ROLLBACK TO SAVEPOINT suppressed_reembed; RELEASE SAVEPOINT suppressed_reembed; SAVEPOINT future_reembed`)
+	execSQL(`UPDATE memories SET valid_from='2099-01-01' WHERE id=$1`, first)
+	for _, point := range []int64{first, unitPointOffset + unit} {
+		if _, err := backend.embeddingInput(ctx, point); err != nil {
+			t.Fatal("future input not admitted to generation", err)
+		}
+	}
+	execSQL(`ROLLBACK TO SAVEPOINT future_reembed; RELEASE SAVEPOINT future_reembed`)
 	call("reembed_start", `{"version":"replay-v1","embedding_command":"http://different-provider"}`, false)
 	call("reembed_cutover", `{}`, true)
 	active("replay-v1")

@@ -28,8 +28,16 @@ passes. Restricted-role link replay covers batched creation, no-op/meaningful
 updates, source reassignment, rollback, deletion, parent cascade and journal
 revision agreement. Schema reapplication and ownership/bus guards pass.
 
-Fresh deployment validation remains pending. New background-worker checks edit
-and delete a link without changing its source content, then wait for the stored
-relationship to be rebuilt or removed. General child-table mutation coverage,
+Fresh candidate `d0e3c5752` passes **1,150/1,150 checks** (130 T1, 1,020 T2).
+Both harness processes exit zero. Background-worker cases edit and delete a link
+without changing its source content, then verify the stored relationship is rebuilt
+or removed. [T1 verdicts](memory-link-journal-2026-09-23/fresh/T1/topology.json),
+[T2 verdicts](memory-link-journal-2026-09-23/fresh/T2/topology.json) and
+[all nine running image identities](memory-link-journal-2026-09-23/fresh/image-identities.json)
+are retained. All three application containers have the actual 32,768-byte provider
+cap. Application image: `sha256:03f14f8b9a55db3bde5f26893587554d9a5021b21d1fa64337c6b021b588b915`;
+schema-34 PostgreSQL image: `sha256:23c6ec9c2ba1c9d14e6fe5bb94f37914571159e80397fd09701a0c6b37fa9db5`.
+The embedder is released 0.4.5. These receipts predate the future-valid admission
+follow-up. General child-table mutation coverage,
 transitive dependencies and release receipts remain open. These functional suite
 timings do not establish a performance improvement.

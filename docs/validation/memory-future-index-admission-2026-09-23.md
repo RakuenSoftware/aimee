@@ -26,6 +26,21 @@ Fresh deployment validation remains pending. A new fixture waits through an
 actual 45-second validity boundary after the real background worker settles,
 then checks that current access changes without another canonical revision or
 embedding write. That fixture does not certify historical semantic recall.
-Full generation coverage, re-embedding admission parity, durable activation of
+Full generation coverage, durable activation of
 copied relationships, rollback and release-time receipts remain open. These
 functional suite timings are not matched performance measurements.
+
+A follow-up applies the same active/unsuppressed admission to generation inputs,
+coverage and pending-metadata checks. Restricted-role replay suppresses a source
+after backfill and proves both direct re-embedding and cutover exclude its whole
+record and units, without another model call. Future-valid generation inputs
+remain admitted. The generic raw-vector operation preserves the established
+contract for other families (including semantic assertions); it does not interpret
+their IDs as memory parents. This compatibility rule has its own vector regression.
+The [final race suite](memory-future-index-admission-2026-09-23/reembed-race.txt)
+passes in 132.763 seconds; [export](memory-future-index-admission-2026-09-23/reembed-export.txt)
+also passes. The first follow-up run exposed a multi-statement prepared-query
+mistake in the new fixture, corrected before the passing run; its
+[diagnostic](memory-future-index-admission-2026-09-23/reembed-fixture-failure.txt)
+is retained. Fresh validation must use this final follow-up, not the earlier
+`f28d6b8ce` commit alone.

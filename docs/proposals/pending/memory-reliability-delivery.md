@@ -513,11 +513,17 @@ not serving freshness or complete MR-02/MR-04 acceptance.
 [Link-only mutation invalidation](../../validation/memory-link-journal-2026-09-23.md)
 now advances source dependency revisions and canonical events, including both
 sources of a moved link. No-op updates remain silent. Creation receipts bind the
-final revision after supersession links. PostgreSQL/race and export checks pass;
-fresh schema-34 worker validation remains pending.
+final revision after supersession links. PostgreSQL/race and export checks pass.
+Fresh `d0e3c5752` passes **1,150/1,150 checks**, with actual regeneration/removal,
+all nine images and three actual provider caps captured.
 
 [Future-valid index admission](../../validation/memory-future-index-admission-2026-09-23.md)
 separates active input processing from current recall, preventing premature retry
 exhaustion. Whole-record/unit model work blocks suppressed inputs, while raw
 vector results enforce current canonical eligibility before limits. PostgreSQL/race
 and export checks pass; real-clock deployment validation remains pending.
+
+Generation backfill/cutover now share active/unsuppressed input admission, including
+suppression after a draft was already prepared. Other raw vector families retain
+their own owner contract. The final PostgreSQL/race suite passes in 132.763 seconds;
+fresh future-valid validation remains pending.

@@ -131,6 +131,14 @@ CREATE TEMP TABLE memory_embeddings(point_id bigint PRIMARY KEY,embedding vector
 					t.Fatal("ineligible unit leaked", update, hits, err)
 				}
 			}
+			// Other vector families retain their established owner contract. The
+			// memory-parent gate must not interpret assertion IDs as memory IDs.
+			if _, err := tx.Exec(ctx, `INSERT INTO memory_embeddings SELECT 99,embedding,'semantic_assertion',primary_scope,workspace,project,kind,payload_json FROM memory_embeddings WHERE point_id=1`); err != nil {
+				t.Fatal(err)
+			}
+			if hits, err := backend.SearchVectors(ctx, query, "semantic_assertion", "team", "app", false, 1); err != nil || len(hits) != 1 || hits[0].ID != 99 {
+				t.Fatal("unrelated vector family reinterpreted", hits, err)
+			}
 			// A healthy empty search and an unavailable vector table must remain
 			// distinguishable at the owner boundary. The retired C smoke test
 			// accepted either zero results or failure without proving this.
