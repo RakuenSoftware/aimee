@@ -237,6 +237,7 @@ def inside(output):
         check('provider arrival sees committed preparation and admission', prepared is not None)
         status, verification = api('/v1/commands/memory.verify_receipt', dict(
             prepared_receipt=prepared, payload_base64=base64.b64encode(payload).decode()))
+        verification = verification.get('result', {})
         check('public receipt verification matches real provider bytes', status == 200 and
               verification.get('evidence', {}).get('binding_commitment') == 'matched' and
               verification.get('evidence', {}).get('payload_correspondence') == 'matched' and
@@ -247,6 +248,7 @@ def inside(output):
               verification.get('evidence', {}).get('decision_replayed') == 'unavailable')
         status, mismatch = api('/v1/commands/memory.verify_receipt', dict(
             prepared_receipt=prepared, payload_base64=base64.b64encode(payload + b' ').decode()))
+        mismatch = mismatch.get('result', {})
         check('public receipt verification detects changed provider bytes', status == 200 and
               mismatch.get('evidence', {}).get('payload_correspondence') == 'mismatch')
         before = len(captures)
@@ -338,7 +340,9 @@ def inside(output):
             provider.shutdown()
             provider.server_close()
             fixture_files.cleanup()
-            Path(output).write_text(json.dumps(dict(checks=checks, runs=runs), indent=2) + '\n')
+            Path(output).write_text(json.dumps(dict(checks=checks, runs=runs,
+                receipt_attempts=[entry['attempt_id'] for entry, _ in receipt_captures if entry is not None],
+                unresolved_attempts=sorted(expected_unresolved)), indent=2) + '\n')
     return 0
 
 
@@ -362,7 +366,51 @@ def main():
         run_result = subprocess.run(['docker', 'exec', '-u', '1000', '-e', 'AIMEE_NATIVE_ASYNC_FIXTURE=1',
             args.server, 'python3', remote, '--inside', '--output', result], timeout=600)
         subprocess.run(['docker', 'cp', args.server + ':' + result, args.output], check=True)
-        return run_result.returncode
+        if run_result.returncode:
+            return run_result.returncode
+        evidence = json.loads(Path(args.output).read_text())
+        # The fixture owns this entire container, confirmed by its Compose label
+        # above. SIGKILL tests host-process loss, not a graceful SQLite close.
+        def committed_rows():
+            code = """import hashlib,json,sqlite3,sys
+attempts=json.load(sys.stdin)
+with sqlite3.connect('file:/var/lib/aimee/audit/worm-live.db?mode=ro',uri=True) as db:
+ rows=[]
+ for attempt in attempts:
+  for seq,event,detail in db.execute('SELECT seq,event_id,detail FROM audit_event WHERE subject=? AND action LIKE ? ORDER BY seq',(attempt,'memory.provider.%')):
+   rows.append(dict(sequence=str(seq),event=event,detail_sha256=hashlib.sha256(detail.encode()).hexdigest()))
+print(json.dumps(rows))
+"""
+            return json.loads(subprocess.check_output(['docker', 'exec', '-i', '-u', '1000',
+                args.server, 'python3', '-c', code], input=json.dumps(evidence['receipt_attempts']), text=True))
+        before = committed_rows()
+        subprocess.run(['docker', 'kill', '--signal', 'KILL', args.server], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(['docker', 'start', args.server], check=True, stdout=subprocess.DEVNULL)
+        deadline = time.monotonic() + 120
+        recovered = False
+        while time.monotonic() < deadline:
+            health = subprocess.check_output(['docker', 'inspect', '--format', '{{.State.Health.Status}}', args.server], text=True).strip()
+            if health == 'healthy':
+                recovered = True
+                break
+            time.sleep(1)
+        def record(name, passed):
+            evidence['checks'].append(dict(name=name, passed=bool(passed)))
+            Path(args.output).write_text(json.dumps(evidence, indent=2) + '\n')
+            print(('PASS ' if passed else 'FAIL ') + name, flush=True)
+            if not passed:
+                raise RuntimeError(name)
+        record('owned Server recovers after an ungraceful process kill', recovered)
+        after = committed_rows()
+        evidence['post_crash_receipts'] = after
+        record('host crash preserves every committed provider stage exactly', bool(before) and before == after)
+        recorded = {row['event'] for row in after}
+        record('host recovery does not invent acknowledgement for unresolved transport',
+               bool(evidence['unresolved_attempts']) and all(
+                   'memory.provider.' + attempt + '.dispatch_admitted' in recorded and
+                   'memory.provider.' + attempt + '.acknowledged' not in recorded
+                   for attempt in evidence['unresolved_attempts']))
+        return 0
     finally:
         subprocess.run(['docker', 'exec', args.server, 'rm', '-f', remote, result], check=True)
 

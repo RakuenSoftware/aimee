@@ -27,7 +27,14 @@ base64 and ambiguous metadata. The [exported owner build](memory-receipt-verific
 passes. New disposable native-provider assertions check durable preparation and
 admission at provider arrival, public verification of actual bytes, independent
 attempt IDs and acknowledgement uncertainty through the deliberate owner outage.
-Their fresh deployment run is pending; they are not certified by prior receipts.
+The harness unwraps the dynamic HTTP route's `result` envelope before checking
+the owner evidence. Its follow-up kills the owned Server with SIGKILL, starts it
+again, and compares sequence/event/detail commitments through independent
+read-only ledger connections. It also checks that recovery adds no acknowledgement
+to the intentionally unresolved admission. This models host loss after recorded
+work, not a claim that every crash instruction boundary has been exercised.
+Fresh deployment validation is pending; prior receipts do not certify these new
+assertions.
 
 Authorized stored-receipt lookup, dispatch ownership recovery, ledger verification,
 external checkpoints and CLI/MCP/ACP exposure remain separate work. This slice
