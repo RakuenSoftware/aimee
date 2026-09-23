@@ -36,7 +36,14 @@ The fresh-deployment harness also now requires a nonempty operator byte ceiling
 (default 32768 bytes) and verifies that the actual application container received
 it. Without this fixture setting, 73 operator-ceiling tests per Server topology
 were silently skipped. This is test configuration, not a production policy change.
-Fresh validation of this candidate is pending.
+Fresh application/harness `5eccd52d5` passes **1,698/1,698 checks**: 108 T1,
+998 T2 and 592 T3. All 12 image identities and four actual application ceilings
+were verified. The [summary](memory-fair-assertion-arms-2026-09-23/fresh/summary.json),
+[image identities](memory-fair-assertion-arms-2026-09-23/fresh/image-identities.json)
+and [environment/cleanup](memory-fair-assertion-arms-2026-09-23/fresh/environment.json)
+are retained beside the raw receipts. Topologies ran concurrently for functional
+validation; this makes no performance claim. Released 0.4.5 on CT100 remained
+healthy, and a paired thin-client store/read/retire/not-found smoke passed.
 
 The full PostgreSQL/race suite passes in 117.451 seconds; the actual native
 Go-owner ingress fixture and memory ownership/C/descriptor checks also pass.

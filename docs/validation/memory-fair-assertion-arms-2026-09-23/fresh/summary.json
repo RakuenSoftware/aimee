@@ -1,0 +1,14 @@
+{
+  "T1": {
+    "checks": 108,
+    "failed": 0
+  },
+  "T2": {
+    "checks": 998,
+    "failed": 0
+  },
+  "T3": {
+    "checks": 592,
+    "failed": 0
+  }
+}
