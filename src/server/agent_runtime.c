@@ -1,5 +1,6 @@
 #include "aimee.h"
 #include "wire_fence.h"
+#include "request_context.h"
 #include "server.h"
 #include "agent_admission.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
@@ -1656,6 +1657,8 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
       return -1;
    }
    ctx_append_bytes(buf, cap, pos, text, strlen(text));
+   if (text[0] && request_context_get())
+      (void)request_context_require_memory_receipt();
    if (mark_reminders)
    {
       cJSON_ArrayForEach(id, reminders)

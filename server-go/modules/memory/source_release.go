@@ -176,6 +176,14 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	if operation == "provider-receipt-observe" {
 		return s.receiptObservation(args)
 	}
+	if operation == "provider-receipt-plan" && ticket == "" {
+		if _, present := args["source_release_ticket"]; present {
+			if _, ok := args.stringValue("source_release_ticket"); !ok {
+				return commandResult(commandError("unavailable", "invalid source release handle"))
+			}
+		}
+		return s.receiptPlan(args, nil)
+	}
 	if (operation == "source-release-finish" || operation == "source-release-discard") && (entry == nil || entry.binding == releaseBinding(args)) {
 		s.drop(ticket, releaseBinding(args), operation == "source-release-finish")
 		return commandResult(map[string]any{"status": "ok"})

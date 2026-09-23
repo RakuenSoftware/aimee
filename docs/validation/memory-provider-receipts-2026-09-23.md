@@ -87,3 +87,11 @@ both proof modes, plus the IR relay helper. Both minimal adapter fixtures pass.
 pass under the race detector; the [exported owner build](memory-provider-receipts-2026-09-23/stream-export.txt)
 also passes. These are native/owner tests; fresh deployment results for the
 preceding buffered candidate do not certify this later streaming change.
+
+
+The streaming candidate `5b424e1bf` passed fresh T2/T3 suites with 1,630/1,630
+checks and both processes exiting 0. [Nine image identities](memory-provider-receipts-2026-09-23/stream-fresh/image-identities.json)
+bind application `sha256:ec72ea38d252c79fd165e1135e8af2f35d1c8626184e2f3ef14f5ab017e2c861`.
+Those adapter checks still precede the direct ledger-at-arrival assertions added
+with supplied receipt verification. Their success does not imply coverage of
+unversioned native recall; the next experiment exposed that specific gap.

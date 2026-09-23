@@ -50,7 +50,11 @@ int ingress_preinject_revalidate_sources(void)
 int ingress_preinject_prepare_attempt(const void *body, size_t length, const char *route,
                                       const char *provider, const char *model, char attempt[33])
 {
-   assert(g_receipt_refuse);
+   if (!g_receipt_refuse)
+   {
+      attempt[0] = '\0';
+      return 0;
+   }
    g_receipt_calls++;
    attempt[0] = '\0';
    assert(request_context_refuse_assembly("unavailable") == 0);
@@ -1259,34 +1263,38 @@ static void test_durable_receipt_refusal_blocks_buffered_and_streamed(void)
    g_receipt_refuse = 1;
    for (size_t i = 0; i < sizeof(drivers) / sizeof(drivers[0]); i++)
       for (int gated = 0; gated <= 1; gated++)
-      {
-         reset_capture();
-         g_driver = &drivers[i];
-         g_proof_gated = gated;
-         request_context_t context = {0};
-         strcpy(context.memory_source_release, "0123456789abcdef0123456789abcdef");
-         request_context_set(&context);
-         g_receipt_calls = 0;
-         char response[4096];
-         assert(messages_buffered(request, response, sizeof(response)) == 502);
-         assert(strstr(response, "unavailable") && !g_last_body && g_receipt_calls == 1);
-         request_context_set(&context);
-         g_receipt_calls = 0;
-         emit_capture_t cap = {0};
-         assert(messages_stream(request, cap_emit, &cap) == 0);
-         assert_terminal_receipt_error(&cap);
-         if (i == 1)
+         for (int versioned = 0; versioned <= 1; versioned++)
          {
+            reset_capture();
+            g_driver = &drivers[i];
+            g_proof_gated = gated;
+            request_context_t context = {0};
+            context.memory_receipt_required = 1;
+            if (versioned)
+               strcpy(context.memory_source_release, "0123456789abcdef0123456789abcdef");
             request_context_set(&context);
             g_receipt_calls = 0;
-            memset(&cap, 0, sizeof(cap));
-            agent_t agent = {0};
-            assert(messages_stream_ir_relay("fixture", "", "{}", 2, "", &agent, "model", "message",
-                                            0, cap_emit, &cap) == HTTP_RETRY_ADMISSION_REFUSED);
+            char response[4096];
+            assert(messages_buffered(request, response, sizeof(response)) == 502);
+            assert(strstr(response, "unavailable") && !g_last_body && g_receipt_calls == 1);
+            request_context_set(&context);
+            g_receipt_calls = 0;
+            emit_capture_t cap = {0};
+            assert(messages_stream(request, cap_emit, &cap) == 0);
             assert_terminal_receipt_error(&cap);
+            if (i == 1)
+            {
+               request_context_set(&context);
+               g_receipt_calls = 0;
+               memset(&cap, 0, sizeof(cap));
+               agent_t agent = {0};
+               assert(messages_stream_ir_relay("fixture", "", "{}", 2, "", &agent, "model",
+                                               "message", 0, cap_emit,
+                                               &cap) == HTTP_RETRY_ADMISSION_REFUSED);
+               assert_terminal_receipt_error(&cap);
+            }
+            request_context_clear();
          }
-         request_context_clear();
-      }
    g_receipt_refuse = 0;
    reset_capture();
    PASS("durable_receipt_refusal_blocks_buffered_and_streamed");

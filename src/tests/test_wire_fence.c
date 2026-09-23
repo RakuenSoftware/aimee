@@ -294,11 +294,12 @@ static int consume_stream(const char *bytes, size_t length, void *unused)
 static void test_stream_receipt_admission_and_commitment(void)
 {
    for (int route = 1; route <= 3; route++)
-      for (int scenario = 0; scenario < 5; scenario++)
+      for (int scenario = 0; scenario < 7; scenario++)
       {
          memset(&context, 0, sizeof(context));
-         have_context = 1;
-         if (scenario != 4)
+         have_context = scenario != 5;
+         context.memory_receipt_required = scenario == 4;
+         if (scenario < 4)
             strcpy(context.memory_source_release, "0123456789abcdef0123456789abcdef");
          stream_refuse = scenario == 1;
          stream_abort = scenario == 2;
@@ -316,7 +317,7 @@ static void test_stream_receipt_admission_and_commitment(void)
          }
          assert(status == (stream_abort ? -1 : 200) && stream_transport_calls == 1);
          assert(stream_consumed == (stream_abort ? 3 : sizeof(stream_bytes)));
-         if (scenario == 4)
+         if (scenario >= 5)
             assert(stream_before_calls == 0 && stream_after_calls == 0);
          else
          {
@@ -328,6 +329,7 @@ static void test_stream_receipt_admission_and_commitment(void)
          }
       }
    memset(&context, 0, sizeof(context));
+   have_context = 1;
    puts("stream admission and exact incremental commitments survive partial/failed observations");
 }
 

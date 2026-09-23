@@ -2076,7 +2076,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "82fbe23e4e127c4ade2f144f945ff3184ecee8678ca4757bfd46aa3015a55963"
+      "sha256": "c7b268f3bc59362a29e7115a0644e19876a3988dc838197e69449dcd3a1d5006"
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2086,7 +2086,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "629c01c1a667758aa87023dca7c6c91aed8fd33dfc6b634596fceedf76b77293"
+      "sha256": "341686f1a6081617a0f6fcad75c71df80e11cab3a78875af234977d057386a62"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2345,7 +2345,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "7bde1d1c1601b624be0edeaa2f50df63ca17b9a25787f539bebe518d4043cd13"
+      "sha256": "15d214e9ff05caf1380934b9260e8e64994b38ebbe66804395c58f5676981226"
     },
     "src/tests/test_ir_module_plan.c": {
       "disposition": "host-fixture",

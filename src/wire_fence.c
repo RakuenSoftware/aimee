@@ -217,7 +217,7 @@ static int wire_attempt_before(void *opaque, const void *body, size_t length)
       return 0;
    if (context->context_refused)
       goto refused;
-   if (!context->memory_source_release[0])
+   if (!context->memory_source_release[0] && !context->memory_receipt_required)
       return 0;
    const char *route = attempt->route == WIRE_FENCE_OPENAI_CHAT          ? "openai_chat"
                        : attempt->route == WIRE_FENCE_OPENAI_RESPONSES   ? "openai_responses"

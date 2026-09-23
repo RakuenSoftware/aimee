@@ -39,3 +39,32 @@ assertions.
 Authorized stored-receipt lookup, dispatch ownership recovery, ledger verification,
 external checkpoints and CLI/MCP/ACP exposure remain separate work. This slice
 does not complete MR-06 or the 18-proposal program. CT100 remains on released 0.4.5.
+
+
+## Native unversioned coverage follow-up
+
+The first fresh verifier experiment at `773272f7e` failed the new ledger-at-arrival
+assertion: native automatic recall supplied unversioned memory and consequently
+had no source-release handle. Its provider request therefore did not participate
+in the earlier receipt gate. The [failed receipt](memory-receipt-verification-2026-09-23/unversioned-coverage-failure/T3/native-async.json)
+is retained; this is a coverage gap, not an audit-path lookup error. The complete
+Go/PostgreSQL race suite for that verifier candidate passed in 186.601 seconds.
+
+The follow-up marks accepted nonempty Go memory projections in host request
+state, preserving the marker in normal asynchronous context copies. Such a
+request now requires synchronous body receipts even when its memory sources
+lack version handles. Go labels these `no_versioned_source_handle`, with empty
+source references/check/scope metadata; this never claims that there was no
+memory input or that eligibility was revalidated. A nonempty invalid/expired
+handle still refuses instead of downgrading to this gap. The public verifier
+returns the source-coverage label independently of payload correspondence.
+Memory-disabled passthrough and calls without host request context retain their
+existing behavior. Fully versioned native recall remains MR-01 acceptance work.
+
+[Targeted race tests](memory-receipt-verification-2026-09-23/unversioned-contracts-race.txt)
+cover separate attempts, explicit gaps, foreign observation and malformed handle
+refusal. [Native ingress tests](memory-receipt-verification-2026-09-23/unversioned-ingress.txt)
+use the real Go owner and WORM store for both source-versioned and unversioned
+body receipts. Stream, actual Anthropic handler, request-context copy and agent
+refusal tests pass, as does the [exported owner build](memory-receipt-verification-2026-09-23/unversioned-export.txt).
+Fresh direct-ledger and SIGKILL/restart validation for the repair is pending.

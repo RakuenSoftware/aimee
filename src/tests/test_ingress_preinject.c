@@ -1289,6 +1289,47 @@ static void test_preview_sources_at_provider_fence(void)
    puts("preview summary versions survive C transport and fence every provider route");
 }
 
+static void test_unversioned_provider_body_receipt(void)
+{
+   char directory[] = "/tmp/aimee-unversioned-receipt-XXXXXX";
+   assert(mkdtemp(directory));
+   char path[512];
+   snprintf(path, sizeof(path), "%s/receipt.db", directory);
+   assert(audit_worm_init_at(path) == 0);
+   request_context_t context = {0};
+   context.memory_receipt_required = 1;
+   strcpy(context.request_id, "unversioned-body-request");
+   strcpy(context.principal, "receipt-owner");
+   request_context_set(&context);
+   char attempt[33];
+   assert(ingress_preinject_prepare_attempt("{}", 2, "openai_chat", "test", "model", attempt) == 0);
+   assert(attempt[0] && audit_worm_count() == 2);
+   long total;
+   cJSON *rows = audit_worm_read_page(0, 2, &total);
+   const char *detail = cJSON_GetStringValue(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 1), "detail"));
+   cJSON *event = cJSON_Parse(detail);
+   cJSON *binding = cJSON_GetObjectItemCaseSensitive(event, "binding");
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "source_coverage")),
+               "no_versioned_source_handle"));
+   assert(!strcmp(
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "source_check_id")), ""));
+   assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(binding, "sources")) == 0);
+   assert(ingress_preinject_observe_attempt(attempt, 200, "ok", 2) == 0 && audit_worm_count() == 3);
+   cJSON_Delete(event);
+   cJSON_Delete(rows);
+   request_context_clear();
+   audit_worm_close();
+   unlink(path);
+   snprintf(path, sizeof(path), "%s/receipt.db-wal", directory);
+   unlink(path);
+   snprintf(path, sizeof(path), "%s/receipt.db-shm", directory);
+   unlink(path);
+   rmdir(directory);
+   puts("unversioned host inputs receive durable body receipts with an explicit source gap");
+}
+
 static void test_durable_provider_attempt(void)
 {
    char directory[] = "/tmp/aimee-provider-receipt-XXXXXX";
@@ -1381,6 +1422,7 @@ static void test_durable_provider_attempt(void)
 int main(void)
 {
    test_durable_provider_attempt();
+   test_unversioned_provider_body_receipt();
    test_source_revalidation_at_provider_fence();
    test_preview_sources_at_provider_fence();
    test_required_assembly_refusal_reaches_dispatch();

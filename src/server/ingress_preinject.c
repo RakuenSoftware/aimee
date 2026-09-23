@@ -175,7 +175,7 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
       return 0;
    if (context->context_refused)
       return -1;
-   if (!context->memory_source_release[0])
+   if (!context->memory_source_release[0] && !context->memory_receipt_required)
       return 0;
    if ((!body && body_len) || ingress_preinject_revalidate_sources() != 0)
       return -1;
@@ -684,6 +684,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    }
    if (result && rctx)
    {
+      (void)request_context_require_memory_receipt();
       const char *ticket =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "source_release_ticket"));
       if (request_context_set_source_release(ticket) != 0)

@@ -242,6 +242,10 @@ def inside(output):
               verification.get('evidence', {}).get('binding_commitment') == 'matched' and
               verification.get('evidence', {}).get('payload_correspondence') == 'matched' and
               verification.get('evidence', {}).get('source_commitment') == 'matched')
+        check('unversioned native memory remains an explicit receipt coverage gap',
+              verification.get('source_coverage') == 'no_versioned_source_handle' and
+              prepared['binding'].get('sources') == [] and
+              prepared['binding'].get('source_check_id') == '')
         check('supplied receipt does not claim producer or chain authentication',
               verification.get('evidence', {}).get('authenticated_producer') == 'unavailable' and
               verification.get('evidence', {}).get('chain_included') == 'not_checked' and

@@ -556,3 +556,14 @@ add Go-canonical exact-body bindings and synchronous WORM preparation/admission
 for retained versioned source handles. Acknowledged HTTP responses and unresolved
 network outcomes remain distinct; missing observation cannot prove non-dispatch.
 Incremental streaming, recovery/inspection and remaining MR-06 coverage stay open.
+
+
+[Durable provider receipts](../../validation/memory-provider-receipts-2026-09-23.md)
+now cover participating buffered and incremental streaming transports with
+synchronous preparation/admission and separate response or uncertainty records.
+Both pinned candidates passed their 1,630-check fresh adapter matrices.
+[Supplied receipt verification](../../validation/memory-receipt-verification-2026-09-23.md)
+adds independent evidence dimensions. Its direct ledger experiment exposed an
+unversioned native-recall coverage gap; the follow-up records body commitments
+with that gap explicit, while fresh repair and host-loss validation continue.
+No MR-06 or program completion is claimed by these component checks.

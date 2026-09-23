@@ -86,14 +86,28 @@ func receiptEventJSON(event providerReceiptEvent) (string, bool) {
 // binds one concrete body/attempt. Retrying either transport or preparation needs
 // a fresh owner check and receives a distinct attempt identity.
 func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseEntry) ([]byte, bus.ModuleStatus) {
-	check := entry.admitted
-	entry.admitted = ""
+	coverage := "retained_versioned_inputs"
+	check := ""
+	if entry != nil {
+		check = entry.admitted
+		entry.admitted = ""
+		if check == "" {
+			return commandResult(commandError("unavailable", "provider receipt requires fresh source admission"))
+		}
+	} else {
+		// Body receipts also cover host requests whose input channels do not yet
+		// have source versions. Empty source metadata is an explicit gap, never
+		// evidence of an empty memory input or a successful source check.
+		coverage = "no_versioned_source_handle"
+		entry = &sourceReleaseEntry{sources: json.RawMessage(`[]`),
+			binding: releaseBinding(args), digest: releaseDigest([]typedProjectionRef{})}
+	}
 	digest, count := args.stringOr("payload_sha256", ""), args.stringOr("payload_bytes", "")
 	route := args.stringOr("route", "")
 	requestID, provider, model := args.stringOr("request_id", ""), args.stringOr("provider", ""), args.stringOr("model", "")
 	turn, build := args.stringOr("turn_id", ""), args.stringOr("producer_build", "")
 	callerLimits, operatorLimits := args.stringOr("caller_limits_sha256", ""), args.stringOr("operator_limits_sha256", "")
-	if check == "" || !receiptDigestValid(digest) || !receiptByteCount(count) ||
+	if !receiptDigestValid(digest) || !receiptByteCount(count) ||
 		(route != "openai_chat" && route != "openai_responses" && route != "anthropic_messages") ||
 		len(requestID) > 256 || len(provider) > 1024 || len(model) > 1024 || len(s.receipts) >= sourceReleaseMaxEntries ||
 		len(turn) > 128 || len(build) > 128 || !receiptDigestValid(callerLimits) || !receiptDigestValid(operatorLimits) {
@@ -112,7 +126,7 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 	binding := providerReceiptBinding{SchemaVersion: 1, AttemptID: attempt, ProducerID: s.receiptProducer,
 		TurnID: turn, ProducerBuild: build, CallerLimitsDigest: callerLimits, OperatorLimitsDigest: operatorLimits,
 		RequestID: requestID, RequestBinding: entry.binding, Workspace: entry.workspace, Project: entry.project,
-		Retention: "commitment_only", SourceCoverage: "retained_versioned_inputs", Sources: entry.sources,
+		Retention: "commitment_only", SourceCoverage: coverage, Sources: entry.sources,
 		SourcesDigest: entry.digest, SourceCheckID: check, Route: route, Provider: provider, Model: model,
 		PayloadDigest: digest, PayloadBytes: count, CountProvenance: "host_final_provider_bytes"}
 	now := time.Now()

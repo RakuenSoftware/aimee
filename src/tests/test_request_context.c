@@ -167,8 +167,26 @@ static void test_assembly_refusal_lifetime(void)
    request_context_clear();
    PASS("context: first refusal survives worker copy without leaking into another request");
 }
+static void test_memory_receipt_requirement_is_host_state(void)
+{
+   request_context_clear();
+   assert(request_context_require_memory_receipt() == -1);
+   request_context_t context = {0};
+   request_context_set(&context);
+   assert(!request_context_get()->memory_receipt_required);
+   assert(request_context_require_memory_receipt() == 0);
+   assert(request_context_get()->memory_receipt_required);
+   assert(!request_context_get()->memory_source_release[0]);
+   context = *request_context_get();
+   request_context_clear();
+   request_context_set(&context);
+   assert(request_context_get()->memory_receipt_required);
+   request_context_clear();
+}
+
 int main(void)
 {
+   test_memory_receipt_requirement_is_host_state();
    test_assembly_refusal_lifetime();
    test_budget_header();
    printf("request_context: unit tests\n");

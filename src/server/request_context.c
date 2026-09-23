@@ -48,6 +48,14 @@ int request_context_set_source_release(const char *ticket)
    return 0;
 }
 
+int request_context_require_memory_receipt(void)
+{
+   if (!g_req_ctx_set)
+      return -1;
+   g_req_ctx.memory_receipt_required = 1;
+   return 0;
+}
+
 void request_context_clear(void)
 {
    memset(&g_req_ctx, 0, sizeof(g_req_ctx));

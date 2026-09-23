@@ -188,3 +188,46 @@ func TestProviderReceiptResponseRepresentationCompatibility(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderReceiptWithoutSourceHandleIsAnExplicitGap(t *testing.T) {
+	s := &sourceReleaseState{}
+	args := receiptTestAdmission(t, s)
+	delete(args, "source_release_ticket")
+	plan := sourceReleaseCall(t, s, args)
+	if plan["status"] != "ok" || plan["durable"] != false {
+		t.Fatal(plan)
+	}
+	var event providerReceiptEvent
+	if json.Unmarshal([]byte(plan["prepared_detail"].(string)), &event) != nil {
+		t.Fatal(plan)
+	}
+	b := event.Binding
+	if b.SourceCoverage != "no_versioned_source_handle" || string(b.Sources) != "[]" || b.SourceCheckID != "" || b.Workspace != "" || b.Project != "" || b.RequestBinding != releaseBinding(args) {
+		t.Fatal(b)
+	}
+	if _, ok := decodePreparedReceipt([]byte(plan["prepared_detail"].(string))); !ok {
+		t.Fatal("unversioned body commitment not verifiable")
+	}
+	if next := sourceReleaseCall(t, s, args); next["attempt_id"] == plan["attempt_id"] || next["status"] != "ok" {
+		t.Fatal("resend reused attempt", next)
+	}
+	args["operation"] = json.RawMessage(`"provider-receipt-observe"`)
+	args["attempt_id"], _ = json.Marshal(plan["attempt_id"])
+	args["http_status"] = json.RawMessage(`200`)
+	args["response_sha256"], _ = json.Marshal(strings.Repeat("b", 64))
+	args["response_bytes"] = json.RawMessage(`"2"`)
+	if observed := sourceReleaseCall(t, s, args); observed["status"] != "ok" {
+		t.Fatal(observed)
+	}
+	args["principal"] = json.RawMessage(`"other"`)
+	if observed := sourceReleaseCall(t, s, args); observed["status"] != "error" {
+		t.Fatal("foreign observation", observed)
+	}
+	args["operation"] = json.RawMessage(`"provider-receipt-plan"`)
+	for _, ticket := range []string{`null`, `false`, `{}`, `"expired-or-foreign"`} {
+		args["source_release_ticket"] = json.RawMessage(ticket)
+		if invalid := sourceReleaseCall(t, s, args); invalid["status"] != "error" {
+			t.Fatal("downgraded invalid handle", ticket, invalid)
+		}
+	}
+}

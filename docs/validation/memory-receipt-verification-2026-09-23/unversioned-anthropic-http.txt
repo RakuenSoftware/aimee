@@ -1,0 +1,24 @@
+  PASS: explicit_unknown_model_is_rejected
+  PASS: translate_request_anthropic_passthrough
+  PASS: anthropic_relay_round_trip
+  PASS: anthropic_relay_usage_capture
+  PASS: anthropic_relay_reasoning_tap
+  PASS: anthropic_relay_reasoning_abstains_on_bad_stream
+  PASS: messages_stream_anthropic_reasoning_metrics
+  PASS: relay_append_data_growth
+  PASS: relay_transport_error
+  PASS: messages_buffered_anthropic_preserves_request_shape
+  PASS: messages_buffered_anthropic_parity_passthrough
+  PASS: messages_buffered_anthropic_strips_stream_false_path
+  PASS: messages_stream_anthropic_preserves_request_shape
+  PASS: messages_buffered_openai_family_translates
+  PASS: messages_buffered_system_prompt_driver_no_duplicate_system
+  PASS: messages_buffered_system_prompt_capability_no_duplicate_system
+  PASS: messages_stream_openai_family_translates
+  PASS: messages_stream_chatgpt_buffered_replays_responses
+  PASS: proof_gated_ingress_wire_parity
+  PASS: memory_refusal_blocks_provider_dispatch
+  PASS: durable_receipt_refusal_blocks_buffered_and_streamed
+  PASS: count_tokens_validates_request_shape
+  PASS: messages_buffered_rejects_missing_messages
+anthropic_http: OK
