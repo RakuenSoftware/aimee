@@ -44,6 +44,8 @@ static const char *preview_reply =
     "0c9d7a31ae090a4adc7956612a40b54b3c66f29b4526db3c9c684e8ddf5b1368\"}}";
 static int g_source_check_mode;
 static int g_source_check_calls;
+static int g_receipt_stored_calls;
+static int g_receipt_stored_failure;
 static char g_typed_first_ref[512];
 static int64_t g_evidence_ids[5];
 static char g_evidence_preview[256];
@@ -58,6 +60,15 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 500);
    const char *operation =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
+   if (operation && !strcmp(operation, "provider-receipt-stored"))
+   {
+      g_receipt_stored_calls++;
+      if (g_receipt_stored_failure)
+      {
+         *result = NULL;
+         return -1;
+      }
+   }
    if (g_assembly_failure && operation && !strcmp(operation, "ingress-assemble"))
    {
       *result = g_assembly_failure == 2
@@ -1316,7 +1327,24 @@ static void test_unversioned_provider_body_receipt(void)
    assert(!strcmp(
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "source_check_id")), ""));
    assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(binding, "sources")) == 0);
+   g_receipt_stored_calls = 0;
+   sqlite3 *injection = NULL;
+   assert(sqlite3_open(path, &injection) == SQLITE_OK);
+   assert(sqlite3_exec(injection,
+                       "CREATE TRIGGER deny_observation BEFORE INSERT ON audit_event WHEN "
+                       "NEW.action='memory.provider.acknowledged' BEGIN SELECT "
+                       "RAISE(ABORT,'fixture observation unavailable'); END",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(ingress_preinject_observe_attempt(attempt, 200, "ok", 2) != 0);
+   assert(audit_worm_count() == 2 && g_receipt_stored_calls == 0);
+   assert(sqlite3_exec(injection, "DROP TRIGGER deny_observation", NULL, NULL, NULL) == SQLITE_OK);
+   g_receipt_stored_failure = 1;
    assert(ingress_preinject_observe_attempt(attempt, 200, "ok", 2) == 0 && audit_worm_count() == 3);
+   assert(g_receipt_stored_calls == 1);
+   g_receipt_stored_failure = 0;
+   assert(ingress_preinject_observe_attempt(attempt, 200, "ok", 2) == 0 && audit_worm_count() == 3);
+   assert(g_receipt_stored_calls == 2);
+   sqlite3_close(injection);
    cJSON_Delete(event);
    cJSON_Delete(rows);
    request_context_clear();

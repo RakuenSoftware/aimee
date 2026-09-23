@@ -60,6 +60,7 @@ type providerReceiptEntry struct {
 	observation              string
 	observationInput         string
 	expires                  time.Time
+	persistedAt              time.Time
 }
 
 func receiptDigestValid(value string) bool {
@@ -109,7 +110,7 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 	callerLimits, operatorLimits := args.stringOr("caller_limits_sha256", ""), args.stringOr("operator_limits_sha256", "")
 	if !receiptDigestValid(digest) || !receiptByteCount(count) ||
 		(route != "openai_chat" && route != "openai_responses" && route != "anthropic_messages") ||
-		len(requestID) > 256 || len(provider) > 1024 || len(model) > 1024 || len(s.receipts) >= sourceReleaseMaxEntries ||
+		len(requestID) > 256 || len(provider) > 1024 || len(model) > 1024 ||
 		len(turn) > 128 || len(build) > 128 || !receiptDigestValid(callerLimits) || !receiptDigestValid(operatorLimits) {
 		return commandResult(commandError("unavailable", "provider receipt binding unavailable"))
 	}
@@ -139,7 +140,7 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 	}
 	event.Stage, event.Binding = "dispatch_admitted", nil
 	admitted, ok := receiptEventJSON(event)
-	if !ok || s.receiptBytes+len(prepared)+len(admitted) > sourceReleaseMaxBytes {
+	if !ok || !s.receiptRoom(1, len(prepared)+len(admitted)) {
 		return commandResult(commandError("unavailable", "provider receipt capacity unavailable"))
 	}
 	if s.receipts == nil {
@@ -188,11 +189,49 @@ func (s *sourceReleaseState) receiptObservation(args commandArgs) ([]byte, bus.M
 			event.Stage, event.HTTPStatus, event.Reason = "outcome_unknown", 0, "transport_outcome_unresolved"
 		}
 		raw, ok := receiptEventJSON(event)
-		if !ok || s.receiptBytes+len(raw) > sourceReleaseMaxBytes {
+		if !ok || !s.receiptRoom(0, len(raw)) {
 			return commandResult(commandError("unavailable", "provider observation capacity unavailable"))
 		}
 		entry.observation, entry.observationInput = raw, input
 		s.receiptBytes += len(raw)
 	}
 	return commandResult(map[string]any{"status": "ok", "durable": false, "attempt_id": entry.attempt, "observation_detail": entry.observation})
+}
+
+// Completed observations remain replayable while cached. Under pressure only
+// entries whose exact observation the trusted host reports durably appended can
+// be reclaimed. Missing observations or failed writes never become evictable.
+// Reclamation changes neither WORM retention nor the recorded transport outcome.
+func (s *sourceReleaseState) receiptRoom(entries, bytes int) bool {
+	for len(s.receipts)+entries > sourceReleaseMaxEntries || s.receiptBytes+bytes > sourceReleaseMaxBytes {
+		oldest := ""
+		var at time.Time
+		for id, entry := range s.receipts {
+			if entry == nil || entry.persistedAt.IsZero() {
+				continue
+			}
+			if oldest == "" || entry.persistedAt.Before(at) || entry.persistedAt.Equal(at) && id < oldest {
+				oldest, at = id, entry.persistedAt
+			}
+		}
+		if oldest == "" {
+			return false
+		}
+		entry := s.receipts[oldest]
+		delete(s.receipts, oldest)
+		s.receiptBytes -= len(entry.prepared) + len(entry.admitted) + len(entry.observation)
+	}
+	return true
+}
+
+func (s *sourceReleaseState) receiptStored(args commandArgs) ([]byte, bus.ModuleStatus) {
+	entry := s.receipts[args.stringOr("attempt_id", "")]
+	digest := args.stringOr("observation_sha256", "")
+	if entry == nil || entry.binding != releaseBinding(args) || entry.observation == "" || !receiptDigestValid(digest) || digest != releaseDigest(json.RawMessage(entry.observation)) {
+		return commandResult(commandError("unavailable", "durable observation confirmation unavailable"))
+	}
+	if entry.persistedAt.IsZero() {
+		entry.persistedAt = time.Now()
+	}
+	return commandResult(map[string]any{"status": "ok", "cache_reclaimable": true, "durability_evidence": "trusted_host_append_confirmation"})
 }

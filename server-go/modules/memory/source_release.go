@@ -176,6 +176,9 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	if operation == "provider-receipt-observe" {
 		return s.receiptObservation(args)
 	}
+	if operation == "provider-receipt-stored" {
+		return s.receiptStored(args)
+	}
 	if operation == "provider-receipt-plan" && ticket == "" {
 		if _, present := args["source_release_ticket"]; present {
 			if _, ok := args.stringValue("source_release_ticket"); !ok {

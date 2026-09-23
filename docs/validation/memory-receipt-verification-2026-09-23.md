@@ -67,4 +67,37 @@ refusal. [Native ingress tests](memory-receipt-verification-2026-09-23/unversion
 use the real Go owner and WORM store for both source-versioned and unversioned
 body receipts. Stream, actual Anthropic handler, request-context copy and agent
 refusal tests pass, as does the [exported owner build](memory-receipt-verification-2026-09-23/unversioned-export.txt).
-Fresh direct-ledger and SIGKILL/restart validation for the repair is pending.
+The repair's focused fresh deployment at `7fad8fce1` passed **48/48 checks**,
+with [actual receipt evidence](memory-receipt-verification-2026-09-23/native-host-crash/native-async.json)
+and [three image identities](memory-receipt-verification-2026-09-23/native-host-crash/image-identities.json).
+Application image `sha256:4b05d948ce6b33388169dfacba1be6e263cb2b2e6ab6043faf948f4be8d0dd09`
+recorded 15 distinct provider attempts and 44 durable stages. Independent reads
+at provider arrival observed preparation/admission. The public verifier matched
+the actual bytes and rejected a changed body. One deliberate owner outage left
+admission unresolved. SIGKILL/restart preserved every selected sequence/event/
+detail commitment exactly and invented no acknowledgement. This focused native
+fixture does not replace the full T2/T3 matrix or prove every crash boundary.
+
+
+## Bounded transient cache follow-up
+
+The host now confirms the exact observation digest to Go only after its native
+WORM append succeeds. Under count or byte pressure, Go may reclaim the oldest
+such confirmed cache entry; pending admissions and observations without successful
+persistence confirmation remain protected from pressure eviction. Existing expiry
+still applies independently of durable ledger retention. Reclaiming a cached plan
+never deletes ledger rows or changes the recorded outcome, including an explicitly
+recorded unknown outcome. A later observation request for a reclaimed entry returns
+unavailable rather than inventing a new event. Ordinary retries remain idempotent
+while the entry is cached.
+
+[Race tests](memory-receipt-verification-2026-09-23/cache-contracts-race.txt)
+fill all 1,024 slots, prove pending and unpersisted entries cannot be displaced,
+reject wrong/foreign confirmations, then admit another distinct attempt after
+confirmed persistence without exceeding cache accounting. [Native tests](memory-receipt-verification-2026-09-23/cache-native.txt)
+inject an observation append failure and prove no confirmation is sent; after
+retry succeeds, a confirmation outage preserves the successful append and its
+idempotent retry. The [exported build](memory-receipt-verification-2026-09-23/cache-export.txt)
+and ownership/bus guards pass. Fresh full-matrix validation of this follow-up is
+pending. It adds one bounded owner confirmation per persisted observation; no
+matched latency or throughput claim has yet been established.

@@ -231,3 +231,77 @@ func TestProviderReceiptWithoutSourceHandleIsAnExplicitGap(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderReceiptPressureReclaimsOnlyDurablyConfirmedObservations(t *testing.T) {
+	s := &sourceReleaseState{}
+	args := receiptTestAdmission(t, s)
+	delete(args, "source_release_ticket")
+	first := sourceReleaseCall(t, s, args)
+	firstID := first["attempt_id"].(string)
+	secondID := ""
+	for i := 1; i < sourceReleaseMaxEntries; i++ {
+		plan := sourceReleaseCall(t, s, args)
+		if plan["status"] != "ok" {
+			t.Fatal(i, plan)
+		}
+		if i == 1 {
+			secondID = plan["attempt_id"].(string)
+		}
+	}
+	if blocked := sourceReleaseCall(t, s, args); blocked["status"] != "error" {
+		t.Fatal("unresolved admission evicted", blocked)
+	}
+	args["operation"] = json.RawMessage(`"provider-receipt-stored"`)
+	args["attempt_id"], _ = json.Marshal(firstID)
+	args["observation_sha256"], _ = json.Marshal(strings.Repeat("a", 64))
+	if stored := sourceReleaseCall(t, s, args); stored["status"] != "error" {
+		t.Fatal("admission mistaken for persisted observation", stored)
+	}
+	args["operation"] = json.RawMessage(`"provider-receipt-observe"`)
+	args["http_status"] = json.RawMessage(`200`)
+	args["response_sha256"], _ = json.Marshal(strings.Repeat("b", 64))
+	args["response_bytes"] = json.RawMessage(`"2"`)
+	observed := sourceReleaseCall(t, s, args)
+	if observed["status"] != "ok" {
+		t.Fatal(observed)
+	}
+	args["operation"] = json.RawMessage(`"provider-receipt-plan"`)
+	if blocked := sourceReleaseCall(t, s, args); blocked["status"] != "error" {
+		t.Fatal("unpersisted observation evicted", blocked)
+	}
+	args["operation"] = json.RawMessage(`"provider-receipt-stored"`)
+	if stored := sourceReleaseCall(t, s, args); stored["status"] != "error" {
+		t.Fatal("wrong observation accepted", stored)
+	}
+	args["observation_sha256"], _ = json.Marshal(releaseDigest(json.RawMessage(observed["observation_detail"].(string))))
+	original := args["principal"]
+	args["principal"] = json.RawMessage(`"other"`)
+	if stored := sourceReleaseCall(t, s, args); stored["status"] != "error" {
+		t.Fatal("foreign completion", stored)
+	}
+	args["principal"] = original
+	for i := 0; i < 2; i++ {
+		stored := sourceReleaseCall(t, s, args)
+		if stored["status"] != "ok" || stored["cache_reclaimable"] != true || stored["durable"] != nil {
+			t.Fatal(stored)
+		}
+	}
+	args["operation"] = json.RawMessage(`"provider-receipt-plan"`)
+	if plan := sourceReleaseCall(t, s, args); plan["status"] != "ok" || plan["attempt_id"] == firstID {
+		t.Fatal(plan)
+	}
+	if s.receipts[firstID] != nil || s.receipts[secondID] == nil || len(s.receipts) != sourceReleaseMaxEntries {
+		t.Fatal("pressure discarded unresolved state")
+	}
+	bytes := 0
+	for _, entry := range s.receipts {
+		bytes += len(entry.prepared) + len(entry.admitted) + len(entry.observation)
+	}
+	if s.receiptBytes != bytes || bytes > sourceReleaseMaxBytes {
+		t.Fatal("cache accounting", s.receiptBytes, bytes)
+	}
+	args["operation"] = json.RawMessage(`"provider-receipt-observe"`)
+	if expired := sourceReleaseCall(t, s, args); expired["status"] != "error" {
+		t.Fatal("reclaimed entry invented new observation", expired)
+	}
+}

@@ -263,6 +263,21 @@ int ingress_preinject_observe_commitment(const char *attempt, int http_status, c
    const char *at = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "at"));
    const char *stage = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "stage"));
    int rc = ingress_append_receipt(attempt, stage, at, detail, context);
+   if (rc == 0)
+   {
+      char stored_digest[65];
+      if (aimee_sha256_hex(detail, strlen(detail), stored_digest) == 0)
+      {
+         cJSON *stored = cJSON_CreateObject();
+         ingress_release_context(stored, context);
+         cJSON_AddStringToObject(stored, "operation", "provider-receipt-stored");
+         cJSON_AddStringToObject(stored, "attempt_id", attempt);
+         cJSON_AddStringToObject(stored, "observation_sha256", stored_digest);
+         /* The append already succeeded. An unavailable cache confirmation
+          * leaves the owner's entry retained; it never resends the provider. */
+         cJSON_Delete(ingress_command(stored, 0));
+      }
+   }
    cJSON_Delete(event);
    cJSON_Delete(plan);
    return rc;
