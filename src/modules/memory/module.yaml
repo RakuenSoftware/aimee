@@ -182,7 +182,8 @@
     "server-go/modules/memory/preview_projection.go",
     "server-go/modules/memory/lifecycle_version.go",
     "server-go/modules/memory/lifecycle_retry.go",
-    "server-go/modules/memory/ranking_trace.go"
+    "server-go/modules/memory/ranking_trace.go",
+    "server-go/modules/memory/evidence_recovery.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -324,7 +325,8 @@
     "server-go/modules/memory/preview_projection_test.go",
     "server-go/modules/memory/lifecycle_version_test.go",
     "server-go/modules/memory/lifecycle_retry_test.go",
-    "server-go/modules/memory/ranking_trace_test.go"
+    "server-go/modules/memory/ranking_trace_test.go",
+    "server-go/modules/memory/evidence_recovery_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

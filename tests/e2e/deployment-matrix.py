@@ -256,6 +256,21 @@ def typed_source_version_gate(kb, check):
         code, absent = call(dict(evidence_requirements=unrelated))
         check('Unrelated retrieved evidence cannot fill a current-state obligation', code == 200 and
               absent.get('context_sufficiency') == 'insufficient')
+        recovery_budget = dict(max_rounds=1, max_new_items=1, max_tokens=256,
+                               max_elapsed_ms=200, max_cost_microunits=0)
+        code, proposed = call(dict(evidence_requirements=dict(unrelated, recovery_budget=recovery_budget)))
+        plan = proposed.get('evidence_recovery', {})
+        check('Missing role recovery remains a bounded host-admitted proposal', code == 200 and
+              proposed.get('context_sufficiency') == 'insufficient' and
+              plan.get('authority') == 'proposal_only' and plan.get('state') == 'awaiting_host_admission' and
+              plan.get('proposed_budget') == recovery_budget and len(plan.get('actions', [])) == 1 and
+              plan.get('selection_digest') == proposed.get('selection_digest'))
+        code, blocked = call(dict(evidence_requirements=dict(requirements, recovery_budget=recovery_budget),
+                                  context_limits=dict(schema_version=1, max_context_bytes=0)))
+        plan = blocked.get('evidence_recovery', {})
+        check('Recovery cannot retry evidence removed by packing', code == 200 and
+              plan.get('state') == 'blocked' and plan.get('actions') == [] and
+              any(gap.get('reason') == 'packing_budget_requires_host_revision' for gap in plan.get('remaining_gaps', [])))
         code, unknown = call(dict(evidence_requirements=dict(requirements, query_mode='timeline')))
         check('Unsupported evidence query mode remains unknown', code == 200 and unknown.get('context_sufficiency') == 'unknown')
         code, hidden_coverage = call(dict(evidence_requirements=requirements, project=key+'-hidden'))

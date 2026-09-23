@@ -148,6 +148,14 @@ conflict by dropping evidence. Other query modes remain unknown. This opt-in
 coverage describes the memory projection; it does not authorize actions, prove
 answer correctness, attest provider dispatch, or replace source revalidation.
 
+An optional `evidence_requirements.recovery_budget` produces bounded current-state
+lookup proposals for missing required roles. `evidence_recovery` is metadata with
+`authority=proposal_only`; the host must separately admit and execute work. The
+plan is regenerated after packing and never changes coverage by itself. Caps are
+one round, 16 new items, 4096 estimated tokens, 2000 ms and zero external model
+cost. Budget-dropped/conflicting/unavailable evidence is not blindly retried.
+See the [planner validation](../validation/memory-recovery-plans-2026-09-23.md).
+
 The host's assembly allocation is an inherited ceiling: an explicit byte cap may
 reduce it but cannot increase it. An absent cap inherits that ceiling. Versioned
 limits reject duplicate fields (including escaped aliases), case aliases, null

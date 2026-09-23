@@ -59,6 +59,7 @@ type typedWatermark struct {
 	Reason       string `json:"reason,omitempty"`
 }
 type typedContextResult struct {
+	Recovery           *evidenceRecoveryPlan   `json:"evidence_recovery,omitempty"`
 	Requirements       *evidenceRequirementSet `json:"evidence_requirements,omitempty"`
 	Coverage           *evidenceCoverage       `json:"evidence_coverage,omitempty"`
 	coverageCandidates []typedItem

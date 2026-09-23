@@ -97,7 +97,7 @@ class CProcessBuildTests(unittest.TestCase):
                                    cwd=module, capture_output=True, text=True, timeout=180)
             self.assertEqual(build.returncode, 0, build.stderr)
             tests = subprocess.run(["go", "test", "./server-go/modules/memory",
-                                    "-run", "TestLifecycleVersionValidation|TestObservedRankingTrace|TestEvidenceCoverage|TestEvidenceRequirements|TestUtilityHorizon", "-count=1"],
+                                    "-run", "TestLifecycleVersionValidation|TestObservedRankingTrace|TestEvidenceCoverage|TestEvidenceRequirements|TestEvidenceRecovery|TestUtilityHorizon", "-count=1"],
                                    cwd=module, capture_output=True, text=True, timeout=180)
             self.assertEqual(tests.returncode, 0, tests.stdout + tests.stderr)
 

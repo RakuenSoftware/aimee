@@ -478,3 +478,11 @@ canonical anchor admission and gated rollout remain open.
 now compete before final top-k and expose bounded graph work. The old lexical
 capacity veto is reproduced by a restricted-role fixture. This advances MR-09;
 prior/diversity policies and quality gates remain unfinished.
+
+[Bounded recovery proposals](../../validation/memory-recovery-plans-2026-09-23.md)
+add opt-in current-state lookup planning with explicit work ceilings, stable
+attempt keys and post-packing regeneration. Proposals grant no execution authority
+and cannot improve coverage without new retained evidence. Host admission,
+durable attempt tracking and outcome application remain open. The shared decoder
+also rejects ambiguous requirement and budget fields. Targeted race, exported
+owner and native ingress checks pass; fresh HTTP validation remains pending.

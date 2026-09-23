@@ -68,3 +68,9 @@ adds an opt-in bounded requirement set, owner-versioned retained-assertion role
 checks and post-packing reevaluation. Unsupported query shapes remain unknown.
 Timeline planning, independent-origin roles, bounded recovery and broader host
 integration remain open; this does not certify MR-05.
+
+The [bounded recovery planner](../../validation/memory-recovery-plans-2026-09-23.md)
+now emits opt-in current-state lookup proposals with work ceilings, stable attempt
+keys and explicit host-admission status. Outer packing regenerates proposals;
+strict requirement decoding rejects ambiguous inputs. Host execution, durable
+attempt/outcome tracking and the complete recovery-loop gate remain open.

@@ -5,17 +5,20 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
+	"unicode/utf8"
 )
 
 // Requirements describe answer obligations, never expected record IDs. Version 1
 // supports exact subject/relation current-state questions only. This is evidence
 // coverage at the packing boundary, not answer correctness or release authority.
 type evidenceRequirementSet struct {
-	SchemaVersion int                  `json:"schema_version"`
-	TaskRevision  string               `json:"task_revision"`
-	QueryMode     string               `json:"query_mode"`
-	Obligations   []evidenceObligation `json:"obligations"`
+	Recovery      *evidenceRecoveryBudget `json:"recovery_budget,omitempty"`
+	SchemaVersion int                     `json:"schema_version"`
+	TaskRevision  string                  `json:"task_revision"`
+	QueryMode     string                  `json:"query_mode"`
+	Obligations   []evidenceObligation    `json:"obligations"`
 }
 type evidenceObligation struct {
 	Subject  string `json:"subject"`
@@ -45,6 +48,9 @@ func (p *evidenceRequirementSet) valid() bool {
 	if p == nil || p.SchemaVersion != 1 || len(p.TaskRevision) == 0 || len(p.TaskRevision) > 128 || len(p.QueryMode) > 64 || len(p.Obligations) == 0 || len(p.Obligations) > 16 {
 		return false
 	}
+	if p.Recovery != nil && !p.Recovery.valid() {
+		return false
+	}
 	seen := map[[2]string]bool{}
 	required := false
 	for _, o := range p.Obligations {
@@ -57,20 +63,83 @@ func (p *evidenceRequirementSet) valid() bool {
 	}
 	return required
 }
-func decodeEvidenceRequirements(raw json.RawMessage) (*evidenceRequirementSet, error) {
-	if len(raw) > 16384 {
-		return nil, fmt.Errorf("evidence requirements exceed bound")
+
+// Requirement admission must preserve the declared obligations exactly. Standard
+// struct decoding accepts case aliases, duplicate keys and null scalar fields,
+// any of which can silently weaken the task against which coverage is measured.
+func decodeEvidenceObject(raw []byte, fields map[string]any) error {
+	if !utf8.Valid(raw) {
+		return fmt.Errorf("evidence requirements require UTF-8")
 	}
-	var p *evidenceRequirementSet
 	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&p); err != nil {
+	start, err := decoder.Token()
+	if err != nil || start != json.Delim('{') {
+		return fmt.Errorf("evidence requirements require an object")
+	}
+	seen := map[string]bool{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := token.(string)
+		target, known := fields[key]
+		if !ok || !known || seen[key] {
+			return fmt.Errorf("unknown or duplicate evidence requirement field")
+		}
+		seen[key] = true
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return err
+		}
+		if bytes.Equal(value, []byte("null")) {
+			return fmt.Errorf("null evidence requirement field")
+		}
+		if err := json.Unmarshal(value, target); err != nil {
+			return err
+		}
+	}
+	if end, err := decoder.Token(); err != nil || end != json.Delim('}') {
+		return fmt.Errorf("unterminated evidence requirements")
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("trailing evidence requirements data")
+	}
+	return nil
+}
+func (p *evidenceRequirementSet) UnmarshalJSON(raw []byte) error {
+	if len(raw) > 16384 {
+		return fmt.Errorf("evidence requirements exceed bound")
+	}
+	var value evidenceRequirementSet
+	if err := decodeEvidenceObject(raw, map[string]any{
+		"schema_version": &value.SchemaVersion, "task_revision": &value.TaskRevision,
+		"query_mode": &value.QueryMode, "obligations": &value.Obligations, "recovery_budget": &value.Recovery,
+	}); err != nil {
+		return err
+	}
+	if !value.valid() {
+		return fmt.Errorf("invalid evidence requirements")
+	}
+	*p = value
+	return nil
+}
+func (o *evidenceObligation) UnmarshalJSON(raw []byte) error {
+	var value evidenceObligation
+	if err := decodeEvidenceObject(raw, map[string]any{
+		"subject": &value.Subject, "relation": &value.Relation, "optional": &value.Optional,
+	}); err != nil {
+		return err
+	}
+	*o = value
+	return nil
+}
+func decodeEvidenceRequirements(raw json.RawMessage) (*evidenceRequirementSet, error) {
+	var p evidenceRequirementSet
+	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, err
 	}
-	if !p.valid() {
-		return nil, fmt.Errorf("invalid evidence requirements")
-	}
-	return p, nil
+	return &p, nil
 }
 
 // Record only owner-selected candidates. Read counters, ranking confidence and
@@ -91,6 +160,7 @@ func coverageAssertion(item typedItem) (assertionHit, bool) {
 	return h, true
 }
 func (r *typedContextResult) evaluateCoverage() {
+	defer r.planEvidenceRecovery()
 	p := r.Requirements
 	if p == nil {
 		return

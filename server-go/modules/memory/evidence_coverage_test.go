@@ -3,6 +3,7 @@ package memory
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -160,5 +161,46 @@ func TestEvidenceCoverageCannotImportCompletionAsEvidence(t *testing.T) {
 	}
 	if copy.Sufficiency != "insufficient" || len(copy.Coverage.Roles[0].Retained) != 0 {
 		t.Fatal("serialized verdict replaced evidence", copy.Coverage)
+	}
+}
+
+func TestEvidenceRequirementsRejectAmbiguousWireShapes(t *testing.T) {
+	valid := `{"schema_version":1,"task_revision":"7","query_mode":"current_state","obligations":[{"subject":"service","relation":"uses"}]}`
+	for _, raw := range []string{
+		strings.Replace(valid, `"task_revision":"7"`, `"task_revision":"old","task_revision":"7"`, 1),
+		strings.Replace(valid, `"task_revision"`, `"TASK_REVISION"`, 1),
+		strings.Replace(valid, `"query_mode":"current_state"`, `"query_mode":null`, 1),
+		strings.Replace(valid, `"subject":"service"`, `"subject":"other","subject":"service"`, 1),
+		strings.Replace(valid, `"relation":"uses"`, `"Relation":"uses"`, 1),
+		strings.Replace(valid, `"relation":"uses"`, `"relation":"uses","optional":null`, 1),
+		strings.Replace(valid, `"relation":"uses"`, `"relation":"uses","optional":true,"optional":false`, 1),
+		strings.Replace(valid, `"subject":"service"`, `"subject":"`+string([]byte{0xff})+`"`, 1),
+		valid + `{}`,
+	} {
+		if _, err := decodeEvidenceRequirements([]byte(raw)); err == nil {
+			t.Fatalf("accepted ambiguous public requirements: %s", raw)
+		}
+		var request DataRequest
+		if err := json.Unmarshal([]byte(`{"typed_context":{"evidence_requirements":`+raw+`}}`), &request); err == nil {
+			t.Fatalf("direct owner request bypassed requirement decoder: %s", raw)
+		}
+	}
+	// Omitted optional remains a required role, and escaped exact key names remain
+	// compatible JSON. The decoder must not overwrite an admitted value on error.
+	var p evidenceRequirementSet
+	if err := json.Unmarshal([]byte(valid), &p); err != nil || p.Obligations[0].Optional {
+		t.Fatal(p, err)
+	}
+	before, _ := json.Marshal(p)
+	if err := json.Unmarshal([]byte(`{"schema_version":2}`), &p); err == nil {
+		t.Fatal("accepted unknown schema")
+	}
+	after, _ := json.Marshal(p)
+	if string(before) != string(after) {
+		t.Fatal("failed decode changed admitted requirements")
+	}
+	escaped := strings.Replace(valid, `"subject"`, `"\u0073ubject"`, 1)
+	if _, err := decodeEvidenceRequirements([]byte(escaped)); err != nil {
+		t.Fatal(err)
 	}
 }
