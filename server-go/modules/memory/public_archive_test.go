@@ -49,11 +49,16 @@ SET LOCAL ROLE memory_archive_test;`)
 	if err != nil {
 		t.Fatal(err)
 	}
+	modelCalls := 0
 	backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB,
 		settings: func() (map[string]any, error) {
 			return map[string]any{"memory_episode_summaries_enabled": true, "memory_cognify_command": "fixture"}, nil
 		},
 		episodeCommand: func(_ context.Context, command string, input []byte) ([]byte, error) {
+			modelCalls++
+			if strings.Contains(string(input), "ineligible-card-source") {
+				t.Fatal("ineligible source sent to card model", string(input))
+			}
 			if command != "fixture" {
 				t.Fatal(command)
 			}
@@ -75,6 +80,36 @@ SET LOCAL ROLE memory_archive_test;`)
 		t.Helper()
 		data, _ := json.Marshal(args)
 		return runPublicCommand(t, client, verb, string(data))
+	}
+	// Exclude unavailable source states before scope compatibility, capacity and
+	// the external model call. The fixture uses a savepoint to isolate exports.
+	if _, err := tx.Exec(ctx, `SAVEPOINT card_source_eligibility; RESET ROLE;
+ INSERT INTO memories(key,content,source_session,lifecycle_state,activation_suppressed,valid_from,valid_until)
+ SELECT 'card-source-'||name,'ineligible-card-source '||name,'card-eligibility',state,suppressed,starts,ends
+ FROM (VALUES
+ ('future','active',0,(CURRENT_TIMESTAMP+interval '1 hour')::text,''),
+ ('expired','active',0,'',CURRENT_TIMESTAMP::text),
+ ('suppressed','active',1,'',''),
+ ('superseded','superseded',0,'',''),
+ ('archived','archived',0,'',''),
+ ('quarantined','quarantined',0,'',''),
+ ('deleted','deleted',0,'',''),
+ ('revoked','revoked',0,'','')) fixture(name,state,suppressed,starts,ends);
+ SET LOCAL ROLE memory_archive_test;`); err != nil {
+		t.Fatal(err)
+	}
+	callsBefore := modelCalls
+	if r := run("episode_card_generate", map[string]any{"source_session": "card-eligibility", "scope_context": true}); r["kind"] != "not_found" || modelCalls != callsBefore {
+		t.Fatal("empty eligible source set reached model", r, modelCalls, callsBefore)
+	}
+	if _, err := tx.Exec(ctx, `RESET ROLE; INSERT INTO memories(key,content,source_session) VALUES('card-source-current','current allowed card source','card-eligibility'); SET LOCAL ROLE memory_archive_test`); err != nil {
+		t.Fatal(err)
+	}
+	if r := run("episode_card_generate", map[string]any{"source_session": "card-eligibility", "scope_context": true}); r["status"] != "ok" || modelCalls != callsBefore+1 {
+		t.Fatal("eligible card source was not generated", r, modelCalls, callsBefore)
+	}
+	if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT card_source_eligibility; RELEASE SAVEPOINT card_source_eligibility`); err != nil {
+		t.Fatal(err)
 	}
 	for _, verb := range []string{"episode_cards", "episode_card_generate", "export_jsonl", "decisions_export_jsonl"} {
 		if r := run(verb, map[string]any{}); r["kind"] != "invalid_argument" {

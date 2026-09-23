@@ -642,3 +642,8 @@ recall, direct embedding and re-embedding. Parent revision, unit field commitmen
 and optional summary observations are producer-owned. Local packaged race and
 export checks pass; fresh deployment evidence remains pending. Other intermediate
 source contracts and full MR-04 closure remain open.
+
+[Episode-card source eligibility](../../validation/memory-card-source-eligibility-2026-09-23.md)
+now excludes suppressed and temporally inapplicable inputs before the model call.
+The public PostgreSQL regression covers all unavailable source states and an
+eligible positive case. Later invalidation of generated cards remains open.

@@ -383,7 +383,7 @@ func (s *postgresDataStore) GenerateEpisodeCard(ctx context.Context, session str
 		return 0, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,key,content,scope_type,scope_value FROM memories m
-WHERE source_session=$1 AND lifecycle_state='active'
+WHERE source_session=$1 AND `+currentMemorySQL("m.")+`
  AND NOT EXISTS (SELECT 1 FROM memory_units u WHERE u.memory_id=m.id AND u.is_episode_card=1)
 ORDER BY id LIMIT 201`, session)
 	if err != nil {
