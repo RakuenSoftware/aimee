@@ -307,6 +307,18 @@ def relation_consumer_rebuild_gate(kb, check):
             command('docker', 'restart', kb.application)
         kb.start()
         check('Background invalidation survives application restart', await_copy('restart copied detail'))
+        sql(f"UPDATE memory_links SET relation='supports' WHERE source_id=(SELECT id FROM memories WHERE key='{key}-parent')")
+        check('Link-only edit rebuilds the source relation', await_copy('supports restart copied detail'))
+        sql(f"DELETE FROM memory_links WHERE source_id=(SELECT id FROM memories WHERE key='{key}-parent')")
+        deadline = time.monotonic() + 60
+        removed = False
+        while time.monotonic() < deadline:
+            removed = sql(f"""SELECT count(*) FROM memory_relations r JOIN memories p ON p.id=r.memory_id
+                WHERE p.key='{key}-parent' AND r.dst_entity='{key}-target'""").strip() == '0'
+            if removed:
+                break
+            time.sleep(1)
+        check('Link deletion removes the materialized dependent relation', removed)
     finally:
         sql(f"""DELETE FROM memory_lineage WHERE object_type='relation' AND object_id IN
             (SELECT r.id FROM memory_relations r JOIN memories m ON m.id=r.memory_id WHERE m.key='{key}-parent');

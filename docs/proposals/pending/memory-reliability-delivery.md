@@ -508,3 +508,9 @@ Committed-connection tests cover restart, competing workers, rollback and retent
 resynchronization; full PostgreSQL/race and export checks pass. Fresh schema-33
 background-worker validation remains pending. Progress records queued invalidation,
 not serving freshness or complete MR-02/MR-04 acceptance.
+
+[Link-only mutation invalidation](../../validation/memory-link-journal-2026-09-23.md)
+now advances source dependency revisions and canonical events, including both
+sources of a moved link. No-op updates remain silent. Creation receipts bind the
+final revision after supersession links. PostgreSQL/race and export checks pass;
+fresh schema-34 worker validation remains pending.

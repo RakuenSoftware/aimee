@@ -18086,6 +18086,44 @@ BEGIN
 END $relation_consumer_acl$;
 -- END memory relation invalidation consumer
 
+-- BEGIN memory link revisions
+-- Link-only edits change the source's derived view. Publish their dependency
+-- revision through the same canonical journal, once per parent per statement.
+CREATE OR REPLACE FUNCTION memory_capture_link_change() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+DECLARE target BIGINT; changed TEXT;
+BEGIN
+  PERFORM set_config('search_path',format('pg_catalog,%I,pg_temp',TG_TABLE_SCHEMA),true);
+  changed:=CASE TG_OP
+    WHEN 'INSERT' THEN 'SELECT id,source_id,target_id,relation,weight FROM new_memory_link_rows'
+    WHEN 'DELETE' THEN 'SELECT id,source_id,target_id,relation,weight FROM old_memory_link_rows'
+    ELSE '(SELECT id,source_id,target_id,relation,weight FROM new_memory_link_rows EXCEPT
+           SELECT id,source_id,target_id,relation,weight FROM old_memory_link_rows)
+          UNION (SELECT id,source_id,target_id,relation,weight FROM old_memory_link_rows EXCEPT
+                 SELECT id,source_id,target_id,relation,weight FROM new_memory_link_rows)' END;
+  FOR target IN EXECUTE format('SELECT DISTINCT source_id FROM (%s) changed ORDER BY source_id',changed)
+  LOOP
+    -- Invoker RLS remains in force. Deleted parents already have a canonical
+    -- deletion event; its consumer also follows retained copied-input lineage.
+    EXECUTE format('UPDATE %I.memories SET dependency_revision=dependency_revision+1 WHERE id=$1',TG_TABLE_SCHEMA)
+      USING target;
+  END LOOP;
+  RETURN NULL;
+END $$;
+DROP TRIGGER IF EXISTS memory_capture_link_insert ON memory_links;
+CREATE TRIGGER memory_capture_link_insert AFTER INSERT ON memory_links
+  REFERENCING NEW TABLE AS new_memory_link_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_link_change();
+DROP TRIGGER IF EXISTS memory_capture_link_update ON memory_links;
+CREATE TRIGGER memory_capture_link_update AFTER UPDATE ON memory_links
+  REFERENCING OLD TABLE AS old_memory_link_rows NEW TABLE AS new_memory_link_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_link_change();
+DROP TRIGGER IF EXISTS memory_capture_link_delete ON memory_links;
+CREATE TRIGGER memory_capture_link_delete AFTER DELETE ON memory_links
+  REFERENCING OLD TABLE AS old_memory_link_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_link_change();
+-- END memory link revisions
+
 -- BEGIN memory episode revisions
 -- Episode text and provenance can change independently of the canonical parent.
 -- Keep an owner revision for typed selection/release identities. No-op refreshes
@@ -18248,7 +18286,9 @@ BEGIN
       AND c.operation='memory.'||NEW.operation
       AND ((NEW.operation='store' AND EXISTS(SELECT 1 FROM public.fact_graph_changes f
          WHERE f.commit_id=c.commit_id AND f.object_kind='memory' AND f.object_key=NEW.result_id::text
-          AND f.action='insert' AND f.after_version=NEW.result_revision))
+          AND f.action='insert') AND EXISTS(SELECT 1 FROM public.fact_graph_changes f
+         WHERE f.commit_id=c.commit_id AND f.object_kind='memory' AND f.object_key=NEW.result_id::text
+          AND f.after_version=NEW.result_revision))
        OR (NEW.operation='store_noop' AND c.origin_ref='memory:'||NEW.result_id::text||':'||NEW.result_revision::text
          AND NOT EXISTS(SELECT 1 FROM public.fact_graph_changes f WHERE f.commit_id=c.commit_id)))) THEN
     RAISE EXCEPTION 'memory store receipt requires its admitted canonical audit';
@@ -18497,5 +18537,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '33')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '34')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

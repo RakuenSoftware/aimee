@@ -2582,10 +2582,10 @@
       "symbols": [
         "db2_memory_find_facts_like"
       ],
-      "sha256": "01c8ac2208e43f52a5c58af1439017abffe7c65b6da6cff26c08675f345a19da",
+      "sha256": "789fed184ffb2ec4f28bde47a94675c9cd2083adbdff76bdb8c33f8f6cb8a53c",
       "inputs": {
         "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "cab366a1481faffa94fd6ecd63904d8197f988856ad161c9176b129052a0a4ea",
+        "src/modules/db2/c/schema.sql": "fb41265b6a5d4698668ff7d038020e47b24bcd3c0a6d84e99cac96ddfbd06cbf",
         "src/modules/db2/c/schema_sqlite.sql": "3d5ef4d20f1e3f2a9025e8bbc350c0d3e29f2654000f59620db51dc00ecb48a0"
       }
     },

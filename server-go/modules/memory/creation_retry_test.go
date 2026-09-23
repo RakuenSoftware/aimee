@@ -112,6 +112,16 @@ func exerciseCreationRetryReplay(t *testing.T, ctx context.Context, tx pgx.Tx, h
 		if replacement["status"] != "ok" || replacement["id"] == id {
 			t.Fatal("replacement admission", replacement)
 		}
+		// Replacement inserts its supersession link in the same commit. Bind the
+		// receipt to the final dependency revision, not just the initial insert.
+		replacedReceipt := replacement["mutation_receipt"].(map[string]any)
+		replacedVersion := replacedReceipt["version"].(map[string]any)
+		if replacedVersion["record_revision"] != "2" {
+			t.Fatal("replacement receipt omitted link revision", replacement)
+		}
+		if retry := invoke("store", args); retry["status"] != "ok" || !reflect.DeepEqual(retry["mutation_receipt"].(map[string]any)["version"], replacedVersion) {
+			t.Fatal("replacement final revision not replayable", retry)
+		}
 		args["idempotency_key"] = "creation-fixture-" + authority
 		args["content"] = "creation fixture"
 		if out := invoke("store", args); out["reason"] != "idempotent_result_unavailable" {

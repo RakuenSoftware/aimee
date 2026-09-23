@@ -506,3 +506,102 @@ func TestSharedMemoryChangeJournal(t *testing.T) {
 		t.Fatal("retention gap accepted", gap)
 	}
 }
+
+func TestSharedLinkChangeJournal(t *testing.T) {
+	dsn := os.Getenv("AIMEE_MEMORY_EVAL_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_MEMORY_EVAL_URL for link journal replay")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(context.Background())
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`CREATE SCHEMA link_journal_test; SET LOCAL search_path=link_journal_test,public;
+ CREATE ROLE link_journal_runtime NOINHERIT NOBYPASSRLS;
+ GRANT USAGE ON SCHEMA link_journal_test TO link_journal_runtime;
+ ALTER DEFAULT PRIVILEGES IN SCHEMA link_journal_test GRANT ALL ON TABLES TO link_journal_runtime;
+ CREATE TABLE memories(id BIGINT PRIMARY KEY,key TEXT,content TEXT,scope_type TEXT,scope_value TEXT,
+ use_count BIGINT DEFAULT 0,last_used_at TEXT,updated_at TEXT);
+ CREATE TABLE memory_scopes(memory_id BIGINT REFERENCES memories(id) ON DELETE CASCADE,scope_type TEXT,scope_value TEXT);
+ CREATE TABLE memory_links(id BIGINT PRIMARY KEY,source_id BIGINT REFERENCES memories(id) ON DELETE CASCADE,
+ target_id BIGINT REFERENCES memories(id) ON DELETE CASCADE,relation TEXT,weight FLOAT8,created_at TEXT);
+ CREATE FUNCTION memory_row_scope_visible(t TEXT,v TEXT) RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
+ SELECT current_setting('aimee.memory_scope_all',true)='1' OR v=current_setting('aimee.memory_scope_value',true) $$;
+ ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
+ CREATE POLICY visible ON memories USING(memory_row_scope_visible(scope_type,scope_value))
+ WITH CHECK(memory_row_scope_visible(scope_type,scope_value));`)
+	exec(sharedChangeMigration(t))
+	body, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := strings.Index(string(body), "-- BEGIN memory link revisions"), strings.Index(string(body), "-- END memory link revisions")
+	if a < 0 || b < a {
+		t.Fatal("link migration missing")
+	}
+	exec(string(body[a:b]))
+	exec(string(body[a:b]))
+	exec(`SET LOCAL ROLE link_journal_runtime; SELECT set_config('aimee.memory_scope_all','1',true);
+ INSERT INTO memories(id,key,content,scope_type,scope_value) VALUES
+ (1,'source','one','project','alpha'),(2,'target','two','project','alpha'),(3,'other','three','project','beta')`)
+	revision := func(id int64) int64 {
+		t.Helper()
+		var r int64
+		if err := tx.QueryRow(ctx, `SELECT record_revision FROM memories WHERE id=$1`, id).Scan(&r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	expect := func(id, want int64) {
+		t.Helper()
+		if got := revision(id); got != want {
+			t.Fatalf("parent %d revision=%d want=%d", id, got, want)
+		}
+	}
+	exec(`INSERT INTO memory_links VALUES(1,1,2,'related',1,''),(2,1,3,'depends_on',1,'')`)
+	expect(1, 2)
+	expect(2, 1)
+	expect(3, 1)
+	exec(`UPDATE memory_links SET relation=relation,created_at='metadata only'`)
+	expect(1, 2)
+	exec(`UPDATE memory_links SET relation='changed'`)
+	expect(1, 3)
+	exec(`UPDATE memory_links SET source_id=3 WHERE id=1`)
+	expect(1, 4)
+	expect(3, 2)
+	exec(`SAVEPOINT rollback_link; DELETE FROM memory_links; ROLLBACK TO rollback_link`)
+	expect(1, 4)
+	expect(3, 2)
+	exec(`DELETE FROM memory_links`)
+	expect(1, 5)
+	expect(3, 3)
+	// A hidden source is not rewritten through the invoker's trigger. Its copied
+	// inputs are still fenced directly, and target deletion has its own journal.
+	exec(`INSERT INTO memory_links VALUES(3,3,2,'related',1,'');
+ SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_scope_value','alpha',true);
+ DELETE FROM memory_links WHERE id=3;
+ SELECT set_config('aimee.memory_scope_all','1',true)`)
+	expect(3, 4)
+	exec(`INSERT INTO memory_links VALUES(4,1,2,'related',1,''); DELETE FROM memories WHERE id=2`)
+	expect(1, 7)
+	var mismatches int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories m WHERE
+ m.record_revision<>(SELECT max(record_revision) FROM memory_invalidation_outbox o WHERE o.memory_id=m.id)`).Scan(&mismatches); err != nil || mismatches != 0 {
+		t.Fatal("link revisions not journalled", mismatches, err)
+	}
+	exec(`DELETE FROM memories WHERE id=1`)
+}

@@ -256,7 +256,7 @@ func TestCorrectionProposalRuntimeReplay(t *testing.T) {
 	if scalar(`SELECT count(*) FROM knowledge_review_decisions WHERE item_id=$1 AND source_queue='memory_correction' AND evidence_snapshot::jsonb->>'payload_digest'=$2 AND authenticated_actor=$3`, pid, digest, user.Principal) != 1 {
 		t.Fatal("missing exact approval decision")
 	}
-	if scalar(`SELECT count(*) FROM fact_graph_changes WHERE commit_id=$1 AND object_kind='memory' AND after_state::jsonb->>'provenance_category'='reviewed_model'`, ap["review_commit_id"]) != 1 {
+	if scalar(`SELECT count(*) FROM fact_graph_changes WHERE commit_id=$1 AND object_kind='memory' AND action='insert' AND after_state::jsonb->>'provenance_category'='reviewed_model'`, ap["review_commit_id"]) != 1 {
 		t.Fatal("canonical audit lacks model authorship")
 	}
 	if scalar(`SELECT count(*) FROM memories WHERE id=$1 AND provenance_category='user_stated' AND content='authoritative original' AND lifecycle_state='superseded'`, id) != 1 {
