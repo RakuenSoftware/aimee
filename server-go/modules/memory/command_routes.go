@@ -11,6 +11,7 @@ type commandRoute struct {
 }
 
 var sharedCommandRoutes = []commandRoute{
+	{"memory", "verify_receipt", "Compare a supplied prepared receipt with optional exact payload bytes.", handleReceiptVerification, true},
 	{"memory", "pack", "Manage memory profile packs.", handlePackCommand, true},
 	{"memory", "screen_content", "Screen content before transmission or export.", handleScreenCommand, true},
 }

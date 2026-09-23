@@ -185,7 +185,8 @@
     "server-go/modules/memory/ranking_trace.go",
     "server-go/modules/memory/evidence_recovery.go",
     "server-go/modules/memory/relation_invalidation.go",
-    "server-go/modules/memory/provider_receipt.go"
+    "server-go/modules/memory/provider_receipt.go",
+    "server-go/modules/memory/receipt_verification.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -330,7 +331,8 @@
     "server-go/modules/memory/ranking_trace_test.go",
     "server-go/modules/memory/evidence_recovery_test.go",
     "server-go/modules/memory/relation_invalidation_test.go",
-    "server-go/modules/memory/provider_receipt_test.go"
+    "server-go/modules/memory/provider_receipt_test.go",
+    "server-go/modules/memory/receipt_verification_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

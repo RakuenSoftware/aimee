@@ -55,8 +55,12 @@ preserve refusal through both execution paths and their fallbacks.
 The [final full PostgreSQL race suite](memory-provider-receipts-2026-09-23/full-race.txt)
 and [exported owner build](memory-provider-receipts-2026-09-23/export.txt) pass.
 Native retry, ingress, agent and buffered provider adapter builds/tests pass;
-C ownership, bus-boundary and descriptor guards pass. Fresh deployment evidence
-for this receipt change is pending.
+C ownership, bus-boundary and descriptor guards pass. The buffered candidate
+`c3919b1a8` passed fresh T2/T3 deployment checks: 1,630/1,630, both processes
+exit 0. [Raw receipts and nine container identities](memory-provider-receipts-2026-09-23/fresh/image-identities.json)
+bind application image `sha256:2ef35cb0dd6ec8f4954a302766080ea9056e35ff1028f5e447e74a269d5fc3b7`
+and the schema-34 database image. This existing matrix checks adapter behavior;
+it does not directly inspect durable receipt rows.
 Released CT100 remains 0.4.5; the draft changes do not replace its application.
 
 

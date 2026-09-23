@@ -6,6 +6,9 @@ and pauses/restarts only the Server's Go memory process. Results omit prompts,
 credentials and provider headers. Never run against a user's installation.
 """
 import argparse
+import base64
+import hashlib
+import sqlite3
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -36,6 +39,8 @@ def inside(output):
         raise RuntimeError('requires the disposable-container launcher')
     checks, captures, runs, provider_errors, request_sizes = [], [], [], [], []
     lock = threading.Lock()
+    receipt_captures = []
+    expected_unresolved = set()
     prefix = 'native-memory-' + uuid.uuid4().hex[:10]
     content = 'Complete native Go memory fixture 界🦊; preserve LIMIT_7 and identifier ' + prefix
     owner_pid, memory_id = None, None
@@ -84,7 +89,28 @@ def inside(output):
             nonlocal refresh_id
             raw = self.rfile.read(int(self.headers.get('Content-Length', '0')))
             body = json.loads(raw)
+            # Independent read-only connection sees committed intent before the
+            # synthetic provider replies. No prompt or ledger detail is exported.
+            admission = None
+            try:
+                uri = Path('/var/lib/aimee/audit/worm-live.db').as_uri() + '?mode=ro'
+                with sqlite3.connect(uri, uri=True, timeout=5) as ledger:
+                    for seq, detail in ledger.execute(
+                            "SELECT seq,detail FROM audit_event WHERE action='memory.provider.prepared' ORDER BY seq DESC LIMIT 64"):
+                        event = json.loads(detail)
+                        binding = event.get('binding', {})
+                        if binding.get('payload_sha256') != hashlib.sha256(raw).hexdigest():
+                            continue
+                        admitted = ledger.execute(
+                            'SELECT seq,detail FROM audit_event WHERE event_id=?',
+                            ('memory.provider.' + event['attempt_id'] + '.dispatch_admitted',)).fetchone()
+                        if admitted and admitted[0] > seq and json.loads(admitted[1]).get('binding_sha256') == event['binding_sha256']:
+                            admission = event
+                            break
+            except (OSError, sqlite3.Error, ValueError, KeyError):
+                pass
             with lock:
+                receipt_captures.append((admission, raw))
                 captures.append(body)
                 request_sizes.append(len(raw))
                 ordinal = len(captures) - scenario_start
@@ -110,6 +136,8 @@ def inside(output):
                                 raise RuntimeError('refresh identity was not committed')
                             refresh_id = stored['id']
                         elif scenario == 'refresh-outage':
+                            if admission is not None:
+                                expected_unresolved.add(admission['attempt_id'])
                             os.kill(owner_pid, signal.SIGSTOP)
                     except Exception as exc:
                         provider_errors.append(type(exc).__name__ + ': ' + str(exc))
@@ -205,6 +233,22 @@ def inside(output):
         check('healthy native run completes', result.get('status') == 'completed' and 'NATIVE_MEMORY_OK' in list(strings(result)))
         check('healthy native run dispatches exactly once', len(captures) == before + 1)
         check('native provider receives complete Go memory', any(content in text for text in strings(captures[-1])))
+        prepared, payload = receipt_captures[-1]
+        check('provider arrival sees committed preparation and admission', prepared is not None)
+        status, verification = api('/v1/commands/memory.verify_receipt', dict(
+            prepared_receipt=prepared, payload_base64=base64.b64encode(payload).decode()))
+        check('public receipt verification matches real provider bytes', status == 200 and
+              verification.get('evidence', {}).get('binding_commitment') == 'matched' and
+              verification.get('evidence', {}).get('payload_correspondence') == 'matched' and
+              verification.get('evidence', {}).get('source_commitment') == 'matched')
+        check('supplied receipt does not claim producer or chain authentication',
+              verification.get('evidence', {}).get('authenticated_producer') == 'unavailable' and
+              verification.get('evidence', {}).get('chain_included') == 'not_checked' and
+              verification.get('evidence', {}).get('decision_replayed') == 'unavailable')
+        status, mismatch = api('/v1/commands/memory.verify_receipt', dict(
+            prepared_receipt=prepared, payload_base64=base64.b64encode(payload + b' ').decode()))
+        check('public receipt verification detects changed provider bytes', status == 200 and
+              mismatch.get('evidence', {}).get('payload_correspondence') == 'mismatch')
         before = len(captures)
         result, events = run('inherited zero byte cap', dict(schema_version=1, max_request_bytes=0))
         check('worker preserves inherited byte refusal', result.get('status') == 'failed' and
@@ -261,6 +305,19 @@ def inside(output):
             json.dumps(dict(error=dict(message=provider_failure)), ensure_ascii=False) in text
             for text in strings(events)))
         check('permanent provider error is not retried', len(captures) == before + 1)
+        attempts = [entry['attempt_id'] for entry, _ in receipt_captures if entry is not None]
+        check('every actual native send has separate durable admission',
+              len(attempts) == len(captures) and len(set(attempts)) == len(attempts))
+        uri = Path('/var/lib/aimee/audit/worm-live.db').as_uri() + '?mode=ro'
+        with sqlite3.connect(uri, uri=True, timeout=5) as ledger:
+            observations = [ledger.execute('SELECT detail FROM audit_event WHERE event_id=?',
+                ('memory.provider.' + attempt + '.acknowledged',)).fetchone() for attempt in attempts]
+        check('completed native transports retain durable response observations',
+              all(row and json.loads(row[0]).get('http_status') in (200, 400)
+                  for attempt, row in zip(attempts, observations) if attempt not in expected_unresolved))
+        check('owner outage leaves admitted transport unresolved without invented acknowledgement',
+              len(expected_unresolved) == 1 and all(row is None
+                  for attempt, row in zip(attempts, observations) if attempt in expected_unresolved))
     finally:
         try:
             if owner_pid is not None:
