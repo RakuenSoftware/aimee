@@ -172,7 +172,8 @@ int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const c
 /* Scope a detached-workspace runner to one synchronous remote Git CLI call.
  * Returns 1 when a runner thread started, 0 when no detached runner is needed,
  * and -1 when the remote workspace registry could not be resolved. */
-int cli_workspace_git_runner_start(void);
+void cli_v1_set_git_runner(int (*start)(const char *), void (*stop)(void));
+int cli_workspace_git_runner_start(const char *target);
 void cli_workspace_git_runner_stop(void);
 
 /* Reverse-channel for interactive/bridge commands (mcp-serve, chat) against a

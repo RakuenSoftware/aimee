@@ -20,6 +20,9 @@ int client_config_profile_present(const char *name);
 /* Return an owned array of profile-name strings, or NULL on failure. */
 cJSON *client_config_profile_list(void);
 
+/* 1 registered, 0 outside the registry, -1 registry unavailable. */
+int client_config_workspace_contains(const char *cwd);
+
 int client_config_bool(const char *key, int fallback);
 int client_config_int(const char *key, int fallback);
 int client_config_string(const char *key, char *out, unsigned long out_size, const char *fallback);

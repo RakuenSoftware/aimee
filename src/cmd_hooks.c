@@ -1,3 +1,4 @@
+#include "workspace_hook_scope.h"
 /* cmd_hooks.c: the `aimee hooks` pre/post tool hook command.
  *
  * Session-start / launch / wrapup live in cmd_session_lifecycle.c; scope-aware
@@ -277,10 +278,6 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    argc--;
    argv++;
 
-   audit_log_open();
-   if (audit_ensure_key() != 0)
-      fatal("required governed-action audit key is unavailable");
-
    /* Read JSON from stdin -- hook input is small (tool name + args) */
    char input[65536];
    size_t total = 0;
@@ -319,6 +316,34 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
+   char cwd[MAX_PATH_LEN] = "";
+   if (!hook_payload_cwd(json, cwd, sizeof(cwd)))
+      (void)getcwd(cwd, sizeof(cwd));
+   cJSON *scope_input = cJSON_Parse(tool_input);
+   static const char *const scope_keys[] = {"workdir", "cwd", "working_dir", "working_directory",
+                                            NULL};
+   for (int i = 0; scope_keys[i]; i++)
+   {
+      const char *value =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scope_input, scope_keys[i]));
+      if (value && value[0])
+      {
+         snprintf(cwd, sizeof(cwd), "%s", value);
+         break;
+      }
+   }
+   cJSON_Delete(scope_input);
+   if (!workspace_hook_registered(cwd))
+   {
+      free(tool_input_heap);
+      cJSON_Delete(json);
+      return;
+   }
+
+   audit_log_open();
+   if (audit_ensure_key() != 0)
+      fatal("required governed-action audit key is unavailable");
+
    /* DB1 owns its own connection; session_state_load/save delegate to DB1. */
    if (!db1_store_ready())
       fatal("cannot open database");
@@ -329,21 +354,6 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
       const char *sid = hook_sid[0] ? hook_sid : session_id();
       session_state_t state;
       session_state_load(&state, sid);
-
-      char cwd[MAX_PATH_LEN];
-      if (!getcwd(cwd, sizeof(cwd)))
-         cwd[0] = '\0';
-      char payload_cwd[MAX_PATH_LEN];
-      if (hook_payload_cwd(json, payload_cwd, sizeof(payload_cwd)))
-      {
-         snprintf(cwd, sizeof(cwd), "%s", payload_cwd);
-      }
-      if (!is_aimee_worktree_path(cwd))
-      {
-         const char *pwd = getenv("PWD");
-         if (pwd && pwd[0] && is_aimee_worktree_path(pwd))
-            snprintf(cwd, sizeof(cwd), "%s", pwd);
-      }
 
       /* Write CWD to session-scoped tracking file so MCP server follows session CWD */
       if (cwd[0])

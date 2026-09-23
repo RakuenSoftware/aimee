@@ -2204,6 +2204,15 @@ static int cli_v1_confirm_or_refuse(const char *method, int argc, char **argv)
    return 1;
 }
 
+static int (*git_runner_start)(const char *target);
+static void (*git_runner_stop)(void);
+
+void cli_v1_set_git_runner(int (*start)(const char *), void (*stop)(void))
+{
+   git_runner_start = start;
+   git_runner_stop = stop;
+}
+
 int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int json_output,
                    const char *json_fields, const char *response_profile, int argc, char **argv)
 {
@@ -2313,6 +2322,27 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
       cJSON_Delete(projects);
       free(worktree_root);
    }
+   int git_runner = 0;
+   const char *git_tool = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "tool"));
+   if (git_tool && strncmp(git_tool, "git_", 4) == 0 && git_runner_start && git_runner_stop &&
+       cli_v1_remote_endpoint_is_network())
+   {
+      const cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+      const char *target = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+          args, strcmp(git_tool, "git_clone") == 0 ? "cwd" : "path"));
+      if (!target || !target[0])
+         target = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "cwd"));
+      git_runner = git_runner_start(target);
+      if (git_runner < 0)
+      {
+         fprintf(stderr, "aimee: could not start the detached workspace runner for this Git "
+                         "command; no request was sent\n");
+         cJSON_Delete(req);
+         free(bearer);
+         free(remote);
+         return 1;
+      }
+   }
    char *http_body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    int http_status = 0; /* last HTTP status from the REST send (0 for the async path) */
@@ -2354,6 +2384,8 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
          free(http_body);
          free(bearer);
          free(remote);
+         if (git_runner > 0)
+            git_runner_stop();
          return -1;
       }
       static const int retry_delays_ms[] = {200, 500, 1000};
@@ -2409,9 +2441,13 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
        * no request was ever attempted, so blaming the server on the next line is
        * doubly wrong. A real routing gap keeps returning -1 so that path is
        * unchanged. */
+      if (git_runner > 0)
+         git_runner_stop();
       return missing_arg ? 1 : -1;
    }
 
+   if (git_runner > 0)
+      git_runner_stop();
    free(http_body);
    free(bearer);
    free(remote);

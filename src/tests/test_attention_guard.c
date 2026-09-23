@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "cli_attention_guard.h"
+#include "aimee_git_command.h"
 #include "client_session_worktree.h"
 #include "client_config.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
@@ -22,9 +23,12 @@ static char g_home[256] = "/tmp";
 static int g_ingress_max_raw_scans;
 static int g_require_session_worktree = 1;
 static int g_require_aimee_memory = 1;
+static const char *g_workspaces;
 
 static cJSON *test_config_value(const char *key)
 {
+   if (!strcmp(key, "workspaces"))
+      return g_workspaces ? cJSON_Parse(g_workspaces) : NULL;
    if (!strcmp(key, "ingress_max_raw_scans"))
       return cJSON_CreateNumber(g_ingress_max_raw_scans);
    if (!strcmp(key, "require_session_worktree"))
@@ -819,9 +823,43 @@ static void test_camel_case_client_path_routing(void)
    printf("camelCase client path routing OK\n");
 }
 
+static void test_aimee_git_keeps_explicit_target(void)
+{
+   assert(aimee_git_command("/home/user/.local/bin/aimee git push repo='/other checkout'"));
+   assert(!aimee_git_command("echo 'aimee git push'"));
+   assert(!aimee_git_command("aimee git push; git push"));
+   assert(!aimee_git_command("aimee git status $(touch file)"));
+   assert(!aimee_git_command("aimee git status >file"));
+   cJSON *input = cJSON_Parse("{\"workdir\":\"/other\",\"cmd\":\"aimee git push repo=/other\"}");
+   cJSON *updated = NULL;
+   assert(attn_route_tool_input("s", "/blog", "exec_command", input, &updated) == 1);
+   assert(!updated);
+   cJSON_Delete(input);
+}
+
+static void test_unregistered_hooks_are_inert(void)
+{
+   g_workspaces = "[{\"path\":\"/registered\"}]";
+   assert(client_config_workspace_contains("/registered/src") == 1);
+   assert(client_config_workspace_contains("/registered-other") == 0);
+   assert(client_config_workspace_contains("/unregistered") == 0);
+   setenv("AIMEE_HOOK_TRANSPORT", "cli", 1);
+   g_stdin_json = "{\"session_id\":\"outside\",\"cwd\":\"/registered\","
+                  "\"tool_name\":\"Bash\",\"tool_input\":{\"workdir\":\"/"
+                  "unregistered\",\"command\":\"git push\"}}";
+   assert(handle_attention_guard() == 0);
+   g_workspaces = "[]";
+   assert(handle_attention_guard() == 0);
+   g_workspaces = NULL;
+   g_stdin_json = NULL;
+   unsetenv("AIMEE_HOOK_TRANSPORT");
+}
+
 int main(void)
 {
    client_config_set_provider(test_config_value);
+   test_aimee_git_keeps_explicit_target();
+   test_unregistered_hooks_are_inert();
    printf("attention_guard: ");
    test_classify();
    test_weight();

@@ -306,6 +306,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-code-match \
                $(TESTPREFIX)/unit-test-ir-module-plan \
                $(TESTPREFIX)/unit-test-attention-guard \
+               $(TESTPREFIX)/unit-test-workspace-hook-scope \
                $(TESTPREFIX)/unit-test-client-session-worktree \
                $(TESTPREFIX)/unit-test-hook-session-token \
                $(TESTPREFIX)/unit-test-artifact-trust \
@@ -7908,3 +7909,6 @@ $(TESTPREFIX)/unit-test-agent-memory-transport: $(OBJDIR)/tests/test_agent_memor
 
 $(TESTPREFIX)/unit-test-session-memory-transport: $(OBJDIR)/tests/test_session_memory_transport.o $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-workspace-hook-scope: $(OBJDIR)/tests/test_workspace_hook_scope.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

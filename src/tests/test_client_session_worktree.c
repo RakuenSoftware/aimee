@@ -9,6 +9,7 @@
  */
 #include "client_session_worktree.h"
 #include "client_config.h"
+#include "cli_attention_guard.h"
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -418,6 +419,27 @@ static void test_external_path_does_not_provision_a_worktree(void)
    printf("  route: external path needs no repository worktree base: ok\n");
 }
 
+static void test_tool_workdir_overrides_session_directory(void)
+{
+   char blog[512], aimee[512], upstream[512];
+   make_repo("upstream-switch", "testing", upstream, sizeof upstream);
+   make_clone(upstream, "blog-switch", blog, sizeof blog);
+   make_clone(upstream, "aimee-switch", aimee, sizeof aimee);
+   const char *sid = "cross-repository-session";
+   cJSON *input = cJSON_CreateObject();
+   cJSON_AddStringToObject(input, "workdir", aimee);
+   cJSON_AddStringToObject(input, "cmd", "pwd");
+   cJSON *updated = NULL;
+   assert(attn_route_tool_input(sid, blog, "exec_command", input, &updated) == 0);
+   assert(updated);
+   const char *cmd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(updated, "cmd"));
+   const char *wd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(updated, "workdir"));
+   assert(cmd && strstr(cmd, aimee) && !strstr(cmd, blog));
+   assert(wd && strstr(wd, aimee) && !strstr(wd, blog));
+   cJSON_Delete(updated);
+   cJSON_Delete(input);
+}
+
 static void test_routes_reads_writes_shell_and_patch_per_session(void)
 {
    char upstream[512], clone[512];
@@ -776,6 +798,7 @@ int main(void)
    test_ensure_requires_a_session_id_and_a_repo();
    test_worktree_opt_out();
    test_external_path_does_not_provision_a_worktree();
+   test_tool_workdir_overrides_session_directory();
    test_routes_reads_writes_shell_and_patch_per_session();
    test_release_recycles_only_clean_session_worktrees();
    test_ensure_reclaims_pre_rekey_worktree();

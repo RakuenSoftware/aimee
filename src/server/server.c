@@ -1,3 +1,4 @@
+#include "workspace_hook_scope.h"
 /* server.c: aimee-server core -- event loop, connection handling, method dispatch */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -887,6 +888,35 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
 
+   cJSON *scope_input = cJSON_Parse(tool_input);
+   const char *scope_cwd = cwd;
+   static const char *const scope_keys[] = {"workdir", "cwd", "working_dir", "working_directory",
+                                            NULL};
+   for (int i = 0; scope_keys[i]; i++)
+   {
+      const char *value =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scope_input, scope_keys[i]));
+      if (value && value[0])
+      {
+         scope_cwd = value;
+         break;
+      }
+   }
+   int registered = workspace_hook_registered(scope_cwd);
+   cJSON_Delete(scope_input);
+   if (!registered)
+   {
+      free(ti_heap);
+      cJSON *allowed = cJSON_CreateObject();
+      cJSON_AddStringToObject(allowed, "status", "ok");
+      cJSON_AddNumberToObject(allowed, "exit_code", 0);
+      if (request_id)
+         cJSON_AddStringToObject(allowed, "request_id", request_id);
+      int rc = server_send_response(conn, allowed);
+      cJSON_Delete(allowed);
+      return rc;
+   }
+
    const char *trusted_client = NULL;
    int hook_identity = server_hook_identity(conn, req, sid, &trusted_client);
    if (hook_identity < 0)
@@ -949,9 +979,9 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (detached)
       run_cmd_set_cwd(target_cwd);
    else if (!client_non_git)
-      hooks_ensure_cwd_worktree(&state, sid, cwd);
+      hooks_ensure_cwd_worktree(&state, sid, target_cwd);
    int rc = pre_tool_check_client_workspace(tool_name, tool_input, &state, config_guardrail_mode(),
-                                            cwd, msg, sizeof(msg), client_non_git);
+                                            target_cwd, msg, sizeof(msg), client_non_git);
    run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
    workspace_turn_unbind_active();
    cJSON_Delete(input);

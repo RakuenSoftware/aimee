@@ -158,3 +158,50 @@ int client_config_string(const char *key, char *out, unsigned long out_size, con
    cJSON_Delete(value);
    return found;
 }
+
+/* Hooks are installed globally, but their policy belongs only to registered
+ * workspaces. An unavailable registry is distinct from an empty registry. */
+int client_config_workspace_contains(const char *cwd)
+{
+   cJSON *rows = NULL;
+   if (g_provider)
+      rows = g_provider("workspaces");
+   else
+   {
+#if defined(__GNUC__)
+      if (!cli_v1_dispatch)
+         return -1;
+#endif
+      cJSON *req = cJSON_CreateObject();
+      cJSON_AddStringToObject(req, "method", "workspace.list");
+      cJSON *resp = cli_v1_dispatch(req, 5000);
+      cJSON_Delete(req);
+      rows = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(resp, "workspaces"), 1);
+      cJSON_Delete(resp);
+   }
+   if (!cJSON_IsArray(rows))
+   {
+      cJSON_Delete(rows);
+      return -1;
+   }
+   int found = 0;
+   const cJSON *row;
+   cJSON_ArrayForEach(row, rows)
+   {
+      const char *root = cJSON_IsString(row)
+                             ? row->valuestring
+                             : cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "path"));
+      if (!root || !root[0] || !cwd)
+         continue;
+      size_t n = strlen(root);
+      while (n > 1 && root[n - 1] == '/')
+         n--;
+      if (strncmp(root, cwd, n) == 0 && (n == 1 || cwd[n] == '/' || cwd[n] == '\0'))
+      {
+         found = 1;
+         break;
+      }
+   }
+   cJSON_Delete(rows);
+   return found;
+}

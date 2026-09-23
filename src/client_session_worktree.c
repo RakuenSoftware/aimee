@@ -7,6 +7,7 @@
  * paths reach argv directly, so there is nothing to quote or inject. */
 #include "client_session_worktree.h"
 #include "client_config.h"
+#include "aimee_git_command.h"
 #include "session_worktree_key.h"
 #include <errno.h>
 #include <signal.h>
@@ -1022,6 +1023,9 @@ int client_session_worktree_route_command(const char *sid, const char *cwd, cons
       return -2;
    if (!client_config_bool("require_session_worktree", 1))
       return 1; /* Routing is disabled, including existing session mappings. */
+
+   if (aimee_git_command(command))
+      return 1; /* Git request target is authoritative; the server owns Git policy. */
 
    if (csw_is_foreign_worktree(command, sid))
       return -3;

@@ -1,3 +1,4 @@
+#include "aimee_git_command.h"
 /* guardrails_orchestrator.c: the `pre_tool_check` entry point and its
  * orchestrator-self-discipline helpers (write-command classification,
  * bash-guard messaging, per-session counters).
@@ -1278,6 +1279,12 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
          cJSON_Delete(root);
          return 2;
       }
+   }
+
+   if (is_shell_tool(tool_name) && cJSON_IsString(cmd) && aimee_git_command(cmd->valuestring))
+   {
+      cJSON_Delete(root);
+      return 0; /* dispatch_git_tool enforces policy against the actual target. */
    }
 
    /* Verify gate: block push/PR (enforce:true); --show-toplevel keeps worktrees independent. */

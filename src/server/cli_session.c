@@ -674,13 +674,9 @@ int cli_session_create(cli_session_t *s, const char *session_name, const char *c
     * message lands before the CLI is fully attached and also keeps shell
     * prompts out of captured output.
     *
-    * Use `/bin/sh -c` (NOT `-lc`): a login shell sources /etc/profile, which on
-    * Debian resets PATH to a bare default and discards the image's
-    * `ENV PATH=.../.npm-global/bin:$PATH`. The on-demand CLI agents (claude /
-    * codex) install into that npm prefix, so a login shell can no longer find
-    * them and the pane exits instantly ("failed to send prompt to tmux
-    * session"). A non-login shell inherits the tmux server's env (= aimee-
-    * server's, which carries the image PATH), so the CLI resolves. */
+    * Non-login interactive Bash loads ~/.bashrc on every new seat without
+    * /etc/profile replacing the inherited PATH (including npm-installed CLIs).
+    * -c executes the CLI directly, so no prompt can race the first message. */
    /* shell_quote() returns a complete shell token. Leaving the command unquoted
     * worked only while cli_cmd was a single
     * word ("claude"): a multi-word command (the AIMEE_SESSION_ID=<sid> stamp, or
@@ -694,15 +690,15 @@ int cli_session_create(cli_session_t *s, const char *session_name, const char *c
    {
       char *esc_dir = shell_quote(work_dir);
       snprintf(create_cmd, sizeof(create_cmd),
-               "tmux new-session -d -s '%s' -x 220 -y 50 -c %s /bin/sh -c %s 2>/dev/null",
+               "tmux new-session -d -s '%s' -x 220 -y 50 -c %s /bin/bash -ic %s 2>/dev/null",
                session_name, esc_dir, esc_cli);
       free(esc_dir);
    }
    else
    {
       snprintf(create_cmd, sizeof(create_cmd),
-               "tmux new-session -d -s '%s' -x 220 -y 50 /bin/sh -c %s 2>/dev/null", session_name,
-               esc_cli);
+               "tmux new-session -d -s '%s' -x 220 -y 50 /bin/bash -ic %s 2>/dev/null",
+               session_name, esc_cli);
    }
    free(esc_cli);
    int rc;
