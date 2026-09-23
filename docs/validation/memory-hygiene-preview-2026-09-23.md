@@ -56,3 +56,12 @@ The transport-envelope repair passed its PostgreSQL/runtime-role and strict
 handler race tests in [110.796 seconds](memory-hygiene-preview-2026-09-23/envelope-race.txt).
 The preceding candidate `ed2a7ae1d` separately passed its KB-free T3 suite;
 T3 does not exercise the KB hygiene path and cannot certify the repair.
+
+Candidate application `377b5309d` passed the complete T3 run (**614/614**) with
+its matching harness. The [raw results](memory-hygiene-preview-2026-09-23/repaired-fresh/T3/topology.json)
+and [nine combined image identities](memory-hygiene-preview-2026-09-23/repaired-fresh/image-identities.json)
+are retained. T2 uses the same application with harness `95f85ef53`: the direct
+KB action bridge correctly returns HTTP 200 for domain refusal envelopes, so the
+harness now requires both that status and the explicit error body. This harness
+correction does not change the application. All three actual provider request
+byte limits are 32,768. T2 completion remains pending.

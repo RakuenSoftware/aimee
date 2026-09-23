@@ -46,7 +46,7 @@ func (s *postgresDataStore) replaceDerivedUnits(ctx context.Context, id int64) e
 		return err
 	}
 	rows, err := s.db.Query(ctx, `SELECT 'summary',scope,summary,3.0 FROM
- (SELECT scope,summary FROM memory_summaries WHERE memory_id=$1 ORDER BY id LIMIT 8) s
+ (SELECT summary.scope,summary.summary FROM memory_summaries summary JOIN memories m ON m.id=summary.memory_id WHERE m.id=$1 AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY summary.id LIMIT 8) s
  UNION ALL SELECT 'event',actor||' '||action,concat_ws(' ',actor,action,object,location,event_time),2.8 FROM
  (SELECT * FROM memory_event_frames WHERE memory_id=$1 ORDER BY id LIMIT 16) e
  UNION ALL SELECT 'temporal',granularity,ref_key,1.6+weight*0.4 FROM

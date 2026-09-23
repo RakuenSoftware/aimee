@@ -608,3 +608,10 @@ edits invalidate the old source references. Aggregate entities and transitive
 closure remain open. The first hygiene image exposed a strict-handler transport
 envelope mismatch; its failed evidence is retained and a narrow repair is under
 validation rather than counted as passing.
+
+[Generated summary input observations](../../validation/memory-summary-inputs-2026-09-23.md)
+bind deterministic summaries to the parent revision actually used by their
+producer. Current reads and release checks withhold unknown or stale observations;
+canonical fallback remains available. Episode and unit producers apply the same
+check before copying summary text. Full MR-04 lineage and erasure remain open;
+validation results are tracked in the linked report.

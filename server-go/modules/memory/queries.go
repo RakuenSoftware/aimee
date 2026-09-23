@@ -260,9 +260,9 @@ updated_at=pg_now_text() WHERE id=$1`, id, kind, ref, hash)
 }
 
 func (s *postgresDataStore) Summaries(ctx context.Context, id int64, limit int) ([]MemorySummary, error) {
-	rows, err := s.db.Query(ctx, `SELECT scope,summary FROM memory_summaries
-WHERE memory_id=$1 AND EXISTS(SELECT 1 FROM memories m WHERE m.id=memory_id AND `+currentMemorySQL("m.")+`)
-ORDER BY id LIMIT $2`, id, limit)
+	rows, err := s.db.Query(ctx, `SELECT summary.scope,summary.summary FROM memory_summaries summary JOIN memories m ON m.id=summary.memory_id
+WHERE summary.memory_id=$1 AND `+currentMemorySQL("m.")+` AND `+summaryCurrentInputsSQL("summary", "m")+`
+ORDER BY summary.id LIMIT $2`, id, limit)
 	if err != nil {
 		return nil, err
 	}

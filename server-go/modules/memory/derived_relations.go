@@ -40,7 +40,7 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 		return err
 	}
 	episodes := []struct{ key, text string }{{key, content}}
-	rows, err := s.db.Query(ctx, `SELECT scope,summary FROM memory_summaries WHERE memory_id=$1 ORDER BY id LIMIT 2`, id)
+	rows, err := s.db.Query(ctx, `SELECT summary.scope,summary.summary FROM memory_summaries summary JOIN memories m ON m.id=summary.memory_id WHERE m.id=$1 AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY summary.id LIMIT 2`, id)
 	if err != nil {
 		return err
 	}

@@ -67,6 +67,7 @@ CREATE UNIQUE INDEX memory_key_scope ON memories(kind,key,scope_type,scope_value
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text,UNIQUE(memory_id,scope_type,scope_value));
 CREATE TEMP TABLE memory_links(id bigserial PRIMARY KEY,source_id bigint,target_id bigint,relation text);
 CREATE TEMP TABLE memory_rejection_tombstones(object_kind text,memory_key text,memory_content text,scope_type text,scope_value text,active int DEFAULT 1);
+CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
 CREATE TEMP TABLE memory_summaries(id bigserial PRIMARY KEY,memory_id bigint,scope text,summary text);
 CREATE TEMP TABLE memory_fact_actors(memory_id bigint PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,actor_principal text,actor_role text,authority_rank int,authenticated int,transport_identity text,captured_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE kb_async_jobs(id bigserial PRIMARY KEY,kind text,document_id bigint,project text,status text,updated_at text,generation bigint DEFAULT 1,attempts int DEFAULT 0,claimed_by text DEFAULT '',claimed_at text DEFAULT '',last_error text DEFAULT '',next_attempt_at text DEFAULT '',UNIQUE(kind,document_id));`)
@@ -453,6 +454,7 @@ VALUES($1,$2,'exact integer fixture','L2','fact','world_fact','project','exact-i
 	// Replacement under a non-owner role cannot reach a different project's source.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_store_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA store_command_test TO memory_store_test;
+GRANT SELECT ON derived_memory_dependencies TO memory_store_test;
 GRANT SELECT,UPDATE,DELETE,INSERT ON memories,memory_rejection_tombstones,memory_links,memory_scopes,memory_summaries,memory_fact_actors,kb_async_jobs TO memory_store_test;
 GRANT USAGE,SELECT ON SEQUENCE memories_id_seq,memory_links_id_seq,kb_async_jobs_id_seq TO memory_store_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;

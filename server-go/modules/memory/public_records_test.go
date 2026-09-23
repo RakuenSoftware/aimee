@@ -70,6 +70,7 @@ CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,record_revision bigint NOT N
  epistemic_kind text DEFAULT 'world_fact',scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT 'answer questions',last_used_at text DEFAULT '',source_session text DEFAULT 'session-1',provenance_category text DEFAULT 'human',
  valid_from text DEFAULT '2026-01-01',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text());
+CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
 CREATE TEMP TABLE memory_summaries(id bigserial PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,memory_id bigint,scope text,summary text);
 CREATE TEMP TABLE memory_collection_owner(id integer PRIMARY KEY,owner_id uuid);
 INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
@@ -80,6 +81,7 @@ INSERT INTO memories(key,lifecycle_state,valid_until) VALUES ('release#v1','supe
 INSERT INTO memories(key,scope_value) VALUES ('private-key','private');
 INSERT INTO memories(key,content,scope_type,scope_value) VALUES ('global-key','global marker','global','_global'),('workspace-key','workspace marker','workspace','team');
 INSERT INTO memory_summaries(memory_id,scope,summary) VALUES (1,'summary','fallback'),(1,'headline','Release headline'),(3,'headline','Private headline');
+INSERT INTO derived_memory_dependencies SELECT 'summary',s.id::text,'memory',m.id::text,m.record_revision::text,'go-derived-text-v1','summary-input-v1' FROM memory_summaries s JOIN memories m ON m.id=s.memory_id;
 INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	if err != nil {
 		t.Fatal(err)
@@ -297,7 +299,7 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_record_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA record_command_test TO memory_record_test;
 GRANT SELECT,UPDATE ON memories TO memory_record_test;
-GRANT SELECT ON memory_summaries TO memory_record_test;
+GRANT SELECT ON memory_summaries,derived_memory_dependencies TO memory_record_test;
 GRANT SELECT,INSERT ON memory_scopes,memory_workspaces TO memory_record_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY test_memory_visibility ON memories USING

@@ -51,6 +51,10 @@ func exerciseHybridReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 	const largeID int64 = 9007199254741507
 	exec(`INSERT INTO memories(id,tier,kind,key,content,confidence,scope_type,scope_value) VALUES($1,'L2','decision','hybrid-replay',$2,.1,'project','hybrid-fixture')`, largeID, content)
 	exec(`INSERT INTO memory_summaries(memory_id,scope,summary) VALUES($1,'headline','hybrid headline')`, largeID)
+	fixtureStore := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+	if err := fixtureStore.pinDerivedSummaryInputs(ctx, largeID); err != nil {
+		t.Fatal(err)
+	}
 	exec(`INSERT INTO memories(tier,kind,key,content,confidence,scope_type,scope_value)
  SELECT 'L4','fact','hybrid-replay','global',1,'global','_global' FROM generate_series(1,12);
  INSERT INTO memories(tier,kind,key,content,confidence,scope_type,scope_value)

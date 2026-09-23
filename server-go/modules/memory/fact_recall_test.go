@@ -123,10 +123,11 @@ func benchmarkVersionedFacts(b *testing.B, revalidate bool) {
  CREATE INDEX ON fact_evidence(assertion_id);
  CREATE TEMP TABLE entity_registry(canonical_id bigint,status text);
  CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
- CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
+ CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
+CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
  CREATE TEMP TABLE entity_aliases(id bigint,canonical_id bigint,name text,name_norm text,suppressed int,is_preferred int);
  CREATE ROLE aimee_fact_benchmark NOINHERIT NOBYPASSRLS;
- GRANT SELECT ON memories,memory_collection_owner,entity_edges,fact_evidence,entity_registry,entity_aliases,memory_episodes,memory_summaries TO aimee_fact_benchmark;
+ GRANT SELECT ON derived_memory_dependencies,memories,memory_collection_owner,entity_edges,fact_evidence,entity_registry,entity_aliases,memory_episodes,memory_summaries TO aimee_fact_benchmark;
  ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
  CREATE POLICY fact_bench_scope ON memories USING(scope_type='project' AND scope_value=current_setting('aimee.memory_project',true));
  SELECT set_config('aimee.memory_project','fact-bench',true);

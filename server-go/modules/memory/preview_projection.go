@@ -116,7 +116,7 @@ func (s *postgresDataStore) ingressMemoryPreviews(ctx context.Context, diagnosti
  COALESCE(h.id::text,''),COALESCE(h.record_revision::text,''),COALESCE(h.summary,'')
  FROM memories m LEFT JOIN LATERAL (
  SELECT id,record_revision,summary FROM
- (SELECT id,record_revision,scope,summary FROM memory_summaries WHERE memory_id=m.id ORDER BY id LIMIT 4) summaries
+ (SELECT id,record_revision,scope,summary FROM memory_summaries summary WHERE summary.memory_id=m.id AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY id LIMIT 4) summaries
  ORDER BY CASE WHEN scope='headline' AND summary<>'' THEN 0 ELSE 1 END,id LIMIT 1
  ) h ON TRUE WHERE m.id=ANY($1::text::bigint[]) AND `+currentMemorySQL("m.")+` AND ($2::text='' OR (m.scope_type=$2 AND m.scope_value=$3))`, memoryIDsParameter(ids), exact.Type, exact.Value)
 	if err != nil {

@@ -146,6 +146,11 @@ func exerciseDerivedEligibilityReplay(t *testing.T, ctx context.Context, tx pgx.
 	} {
 		t.Log("derived serving boundary:", tc.name)
 		exec(`UPDATE memories SET valid_from=$1,valid_until=$2,lifecycle_state=$3,activation_suppressed=$4 WHERE id=$5`, tc.from, tc.until, tc.lifecycle, tc.suppressed, parent)
+		// This fixture tests visibility independently of producer freshness.
+		// Re-observe the unchanged source under the transaction's held parent lock.
+		if err := backend.pinDerivedSummaryInputs(ctx, parent); err != nil {
+			t.Fatal(err)
+		}
 		check(tc.want)
 	}
 	// A second eligible parent cannot authorize the expired source. This is

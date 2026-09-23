@@ -134,6 +134,12 @@ def preview_source_version_gate(kb, check):
         SELECT json_build_object('owner_id',(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
           'parent_id',id::text,'parent_revision',record_revision::text) FROM memories WHERE key='{key}-headline';
         COMMIT"""))
+    def observe_summary():
+        # Fixture-only producer observation; public reads must never stamp this.
+        sql(f"""UPDATE derived_memory_dependencies d SET input_version=m.record_revision::text,
+          extractor_version='go-derived-text-v1',derivation_policy_version='summary-input-v1'
+          FROM memories m WHERE d.derived_kind='summary' AND d.derived_memory_id='{summary_id}'
+          AND d.input_kind='memory' AND d.input_id=m.id::text""")
     def previews():
         return kb.kb_request('/v1/actions/memory.diagnose_scoped',
                              dict(query=key, project=key, scope_context=True, format='ingress', limit=5))
@@ -150,6 +156,11 @@ def preview_source_version_gate(kb, check):
         digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
         return p.get('projection_digest') == 'sha256:' + hashlib.sha256(rendered.encode()).hexdigest() and p.get('rendered_bytes') == len(rendered.encode()) and p.get('selection_digest') == 'sha256:' + digest
     try:
+        code, unobserved = previews()
+        unobserved_refs = unobserved.get('memory_projection', {}).get('retained_items', [])
+        check('Preview withholds unobserved summary and retains canonical fallback', code == 200 and matches(unobserved) and
+              len(unobserved_refs) == 2 and all(r.get('source_version', {}).get('record_kind') == 'memory_record' for r in unobserved_refs))
+        observe_summary()
         code, before = previews()
         refs = before.get('memory_projection', {}).get('retained_items', [])
         summary = next((r.get('source_version', {}) for r in refs if r.get('stable_id') == str(summary_id)), {})
@@ -164,17 +175,34 @@ def preview_source_version_gate(kb, check):
         check('Preview final source check refuses hidden sources', code == 200 and result.get('eligible') is False)
         sql(f"UPDATE memory_summaries SET summary=summary,record_revision=999 WHERE id={summary_id}")
         code, result = revalidate(refs)
-        check('Preview no-op refresh cannot forge a source revision', code == 200 and result.get('eligible') is True)
+        check('Preview no-op dependency reset requires producer observation', code == 200 and result.get('eligible') is False)
+        observe_summary()
+        code, result = revalidate(refs)
+        check('Preview observed no-op preserves source revision', code == 200 and result.get('eligible') is True)
         sql(f"UPDATE memory_summaries SET summary='revised headline' WHERE id={summary_id}")
         code, result = revalidate(refs)
         check('Preview final source check refuses independently edited summary', code == 200 and result.get('eligible') is False)
         code, after = previews()
         fresh_refs = after.get('memory_projection', {}).get('retained_items', [])
+        check('Preview edited summary cannot acquire freshness from a new read', code == 200 and matches(after) and
+              len(fresh_refs) == 2 and all(r.get('source_version', {}).get('record_kind') == 'memory_record' for r in fresh_refs))
+        observe_summary()
+        code, after = previews()
+        fresh_refs = after.get('memory_projection', {}).get('retained_items', [])
         fresh_summary = next((r.get('source_version', {}) for r in fresh_refs if r.get('stable_id') == str(summary_id)), {})
-        check('Preview refresh binds revised summary without inventing parent change', code == 200 and matches(after) and
+        check('Preview producer observation binds revised summary without inventing parent change', code == 200 and matches(after) and
               fresh_summary.get('version', {}).get('record_revision') == '2' and fresh_summary.get('memory_parents') == summary.get('memory_parents'))
         code, result = revalidate(fresh_refs)
         check('Preview final source check accepts refreshed summary', code == 200 and result.get('eligible') is True)
+        sql(f"UPDATE memories SET content='revised canonical parent' WHERE key='{key}-headline'")
+        code, result = revalidate(fresh_refs)
+        check('Preview parent edit invalidates previously observed summary', code == 200 and result.get('eligible') is False)
+        code, after = previews()
+        fresh_refs = after.get('memory_projection', {}).get('retained_items', [])
+        check('Preview stale summary cannot borrow the new parent revision', code == 200 and matches(after) and
+              len(fresh_refs) == 2 and all(r.get('source_version', {}).get('record_kind') == 'memory_record' for r in fresh_refs))
+        code, result = revalidate(fresh_refs)
+        check('Preview current canonical fallback passes after parent edit', code == 200 and result.get('eligible') is True)
         sql(f"UPDATE memories SET content='revised fallback' WHERE key='{key}-fallback'")
         code, result = revalidate(fresh_refs)
         check('Preview final source check refuses changed canonical fallback', code == 200 and result.get('eligible') is False)

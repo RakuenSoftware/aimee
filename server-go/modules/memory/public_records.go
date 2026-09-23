@@ -45,7 +45,7 @@ func (s *postgresDataStore) publicRecords(ctx context.Context, records []Record)
 	rows, err := s.db.Query(ctx, `SELECT m.id,COALESCE(m.use_cases,''),m.use_count,
 COALESCE(m.last_used_at,''),m.created_at,m.updated_at,COALESCE(m.source_session,''),
 COALESCE(m.provenance_category,''),COALESCE((SELECT summary FROM
- (SELECT id,scope,summary FROM memory_summaries WHERE memory_id=m.id ORDER BY id LIMIT 4) summaries
+ (SELECT id,scope,summary FROM memory_summaries summary WHERE summary.memory_id=m.id AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY id LIMIT 4) summaries
  ORDER BY CASE WHEN scope='headline' AND summary<>'' THEN 0 ELSE 1 END,id LIMIT 1),'')
 FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 	if err != nil {

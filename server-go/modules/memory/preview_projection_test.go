@@ -144,6 +144,13 @@ func exercisePreviewSourceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 	exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_project',$1,true),set_config('aimee.memory_scope_type','',true),set_config('aimee.memory_scope_value','',true)`, project)
 	exec(`SET LOCAL ROLE aimee_store_runtime`)
 	diagnostics := []Diagnostic{{Memory: Record{ID: 9007199254745001}, Parts: DiagnosticParts{Total: .12349999999999998}}, {Memory: Record{ID: 9007199254745002}, Parts: DiagnosticParts{Total: .75}}}
+	unobserved, _, err := backend.ingressMemoryPreviews(ctx, diagnostics, Scope{Type: "project", Value: project})
+	if err != nil || len(unobserved) != 2 || unobserved[0].Headline != "" || unobserved[0].Source.Kind != "memory_record" {
+		t.Fatal("unobserved summary certified by fresh parent read", unobserved, err)
+	}
+	if err := backend.pinDerivedSummaryInputs(ctx, 9007199254745001); err != nil {
+		t.Fatal(err)
+	}
 	rows, p, err := backend.ingressMemoryPreviews(ctx, diagnostics, Scope{Type: "project", Value: project})
 	if err != nil || len(rows) != 2 || !p.valid(rows) || rows[0].Source.Kind != "memory_summary" || rows[1].Source.Kind != "memory_record" || rows[0].ScoreText != "0.123" {
 		t.Fatal(rows, p, err)
@@ -157,8 +164,14 @@ func exercisePreviewSourceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 		}
 	}
 	check(true)
-	// No-op maintenance must preserve both versions and rendered commitments.
+	// A direct no-op leaves record revisions unchanged, but the legacy writer
+	// replaces the dependency declaration. Missing observations fail closed until
+	// the producer explicitly observes the inputs again.
 	exec(`UPDATE memory_summaries SET summary=summary,record_revision=999 WHERE id=9007199254745003`)
+	check(false)
+	if err := backend.pinDerivedSummaryInputs(ctx, 9007199254745001); err != nil {
+		t.Fatal(err)
+	}
 	check(true)
 	for _, change := range []string{
 		`UPDATE memory_summaries SET summary='changed independently' WHERE id=9007199254745003`,
@@ -173,6 +186,12 @@ func exercisePreviewSourceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 		exec("SAVEPOINT preview_change")
 		exec(change)
 		check(false)
+		if strings.Contains(change, "changed parent") || strings.Contains(change, "changed independently") {
+			current, _, err := backend.ingressMemoryPreviews(ctx, diagnostics, Scope{Type: "project", Value: project})
+			if err != nil || current[0].Headline != "" || current[0].Source.Kind != "memory_record" {
+				t.Fatal("old derived text acquired current parent revision", current, err)
+			}
+		}
 		exec("ROLLBACK TO SAVEPOINT preview_change; RELEASE SAVEPOINT preview_change")
 		check(true)
 	}
@@ -181,8 +200,17 @@ func exercisePreviewSourceReplay(t *testing.T, ctx context.Context, tx pgx.Tx, b
 	}
 	exec(`UPDATE memory_summaries SET summary='new headline' WHERE id=9007199254745003`)
 	refreshed, newProjection, err := backend.ingressMemoryPreviews(ctx, diagnostics, Scope{})
-	if err != nil || !newProjection.valid(refreshed) || newProjection.SelectionDigest == p.SelectionDigest || refreshed[0].Source.Version.RecordRevision != "2" {
+	if err != nil || !newProjection.valid(refreshed) || newProjection.SelectionDigest == p.SelectionDigest || refreshed[0].Source.Kind != "memory_record" || refreshed[0].Headline != "" {
 		t.Fatal(refreshed, err)
+	}
+	request.Sources = newProjection.Retained
+	check(true)
+	if err := backend.pinDerivedSummaryInputs(ctx, 9007199254745001); err != nil {
+		t.Fatal(err)
+	}
+	refreshed, newProjection, err = backend.ingressMemoryPreviews(ctx, diagnostics, Scope{})
+	if err != nil || !newProjection.valid(refreshed) || refreshed[0].Source.Kind != "memory_summary" || refreshed[0].Source.Version.RecordRevision != "2" {
+		t.Fatal("observed summary revision", refreshed, err)
 	}
 	request.Sources = newProjection.Retained
 	check(true)

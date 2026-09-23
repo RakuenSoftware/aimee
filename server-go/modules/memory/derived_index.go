@@ -70,7 +70,7 @@ func (s *postgresDataStore) RebuildDerivedIndexes(ctx context.Context, limit int
 func (s *postgresDataStore) refreshDerivedRecord(ctx context.Context, id int64, settings derivedSettings) error {
 	var err error
 	var key, content, created string
-	if err = s.db.QueryRow(ctx, `SELECT key,content,created_at FROM memories WHERE id=$1`, id).Scan(&key, &content, &created); err != nil {
+	if err = s.db.QueryRow(ctx, `SELECT key,content,created_at FROM memories WHERE id=$1 FOR UPDATE`, id).Scan(&key, &content, &created); err != nil {
 		return err
 	}
 	if err = s.replaceDerivedText(ctx, id, deriveText(key, content, created)); err != nil {
@@ -85,6 +85,9 @@ func (s *postgresDataStore) refreshDerivedRecord(ctx context.Context, id int64, 
 	if err = s.refreshCoreference(ctx, id, content, settings); err != nil {
 		return err
 	}
+	if err = s.pinDerivedSummaryInputs(ctx, id); err != nil {
+		return err
+	}
 	if err = s.replaceDerivedRelations(ctx, id); err != nil {
 		return err
 	}
@@ -93,6 +96,11 @@ func (s *postgresDataStore) refreshDerivedRecord(ctx context.Context, id int64, 
 	}
 	if _, err = s.db.Exec(ctx, `INSERT INTO memory_scopes(memory_id,scope_type,scope_value)
  SELECT id,scope_type,scope_value FROM memories WHERE id=$1 ON CONFLICT DO NOTHING`, id); err != nil {
+		return err
+	}
+	// Scope-tag admission can advance the parent revision. The lock still
+	// protects the source text read above, so retain the final observed revision.
+	if err = s.pinDerivedSummaryInputs(ctx, id); err != nil {
 		return err
 	}
 	if _, err = s.db.Exec(ctx, `INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,updated_at)
