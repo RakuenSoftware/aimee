@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -84,15 +85,25 @@ func recallItems(records []Record) []RecallRecord {
 func (s *postgresDataStore) recallSource() string {
 	if s.placement == PlacementServer {
 		return `(SELECT id, 'user'::text AS scope_type, '_user'::text AS scope_value,
- tier, kind, key, content, confidence, use_count, updated_at, lifecycle_state,
+ tier, kind, key, content, confidence, use_count, updated_at, lifecycle_state, record_revision,
  0 AS activation_suppressed FROM user_memories
  WHERE valid_until IS NULL OR valid_until > now()) AS recall_memories`
 	}
 	return `(SELECT * FROM memories WHERE ` + memoryValiditySQL("") + `) AS recall_memories`
 }
 
+// Owner and revision travel with the payload in the same statement snapshot.
+// They describe the observed row; dispatch eligibility is checked separately.
+func (s *postgresDataStore) recallVersionColumns() string {
+	owner := "memory_collection_owner"
+	if s.placement == PlacementServer {
+		owner = "user_memory_collection_generation"
+	}
+	return ",(SELECT owner_id::text FROM " + owner + " WHERE id=1),record_revision::text"
+}
+
 func (s *postgresDataStore) recallRecords(ctx context.Context, where string, limit int, args ...any) ([]Record, error) {
-	query := fmt.Sprintf(`SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
+	query := fmt.Sprintf(`SELECT id,scope_type,scope_value,tier,kind,key,content,confidence`+s.recallVersionColumns()+`
 FROM %s WHERE lifecycle_state='active' AND activation_suppressed=0 AND (%s)
 ORDER BY `+queryScopeOrder+`,confidence DESC,use_count DESC,updated_at DESC,id DESC LIMIT $%d`, s.recallSource(), where, len(args)+1)
 	args = append(args, limit)
@@ -108,9 +119,14 @@ func (s *postgresDataStore) readRecallRecords(ctx context.Context, query string,
 	items := make([]Record, 0)
 	for rows.Next() {
 		var item Record
+		item.Version = &MemoryRecordVersion{SchemaVersion: 1}
 		if err := rows.Scan(&item.ID, &item.Scope.Type, &item.Scope.Value, &item.Tier,
-			&item.Kind, &item.Key, &item.Content, &item.Confidence); err != nil {
+			&item.Kind, &item.Key, &item.Content, &item.Confidence, &item.Version.OwnerID, &item.Version.RecordRevision); err != nil {
 			return nil, err
+		}
+		item.Version.RecordID = strconv.FormatInt(item.ID, 10)
+		if !item.Version.validFor(item.ID) {
+			return nil, fmt.Errorf("invalid recalled memory version")
 		}
 		items = append(items, item)
 	}

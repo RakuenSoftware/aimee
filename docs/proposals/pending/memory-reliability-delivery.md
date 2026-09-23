@@ -567,3 +567,8 @@ adds independent evidence dimensions. Its direct ledger experiment exposed an
 unversioned native-recall coverage gap; the follow-up records body commitments
 with that gap explicit, while fresh repair and host-loss validation continue.
 No MR-06 or program completion is claimed by these component checks.
+
+[Recall record revisions](../../validation/memory-recall-versions-2026-09-23.md)
+now accompany private/shared ordinary and shared activation-selected payloads
+from the same statement snapshot. Full PostgreSQL race and export checks pass.
+Native retained-source binding and mixed-owner release revalidation remain open.

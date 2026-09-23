@@ -126,7 +126,18 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 		}
 		return r.Records[0]
 	}
+	assertRecall := func(want Record) {
+		t.Helper()
+		tx := begin(conn)
+		defer tx.Rollback(context.Background())
+		backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementServer}
+		rows, err := backend.recallRecords(ctx, "id=42", 1)
+		if err != nil || len(rows) != 1 || rows[0].Version == nil || *rows[0].Version != *want.Version || rows[0].Content != want.Content {
+			t.Fatalf("private recall payload/revision: %+v %v", rows, err)
+		}
+	}
 	original := get()
+	assertRecall(original)
 	if original.Version.RecordRevision != "1" {
 		t.Fatal(original)
 	}
@@ -136,6 +147,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 		t.Fatal(status, stored)
 	}
 	current := get()
+	assertRecall(current)
 	if current.Version.RecordRevision != "2" || current.Content != "corrected" {
 		t.Fatal(current)
 	}

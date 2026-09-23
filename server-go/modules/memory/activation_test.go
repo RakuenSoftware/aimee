@@ -61,13 +61,15 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 	}
 	defer tx.Rollback(ctx)
 	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memories (
- id bigint PRIMARY KEY,scope_type text DEFAULT 'global',scope_value text DEFAULT '_global',
+ id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,scope_type text DEFAULT 'global',scope_value text DEFAULT '_global',
  tier text DEFAULT 'L2',kind text DEFAULT 'preference',key text DEFAULT 'editor',content text DEFAULT 'fixture',
  confidence double precision DEFAULT 0.5,lifecycle_state text DEFAULT 'active',
  valid_from text DEFAULT '',valid_until text DEFAULT '',
  use_count bigint DEFAULT 0,updated_at timestamptz DEFAULT now(),
  activation_sticky_turns bigint DEFAULT 2,activation_cooldown_turns bigint DEFAULT 1,
  activation_delay_turns bigint DEFAULT 0,activation_suppressed bigint DEFAULT 0);
+ CREATE TEMP TABLE memory_collection_owner(id int,owner_id uuid);
+ INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-0000-0000-000000000001');
  INSERT INTO memories(id,confidence,activation_cooldown_turns,activation_delay_turns,activation_suppressed) VALUES
  (1,1,3,0,0),(2,0.99,1,3,0),(3,0.98,1,0,1),(4,0.8,1,0,0),(5,0.82,1,0,0);
  INSERT INTO memories(id,kind,key,confidence) VALUES(6,'fact','unrelated',0.7);
@@ -103,6 +105,23 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 	records, why, held, err := s.recallActivated(ctx, snapshot, "kind='preference'", 2, false, false)
 	if err != nil || !reflect.DeepEqual(ids(records), []int64{4, 5}) || held != 3 || why[4] != "sticky activation" {
 		t.Fatalf("selection=%v why=%v held=%d err=%v", ids(records), why, held, err)
+	}
+	for _, row := range records {
+		if !row.Version.validFor(row.ID) || row.Version.RecordRevision != "1" {
+			t.Fatalf("activated version missing: %+v", row)
+		}
+	}
+	// Content and its exact decimal revision must come from the same selection.
+	if _, err := tx.Exec(ctx, "UPDATE memories SET content='corrected',record_revision=9007199254740993 WHERE id=4"); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := s.recallRecords(ctx, "id=4", 1)
+	if err != nil || len(plain) != 1 || plain[0].Content != "corrected" || plain[0].Version.RecordRevision != "9007199254740993" {
+		t.Fatalf("plain revision: %+v %v", plain, err)
+	}
+	changed, _, _, err := s.recallActivated(ctx, snapshot, "id=4", 1, false, false)
+	if err != nil || len(changed) != 1 || changed[0].Content != "corrected" || *changed[0].Version != *plain[0].Version {
+		t.Fatalf("activated revision: %+v %v", changed, err)
 	}
 	records, _, held, err = s.recallActivated(ctx, snapshot, "id=1", 2, false, false)
 	if err != nil || len(records) != 0 || held != 1 {

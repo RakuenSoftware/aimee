@@ -229,7 +229,7 @@ func (s *postgresDataStore) recallBundleActivated(ctx context.Context, query str
 			reasons[id] = reason
 		}
 	} else {
-		commitments, err = s.readRecallRecords(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
+		commitments, err = s.readRecallRecords(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence`+s.recallVersionColumns()+`
 FROM `+s.recallSource()+` WHERE lifecycle_state='pending' AND activation_suppressed=0 ORDER BY `+queryScopeOrder+`,updated_at DESC,id DESC LIMIT $1`, commitmentsCap)
 	}
 	if err != nil {
