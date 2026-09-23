@@ -1668,6 +1668,8 @@ $(TESTPREFIX)/unit-test-text: $(OBJDIR)/tests/test_text.o $(OBJDIR)/util.o $(OBJ
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-ingress-preinject: $(OBJDIR)/tests/test_ingress_preinject.o \
+                     $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o \
+                     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/aimee_home.o \
                      $(OBJDIR)/server/ingress_preinject.o $(OBJDIR)/server/request_context.o $(OBJDIR)/wire_fence.o \
                      $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o \
                      $(OBJDIR)/log.o $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o \

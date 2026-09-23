@@ -24,6 +24,7 @@
 #include "cJSON.h"
 #include <aimee/delegates/delegate_driver.h>
 #include "wire_fence.h"
+#include "http_retry.h"
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
 #include <aimee/gateway/gateway_policy.h>
@@ -609,8 +610,16 @@ static int messages_buffered(const char *body, char *resp, int cap)
                            wire_fence_error_type(error), error, AIMEE_ERR_REQUEST_PIPELINE);
       goto cleanup;
    }
-   http_status = agent_http_post_bytes(url, auth, wire_body.data, wire_body.len, &response,
-                                       ag->timeout_ms, extra[0] ? extra : NULL);
+   http_status =
+       wire_fence_post(url, auth, wire_body.data, wire_body.len, &response, ag->timeout_ms,
+                       extra[0] ? extra : NULL, 1, 0, 0, ag->provider, ag->model, NULL, wire_route);
+   if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
+   {
+      const char *error = wire_fence_last_error();
+      status = write_error(resp, cap, wire_fence_error_http_status(error),
+                           wire_fence_error_type(error), error, AIMEE_ERR_REQUEST_PIPELINE);
+      goto cleanup;
+   }
 
    /* THE GATEWAY SAFETY NET. Until now nothing called this, so a reduced payload
     * the provider rejected tripped no breaker and repeated on every later turn.
@@ -1037,8 +1046,25 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
    parsed_response_t parsed;
    int raw_responses = responses_wire;
    memset(&parsed, 0, sizeof(parsed));
-   buf_status = agent_http_post_bytes(url, auth, prov_body, prov_body_len, &buf_resp,
-                                      ag->timeout_ms, extra[0] ? extra : NULL);
+   wire_fence_route_t wire_route = responses_wire ? WIRE_FENCE_OPENAI_RESPONSES
+                                   : driver && driver->name && !strcmp(driver->name, "anthropic")
+                                       ? WIRE_FENCE_ANTHROPIC_MESSAGES
+                                       : WIRE_FENCE_OPENAI_CHAT;
+   buf_status =
+       wire_fence_post(url, auth, prov_body, prov_body_len, &buf_resp, ag->timeout_ms,
+                       extra[0] ? extra : NULL, 1, 0, 0, ag->provider, ag->model, NULL, wire_route);
+   if (buf_status == HTTP_RETRY_ADMISSION_REFUSED)
+   {
+      const char *error = wire_fence_last_error();
+      char frame[256];
+      snprintf(frame, sizeof(frame),
+               "{\"type\":\"error\",\"error\":{\"type\":\"%s\",\"message\":\"%s\"}}",
+               wire_fence_error_type(error), error);
+      if (emit)
+         emit(ctx, "error", frame);
+      free(buf_resp);
+      return;
+   }
    if (buf_status == 200 && buf_resp)
    {
       if (raw_responses)

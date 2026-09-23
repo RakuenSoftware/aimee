@@ -21,13 +21,17 @@ const sourceReleaseMaxEntries = 1024
 // C host. Losing the process or expiring an entry refuses release. These are
 // neither durable prepared receipts nor acknowledgements of provider dispatch.
 type sourceReleaseState struct {
-	mu      sync.Mutex
-	entries map[string]*sourceReleaseEntry
-	bytes   int
+	mu              sync.Mutex
+	entries         map[string]*sourceReleaseEntry
+	bytes           int
+	receipts        map[string]*providerReceiptEntry
+	receiptBytes    int
+	receiptProducer string
 }
 type sourceReleaseEntry struct {
 	sources                                      json.RawMessage
 	workspace, project, binding, digest, pending string
+	admitted                                     string
 	previous                                     string
 	expires                                      time.Time
 }
@@ -59,6 +63,12 @@ func releaseBinding(args commandArgs) string {
 	return releaseDigest([]string{args.stringOr("request_id", ""), args.stringOr("principal", ""), args.stringOr("caller_subject", "")})
 }
 func (s *sourceReleaseState) expire(now time.Time) {
+	for token, receipt := range s.receipts {
+		if !now.Before(receipt.expires) {
+			delete(s.receipts, token)
+			s.receiptBytes -= len(receipt.prepared) + len(receipt.admitted) + len(receipt.observation)
+		}
+	}
 	for token, e := range s.entries {
 		if !now.Before(e.expires) {
 			delete(s.entries, token)
@@ -163,6 +173,9 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	ticket := args.stringOr("source_release_ticket", "")
 	entry := s.entries[ticket]
 	operation := args.stringOr("operation", "")
+	if operation == "provider-receipt-observe" {
+		return s.receiptObservation(args)
+	}
 	if (operation == "source-release-finish" || operation == "source-release-discard") && (entry == nil || entry.binding == releaseBinding(args)) {
 		s.drop(ticket, releaseBinding(args), operation == "source-release-finish")
 		return commandResult(map[string]any{"status": "ok"})
@@ -170,7 +183,11 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	if entry == nil || entry.binding != releaseBinding(args) {
 		return commandResult(commandError("unavailable", "source release handle unavailable"))
 	}
-	if args.stringOr("operation", "") == "source-release-plan" {
+	if operation == "provider-receipt-plan" {
+		return s.receiptPlan(args, entry)
+	}
+	if operation == "source-release-plan" {
+		entry.admitted = ""
 		// Reaching the fence confirms host integrity acceptance. The cumulative
 		// source set supersedes its earlier handles; a rejected candidate never does.
 		s.drop(entry.previous, entry.binding, true)
@@ -190,6 +207,7 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 		CheckID  string `json:"check_id"`
 		Digest   string `json:"sources_digest"`
 	}
+	entry.admitted = ""
 	check := entry.pending
 	entry.pending = "" // one owner answer per attempt; every retry rechecks the owner
 	if json.Unmarshal(args["owner_response"], &reply) != nil || check == "" || reply.Status != "ok" || reply.CheckID != check || reply.Digest != entry.digest {
@@ -198,5 +216,6 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	if !reply.Eligible {
 		return commandResult(commandError("stale_context", "retained memory source changed or is no longer visible"))
 	}
+	entry.admitted = check
 	return commandResult(map[string]any{"status": "ok", "admitted": true, "boundary": "source_revalidation"})
 }

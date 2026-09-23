@@ -1331,12 +1331,14 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    int ra = config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
    int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
    int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
+   wire_fence_route_t wire_route = is_anthropic_provider(agent) ? WIRE_FENCE_ANTHROPIC_MESSAGES
+                                   : strstr(url, "/responses")  ? WIRE_FENCE_OPENAI_RESPONSES
+                                                                : WIRE_FENCE_OPENAI_CHAT;
    int http_status = wire_fence_revalidate_sources() != 0
                          ? HTTP_RETRY_ADMISSION_REFUSED
-                         : http_retry_post_guarded_bytes(
-                               url, auth_header, body, strlen(body), &response_body,
-                               agent->timeout_ms, extra_headers, ra, rb, rm, agent->provider,
-                               agent->model, session_id(), wire_fence_revalidate_sources);
+                         : wire_fence_post(url, auth_header, body, strlen(body), &response_body,
+                                           agent->timeout_ms, extra_headers, ra, rb, rm,
+                                           agent->provider, agent->model, session_id(), wire_route);
    free(body);
    if (active_delegation_stopped(stop_reason, sizeof(stop_reason)))
    {
@@ -1367,12 +1369,12 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       cJSON_Delete(fb_req);
       if (fb_body)
       {
-         http_status = wire_fence_revalidate_sources() != 0
-                           ? HTTP_RETRY_ADMISSION_REFUSED
-                           : http_retry_post_guarded_bytes(
-                                 url, auth_header, fb_body, strlen(fb_body), &response_body,
-                                 agent->timeout_ms, extra_headers, ra, rb, rm, fb_agent.provider,
-                                 fb_agent.model, session_id(), wire_fence_revalidate_sources);
+         http_status =
+             wire_fence_revalidate_sources() != 0
+                 ? HTTP_RETRY_ADMISSION_REFUSED
+                 : wire_fence_post(url, auth_header, fb_body, strlen(fb_body), &response_body,
+                                   agent->timeout_ms, extra_headers, ra, rb, rm, fb_agent.provider,
+                                   fb_agent.model, session_id(), wire_route);
          free(fb_body);
       }
    }

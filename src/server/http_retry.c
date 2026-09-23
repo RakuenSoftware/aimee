@@ -155,6 +155,18 @@ int http_retry_post_guarded_bytes(const char *url, const char *auth_header, cons
                                   int max_ms, const char *provider, const char *model,
                                   const char *session_id, http_retry_admit_cb_t admit_retry)
 {
+   return http_retry_post_observed_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
+                                         extra_headers, max_attempts, base_ms, max_ms, provider,
+                                         model, session_id, admit_retry, NULL);
+}
+
+int http_retry_post_observed_bytes(const char *url, const char *auth_header, const void *body,
+                                   size_t body_len, char **response_buf, int timeout_ms,
+                                   const char *extra_headers, int max_attempts, int base_ms,
+                                   int max_ms, const char *provider, const char *model,
+                                   const char *session_id, http_retry_admit_cb_t admit_retry,
+                                   const http_retry_observer_t *observer)
+{
    if (max_attempts <= 0)
       max_attempts = 1; /* at least one attempt */
 
@@ -182,7 +194,9 @@ int http_retry_post_guarded_bytes(const char *url, const char *auth_header, cons
          *response_buf = NULL;
       }
 
-      if (attempt > 0 && admit_retry && admit_retry() != 0)
+      if ((attempt > 0 && admit_retry && admit_retry() != 0) ||
+          (observer && observer->before &&
+           observer->before(observer->context, body, body_len) != 0))
          return HTTP_RETRY_ADMISSION_REFUSED;
 
       aimee_log(LOG_INFO, "http_retry",
@@ -194,6 +208,9 @@ int http_retry_post_guarded_bytes(const char *url, const char *auth_header, cons
       http_status = agent_http_post_bytes(url, auth_header, body, body_len, response_buf,
                                           timeout_ms, extra_headers);
       int64_t attempt_ms = retry_now_ms() - attempt_start_ms;
+      if (observer && observer->after)
+         observer->after(observer->context, http_status, *response_buf,
+                         *response_buf ? strlen(*response_buf) : 0);
 
       aimee_log(LOG_INFO, "http_retry", "attempt %d/%d: HTTP %d (provider=%s model=%s)",
                 attempt + 1, effective_max_attempts, http_status, provider ? provider : "?",

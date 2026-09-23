@@ -545,3 +545,14 @@ The combined future-record/copied-relation application `921d7f3c4` passes
 **1,162/1,162 fresh checks** (136 T1 and 1,026 T2), with all nine image identities
 and three provider caps checked. The [receipts](../../validation/memory-future-index-admission-2026-09-23.md)
 retain the initial public-field harness failure and the corrected reruns.
+
+The provider retry application `1e61d4833` passes **1,630/1,630 fresh checks**
+(1,032 T2 and 598 T3), including the six new exact-body resend assertions. All
+nine image identities and three operator caps match the
+[retained evidence](../../validation/memory-provider-retry-admission-2026-09-23.md).
+
+[Buffered provider attempt receipts](../../validation/memory-provider-receipts-2026-09-23.md)
+add Go-canonical exact-body bindings and synchronous WORM preparation/admission
+for retained versioned source handles. Acknowledged HTTP responses and unresolved
+network outcomes remain distinct; missing observation cannot prove non-dispatch.
+Incremental streaming, recovery/inspection and remaining MR-06 coverage stay open.

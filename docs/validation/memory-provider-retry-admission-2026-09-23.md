@@ -32,8 +32,15 @@ const-qualified `strchr` call in the CLI. No CLI workaround is included here.
 
 The deployment fixture additionally injects one transient provider failure for
 buffered Responses using both OpenAI and Anthropic provider formats, checking
-successful recovery and identical serialized bytes. Fresh candidate validation
-is pending. These checks do not establish durable dispatch receipts, full
+successful recovery and identical serialized bytes. Fresh application `1e61d4833` passes **1,630/1,630 checks**: 1,032 T2
+(enrolled KB) and 598 T3 (KB-free). Both harnesses exit zero and remove their
+owned containers. The [topology verdicts](memory-provider-retry-admission-2026-09-23/fresh/T2/topology.json)
+and [nine image identities](memory-provider-retry-admission-2026-09-23/fresh/image-identities.json)
+are retained, with all three actual 32,768-byte provider ceilings. Application
+image: `sha256:24fda37b510f2d0cce93dddf63fbd66017534f95a53432e90d87d280c44e8c34`.
+The database remains schema-34 `aimee-pr2990-postgres:d0e3c5752`, and the embedder
+is released 0.4.5. All six added real-provider retry assertions pass. CT100's
+released 0.4.5 service remains healthy and unchanged. These checks do not establish durable dispatch receipts, full
 provider-path parity, or elimination of the mutation race after the owner's
 snapshot. MR-06 remains open.
 

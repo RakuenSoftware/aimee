@@ -71,6 +71,22 @@ int http_retry_post_guarded_bytes(const char *url, const char *auth_header, cons
                                   int max_ms, const char *provider, const char *model,
                                   const char *session_id, http_retry_admit_cb_t admit_retry);
 
+/* Explicit per-call observer; no process-global or thread-global mutable hook.
+ * before runs after backoff on EVERY attempt and must durably admit the handoff.
+ * after observes only actual transport returns; it cannot undo network effects. */
+typedef struct
+{
+   void *context;
+   int (*before)(void *context, const void *body, size_t length);
+   void (*after)(void *context, int status, const char *response, size_t length);
+} http_retry_observer_t;
+int http_retry_post_observed_bytes(const char *url, const char *auth_header, const void *body,
+                                   size_t body_len, char **response_buf, int timeout_ms,
+                                   const char *extra_headers, int max_attempts, int base_ms,
+                                   int max_ms, const char *provider, const char *model,
+                                   const char *session_id, http_retry_admit_cb_t admit_retry,
+                                   const http_retry_observer_t *observer);
+
 /* Register a thread-local progress callback invoked after every model HTTP
  * attempt (decoupled from db1: the server side installs a callback that bumps the
  * running delegate job's heartbeat). This keeps a slow-but-progressing delegate —

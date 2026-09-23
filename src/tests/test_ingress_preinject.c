@@ -11,6 +11,10 @@
 #include "request_context.h"
 #include "wire_fence.h"
 #include <limits.h>
+#include <unistd.h>
+#include <sqlite3.h>
+#include "aimee_sha256.h"
+#include <aimee/audit/audit_worm.h>
 #include "support/module_runtime_fixture.h"
 
 static int g_runtime_failure;
@@ -1285,8 +1289,98 @@ static void test_preview_sources_at_provider_fence(void)
    puts("preview summary versions survive C transport and fence every provider route");
 }
 
+static void test_durable_provider_attempt(void)
+{
+   char directory[] = "/tmp/aimee-provider-receipt-XXXXXX";
+   assert(mkdtemp(directory));
+   char path[512];
+   snprintf(path, sizeof(path), "%s/receipt.db", directory);
+   assert(audit_worm_init_at(path) == 0);
+   request_context_t context = {0};
+   strcpy(context.request_id, "durable-provider-request");
+   strcpy(context.principal, "receipt-owner");
+   request_context_set(&context);
+   g_source_check_mode = g_runtime_failure = 0;
+   g_fact_projection = 1;
+   char *envelope = ingress_preinject_build("deployment matrix", 0);
+   assert(envelope && request_context_get()->memory_source_release[0]);
+   free(envelope);
+   const unsigned char body[] = {'a', 0, 'b'};
+   char attempt[33], next[33];
+   assert(ingress_preinject_prepare_attempt(body, sizeof(body), "openai_chat", "test", "model",
+                                            attempt) == 0);
+   assert(strlen(attempt) == 32 && audit_worm_count() == 2);
+   long total = 0;
+   cJSON *rows = audit_worm_read_page(0, 10, &total);
+   assert(total == 2);
+   cJSON *prepared = cJSON_Parse(cJSON_GetStringValue(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 1), "detail")));
+   cJSON *binding = cJSON_GetObjectItemCaseSensitive(prepared, "binding");
+   char digest[65];
+   assert(aimee_sha256_hex(body, sizeof(body), digest) == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "payload_sha256")),
+                 digest) == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "payload_bytes")),
+                 "3") == 0);
+   cJSON_Delete(prepared);
+   cJSON_Delete(rows);
+   assert(ingress_preinject_observe_attempt(attempt, 200, "{}", 2) == 0);
+   assert(ingress_preinject_observe_attempt(attempt, 200, "{}", 2) == 0);
+   assert(audit_worm_count() == 3);
+   assert(ingress_preinject_observe_attempt(attempt, 200, "changed", 7) != 0);
+   assert(audit_worm_count() == 3);
+   assert(ingress_preinject_prepare_attempt("{}", 2, "openai_responses", "test", "model", next) ==
+          0);
+   assert(strcmp(attempt, next) != 0);
+   assert(ingress_preinject_observe_attempt(next, -1, NULL, 0) == 0);
+   assert(audit_worm_count() == 6);
+   rows = audit_worm_read_page(0, 1, &total);
+   cJSON *event = cJSON_Parse(cJSON_GetStringValue(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 0), "detail")));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "stage")),
+                 "outcome_unknown") == 0);
+   cJSON_Delete(event);
+   cJSON_Delete(rows);
+   assert(ingress_preinject_prepare_attempt("{}", 2, "anthropic_messages", "test", "model", next) ==
+          0);
+   audit_worm_close();
+   assert(audit_worm_init_at(path) == 0 && audit_worm_count() == 8);
+   rows = audit_worm_read_page(0, 1, &total);
+   assert(strcmp(cJSON_GetStringValue(
+                     cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 0), "action")),
+                 "memory.provider.dispatch_admitted") == 0);
+   cJSON_Delete(rows);
+   char error[256];
+   assert(audit_worm_verify_chain(error, sizeof(error)) == 0);
+   /* Refuse the second durable append: the caller must not receive admission
+    * even though preparation was durably accepted. */
+   sqlite3 *injection = NULL;
+   assert(sqlite3_open(path, &injection) == SQLITE_OK);
+   assert(sqlite3_exec(injection,
+                       "CREATE TRIGGER deny_admission BEFORE INSERT ON audit_event WHEN "
+                       "NEW.action='memory.provider.dispatch_admitted' BEGIN SELECT "
+                       "RAISE(ABORT,'fixture admission unavailable'); END",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(ingress_preinject_prepare_attempt("{}", 2, "openai_chat", "test", "model", next) != 0);
+   assert(!next[0] && request_context_get()->context_refused && audit_worm_count() == 9);
+   sqlite3_close(injection);
+   ingress_preinject_finish_sources();
+   request_context_clear();
+   g_fact_projection = 0;
+   audit_worm_close();
+   unlink(path);
+   snprintf(path, sizeof(path), "%s/receipt.db-wal", directory);
+   unlink(path);
+   snprintf(path, sizeof(path), "%s/receipt.db-shm", directory);
+   unlink(path);
+   assert(rmdir(directory) == 0);
+   puts("provider preparations and admissions survive reopen; timeout and append failure remain "
+        "distinct");
+}
+
 int main(void)
 {
+   test_durable_provider_attempt();
    test_source_revalidation_at_provider_fence();
    test_preview_sources_at_provider_fence();
    test_required_assembly_refusal_reaches_dispatch();

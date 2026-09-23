@@ -1421,10 +1421,9 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    int ra = config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
    int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
    int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
-   int http_status = http_retry_post_guarded_bytes(url, auth_header, wire_body.data, wire_body.len,
-                                                   &response_body, agent->timeout_ms, extra_headers,
-                                                   ra, rb, rm, agent->provider, agent->model, NULL,
-                                                   wire_fence_revalidate_sources);
+   int http_status = wire_fence_post(url, auth_header, wire_body.data, wire_body.len,
+                                     &response_body, agent->timeout_ms, extra_headers, ra, rb, rm,
+                                     agent->provider, agent->model, NULL, wire_route);
    /* The gateway safety net, before mbox is released: it holds the array the
     * restore writes back into. The module decides and trips its breaker, so a
     * reduction the provider rejects stops repeating on later turns. The single

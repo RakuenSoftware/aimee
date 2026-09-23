@@ -1,4 +1,6 @@
 #include <stdlib.h>
+#include <stdio.h>
+#include "http_retry.h"
 #include <string.h>
 #include "wire_fence.h"
 #include "request_context.h"
@@ -189,4 +191,65 @@ void wire_fence_destroy(wire_fence_t *snapshot)
    snapshot->data = NULL;
    snapshot->len = 0;
    free(snapshot);
+}
+
+/* This state belongs to one synchronous call, including its retries. Nested
+ * owner HTTP requests use the ordinary transport and cannot inherit it. */
+extern int ingress_preinject_prepare_attempt(const void *, size_t, const char *, const char *,
+                                             const char *, char[33]) __attribute__((weak));
+extern int ingress_preinject_observe_attempt(const char *, int, const char *, size_t)
+    __attribute__((weak));
+typedef struct
+{
+   wire_fence_route_t route;
+   const char *provider, *model;
+   char attempt[33];
+} wire_attempt_t;
+
+static int wire_attempt_before(void *opaque, const void *body, size_t length)
+{
+   wire_attempt_t *attempt = opaque;
+   attempt->attempt[0] = '\0';
+   const request_context_t *context = request_context_get ? request_context_get() : NULL;
+   if (!context)
+      return 0;
+   if (context->context_refused)
+      goto refused;
+   if (!context->memory_source_release[0])
+      return 0;
+   const char *route = attempt->route == WIRE_FENCE_OPENAI_CHAT          ? "openai_chat"
+                       : attempt->route == WIRE_FENCE_OPENAI_RESPONSES   ? "openai_responses"
+                       : attempt->route == WIRE_FENCE_ANTHROPIC_MESSAGES ? "anthropic_messages"
+                                                                         : "";
+   if (ingress_preinject_prepare_attempt &&
+       ingress_preinject_prepare_attempt(body, length, route, attempt->provider, attempt->model,
+                                         attempt->attempt) == 0)
+      return 0;
+refused:
+   last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
+   return -1;
+}
+
+static void wire_attempt_after(void *opaque, int status, const char *response, size_t length)
+{
+   wire_attempt_t *attempt = opaque;
+   if (attempt->attempt[0] &&
+       (!ingress_preinject_observe_attempt ||
+        ingress_preinject_observe_attempt(attempt->attempt, status, response, length) != 0))
+      fputs(
+          "provider receipt observation unavailable; admitted attempt outcome remains unresolved\n",
+          stderr);
+}
+
+int wire_fence_post(const char *url, const char *auth_header, const void *body, size_t body_len,
+                    char **response_buf, int timeout_ms, const char *extra_headers,
+                    int max_attempts, int base_ms, int max_ms, const char *provider,
+                    const char *model, const char *session_id, wire_fence_route_t route)
+{
+   wire_attempt_t attempt = {.route = route, .provider = provider, .model = model};
+   http_retry_observer_t observer = {
+       .context = &attempt, .before = wire_attempt_before, .after = wire_attempt_after};
+   return http_retry_post_observed_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
+                                         extra_headers, max_attempts, base_ms, max_ms, provider,
+                                         model, session_id, NULL, &observer);
 }

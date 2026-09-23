@@ -1084,9 +1084,9 @@ native_provider_http:
          free(body);
          break;
       }
-      int http_status = http_retry_post_guarded_bytes(
-          url, auth_header, wire_body.data, wire_body.len, &response_body, per_call, extra_headers,
-          ra, rb, rm, agent->provider, fb_agent.model, session_id, wire_fence_revalidate_sources);
+      int http_status = wire_fence_post(url, auth_header, wire_body.data, wire_body.len,
+                                        &response_body, per_call, extra_headers, ra, rb, rm,
+                                        agent->provider, fb_agent.model, session_id, wire_route);
       api_call_count++;
       {
          int dj = agent_get_durable_job_id();
@@ -1149,10 +1149,10 @@ native_provider_http:
                free(fb_body);
                break;
             }
-            http_status = http_retry_post_guarded_bytes(
-                url, auth_header, fb_wire_body.data, fb_wire_body.len, &response_body, per_call,
-                extra_headers, ra, rb, rm, fb_agent.provider, fb_agent.model, session_id,
-                wire_fence_revalidate_sources);
+            http_status =
+                wire_fence_post(url, auth_header, fb_wire_body.data, fb_wire_body.len,
+                                &response_body, per_call, extra_headers, ra, rb, rm,
+                                fb_agent.provider, fb_agent.model, session_id, wire_route);
             api_call_count++;
             {
                int dj = agent_get_durable_job_id();

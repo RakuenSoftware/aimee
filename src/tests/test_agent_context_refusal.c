@@ -61,29 +61,35 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
    return 200;
 }
 
-int http_retry_post_guarded_bytes(const char *url, const char *auth_header, const void *body,
-                                  size_t body_len, char **response_buf, int timeout_ms,
-                                  const char *extra_headers, int max_attempts, int base_ms,
-                                  int max_ms, const char *provider, const char *model,
-                                  const char *session_id, http_retry_admit_cb_t admit_retry)
+int http_retry_post_observed_bytes(const char *url, const char *auth_header, const void *body,
+                                   size_t body_len, char **response_buf, int timeout_ms,
+                                   const char *extra_headers, int max_attempts, int base_ms,
+                                   int max_ms, const char *provider, const char *model,
+                                   const char *session_id, http_retry_admit_cb_t admit_retry,
+                                   const http_retry_observer_t *observer)
 {
-   assert(admit_retry);
+   assert(!admit_retry && observer && observer->before && observer->after);
+   assert(observer->before(observer->context, body, body_len) == 0);
    if (transport_refuse)
    {
       provider_calls++;
       if (transport_refuse == 2 && provider_calls == 1)
       {
          *response_buf = strdup("{}");
-         return 400; /* enter the model fallback before its retry is refused */
+         observer->after(observer->context, 400, *response_buf, 2);
+         return 400;
       }
       assert(request_context_refuse_assembly("stale_context") == 0);
-      assert(admit_retry() != 0);
+      assert(observer->before(observer->context, body, body_len) != 0);
       *response_buf = NULL;
       return HTTP_RETRY_ADMISSION_REFUSED;
    }
-   return http_retry_post_context_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
-                                        extra_headers, max_attempts, base_ms, max_ms, provider,
-                                        model, session_id);
+   int status = http_retry_post_context_bytes(url, auth_header, body, body_len, response_buf,
+                                              timeout_ms, extra_headers, max_attempts, base_ms,
+                                              max_ms, provider, model, session_id);
+   observer->after(observer->context, status, *response_buf,
+                   *response_buf ? strlen(*response_buf) : 0);
+   return status;
 }
 
 int http_retry_post_context(const char *url, const char *auth_header, const char *body,

@@ -47,6 +47,12 @@ extern "C"
    /* Relay the source owner's current admission before resending frozen bytes. */
    int wire_fence_revalidate_sources(void);
 
+   /* Buffered provider transport with one durable admission per actual attempt. */
+   int wire_fence_post(const char *url, const char *auth_header, const void *body, size_t body_len,
+                       char **response_buf, int timeout_ms, const char *extra_headers,
+                       int max_attempts, int base_ms, int max_ms, const char *provider,
+                       const char *model, const char *session_id, wire_fence_route_t route);
+
    /* Stable failure kind for the current thread's last selection attempt. */
    const char *wire_fence_last_error(void);
    int wire_fence_error_http_status(const char *error);

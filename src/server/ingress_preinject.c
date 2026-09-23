@@ -16,6 +16,8 @@
 #include "agent_code_capabilities.h"
 #include "integrity.h"
 #include "module_commands.h"
+#include "aimee_sha256.h"
+#include <aimee/audit/audit_worm.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -143,6 +145,118 @@ int ingress_preinject_revalidate_sources(void)
    if (!admitted)
       (void)request_context_refuse_assembly("unavailable");
    return admitted ? 0 : -1;
+}
+
+/* The Go owner supplies canonical metadata. This adapter cannot interpret or
+ * rewrite source references; it only waits for the existing durable audit owner.
+ * A failed append is not replaced by the asynchronous observability queue. */
+static int ingress_append_receipt(const char *attempt, const char *stage, const char *at,
+                                  const char *detail, const request_context_t *context)
+{
+   if (!attempt || strlen(attempt) != 32 || !stage || !at || !*at || !detail ||
+       strlen(detail) > AUDIT_WORM_DETAIL_MAX)
+      return -1;
+   char event_id[128], action[96];
+   snprintf(event_id, sizeof(event_id), "memory.provider.%s.%s", attempt, stage);
+   snprintf(action, sizeof(action), "memory.provider.%s", stage);
+   long long sequence = 0;
+   return audit_worm_append_idempotent(event_id, at, "host", context->principal, action, attempt,
+                                       "record", detail, &sequence);
+}
+
+int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const char *route,
+                                      const char *provider, const char *model, char attempt[33])
+{
+   if (!attempt)
+      return -1;
+   attempt[0] = '\0';
+   const request_context_t *context = request_context_get();
+   if (!context)
+      return 0;
+   if (context->context_refused)
+      return -1;
+   if (!context->memory_source_release[0])
+      return 0;
+   if ((!body && body_len) || ingress_preinject_revalidate_sources() != 0)
+      return -1;
+   char digest[65], count[32];
+   if (aimee_sha256_hex(body, body_len, digest) != 0)
+      return -1;
+   snprintf(count, sizeof(count), "%zu", body_len);
+   cJSON *request = cJSON_CreateObject();
+   ingress_release_context(request, context);
+   cJSON_AddStringToObject(request, "operation", "provider-receipt-plan");
+   cJSON_AddStringToObject(request, "route", route ? route : "");
+   cJSON_AddStringToObject(request, "provider", provider ? provider : "");
+   cJSON_AddStringToObject(request, "model", model ? model : "");
+   cJSON_AddStringToObject(request, "payload_sha256", digest);
+   cJSON_AddStringToObject(request, "payload_bytes", count);
+   cJSON_AddStringToObject(request, "turn_id", ingress_preinject_turn_id());
+   cJSON_AddStringToObject(request, "producer_build", AIMEE_VERSION);
+   const char *caller_limits =
+       context->request_budget_present ? context->request_budget_limits : "";
+   const char *operator_limits = getenv("AIMEE_PROVIDER_CONTEXT_LIMITS");
+   char caller_digest[65], operator_digest[65];
+   if (!operator_limits)
+      operator_limits = "";
+   if (aimee_sha256_hex(caller_limits, strlen(caller_limits), caller_digest) != 0 ||
+       aimee_sha256_hex(operator_limits, strlen(operator_limits), operator_digest) != 0)
+   {
+      cJSON_Delete(request);
+      return -1;
+   }
+   cJSON_AddStringToObject(request, "caller_limits_sha256", caller_digest);
+   cJSON_AddStringToObject(request, "operator_limits_sha256", operator_digest);
+   cJSON *plan = ingress_command(request, 1);
+   const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "attempt_id"));
+   const char *at = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "at"));
+   const char *prepared =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "prepared_detail"));
+   const char *admitted =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "admitted_detail"));
+   int rc = -1;
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "requires_durable_acceptance")) &&
+       ingress_append_receipt(id, "prepared", at, prepared, context) == 0 &&
+       ingress_append_receipt(id, "dispatch_admitted", at, admitted, context) == 0)
+   {
+      memcpy(attempt, id, 33);
+      rc = 0;
+   }
+   cJSON_Delete(plan);
+   if (rc != 0)
+      (void)request_context_refuse_assembly("unavailable");
+   return rc;
+}
+
+int ingress_preinject_observe_attempt(const char *attempt, int http_status, const char *response,
+                                      size_t response_len)
+{
+   if (!attempt || !*attempt)
+      return 0;
+   const request_context_t *context = request_context_get();
+   if (!context || (!response && response_len))
+      return -1;
+   char digest[65], count[32];
+   if (aimee_sha256_hex(response, response_len, digest) != 0)
+      return -1;
+   snprintf(count, sizeof(count), "%zu", response_len);
+   cJSON *request = cJSON_CreateObject();
+   ingress_release_context(request, context);
+   cJSON_AddStringToObject(request, "operation", "provider-receipt-observe");
+   cJSON_AddStringToObject(request, "attempt_id", attempt);
+   cJSON_AddNumberToObject(request, "http_status", http_status < 0 ? -1 : http_status);
+   cJSON_AddStringToObject(request, "response_sha256", digest);
+   cJSON_AddStringToObject(request, "response_bytes", count);
+   cJSON *plan = ingress_command(request, 0);
+   const char *detail =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "observation_detail"));
+   cJSON *event = detail ? cJSON_Parse(detail) : NULL;
+   const char *at = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "at"));
+   const char *stage = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "stage"));
+   int rc = ingress_append_receipt(attempt, stage, at, detail, context);
+   cJSON_Delete(event);
+   cJSON_Delete(plan);
+   return rc;
 }
 
 void ingress_preinject_finish_sources(void)

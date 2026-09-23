@@ -1,0 +1,34 @@
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  db1.conversation: DB1 conversation is unreachable (module call result 1)
+2026-09-23T16:28:36Z WARN  db1.agent_work: DB1 agent work is unreachable (module call result 1)
+2026-09-23T16:28:36Z WARN  db1.runtime: DB1 runtime is unreachable (module call result 1)
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z ERROR agent_http: TCP connect failed: 127.0.0.1:1
+2026-09-23T16:28:36Z WARN  server.kb: knowledge service unreachable (transport /v1/actions/rules.generate); suppressing calls for 1021ms after 3 consecutive failure(s)
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  db1.workflow: DB1 workflow is unreachable (module call result 1)
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z INFO  agent_runtime: model call end: http=-2 ms=0 provider=openai model=fixture-model
+2026-09-23T16:28:36Z WARN  obs_bus: durability event has no configured WORM sink: integrity.ingress
+2026-09-23T16:28:36Z INFO  agent_runtime: model call end: http=-2 ms=2 provider=openai model=fixture-model
+agent context refusal: passed
