@@ -231,6 +231,32 @@ def typed_source_version_gate(kb, check):
                                record_id=fixture['parent_id'], record_revision=fixture['parent_revision'])
         check('Typed assertion binds its direct memory parent revision',
               source.get('memory_parents') == [expected_parent] and source.get('memory_parent_state') == 'observed')
+        requirements = dict(schema_version=1, task_revision='deployment-fixture:1', query_mode='current_state',
+                            obligations=[dict(subject=key, relation='naming_convention')])
+        code, covered = call(dict(evidence_requirements=requirements))
+        coverage = covered.get('evidence_coverage', {})
+        roles = coverage.get('roles', [])
+        check('Typed coverage evaluates explicit current-state roles over retained evidence', code == 200 and
+              coverage.get('status') == 'complete' and len(roles) == 1 and
+              roles[0].get('retained_ids') == [fixture['record_id']] and
+              coverage.get('selection_digest') == covered.get('selection_digest') and
+              coverage.get('release_state') == 'not_revalidated')
+        code, dropped = call(dict(evidence_requirements=requirements,
+                                  context_limits=dict(schema_version=1, max_context_bytes=0)))
+        roles = dropped.get('evidence_coverage', {}).get('roles', [])
+        check('Typed coverage marks a packed-away role budget_dropped', code == 200 and
+              dropped.get('context_sufficiency') == 'insufficient' and len(roles) == 1 and
+              roles[0].get('status') == 'budget_dropped' and roles[0].get('retained_ids') == [])
+        unrelated = dict(requirements, obligations=[dict(subject=key+'-unrelated', relation='naming_convention')])
+        code, absent = call(dict(evidence_requirements=unrelated))
+        check('Unrelated retrieved evidence cannot fill a current-state obligation', code == 200 and
+              absent.get('context_sufficiency') == 'insufficient')
+        code, unknown = call(dict(evidence_requirements=dict(requirements, query_mode='timeline')))
+        check('Unsupported evidence query mode remains unknown', code == 200 and unknown.get('context_sufficiency') == 'unknown')
+        code, hidden_coverage = call(dict(evidence_requirements=requirements, project=key+'-hidden'))
+        check('Hidden assertion cannot establish evidence coverage', code == 200 and
+              hidden_coverage.get('context_sufficiency') != 'complete' and
+              all(not role.get('retained_ids') for role in hidden_coverage.get('evidence_coverage', {}).get('roles', [])))
         code, again = call()
         # Other visible candidates and their retrieval traces can change while
         # background indexing progresses. This check concerns the exact fixture
