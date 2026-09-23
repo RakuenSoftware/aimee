@@ -134,6 +134,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseSharedRecallReplay(t, ctx, tx, backend.(*postgresDataStore))
 	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
 	exerciseExpectedVersionReplay(t, ctx, tx, handler)
+	exerciseLifecycleVersionReplay(t, ctx, tx, handler)
 	exerciseMutationRetryReplay(t, ctx, tx, handler)
 	exerciseDeletionRetryReplay(t, ctx, tx, handler)
 	exerciseCreationRetryReplay(t, ctx, tx, handler)

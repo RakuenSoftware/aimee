@@ -257,6 +257,14 @@ char *kb_v1_action_request(const char *method, cJSON *request)
    }
 
    assert(strcmp(method, review_method) == 0);
+   if (!strcmp(method, "memory.restore") && expected_version)
+   {
+      char *encoded =
+          cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(request, "expected_version"));
+      assert(encoded && !strcmp(encoded, expected_version));
+      free(encoded);
+      assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(request, "idempotency_key")));
+   }
    if (!strcmp(method, "memory.search"))
    {
       assert(!strcmp(cJSON_GetObjectItemCaseSensitive(request, "view")->valuestring, "server"));
@@ -365,6 +373,10 @@ static void test_review_transport(void)
       cJSON_Delete(response);
    }
    review_method = "memory.restore";
+   expected_version = "{\"schema_version\":1,\"owner_id\":\"00000000-0000-0000-0000-000000000001\","
+                      "\"record_id\":\"42\",\"record_revision\":\"9007199254740993\"}";
+   cJSON_AddItemToObject(request, "expected_version", cJSON_Parse(expected_version));
+   cJSON_AddNullToObject(request, "idempotency_key");
    cJSON_AddNumberToObject(request, "id", 42);
    cJSON_AddStringToObject(request, "actor", "forged");
    cJSON_AddStringToObject(request, "authority", "user");
@@ -386,6 +398,7 @@ static void test_review_transport(void)
           0);
    cJSON_Delete(response);
    assert(restore_audits == 3 && restore_successes == 1);
+   expected_version = NULL;
    cJSON_Delete(request);
 }
 

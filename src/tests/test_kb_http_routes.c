@@ -2767,7 +2767,8 @@ static void test_console_memories(void)
    assert(status == 200);
    assert(strstr(buf, "\"action\":\"reject\"") != NULL);
 
-   const char *restore = "{\"memory_id\":42,\"action\":\"restore\"}";
+   const char *restore = "{\"memory_id\":42,\"action\":\"restore\",\"expected_version\":{\"record_"
+                         "revision\":\"9007199254740993\"},\"idempotency_key\":null}";
    status = kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, restore,
                              (int)strlen(restore), buf, sizeof(buf));
    assert(status == 200);
@@ -2777,9 +2778,14 @@ static void test_console_memories(void)
                            sizeof(buf)) == 405);
    assert(kb_http_route_ex("GET", "/v1/console/memories/review", NULL, NULL, NULL, NULL, 0, buf,
                            sizeof(buf)) == 405);
-   const char *failures[] = {"bad-json", "{}", "{\"status\":\"error\",\"kind\":\"not_found\"}",
-                             "{\"status\":\"error\",\"kind\":\"forbidden\"}"};
-   const int codes[] = {503, 503, 404, 403};
+   const char *failures[] = {"bad-json",
+                             "{}",
+                             "{\"status\":\"error\",\"kind\":\"not_found\"}",
+                             "{\"status\":\"error\",\"kind\":\"forbidden\"}",
+                             "{\"status\":\"error\",\"kind\":\"conflict\"}",
+                             "{\"status\":\"error\",\"kind\":\"invalid_argument\"}",
+                             "{\"status\":\"error\",\"kind\":\"unsupported_mode\"}"};
+   const int codes[] = {503, 503, 404, 403, 409, 400, 400};
    for (unsigned i = 0; i < sizeof(codes) / sizeof(codes[0]); i++)
    {
       review_reply = failures[i];
@@ -4658,6 +4664,12 @@ int aimee_module_commands_dispatch_context(const char *method, const cJSON *args
    if (!strcmp(method, "memory.runtime"))
       assert(!strcmp(jo_cstr(args, "operation"), "fact-review"));
    assert(jo_i64((cJSON *)args, "id", 0) == 42);
+   if (!strcmp(method, "memory.restore"))
+   {
+      const cJSON *version = cJSON_GetObjectItemCaseSensitive(args, "expected_version");
+      assert(!strcmp(jo_cstr(version, "record_revision"), "9007199254740993"));
+      assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(args, "idempotency_key")));
+   }
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "authenticated")));
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(context, "user_authority")));
    assert(strcmp(jo_cstr(context, "principal"), "test:operator") == 0);

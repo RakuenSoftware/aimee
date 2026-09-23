@@ -265,6 +265,15 @@ promoted style requests more evidence; required database replay verifies six
 allocations. Complete native protected rendering, configured Anthropic opt-in,
 provider tokens and the remaining MR-03 acceptance work remain open.
 
+## Conditional lifecycle follow-up
+
+[Conditional shared rejection/restoration](../../validation/memory-lifecycle-versions-2026-09-23.md)
+adds scoped row-locked owner/record/revision preconditions to both verbs. The native
+server and KB console preserve the conditions and owner refusals. Restricted-role
+replay and competing-correction tests cover stale versions, hidden records,
+owner mismatch and successful restoration. Lifecycle retry receipts, complete
+mutation coverage, and full MR-02 certification remain open.
+
 ## Supporting indexed-lookup repair
 
 The repeated `scope_required: no active project` during this migration came from

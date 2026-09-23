@@ -111,9 +111,9 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if _, exists := args["idempotency_key"]; exists && !((options.placement == PlacementKB && (verb == "store" || verb == "supersede" || verb == "update" || verb == "delete")) || (options.placement == PlacementServer && (verb == "store" || verb == "supersede" || verb == "delete" || verb == "runtime"))) {
 		return commandResult(commandError("unsupported_mode", "idempotency_key is supported for store, conditional corrections and deletion"))
 	}
-	versionedMutation := (options.placement == PlacementKB && (verb == "supersede" || verb == "update" || verb == "delete" || verb == "review_correction")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "delete" || verb == "runtime"))
+	versionedMutation := (options.placement == PlacementKB && (verb == "supersede" || verb == "update" || verb == "delete" || verb == "reject" || verb == "restore" || verb == "review_correction")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "delete" || verb == "runtime"))
 	if _, exists := args["expected_version"]; exists && !versionedMutation {
-		return commandResult(commandError("unsupported_mode", "expected_version is supported for supersede, shared update, deletion and correction review"))
+		return commandResult(commandError("unsupported_mode", "expected_version is supported for supersede, shared update/reject/restore, deletion and correction review"))
 	}
 	if _, exists := args["include_version"]; exists && verb != "get" && !(verb == "runtime" && options.placement == PlacementServer) {
 		return commandResult(commandError("unsupported_mode", "include_version is supported only for exact-ID get"))

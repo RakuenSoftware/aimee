@@ -98,6 +98,22 @@ new evidence. See [creation retry validation](../../validation/memory-creation-r
 for local tests and the pending fresh-image gate. Remaining mutation preconditions
 and full durable consumer/retention semantics are still acceptance work.
 
+### Conditional rejection and restoration
+
+Shared `reject` and `restore` accept the same `expected_version` object as
+corrections. The Go owner locks the scoped canonical row and compares its owner,
+ID and revision before the existing tombstone/lifecycle mutation. A stale version
+returns `conflict` / `expected_version_conflict`; a hidden or missing target stays
+`not_found`. A version does not grant visibility or restoration authority.
+Rejection advances the revision, so restoration requires the subsequently observed
+version, not the version that authorized rejection. Existing unversioned requests
+retain their behavior. These two verbs still reject `idempotency_key` explicitly;
+this slice does not add durable lifecycle retry receipts.
+
+Native server and KB console adapters forward the precondition without interpreting
+it, including decimal-string revisions. They also forward unsupported retry keys
+so the owner can refuse them. See the [validation record](../../validation/memory-lifecycle-versions-2026-09-23.md).
+
 ### Expected-version shared corrections
 
 Shared exact-ID `get` accepts `include_version: true`. Its `memory.version` object
