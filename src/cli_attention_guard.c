@@ -16,6 +16,7 @@
  */
 #include "cli_attention_guard.h"
 #include "worktree_scope.h"
+#include "aimee_git_command.h"
 #include "cli_session_start.h" /* read_stdin */
 #include "client_config.h"
 #include "client_session_worktree.h"
@@ -66,6 +67,19 @@ static int attn_tool_is_shell(const char *tool)
                    strcmp(tool, "execute_command") == 0);
 }
 
+/* The tool's explicit working directory outranks the session launch directory. */
+const char *attn_tool_cwd(const char *cwd, const cJSON *input)
+{
+   static const char *const keys[] = {"workdir", "cwd", "working_dir", "working_directory", NULL};
+   for (int i = 0; keys[i]; i++)
+   {
+      const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, keys[i]));
+      if (value && value[0])
+         return value;
+   }
+   return cwd;
+}
+
 /* Client-neutral route. Adapters only translate lifecycle events into this
  * common payload; worktree ownership and path semantics stay here. */
 int attn_route_tool_input(const char *sid, const char *cwd, const char *tool, const cJSON *input,
@@ -74,13 +88,24 @@ int attn_route_tool_input(const char *sid, const char *cwd, const char *tool, co
    *updated_out = NULL;
    if (!sid || !cwd || !tool || !cJSON_IsObject(input))
       return 1;
+   if (attn_tool_is_shell(tool))
+   {
+      const char *command =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, "command"));
+      if (!command)
+         command = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, "cmd"));
+      if (aimee_git_command(command))
+         return 1;
+   }
+   cwd = attn_tool_cwd(cwd, input);
    cJSON *updated = cJSON_Duplicate(input, 1);
    if (!updated)
       return -2;
    int changed = 0;
 
-   static const char *const path_keys[] = {"file_path", "filePath", "path", "notebook_path",
-                                           "directory", "workdir",  NULL};
+   static const char *const path_keys[] = {"file_path",         "filePath", "path", "notebook_path",
+                                           "directory",         "workdir",  "cwd",  "working_dir",
+                                           "working_directory", NULL};
    for (int i = 0; path_keys[i]; i++)
    {
       cJSON *item = cJSON_GetObjectItemCaseSensitive(updated, path_keys[i]);
@@ -1650,6 +1675,15 @@ int handle_attention_guard(void)
    const char *bash_cmd =
        ti ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "command")) : NULL;
 
+   if (client_config_workspace_contains(attn_tool_cwd(payload_cwd, ti)) == 0)
+   {
+      cJSON_Delete(hook);
+      free(stdin_data);
+      return 0;
+   }
+
+   if (!bash_cmd && ti)
+      bash_cmd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "cmd"));
    char discovery_reason[1024];
    if (attn_discovery_gate(tool, bash_cmd, sid, discovery_reason, sizeof(discovery_reason)) != 0)
    {
@@ -1657,6 +1691,13 @@ int handle_attention_guard(void)
       cJSON_Delete(hook);
       free(stdin_data);
       return 2;
+   }
+
+   if (attn_tool_is_shell(tool) && aimee_git_command(bash_cmd))
+   {
+      cJSON_Delete(hook);
+      free(stdin_data);
+      return 0;
    }
 
    long now_ts = (long)time(NULL);

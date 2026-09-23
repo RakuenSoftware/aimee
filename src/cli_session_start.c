@@ -2,6 +2,7 @@
  * session's hidden checkout; model context still enters through shared ingress. */
 #include "cli_client.h"
 #include "cli_session_start.h"
+#include "client_config.h"
 #include "cJSON.h"
 #include "client_session_worktree.h" /* client_session_id_publish */
 #include "aimee_home.h"              /* aimee_home */
@@ -425,6 +426,12 @@ int handle_session_start(int json_output)
       payload_cwd = jcwd->valuestring;
    else if (getcwd(cwd, sizeof cwd))
       payload_cwd = cwd;
+   if (client_config_workspace_contains(payload_cwd) == 0)
+   {
+      cJSON_Delete(hook_json);
+      free(stdin_data);
+      return 0;
+   }
    char worktree[4096];
    int wt = client_session_worktree_ensure_at(sid, payload_cwd, worktree, sizeof worktree);
    if (wt == -2)

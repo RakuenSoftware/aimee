@@ -577,7 +577,11 @@ static void add_verify_arg(cJSON *args, const char *name, const char *val)
 {
    if (!name || !name[0] || !val)
       return;
-   if (strcmp(val, "true") == 0)
+   if (strcmp(name, "repo") == 0)
+      name = "path";
+   if (strcmp(name, "path") == 0 || strcmp(name, "cwd") == 0)
+      cJSON_AddStringToObject(args, name, val);
+   else if (strcmp(val, "true") == 0)
       cJSON_AddBoolToObject(args, name, 1);
    else if (strcmp(val, "false") == 0)
       cJSON_AddBoolToObject(args, name, 0);
