@@ -119,3 +119,24 @@ func currentRelationInputsSQL(alias string) string {
  WHERE dep.object_type='relation' AND dep.object_id=` + alias + `.id
  AND dep.source_kind='memory-relation-input-v2' AND input.id IS NULL)`
 }
+
+// Generator-owned episodes carry producer observations, not merely versions
+// read alongside their old payload. Authored episodes retain the parent policy.
+func currentEpisodeInputsSQL(alias string) string {
+	input := `(CASE WHEN episode_input.source_kind='memory-episode-input-v1' THEN episode_input.source_ref::jsonb END)`
+	return `(NOT EXISTS(SELECT 1 FROM memory_lineage episode_owner WHERE episode_owner.object_type='episode'
+ AND episode_owner.object_id=` + alias + `.id AND episode_owner.source_kind='memory-index-v1') OR EXISTS(
+ SELECT 1 FROM memory_lineage episode_input JOIN memories episode_parent
+ ON episode_parent.id=` + alias + `.memory_id
+ WHERE episode_input.object_type='episode' AND episode_input.object_id=` + alias + `.id
+ AND episode_input.source_kind='memory-episode-input-v1'
+ AND ` + input + `->>'record_id'=episode_parent.id::text
+ AND ` + input + `->>'record_revision'=episode_parent.record_revision::text
+ AND ` + input + `->>'episode_revision'=` + alias + `.record_revision::text
+ AND ` + currentMemorySQL("episode_parent.") + `
+ AND ((` + input + `->>'summary_id'='0' AND ` + input + `->>'summary_revision'='0') OR EXISTS(
+ SELECT 1 FROM memory_summaries episode_summary WHERE episode_summary.id=(` + input + `->>'summary_id')::bigint
+ AND episode_summary.memory_id=episode_parent.id
+ AND episode_summary.record_revision::text=` + input + `->>'summary_revision'
+ AND ` + summaryCurrentInputsSQL("episode_summary", "episode_parent") + `))))`
+}

@@ -80,7 +80,7 @@ func buildSourceRevalidationSQL() string {
  AND CASE r.ref#>>'{source_version,record_kind}'
  WHEN 'memory_record' THEN true
  WHEN 'memory_episode' THEN EXISTS (SELECT 1 FROM memory_episodes e WHERE e.id=(r.ref->>'stable_id')::bigint
- AND e.memory_id=m.id AND e.record_revision::text=r.ref#>>'{source_version,version,record_revision}')
+ AND e.memory_id=m.id AND e.record_revision::text=r.ref#>>'{source_version,version,record_revision}' AND ` + currentEpisodeInputsSQL("e") + `)
  WHEN 'memory_summary' THEN EXISTS (SELECT 1 FROM memory_summaries s WHERE s.id=(r.ref->>'stable_id')::bigint
  AND s.memory_id=m.id AND s.record_revision::text=r.ref#>>'{source_version,version,record_revision}'
  AND ` + summaryCurrentInputsSQL("s", "m") + `)

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -83,6 +84,76 @@ func exerciseDerivedRelationsReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 	authoredEpisode, err := backend.EpisodeGet(ctx, "curated-episode")
 	if err != nil || authoredEpisode.ID != customEpisode || authoredEpisode.Text != "Authored episode" {
 		t.Fatal("distinct authored episode changed during refresh", authoredEpisode, err)
+	}
+	// Existing generated text cannot borrow a new parent revision. Each read
+	// path must fence it before limits, while authored episodes remain distinct.
+	for _, change := range []string{
+		`UPDATE memories SET content='new parent text' WHERE id=$1`,
+		`UPDATE memory_episodes SET episode_text='independent edit' WHERE memory_id=$1 AND episode_key='relations-owner'`,
+		`DELETE FROM memory_lineage WHERE object_type='episode' AND source_kind='memory-episode-input-v1' AND object_id IN(SELECT id FROM memory_episodes WHERE memory_id=$1)`,
+	} {
+		if _, err := tx.Exec(ctx, `SAVEPOINT episode_input_change`); err != nil {
+			t.Fatal(err)
+		}
+		before, err := backend.typedEpisodes(ctx, "relations-owner", 1, Scope{})
+		if err != nil || len(before) != 1 {
+			t.Fatal("generated episode not observed", before, err)
+		}
+		if _, err := tx.Exec(ctx, change, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := backend.EpisodeGet(ctx, "relations-owner"); !errors.Is(err, ErrMemoryNotFound) {
+			t.Fatal("stale generated episode get", err)
+		}
+		if rows, err := backend.EpisodeList(ctx, "relations-owner", 1); err != nil || len(rows) != 0 {
+			t.Fatal("stale generated episode list", rows, err)
+		}
+		if rows, err := backend.typedEpisodes(ctx, "relations-owner", 1, Scope{}); err != nil || len(rows) != 0 {
+			t.Fatal("stale generated typed episode", rows, err)
+		}
+		if _, err := backend.EpisodeGet(ctx, "curated-episode"); err != nil {
+			t.Fatal("authored episode lost", err)
+		}
+		ref := typedProjectionRef{Channel: "episodes", ID: before[0].source.Version.RecordID, Source: before[0].source}
+		request := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("e", 32), Sources: []typedProjectionRef{ref}}
+		if ok, err := backend.revalidateSources(ctx, request, Scope{}); err != nil || ok {
+			t.Fatal("stale episode release admitted", ok, err)
+		}
+		if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT episode_input_change; RELEASE SAVEPOINT episode_input_change`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A summary-derived episode also depends on its intermediate summary, even
+	// when neither its own bytes nor its canonical parent have changed.
+	for _, change := range []string{
+		`UPDATE memory_summaries SET summary='independently revised summary' WHERE memory_id=$1 AND scope='headline'`,
+		`DELETE FROM derived_memory_dependencies WHERE derived_kind='summary' AND derived_memory_id IN(SELECT id::text FROM memory_summaries WHERE memory_id=$1 AND scope='headline')`,
+	} {
+		if _, err := tx.Exec(ctx, `SAVEPOINT episode_summary_change`); err != nil {
+			t.Fatal(err)
+		}
+		exact := Scope{Type: "project", Value: "relations-visible"}
+		before, err := backend.typedEpisodes(ctx, "headline", 1, exact)
+		if err != nil || len(before) != 1 {
+			t.Fatal("observed summary episode missing", before, err)
+		}
+		if _, err := tx.Exec(ctx, change, id); err != nil {
+			t.Fatal(err)
+		}
+		if rows, err := backend.typedEpisodes(ctx, "headline", 1, exact); err != nil || len(rows) != 0 {
+			t.Fatal("stale intermediate summary served", rows, err)
+		}
+		ref := typedProjectionRef{Channel: "episodes", ID: before[0].source.Version.RecordID, Source: before[0].source}
+		request := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("f", 32), Sources: []typedProjectionRef{ref}}
+		if ok, err := backend.revalidateSources(ctx, request, exact); err != nil || ok {
+			t.Fatal("stale intermediate summary released", ok, err)
+		}
+		if _, err := backend.EpisodeGet(ctx, "relations-owner"); err != nil {
+			t.Fatal("independent canonical episode lost", err)
+		}
+		if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT episode_summary_change; RELEASE SAVEPOINT episode_summary_change`); err != nil {
+			t.Fatal(err)
+		}
 	}
 	first := snapshot()
 	call()

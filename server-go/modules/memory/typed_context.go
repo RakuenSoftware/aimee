@@ -606,7 +606,7 @@ func (s *postgresDataStore) typedWatermarks(ctx context.Context, request DataReq
 	// A hidden parent denies assertion timestamps just as it denies assertion text.
 	err := s.db.QueryRow(ctx, `SELECT COALESCE(max(ts),'') FROM (
  SELECT asserted_at AS ts FROM entity_edges e WHERE edge_class='semantic' AND `+currentMemoryEvidenceSQL("e", `$1='' OR (m.scope_type=$1 AND m.scope_value=$2)`, true)+`
- UNION ALL SELECT me.created_at FROM memory_episodes me JOIN memories m ON m.id=me.memory_id WHERE `+currentMemorySQL("m.")+` AND ($1='' OR (m.scope_type=$1 AND m.scope_value=$2))) q`, exact.Type, exact.Value).Scan(&result.Durable)
+ UNION ALL SELECT me.created_at FROM memory_episodes me JOIN memories m ON m.id=me.memory_id WHERE `+currentMemorySQL("m.")+` AND `+currentEpisodeInputsSQL("me")+` AND ($1='' OR (m.scope_type=$1 AND m.scope_value=$2))) q`, exact.Type, exact.Value).Scan(&result.Durable)
 	if err != nil {
 		return result, err
 	}

@@ -615,3 +615,17 @@ producer. Current reads and release checks withhold unknown or stale observation
 canonical fallback remains available. Episode and unit producers apply the same
 check before copying summary text. Full MR-04 lineage and erasure remain open;
 validation results are tracked in the linked report.
+
+The repaired [hygiene preview deployment](../../validation/memory-hygiene-preview-2026-09-23.md)
+passes **1,683/1,683** fresh checks (1,069 T2 and 614 T3) on application
+`377b5309d`. T2 uses corrected harness `95f85ef53`; T3 uses its matching
+`377b5309d` harness. All nine images and three actual provider limits are recorded.
+This validates bounded read-only hygiene through direct KB, Server HTTP and the
+candidate CLI; durable hygiene proposals and the other MR-14 gates remain open.
+
+[Generated episode observations](../../validation/memory-episode-inputs-2026-09-23.md)
+extend the producer-input fence to deterministic episode text and its optional
+summary input. Ordinary and typed reads, briefing, profile episode labels and
+release checks withhold mismatched observations before limits. Authored episode
+policy remains explicit. Full MR-04 lineage and erasure remain open; final
+validation is tracked in the linked report.

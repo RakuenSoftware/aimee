@@ -39,18 +39,22 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
  ORDER BY CASE role WHEN 'actor' THEN 0 WHEN 'subject' THEN 1 WHEN 'person' THEN 2 ELSE 3 END,weight DESC,id LIMIT 1),key),record_revision FROM memories m WHERE id=$1`, id).Scan(&key, &content, &session, &valid, &invalid, &primary, &parentRevision); err != nil {
 		return err
 	}
-	episodes := []struct{ key, text string }{{key, content}}
-	rows, err := s.db.Query(ctx, `SELECT summary.scope,summary.summary FROM memory_summaries summary JOIN memories m ON m.id=summary.memory_id WHERE m.id=$1 AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY summary.id LIMIT 2`, id)
+	type episodeInput struct {
+		key, text                  string
+		summaryID, summaryRevision int64
+	}
+	episodes := []episodeInput{{key: key, text: content}}
+	rows, err := s.db.Query(ctx, `SELECT summary.scope,summary.summary,summary.id,summary.record_revision FROM memory_summaries summary JOIN memories m ON m.id=summary.memory_id WHERE m.id=$1 AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY summary.id LIMIT 2`, id)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var k, text string
-		if err = rows.Scan(&k, &text); err != nil {
+		var input episodeInput
+		if err = rows.Scan(&input.key, &input.text, &input.summaryID, &input.summaryRevision); err != nil {
 			rows.Close()
 			return err
 		}
-		episodes = append(episodes, struct{ key, text string }{k, text})
+		episodes = append(episodes, input)
 	}
 	err = rows.Err()
 	rows.Close()
@@ -73,6 +77,18 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 			return err
 		}
 		if err = s.markDerivedIndexObject(ctx, "episode", episodeID, id); err != nil {
+			return err
+		}
+		// Capture the exact inputs read above and the replacement's own revision.
+		// Readers never refresh these observations on behalf of old copied text.
+		if _, err = s.db.Exec(ctx, `DELETE FROM memory_lineage WHERE object_type='episode' AND object_id=$1 AND source_kind='memory-episode-input-v1'`, episodeID); err != nil {
+			return err
+		}
+		if _, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'episode',id,'memory-episode-input-v1',jsonb_build_object(
+ 'record_id',$2::bigint::text,'record_revision',$3::bigint::text,
+ 'episode_revision',record_revision::text,'summary_id',$4::bigint::text,
+ 'summary_revision',$5::bigint::text)::text FROM memory_episodes WHERE id=$1`, episodeID, id, parentRevision, e.summaryID, e.summaryRevision); err != nil {
 			return err
 		}
 		episodeIDs = append(episodeIDs, episodeID)

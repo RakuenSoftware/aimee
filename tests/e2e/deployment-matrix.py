@@ -608,6 +608,27 @@ def typed_source_version_gate(kb, check):
         code, episode_empty = call(dict(context_limits=dict(schema_version=1, max_context_bytes=0)))
         check('Omitted typed episode claims no retained source revision', code == 200 and
               episode_empty.get('retained_items') == [] and episode_empty.get('source_version_state') == 'unavailable')
+        # Model an existing generator-owned row before/after its producer records
+        # inputs. A serving read must never perform this observation itself.
+        sql(f"INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref) VALUES('episode',{int(episode_id)},'memory-index-v1','{fixture['parent_id']}')")
+        code, unobserved = call()
+        check('Generated episode without producer observations is withheld', code == 200 and not episode_source(unobserved))
+        sql(f"""INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+          SELECT 'episode',e.id,'memory-episode-input-v1',jsonb_build_object(
+            'record_id',m.id::text,'record_revision',m.record_revision::text,
+            'episode_revision',e.record_revision::text,'summary_id','0','summary_revision','0')::text
+          FROM memory_episodes e JOIN memories m ON m.id=e.memory_id WHERE e.id={int(episode_id)}""")
+        code, observed = call()
+        check('Generated episode with exact observed inputs is served', code == 200 and
+              episode_source(observed).get('version') == expected_episode and matches(observed))
+        observed_refs = observed.get('retained_items', [])
+        sql(f"UPDATE memories SET content='newer source must not certify old episode' WHERE id={int(fixture['parent_id'])}")
+        code, stale = call()
+        check('Generated episode cannot borrow a new parent revision', code == 200 and not episode_source(stale))
+        code, refused = kb.kb_request('/v1/actions/memory.revalidate_sources',
+            dict(scope_context=True, project=key, include_all=False,
+                 revalidation=dict(schema_version=1, check_id=uuid.uuid4().hex, sources=observed_refs)))
+        check('Previously retained generated episode fails release after parent edit', code == 200 and refused.get('eligible') is False)
     finally:
         sql(f"""BEGIN; UPDATE entity_edges SET lifecycle_state='invalidated',version=version+1 WHERE commit_id='{key}';
             INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,

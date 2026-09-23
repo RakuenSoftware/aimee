@@ -60,6 +60,8 @@ CREATE TEMP TABLE memory_entities(memory_id bigint,entity text);
 CREATE TEMP TABLE memory_conflicts(id bigint,memory_a bigint,memory_b bigint,detected_at text,resolved int,resolution text);
 CREATE TEMP TABLE memory_links(id bigint,source_id bigint,target_id bigint,relation text);
 CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
+CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
 CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text DEFAULT '',valid_at text DEFAULT '',invalid_at text DEFAULT '',weight double precision DEFAULT 1.5,created_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE tasks(id bigint PRIMARY KEY,parent_id bigint,title text);
 INSERT INTO memories(id,key,content) VALUES (1,'release','release the app');
@@ -70,7 +72,7 @@ INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity) SELECT 1,
 INSERT INTO tasks(id,parent_id,title) VALUES (1,0,'release app'),(2,1,'update changelog');
 CREATE ROLE memory_runtime_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA runtime_command_test TO memory_runtime_test;
-GRANT SELECT ON memory_collection_owner,memory_links,memory_lineage,memories,memory_episodes,memory_entities,memory_conflicts,memory_relations,tasks TO memory_runtime_test;
+GRANT SELECT ON memory_collection_owner,memory_summaries,derived_memory_dependencies,memory_links,memory_lineage,memories,memory_episodes,memory_entities,memory_conflicts,memory_relations,tasks TO memory_runtime_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY test_memory_visibility ON memories USING
  (scope_type='global' OR current_setting('aimee.memory_scope_all',true)='1' OR

@@ -142,7 +142,7 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
  (SELECT owner_id::text FROM memory_collection_owner WHERE id=1) AS owner_id,`+queryScopeOrder+` AS scope_rank,
  row_number() OVER(PARTITION BY e.source_session ORDER BY `+queryScopeOrder+`,e.created_at DESC,e.id DESC) AS rn
  FROM memory_episodes e JOIN memories m ON m.id=e.memory_id
- WHERE e.source_session<>'' AND `+currentMemorySQL("m.")+`
+ WHERE e.source_session<>'' AND `+currentMemorySQL("m.")+` AND `+currentEpisodeInputsSQL("e")+`
  AND COALESCE(m.sensitivity,'normal')<>'secret')
  SELECT source_session,COALESCE(episode_text,''),COALESCE(reference_time,''),COALESCE(created_at,''),
  episode_id,episode_revision,parent_id,parent_revision,owner_id FROM ranked WHERE rn=1

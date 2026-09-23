@@ -34,3 +34,9 @@ image validation of this repair remains pending.
 This closes one MR-04 freshness gap. Full derivation family identity, transitive
 lineage, query dependencies and restore-resistant erasure remain open. It does not
 certify MR-01 or MR-04 complete. Released CT100 remains on version 0.4.5.
+
+Application/harness `83ff06d9c` passes **614/614** fresh T3 checks; the
+[raw receipt](memory-summary-inputs-2026-09-23/fresh/T3/topology.json) and
+[nine image identities](memory-summary-inputs-2026-09-23/fresh/image-identities.json)
+are retained. All three actual provider request byte limits are 32,768. T2 has
+passed all 16 summary preview/release cases, but its full run is still pending.

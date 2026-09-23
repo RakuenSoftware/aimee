@@ -21,7 +21,7 @@ func (s *postgresDataStore) typedEpisodes(ctx context.Context, query string, lim
  e.record_revision::text,m.record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
  FROM memory_episodes e JOIN memories m ON m.id=e.memory_id
  WHERE ($1='' OR e.episode_key ILIKE '%'||$1||'%' OR e.episode_text ILIKE '%'||$1||'%')
- AND `+currentMemorySQL("m.")+` AND ($3='' OR (m.scope_type=$3 AND m.scope_value=$4))
+ AND `+currentMemorySQL("m.")+` AND `+currentEpisodeInputsSQL("e")+` AND ($3='' OR (m.scope_type=$3 AND m.scope_value=$4))
  ORDER BY `+domainScopeRankSQL+` DESC,e.reference_time DESC,e.created_at DESC,e.id DESC LIMIT $2`, query, limit, exact.Type, exact.Value)
 	if err != nil {
 		return nil, err

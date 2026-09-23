@@ -82,9 +82,11 @@ func TestDomainPublicPostgres(t *testing.T) {
  CREATE TEMP TABLE memory_provenance(id bigserial PRIMARY KEY,memory_id bigint,session_id text,action text,details text,created_at text DEFAULT pg_now_text());
  INSERT INTO memory_provenance(memory_id,session_id,action,details) VALUES (1,'session','created','source detail');
  CREATE TEMP TABLE memory_links(id bigserial PRIMARY KEY,source_id bigint,target_id bigint,relation text,weight double precision DEFAULT 1,created_at text DEFAULT pg_now_text());
- CREATE TEMP TABLE memory_episodes(id bigserial PRIMARY KEY,memory_id bigint,episode_key text,episode_text text,source_session text,reference_time text,created_at text DEFAULT pg_now_text());
+ CREATE TEMP TABLE memory_episodes(id bigserial PRIMARY KEY,record_revision bigint DEFAULT 1,memory_id bigint,episode_key text,episode_text text,source_session text,reference_time text,created_at text DEFAULT pg_now_text());
  INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session,reference_time) VALUES (2,'release','release recap','session','2026-09-01');
  CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
+CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
 CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text,valid_at text,invalid_at text,weight double precision,created_at text DEFAULT pg_now_text());
  INSERT INTO memory_relations(memory_id,episode_id,src_entity,relation,dst_entity,fact_text,valid_at,invalid_at,weight) VALUES
  (1,1,'app','uses','old','app used old','2025-01-01','2026-01-01',0.9),
@@ -282,7 +284,7 @@ CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,epi
 	// policy, with a real non-owner connection and transaction-local scope.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_domain_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA domain_command_test TO memory_domain_test;
-GRANT SELECT ON memory_lineage,memories,memory_scopes,memory_conflicts,memory_relations,memory_episodes,memory_provenance,memory_links,memory_entities,entity_edges,fact_evidence TO memory_domain_test;
+GRANT SELECT ON memory_lineage,memory_summaries,derived_memory_dependencies,memories,memory_scopes,memory_conflicts,memory_relations,memory_episodes,memory_provenance,memory_links,memory_entities,entity_edges,fact_evidence TO memory_domain_test;
 GRANT INSERT,DELETE ON memory_links TO memory_domain_test;
 GRANT USAGE,SELECT ON SEQUENCE memory_links_id_seq TO memory_domain_test;
 UPDATE memories SET scope_type='project',scope_value='app' WHERE id=2;
