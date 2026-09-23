@@ -33,6 +33,8 @@ func TestVectorSearchDimensionsAndScopePostgres(t *testing.T) {
 			defer tx.Rollback(ctx)
 			_, err = tx.Exec(ctx, fmt.Sprintf(`CREATE EXTENSION IF NOT EXISTS vector; CREATE SCHEMA vector_search_test; SET LOCAL search_path TO pg_temp,vector_search_test,public;
 CREATE FUNCTION vector_search_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
+CREATE TEMP TABLE memories(id bigint PRIMARY KEY,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint);
 CREATE TEMP TABLE memory_embeddings(point_id bigint PRIMARY KEY,embedding vector(%d),record_type text,primary_scope text,workspace text,project text,kind text,payload_json text);
  CREATE TEMP TABLE vector_index_ops(point_id bigint PRIMARY KEY,collection text,memory_id bigint,status text,attempts int,last_error text,indexed_at text,updated_at text);`, dim))
 			if err != nil {
@@ -47,6 +49,9 @@ CREATE TEMP TABLE memory_embeddings(point_id bigint PRIMARY KEY,embedding vector
 			}
 			scopes := []Scope{{Type: ScopeGlobal, Value: "_global"}, {Type: ScopeProject, Value: "app"}, {Type: ScopeProject, Value: "private"}, {Type: ScopeWorkspace, Value: "team"}}
 			for i, scope := range scopes {
+				if _, err := tx.Exec(ctx, `INSERT INTO memories(id,scope_type,scope_value) VALUES($1,$2,$3)`, i+1, scope.Type, scope.Value); err != nil {
+					t.Fatal(err)
+				}
 				if err := backend.UpsertEmbedding(ctx, Record{ID: int64(i + 1), Scope: scope, Kind: "fact"}, vector); err != nil {
 					t.Fatal(err)
 				}
@@ -102,6 +107,29 @@ CREATE TEMP TABLE memory_embeddings(point_id bigint PRIMARY KEY,embedding vector
 						t.Fatal(status)
 					}
 				})
+			}
+			// Apply eligibility before the vector limit: a hidden best match must
+			// neither leak its identity nor crowd out the next authorized record.
+			if _, err := tx.Exec(ctx, `INSERT INTO memory_units VALUES(1,1);
+ INSERT INTO memory_embeddings SELECT 1000000000001,embedding,'unit',primary_scope,workspace,project,kind,payload_json FROM memory_embeddings WHERE point_id=1`); err != nil {
+				t.Fatal(err)
+			}
+			for _, update := range []string{
+				"valid_from='2099-01-01'", "valid_until='2000-01-01'", "activation_suppressed=1",
+				"lifecycle_state='retired'", "scope_type='project',scope_value='moved-hidden'",
+			} {
+				if _, err := tx.Exec(ctx, `UPDATE memories SET valid_from='',valid_until='',activation_suppressed=0,lifecycle_state='active',scope_type='global',scope_value='_global' WHERE id=1;
+ UPDATE memories SET `+update+` WHERE id=1`); err != nil {
+					t.Fatal(err)
+				}
+				hits, err := backend.SearchVectors(ctx, query, "memory", "team", "app", false, 1)
+				if err != nil || len(hits) != 1 || hits[0].ID != 2 {
+					t.Fatal("ineligible vector consumed limit", update, hits, err)
+				}
+				hits, err = backend.SearchVectors(ctx, query, "unit", "team", "app", false, 1)
+				if err != nil || len(hits) != 0 {
+					t.Fatal("ineligible unit leaked", update, hits, err)
+				}
 			}
 			// A healthy empty search and an unavailable vector table must remain
 			// distinguishable at the owner boundary. The retired C smoke test

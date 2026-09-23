@@ -505,8 +505,9 @@ certify MR-07's task-contract and recovery requirements.
 The [durable relation consumer](../../validation/memory-relation-consumer-2026-09-23.md)
 atomically queues copied-input dependants and advances bounded replay progress.
 Committed-connection tests cover restart, competing workers, rollback and retention
-resynchronization; full PostgreSQL/race and export checks pass. Fresh schema-33
-background-worker validation remains pending. Progress records queued invalidation,
+resynchronization; full PostgreSQL/race and export checks pass. Fresh schema-33 candidate `1baa020a6` passes **1,146/1,146 checks**, including
+actual regeneration and restart in both KB topologies. All nine images and three
+actual provider caps are captured. Progress records queued invalidation,
 not serving freshness or complete MR-02/MR-04 acceptance.
 
 [Link-only mutation invalidation](../../validation/memory-link-journal-2026-09-23.md)
@@ -514,3 +515,9 @@ now advances source dependency revisions and canonical events, including both
 sources of a moved link. No-op updates remain silent. Creation receipts bind the
 final revision after supersession links. PostgreSQL/race and export checks pass;
 fresh schema-34 worker validation remains pending.
+
+[Future-valid index admission](../../validation/memory-future-index-admission-2026-09-23.md)
+separates active input processing from current recall, preventing premature retry
+exhaustion. Whole-record/unit model work blocks suppressed inputs, while raw
+vector results enforce current canonical eligibility before limits. PostgreSQL/race
+and export checks pass; real-clock deployment validation remains pending.

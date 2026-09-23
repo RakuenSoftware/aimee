@@ -84,6 +84,46 @@ func exerciseSharedIndexReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	if executor.calls != calls {
 		t.Fatal("completed work repeated")
 	}
+	// Future applicability must not exhaust the background queue before time
+	// makes a record visible. Index admission and current recall are distinct.
+	future := seed("index-future")
+	execSQL(`UPDATE memories SET valid_from='2099-01-01' WHERE id=$1`, future)
+	batch(64)
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_embeddings WHERE point_id=$1`, future).Scan(&count); err != nil || count != 1 {
+		t.Fatal("future record was not pre-indexed", count, err)
+	}
+	query := make([]float64, len(vector))
+	for i, v := range vector {
+		query[i] = float64(v)
+	}
+	for _, kind := range []string{"memory", "unit"} {
+		hits, err := backend.searchVectors(ctx, query, kind, "", "index-future", false, 64, Scope{Type: ScopeProject, Value: "index-future"})
+		if err != nil || len(hits) != 0 {
+			t.Fatal("future vector escaped serving fence", kind, hits, err)
+		}
+	}
+	if _, err := backend.Get(ctx, Scope{}, future); !errors.Is(err, ErrMemoryNotFound) {
+		t.Fatal("future index membership granted current read", err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories m JOIN memory_embeddings e ON e.point_id=m.id
+ WHERE m.id=$1 AND `+memoryValidityAtSQL("m.", "'2099-01-01'::timestamptz"), future).Scan(&count); err != nil || count != 1 {
+		t.Fatal("prepared vector missing at applicability boundary", count, err)
+	}
+	var futureUnit int64
+	if err := tx.QueryRow(ctx, `SELECT $2+id FROM memory_units WHERE memory_id=$1 ORDER BY id LIMIT 1`, future, unitPointOffset).Scan(&futureUnit); err != nil {
+		t.Fatal(err)
+	}
+	execSQL(`UPDATE memories SET activation_suppressed=1 WHERE id=$1`, future)
+	calls = executor.calls
+	for _, point := range []int64{future, futureUnit} {
+		if r := EmbedRecord(ctx, 0, executor, backend, point, "http://embedder", dimension); r.Embedded || r.Error == "" {
+			t.Fatal("suppressed indexing input admitted", point, r)
+		}
+	}
+	if executor.calls != calls {
+		t.Fatal("suppressed content reached the model")
+	}
+	execSQL(`DELETE FROM memories WHERE id=$1`, future)
 	execSQL(`UPDATE memories SET confidence=0.7 WHERE id=$1`, first)
 	checkJob(first, "done", 1, 0)
 	// In-place content changes must requeue completed jobs and existing vectors.

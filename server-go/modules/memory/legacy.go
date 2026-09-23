@@ -523,7 +523,16 @@ func (s *postgresDataStore) searchVectors(ctx context.Context, vector []float64,
 		return nil, errors.New("memory: invalid vector search")
 	}
 	rows, err := s.db.Query(ctx, `SELECT e.point_id,1-(e.embedding <=> $1::vector) AS score
-FROM memory_embeddings e WHERE e.record_type=$2 AND ($5 OR
+FROM memory_embeddings e WHERE e.record_type=$2
+ AND EXISTS(SELECT 1 FROM memories m WHERE m.id=CASE e.record_type
+   WHEN 'memory' THEN e.point_id WHEN 'unit' THEN
+    (SELECT u.memory_id FROM memory_units u WHERE u.id=e.point_id-1000000000000) END
+   AND `+currentMemorySQL("m.")+`
+   AND m.scope_type=e.primary_scope AND
+    ((m.scope_type='global' AND m.scope_value='_global') OR
+     (m.scope_type='workspace' AND m.scope_value=e.workspace) OR
+     (m.scope_type='project' AND m.scope_value=e.project)))
+ AND ($5 OR
  e.primary_scope='global' OR e.workspace='_shared' OR ($3<>'' AND e.workspace=$3) OR
  ($4<>'' AND e.project=$4))
  AND ($7='' OR (e.primary_scope=$7 AND

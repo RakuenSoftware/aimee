@@ -22,6 +22,14 @@ func memoryTimeSQL(column string) string {
 func memoryValiditySQL(prefix string) string {
 	return memoryValidityAtSQL(prefix, "CURRENT_TIMESTAMP")
 }
+
+// Active retained inputs may be indexed before their valid-time boundary.
+// This never grants serving authority: recall still applies currentMemorySQL.
+// Suppression and non-active lifecycle states prohibit this indexing route.
+func indexableMemorySQL(prefix string) string {
+	return prefix + `lifecycle_state='active' AND ` + prefix + `activation_suppressed=0`
+}
+
 func currentMemorySQL(prefix string) string {
 	return prefix + `lifecycle_state='active' AND ` + prefix + `activation_suppressed=0 AND ` + memoryValiditySQL(prefix)
 }

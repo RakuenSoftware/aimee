@@ -325,6 +325,48 @@ def relation_consumer_rebuild_gate(kb, check):
             DELETE FROM memories WHERE key IN ('{key}-parent','{key}-target')""")
 
 
+def future_index_admission_gate(kb, check):
+    key = 'future-index-' + uuid.uuid4().hex
+    def sql(query):
+        return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+    mid = int(sql(f"""INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,valid_from)
+        VALUES('L2','fact','{key}','I ride my bicycle to the office every morning.',
+          'project','{key}',(clock_timestamp()+interval '45 seconds')::text) RETURNING id"""))
+    try:
+        ready = False
+        deadline = time.monotonic() + 40
+        while time.monotonic() < deadline:
+            ready = sql(f"""SELECT count(*) FROM memories m JOIN memory_embeddings e ON e.point_id=m.id
+                WHERE m.id={mid} AND m.valid_from::timestamptz>clock_timestamp()
+                AND EXISTS(SELECT 1 FROM kb_async_jobs j WHERE j.kind='memory_index' AND j.document_id=m.id AND j.status='done')
+                AND EXISTS(SELECT 1 FROM memory_relation_consumer_positions c JOIN memory_collection_generations g
+                  USING(scope_type,scope_value) WHERE c.scope_type='project' AND c.scope_value='{key}' AND c.generation=g.generation)""").strip() == '1'
+            if ready:
+                break
+            time.sleep(1)
+        check('Future-valid record is indexed before its serving boundary', ready)
+        args = dict(id=mid, project=key, scope_context=True)
+        code, before = kb.kb_request('/v1/actions/memory.get', args)
+        check('Pre-indexing cannot grant an early current read', before.get('kind') == 'not_found')
+        version = sql(f"SELECT record_revision FROM memories WHERE id={mid}")
+        indexed_at = sql(f"SELECT indexed_at FROM vector_index_ops WHERE point_id={mid}")
+        deadline = time.monotonic() + 50
+        after = {}
+        while time.monotonic() < deadline:
+            code, after = kb.kb_request('/v1/actions/memory.get', args)
+            if after.get('status') == 'ok':
+                break
+            time.sleep(1)
+        check('Clock-only validity activation exposes the prepared record',
+              code == 200 and after.get('memory', {}).get('id') == mid)
+        check('Activation needs neither another canonical write nor another embedding',
+              sql(f"SELECT record_revision FROM memories WHERE id={mid}") == version and
+              sql(f"SELECT indexed_at FROM vector_index_ops WHERE point_id={mid}") == indexed_at)
+    finally:
+        sql(f"DELETE FROM memories WHERE id={mid}")
+
+
 def typed_source_version_gate(kb, check):
     """Observe real assertion versions through the authenticated KB/Go path."""
     key = 'typed-version-' + uuid.uuid4().hex
@@ -883,6 +925,7 @@ def main():
             typed_source_version_gate(kb, check)
             linked_relation_input_gate(kb, check)
             relation_consumer_rebuild_gate(kb, check)
+            future_index_admission_gate(kb, check)
             preview_source_version_gate(kb, check)
             evidence_exact_identity_gate(kb, check)
         if args.topology in ('T2', 'T3'):

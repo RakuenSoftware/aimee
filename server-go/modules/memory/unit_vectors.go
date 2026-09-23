@@ -39,12 +39,12 @@ func (s *postgresDataStore) embedUnit(ctx context.Context, trace uint64, executo
 	// Acquire the parent before its unit, matching the reindex lock order.
 	// The second query gets a fresh snapshot after any concurrent rebuild.
 	if err := s.db.QueryRow(ctx, `SELECT m.id FROM memory_units u JOIN memories m ON m.id=u.memory_id
- WHERE u.id=$1 AND m.lifecycle_state='active' FOR UPDATE OF m`, pointID-unitPointOffset).Scan(&parent.ID); err != nil {
+ WHERE u.id=$1 AND `+indexableMemorySQL("m.")+` FOR UPDATE OF m`, pointID-unitPointOffset).Scan(&parent.ID); err != nil {
 		return EmbedResponse{Error: "embed: memory unit unavailable"}
 	}
 	if err := s.db.QueryRow(ctx, `SELECT u.id,u.unit_type,u.unit_key,u.unit_text,u.memory_kind,u.weight,
  m.id,m.kind,m.scope_type,m.scope_value FROM memory_units u JOIN memories m ON m.id=u.memory_id
- WHERE u.id=$1 AND m.lifecycle_state='active' FOR UPDATE OF u`, pointID-unitPointOffset).Scan(
+ WHERE u.id=$1 AND `+indexableMemorySQL("m.")+` FOR UPDATE OF u`, pointID-unitPointOffset).Scan(
 		&u.ID, &u.Type, &u.Key, &u.Text, &u.Kind, &u.Weight, &parent.ID, &parent.Kind, &parent.Scope.Type, &parent.Scope.Value); err != nil {
 		return EmbedResponse{Error: "embed: memory unit unavailable"}
 	}
