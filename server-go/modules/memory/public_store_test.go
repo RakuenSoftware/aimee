@@ -454,7 +454,7 @@ VALUES($1,$2,'exact integer fixture','L2','fact','world_fact','project','exact-i
 	// Replacement under a non-owner role cannot reach a different project's source.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_store_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA store_command_test TO memory_store_test;
-GRANT SELECT ON derived_memory_dependencies TO memory_store_test;
+GRANT SELECT ON memory_collection_owner,derived_memory_dependencies TO memory_store_test;
 GRANT SELECT,UPDATE,DELETE,INSERT ON memories,memory_rejection_tombstones,memory_links,memory_scopes,memory_summaries,memory_fact_actors,kb_async_jobs TO memory_store_test;
 GRANT USAGE,SELECT ON SEQUENCE memories_id_seq,memory_links_id_seq,kb_async_jobs_id_seq TO memory_store_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;

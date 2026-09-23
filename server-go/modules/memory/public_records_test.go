@@ -268,6 +268,49 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	if view := run("top_l2_facts", `{"view":"session","section":"facts","scope_context":true,"project":"app","budget_bytes":1}`)["text"]; view != "" {
 		t.Fatal("session exceeded budget", view)
 	}
+	// Enrichment is another READ COMMITTED statement: mutations between source
+	// selection and metadata selection must not create a mixed public record.
+	backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+	for _, mutation := range []string{
+		"UPDATE memories SET content='changed after selection' WHERE id=1",
+		"UPDATE memories SET scope_value='moved after selection' WHERE id=1",
+		"UPDATE memories SET confidence=0.25 WHERE id=1",
+		"UPDATE memories SET record_revision=record_revision+1 WHERE id=1",
+		"UPDATE memory_collection_owner SET owner_id='00000000-0000-4000-8000-000000000002' WHERE id=1",
+	} {
+		if _, err := tx.Exec(ctx, "SAVEPOINT enrichment_race"); err != nil {
+			t.Fatal(err)
+		}
+		selected, err := backend.getAtVersioned(ctx, Scope{}, 1, false, "", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rows, err := backend.publicRecords(ctx, []Record{selected}); err != nil || len(rows) != 1 || rows[0].Content != selected.Content {
+			t.Fatal("unchanged enrichment refused", rows, err)
+		}
+		if _, err := tx.Exec(ctx, mutation); err != nil {
+			t.Fatal(err)
+		}
+		if rows, err := backend.publicRecords(ctx, []Record{selected}); err == nil || rows != nil {
+			t.Fatal("mixed enrichment accepted", mutation, rows, err)
+		}
+		if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT enrichment_race"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	selected, err := backend.getAtVersioned(ctx, Scope{}, 1, false, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, "SAVEPOINT unversioned_enrichment; UPDATE memories SET content='changed unversioned payload' WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := backend.publicRecords(ctx, []Record{selected}); err == nil || rows != nil {
+		t.Fatal("mixed unversioned enrichment accepted", rows, err)
+	}
+	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT unversioned_enrichment"); err != nil {
+		t.Fatal(err)
+	}
 	// Metadata loss must not silently produce partial success.
 	if _, err := (&postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}).publicRecords(ctx, []Record{{ID: 9223372036854775807}}); err == nil {
 		t.Fatal("missing metadata accepted")
@@ -299,7 +342,7 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_record_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA record_command_test TO memory_record_test;
 GRANT SELECT,UPDATE ON memories TO memory_record_test;
-GRANT SELECT ON memory_summaries,derived_memory_dependencies TO memory_record_test;
+GRANT SELECT ON memory_collection_owner,memory_summaries,derived_memory_dependencies TO memory_record_test;
 GRANT SELECT,INSERT ON memory_scopes,memory_workspaces TO memory_record_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY test_memory_visibility ON memories USING

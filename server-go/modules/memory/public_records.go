@@ -11,7 +11,8 @@ import (
 )
 
 // Public records retain the KB response shape, without the former native
-// fixed-size content buffer. Metadata is read inside the same scoped transaction.
+// fixed-size content buffer. Enrichment refuses changed payloads and mismatched
+// observed versions; a scoped READ COMMITTED transaction alone is not a snapshot.
 type publicMemoryRecord struct {
 	Version *MemoryRecordVersion `json:"version,omitempty"`
 
@@ -46,16 +47,23 @@ func (s *postgresDataStore) publicRecords(ctx context.Context, records []Record)
 COALESCE(m.last_used_at,''),m.created_at,m.updated_at,COALESCE(m.source_session,''),
 COALESCE(m.provenance_category,''),COALESCE((SELECT summary FROM
  (SELECT id,scope,summary FROM memory_summaries summary WHERE summary.memory_id=m.id AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY id LIMIT 4) summaries
- ORDER BY CASE WHEN scope='headline' AND summary<>'' THEN 0 ELSE 1 END,id LIMIT 1),'')
+ ORDER BY CASE WHEN scope='headline' AND summary<>'' THEN 0 ELSE 1 END,id LIMIT 1),''),
+m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,
+m.record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
 FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	metadata := make(map[int64]publicMemoryRecord, len(records))
+	type observedMetadata struct {
+		publicMemoryRecord
+		scope           Scope
+		revision, owner string
+	}
+	metadata := make(map[int64]observedMetadata, len(records))
 	for rows.Next() {
-		var r publicMemoryRecord
-		if err = rows.Scan(&r.ID, &r.UseCases, &r.UseCount, &r.LastUsedAt, &r.CreatedAt, &r.UpdatedAt, &r.SourceSession, &r.ProvenanceCategory, &r.Headline); err != nil {
+		var r observedMetadata
+		if err = rows.Scan(&r.ID, &r.UseCases, &r.UseCount, &r.LastUsedAt, &r.CreatedAt, &r.UpdatedAt, &r.SourceSession, &r.ProvenanceCategory, &r.Headline, &r.scope.Type, &r.scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.revision, &r.owner); err != nil {
 			return nil, err
 		}
 		metadata[r.ID] = r
@@ -68,9 +76,15 @@ FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 		if !ok {
 			return nil, fmt.Errorf("memory: metadata missing for record %d", record.ID)
 		}
+		if r.scope != record.Scope || r.Tier != record.Tier || r.Kind != record.Kind || r.Key != record.Key || r.Content != record.Content || r.Confidence != record.Confidence {
+			return nil, fmt.Errorf("memory: record %d changed during public enrichment", record.ID)
+		}
+		if v := record.Version; v != nil && (!v.validFor(record.ID) || v.RecordRevision != r.revision || v.OwnerID != r.owner) {
+			return nil, fmt.Errorf("memory: record %d version changed during public enrichment", record.ID)
+		}
 		r.Version = record.Version
 		r.Tier, r.Kind, r.Key, r.Content, r.Confidence = record.Tier, record.Kind, record.Key, record.Content, record.Confidence
-		result = append(result, r)
+		result = append(result, r.publicMemoryRecord)
 	}
 	return result, nil
 }

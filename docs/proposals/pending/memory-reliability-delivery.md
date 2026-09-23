@@ -640,7 +640,8 @@ producer observations are absent or stale. Full MR-04 remains open.
 withhold stale deterministic units from raw vector search, shared/unit semantic
 recall, direct embedding and re-embedding. Parent revision, unit field commitment
 and optional summary observations are producer-owned. Local packaged race and
-export checks pass; fresh deployment evidence remains pending. Other intermediate
+export checks pass; combined unit/card candidate `76be02a42` passes all 1,694
+fresh deployment checks with nine image identities and three provider limits verified. Other intermediate
 source contracts and full MR-04 closure remain open.
 
 [Episode-card source eligibility](../../validation/memory-card-source-eligibility-2026-09-23.md)
@@ -660,3 +661,9 @@ context window, and blocks suppressed coreference targets from the resolver.
 Explicit evaluation-corpus scope narrowing is preserved. Local packaged race,
 public-scope and export checks pass; fresh deployment evidence remains pending.
 These repairs do not certify the remaining MR-01 release-race and parity gates.
+
+[Public enrichment consistency](../../validation/memory-public-enrichment-2026-09-23.md)
+refuses changed payloads and mismatched observed owner/revisions across metadata
+reads. Historical selection remains separate. Packaged runtime replay, corrected
+restricted-role fixtures and export checks pass; fresh-image validation and
+unchanged-payload unversioned observation coverage remain open.

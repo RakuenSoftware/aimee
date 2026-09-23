@@ -26,12 +26,12 @@ separately. The final single-point lookup optimization passes the
 and [export build](memory-unit-inputs-2026-09-23/export.txt). Ownership, module
 boundary, descriptor/inventory, route, API and documentation checks pass. The
 fresh matrix also checks that the real background unit producer records its
-source observations; that deployment validation remains pending. Released CT100 remains
+source observations; that deployment validation passes. Released CT100 remains
 on 0.4.5 throughout candidate validation.
 
-The combined unit/card candidate `76be02a42` passes **614/614** fresh T3 checks.
+The combined unit/card candidate `76be02a42` passes **1,694/1,694** fresh checks (1,080 T2 and 614 T3).
 The [raw T3 receipt](memory-unit-inputs-2026-09-23/fresh/T3/topology.json) and
 [nine verified image identities](memory-unit-inputs-2026-09-23/fresh/image-identities.json)
 are retained, including all three actual provider byte limits of 32,768. Full
-T2 validation remains pending. The intermediate unit-only image `0cda332a0` was
+T2 validation also completed with exit status zero; its [raw receipt](memory-unit-inputs-2026-09-23/fresh/T2/topology.json) is retained. The intermediate unit-only image `0cda332a0` was
 built but was superseded by this combined candidate before deployment testing.
