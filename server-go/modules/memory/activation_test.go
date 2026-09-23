@@ -162,6 +162,19 @@ func TestActivationPostgresSelectionAndRecall(t *testing.T) {
 	if dashboard["session_start"] != true || metrics["assemblies_total"].(float64) != float64(beforeMetrics.Assemblies+1) || metrics["session_start_assemblies"].(float64) != float64(beforeMetrics.Starts+1) || metrics["ms_max"].(float64) < 0 {
 		t.Fatal(dashboard)
 	}
+	if metrics["calls_total"].(float64) != float64(beforeMetrics.Calls+1) || metrics["population"] != "process_recall_bundle_completions" {
+		t.Fatalf("dashboard call population: %v", metrics)
+	}
+	beforeFailure := recallMetrics()
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := s.RecallBundle(cancelled, "", 0, false); err == nil {
+		t.Fatal("cancelled recall unexpectedly succeeded")
+	}
+	afterFailure := recallMetrics()
+	if afterFailure.Calls != beforeFailure.Calls+1 || afterFailure.Assemblies != beforeFailure.Assemblies || afterFailure.Starts != beforeFailure.Starts {
+		t.Fatalf("failed call must count only as a completion: before=%+v after=%+v", beforeFailure, afterFailure)
+	}
 	client := clientForHandler(t, handler)
 	reply, err := client.Data(ctx, 73, DataRequest{Operation: "recall-bundle", Activation: raw})
 	if err != nil {

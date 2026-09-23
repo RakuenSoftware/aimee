@@ -540,3 +540,8 @@ rechecks the Go source owner after backoff before native or buffered Responses
 resends. A local refusal remains `context_refused` through native primary and
 model-fallback paths. Socket, real-Go ingress and agent propagation tests pass;
 durable provider receipts and the post-check mutation race remain open.
+
+The combined future-record/copied-relation application `921d7f3c4` passes
+**1,162/1,162 fresh checks** (136 T1 and 1,026 T2), with all nine image identities
+and three provider caps checked. The [receipts](../../validation/memory-future-index-admission-2026-09-23.md)
+retain the initial public-field harness failure and the corrected reruns.

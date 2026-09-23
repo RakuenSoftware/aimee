@@ -32,7 +32,7 @@ image: `sha256:03e39b52ade17017c893feefccea152e5404eba659ad4a133a80d920ba97234a`
 The database is schema-34 `aimee-pr2990-postgres:d0e3c5752`, with the released
 0.4.5 embedder. The harness exits zero and removes its containers. T2 was not
 rerun for this intermediate candidate; combined T1/T2 validation of the copied
-relationship activation follow-up remains pending. This test does not certify
+relationship activation follow-up is recorded below. This test does not certify
 historical semantic recall.
 Full generation coverage, rollback and release-time receipts remain open. These
 functional suite timings are not matched performance measurements.
@@ -64,4 +64,22 @@ passes in 138.321 seconds, and
 [export](memory-future-index-admission-2026-09-23/linked-future-export.txt) passes.
 An additional bulk-cascade regression confirms the existing link journal handles
 erasing both endpoints in one statement. No schema change is needed. Combined
-fresh T1/T2 validation of this follow-up remains pending.
+fresh T1/T2 validation of application `921d7f3c4` now passes **1,162/1,162**
+checks (136 T1 and 1,026 T2). Both harness processes exit zero. The
+[raw topology receipts](memory-future-index-admission-2026-09-23/linked-fresh/T2/topology.json)
+and [nine image identities](memory-future-index-admission-2026-09-23/linked-fresh/image-identities.json)
+are retained, with all three actual 32,768-byte provider ceilings. The application
+is `sha256:af92b5852ce26a9e909b6b03b54c149575ea255740d11a60e06444c27ed21fb2`;
+the schema-34 PostgreSQL and released embedder identities are unchanged. Both
+owned deployment stacks removed their containers; the separate replay database
+remains for ongoing work. Released CT100 0.4.5 was not replaced.
+
+The [initial T1](memory-future-index-admission-2026-09-23/linked-harness-failure/T1/topology.json)
+and [initial T2](memory-future-index-admission-2026-09-23/linked-harness-failure/T2/topology.json)
+runs exposed a harness contract error: the public graph response uses
+`dst_entity`, while the new fixture filtered on the internal `target` name.
+That made the early-omission check vacuous and rejected the visible result after
+activation. The corrected harness, committed in `1e61d4833`, checks the public
+field and the same relation ID before/after the real boundary against the
+unchanged `921d7f3c4` application image. These receipts do not test the separate
+provider retry code introduced by `1e61d4833`.

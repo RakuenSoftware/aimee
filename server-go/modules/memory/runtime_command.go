@@ -323,7 +323,7 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 			return nil, bus.ModuleStatusInternal
 		}
 		m := recallMetrics()
-		bundle["metrics"] = map[string]any{"assemblies_total": m.Assemblies, "session_start_assemblies": m.Starts, "ms_avg": m.AverageMS, "ms_max": m.MaximumMS, "answer_counters": m.AnswerCounters}
+		bundle["metrics"] = map[string]any{"calls_total": m.Calls, "population": "process_recall_bundle_completions", "assemblies_total": m.Assemblies, "session_start_assemblies": m.Starts, "ms_avg": m.AverageMS, "ms_max": m.MaximumMS, "answer_counters": m.AnswerCounters}
 		return commandResult(bundle)
 	}
 	return nil, bus.ModuleStatusInvalidRequest

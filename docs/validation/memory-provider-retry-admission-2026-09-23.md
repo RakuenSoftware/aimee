@@ -36,3 +36,13 @@ successful recovery and identical serialized bytes. Fresh candidate validation
 is pending. These checks do not establish durable dispatch receipts, full
 provider-path parity, or elimination of the mutation race after the owner's
 snapshot. MR-06 remains open.
+
+A telemetry follow-up fixes `recall-metrics.calls`, which discarded the measured
+call count and always serialized zero. The runtime recall dashboard now includes
+`calls_total` and labels its population `process_recall_bundle_completions`.
+This process-lifetime operational counter includes failed bundle completions;
+`assemblies_total` still counts successful assembly only. It is not a count of
+provider deliveries, a scoped health window, or durable exposure telemetry.
+[Restricted-role race replay](memory-provider-retry-admission-2026-09-23/recall-count-race.txt)
+checks a successful dashboard assembly and a cancelled recall: cancellation
+increments calls without incrementing successful or session-start assemblies.
