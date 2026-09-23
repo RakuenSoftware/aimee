@@ -1917,7 +1917,7 @@
       "symbols": [
         "kb_client_memory_check_drift"
       ],
-      "sha256": "97df185ec3a926fb00926bd805f87db677d07f690eb3ed3efbe8bfd1b791a963"
+      "sha256": "342351f53d1336a83cc16a0e2df9dd2ae6d9ea637ccde38edf61583b72530aa7"
     },
     "src/modules/kb_client/kb_client.h": {
       "disposition": "kb-client",
@@ -2103,7 +2103,7 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "ac281a3358a4e9dad4beb225cf249a39bb8e07d0ec11d0d5f5d9c9fbcba3ef2d"
+      "sha256": "ef51245321a72a2933abfc95f538ac83850f2b662d76f67da372e8ad38ca352c"
     },
     "src/server/server_api.c": {
       "disposition": "host-transport",
@@ -2470,7 +2470,7 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "a95e671fb426956b20144f9b3e2aa2c6f58b29676c28d2a39bc7891b010035ee"
+      "sha256": "765aa3e0eb926fead02f4cc5613ac226ccc8e387f7598b60233afc1475aa68b1"
     },
     "src/tests/test_server_facts_transport.c": {
       "disposition": "host-fixture",

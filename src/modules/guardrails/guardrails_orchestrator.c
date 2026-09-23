@@ -1,4 +1,3 @@
-#include "aimee_git_command.h"
 /* guardrails_orchestrator.c: the `pre_tool_check` entry point and its
  * orchestrator-self-discipline helpers (write-command classification,
  * bash-guard messaging, per-session counters).
@@ -8,6 +7,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include "aimee_git_command.h"
 #include "aimee.h"
 #include "worktree_scope.h"
 #include "cJSON.h"

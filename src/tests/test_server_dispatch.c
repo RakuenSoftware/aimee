@@ -2208,28 +2208,49 @@ static void test_launch_run_returns_provider_metadata(void)
    free(ctx);
 }
 
+static cJSON *hook_test_register_workspace(const char *path)
+{
+   cJSON *saved = cJSON_CreateObject();
+   cJSON_AddItemToObject(saved, "workspaces", config_client_value_copy("workspaces"));
+   cJSON_AddNumberToObject(saved, "workspace_count", config_workspace_count());
+   cJSON *paths = cJSON_CreateArray();
+   cJSON_AddItemToArray(paths, cJSON_CreateString(path));
+   assert(config_client_set_value("workspaces", paths) == 0);
+   assert(config_set_workspace_count(1) == 0);
+   return saved;
+}
+
+static void hook_test_restore_workspaces(cJSON *saved)
+{
+   cJSON *paths = cJSON_DetachItemFromObjectCaseSensitive(saved, "workspaces");
+   assert(config_client_set_value("workspaces", paths ? paths : cJSON_CreateArray()) == 0);
+   assert(config_set_workspace_count(cJSON_GetObjectItem(saved, "workspace_count")->valueint) == 0);
+   cJSON_Delete(saved);
+}
+
 static void test_hooks_pre_recovers_worktree_mapping_from_cwd(void)
 {
+   cJSON *saved_workspaces = hook_test_register_workspace("/workspace/project");
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx != NULL && conn != NULL);
 
-   snprintf(g_git_repo_root_prefix, sizeof(g_git_repo_root_prefix), "%s", "/tmp/project");
-   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", "/tmp/project");
+   snprintf(g_git_repo_root_prefix, sizeof(g_git_repo_root_prefix), "%s", "/workspace/project");
+   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", "/workspace/project");
    memset(&g_saved_state, 0, sizeof(g_saved_state));
    memset(&g_pre_tool_state, 0, sizeof(g_pre_tool_state));
    g_session_state_save_calls = 0;
    g_pre_tool_seen_state = 0;
 
    const char *req = "{\"method\":\"hooks.pre\",\"session_id\":\"sessabcdef\","
-                     "\"tool_name\":\"Read\",\"tool_input\":{},\"cwd\":\"/tmp/project/src\"}";
+                     "\"tool_name\":\"Read\",\"tool_input\":{},\"cwd\":\"/workspace/project/src\"}";
    cJSON *json = dispatch_json(ctx, conn, req, strlen(req));
    assert(strcmp(cJSON_GetObjectItem(json, "status")->valuestring, "ok") == 0);
    assert(g_pre_tool_seen_state == 1);
    assert(g_pre_tool_state.worktree_count == 1);
-   assert(strcmp(g_pre_tool_state.worktrees[0].git_root, "/tmp/project") == 0);
+   assert(strcmp(g_pre_tool_state.worktrees[0].git_root, "/workspace/project") == 0);
    assert(strcmp(g_pre_tool_state.worktrees[0].worktree_path,
-                 "/tmp/project/.aimee/worktrees/sessabcd/main") == 0);
+                 "/workspace/project/.aimee/worktrees/sessabcd/main") == 0);
    assert(g_session_state_save_calls == 1);
    assert(g_saved_state.worktree_count == 1);
    cJSON_Delete(json);
@@ -2238,10 +2259,35 @@ static void test_hooks_pre_recovers_worktree_mapping_from_cwd(void)
    g_git_repo_root_value[0] = '\0';
    free(conn);
    free(ctx);
+   hook_test_restore_workspaces(saved_workspaces);
+}
+
+static void test_hooks_pre_unregistered_workspace(void)
+{
+   cJSON *saved_workspaces = hook_test_register_workspace("/workspace/project");
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx && conn);
+   g_pre_tool_seen_state = 0;
+   g_session_state_save_calls = 0;
+   const char *req = "{\"method\":\"hooks.pre\",\"session_id\":\"outside\","
+                     "\"tool_name\":\"Read\",\"tool_input\":{},"
+                     "\"cwd\":\"/workspace/project-other\",\"request_id\":\"scope-test\"}";
+   cJSON *json = dispatch_json(ctx, conn, req, strlen(req));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "status")), "ok") == 0);
+   assert(cJSON_GetObjectItem(json, "exit_code")->valueint == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "request_id")), "scope-test") == 0);
+   assert(g_pre_tool_seen_state == 0);
+   assert(g_session_state_save_calls == 0);
+   cJSON_Delete(json);
+   free(conn);
+   free(ctx);
+   hook_test_restore_workspaces(saved_workspaces);
 }
 
 static void test_hooks_pre_remote_workspace_scope(void)
 {
+   cJSON *saved_workspaces = hook_test_register_workspace("/client/only/repo");
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx && conn);
@@ -2295,10 +2341,12 @@ static void test_hooks_pre_remote_workspace_scope(void)
    run_cmd_set_cwd(NULL);
    free(conn);
    free(ctx);
+   hook_test_restore_workspaces(saved_workspaces);
 }
 
 static void test_hook_identity_session_binding(void)
 {
+   cJSON *saved_workspaces = hook_test_register_workspace("/tmp");
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx && conn);
@@ -2344,6 +2392,7 @@ static void test_hook_identity_session_binding(void)
    hook_session_token_registry_reset();
    free(conn);
    free(ctx);
+   hook_test_restore_workspaces(saved_workspaces);
 }
 
 /* Regression: the /v1 HTTP workers (server_http.c) build a memset-zeroed
@@ -2713,6 +2762,7 @@ int main(void)
    test_init_route_through_server_to_kb();
    test_launch_run_returns_provider_metadata();
    test_hooks_pre_recovers_worktree_mapping_from_cwd();
+   test_hooks_pre_unregistered_workspace();
    test_hooks_pre_remote_workspace_scope();
    test_hook_identity_session_binding();
    printf("server_dispatch: all tests passed\n");

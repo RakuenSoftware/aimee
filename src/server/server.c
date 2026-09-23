@@ -1,8 +1,8 @@
-#include "workspace_hook_scope.h"
 /* server.c: aimee-server core -- event loop, connection handling, method dispatch */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include "workspace_hook_scope.h"
 #include "server_internal.h"
 #include "aimee.h"
 #include "harness_memory_scope.h" /* hmem_scope_for_client */
