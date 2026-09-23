@@ -676,3 +676,8 @@ Public enrichment rechecks current or historical eligibility as appropriate.
 Fact history applies retained-history exclusions before limits and honors explicit
 scope narrowing. The full packaged race suite passes in 254.529 seconds and
 export passes; fresh deployment validation remains pending.
+
+[Literal history identity](../../validation/memory-literal-history-2026-09-23.md)
+prevents '%' and '_' in a canonical key from admitting unrelated predecessors.
+The public PostgreSQL race regression and export pass; combined fresh validation
+with the read-observation repair is pending.

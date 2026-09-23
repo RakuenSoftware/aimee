@@ -560,7 +560,7 @@ func (s *postgresDataStore) FactHistory(ctx context.Context, key string, limit i
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+queryRecordColumns+`
-FROM memories WHERE (key=$1 OR key LIKE $1||'#v%') AND `+historicalMemoryInspectionSQL("")+` ORDER BY created_at DESC,id DESC LIMIT $2`, key, limit)
+FROM memories WHERE (key=$1 OR starts_with(key,$1||'#v')) AND `+historicalMemoryInspectionSQL("")+` ORDER BY created_at DESC,id DESC LIMIT $2`, key, limit)
 	if err != nil {
 		return nil, err
 	}

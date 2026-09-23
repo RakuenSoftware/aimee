@@ -367,6 +367,25 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT historical_enrichment"); err != nil {
 		t.Fatal(err)
 	}
+	// A requested history key is an identity, not a SQL wildcard pattern.
+	// An unrelated record cannot supply a false predecessor for a '%'/'_' key.
+	if _, err := tx.Exec(ctx, `SAVEPOINT literal_history;
+ INSERT INTO memories(key,content) VALUES ('history_%','literal current'),('history_%#v1','literal old'),('history_other#v1','unrelated old');
+ UPDATE memories SET lifecycle_state='superseded',activation_suppressed=1 WHERE key='history_%#v1';`); err != nil {
+		t.Fatal(err)
+	}
+	literal := run("fact_history", `{"key":"history_%","max":64}`)["history"].([]any)
+	if len(literal) != 2 {
+		t.Fatal("history interpreted a key as a pattern", literal)
+	}
+	for _, row := range literal {
+		if row.(map[string]any)["key"] == "history_other#v1" {
+			t.Fatal("unrelated predecessor admitted", literal)
+		}
+	}
+	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT literal_history"); err != nil {
+		t.Fatal(err)
+	}
 	// Metadata loss must not silently produce partial success.
 	if _, err := (&postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}).publicRecords(ctx, []Record{{ID: 9223372036854775807}}); err == nil {
 		t.Fatal("missing metadata accepted")

@@ -168,6 +168,17 @@ def legacy_query_eligibility_gate(kb, check):
                   code == 200 and result.get('status') == 'ok' and
                   len(rows) == min(limit, len(expected_history)) and keys <= expected_history and
                   (limit < len(expected_history) or keys == expected_history))
+        literal_key = key + '_%'
+        sql(f"""INSERT INTO memories(key,content,tier,kind,scope_type,scope_value)
+          VALUES('{literal_key}','literal current','L2','fact','project','{key}'),
+                ('{literal_key}#v1','literal predecessor','L2','fact','project','{key}'),
+                ('{key}_other#v1','unrelated predecessor','L2','fact','project','{key}')""")
+        code, result = kb.kb_request('/v1/actions/memory.fact_history',
+            dict(key=literal_key, scope_context=True, project=key, max=64))
+        rows = result.get('history', [])
+        check('History treats wildcard characters as literal identity', code == 200 and
+              result.get('status') == 'ok' and len(rows) == 2 and
+              {r.get('key') for r in rows} == {literal_key, literal_key+'#v1'})
     finally:
         sql(f"DELETE FROM memories WHERE key LIKE '{key}%'")
 
