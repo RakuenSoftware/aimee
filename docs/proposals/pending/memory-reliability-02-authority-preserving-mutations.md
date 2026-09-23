@@ -107,12 +107,19 @@ returns `conflict` / `expected_version_conflict`; a hidden or missing target sta
 `not_found`. A version does not grant visibility or restoration authority.
 Rejection advances the revision, so restoration requires the subsequently observed
 version, not the version that authorized rejection. Existing unversioned requests
-retain their behavior. These two verbs still reject `idempotency_key` explicitly;
-this slice does not add durable lifecycle retry receipts.
+retain their behavior. Shared schema 32 adds authenticated `idempotency_key` support for both verbs.
+Caller-scoped receipts use the existing immutable receipt table and bind the
+effective authority, scope, observed version, operation and rejection reason.
+The canonical change, tombstone, audit and receipt commit together. Replays
+confirm the same revision and lifecycle outcome without repeating the mutation.
+Changed requests return `idempotency_conflict`; later lifecycle changes or hidden
+results return `idempotent_result_unavailable`. A fresh-key rejection of an
+already rejected matching record records a no-op receipt without a new revision.
+See [lifecycle retry validation](../../validation/memory-lifecycle-retries-2026-09-23.md).
 
 Native server and KB console adapters forward the precondition without interpreting
-it, including decimal-string revisions. They also forward unsupported retry keys
-so the owner can refuse them. See the [validation record](../../validation/memory-lifecycle-versions-2026-09-23.md).
+it, including decimal-string revisions. They also forward retry keys
+for owner validation. See the [validation record](../../validation/memory-lifecycle-versions-2026-09-23.md).
 
 ### Expected-version shared corrections
 

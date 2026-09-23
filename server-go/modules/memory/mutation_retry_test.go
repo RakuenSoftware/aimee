@@ -240,6 +240,9 @@ func TestIdempotentMutationConcurrentCommitAndDisconnect(t *testing.T) {
 		{"supersede", true, AuthorityUser}, {"supersede", false, AuthorityUser}, {"update-as", true, AuthorityUser}, {"update-as", false, AuthorityUser},
 		{"delete-as", true, AuthorityModel}, {"delete-as", false, AuthorityModel},
 		{"delete-as", true, AuthorityUser}, {"delete-as", false, AuthorityUser},
+		{"reject", true, AuthorityUser}, {"reject", false, AuthorityUser},
+		{"reject", true, AuthorityModel}, {"reject", false, AuthorityModel},
+		{"restore", true, AuthorityUser}, {"restore", false, AuthorityUser},
 	} {
 		operation, commitFirst, authority := test.operation, test.commitFirst, test.authority
 		t.Run(fmt.Sprintf("%s/authority=%d/commit=%v", operation, authority, commitFirst), func(t *testing.T) {
@@ -286,6 +289,14 @@ func TestIdempotentMutationConcurrentCommitAndDisconnect(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
+			if operation == "restore" {
+				if ok, err := backend.Reject(ctx, old.ID, "concurrent fixture"); err != nil || !ok {
+					t.Fatal(ok, err)
+				}
+				if err := create.QueryRow(ctx, "SELECT record_revision::text FROM memories WHERE id=$1", old.ID).Scan(&observed.Version.RecordRevision); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if e = create.Commit(ctx); e != nil {
 				t.Fatal(e)
 			}
@@ -312,6 +323,10 @@ func TestIdempotentMutationConcurrentCommitAndDisconnect(t *testing.T) {
 			mutate := func(s *postgresDataStore) (Record, *MemoryMutationReceipt, error) {
 				if operation == "insert-epistemic" {
 					return s.storeKBIdempotent(ctx, request, caller, "")
+				}
+				if operation == "reject" || operation == "restore" {
+					receipt, err := s.lifecycleKBIdempotent(ctx, request, caller, "")
+					return Record{ID: request.ID}, receipt, err
 				}
 				if operation == "delete-as" {
 					receipt, err := s.deleteKBIdempotent(ctx, request, authority, caller, "")
@@ -377,7 +392,7 @@ func TestIdempotentMutationConcurrentCommitAndDisconnect(t *testing.T) {
 			if commitFirst && (result.row.ID != record.ID || result.receipt.CommitID != receipt.CommitID) {
 				t.Fatal("retry did not identify first commit", result)
 			}
-			if !commitFirst && ((operation != "delete-as" && result.row.ID == record.ID) || result.receipt.CommitID == receipt.CommitID) {
+			if !commitFirst && ((operation != "delete-as" && operation != "reject" && operation != "restore" && result.row.ID == record.ID) || result.receipt.CommitID == receipt.CommitID) {
 				t.Fatal("uncommitted result survived disconnect", result)
 			}
 			if e = b.Commit(ctx); e != nil {
@@ -404,6 +419,9 @@ func TestIdempotentMutationConcurrentCommitAndDisconnect(t *testing.T) {
 				if authority == AuthorityUser {
 					wantRows = 0
 				}
+			}
+			if operation == "reject" || operation == "restore" {
+				wantRows, wantJobs = 1, 0
 			}
 			var rows, receipts, jobs int
 			if e = owner.QueryRow(ctx, `SELECT

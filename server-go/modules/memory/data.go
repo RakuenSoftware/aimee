@@ -1036,7 +1036,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	creation := (options.placement == PlacementServer && request.Operation == "store") || (options.placement == PlacementKB && request.Operation == "insert-epistemic")
-	if request.IdempotencyKey != "" && ((!creation && (!versionedMutation || request.ExpectedVersion == nil || request.Operation == "reject" || request.Operation == "restore")) || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
+	if request.IdempotencyKey != "" && ((!creation && (!versionedMutation || request.ExpectedVersion == nil)) || !validIdempotencyKey(request.IdempotencyKey) || !verifiedRetryCaller(options.commandContext)) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementServer {
@@ -2443,14 +2443,22 @@ set_config('aimee.correlation_id',$9,true)`,
 			if request.ID <= 0 {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			if request.ExpectedVersion != nil {
+			if request.IdempotencyKey != "" {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok || transaction == nil || !options.publicWrite {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				response.MutationReceipt, err = backend.lifecycleKBIdempotent(ctx, request, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
+				response.Updated = err == nil
+				rollbackOnly = err != nil
+			} else if request.ExpectedVersion != nil {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok || transaction == nil || !options.publicWrite {
 					return nil, bus.ModuleStatusCapabilityAbsent
 				}
 				err = backend.lockKBLifecycleVersion(ctx, request.ID, request.ExpectedVersion)
 			}
-			if err == nil {
+			if err == nil && request.IdempotencyKey == "" {
 				response.Updated, err = domain.Reject(ctx, request.ID, request.Reason)
 			}
 			if errors.Is(err, ErrMemoryNotFound) {
@@ -2671,14 +2679,22 @@ set_config('aimee.correlation_id',$9,true)`,
 			if request.ID <= 0 || request.Actor == "" {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
-			if request.ExpectedVersion != nil {
+			if request.IdempotencyKey != "" {
+				backend, ok := options.data.(*postgresDataStore)
+				if !ok || transaction == nil || !options.publicWrite {
+					return nil, bus.ModuleStatusCapabilityAbsent
+				}
+				response.MutationReceipt, err = backend.lifecycleKBIdempotent(ctx, request, options.commandContext, strconv.FormatUint(invocation.TraceID, 10))
+				response.Updated = err == nil
+				rollbackOnly = err != nil
+			} else if request.ExpectedVersion != nil {
 				backend, ok := options.data.(*postgresDataStore)
 				if !ok || transaction == nil || !options.publicWrite {
 					return nil, bus.ModuleStatusCapabilityAbsent
 				}
 				err = backend.lockKBLifecycleVersion(ctx, request.ID, request.ExpectedVersion)
 			}
-			if err == nil {
+			if err == nil && request.IdempotencyKey == "" {
 				response.Updated, err = queries.Restore(ctx, request.ID, request.Actor)
 			}
 			if errors.Is(err, ErrMemoryNotFound) {

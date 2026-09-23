@@ -446,3 +446,10 @@ native transport and lint checks pass. Fresh application/harness `d8154014bb` pa
 **1,688/1,688 checks** (103 T1, 993 T2, 592 T3), with all 12 images and four
 actual provider caps verified. This advances
 MR-01/MR-06 source coverage without certifying either proposal or durable dispatch.
+
+
+[Shared lifecycle retry receipts](../../validation/memory-lifecycle-retries-2026-09-23.md)
+extend conditional reject/restore with caller-scoped durable outcomes in shared
+schema 32. Restricted-role rollback/replay, migration reapplication and real
+concurrent commit/disconnect checks cover this slice. It does not certify the
+remaining frozen clauses or deploy the draft PR onto the released 0.4.5 service.

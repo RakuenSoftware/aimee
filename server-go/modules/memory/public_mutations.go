@@ -69,10 +69,10 @@ func handleMutationCommand(options handlerOptions, invocation bus.ModuleInvocati
 			options.publicWrite = true
 		}
 		if verb == "reject" || verb == "restore" {
-			var valid bool
-			request.ExpectedVersion, valid = commandExpectedVersion(args, request.ID)
-			if !valid {
-				return invalid("invalid expected_version")
+			var refusal map[string]any
+			request.ExpectedVersion, request.IdempotencyKey, refusal = commandCorrectionOptions(args, request.ID, options.commandContext)
+			if refusal != nil {
+				return commandResult(refusal)
 			}
 			options.publicWrite = request.ExpectedVersion != nil
 		}

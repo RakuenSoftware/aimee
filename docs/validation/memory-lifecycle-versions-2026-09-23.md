@@ -17,7 +17,8 @@ keys. Malformed/unsupported console conditions return 400; conflicts return 409.
 The external-host ownership ledger was reviewed and refreshed for the server
 adapter: it only copies opaque JSON fields; all validation and locking remain
 in Go. No C memory policy or event-bus implementation was added. Unversioned success
-paths remain unchanged. Lifecycle idempotency keys are still explicitly refused.
+paths remain unchanged. At this checkpoint lifecycle idempotency keys were explicitly refused.
+The subsequent [retry slice](memory-lifecycle-retries-2026-09-23.md) adds them.
 This does not certify MR-02, all lifecycle transitions, restore-resistant owner
 identity, durable retries or final provider-release correctness.
 

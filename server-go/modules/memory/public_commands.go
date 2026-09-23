@@ -108,8 +108,8 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if _, exists := args["read_policy"]; exists && verb != "get" && verb != "runtime" {
 		return commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get"))
 	}
-	if _, exists := args["idempotency_key"]; exists && !((options.placement == PlacementKB && (verb == "store" || verb == "supersede" || verb == "update" || verb == "delete")) || (options.placement == PlacementServer && (verb == "store" || verb == "supersede" || verb == "delete" || verb == "runtime"))) {
-		return commandResult(commandError("unsupported_mode", "idempotency_key is supported for store, conditional corrections and deletion"))
+	if _, exists := args["idempotency_key"]; exists && !((options.placement == PlacementKB && (verb == "store" || verb == "supersede" || verb == "update" || verb == "delete" || verb == "reject" || verb == "restore")) || (options.placement == PlacementServer && (verb == "store" || verb == "supersede" || verb == "delete" || verb == "runtime"))) {
+		return commandResult(commandError("unsupported_mode", "idempotency_key is supported for store, conditional corrections, deletion and shared reject/restore"))
 	}
 	versionedMutation := (options.placement == PlacementKB && (verb == "supersede" || verb == "update" || verb == "delete" || verb == "reject" || verb == "restore" || verb == "review_correction")) || (options.placement == PlacementServer && (verb == "supersede" || verb == "delete" || verb == "runtime"))
 	if _, exists := args["expected_version"]; exists && !versionedMutation {

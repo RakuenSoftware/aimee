@@ -22,8 +22,8 @@ func TestLifecycleVersionValidation(t *testing.T) {
 				t.Fatal(verb, version, r)
 			}
 		}
-		if r := runPublicCommand(t, client, verb, `{"id":1,"idempotency_key":"unsupported"}`); r["kind"] != "unsupported_mode" {
-			t.Fatal("retry key silently accepted", verb, r)
+		if r := runPublicCommand(t, client, verb, `{"id":1,"idempotency_key":"missing-version-key"}`); r["kind"] != "invalid_argument" {
+			t.Fatal("retry without expected version accepted", verb, r)
 		}
 	}
 }

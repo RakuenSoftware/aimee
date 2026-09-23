@@ -18061,7 +18061,7 @@ REVOKE ALL ON FUNCTION memory_deletion_replay_current(UUID,TEXT) FROM PUBLIC;
 -- already committed creation receipts while preserving all older receipts.
 ALTER TABLE memory_mutation_receipts DROP CONSTRAINT IF EXISTS memory_mutation_receipts_operation_check;
 ALTER TABLE memory_mutation_receipts ADD CONSTRAINT memory_mutation_receipts_operation_check
- CHECK(operation IN ('correction','retired','destroyed','store','store_noop'));
+ CHECK(operation IN ('correction','retired','destroyed','store','store_noop','rejected','restored'));
 CREATE OR REPLACE FUNCTION memory_store_receipt_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
@@ -18107,6 +18107,43 @@ DROP TRIGGER IF EXISTS memory_store_receipt_guard ON memory_mutation_receipts;
 CREATE TRIGGER memory_store_receipt_guard BEFORE INSERT ON memory_mutation_receipts
  FOR EACH ROW EXECUTE FUNCTION memory_store_receipt_guard();
 REVOKE ALL ON FUNCTION memory_store_receipt_guard() FROM PUBLIC;
+-- Lifecycle receipts bind an admitted canonical outcome to its sealed audit.
+CREATE OR REPLACE FUNCTION memory_lifecycle_receipt_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF NEW.operation NOT IN ('rejected','restored') THEN RETURN NEW; END IF;
+ IF NEW.actor_principal<>COALESCE(current_setting('aimee.principal',true),'') OR
+    NEW.target_revision<=0 OR NEW.proposal_id IS NOT NULL OR
+    NOT public.memory_row_scope_visible(NEW.scope_type,NEW.scope_value) OR
+    NOT EXISTS(SELECT 1 FROM public.memory_collection_owner o WHERE o.id=1 AND o.owner_id=NEW.owner_id) OR
+    NOT EXISTS(SELECT 1 FROM public.memories m WHERE m.id=NEW.result_id AND m.record_revision=NEW.result_revision
+      AND m.scope_type=NEW.scope_type AND m.scope_value=NEW.scope_value
+      AND ((NEW.operation='rejected' AND m.lifecycle_state='archived' AND m.activation_suppressed=1
+        AND EXISTS(SELECT 1 FROM public.memory_rejection_tombstones t WHERE t.object_kind='memory' AND t.active=1
+          AND t.memory_key=m.key AND t.memory_content=m.content AND t.scope_type=m.scope_type AND t.scope_value=m.scope_value
+          AND t.reason=m.archive_reason))
+       OR (NEW.operation='restored' AND m.lifecycle_state='active' AND m.activation_suppressed=0 AND m.archive_reason=''
+        AND NOT EXISTS(SELECT 1 FROM public.memory_rejection_tombstones t WHERE t.object_kind='memory' AND t.active=1
+          AND t.memory_key=m.key AND t.memory_content=m.content AND t.scope_type=m.scope_type AND t.scope_value=m.scope_value)))) OR
+    NOT EXISTS(SELECT 1 FROM public.fact_graph_commits c WHERE c.commit_id=NEW.commit_id AND c.status='applied'
+      AND c.actor_principal=NEW.actor_principal
+      AND c.operation=CASE NEW.operation WHEN 'rejected' THEN 'memory.reject' ELSE 'memory.restore' END
+      AND ((NEW.result_revision>NEW.target_revision AND EXISTS(SELECT 1 FROM public.fact_graph_changes f
+        WHERE f.commit_id=c.commit_id AND f.object_kind='memory' AND f.object_key=NEW.result_id::text
+          AND f.action=CASE NEW.operation WHEN 'rejected' THEN 'update' ELSE 'restore' END
+          AND f.before_version=NEW.target_revision AND f.after_version=NEW.result_revision))
+       OR (NEW.operation='rejected' AND NEW.result_revision=NEW.target_revision
+        AND c.origin_ref='memory:'||NEW.result_id::text||':'||NEW.result_revision::text
+        AND NOT EXISTS(SELECT 1 FROM public.fact_graph_changes f
+          WHERE f.commit_id=c.commit_id AND f.object_kind='memory')))) THEN
+  RAISE EXCEPTION 'memory lifecycle receipt requires its admitted canonical audit';
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_lifecycle_receipt_guard ON memory_mutation_receipts;
+CREATE TRIGGER memory_lifecycle_receipt_guard BEFORE INSERT ON memory_mutation_receipts
+ FOR EACH ROW EXECUTE FUNCTION memory_lifecycle_receipt_guard();
+REVOKE ALL ON FUNCTION memory_lifecycle_receipt_guard() FROM PUBLIC;
 -- END memory mutation receipts
 
 -- BEGIN memory correction proposals
@@ -18306,5 +18343,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '31')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '32')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
