@@ -62,3 +62,8 @@ Expired, malformed, wrong-task or wrong-project contracts are ignored as adaptiv
 Return adaptive mode to observe while preserving baseline policy, receipts and budget history. Never ask the agent to alter operator configuration as the normal recovery path.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+The [incomplete-command repair](../../validation/memory-discovery-policy-2026-09-23.md)
+prevents bare search-tool names from panicking the Go execution-policy handler.
+Baseline prohibitions still apply; the race suite passes. Task-contract issuance,
+budget sharing and authenticated fallback remain unimplemented by this repair.

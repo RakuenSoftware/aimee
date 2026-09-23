@@ -203,6 +203,11 @@ func sourceDiscovery(command string) bool {
 	}
 	switch fields[0] {
 	case "grep", "rg", "ripgrep":
+		// An argument-free invocation prints tool usage; it has no search target.
+		// Keep it under operator policy without slicing past the token list.
+		if len(fields) < 2 {
+			return false
+		}
 		// A concrete file after the search pattern is a read, not repository discovery.
 		for _, field := range fields[2:] {
 			if tokenLooksSpecificFilePath(field) {

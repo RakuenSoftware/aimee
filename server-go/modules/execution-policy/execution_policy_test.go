@@ -90,6 +90,9 @@ func TestSourceDiscoveryParity(t *testing.T) {
 		command string
 		blocked bool
 	}{
+		{"grep", false},
+		{"rg", false},
+		{"ripgrep", false},
 		{"grep -r foo src/", true},
 		{"grep -rn TODO .", true},
 		{"grep foo_func src/agent_policy.c", false},
@@ -152,5 +155,20 @@ func TestPolicyLoadFailureAndMalformedInputFailClosed(t *testing.T) {
 	invalidArguments["arguments"] = nil
 	if invoke(t, newHandler(func() (*operatorPolicy, error) { return nil, nil }), invalidArguments).Allowed {
 		t.Fatal("null arguments allowed action")
+	}
+}
+
+func TestIncompleteSearchKeepsOperatorPolicy(t *testing.T) {
+	for _, command := range []string{"grep", "rg", "ripgrep"} {
+		t.Run(command, func(t *testing.T) {
+			handler := newHandler(func() (*operatorPolicy, error) { return nil, nil })
+			if got := invoke(t, handler, base("bash", map[string]any{"command": command})); !got.Allowed {
+				t.Fatal(got)
+			}
+			handler = newHandler(func() (*operatorPolicy, error) { return &operatorPolicy{ForbiddenCommands: []string{command}}, nil })
+			if got := invoke(t, handler, base("bash", map[string]any{"command": command})); got.Allowed || got.Reason != "command matches forbidden pattern: "+command {
+				t.Fatal(got)
+			}
+		})
 	}
 }

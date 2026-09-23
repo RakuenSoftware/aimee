@@ -1,0 +1,21 @@
+--- FAIL: TestSourceDiscoveryParity (0.00s)
+    --- FAIL: TestSourceDiscoveryParity/grep (0.00s)
+panic: runtime error: slice bounds out of range [2:1] [recovered, repanicked]
+
+goroutine 9 [running]:
+testing.tRunner.func1.2({0x5beaa0, 0x3f5f1ecf0288})
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:1974 +0x232
+testing.tRunner.func1()
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:1977 +0x349
+panic({0x5beaa0?, 0x3f5f1ecf0288?})
+	/home/virant/.local/share/aimee-dev-tools/go/src/runtime/panic.go:860 +0x13a
+github.com/JBailes/aimee/server-go/modules/execution-policy.sourceDiscovery({0x5d12c7?, 0x6202fb?})
+	/home/virant/dev/aimee-pr2990/server-go/modules/execution-policy/execution_policy.go:207 +0x376
+github.com/JBailes/aimee/server-go/modules/execution-policy.TestSourceDiscoveryParity.func1(0x3f5f1ee48488)
+	/home/virant/dev/aimee-pr2990/server-go/modules/execution-policy/execution_policy_test.go:133 +0x39
+testing.tRunner(0x3f5f1ee48488, 0x3f5f1ed702a0)
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:2036 +0xea
+created by testing.(*T).Run in goroutine 8
+	/home/virant/.local/share/aimee-dev-tools/go/src/testing/testing.go:2101 +0x4c5
+FAIL	github.com/JBailes/aimee/server-go/modules/execution-policy	0.004s
+FAIL

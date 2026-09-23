@@ -495,3 +495,8 @@ before limits and aggregation; rebuilding refreshes the observations. A packaged
 PostgreSQL replay reproduces the previous leak. The full PostgreSQL/race suite
 and exported owner pass; fresh-image validation remains pending. Transitive
 closure and automatic dependent rebuilding remain open.
+
+[Discovery classifier robustness](../../validation/memory-discovery-policy-2026-09-23.md)
+fixes a reproduced panic on bare `grep`, `rg` and `ripgrep` commands while preserving
+baseline operator prohibitions. Execution-policy race tests pass. This does not
+certify MR-07's task-contract and recovery requirements.
