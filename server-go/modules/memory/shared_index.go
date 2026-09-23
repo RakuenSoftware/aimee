@@ -27,6 +27,9 @@ func StartSharedIndex(ctx context.Context, data DataStore, executor egress.Execu
 		defer ticker.Stop()
 		for ctx.Err() == nil {
 			attempt, cancel := context.WithTimeout(ctx, 60*time.Second)
+			if err := s.reconcileRelationInputs(attempt); err != nil && ctx.Err() == nil {
+				log.Printf("shared relation invalidation pending: %v", err)
+			}
 			err := s.sharedIndexBatch(attempt, executor, 16)
 			cancel()
 			if err != nil && ctx.Err() == nil {

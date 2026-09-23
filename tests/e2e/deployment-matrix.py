@@ -6,6 +6,8 @@ T3: KB-free Server. Images must already exist locally. All created containers,
 networks and volumes belong to a random project and are removed unless --keep.
 Credentials remain in memory and test output contains verdicts only.
 """
+import contextlib
+import select
 import argparse
 import hashlib
 import importlib.util
@@ -180,7 +182,36 @@ def preview_source_version_gate(kb, check):
         sql(f"DELETE FROM memories WHERE key IN ('{key}-headline','{key}-fallback')")
 
 
+@contextlib.contextmanager
+def paused_relation_consumer(kb):
+    # Keep deliberately stale negative fixtures from being repaired while their
+    # HTTP read fences are measured. Other database requests remain available.
+    proc = subprocess.Popen(['docker', 'exec', '-i', kb.postgres, 'psql', '-U', 'postgres',
+                             '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1'],
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, bufsize=1)
+    try:
+        proc.stdin.write("DO $$ BEGIN PERFORM pg_advisory_lock(741901620110046301::bigint); END $$; SELECT 'consumer-paused';\n")
+        proc.stdin.flush()
+        ready, _, _ = select.select([proc.stdout], [], [], 65)
+        if not ready or proc.stdout.readline().strip() != 'consumer-paused':
+            raise RuntimeError('relation consumer fixture barrier unavailable')
+        yield
+    finally:
+        if proc.poll() is None:
+            try:
+                proc.communicate("SELECT pg_advisory_unlock(741901620110046301::bigint);\n\\q\n", timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+
+
 def linked_relation_input_gate(kb, check):
+    with paused_relation_consumer(kb):
+        linked_relation_input_checks(kb, check)
+
+
+def linked_relation_input_checks(kb, check):
     """Verify copied-input and link fences through authenticated graph endpoints."""
     key = 'linked-input-' + uuid.uuid4().hex
     def sql(query):
@@ -234,6 +265,51 @@ def linked_relation_input_gate(kb, check):
         reads('deleted link withholds copied relationship', 0)
     finally:
         sql(f"""DELETE FROM memory_lineage WHERE object_type='relation' AND object_id={fixture['relation_id']};
+            DELETE FROM memories WHERE key IN ('{key}-parent','{key}-target')""")
+
+
+def relation_consumer_rebuild_gate(kb, check):
+    """Exercise the real Go background consumer and generator, without direct apply."""
+    key = 'relation-rebuild-' + uuid.uuid4().hex
+    def sql(query):
+        return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+    def copied(text):
+        return sql(f"""SELECT count(*) FROM memory_relations r JOIN memories p ON p.id=r.memory_id
+            WHERE p.key='{key}-parent' AND r.fact_text LIKE '%{text}%' AND EXISTS(
+              SELECT 1 FROM memory_lineage d JOIN memories t ON t.key='{key}-target'
+              WHERE d.object_type='relation' AND d.object_id=r.id
+                AND d.source_kind='memory-relation-input-v2'
+                AND d.source_ref::jsonb->>'record_id'=t.id::text
+                AND d.source_ref::jsonb->>'record_revision'=t.record_revision::text)""").strip() == '1'
+    def await_copy(text):
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            if copied(text):
+                return True
+            time.sleep(1)
+        return False
+    try:
+        sql(f"""BEGIN;
+          INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES
+            ('L2','fact','{key}-parent','parent','project','{key}'),
+            ('L2','fact','{key}-target','original copied detail','project','{key}');
+          INSERT INTO memory_links(source_id,target_id,relation)
+            SELECT p.id,t.id,'related_to' FROM memories p,memories t
+            WHERE p.key='{key}-parent' AND t.key='{key}-target'; COMMIT""")
+        check('Background relation generator records current copied input', await_copy('original copied detail'))
+        sql(f"UPDATE memories SET content='replacement copied detail' WHERE key='{key}-target'")
+        check('Background invalidation rebuilds dependent from target mutation', await_copy('replacement copied detail'))
+        # Pause application in SQL until the process is gone, then release it.
+        # The committed mutation must remain pending across the worker restart.
+        with paused_relation_consumer(kb):
+            sql(f"UPDATE memories SET content='restart copied detail' WHERE key='{key}-target'")
+            command('docker', 'restart', kb.application)
+        kb.start()
+        check('Background invalidation survives application restart', await_copy('restart copied detail'))
+    finally:
+        sql(f"""DELETE FROM memory_lineage WHERE object_type='relation' AND object_id IN
+            (SELECT r.id FROM memory_relations r JOIN memories m ON m.id=r.memory_id WHERE m.key='{key}-parent');
             DELETE FROM memories WHERE key IN ('{key}-parent','{key}-target')""")
 
 
@@ -794,6 +870,7 @@ def main():
             typed_context_budget_gate(kb, check)
             typed_source_version_gate(kb, check)
             linked_relation_input_gate(kb, check)
+            relation_consumer_rebuild_gate(kb, check)
             preview_source_version_gate(kb, check)
             evidence_exact_identity_gate(kb, check)
         if args.topology in ('T2', 'T3'):

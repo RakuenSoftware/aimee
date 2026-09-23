@@ -493,10 +493,18 @@ binds generated relation text to every directly copied memory revision. Search,
 entity edges and profiles withhold changed, expired, hidden or unobserved inputs
 before limits and aggregation; rebuilding refreshes the observations. A packaged
 PostgreSQL replay reproduces the previous leak. The full PostgreSQL/race suite
-and exported owner pass; fresh-image validation remains pending. Transitive
-closure and automatic dependent rebuilding remain open.
+and exported owner pass. Fresh `09aa330ea` passes **1,140/1,140 checks** across
+T1/T2, with all nine images and three actual provider caps captured. Transitive
+closure remains open; direct dependent rebuilding is extended below.
 
 [Discovery classifier robustness](../../validation/memory-discovery-policy-2026-09-23.md)
 fixes a reproduced panic on bare `grep`, `rg` and `ripgrep` commands while preserving
 baseline operator prohibitions. Execution-policy race tests pass. This does not
 certify MR-07's task-contract and recovery requirements.
+
+The [durable relation consumer](../../validation/memory-relation-consumer-2026-09-23.md)
+atomically queues copied-input dependants and advances bounded replay progress.
+Committed-connection tests cover restart, competing workers, rollback and retention
+resynchronization; full PostgreSQL/race and export checks pass. Fresh schema-33
+background-worker validation remains pending. Progress records queued invalidation,
+not serving freshness or complete MR-02/MR-04 acceptance.

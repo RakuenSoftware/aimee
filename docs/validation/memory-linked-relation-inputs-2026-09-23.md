@@ -27,8 +27,7 @@ and [export](memory-linked-relation-inputs-2026-09-23/export.txt) logs are retai
 The first broad run required updating two minimal test schemas with the existing
 lineage table, record revision and restricted-role SELECT grant; the
 [initial fixture result](memory-linked-relation-inputs-2026-09-23/fixture-update-required.txt)
-is retained separately from the passing final run. Fresh-image validation of this
-SQL change remains pending.
+is retained separately from the passing final run. Fresh-image validation is recorded below.
 
 The regression covers target expiry, suppression,
 retirement, content and scope changes, restore without reindex, legacy missing
@@ -52,5 +51,16 @@ seconds after batching observation inserts once per parent. A two-origin fixture
 also proves that identical relation text retains both input observations and
 withholds the copy when either origin expires. [Final race](memory-linked-relation-inputs-2026-09-23/batched-input-race.txt)
 and [export](memory-linked-relation-inputs-2026-09-23/batched-export.txt) checks pass.
-Fresh HTTP validation of the final candidate remains pending. These functional
-suite timings are not matched performance measurements.
+Fresh application/harness `09aa330ea` passes **1,140/1,140 checks**: 125 in
+T1 and 1,015 in T2, including all 30 linked-input HTTP checks. The
+[raw receipts](memory-linked-relation-inputs-2026-09-23/fresh/T1/topology.json)
+and [T2 receipts](memory-linked-relation-inputs-2026-09-23/fresh/T2/topology.json)
+retain individual verdicts. All nine running container image identities were
+[captured](memory-linked-relation-inputs-2026-09-23/fresh/image-identities.json),
+including the actual 32,768-byte provider cap on all three application containers.
+The application image is `sha256:3287db9b28123de7445d4ae3124c876049d98c15dae4545ca7be444e04b8ee0c`;
+the database uses schema-32 image `aimee-pr2990-postgres:686b99ea0` and the embedder
+uses released 0.4.5. Both harness processes exited zero and removed their containers.
+The task-owned PostgreSQL replay fixture remains for continuing implementation.
+These functional parallel runs are not matched performance measurements and do
+not validate the later durable consumer or execution-policy changes.

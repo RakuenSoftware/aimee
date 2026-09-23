@@ -1,0 +1,59 @@
+[
+  {
+    "name": "aimee-e2e-kb-6465d9d620-aimee-embedder-1",
+    "image": "sha256:a2652e92cf2f68d684b56b44b8eed37ab0701ff1867eb1c59d3c2abb79917c85",
+    "configured_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5"
+  },
+  {
+    "name": "aimee-e2e-kb-6465d9d620-aimee-kb-1",
+    "image": "sha256:3287db9b28123de7445d4ae3124c876049d98c15dae4545ca7be444e04b8ee0c",
+    "configured_image": "aimee-pr2990:09aa330ea",
+    "provider_context_limits": {
+      "schema_version": 1,
+      "max_request_bytes": 32768
+    }
+  },
+  {
+    "name": "aimee-e2e-kb-6465d9d620-aimee-store-db-1",
+    "image": "sha256:8927f0f4ab4b0cf7f4a5f1d4590f1324fc95da5722fe70e4317e228d37dc8f64",
+    "configured_image": "aimee-pr2990-postgres:686b99ea0"
+  },
+  {
+    "name": "aimee-e2e-kb-241be53726-aimee-embedder-1",
+    "image": "sha256:a2652e92cf2f68d684b56b44b8eed37ab0701ff1867eb1c59d3c2abb79917c85",
+    "configured_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5"
+  },
+  {
+    "name": "aimee-e2e-kb-241be53726-aimee-kb-1",
+    "image": "sha256:3287db9b28123de7445d4ae3124c876049d98c15dae4545ca7be444e04b8ee0c",
+    "configured_image": "aimee-pr2990:09aa330ea",
+    "provider_context_limits": {
+      "schema_version": 1,
+      "max_request_bytes": 32768
+    }
+  },
+  {
+    "name": "aimee-e2e-kb-241be53726-aimee-store-db-1",
+    "image": "sha256:8927f0f4ab4b0cf7f4a5f1d4590f1324fc95da5722fe70e4317e228d37dc8f64",
+    "configured_image": "aimee-pr2990-postgres:686b99ea0"
+  },
+  {
+    "name": "aimee-e2e-server-a2a2150fc8-aimee-embedder-1",
+    "image": "sha256:a2652e92cf2f68d684b56b44b8eed37ab0701ff1867eb1c59d3c2abb79917c85",
+    "configured_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5"
+  },
+  {
+    "name": "aimee-e2e-server-a2a2150fc8-aimee-server-1",
+    "image": "sha256:3287db9b28123de7445d4ae3124c876049d98c15dae4545ca7be444e04b8ee0c",
+    "configured_image": "aimee-pr2990:09aa330ea",
+    "provider_context_limits": {
+      "schema_version": 1,
+      "max_request_bytes": 32768
+    }
+  },
+  {
+    "name": "aimee-e2e-server-a2a2150fc8-aimee-store-db-1",
+    "image": "sha256:8927f0f4ab4b0cf7f4a5f1d4590f1324fc95da5722fe70e4317e228d37dc8f64",
+    "configured_image": "aimee-pr2990-postgres:686b99ea0"
+  }
+]

@@ -17933,6 +17933,159 @@ END
 $memory_change_acl$;
 -- END memory change journal
 
+-- BEGIN memory relation invalidation consumer
+-- Progress is private to this projection. Applying a page queues canonical
+-- rebuilding and advances its cursor in the SAME transaction. Neither progress
+-- nor queue completion certifies serving freshness; readers check source inputs.
+CREATE TABLE IF NOT EXISTS memory_relation_consumer_state (
+  id INTEGER PRIMARY KEY CHECK(id=1), owner_id UUID NOT NULL,
+  phase TEXT NOT NULL CHECK(phase IN ('snapshot','replay')),
+  snapshot_after_id BIGINT NOT NULL DEFAULT 0 CHECK(snapshot_after_id>=0),
+  snapshot_max_id BIGINT NOT NULL DEFAULT 0 CHECK(snapshot_max_id>=0)
+);
+CREATE TABLE IF NOT EXISTS memory_relation_consumer_positions (
+  scope_type TEXT NOT NULL, scope_value TEXT NOT NULL,
+  generation BIGINT NOT NULL CHECK(generation>=0),
+  target_after_id BIGINT NOT NULL DEFAULT 0 CHECK(target_after_id>=0),
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
+  PRIMARY KEY(scope_type,scope_value)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_links_target_source ON memory_links(target_id,source_id);
+CREATE INDEX IF NOT EXISTS idx_memory_relation_input_record ON memory_lineage
+ ((CASE WHEN source_kind IN ('memory-relation-input-v1','memory-relation-input-v2')
+   THEN source_ref::jsonb->>'record_id' END),object_id)
+ WHERE object_type='relation' AND source_kind IN ('memory-relation-input-v1','memory-relation-input-v2');
+
+CREATE OR REPLACE FUNCTION memory_reset_relation_consumer() RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE owner UUID; maximum BIGINT; heads JSONB;
+BEGIN
+  -- Capture the collection frontier and snapshot extent in one statement.
+  SELECT o.owner_id,COALESCE((SELECT max(id) FROM public.memories),0),
+    COALESCE((SELECT jsonb_agg(to_jsonb(g)) FROM public.memory_collection_generations g),'[]'::jsonb)
+  INTO STRICT owner,maximum,heads FROM public.memory_collection_owner o WHERE o.id=1;
+  DELETE FROM public.memory_relation_consumer_positions;
+  INSERT INTO public.memory_relation_consumer_positions(scope_type,scope_value,generation)
+    SELECT x.scope_type,x.scope_value,x.generation FROM jsonb_to_recordset(heads)
+      AS x(scope_type TEXT,scope_value TEXT,generation BIGINT);
+  INSERT INTO public.memory_relation_consumer_state(id,owner_id,phase,snapshot_after_id,snapshot_max_id)
+    VALUES(1,owner,'snapshot',0,maximum)
+    ON CONFLICT(id) DO UPDATE SET owner_id=EXCLUDED.owner_id,phase='snapshot',
+      snapshot_after_id=0,snapshot_max_id=EXCLUDED.snapshot_max_id;
+END $$;
+
+CREATE OR REPLACE FUNCTION memory_apply_relation_invalidations(p_limit INTEGER) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE owner UUID; state public.memory_relation_consumer_state%ROWTYPE;
+        position RECORD; inputs BIGINT[]; targets BIGINT[];
+        first_generation BIGINT; last_generation BIGINT; event_count BIGINT; next_id BIGINT; more_targets BOOLEAN:=false;
+BEGIN
+  IF p_limit IS NULL OR p_limit<1 OR p_limit>256 THEN
+    RAISE EXCEPTION 'invalid relation invalidation batch limit' USING ERRCODE='22023';
+  END IF;
+  -- One durable consumer may have several Go workers. Serialize only its short
+  -- application transaction; canonical writers do not take this advisory lock.
+  PERFORM pg_advisory_xact_lock(741901620110046301::bigint);
+  SELECT owner_id INTO STRICT owner FROM public.memory_collection_owner WHERE id=1;
+  SELECT * INTO state FROM public.memory_relation_consumer_state WHERE id=1;
+  IF NOT FOUND OR state.owner_id<>owner THEN
+    PERFORM public.memory_reset_relation_consumer();
+    SELECT * INTO STRICT state FROM public.memory_relation_consumer_state WHERE id=1;
+  END IF;
+  IF state.phase='snapshot' THEN
+    SELECT COALESCE(array_agg(id ORDER BY id),'{}'::bigint[]),max(id) INTO targets,next_id
+    FROM (SELECT id FROM public.memories WHERE id>state.snapshot_after_id AND id<=state.snapshot_max_id
+          ORDER BY id LIMIT p_limit) roots;
+    IF cardinality(targets)=0 THEN
+      UPDATE public.memory_relation_consumer_state SET phase='replay',snapshot_after_id=snapshot_max_id WHERE id=1;
+      RETURN;
+    END IF;
+  ELSE
+    -- Collections created after the captured frontier start at zero. Existing
+    -- collections retain their cursor across process/database restarts.
+    INSERT INTO public.memory_relation_consumer_positions(scope_type,scope_value,generation)
+      SELECT scope_type,scope_value,0 FROM public.memory_collection_generations ON CONFLICT DO NOTHING;
+    SELECT g.scope_type,g.scope_value,g.generation AS head,c.generation AS after_generation,c.target_after_id INTO position
+    FROM public.memory_collection_generations g JOIN public.memory_relation_consumer_positions c
+      USING(scope_type,scope_value) WHERE g.generation<>c.generation
+    ORDER BY c.applied_at,g.scope_type,g.scope_value LIMIT 1;
+    IF NOT FOUND THEN RETURN; END IF;
+    SELECT COALESCE(array_agg(memory_id),'{}'::bigint[]),count(*),min(generation),max(generation)
+      INTO inputs,event_count,first_generation,last_generation
+    FROM (SELECT generation,memory_id FROM public.memory_invalidation_outbox
+      WHERE scope_type=position.scope_type AND scope_value=position.scope_value
+        AND generation>position.after_generation AND generation<=position.head
+      ORDER BY generation LIMIT 1) page;
+    IF position.after_generation>position.head OR event_count=0 OR
+       first_generation<>position.after_generation+1 OR
+       last_generation<>position.after_generation+event_count THEN
+      -- A retention gap cannot be acknowledged as applied. Capture a new
+      -- frontier and restart bounded canonical rebuilding of all roots.
+      PERFORM public.memory_reset_relation_consumer();
+      RETURN;
+    END IF;
+    SELECT COALESCE(array_agg(id ORDER BY id),'{}'::bigint[]) INTO targets FROM (
+ SELECT id FROM (
+      SELECT unnest(inputs) AS id
+      UNION SELECT l.source_id FROM public.memory_links l WHERE l.target_id=ANY(inputs)
+      UNION SELECT r.memory_id FROM public.memory_lineage dep JOIN public.memory_relations r
+        ON r.id=dep.object_id WHERE dep.object_type='relation'
+        AND dep.source_kind IN ('memory-relation-input-v1','memory-relation-input-v2')
+        AND (CASE WHEN dep.source_kind IN ('memory-relation-input-v1','memory-relation-input-v2')
+             THEN dep.source_ref::jsonb->>'record_id' END)=ANY(
+               ARRAY(SELECT i::text FROM unnest(inputs) i))
+    ) affected WHERE id>position.target_after_id ORDER BY id LIMIT p_limit+1) bounded;
+    more_targets:=cardinality(targets)>p_limit;
+    IF more_targets THEN targets:=targets[1:p_limit]; END IF;
+  END IF;
+  -- Coalesce already-pending work. An in-flight worker holds its job row until
+  -- commit; if it finishes first, this upsert leaves a new pending generation.
+  INSERT INTO public.kb_async_jobs(kind,document_id,project,status,updated_at)
+    SELECT 'memory_index',id,'memory','pending',clock_timestamp()::text FROM unnest(targets) id ORDER BY id
+    ON CONFLICT(kind,document_id) DO UPDATE SET status='pending',attempts=0,
+      last_error='',claimed_by='',claimed_at='',next_attempt_at='',
+      generation=kb_async_jobs.generation+1,updated_at=EXCLUDED.updated_at
+    WHERE kb_async_jobs.status<>'pending' OR kb_async_jobs.attempts<>0;
+  IF state.phase='snapshot' THEN
+    UPDATE public.memory_relation_consumer_state SET snapshot_after_id=next_id,
+      phase=CASE WHEN next_id>=snapshot_max_id THEN 'replay' ELSE 'snapshot' END WHERE id=1;
+  ELSE
+    UPDATE public.memory_relation_consumer_positions SET generation=CASE WHEN more_targets THEN generation ELSE last_generation END,
+      target_after_id=CASE WHEN more_targets THEN targets[cardinality(targets)] ELSE 0 END,applied_at=clock_timestamp()
+      WHERE scope_type=position.scope_type AND scope_value=position.scope_value;
+  END IF;
+END $$;
+
+-- The runtime can apply authoritative pages, never supply a cursor or mutate
+-- progress. No IDs, counts or cross-scope state are returned by the helper.
+DO $relation_consumer_acl$
+DECLARE item RECORD; recipient RECORD; role_name TEXT;
+BEGIN
+  FOR item IN SELECT oid,relname,relowner FROM pg_class WHERE oid IN
+    ('memory_relation_consumer_state'::regclass,'memory_relation_consumer_positions'::regclass)
+  LOOP
+    FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class r,
+      LATERAL aclexplode(COALESCE(r.relacl,acldefault('r',r.relowner))) acl
+      WHERE r.oid=item.oid AND acl.grantee<>item.relowner
+    LOOP
+      role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+      EXECUTE format('REVOKE ALL ON TABLE %I FROM %s',item.relname,role_name);
+    END LOOP;
+  END LOOP;
+  FOR item IN SELECT oid,proname,proowner,pg_get_function_identity_arguments(oid) AS args FROM pg_proc
+    WHERE oid IN ('memory_reset_relation_consumer()'::regprocedure,'memory_apply_relation_invalidations(integer)'::regprocedure)
+  LOOP
+    FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_proc p,
+      LATERAL aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) acl
+      WHERE p.oid=item.oid AND acl.grantee<>item.proowner
+    LOOP
+      role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+      EXECUTE format('REVOKE ALL ON FUNCTION %I(%s) FROM %s',item.proname,item.args,role_name);
+    END LOOP;
+  END LOOP;
+END $relation_consumer_acl$;
+-- END memory relation invalidation consumer
+
 -- BEGIN memory episode revisions
 -- Episode text and provenance can change independently of the canonical parent.
 -- Keep an owner revision for typed selection/release identities. No-op refreshes
@@ -18317,7 +18470,8 @@ BEGIN
     memory_active_embedder, kb_embeddings, kb_documents,
     document_versions, derivation_policy_versions TO aimee_store_runtime;
   GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT),
-    kb_fact_commit_worm_seal(TEXT,TEXT), memory_deletion_replay_current(UUID,TEXT) TO aimee_store_runtime;
+    kb_fact_commit_worm_seal(TEXT,TEXT), memory_deletion_replay_current(UUID,TEXT),
+    memory_apply_relation_invalidations(INTEGER) TO aimee_store_runtime;
 END
 $memory_store_grants$;
 
@@ -18343,5 +18497,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '32')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '33')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
