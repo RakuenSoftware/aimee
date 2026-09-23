@@ -152,6 +152,8 @@ func exerciseDerivedRelationsReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 		`UPDATE memories SET lifecycle_state='retired' WHERE id=$1`,
 		`UPDATE memories SET content='Changed linked context' WHERE id=$1`,
 		`UPDATE memories SET scope_type='project',scope_value='relations-hidden' WHERE id=$1`,
+		`DELETE FROM memory_links WHERE target_id=$1`,
+		`UPDATE memory_links SET relation='replaced' WHERE target_id=$1`,
 	} {
 		if _, err := tx.Exec(ctx, `SAVEPOINT linked_change`); err != nil {
 			t.Fatal(err)
@@ -163,6 +165,33 @@ func exerciseDerivedRelationsReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 		if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT linked_change; RELEASE SAVEPOINT linked_change`); err != nil {
 			t.Fatal(err)
 		}
+	}
+
+	// Identical relation text from two linked origins keeps both observations;
+	// the healthy origin must not mask expiry of the other required input.
+	if _, err := tx.Exec(ctx, `SAVEPOINT linked_union`); err != nil {
+		t.Fatal(err)
+	}
+	var duplicateTarget int64
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+ VALUES('L2','fact','shared-target','Shared link context','project','relations-visible') RETURNING id`).Scan(&duplicateTarget); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO memory_links(source_id,target_id,relation) VALUES($1,$2,'related_to')`, id, duplicateTarget); err != nil {
+		t.Fatal(err)
+	}
+	rebuildLinked()
+	checkLinked(true)
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_lineage l JOIN memory_relations r ON r.id=l.object_id
+ WHERE l.object_type='relation' AND l.source_kind='memory-relation-input-v2' AND r.memory_id=$1 AND r.dst_entity='shared-target'`, id).Scan(&count); err != nil || count != 3 {
+		t.Fatal("lost shared relation input", count, err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE memories SET valid_until='2000-01-01' WHERE id=$1`, duplicateTarget); err != nil {
+		t.Fatal(err)
+	}
+	checkLinked(false)
+	if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT linked_union; RELEASE SAVEPOINT linked_union`); err != nil {
+		t.Fatal(err)
 	}
 	// Merely restoring lifecycle does not certify that copied bytes match the new
 	// source revision. A canonical rebuild supplies a new observation.
@@ -176,7 +205,7 @@ func exerciseDerivedRelationsReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 	rebuildLinked()
 	checkLinked(true)
 	// Legacy generator rows with absent observations wait for reindexing.
-	if _, err := tx.Exec(ctx, `DELETE FROM memory_lineage WHERE source_kind='memory-relation-input-v1'
+	if _, err := tx.Exec(ctx, `DELETE FROM memory_lineage WHERE source_kind='memory-relation-input-v2'
  AND object_type='relation' AND object_id IN(SELECT id FROM memory_relations WHERE memory_id=$1)`, id); err != nil {
 		t.Fatal(err)
 	}

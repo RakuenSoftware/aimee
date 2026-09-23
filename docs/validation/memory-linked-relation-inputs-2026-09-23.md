@@ -38,3 +38,19 @@ This closes a concrete direct copied-input gap in MR-01/MR-04. General transitiv
 lineage, automatic dependent requeueing, full erasure closure and provider release
 receipts remain open. Invalidated copies are withheld until canonical rebuilding;
 this change does not claim that all dependants rebuild automatically.
+
+A follow-up also records the originating link ID with each linked input. Serving
+requires that link to still connect the recorded source and target with the same
+relation. Deleting or retargeting the link cannot leave an apparently current
+relationship merely because both memory revisions stayed unchanged. The internal
+observation marker advances to version 2; version-1 rows await reindexing. The
+restricted-role fixture adds link deletion and relation-edit cases. Fifteen new
+HTTP checks per KB topology exercise copied-source expiry, restore without a new
+observation, fresh observations and link deletion across graph search, entity
+edges and profile aggregation. The full PostgreSQL/race suite passes in 139.042
+seconds after batching observation inserts once per parent. A two-origin fixture
+also proves that identical relation text retains both input observations and
+withholds the copy when either origin expires. [Final race](memory-linked-relation-inputs-2026-09-23/batched-input-race.txt)
+and [export](memory-linked-relation-inputs-2026-09-23/batched-export.txt) checks pass.
+Fresh HTTP validation of the final candidate remains pending. These functional
+suite timings are not matched performance measurements.

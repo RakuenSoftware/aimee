@@ -180,6 +180,63 @@ def preview_source_version_gate(kb, check):
         sql(f"DELETE FROM memories WHERE key IN ('{key}-headline','{key}-fallback')")
 
 
+def linked_relation_input_gate(kb, check):
+    """Verify copied-input and link fences through authenticated graph endpoints."""
+    key = 'linked-input-' + uuid.uuid4().hex
+    def sql(query):
+        return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+    fixture = json.loads(sql(f"""BEGIN;
+        INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES
+          ('L2','fact','{key}-parent','parent','project','{key}'),
+          ('L2','fact','{key}-target','linked source','project','{key}');
+        INSERT INTO memory_links(source_id,target_id,relation)
+          SELECT p.id,t.id,'related_to' FROM memories p,memories t
+          WHERE p.key='{key}-parent' AND t.key='{key}-target';
+        INSERT INTO memory_entities(memory_id,entity)
+          SELECT id,'{key}' FROM memories WHERE key='{key}-parent';
+        INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text)
+          SELECT id,'{key}','related_to','linked-target','{key} copied linked source'
+          FROM memories WHERE key='{key}-parent';
+        INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+          SELECT 'relation',r.id,'memory-index-v1',r.memory_id::text FROM memory_relations r
+          WHERE r.src_entity='{key}';
+        INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+          SELECT 'relation',r.id,'memory-relation-input-v2',
+            (jsonb_build_object('record_id',m.id::text,'record_revision',m.record_revision::text) ||
+             CASE WHEN m.key='{key}-target' THEN jsonb_build_object('link_id',l.id::text) ELSE '{{}}'::jsonb END)::text
+          FROM memory_relations r JOIN memory_links l ON l.source_id=r.memory_id
+          JOIN memories m ON m.id IN(l.source_id,l.target_id) WHERE r.src_entity='{key}';
+        UPDATE kb_async_jobs SET status='done' WHERE kind='memory_index' AND document_id IN
+          (SELECT id FROM memories WHERE key IN ('{key}-parent','{key}-target'));
+        SELECT json_build_object('relation_id',r.id,'target_id',l.target_id,'link_id',l.id)
+          FROM memory_relations r JOIN memory_links l ON l.source_id=r.memory_id WHERE r.src_entity='{key}';
+        COMMIT"""))
+    def reads(label, expected):
+        for verb, field in [('search_graph','relations'), ('entity_edges','edges'), ('entity_profile','profile')]:
+            code, result = kb.kb_request('/v1/actions/memory.'+verb,
+                dict(query=key+' copied linked source', entity=key, project=key, scope_context=True, limit=1))
+            value = result.get(field, {} if field == 'profile' else [])
+            count = value.get('relation_count', -1) if field == 'profile' else len(value)
+            check('Linked input '+label+' on '+verb, code == 200 and count == expected)
+    try:
+        reads('is initially visible', 1)
+        sql(f"UPDATE memories SET valid_until='2000-01-01' WHERE id={fixture['target_id']}")
+        reads('expiry withholds copied text', 0)
+        sql(f"UPDATE memories SET valid_until='' WHERE id={fixture['target_id']}")
+        reads('restoration cannot reuse old observation', 0)
+        sql(f"""UPDATE memory_lineage SET source_ref=jsonb_set(source_ref::jsonb,'{{record_revision}}',
+            to_jsonb((SELECT record_revision::text FROM memories WHERE id={fixture['target_id']})))::text
+            WHERE object_type='relation' AND object_id={fixture['relation_id']}
+            AND source_kind='memory-relation-input-v2' AND source_ref::jsonb->>'record_id'='{fixture['target_id']}'""")
+        reads('fresh observed input is visible', 1)
+        sql(f"DELETE FROM memory_links WHERE id={fixture['link_id']}")
+        reads('deleted link withholds copied relationship', 0)
+    finally:
+        sql(f"""DELETE FROM memory_lineage WHERE object_type='relation' AND object_id={fixture['relation_id']};
+            DELETE FROM memories WHERE key IN ('{key}-parent','{key}-target')""")
+
+
 def typed_source_version_gate(kb, check):
     """Observe real assertion versions through the authenticated KB/Go path."""
     key = 'typed-version-' + uuid.uuid4().hex
@@ -736,6 +793,7 @@ def main():
             check('KB graph and memory retrieval survives the deepest worker path', code == 200 and isinstance(body.get('facts'), list))
             typed_context_budget_gate(kb, check)
             typed_source_version_gate(kb, check)
+            linked_relation_input_gate(kb, check)
             preview_source_version_gate(kb, check)
             evidence_exact_identity_gate(kb, check)
         if args.topology in ('T2', 'T3'):

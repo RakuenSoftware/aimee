@@ -94,15 +94,20 @@ func memoryLocatorIDSQL(column string) string {
 // generator-owned row with no input observations waits for canonical reindexing.
 // Authored relations retain their existing parent policy.
 func currentRelationInputsSQL(alias string) string {
-	dependency := `(CASE WHEN dep.source_kind='memory-relation-input-v1' THEN dep.source_ref::jsonb END)`
+	dependency := `(CASE WHEN dep.source_kind='memory-relation-input-v2' THEN dep.source_ref::jsonb END)`
 	return `(NOT EXISTS(SELECT 1 FROM memory_lineage own WHERE own.object_type='relation'
  AND own.object_id=` + alias + `.id AND own.source_kind='memory-index-v1') OR EXISTS(
  SELECT 1 FROM memory_lineage dep WHERE dep.object_type='relation' AND dep.object_id=` + alias + `.id
- AND dep.source_kind='memory-relation-input-v1' AND ` + dependency + `->>'record_id'=` + alias + `.memory_id::text))
+ AND dep.source_kind='memory-relation-input-v2' AND ` + dependency + `->>'record_id'=` + alias + `.memory_id::text))
  AND NOT EXISTS(SELECT 1 FROM memory_lineage dep LEFT JOIN LATERAL (
  SELECT m.id FROM memories m WHERE m.id=(` + dependency + `->>'record_id')::bigint
  AND m.record_revision::text=` + dependency + `->>'record_revision'
- AND ` + currentMemorySQL("m.") + ` LIMIT 1) input ON TRUE
+ AND ` + currentMemorySQL("m.") + `
+ AND (NOT (` + dependency + ` ? 'link_id') OR EXISTS(SELECT 1 FROM memory_links input_link
+ WHERE input_link.id=(` + dependency + `->>'link_id')::bigint
+ AND input_link.source_id=` + alias + `.memory_id AND input_link.target_id=m.id
+ AND COALESCE(NULLIF(input_link.relation,''),'related_to')=` + alias + `.relation))
+ LIMIT 1) input ON TRUE
  WHERE dep.object_type='relation' AND dep.object_id=` + alias + `.id
- AND dep.source_kind='memory-relation-input-v1' AND input.id IS NULL)`
+ AND dep.source_kind='memory-relation-input-v2' AND input.id IS NULL)`
 }

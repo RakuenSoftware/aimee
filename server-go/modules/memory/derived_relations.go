@@ -12,7 +12,7 @@ const derivedIndexSource = "memory-index-v1"
 type derivedGraphRelation struct {
 	Source, Relation, Target, Fact, Valid, Invalid string
 	Weight                                         float64
-	InputID, InputRevision                         int64
+	InputID, InputRevision, InputLinkID            int64
 }
 
 // The legacy rebuild deleted every relation, including authored and cognified
@@ -97,13 +97,13 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 			at = f.Time
 		}
 		if f.Actor != "" && f.Action != "" && f.Object != "" {
-			relations = append(relations, derivedGraphRelation{f.Actor, f.Action, f.Object, fact, at, invalid, 2.4, 0, 0})
+			relations = append(relations, derivedGraphRelation{f.Actor, f.Action, f.Object, fact, at, invalid, 2.4, 0, 0, 0})
 		}
 		if f.Actor != "" && f.Location != "" {
-			relations = append(relations, derivedGraphRelation{f.Actor, "located_at", f.Location, fact, at, invalid, 1.8, 0, 0})
+			relations = append(relations, derivedGraphRelation{f.Actor, "located_at", f.Location, fact, at, invalid, 1.8, 0, 0, 0})
 		}
 		if f.Actor != "" && f.Time != "" {
-			relations = append(relations, derivedGraphRelation{f.Actor, "occurred_at", f.Time, fact, f.Time, invalid, 1.9, 0, 0})
+			relations = append(relations, derivedGraphRelation{f.Actor, "occurred_at", f.Time, fact, f.Time, invalid, 1.9, 0, 0, 0})
 		}
 	}
 	err = rows.Err()
@@ -111,7 +111,7 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 	if err != nil {
 		return err
 	}
-	rows, err = s.db.Query(ctx, `SELECT l.relation,target.key,target.content,target.id,target.record_revision FROM memory_links l
+	rows, err = s.db.Query(ctx, `SELECT l.relation,target.key,target.content,target.id,target.record_revision,l.id FROM memory_links l
  JOIN memories target ON target.id=l.target_id JOIN memories source ON source.id=l.source_id
  WHERE l.source_id=$1 AND `+currentMemorySQL("target.")+` AND
  (target.scope_type='global' OR (target.scope_type=source.scope_type AND target.scope_value=source.scope_value))
@@ -121,8 +121,8 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 	}
 	for rows.Next() {
 		var relation, targetKey, targetContent string
-		var targetID, targetRevision int64
-		if err = rows.Scan(&relation, &targetKey, &targetContent, &targetID, &targetRevision); err != nil {
+		var targetID, targetRevision, linkID int64
+		if err = rows.Scan(&relation, &targetKey, &targetContent, &targetID, &targetRevision, &linkID); err != nil {
 			rows.Close()
 			return err
 		}
@@ -136,7 +136,7 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 		if fact == "" {
 			fact = targetKey
 		}
-		relations = append(relations, derivedGraphRelation{primary, relation, target, primary + " " + relation + " " + fact, valid, invalid, 1.3, targetID, targetRevision})
+		relations = append(relations, derivedGraphRelation{primary, relation, target, primary + " " + relation + " " + fact, valid, invalid, 1.3, targetID, targetRevision, linkID})
 	}
 	err = rows.Err()
 	rows.Close()
@@ -146,11 +146,12 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 	// Replace this generator's dependency observations in the same transaction as
 	// its rows. Multiple identical relations union their observed inputs.
 	if _, err = s.db.Exec(ctx, `DELETE FROM memory_lineage WHERE object_type='relation'
- AND source_kind='memory-relation-input-v1' AND object_id IN
+ AND source_kind IN ('memory-relation-input-v1','memory-relation-input-v2') AND object_id IN
  (SELECT object_id FROM memory_lineage WHERE object_type='relation' AND source_kind=$1 AND source_ref=$2)`, derivedIndexSource, fmt.Sprint(id)); err != nil {
 		return err
 	}
 	relationIDs := []int64{}
+	inputs := []derivedRelationInput{}
 	for _, r := range relations {
 		var relationID int64
 		if err = s.db.QueryRow(ctx, `WITH existing AS (
@@ -165,15 +166,14 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 		if err = s.markDerivedIndexObject(ctx, "relation", relationID, id); err != nil {
 			return err
 		}
-		if err = s.markDerivedRelationInput(ctx, relationID, id, parentRevision); err != nil {
-			return err
-		}
+		inputs = append(inputs, derivedRelationInput{RelationID: relationID, RecordID: fmt.Sprint(id), RecordRevision: fmt.Sprint(parentRevision)})
 		if r.InputID != 0 {
-			if err = s.markDerivedRelationInput(ctx, relationID, r.InputID, r.InputRevision); err != nil {
-				return err
-			}
+			inputs = append(inputs, derivedRelationInput{RelationID: relationID, RecordID: fmt.Sprint(r.InputID), RecordRevision: fmt.Sprint(r.InputRevision), LinkID: fmt.Sprint(r.InputLinkID)})
 		}
 		relationIDs = append(relationIDs, relationID)
+	}
+	if err = s.writeDerivedRelationInputs(ctx, inputs); err != nil {
+		return err
 	}
 	if _, err = s.db.Exec(ctx, `WITH stale AS MATERIALIZED (
  SELECT object_id FROM memory_lineage WHERE object_type='relation' AND source_kind=$2 AND source_ref=$3
@@ -216,13 +216,28 @@ func (s *postgresDataStore) adoptLegacyDerivedRelations(ctx context.Context, id 
 
 // Capture exact versions from the same row reads that supplied the copied text.
 // A later independent SELECT must never certify old text against a newer source.
-func (s *postgresDataStore) markDerivedRelationInput(ctx context.Context, relation, id, revision int64) error {
-	raw, err := json.Marshal(map[string]string{"record_id": fmt.Sprint(id), "record_revision": fmt.Sprint(revision)})
+type derivedRelationInput struct {
+	RelationID     int64  `json:"relation_id"`
+	RecordID       string `json:"record_id"`
+	RecordRevision string `json:"record_revision"`
+	LinkID         string `json:"link_id,omitempty"`
+}
+
+func (s *postgresDataStore) writeDerivedRelationInputs(ctx context.Context, inputs []derivedRelationInput) error {
+	if len(inputs) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(inputs)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
- SELECT 'relation',$1,'memory-relation-input-v1',$2 WHERE NOT EXISTS(SELECT 1 FROM memory_lineage
- WHERE object_type='relation' AND object_id=$1 AND source_kind='memory-relation-input-v1' AND source_ref=$2)`, relation, string(raw))
+	_, err = s.db.Exec(ctx, `WITH inputs AS (
+ SELECT DISTINCT relation_id,jsonb_strip_nulls(jsonb_build_object('record_id',record_id,
+ 'record_revision',record_revision,'link_id',NULLIF(link_id,'')))::text AS source_ref
+ FROM jsonb_to_recordset($1::jsonb) AS x(relation_id bigint,record_id text,record_revision text,link_id text)
+ ) INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'relation',i.relation_id,'memory-relation-input-v2',i.source_ref FROM inputs i
+ WHERE NOT EXISTS(SELECT 1 FROM memory_lineage l WHERE l.object_type='relation'
+ AND l.object_id=i.relation_id AND l.source_kind='memory-relation-input-v2' AND l.source_ref=i.source_ref)`, string(raw))
 	return err
 }
