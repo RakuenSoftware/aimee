@@ -4346,7 +4346,7 @@ $(TESTPREFIX)/unit-test-compact: $(OBJDIR)/tests/test_compact.o $(OBJDIR)/compac
 
 $(TESTPREFIX)/unit-test-wire-fence: \
                                   $(OBJDIR)/tests/test_wire_fence.o \
-                                  $(OBJDIR)/wire_fence.o
+                                  $(OBJDIR)/wire_fence.o $(OBJDIR)/aimee_sha256.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # The guardrail event's durability across the bus, in two halves.

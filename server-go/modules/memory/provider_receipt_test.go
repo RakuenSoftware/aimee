@@ -93,6 +93,11 @@ func TestProviderReceiptObservationPreservesTransportUncertainty(t *testing.T) {
 		args["http_status"], _ = json.Marshal(status)
 		args["response_sha256"], _ = json.Marshal(strings.Repeat("b", 64))
 		args["response_bytes"] = json.RawMessage(`"2"`)
+		representation := "host_buffered_response_string"
+		if status == 200 || status == -1 {
+			representation = "provider_stream_bytes"
+		}
+		args["response_representation"], _ = json.Marshal(representation)
 		observed := sourceReleaseCall(t, s, args)
 		if observed["durable"] != false || observed["status"] != "ok" {
 			t.Fatal(observed)
@@ -100,6 +105,9 @@ func TestProviderReceiptObservationPreservesTransportUncertainty(t *testing.T) {
 		var event providerReceiptEvent
 		if json.Unmarshal([]byte(observed["observation_detail"].(string)), &event) != nil {
 			t.Fatal(observed)
+		}
+		if event.ResponseRepresentation != representation {
+			t.Fatal(event)
 		}
 		if status == -1 {
 			if event.Stage != "outcome_unknown" || event.Reason != "transport_outcome_unresolved" || event.HTTPStatus != 0 {
@@ -153,5 +161,30 @@ func TestProviderReceiptRejectsMalformedAndOversizedBindings(t *testing.T) {
 	s.receiptBytes = sourceReleaseMaxBytes
 	if result := sourceReleaseCall(t, s, args); result["status"] != "error" {
 		t.Fatal("capacity exhaustion ignored", result)
+	}
+}
+
+func TestProviderReceiptResponseRepresentationCompatibility(t *testing.T) {
+	for _, value := range []string{"absent", `null`, `1`, `{}`, `"unknown"`, `""`} {
+		s := &sourceReleaseState{}
+		args := receiptTestAdmission(t, s)
+		plan := sourceReleaseCall(t, s, args)
+		args["operation"] = json.RawMessage(`"provider-receipt-observe"`)
+		args["attempt_id"], _ = json.Marshal(plan["attempt_id"])
+		args["http_status"] = json.RawMessage(`200`)
+		args["response_sha256"], _ = json.Marshal(strings.Repeat("b", 64))
+		args["response_bytes"] = json.RawMessage(`"2"`)
+		if value != "absent" {
+			args["response_representation"] = json.RawMessage(value)
+		}
+		result := sourceReleaseCall(t, s, args)
+		if value == "absent" {
+			var event providerReceiptEvent
+			if result["status"] != "ok" || json.Unmarshal([]byte(result["observation_detail"].(string)), &event) != nil || event.ResponseRepresentation != "host_buffered_response_string" {
+				t.Fatal(result)
+			}
+		} else if result["status"] != "error" {
+			t.Fatal(value, result)
+		}
 	}
 }

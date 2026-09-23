@@ -53,6 +53,12 @@ extern "C"
                        int max_attempts, int base_ms, int max_ms, const char *provider,
                        const char *model, const char *session_id, wire_fence_route_t route);
 
+   typedef int (*wire_fence_stream_cb)(const char *data, size_t len, void *userdata);
+   int wire_fence_post_stream(const char *url, const char *auth_header, const void *body,
+                              size_t body_len, wire_fence_stream_cb callback, void *userdata,
+                              int timeout_ms, const char *extra_headers, const char *provider,
+                              const char *model, wire_fence_route_t route);
+
    /* Stable failure kind for the current thread's last selection attempt. */
    const char *wire_fence_last_error(void);
    int wire_fence_error_http_status(const char *error);

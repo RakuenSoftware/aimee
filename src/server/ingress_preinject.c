@@ -231,14 +231,22 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
 int ingress_preinject_observe_attempt(const char *attempt, int http_status, const char *response,
                                       size_t response_len)
 {
+   char digest[65];
+   if ((!response && response_len) || aimee_sha256_hex(response, response_len, digest) != 0)
+      return -1;
+   return ingress_preinject_observe_commitment(attempt, http_status, digest, response_len,
+                                               "host_buffered_response_string");
+}
+
+int ingress_preinject_observe_commitment(const char *attempt, int http_status, const char *digest,
+                                         size_t response_len, const char *representation)
+{
    if (!attempt || !*attempt)
       return 0;
    const request_context_t *context = request_context_get();
-   if (!context || (!response && response_len))
+   if (!context || !digest || !representation)
       return -1;
-   char digest[65], count[32];
-   if (aimee_sha256_hex(response, response_len, digest) != 0)
-      return -1;
+   char count[32];
    snprintf(count, sizeof(count), "%zu", response_len);
    cJSON *request = cJSON_CreateObject();
    ingress_release_context(request, context);
@@ -247,6 +255,7 @@ int ingress_preinject_observe_attempt(const char *attempt, int http_status, cons
    cJSON_AddNumberToObject(request, "http_status", http_status < 0 ? -1 : http_status);
    cJSON_AddStringToObject(request, "response_sha256", digest);
    cJSON_AddStringToObject(request, "response_bytes", count);
+   cJSON_AddStringToObject(request, "response_representation", representation);
    cJSON *plan = ingress_command(request, 0);
    const char *detail =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "observation_detail"));

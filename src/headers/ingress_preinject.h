@@ -32,6 +32,8 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
                                       const char *provider, const char *model, char attempt[33]);
 int ingress_preinject_observe_attempt(const char *attempt, int http_status, const char *response,
                                       size_t response_len);
+int ingress_preinject_observe_commitment(const char *attempt, int http_status, const char *digest,
+                                         size_t response_len, const char *representation);
 
 /* Extract the recall seed query from a parsed chat `messages` array: the text
  * of the last user-role message. Returns a malloc'd string (caller frees) or

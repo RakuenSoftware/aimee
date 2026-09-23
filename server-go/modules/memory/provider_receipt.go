@@ -40,16 +40,17 @@ type providerReceiptBinding struct {
 }
 
 type providerReceiptEvent struct {
-	SchemaVersion  int                     `json:"schema_version"`
-	Stage          string                  `json:"stage"`
-	AttemptID      string                  `json:"attempt_id"`
-	At             string                  `json:"at"`
-	BindingDigest  string                  `json:"binding_sha256"`
-	Binding        *providerReceiptBinding `json:"binding,omitempty"`
-	HTTPStatus     int                     `json:"http_status,omitempty"`
-	ResponseDigest string                  `json:"response_sha256,omitempty"`
-	ResponseBytes  string                  `json:"response_bytes,omitempty"`
-	Reason         string                  `json:"reason,omitempty"`
+	ResponseRepresentation string                  `json:"response_representation,omitempty"`
+	SchemaVersion          int                     `json:"schema_version"`
+	Stage                  string                  `json:"stage"`
+	AttemptID              string                  `json:"attempt_id"`
+	At                     string                  `json:"at"`
+	BindingDigest          string                  `json:"binding_sha256"`
+	Binding                *providerReceiptBinding `json:"binding,omitempty"`
+	HTTPStatus             int                     `json:"http_status,omitempty"`
+	ResponseDigest         string                  `json:"response_sha256,omitempty"`
+	ResponseBytes          string                  `json:"response_bytes,omitempty"`
+	Reason                 string                  `json:"reason,omitempty"`
 }
 
 type providerReceiptEntry struct {
@@ -149,10 +150,18 @@ func (s *sourceReleaseState) receiptObservation(args commandArgs) ([]byte, bus.M
 		return commandResult(commandError("unavailable", "provider transport observation invalid"))
 	}
 	digest, count := args.stringOr("response_sha256", ""), args.stringOr("response_bytes", "")
-	if !receiptDigestValid(digest) || !receiptByteCount(count) {
+	representation := "host_buffered_response_string" // pre-stream host protocol
+	if _, present := args["response_representation"]; present {
+		var ok bool
+		representation, ok = args.stringValue("response_representation")
+		if !ok {
+			return commandResult(commandError("unavailable", "provider response representation invalid"))
+		}
+	}
+	if !receiptDigestValid(digest) || !receiptByteCount(count) || (representation != "host_buffered_response_string" && representation != "provider_stream_bytes") {
 		return commandResult(commandError("unavailable", "provider response commitment invalid"))
 	}
-	input := releaseDigest([]any{status, digest, count})
+	input := releaseDigest([]any{status, digest, count, representation})
 	if entry.observation != "" {
 		if input != entry.observationInput {
 			return commandResult(commandError("unavailable", "provider observation conflicts with previous observation"))
@@ -160,7 +169,7 @@ func (s *sourceReleaseState) receiptObservation(args commandArgs) ([]byte, bus.M
 	} else {
 		event := providerReceiptEvent{SchemaVersion: 1, Stage: "acknowledged", AttemptID: entry.attempt,
 			At: time.Now().UTC().Format(time.RFC3339Nano), BindingDigest: entry.digest, HTTPStatus: status,
-			ResponseDigest: digest, ResponseBytes: count}
+			ResponseDigest: digest, ResponseBytes: count, ResponseRepresentation: representation}
 		if status == -1 {
 			event.Stage, event.HTTPStatus, event.Reason = "outcome_unknown", 0, "transport_outcome_unresolved"
 		}

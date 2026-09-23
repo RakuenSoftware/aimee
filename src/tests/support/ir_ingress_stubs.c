@@ -9,6 +9,7 @@
 #include "config.h"
 #include "gateway_mutate_wire.h" /* gw_mutate_ctx_t + gw_post_action_t (header-only deps) */
 #include "agent_exec.h"
+#include "http_retry.h"
 
 /* Exact-length transport adapters for ingress tests whose capture doubles expose
  * the historical string API. Production links the real byte-counted transport. */
@@ -34,6 +35,24 @@ __attribute__((weak)) int agent_http_post_stream_bytes(const char *url, const ch
       return -1;
    return agent_http_post_stream(url, auth_header, s, callback, userdata, timeout_ms,
                                  extra_headers);
+}
+
+/* Shape tests model one HTTP return; retry/backoff uses the real socket tests.
+ * Keep observer callbacks live so these fixtures can assert admission failures
+ * and their terminal SSE event rather than bypassing the provider boundary. */
+__attribute__((weak)) int
+http_retry_post_observed_bytes(const char *url, const char *auth, const void *body, size_t length,
+                               char **response, int timeout, const char *extra, int attempts,
+                               int base, int maximum, const char *provider, const char *model,
+                               const char *session, http_retry_admit_cb_t admit_retry,
+                               const http_retry_observer_t *observer)
+{
+   if (observer && observer->before && observer->before(observer->context, body, length) != 0)
+      return HTTP_RETRY_ADMISSION_REFUSED;
+   int status = agent_http_post_bytes(url, auth, body, length, response, timeout, extra);
+   if (observer && observer->after)
+      observer->after(observer->context, status, *response, *response ? strlen(*response) : 0);
+   return status;
 }
 
 /* Gateway-mutation hooks wired into anthropic_http.c / openai_chat.c (§ economizer

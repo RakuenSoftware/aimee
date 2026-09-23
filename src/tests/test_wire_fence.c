@@ -1,4 +1,6 @@
 #include "wire_fence.h"
+#include "http_retry.h"
+#include "aimee_sha256.h"
 #include "request_context.h"
 #include "modules/economizer/economizer_module_client.h"
 
@@ -239,8 +241,99 @@ static void test_source_handle_requires_host_transport(void)
    memset(&context, 0, sizeof(context));
 }
 
+static int stream_before_calls, stream_after_calls, stream_transport_calls;
+static int stream_refuse, stream_abort, stream_after_failure;
+static int stream_observed_status;
+static size_t stream_consumed, stream_observed_bytes;
+static char stream_observed_digest[65];
+static const unsigned char stream_bytes[] = {'a', 0, 'b', 0xce, 0xb1};
+
+int ingress_preinject_prepare_attempt(const void *body, size_t length, const char *route,
+                                      const char *provider, const char *model, char attempt[33])
+{
+   assert(body && length == 3 && memcmp(body, "abc", 3) == 0);
+   assert(!strcmp(provider, "fixture") && !strcmp(model, "fixture-model"));
+   assert(!strcmp(route, "openai_chat") || !strcmp(route, "openai_responses") ||
+          !strcmp(route, "anthropic_messages"));
+   stream_before_calls++;
+   if (stream_refuse)
+      return -1;
+   strcpy(attempt, "0123456789abcdef0123456789abcdef");
+   return 0;
+}
+int ingress_preinject_observe_commitment(const char *attempt, int status, const char *digest,
+                                         size_t length, const char *representation)
+{
+   assert(!strcmp(attempt, "0123456789abcdef0123456789abcdef"));
+   assert(!strcmp(representation, "provider_stream_bytes"));
+   assert(strlen(digest) == 64);
+   stream_after_calls++;
+   stream_observed_status = status;
+   stream_observed_bytes = length;
+   strcpy(stream_observed_digest, digest);
+   return stream_after_failure;
+}
+int agent_http_post_stream_bytes(const char *url, const char *auth, const void *body,
+                                 size_t body_len, wire_fence_stream_cb callback, void *userdata,
+                                 int timeout, const char *extra)
+{
+   assert(body_len == 3 && memcmp(body, "abc", 3) == 0);
+   stream_transport_calls++;
+   if (callback((const char *)stream_bytes, 3, userdata) != 0)
+      return -1;
+   if (callback((const char *)stream_bytes + 3, 2, userdata) != 0)
+      return -1;
+   return 200;
+}
+static int consume_stream(const char *bytes, size_t length, void *unused)
+{
+   assert(!memcmp(bytes, stream_bytes + stream_consumed, length));
+   stream_consumed += length;
+   return stream_abort;
+}
+static void test_stream_receipt_admission_and_commitment(void)
+{
+   for (int route = 1; route <= 3; route++)
+      for (int scenario = 0; scenario < 5; scenario++)
+      {
+         memset(&context, 0, sizeof(context));
+         have_context = 1;
+         if (scenario != 4)
+            strcpy(context.memory_source_release, "0123456789abcdef0123456789abcdef");
+         stream_refuse = scenario == 1;
+         stream_abort = scenario == 2;
+         stream_after_failure = scenario == 3 ? -1 : 0;
+         stream_before_calls = stream_after_calls = stream_transport_calls = 0;
+         stream_consumed = stream_observed_bytes = 0;
+         int status = wire_fence_post_stream("fixture", "secret-header", "abc", 3, consume_stream,
+                                             NULL, 1000, "secret-extra", "fixture", "fixture-model",
+                                             (wire_fence_route_t)route);
+         if (stream_refuse)
+         {
+            assert(status == HTTP_RETRY_ADMISSION_REFUSED && stream_before_calls == 1);
+            assert(!stream_transport_calls && !stream_after_calls && !stream_consumed);
+            continue;
+         }
+         assert(status == (stream_abort ? -1 : 200) && stream_transport_calls == 1);
+         assert(stream_consumed == (stream_abort ? 3 : sizeof(stream_bytes)));
+         if (scenario == 4)
+            assert(stream_before_calls == 0 && stream_after_calls == 0);
+         else
+         {
+            assert(stream_before_calls == 1 && stream_after_calls == 1);
+            assert(stream_observed_status == status && stream_observed_bytes == stream_consumed);
+            char digest[65];
+            assert(aimee_sha256_hex(stream_bytes, stream_consumed, digest) == 0);
+            assert(!strcmp(digest, stream_observed_digest));
+         }
+      }
+   memset(&context, 0, sizeof(context));
+   puts("stream admission and exact incremental commitments survive partial/failed observations");
+}
+
 int main(void)
 {
+   test_stream_receipt_admission_and_commitment();
    operator_policy(NULL);
    test_source_handle_requires_host_transport();
    test_context_refusal_blocks_every_route();

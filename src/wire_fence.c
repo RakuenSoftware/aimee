@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "http_retry.h"
+#include "agent_exec.h"
+#include <openssl/evp.h>
 #include <string.h>
 #include "wire_fence.h"
 #include "request_context.h"
@@ -252,4 +254,69 @@ int wire_fence_post(const char *url, const char *auth_header, const void *body, 
    return http_retry_post_observed_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
                                          extra_headers, max_attempts, base_ms, max_ms, provider,
                                          model, session_id, NULL, &observer);
+}
+
+extern int ingress_preinject_observe_commitment(const char *, int, const char *, size_t,
+                                                const char *) __attribute__((weak));
+typedef struct
+{
+   EVP_MD_CTX *digest;
+   size_t length;
+   wire_fence_stream_cb callback;
+   void *context;
+} wire_stream_t;
+
+static int wire_stream_chunk(const char *data, size_t length, void *opaque)
+{
+   wire_stream_t *stream = opaque;
+   if (length > SIZE_MAX - stream->length || EVP_DigestUpdate(stream->digest, data, length) != 1)
+      return -1;
+   stream->length += length;
+   return stream->callback ? stream->callback(data, length, stream->context) : 0;
+}
+
+int wire_fence_post_stream(const char *url, const char *auth_header, const void *body,
+                           size_t body_len, wire_fence_stream_cb callback, void *userdata,
+                           int timeout_ms, const char *extra_headers, const char *provider,
+                           const char *model, wire_fence_route_t route)
+{
+   wire_attempt_t attempt = {.route = route, .provider = provider, .model = model};
+   if (wire_attempt_before(&attempt, body, body_len) != 0)
+      return HTTP_RETRY_ADMISSION_REFUSED;
+   if (!attempt.attempt[0])
+      return agent_http_post_stream_bytes(url, auth_header, body, body_len, callback, userdata,
+                                          timeout_ms, extra_headers);
+   wire_stream_t stream = {.digest = EVP_MD_CTX_new(), .callback = callback, .context = userdata};
+   if (!stream.digest || EVP_DigestInit_ex(stream.digest, EVP_sha256(), NULL) != 1)
+   {
+      EVP_MD_CTX_free(stream.digest);
+      wire_attempt_after(&attempt, -1, NULL, 0);
+      last_error = "unavailable";
+      return HTTP_RETRY_ADMISSION_REFUSED;
+   }
+   int status = agent_http_post_stream_bytes(url, auth_header, body, body_len, wire_stream_chunk,
+                                             &stream, timeout_ms, extra_headers);
+   unsigned char raw[32];
+   unsigned int length = 0;
+   char digest[65];
+   int final = EVP_DigestFinal_ex(stream.digest, raw, &length);
+   EVP_MD_CTX_free(stream.digest);
+   if (final == 1 && length == 32)
+   {
+      static const char hex[] = "0123456789abcdef";
+      for (unsigned i = 0; i < 32; i++)
+      {
+         digest[2 * i] = hex[raw[i] >> 4];
+         digest[2 * i + 1] = hex[raw[i] & 15];
+      }
+      digest[64] = '\0';
+      if (ingress_preinject_observe_commitment &&
+          ingress_preinject_observe_commitment(attempt.attempt, status, digest, stream.length,
+                                               "provider_stream_bytes") == 0)
+         return status;
+   }
+   fputs("provider stream receipt observation unavailable; admitted attempt outcome remains "
+         "unresolved\n",
+         stderr);
+   return status;
 }

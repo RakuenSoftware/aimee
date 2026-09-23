@@ -33,7 +33,7 @@ Current integration covers native tool/non-tool model calls and model fallbacks,
 buffered Responses, buffered Anthropic, and Anthropic's buffered replay path.
 The latter two retain one transport attempt; this change does not add retries.
 Requests without a versioned source handle do not acquire receipt coverage.
-Incremental streaming still uses its existing source fence. Observed transport
+The follow-up described below adds incremental stream receipts. Observed transport
 start, recovery inspection/ownership resolution, authorized receipt lookup and
 verification, unversioned channels, full policy/index metadata and external
 checkpoint comparison remain open. This is not MR-06 completion.
@@ -58,3 +58,28 @@ Native retry, ingress, agent and buffered provider adapter builds/tests pass;
 C ownership, bus-boundary and descriptor guards pass. Fresh deployment evidence
 for this receipt change is pending.
 Released CT100 remains 0.4.5; the draft changes do not replace its application.
+
+
+## Incremental stream follow-up
+
+Incremental native Anthropic, OpenAI IR relay and legacy OpenAI relay attempts
+now use the same synchronous prepared/admitted persistence gate. The transport
+hashes exact provider chunks before forwarding them, with constant-size SHA-256
+state and a decimal byte count. Observations distinguish `provider_stream_bytes`
+from `host_buffered_response_string`; older hosts that omit the representation
+retain the buffered interpretation. Explicit malformed representations fail.
+A downstream callback abort records the observed prefix with an unresolved
+transport outcome. Observation persistence failure never resends a provider
+request. Admission failure emits one terminal error and no synthetic successful
+stream ending.
+
+[Transport tests](memory-provider-receipts-2026-09-23/stream-wire-fence.txt)
+cover all three routes, zero network calls on refusal, exact embedded-NUL and
+Unicode chunk commitments, partial callback failure, observation failure and
+requests without versioned source handles. [Actual handler tests](memory-provider-receipts-2026-09-23/stream-anthropic-http.txt)
+exercise buffered and streaming refusal across the three provider drivers and
+both proof modes, plus the IR relay helper. Both minimal adapter fixtures pass.
+[Go representation contracts](memory-provider-receipts-2026-09-23/stream-contracts-race.txt)
+pass under the race detector; the [exported owner build](memory-provider-receipts-2026-09-23/stream-export.txt)
+also passes. These are native/owner tests; fresh deployment results for the
+preceding buffered candidate do not certify this later streaming change.
