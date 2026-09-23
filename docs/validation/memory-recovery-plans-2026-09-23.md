@@ -34,7 +34,16 @@ rebuilt native Go-owner ingress fixture passes, as do module inventory, descript
 and memory ownership checks. [Race](memory-recovery-plans-2026-09-23/go-race.txt),
 [native](memory-recovery-plans-2026-09-23/native.txt) and
 [export](memory-recovery-plans-2026-09-23/export.txt) logs are retained.
-Fresh HTTP cases have been added but are not yet run for this candidate.
+Fresh application/harness `0a63ad568` passes **1,110/1,110 checks**: 110 T1
+and 1000 T2. Both topologies exercise the new proposal-only and packed-away-role
+HTTP cases. The enrolled Server additionally passes provider-boundary, native
+async refusal/recovery, restart, outage and isolation checks. The
+[summary](memory-recovery-plans-2026-09-23/fresh/summary.json),
+[T2 image identities](memory-recovery-plans-2026-09-23/fresh/image-identities.json)
+and [environment](memory-recovery-plans-2026-09-23/fresh/environment.json) are
+retained with raw receipts. Six T2 image identities and both actual caps were
+captured; T1 completed before independent image capture. T3 was not rerun for
+this opt-in KB planner change. Released 0.4.5 on CT100 remained healthy.
 
 Host admission/execution, durable duplicate-attempt recording, authenticated
 outcome application and timeline/source-chain expansion remain open. This is an

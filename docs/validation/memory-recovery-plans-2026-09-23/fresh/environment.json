@@ -1,0 +1,9 @@
+{
+  "source_revision": "0a63ad568201c4cb2c239e9737c7200effba1f8f",
+  "application_version": "0.4.5-pr2990.0a63ad568",
+  "application_image": "sha256:06a8c2aca83b085f10f89ab660020c2a576422ebb758f6b1ee5f61542a1dc7f3",
+  "execution": "Concurrent functional T1/T2; no P95 claim",
+  "image_evidence": "All six T2 identities and both caps captured. T1 completed before independent image capture; its harness verifies its actual operator cap.",
+  "production": "CT100 released0.4.5 unchanged, statushealthy uptime12185 duringthisrun",
+  "cleanup": "All e2e containers and volumes removed by harness. One empty e2e network removed after inspection. Only task-owned regression PostgreSQL (including its anonymous parent-data volume) remains for linked-source tests; CT109 retained."
+}

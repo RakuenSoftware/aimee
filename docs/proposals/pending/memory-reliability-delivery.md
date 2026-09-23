@@ -485,4 +485,13 @@ attempt keys and post-packing regeneration. Proposals grant no execution authori
 and cannot improve coverage without new retained evidence. Host admission,
 durable attempt tracking and outcome application remain open. The shared decoder
 also rejects ambiguous requirement and budget fields. Targeted race, exported
-owner and native ingress checks pass; fresh HTTP validation remains pending.
+owner and native ingress checks pass. Fresh application/harness `0a63ad568`
+passes **1,110/1,110 checks** across T1/T2, including both new HTTP cases.
+
+The [linked relation input repair](../../validation/memory-linked-relation-inputs-2026-09-23.md)
+binds generated relation text to every directly copied memory revision. Search,
+entity edges and profiles withhold changed, expired, hidden or unobserved inputs
+before limits and aggregation; rebuilding refreshes the observations. A packaged
+PostgreSQL replay reproduces the previous leak. The full PostgreSQL/race suite
+and exported owner pass; fresh-image validation remains pending. Transitive
+closure and automatic dependent rebuilding remain open.

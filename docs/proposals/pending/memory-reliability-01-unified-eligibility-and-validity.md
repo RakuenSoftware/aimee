@@ -120,3 +120,11 @@ The [negation-lane follow-up](../../validation/memory-program-gates-2026-09-23.m
 applies this same predicate before the optional negation candidate cap. Its
 restricted-role fixture reproduces expired/future re-entry and verifies that
 invalid candidates cannot crowd out eligible evidence.
+
+The [linked relation input repair](../../validation/memory-linked-relation-inputs-2026-09-23.md)
+binds generated relation text to every directly copied memory revision. Search,
+entity edges and profiles withhold changed, expired, hidden or unobserved inputs
+before limits and aggregation; rebuilding refreshes the observations. A packaged
+PostgreSQL replay reproduces the previous leak. The full PostgreSQL/race suite
+and exported owner pass; fresh-image validation remains pending. Transitive
+closure and automatic dependent rebuilding remain open.

@@ -48,7 +48,7 @@ func TestRuntimePublicPostgres(t *testing.T) {
 CREATE FUNCTION runtime_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
 CREATE FUNCTION runtime_command_test.aimee_utc_text_timestamptz(t text) RETURNS timestamptz LANGUAGE sql AS $$ SELECT t::timestamptz $$;
 SET LOCAL search_path TO pg_temp,runtime_command_test,public;
-CREATE TEMP TABLE memories(id bigint PRIMARY KEY,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
+CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
  scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',source_session text DEFAULT '',ttl_at text DEFAULT '',
  sensitivity text DEFAULT 'normal',evidence_strength double precision DEFAULT 0.5,observation_count int DEFAULT 1,last_used_at text,
@@ -56,6 +56,7 @@ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,key text,content text DEFAULT '
 CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,memory_id bigint,source_session text,episode_text text,reference_time text,created_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_entities(memory_id bigint,entity text);
 CREATE TEMP TABLE memory_conflicts(id bigint,memory_a bigint,memory_b bigint,detected_at text,resolved int,resolution text);
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
 CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text DEFAULT '',valid_at text DEFAULT '',invalid_at text DEFAULT '',weight double precision DEFAULT 1.5,created_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE tasks(id bigint PRIMARY KEY,parent_id bigint,title text);
 INSERT INTO memories(id,key,content) VALUES (1,'release','release the app');
@@ -66,7 +67,7 @@ INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity) SELECT 1,
 INSERT INTO tasks(id,parent_id,title) VALUES (1,0,'release app'),(2,1,'update changelog');
 CREATE ROLE memory_runtime_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA runtime_command_test TO memory_runtime_test;
-GRANT SELECT ON memories,memory_episodes,memory_entities,memory_conflicts,memory_relations,tasks TO memory_runtime_test;
+GRANT SELECT ON memory_lineage,memories,memory_episodes,memory_entities,memory_conflicts,memory_relations,tasks TO memory_runtime_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY test_memory_visibility ON memories USING
  (scope_type='global' OR current_setting('aimee.memory_scope_all',true)='1' OR

@@ -76,3 +76,11 @@ Erasure covers derived text, indexes, embeddings, prompt caches, task projection
 Compute lineage/support in shadow before using it for ranking. Enable hard revocation and erasure propagation as correctness gates. Reverting support-based ranking must not remove tombstones, authored history or dependency invalidation.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+The [linked relation input repair](../../validation/memory-linked-relation-inputs-2026-09-23.md)
+binds generated relation text to every directly copied memory revision. Search,
+entity edges and profiles withhold changed, expired, hidden or unobserved inputs
+before limits and aggregation; rebuilding refreshes the observations. A packaged
+PostgreSQL replay reproduces the previous leak. The full PostgreSQL/race suite
+and exported owner pass; fresh-image validation remains pending. Transitive
+closure and automatic dependent rebuilding remain open.

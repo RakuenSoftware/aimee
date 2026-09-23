@@ -838,3 +838,8 @@ This does not supply native SQL/cosine scores or a complete excluded-candidate t
 Exact-ID explain_match labels its legacy text-match estimate separately.
 Its MCP scores map remains numeric; score_evidence is an adjacent field.
 Automatic ingress previews retain their established score and byte commitments.
+
+Generated relation search, entity edges and profile aggregation check the exact
+versions and current eligibility of all recorded copied inputs. Generator-owned
+rows without observations await reindexing; authored relations retain their
+existing parent policy. See [linked input validation](../validation/memory-linked-relation-inputs-2026-09-23.md).

@@ -88,3 +88,21 @@ func memoryLocatorIDSQL(column string) string {
  THEN CASE WHEN ` + value + `::numeric BETWEEN -9223372036854775808 AND 9223372036854775807
  THEN ` + value + `::bigint END END)`
 }
+
+// Generated relation text may copy multiple memories. Observe and check every
+// input, including exact revisions, before limits or profile aggregation. An old
+// generator-owned row with no input observations waits for canonical reindexing.
+// Authored relations retain their existing parent policy.
+func currentRelationInputsSQL(alias string) string {
+	dependency := `(CASE WHEN dep.source_kind='memory-relation-input-v1' THEN dep.source_ref::jsonb END)`
+	return `(NOT EXISTS(SELECT 1 FROM memory_lineage own WHERE own.object_type='relation'
+ AND own.object_id=` + alias + `.id AND own.source_kind='memory-index-v1') OR EXISTS(
+ SELECT 1 FROM memory_lineage dep WHERE dep.object_type='relation' AND dep.object_id=` + alias + `.id
+ AND dep.source_kind='memory-relation-input-v1' AND ` + dependency + `->>'record_id'=` + alias + `.memory_id::text))
+ AND NOT EXISTS(SELECT 1 FROM memory_lineage dep LEFT JOIN LATERAL (
+ SELECT m.id FROM memories m WHERE m.id=(` + dependency + `->>'record_id')::bigint
+ AND m.record_revision::text=` + dependency + `->>'record_revision'
+ AND ` + currentMemorySQL("m.") + ` LIMIT 1) input ON TRUE
+ WHERE dep.object_type='relation' AND dep.object_id=` + alias + `.id
+ AND dep.source_kind='memory-relation-input-v1' AND input.id IS NULL)`
+}
