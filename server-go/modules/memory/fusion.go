@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -36,12 +37,19 @@ type graphVisit struct {
 
 // Repeat the parent visibility predicate at both seed and result collection.
 // The store's RLS context remains an additional bound, including all-scope calls.
-var graphVisible = `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence FROM memories
- WHERE ` + currentMemorySQL("") + `
+var graphVisible = graphVisibleSQL(false)
+
+func graphVisibleSQL(versioned bool) string {
+	columns := "id,scope_type,scope_value,tier,kind,key,content,confidence"
+	if versioned {
+		columns += ",record_revision"
+	}
+	return "SELECT " + columns + " FROM memories" + ` WHERE ` + currentMemorySQL("") + `
  AND CASE WHEN $1 THEN scope_type=$2 AND scope_value=$3
  ELSE $4 OR scope_type='global' OR (scope_type='workspace' AND scope_value='_shared') OR (scope_type='project' AND scope_value=$5)
  OR (scope_type='workspace' AND scope_value=$6) END
  AND ($7='' OR kind=$7) AND ($8='' OR tier=$8)`
+}
 
 func graphScopeArgs(req DataRequest, exact bool) []any {
 	return []any{exact, req.Scope.Type, req.Scope.Value, req.IncludeAll, req.Project, req.Workspace, req.Kind, req.Tier}
@@ -187,11 +195,12 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 		limit = 64
 	}
 	args = append(graphScopeArgs(req, exact), string(encoded), limit, memoryIDsParameter(ids))
-	rows, err = s.db.Query(ctx, `WITH visible AS MATERIALIZED (`+graphVisible+`), reached AS (
+	rows, err = s.db.Query(ctx, `WITH visible AS MATERIALIZED (`+graphVisibleSQL(true)+`), reached AS (
  SELECT * FROM jsonb_to_recordset($9::jsonb) AS n(node text,score double precision,hop int)), ranked AS (
  SELECT e.memory_id,max(n.score) AS score,COALESCE(max(n.score) FILTER(WHERE n.node ~ '^(file|symbol|import|export|route|project):'),0) AS code
  FROM reached n JOIN memory_entities e ON e.entity=n.node GROUP BY e.memory_id)
- SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,r.score,r.code
+ SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,r.score,r.code,
+ (SELECT owner_id::text FROM memory_collection_owner WHERE id=1),m.record_revision::text
  FROM ranked r JOIN visible m ON m.id=r.memory_id
  ORDER BY CASE WHEN $1 THEN 0 WHEN m.scope_type='project' AND m.scope_value=$5 THEN 0
  WHEN m.scope_type='workspace' AND m.scope_value=$6 THEN 1 WHEN m.scope_type='global' OR (m.scope_type='workspace' AND m.scope_value='_shared') THEN 2 ELSE 3 END,
@@ -203,9 +212,15 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 	signals := map[int64]Record{}
 	for rows.Next() {
 		var r Record
-		if err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.graphScore, &r.codeProximity); err != nil {
+		r.Version = &MemoryRecordVersion{SchemaVersion: 1}
+		if err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.graphScore, &r.codeProximity, &r.Version.OwnerID, &r.Version.RecordRevision); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		r.Version.RecordID = strconv.FormatInt(r.ID, 10)
+		if !r.Version.validFor(r.ID) {
+			rows.Close()
+			return nil, fmt.Errorf("invalid graph memory version")
 		}
 		graph = append(graph, r)
 		signals[r.ID] = r

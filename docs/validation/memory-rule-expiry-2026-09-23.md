@@ -20,3 +20,9 @@ passes in 138.331 seconds, and the [exported owner build](memory-rule-expiry-202
 passes. Ownership, C/bus boundaries, descriptors and documentation guards pass.
 Fresh-image validation is pending. No proposal completion is claimed, and CT100
 remains on released 0.4.5.
+
+
+Pinned application/harness `cdafbd67c` has passed [614/614 T3 checks](memory-rule-expiry-2026-09-23/fresh/T3/topology.json),
+including a committed private correction before a retryable HTTP 500 and refusal
+before any second provider request. The runner exited successfully. The parallel
+T2 run is still pending; this is not a complete matrix claim.

@@ -114,6 +114,35 @@ func exerciseGraphFusionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 	if !has(records, bridge.ID) || !has(records, second.ID) || has(records, hidden.ID) || has(records, code.ID) || has(records, stale.ID) || has(records, candidate.ID) {
 		t.Fatal("bridge, scope or graph admission failed", records)
 	}
+	for _, r := range records {
+		if r.ID == bridge.ID || r.ID == second.ID {
+			if !r.Version.validFor(r.ID) || r.Version.RecordRevision != "1" || r.Content != bridge.Content {
+				t.Fatalf("graph payload/version missing: %+v", r)
+			}
+		}
+		if r.ID == first.ID && r.Version != nil {
+			t.Fatal("graph attached a new version to an earlier base payload")
+		}
+	}
+	execSQL("SAVEPOINT graph_version_change")
+	execSQL("UPDATE memories SET content='revised graph payload' WHERE id=$1", bridge.ID)
+	revised, err := backend.fuseMemoryGraph(ctx, req, false, []Record{first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range revised {
+		if r.ID == bridge.ID {
+			found = true
+			if r.Content != "revised graph payload" || !r.Version.validFor(r.ID) || r.Version.RecordRevision != "2" {
+				t.Fatalf("graph correction snapshot: %+v", r)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("revised graph candidate missing")
+	}
+	execSQL("ROLLBACK TO SAVEPOINT graph_version_change; RELEASE SAVEPOINT graph_version_change")
 	if req.lanes[bridge.ID] != laneGraph || req.lanes[second.ID] != laneGraph || req.lanes[hidden.ID] != 0 {
 		t.Fatal("graph attribution lost or included hidden rows", req.lanes)
 	}

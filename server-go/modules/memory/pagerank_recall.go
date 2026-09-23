@@ -131,8 +131,9 @@ func (s *postgresDataStore) pageRankNeighbors(ctx context.Context, req DataReque
 		seen[r.ID] = true
 	}
 	relations, _ := json.Marshal(req.pageRankConfig.request.Relations)
-	rows, err := s.db.Query(ctx, `WITH visible AS NOT MATERIALIZED (`+graphVisible+`)
- SELECT n.id,n.scope_type,n.scope_value,n.tier,n.kind,n.key,n.content,n.confidence
+	rows, err := s.db.Query(ctx, `WITH visible AS NOT MATERIALIZED (`+graphVisibleSQL(true)+`)
+ SELECT n.id,n.scope_type,n.scope_value,n.tier,n.kind,n.key,n.content,n.confidence,
+ (SELECT owner_id::text FROM memory_collection_owner WHERE id=1),n.record_revision::text
  FROM memory_links l JOIN visible a ON a.id=l.source_id JOIN visible b ON b.id=l.target_id
  JOIN visible n ON n.id=CASE WHEN l.source_id=ANY($9::text::bigint[]) THEN l.target_id ELSE l.source_id END
  WHERE (l.source_id=ANY($9::text::bigint[]) OR l.target_id=ANY($9::text::bigint[]))
@@ -152,8 +153,13 @@ func (s *postgresDataStore) pageRankNeighbors(ctx context.Context, req DataReque
 			return nil, errors.New("memory: PageRank neighbor graph exceeds work budget")
 		}
 		var r Record
-		if err := rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence); err != nil {
+		r.Version = &MemoryRecordVersion{SchemaVersion: 1}
+		if err := rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.Version.OwnerID, &r.Version.RecordRevision); err != nil {
 			return nil, err
+		}
+		r.Version.RecordID = strconv.FormatInt(r.ID, 10)
+		if !r.Version.validFor(r.ID) {
+			return nil, errors.New("memory: invalid PageRank neighbor version")
 		}
 		if !seen[r.ID] && len(base) < pageRankCandidateCap {
 			seen[r.ID] = true

@@ -164,6 +164,9 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	for _, r := range got.Records {
 		if r.ID == ids["neighbor"] {
 			found = true
+			if !r.Version.validFor(r.ID) || r.Version.RecordRevision != "1" || r.Content != "unrelated payload" {
+				t.Fatalf("unversioned neighbor: %+v", r)
+			}
 		}
 		if r.ID == ids["ignored"] || r.ID == ids["private"] || r.ID == ids["suppressed"] || r.ID == ids["archived"] || r.ID == ids["wrong-kind"] || r.ID == ids["wrong-tier"] {
 			t.Fatal("ineligible endpoint admitted", r)
@@ -172,6 +175,25 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	if !found {
 		t.Fatal("one-hop neighbor omitted")
 	}
+	exec("SAVEPOINT pagerank_neighbor_version")
+	exec("UPDATE memories SET content='revised unrelated payload' WHERE id=$1", ids["neighbor"])
+	revised, revisedStatus := call(handler)
+	if revisedStatus != bus.ModuleStatusOK {
+		t.Fatal(revisedStatus)
+	}
+	found = false
+	for _, r := range revised.Records {
+		if r.ID == ids["neighbor"] {
+			found = true
+			if !r.Version.validFor(r.ID) || r.Version.RecordRevision != "2" || r.Content != "revised unrelated payload" {
+				t.Fatalf("neighbor correction snapshot: %+v", r)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("corrected neighbor missing")
+	}
+	exec("ROLLBACK TO SAVEPOINT pagerank_neighbor_version; RELEASE SAVEPOINT pagerank_neighbor_version")
 	req.Operation = "diagnose"
 	got, status = call(handler)
 	if status != bus.ModuleStatusOK || len(got.Diagnostics) != 6 {

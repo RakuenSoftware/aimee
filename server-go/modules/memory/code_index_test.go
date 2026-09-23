@@ -160,7 +160,9 @@ func TestKBGraphFusionUsesInstancePolicyAndVisibility(t *testing.T) {
 	t.Setenv("AIMEE_GRAPH_FUSION", "on")
 	ctx, _, db := codeFixture(t)
 	_, err := db.Exec(ctx, `CREATE FUNCTION pg_now_text() RETURNS text LANGUAGE sql AS 'SELECT to_char(now(), ''YYYY-MM-DD HH24:MI:SS'')';
-CREATE TABLE memories(id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,content text,
+CREATE TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-0000-0000-000000000001');
+CREATE TABLE memories(id bigint PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,scope_type text,scope_value text,tier text,kind text,key text,content text,
  confidence double precision,lifecycle_state text,activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',updated_at timestamptz DEFAULT now(),valid_from text DEFAULT '',valid_until text DEFAULT '');
 CREATE TABLE memory_entities(memory_id bigint,entity text,weight double precision DEFAULT 1);
 CREATE TABLE fact_evidence(assertion_id bigint,source_kind text,source_id text);
@@ -190,7 +192,7 @@ INSERT INTO entity_edges(id,source,target,confidence_class,utility_score) VALUES
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(on) != 2 || on[0].ID != 1 || on[1].ID != 2 {
+	if len(on) != 2 || on[0].ID != 1 || on[1].ID != 2 || !on[1].Version.validFor(2) || on[1].Version.RecordRevision != "1" {
 		t.Fatalf("KB graph or visibility: %+v", on)
 	}
 	t.Setenv("AIMEE_GRAPH_FUSION", "off")
