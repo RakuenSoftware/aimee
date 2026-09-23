@@ -52,3 +52,19 @@ conservative current-serving rule. Nontransient kinds receive no new age filter;
 historical/diagnostic purposes never bypass base eligibility. Tests cover these
 boundaries and deterministic nonrenewal. This evaluator is not connected to live
 serving: canonical anchor admission, reporting and rollout still need implementation.
+
+Fresh application `686b99ea05df4387326e30ac171e96bce01780e8` and harness
+`2cae9dec4` pass 1,552 recorded boolean verdicts: 108 T1, 925 T2 and 519 T3.
+[Raw receipts](memory-evidence-coverage-2026-09-23/fresh/summary.json) include
+[image identities](memory-evidence-coverage-2026-09-23/fresh/image-identities.json)
+and the [environment](memory-evidence-coverage-2026-09-23/fresh/environment.json).
+The operator byte ceiling was unset in these stacks, so 73 optional ceiling
+checks per Server topology did not execute. This is narrower than the earlier
+1,688-check deployment receipt; the next harness makes that setting mandatory.
+The fresh containers/networks/volumes were removed by the harness. CT109 remains
+available for the next candidate's isolated tests; CT100 is unchanged.
+
+The full 77-check lint run passed 76 checks and failed only formatting under
+local clang-format 22. Re-running that check with pinned clang-format 19 passes.
+Both the [original run](memory-evidence-coverage-2026-09-23/lint-clang22.txt) and
+[pinned-format result](memory-evidence-coverage-2026-09-23/pinned-format.txt) are retained.

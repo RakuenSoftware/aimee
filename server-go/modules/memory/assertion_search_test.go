@@ -67,7 +67,7 @@ func (e *assertionEgressFixture) Do(_ context.Context, _ uint64, r egress.HTTPRe
 	}
 	v := make([]float32, dim)
 	v[0] = 1
-	if strings.Contains(string(r.Body), "Casey") {
+	if strings.Contains(string(r.Body), "Casey") || strings.Contains(string(r.Body), "FairPool uses") {
 		v[0] = 0
 		v[1] = 1
 	}
@@ -334,6 +334,56 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 		t.Fatal("hidden parent establishes coverage", hiddenCoverage.Coverage)
 	}
 	exec(`ROLLBACK TO SAVEPOINT coverage_hidden; RELEASE SAVEPOINT coverage_hidden`)
+	// A full lexical pool must not veto independently collected dense or
+	// graph-only candidates before the final top-k decision.
+	exec(`SAVEPOINT assertion_fair_pools; RESET ROLE`)
+	exec(`INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,authority_rank,status)
+ VALUES('assertion-fair-pools','assert','test','system',100,'open')`)
+	exec(`INSERT INTO entity_edges(id,source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence_class,confidence,authority_rank,commit_id) VALUES
+ ($1,'FairPool','uses','alpha','semantic','world_fact','persistent','A',.8,80,'assertion-fair-pools'),
+ ($1+1,'FairPool','uses','FairBridge','semantic','world_fact','persistent','A',.8,80,'assertion-fair-pools'),
+ ($1+2,'DenseOnlyPrize','uses','omega','semantic','world_fact','persistent','A',.9,90,'assertion-fair-pools'),
+ ($1+3,'FairBridge','uses','CaseyGraphPrize','semantic','world_fact','persistent','A',1,100,'assertion-fair-pools')`, old+100)
+	exec(`INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,after_lifecycle,after_confidence,after_authority_rank,after_version)
+ SELECT 'assertion-fair-pools',id,'assert',0,1,lifecycle_state,confidence,authority_rank,version FROM entity_edges WHERE commit_id='assertion-fair-pools'`)
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	savedArgs := args
+	args = map[string]any{"operation": "assertion-search", "query": "FairPool", "project": "assertion-local", "limit": 2}
+	fair := call()
+	containsID := func(result map[string]any, id int64) bool {
+		for _, raw := range hits(result) {
+			if raw.(map[string]any)["stable_id"] == fmt.Sprint(id) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(hits(fair)) != 2 || !containsID(fair, old+102) {
+		t.Fatal("full lexical pool excluded dense-only evidence", fair)
+	}
+	if fair["candidate_count"].(float64) <= 2 || fair["candidate_count"].(float64) > 10 {
+		t.Fatal("independent arm union was not retained until fusion", fair)
+	}
+	args["max_hops"] = 1
+	graphFair := call()
+	if len(hits(graphFair)) != 2 || !containsID(graphFair, old+103) || graphFair["graph_candidates"] != float64(1) {
+		t.Fatal("full base pool excluded graph-only evidence", graphFair)
+	}
+	for _, raw := range hits(graphFair) {
+		h := raw.(map[string]any)
+		if h["stable_id"] == fmt.Sprint(old+103) {
+			trace := h["retrieval"].([]any)
+			if len(trace) != 1 || trace[0].(map[string]any)["channel"] != "semantic_graph" || trace[0].(map[string]any)["rank"] != float64(1) {
+				t.Fatal("graph anchor query invented an original lexical vote", trace)
+			}
+		}
+	}
+	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance,evidence_hash) VALUES($1,'memory',$2,'supports','fair-hidden')`, old+103, "memory:"+fmt.Sprint(private))
+	if hidden := call(); containsID(hidden, old+103) {
+		t.Fatal("fair graph arm bypassed hidden parent", hidden)
+	}
+	args = savedArgs
+	exec(`ROLLBACK TO SAVEPOINT assertion_fair_pools; RELEASE SAVEPOINT assertion_fair_pools`)
 	before := len(executor.seen)
 	got = call()
 	if got["indexed_assertions"] != float64(0) || len(executor.seen) != before+1 {

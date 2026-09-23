@@ -390,28 +390,44 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 			}
 			at := find(h.ID)
 			if at < 0 {
-				if len(hits) >= request.Limit {
-					continue
-				}
 				h.Reason = "vector semantic match after lifecycle, authority, scope, and temporal filters"
 				hits = append(hits, h)
 				at = len(hits) - 1
 			} else {
+				if hits[at].Version != h.Version || hits[at].ownerID != h.ownerID {
+					return nil, errors.New("memory: assertion changed during candidate collection")
+				}
 				overlap++
 			}
 			hits[at].Retrieval = append(hits[at].Retrieval, assertionTrace{Channel: "vector", Raw: h.raw, Rank: i + 1})
 		}
 	}
+	// Graph admission has its own candidate and lookup budgets. A full
+	// lexical/dense union cannot consume this arm's slots before fusion.
+	graphCount, expansions := 0, 0
+	maxExpansions := min(64, 2*request.Limit)
+	seenAnchors := map[string]bool{}
 	start, end := 0, len(hits)
-	for hop := 1; hop <= request.Assertions.Hops && start < end; hop++ {
-		for i := start; i < end && len(hits) < request.Limit; i++ {
+	for hop := 1; hop <= request.Assertions.Hops && start < end && expansions < maxExpansions; hop++ {
+		for i := start; i < end && graphCount < request.Limit && expansions < maxExpansions; i++ {
 			for _, anchor := range []string{hits[i].Subject, hits[i].Object} {
+				if graphCount >= request.Limit {
+					break
+				}
+				if seenAnchors[anchor] || expansions >= maxExpansions {
+					continue
+				}
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				seenAnchors[anchor] = true
+				expansions++
 				expanded, err := s.assertionCandidates(ctx, request, exact, anchor, 16, "")
 				if err != nil {
 					return nil, err
 				}
 				for _, h := range expanded {
-					if len(hits) >= request.Limit {
+					if graphCount >= request.Limit {
 						break
 					}
 					if find(h.ID) >= 0 || h.Subject != anchor && h.Object != anchor {
@@ -419,7 +435,10 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 					}
 					h.Hops = hop
 					h.Reason = fmt.Sprintf("bounded semantic hop %d with temporal and scope filters reapplied", hop)
-					h.Retrieval = append(h.Retrieval, assertionTrace{Channel: "semantic_graph", Raw: 1 / float64(hop+1), Rank: len(hits) + 1})
+					graphCount++
+					// The anchor lookup is a graph vote, not lexical evidence
+					// for the original user query. Its rank belongs to this arm.
+					h.Retrieval = []assertionTrace{{Channel: "semantic_graph", Raw: 1 / float64(hop+1), Rank: graphCount}}
 					hits = append(hits, h)
 				}
 			}
@@ -443,9 +462,6 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 		for j := range hits[i].Retrieval {
 			hits[i].Retrieval[j].Fused = hits[i].fused
 		}
-		if err = s.assertionEvidence(ctx, &hits[i]); err != nil {
-			return nil, err
-		}
 	}
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].fused != hits[j].fused {
@@ -456,7 +472,16 @@ func (s *postgresDataStore) searchAssertions(ctx context.Context, trace uint64, 
 		}
 		return hits[i].ID > hits[j].ID
 	})
-	result := map[string]any{"status": "ok", "channel": "semantic_assertion", "mode": "hybrid_shadow", "channel_status": "ok", "assertions": hits, "max_hops": request.Assertions.Hops, "indexed_assertions": indexed, "shadow_delta": map[string]int{"lexical_only": lexicalOnly, "vector_only": vectorOnly, "overlap": overlap}, "valid_at": request.Assertions.ValidAt, "believed_at": request.Assertions.BelievedAt, "include_historical": request.Assertions.Historical}
+	candidateCount := len(hits)
+	if len(hits) > request.Limit {
+		hits = hits[:request.Limit]
+	}
+	for i := range hits {
+		if err = s.assertionEvidence(ctx, &hits[i]); err != nil {
+			return nil, err
+		}
+	}
+	result := map[string]any{"status": "ok", "channel": "semantic_assertion", "mode": "hybrid_shadow", "channel_status": "ok", "assertions": hits, "max_hops": request.Assertions.Hops, "indexed_assertions": indexed, "candidate_count": candidateCount, "candidate_scope": "independent_arm_union", "candidate_policy": "assertion-arm-union-v1", "graph_budget_exhausted": request.Assertions.Hops > 0 && (graphCount >= request.Limit || expansions >= maxExpansions), "graph_candidates": graphCount, "graph_expansions": expansions, "shadow_delta": map[string]int{"lexical_only": lexicalOnly, "vector_only": vectorOnly, "overlap": overlap}, "valid_at": request.Assertions.ValidAt, "believed_at": request.Assertions.BelievedAt, "include_historical": request.Assertions.Historical}
 	if vectorErr != nil {
 		result["mode"] = "lexical_degraded"
 		result["channel_status"] = "degraded"

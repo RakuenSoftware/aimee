@@ -57,3 +57,11 @@ Type floors are desired reservations, not permission to exceed caller/token limi
 Canary each slice separately. Freeze evaluation before tuning and record model/index/policy versions. Keep a last-known-good policy artifact for atomic rollback. Do not use health concentration alone as the optimization objective.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+## Implementation evidence — 2026-09-23
+
+[Fair semantic-assertion candidate admission](../../validation/memory-fair-assertion-arms-2026-09-23.md)
+removes pre-fusion lexical capacity vetoes on dense and graph-only evidence,
+bounds graph expansion independently and records truthful graph-arm votes.
+Restricted-role adversarial replay covers the reproduced failure and hidden
+parents. Prior caps, lineage diversity, exposure and quality gates remain open.

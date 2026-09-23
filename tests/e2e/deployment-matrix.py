@@ -79,6 +79,11 @@ class Stack:
                                       '{{json .HostConfig.PortBindings}}', self.application))
         if bindings:
             raise RuntimeError('isolated topology unexpectedly published a host port')
+        entries = json.loads(command('docker', 'inspect', '--format', '{{json .Config.Env}}', self.application))
+        actual = next((entry.split('=', 1)[1] for entry in entries
+                       if entry.startswith('AIMEE_PROVIDER_CONTEXT_LIMITS=')), '')
+        if not actual or json.loads(actual) != json.loads(self.env['AIMEE_PROVIDER_CONTEXT_LIMITS']):
+            raise RuntimeError('candidate application did not receive the provider byte ceiling')
         host = json.loads(command('docker', 'inspect', '--format', '{{json .HostConfig}}', self.postgres))
         if self.env.get('AIMEE_POSTGRES_STORAGE', 'plain') == 'plain':
             if any(host.get(key) for key in ('Privileged', 'CapAdd', 'Devices', 'DeviceCgroupRules')):
@@ -671,6 +676,10 @@ def main():
     env = dict(os.environ, AIMEE_RUNTIME_WEB_ENABLED='0', AIMEE_POSTGRES_VOLUME_MIB='512',
                COMPOSE_PROFILES='', EMBEDDER_MODEL='bekko-a25m',
                EMBEDDER_URL='https://aimee-embedder:8762', EMBEDDER_DIMS='384')
+    # A missing operator cap silently skips the deployment-ceiling regressions.
+    # Every release topology must exercise this boundary in the actual process.
+    if not env.get('AIMEE_PROVIDER_CONTEXT_LIMITS'):
+        env['AIMEE_PROVIDER_CONTEXT_LIMITS'] = json.dumps(dict(schema_version=1, max_request_bytes=32768))
     for name in ('AIMEE_APPLICATION_IMAGE', 'AIMEE_POSTGRES_IMAGE', 'AIMEE_EMBEDDER_IMAGE'):
         if not env.get(name):
             parser.error(name + ' must name the candidate image')

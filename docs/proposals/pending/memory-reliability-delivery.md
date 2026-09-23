@@ -473,3 +473,8 @@ MR-10 now has a pure Go shadow evaluator with bounded policy artifacts and
 owner-version/event-bound anchors. Boundary, precedence, unknown-anchor and
 nonrenewal fixtures pass. It is not wired into serving or public diagnostics;
 canonical anchor admission and gated rollout remain open.
+
+[Fair semantic-assertion arms](../../validation/memory-fair-assertion-arms-2026-09-23.md)
+now compete before final top-k and expose bounded graph work. The old lexical
+capacity veto is reproduced by a restricted-role fixture. This advances MR-09;
+prior/diversity policies and quality gates remain unfinished.

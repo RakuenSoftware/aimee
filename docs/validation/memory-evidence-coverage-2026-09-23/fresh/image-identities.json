@@ -1,0 +1,22 @@
+[
+  {
+    "reference": "aimee-pr2990:686b99ea0",
+    "id": "sha256:56a9dbf8898f91107654fd6307abaf9eac46f02423e0254371abeba7b70ee3f2",
+    "repo_digests": [],
+    "revision": "686b99ea05df4387326e30ac171e96bce01780e8"
+  },
+  {
+    "reference": "aimee-pr2990-postgres:686b99ea0",
+    "id": "sha256:8927f0f4ab4b0cf7f4a5f1d4590f1324fc95da5722fe70e4317e228d37dc8f64",
+    "repo_digests": [],
+    "revision": null
+  },
+  {
+    "reference": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5",
+    "id": "sha256:a2652e92cf2f68d684b56b44b8eed37ab0701ff1867eb1c59d3c2abb79917c85",
+    "repo_digests": [
+      "ghcr.io/rakuensoftware/aimee-embedder-a25m@sha256:36f313ffc32f6b7df63b2c810cab6c9c9b056ec25b04a0b0ec9606075ef7bb99"
+    ],
+    "revision": null
+  }
+]
