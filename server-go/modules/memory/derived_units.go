@@ -10,12 +10,14 @@ import (
 const unitPointOffset int64 = 1000000000000
 
 type derivedUnit struct {
-	ID     int64   `json:"-"`
-	Type   string  `json:"unit_type"`
-	Key    string  `json:"unit_key"`
-	Text   string  `json:"unit_text"`
-	Kind   string  `json:"memory_kind"`
-	Weight float64 `json:"weight"`
+	ID              int64   `json:"-"`
+	Type            string  `json:"unit_type"`
+	Key             string  `json:"unit_key"`
+	Text            string  `json:"unit_text"`
+	Kind            string  `json:"memory_kind"`
+	Weight          float64 `json:"weight"`
+	SummaryID       int64   `json:"input_summary_id"`
+	SummaryRevision int64   `json:"input_summary_revision"`
 }
 type derivedEdge struct {
 	Source int64   `json:"source"`
@@ -42,18 +44,19 @@ func derivedUnitKind(explicit, kind, unitType string, hasEvents bool) string {
 
 func (s *postgresDataStore) replaceDerivedUnits(ctx context.Context, id int64) error {
 	var key, content, kind, explicit string
-	if err := s.db.QueryRow(ctx, `SELECT key,content,kind,cognified_memory_kind FROM memories WHERE id=$1`, id).Scan(&key, &content, &kind, &explicit); err != nil {
+	var parentRevision int64
+	if err := s.db.QueryRow(ctx, `SELECT key,content,kind,cognified_memory_kind,record_revision FROM memories WHERE id=$1`, id).Scan(&key, &content, &kind, &explicit, &parentRevision); err != nil {
 		return err
 	}
-	rows, err := s.db.Query(ctx, `SELECT 'summary',scope,summary,3.0 FROM
- (SELECT summary.scope,summary.summary FROM memory_summaries summary JOIN memories m ON m.id=summary.memory_id WHERE m.id=$1 AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY summary.id LIMIT 8) s
- UNION ALL SELECT 'event',actor||' '||action,concat_ws(' ',actor,action,object,location,event_time),2.8 FROM
+	rows, err := s.db.Query(ctx, `SELECT 'summary',scope,summary,3.0,id,record_revision FROM
+ (SELECT summary.scope,summary.summary,summary.id,summary.record_revision FROM memory_summaries summary JOIN memories m ON m.id=summary.memory_id WHERE m.id=$1 AND `+summaryCurrentInputsSQL("summary", "m")+` ORDER BY summary.id LIMIT 8) s
+ UNION ALL SELECT 'event',actor||' '||action,concat_ws(' ',actor,action,object,location,event_time),2.8,0::bigint,0::bigint FROM
  (SELECT * FROM memory_event_frames WHERE memory_id=$1 ORDER BY id LIMIT 16) e
- UNION ALL SELECT 'temporal',granularity,ref_key,1.6+weight*0.4 FROM
+ UNION ALL SELECT 'temporal',granularity,ref_key,1.6+weight*0.4,0::bigint,0::bigint FROM
  (SELECT * FROM memory_temporal_refs WHERE memory_id=$1 ORDER BY weight DESC,id LIMIT 16) t
- UNION ALL SELECT 'entity',role,entity,1.4+weight*0.3 FROM
+ UNION ALL SELECT 'entity',role,entity,1.4+weight*0.3,0::bigint,0::bigint FROM
  (SELECT * FROM memory_entities WHERE memory_id=$1 ORDER BY weight DESC,id LIMIT 16) n
- UNION ALL SELECT 'chunk','chunk_'||chunk_index,chunk_text,1.2 FROM
+ UNION ALL SELECT 'chunk','chunk_'||chunk_index,chunk_text,1.2,0::bigint,0::bigint FROM
  (SELECT * FROM memory_chunks WHERE memory_id=$1 ORDER BY chunk_index LIMIT 16) c`, id)
 	if err != nil {
 		return err
@@ -62,7 +65,7 @@ func (s *postgresDataStore) replaceDerivedUnits(ctx context.Context, id int64) e
 	hasSummary, hasEvents := false, false
 	for rows.Next() {
 		var u derivedUnit
-		if err = rows.Scan(&u.Type, &u.Key, &u.Text, &u.Weight); err != nil {
+		if err = rows.Scan(&u.Type, &u.Key, &u.Text, &u.Weight, &u.SummaryID, &u.SummaryRevision); err != nil {
 			rows.Close()
 			return err
 		}
@@ -121,6 +124,23 @@ func (s *postgresDataStore) replaceDerivedUnits(ctx context.Context, id int64) e
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
+		return err
+	}
+	if _, err = s.db.Exec(ctx, `DELETE FROM memory_lineage WHERE object_type='unit'
+ AND source_kind='memory-unit-input-v1' AND object_id=ANY($1::text::bigint[])`, memoryIDsParameter(ids)); err != nil {
+		return err
+	}
+	if _, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'unit',u.id,'memory-index-v1',$2::bigint::text FROM memory_units u WHERE u.id=ANY($1::text::bigint[])
+ AND NOT EXISTS(SELECT 1 FROM memory_lineage l WHERE l.object_type='unit' AND l.object_id=u.id AND l.source_kind='memory-index-v1')`, memoryIDsParameter(ids), id); err != nil {
+		return err
+	}
+	if _, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'unit',u.id,'memory-unit-input-v1',jsonb_build_object('record_id',$1::bigint::text,
+ 'record_revision',$3::bigint::text,'unit_digest',`+unitInputDigestSQL("u")+`,
+ 'summary_id',x.input_summary_id::text,'summary_revision',x.input_summary_revision::text)::text
+ FROM memory_units u JOIN jsonb_to_recordset($2::jsonb) AS x(unit_type text,unit_key text,unit_text text,input_summary_id bigint,input_summary_revision bigint)
+ ON u.unit_type=x.unit_type AND u.unit_key=x.unit_key AND u.unit_text=x.unit_text WHERE u.memory_id=$1`, id, string(encoded), parentRevision); err != nil {
 		return err
 	}
 	// Reuse unchanged unit IDs so episode lineage and external references survive.

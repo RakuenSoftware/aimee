@@ -1,0 +1,2497 @@
+[
+  {
+    "name": "bounded hygiene HTTP preview",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hygiene keeps exact scope and eligible duplicate revisions",
+    "passed": true,
+    "detail": {
+      "status": "ok",
+      "dry_run": true,
+      "detector": "exact-content-duplicates-v1",
+      "scope": {
+        "type": "project",
+        "value": "placement-e2e-c0325cfc00-hygiene"
+      },
+      "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+      "collection_generation": "5",
+      "eligibility_time": "2026-09-23 19:38:20.306816+00",
+      "budget": {
+        "max_rows": 64,
+        "max_content_bytes": 16384
+      },
+      "eligible_rows_considered": 3,
+      "rows_compared": 3,
+      "content_bytes_compared": 120,
+      "partial": false,
+      "unvisited": "none_for_this_detector",
+      "resume_available": false,
+      "canonical_writes": 0,
+      "proposal_writes": 0,
+      "findings": [
+        {
+          "finding_id": "366ea9bed452004a51fda10ce6419a466aeb70117776b6b48c518595b491c823",
+          "type": "possible_duplicate_cluster",
+          "reason": "identical_content_in_visible_window",
+          "proposed_action": "review_duplicate",
+          "uncertainty": "candidate_only",
+          "content_commitment": "28d5befb2374928d225334de2de54d67ff54e751a72769c813e0d4a4f0458c39",
+          "expected_versions": [
+            {
+              "schema_version": 1,
+              "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+              "record_id": "13",
+              "record_revision": "1"
+            },
+            {
+              "schema_version": 1,
+              "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+              "record_id": "14",
+              "record_revision": "1"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "hygiene labels candidate-only findings without leaking content",
+    "passed": true,
+    "detail": {
+      "status": "ok",
+      "dry_run": true,
+      "detector": "exact-content-duplicates-v1",
+      "scope": {
+        "type": "project",
+        "value": "placement-e2e-c0325cfc00-hygiene"
+      },
+      "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+      "collection_generation": "5",
+      "eligibility_time": "2026-09-23 19:38:20.306816+00",
+      "budget": {
+        "max_rows": 64,
+        "max_content_bytes": 16384
+      },
+      "eligible_rows_considered": 3,
+      "rows_compared": 3,
+      "content_bytes_compared": 120,
+      "partial": false,
+      "unvisited": "none_for_this_detector",
+      "resume_available": false,
+      "canonical_writes": 0,
+      "proposal_writes": 0,
+      "findings": [
+        {
+          "finding_id": "366ea9bed452004a51fda10ce6419a466aeb70117776b6b48c518595b491c823",
+          "type": "possible_duplicate_cluster",
+          "reason": "identical_content_in_visible_window",
+          "proposed_action": "review_duplicate",
+          "uncertainty": "candidate_only",
+          "content_commitment": "28d5befb2374928d225334de2de54d67ff54e751a72769c813e0d4a4f0458c39",
+          "expected_versions": [
+            {
+              "schema_version": 1,
+              "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+              "record_id": "13",
+              "record_revision": "1"
+            },
+            {
+              "schema_version": 1,
+              "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+              "record_id": "14",
+              "record_revision": "1"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "hygiene repeat preview",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hygiene findings are stable on repeated read",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hygiene bounded partial preview",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hygiene row limit cannot claim clean full coverage",
+    "passed": true,
+    "detail": {
+      "status": "ok",
+      "dry_run": true,
+      "detector": "exact-content-duplicates-v1",
+      "scope": {
+        "type": "project",
+        "value": "placement-e2e-c0325cfc00-hygiene"
+      },
+      "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+      "collection_generation": "5",
+      "eligibility_time": "2026-09-23 19:38:20.67626+00",
+      "budget": {
+        "max_rows": 1,
+        "max_content_bytes": 16384
+      },
+      "eligible_rows_considered": 1,
+      "rows_compared": 1,
+      "content_bytes_compared": 52,
+      "partial": true,
+      "unvisited": "remaining_eligible_content_unknown",
+      "resume_available": false,
+      "canonical_writes": 0,
+      "proposal_writes": 0,
+      "findings": []
+    }
+  },
+  {
+    "name": "hygiene bounded content preview",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hygiene byte limit reports unvisited content",
+    "passed": true,
+    "detail": {
+      "status": "ok",
+      "dry_run": true,
+      "detector": "exact-content-duplicates-v1",
+      "scope": {
+        "type": "project",
+        "value": "placement-e2e-c0325cfc00-hygiene"
+      },
+      "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+      "collection_generation": "5",
+      "eligibility_time": "2026-09-23 19:38:20.822761+00",
+      "budget": {
+        "max_rows": 64,
+        "max_content_bytes": 1
+      },
+      "eligible_rows_considered": 3,
+      "rows_compared": 0,
+      "content_bytes_compared": 0,
+      "partial": true,
+      "unvisited": "remaining_eligible_content_unknown",
+      "resume_available": false,
+      "canonical_writes": 0,
+      "proposal_writes": 0,
+      "findings": []
+    }
+  },
+  {
+    "name": "hygiene refuses apply",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "hygiene refuses mutation",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "hygiene refuses sql",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "hygiene refuses all",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "hygiene refuses unbounded",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "hygiene refuses private",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "hygiene requires dry_run=true, one explicit shared scope and bounded preview limits",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "CLI hygiene preserves explicit scope and findings",
+    "passed": true,
+    "detail": {
+      "dry_run": true,
+      "detector": "exact-content-duplicates-v1",
+      "scope": {
+        "type": "project",
+        "value": "placement-e2e-c0325cfc00-hygiene"
+      },
+      "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+      "collection_generation": "5",
+      "eligibility_time": "2026-09-23 19:38:21.756624+00",
+      "budget": {
+        "max_rows": 64,
+        "max_content_bytes": 16384
+      },
+      "eligible_rows_considered": 3,
+      "rows_compared": 3,
+      "content_bytes_compared": 120,
+      "partial": false,
+      "unvisited": "none_for_this_detector",
+      "resume_available": false,
+      "canonical_writes": 0,
+      "proposal_writes": 0,
+      "findings": [
+        {
+          "finding_id": "366ea9bed452004a51fda10ce6419a466aeb70117776b6b48c518595b491c823",
+          "type": "possible_duplicate_cluster",
+          "reason": "identical_content_in_visible_window",
+          "proposed_action": "review_duplicate",
+          "uncertainty": "candidate_only",
+          "content_commitment": "28d5befb2374928d225334de2de54d67ff54e751a72769c813e0d4a4f0458c39",
+          "expected_versions": [
+            {
+              "schema_version": 1,
+              "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+              "record_id": "13",
+              "record_revision": "1"
+            },
+            {
+              "schema_version": 1,
+              "owner_id": "a5ae580e-6d3e-4655-9f8c-355c2c0a940e",
+              "record_id": "14",
+              "record_revision": "1"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "name": "hygiene leaves canonical fixtures unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local store",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local store leaves KB unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "get returns exact local content for colliding ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit KB get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit KB get selects the other record",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP store defaults to user",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP personal content stays local",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP update uses local ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP forget retires local ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI default get selects user",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI explicit get selects KB",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI store identifies local scope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI supersede updates local record",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI mutations leave KB unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local stats",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid store rejected 'both'",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid store rejected ''",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid store rejected 1",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid selectors leave KB unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local list",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "list returns local fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local review",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "review returns local fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local search",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "search returns local fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP get preserves selected store {'id': 48}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP get preserves selected store {'handle': 'memory:48', 'scope': 'all'}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local preference fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit shared recall",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit shared recall excludes personal preferences",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local supersede",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local mutation leaves colliding KB record unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "get corrected local memory",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local replacement content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local memory survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "restart preserves corrected value",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local dependency outage fails list",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "http_status": 503,
+        "kind": "unavailable",
+        "message": "user memory module unavailable",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails get",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "http_status": 503,
+        "kind": "unavailable",
+        "message": "user memory module unavailable",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails recall",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "kind": "unavailable",
+        "message": "memory recall unavailable",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails store",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "http_status": 503,
+        "kind": "unavailable",
+        "message": "user memory module unavailable",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails supersede",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "http_status": 503,
+        "kind": "unavailable",
+        "message": "user memory module unavailable",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails delete",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "http_status": 503,
+        "kind": "unavailable",
+        "message": "user memory module unavailable",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "local outage never writes KB",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local dependency recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local get works with KB offline",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local recall works with KB offline",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local recall retains scoped ID and prompt text",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local session recall needs no hint or KB",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI recall works with KB offline",
+    "passed": true,
+    "detail": {
+      "recall": {
+        "always_on_rules": [],
+        "activation_held": 0,
+        "identity": [],
+        "preferences": [
+          {
+            "why": "stable preference",
+            "version": {
+              "schema_version": 1,
+              "owner_id": "0de68bdb-77c5-482a-957e-a3a0b64cbd2b",
+              "record_id": "51",
+              "record_revision": "1"
+            },
+            "id": 51,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "preference",
+            "key": "preference-placement-e2e-c0325cfc00",
+            "content": "Private preference person@local.invalid",
+            "confidence": 1,
+            "memory_id": 51,
+            "text": "Private preference person@local.invalid",
+            "store": "user",
+            "handle": "user:memory:51"
+          }
+        ],
+        "active_context": [
+          {
+            "why": "recent active context",
+            "id": 48,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-c0325cfc00",
+            "content": "corrected local fixture",
+            "confidence": 1,
+            "memory_id": 48,
+            "text": "corrected local fixture",
+            "store": "user",
+            "handle": "user:memory:48"
+          },
+          {
+            "why": "recent active context",
+            "id": 47,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-b26a98d7cf-create-user-model",
+            "content": "model creation fixture",
+            "confidence": 0.8,
+            "memory_id": 47,
+            "text": "model creation fixture",
+            "store": "user",
+            "handle": "user:memory:47"
+          },
+          {
+            "why": "recent active context",
+            "id": 51,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "preference",
+            "key": "preference-placement-e2e-c0325cfc00",
+            "content": "Private preference person@local.invalid",
+            "confidence": 1,
+            "memory_id": 51,
+            "text": "Private preference person@local.invalid",
+            "store": "user",
+            "handle": "user:memory:51"
+          },
+          {
+            "why": "recent active context",
+            "id": 41,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-b26a98d7cf-private-keyed-model",
+            "content": "model corrected",
+            "confidence": 0.8,
+            "memory_id": 41,
+            "text": "model corrected",
+            "store": "user",
+            "handle": "user:memory:41"
+          },
+          {
+            "why": "recent active context",
+            "id": 35,
+            "scope": {
+              "type": "user",
+              "value": "_user"
+            },
+            "tier": "L2",
+            "kind": "fact",
+            "key": "placement-e2e-b26a98d7cf-confidence-0.25",
+            "content": "Synthetic confidence boundary fixture",
+            "confidence": 0.25,
+            "memory_id": 35,
+            "text": "Synthetic confidence boundary fixture",
+            "store": "user",
+            "handle": "user:memory:35"
+          }
+        ],
+        "open_commitments": [],
+        "reminders": [],
+        "directives": [],
+        "limit_tokens": 1024,
+        "used_tokens": 554,
+        "approx_tokens": 554,
+        "elapsed_ms": 129.77,
+        "session_start": false,
+        "explain": []
+      },
+      "store": "user"
+    }
+  },
+  {
+    "name": "MCP recall works with KB offline",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local store works with KB offline",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit KB outage is an HTTP failure",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "KB memory owner unavailable or invalid response",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "hygiene KB outage cannot report a clean scan",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "KB hygiene owner unavailable or invalid response",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "KB recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB memory process outage fails list",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "KB memory owner unavailable or invalid response",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "KB memory process outage fails get",
+    "passed": true,
+    "detail": [
+      503,
+      {
+        "status": "error",
+        "message": "KB memory owner unavailable or invalid response",
+        "kind": "unavailable",
+        "http_status": 503
+      }
+    ]
+  },
+  {
+    "name": "user store works during KB memory process outage",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB memory process recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "retired local ID never resolves to KB collision",
+    "passed": true,
+    "detail": [
+      404,
+      {
+        "http_status": 404,
+        "kind": "not_found",
+        "message": "user memory not found",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "local retirement leaves KB content unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent current get_episode",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent current search_graph",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent current get_entity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent current get_entity_edges",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent future get_episode",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent future search_graph",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent future get_entity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent future get_entity_edges",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent expired get_episode",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent expired search_graph",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent expired get_entity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent expired get_entity_edges",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent suppressed get_episode",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent suppressed search_graph",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent suppressed get_entity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent suppressed get_entity_edges",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent retired get_episode",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent retired search_graph",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent retired get_entity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent retired get_entity_edges",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent restored get_episode",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent restored search_graph",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent restored get_entity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "derived parent restored get_entity_edges",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP creates model-authored shared correction fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP versioned get owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP versioned get preserves exact target",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP private correction precondition owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP private placement refuses a shared owner version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP keyed update owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP update returns canonical commit receipt",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP update preserves confidence and model authority",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP keyed update retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP replay preserves commit without requesting another host audit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP changed retry payload owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP refuses changed idempotency payload",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP stale update version owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP forwards and enforces expected version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP retired update retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP retry never releases retired content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP retries retain exactly one replacement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared journal HTTP store",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared versioned HTTP get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared version binds exact identity and owner",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared version binds current revision",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared HTTP store commits invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared journal identical retry",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared retry preserves identity and journal",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP update admission before audit owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP update requires review before canonical audit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP update stale admission before audit owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP update rejects stale version before canonical audit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP supersede admission before audit owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP supersede requires review before canonical audit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "HTTP supersede admitted correction reaches blocked audit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP supersede stale admission before audit owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP supersede rejects stale version before canonical audit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "refused corrections preserve original revision and invalidations",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "draft outcomes retain their retry references",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared tag batch invalidates its parent once",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared HTTP rejects stale expected version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared refreshed versioned HTTP get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared HTTP replacement refuses failed tag copy",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared original after failed copy",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "failed tag copy preserves original and invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared HTTP version replacement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared correction returns canonical commit receipt",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared HTTP idempotent correction replay",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared correction replay preserves identity and commit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared HTTP refuses idempotency key reuse",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared HTTP correction retry conflicts without duplicating",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared replacement creates a new identity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared HTTP correction retains verified user authorship",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared replacement preserves visible tags",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared replacement and copied tags have durable revisions",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared replacement get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared direct read leaves invalidations unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destructive deletion parent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared deletion fixture indexed before mutation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared deletion expected version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "model cannot elevate shared deletion owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared deletion precondition grants no user authority",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared deletion rejects a stale target",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destruction refuses a receipt write failure",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "failed shared destruction preserves its parent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destruction failure rolls back revision and invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared keyed destruction commits",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destruction receipt invents no current record version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destruction is physically applied and audited as irreversible",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destruction HTTP retry",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destruction retry preserves its committed identity",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destruction key rejects a changed request",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP shared store without project context owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared store rejects the missing-context marker before writing",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP creates shared retirement parent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP shared retirement expected version owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP keyed shared retirement owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP shared retirement receipt binds both versions",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP shared retirement retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP shared retirement replay repeats no mutation or host audit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb keyed HTTP creation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb creation receipt binds exact result",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb keyed HTTP creation replay",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb replay preserves commit and invalidation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb changed creation retry conflicts",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb creation result survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb creation replay survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb restart preserves creation commit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb keyed MCP creation owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb MCP creation has a durable receipt",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb MCP creation replay owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb MCP retry identifies original commit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb model creation read",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb keyed MCP creation retains confidence ceiling",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb creation proposal owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb creation proposal replay owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb creation retry preserves review admission",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb keyed creation retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb retired creation cannot be recreated by retry",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared replacement survives KB restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destruction receipt after KB restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destruction restart retry retains one commit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared destruction retry cannot certify a hidden restored ID as absent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP shared retirement after KB restart owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared retirement restart retry retains one commit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP retirement of reactivated result owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared retirement retry cannot repeat after reactivation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP retirement of erased result owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared retirement key survives erasure",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared journal owner and events survive KB restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared correction receipt survives KB restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared restarted correction never duplicates result",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "shared HTTP retry refuses retired result without cached content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit long KB store",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit long KB get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB get preserves full long Unicode content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "ordinary KB get hides retired record",
+    "passed": true,
+    "detail": [
+      404,
+      {
+        "http_status": 404,
+        "kind": "not_found",
+        "message": "memory not found",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "historical retired KB get 2026-03-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "historical KB get preserves content and validity 2026-03-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "historical retired KB get 2026-07-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "historical KB get preserves content and validity 2026-07-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "versioned historical HTTP read 2026-01-01T00:00:00Z",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "schema_version": 1,
+        "policy_version": "current-validity-v8",
+        "mode": "historical",
+        "valid_at": "2026-01-01T00:00:00Z"
+      }
+    ]
+  },
+  {
+    "name": "versioned historical HTTP read 2026-03-01T00:00:00Z",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "schema_version": 1,
+        "policy_version": "current-validity-v8",
+        "mode": "historical",
+        "valid_at": "2026-03-01T00:00:00Z"
+      }
+    ]
+  },
+  {
+    "name": "versioned historical HTTP excludes 2026-06-01T00:00:00Z",
+    "passed": true,
+    "detail": [
+      404,
+      {
+        "http_status": 404,
+        "kind": "not_found",
+        "message": "memory not found",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "versioned historical HTTP excludes 2025-12-31T23:59:59Z",
+    "passed": true,
+    "detail": [
+      404,
+      {
+        "http_status": 404,
+        "kind": "not_found",
+        "message": "memory not found",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "explicit HTTP read refusal user unsupported_version",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "unsupported_version",
+        "message": "read_policy requires schema_version=1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "explicit HTTP read refusal user unsupported_mode",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "unsupported_mode",
+        "message": "memory record belief-time reconstruction is unavailable",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "explicit HTTP read refusal kb unsupported_version",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "unsupported_version",
+        "message": "read_policy requires schema_version=1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "explicit HTTP read refusal kb unsupported_mode",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "unsupported_mode",
+        "message": "memory record belief-time reconstruction is unavailable",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "versioned personal current fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "versioned personal current HTTP read",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal current HTTP reports applied policy",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal historical HTTP refuses unsupported reconstruction",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "unsupported_mode",
+        "message": "personal memory does not yet retain reconstructable historical versions",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "personal email canaries absent from all KB tables",
+    "passed": true,
+    "detail": {
+      "table_count": 248,
+      "matching_tables": []
+    }
+  },
+  {
+    "name": "user HTTP rejects confidence -1",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence False",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence None",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence []",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user HTTP rejects confidence {}",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "user MCP store rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP update rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user MCP supersede rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "user stores confidence 0",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user preserves confidence 0",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "memory": {
+          "id": 69,
+          "scope": {
+            "type": "user",
+            "value": "_user"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "placement-e2e-c0325cfc00-confidence-0",
+          "content": "Synthetic confidence boundary fixture",
+          "confidence": 0
+        },
+        "status": "ok",
+        "store": "user"
+      }
+    ]
+  },
+  {
+    "name": "user stores confidence 0.25",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user preserves confidence 0.25",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "memory": {
+          "id": 70,
+          "scope": {
+            "type": "user",
+            "value": "_user"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "placement-e2e-c0325cfc00-confidence-0.25",
+          "content": "Synthetic confidence boundary fixture",
+          "confidence": 0.25
+        },
+        "status": "ok",
+        "store": "user"
+      }
+    ]
+  },
+  {
+    "name": "user stores confidence 1",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "user preserves confidence 1",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "memory": {
+          "id": 71,
+          "scope": {
+            "type": "user",
+            "value": "_user"
+          },
+          "tier": "L2",
+          "kind": "fact",
+          "key": "placement-e2e-c0325cfc00-confidence-1",
+          "content": "Synthetic confidence boundary fixture",
+          "confidence": 1
+        },
+        "status": "ok",
+        "store": "user"
+      }
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence -1",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence -1",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence 1.01",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence False",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence False",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence None",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence None",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence 'invalid'",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence []",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence []",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb HTTP rejects confidence {}",
+    "passed": true,
+    "detail": [
+      400,
+      {
+        "http_status": 400,
+        "kind": "invalid_argument",
+        "message": "memory.store confidence must be between 0 and 1",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "kb MCP store rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP update rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb MCP supersede rejects confidence {}",
+    "passed": true,
+    "detail": [
+      200,
+      "{\"status\": \"ok\", \"content\": [{\"type\": \"text\", \"text\": \"error: memory confidence must be between 0 and 1\"}]}"
+    ]
+  },
+  {
+    "name": "kb stores confidence 0",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb preserves confidence 0",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "active_context_missing": true,
+        "memory": {
+          "id": 60,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "placement-e2e-c0325cfc00-confidence-0",
+          "headline": "",
+          "content": "Synthetic confidence boundary fixture",
+          "use_cases": "",
+          "confidence": 0,
+          "use_count": 0,
+          "last_used_at": "",
+          "created_at": "2026-09-23 19:42:37",
+          "updated_at": "2026-09-23 19:42:37",
+          "source_session": "",
+          "provenance_category": "user_stated",
+          "retrieval_score": 0,
+          "hybrid_rank": 0
+        },
+        "status": "ok",
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "kb stores confidence 0.25",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb preserves confidence 0.25",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "active_context_missing": true,
+        "memory": {
+          "id": 61,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "placement-e2e-c0325cfc00-confidence-0.25",
+          "headline": "",
+          "content": "Synthetic confidence boundary fixture",
+          "use_cases": "",
+          "confidence": 0.25,
+          "use_count": 0,
+          "last_used_at": "",
+          "created_at": "2026-09-23 19:42:37",
+          "updated_at": "2026-09-23 19:42:37",
+          "source_session": "",
+          "provenance_category": "user_stated",
+          "retrieval_score": 0,
+          "hybrid_rank": 0
+        },
+        "status": "ok",
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "kb stores confidence 1",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "kb preserves confidence 1",
+    "passed": true,
+    "detail": [
+      200,
+      {
+        "active_context_missing": true,
+        "memory": {
+          "id": 62,
+          "tier": "L0",
+          "kind": "fact",
+          "key": "placement-e2e-c0325cfc00-confidence-1",
+          "headline": "",
+          "content": "Synthetic confidence boundary fixture",
+          "use_cases": "",
+          "confidence": 1,
+          "use_count": 0,
+          "last_used_at": "",
+          "created_at": "2026-09-23 19:42:37",
+          "updated_at": "2026-09-23 19:42:37",
+          "source_session": "",
+          "provenance_category": "user_stated",
+          "retrieval_score": 0,
+          "hybrid_rank": 0
+        },
+        "status": "ok",
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "complete hard-rule HTTP recall False",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "HTTP retains beyond former hard-rule cap False",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "complete hard-rule HTTP recall True",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "HTTP retains beyond former hard-rule cap True",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI retains the complete hard-rule set",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "optional oversized recall fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "hard rules survive optional trimming",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "packing keeps complete rules and omits oversized optional row",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "HTTP exposes protected overflow without partial recall",
+    "passed": true,
+    "detail": [
+      413,
+      {
+        "kind": "protected_context_overflow",
+        "message": "complete hard rules exceed the recall allocation",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "MCP protected overflow False owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP preserves protected refusal before guidance False",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP protected overflow True owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP preserves protected refusal before guidance True",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "HTTP refuses oversized last rule instead of truncating",
+    "passed": true,
+    "detail": [
+      413,
+      {
+        "kind": "protected_context_overflow",
+        "message": "complete hard rules exceed the recall allocation",
+        "status": "error"
+      }
+    ]
+  },
+  {
+    "name": "recall recovers after protected overflow",
+    "passed": true,
+    "detail": null
+  }
+]

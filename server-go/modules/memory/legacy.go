@@ -526,7 +526,7 @@ func (s *postgresDataStore) searchVectors(ctx context.Context, vector []float64,
 FROM memory_embeddings e WHERE e.record_type=$2
  AND (e.record_type NOT IN ('memory','unit') OR EXISTS(SELECT 1 FROM memories m WHERE m.id=CASE e.record_type
    WHEN 'memory' THEN e.point_id WHEN 'unit' THEN
-    (SELECT u.memory_id FROM memory_units u WHERE u.id=e.point_id-1000000000000) END
+    (SELECT u.memory_id FROM memory_units u WHERE u.id=e.point_id-1000000000000 AND `+currentUnitInputsSQL("u")+`) END
    AND `+currentMemorySQL("m.")+`
    AND m.scope_type=e.primary_scope AND
     ((m.scope_type='global' AND m.scope_value='_global') OR

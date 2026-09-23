@@ -140,3 +140,28 @@ func currentEpisodeInputsSQL(alias string) string {
  AND episode_summary.record_revision::text=` + input + `->>'summary_revision'
  AND ` + summaryCurrentInputsSQL("episode_summary", "episode_parent") + `))))`
 }
+
+// Stable input identity includes every unit field used by embedding text or its
+// retrieval payload. The digest avoids retaining another copy of derived text.
+func unitInputDigestSQL(alias string) string {
+	return `encode(sha256(convert_to(jsonb_build_array(` + alias + `.unit_type,` + alias + `.unit_key,` + alias + `.unit_text,` + alias + `.memory_kind,` + alias + `.weight)::text,'UTF8')),'hex')`
+}
+
+// This binds deterministic units to their observed parent and optional summary.
+// Independent event/entity/temporal source revisions remain a separate contract.
+// Temporal serving eligibility belongs to the caller: future inputs may be indexed.
+func currentUnitInputsSQL(alias string) string {
+	input := `(CASE WHEN unit_input.source_kind='memory-unit-input-v1' THEN unit_input.source_ref::jsonb END)`
+	return `(NOT EXISTS(SELECT 1 FROM memory_lineage unit_owner WHERE unit_owner.object_type='unit'
+ AND unit_owner.object_id=` + alias + `.id AND unit_owner.source_kind='memory-index-v1') OR EXISTS(
+ SELECT 1 FROM memory_lineage unit_input JOIN memories unit_parent ON unit_parent.id=` + alias + `.memory_id
+ WHERE unit_input.object_type='unit' AND unit_input.object_id=` + alias + `.id
+ AND unit_input.source_kind='memory-unit-input-v1'
+ AND ` + input + `->>'record_id'=unit_parent.id::text
+ AND ` + input + `->>'record_revision'=unit_parent.record_revision::text
+ AND ` + input + `->>'unit_digest'=` + unitInputDigestSQL(alias) + `
+ AND ((` + input + `->>'summary_id'='0' AND ` + input + `->>'summary_revision'='0') OR EXISTS(
+ SELECT 1 FROM memory_summaries unit_summary WHERE unit_summary.id=(` + input + `->>'summary_id')::bigint
+ AND unit_summary.memory_id=unit_parent.id AND unit_summary.record_revision::text=` + input + `->>'summary_revision'
+ AND ` + summaryCurrentInputsSQL("unit_summary", "unit_parent") + `))))`
+}

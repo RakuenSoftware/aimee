@@ -14,7 +14,7 @@ import (
 
 // Hash every field that affects embedding input or retrieval payload. Confidence,
 // usage counters and timestamps do not invalidate an unchanged vector.
-const embeddingInputs = `WITH sources AS (
+var embeddingInputs = `WITH sources AS (
  SELECT m.id AS point_id,m.id AS memory_id,'memory'::text AS record_type,m.key AS input_key,
  m.content AS input_content,m.scope_type,m.scope_value,m.kind,''::text AS unit_type,
  ''::text AS unit_kind,0::double precision AS unit_weight,m.content AS source_content
@@ -22,7 +22,7 @@ const embeddingInputs = `WITH sources AS (
  UNION ALL
  SELECT 1000000000000+u.id,m.id,'unit',u.unit_key,u.unit_text,m.scope_type,m.scope_value,m.kind,
  u.unit_type,u.memory_kind,u.weight,m.content FROM memory_units u JOIN memories m ON m.id=u.memory_id
- WHERE m.lifecycle_state='active' AND m.activation_suppressed=0
+ WHERE m.lifecycle_state='active' AND m.activation_suppressed=0 AND ` + currentUnitInputsSQL("u") + `
 ), inputs AS (SELECT s.*,encode(sha256(convert_to(to_jsonb(s)::text,'UTF8')),'hex') AS input_hash FROM sources s) `
 
 type reembedStatus struct {
@@ -159,7 +159,7 @@ func (s *postgresDataStore) reembedNext(ctx context.Context, version string, aft
 func (s *postgresDataStore) embeddingInput(ctx context.Context, point int64) (embeddingInput, error) {
 	var in embeddingInput
 	source := strings.Replace(embeddingInputs, "FROM memories m WHERE m.lifecycle_state='active'", "FROM memories m WHERE m.id=$1 AND m.lifecycle_state='active'", 1)
-	source = strings.Replace(source, "WHERE m.lifecycle_state='active' AND m.activation_suppressed=0\n)", "WHERE u.id=$1-1000000000000 AND m.lifecycle_state='active' AND m.activation_suppressed=0\n)", 1)
+	source = strings.Replace(source, "FROM memory_units u JOIN memories m ON m.id=u.memory_id\n WHERE ", "FROM memory_units u JOIN memories m ON m.id=u.memory_id\n WHERE u.id=$1-1000000000000 AND ", 1)
 	err := s.db.QueryRow(ctx, source+`SELECT point_id,memory_id,record_type,input_key,input_content,scope_type,scope_value,kind,unit_type,unit_kind,unit_weight,input_hash FROM inputs WHERE point_id=$1`, point).Scan(&in.PointID, &in.MemoryID, &in.RecordType, &in.Key, &in.Content, &in.ScopeType, &in.ScopeValue, &in.Kind, &in.UnitType, &in.UnitKind, &in.Weight, &in.Hash)
 	return in, err
 }

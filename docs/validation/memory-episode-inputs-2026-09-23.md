@@ -24,3 +24,9 @@ evidence is pending.
 The released 0.4.5 deployment on CT100 remains unchanged. Full MR-04 independent
 family accounting, arbitrary derivation closure and restore-resistant erasure
 remain open.
+
+Matching application/harness `74ed997e7` passes **614/614** fresh T3 checks;
+[raw results](memory-episode-inputs-2026-09-23/fresh/T3/topology.json) and
+[nine verified image identities](memory-episode-inputs-2026-09-23/fresh/image-identities.json)
+are retained. All three provider request byte limits are 32,768. T2 has passed
+all four new generated-episode HTTP checks; its complete run remains pending.

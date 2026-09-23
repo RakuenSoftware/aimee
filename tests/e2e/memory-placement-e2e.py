@@ -286,6 +286,15 @@ class Gate:
         self.check('shared deletion fixture indexed before mutation', indexed)
         if not indexed:
             raise RuntimeError('shared deletion fixture indexing did not complete')
+        observed = self.sql(f"""SELECT (NOT EXISTS(
+            SELECT 1 FROM memory_units u JOIN memories m ON m.id=u.memory_id
+            WHERE u.memory_id={int(mid)} AND u.is_episode_card=0 AND NOT EXISTS(
+              SELECT 1 FROM memory_lineage l WHERE l.object_type='unit' AND l.object_id=u.id
+              AND l.source_kind='memory-unit-input-v1'
+              AND (CASE WHEN l.source_kind='memory-unit-input-v1' THEN l.source_ref::jsonb END)->>'record_id'=m.id::text
+              AND (CASE WHEN l.source_kind='memory-unit-input-v1' THEN l.source_ref::jsonb END)->>'record_revision'=m.record_revision::text
+              AND length((CASE WHEN l.source_kind='memory-unit-input-v1' THEN l.source_ref::jsonb END)->>'unit_digest')=64)))::text""")
+        self.check('shared background unit producer records observed source revisions', observed == 'true')
         version = self.good('shared deletion expected version', self.call('get', dict(store='kb', id=mid, include_version=True)))['memory']['version']
         request = dict(store='kb', id=str(mid), expected_version=version, idempotency_key=key+'-retry')
         refused = self.mcp_document('model cannot elevate shared deletion', 'mutate', dict(verb='forget', authority='user', **request))

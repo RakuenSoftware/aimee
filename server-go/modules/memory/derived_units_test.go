@@ -133,6 +133,71 @@ func exerciseDerivedUnitsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	if err := json.Unmarshal([]byte(payload), &metadata); err != nil || metadata["memory_id"] != float64(first) || metadata["unit_id"] != float64(unit) {
 		t.Fatal(metadata, err)
 	}
+	queryVector := make([]float64, len(vector))
+	for i, value := range vector {
+		queryVector[i] = float64(value)
+	}
+	visiblePoint := func(want bool) {
+		t.Helper()
+		hits, err := backend.searchVectors(ctx, queryVector, "unit", "", "units-visible", false, 256, Scope{Type: "project", Value: "units-visible"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, hit := range hits {
+			if hit.ID == point {
+				found = true
+			}
+		}
+		if found != want {
+			t.Fatal("stale raw unit vector eligibility", found, want)
+		}
+	}
+	visiblePoint(true)
+	for _, change := range []string{
+		`UPDATE memories SET content='changed unit parent' WHERE id=$1`,
+		`UPDATE memory_units SET unit_text='independent unit edit' WHERE id=$2`,
+		`DELETE FROM memory_lineage WHERE object_type='unit' AND object_id=$2 AND source_kind='memory-unit-input-v1'`,
+	} {
+		if _, err := tx.Exec(ctx, `SAVEPOINT unit_input_change`); err != nil {
+			t.Fatal(err)
+		}
+		// Bind both parameters even when a mutation uses only one identity.
+		if _, err := tx.Exec(ctx, `WITH ids AS (SELECT $1::bigint,$2::bigint) `+change, first, unit); err != nil {
+			t.Fatal(err)
+		}
+		visiblePoint(false)
+		var candidates int
+		if err := tx.QueryRow(ctx, embeddingInputs+`SELECT count(*) FROM inputs WHERE point_id=$1`, point).Scan(&candidates); err != nil || candidates != 0 {
+			t.Fatal("stale reembedding input", candidates, err)
+		}
+		calls := executor.calls
+		if r := repair(point); r["failed"] != float64(1) || executor.calls != calls {
+			t.Fatal("stale unit sent for embedding", r, executor.calls, calls)
+		}
+		if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT unit_input_change; RELEASE SAVEPOINT unit_input_change`); err != nil {
+			t.Fatal(err)
+		}
+		visiblePoint(true)
+	}
+	if _, err := tx.Exec(ctx, `SAVEPOINT unit_summary_change`); err != nil {
+		t.Fatal(err)
+	}
+	var summaryPoint int64
+	if err := tx.QueryRow(ctx, `SELECT $2::bigint+id FROM memory_units WHERE memory_id=$1 AND unit_type='summary' AND unit_key='headline'`, first, unitPointOffset).Scan(&summaryPoint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE memory_summaries SET summary='edited intermediate summary' WHERE memory_id=$1 AND scope='headline'`, first); err != nil {
+		t.Fatal(err)
+	}
+	var summaryCandidates int
+	if err := tx.QueryRow(ctx, embeddingInputs+`SELECT count(*) FROM inputs WHERE point_id=$1`, summaryPoint).Scan(&summaryCandidates); err != nil || summaryCandidates != 0 {
+		t.Fatal("stale summary unit indexed", summaryCandidates, err)
+	}
+	visiblePoint(true)
+	if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT unit_summary_change; RELEASE SAVEPOINT unit_summary_change`); err != nil {
+		t.Fatal(err)
+	}
 	executor.reply = `[0.1,0.2]`
 	if r := repair(point); r["failed"] != float64(1) {
 		t.Fatal(r)

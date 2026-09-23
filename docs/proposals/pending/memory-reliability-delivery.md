@@ -629,3 +629,16 @@ summary input. Ordinary and typed reads, briefing, profile episode labels and
 release checks withhold mismatched observations before limits. Authored episode
 policy remains explicit. Full MR-04 lineage and erasure remain open; final
 validation is tracked in the linked report.
+
+The [summary input fence](../../validation/memory-summary-inputs-2026-09-23.md)
+passes **1,689/1,689** fresh deployment checks (1,075 T2 and 614 T3) on matching
+application/harness `83ff06d9c`, with all nine image identities and three provider
+limits verified. Current previews fall back to canonical text when a summary's
+producer observations are absent or stale. Full MR-04 remains open.
+
+[Generated unit input observations](../../validation/memory-unit-inputs-2026-09-23.md)
+withhold stale deterministic units from raw vector search, shared/unit semantic
+recall, direct embedding and re-embedding. Parent revision, unit field commitment
+and optional summary observations are producer-owned. Local packaged race and
+export checks pass; fresh deployment evidence remains pending. Other intermediate
+source contracts and full MR-04 closure remain open.
