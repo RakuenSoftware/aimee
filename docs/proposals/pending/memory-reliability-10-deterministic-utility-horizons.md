@@ -55,3 +55,13 @@ Expose the decision in `memory validity`, actual selection traces and health rep
 Start with observed would-exclude counts, query classes and false exclusions. Enable per domain/kind after its fixture and quality gates pass. Disabling the horizon restores ordinary horizon eligibility, not records erased or prohibited by other controls. Do not use horizon expiry as an implicit housekeeping delete.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+## Implementation evidence — 2026-09-23
+
+A pure shadow evaluator and bounded policy schema now live in the Go memory
+owner. Tests pin explicit transient-kind admission, system/record/domain/kind
+precedence, exact deadline boundaries, version-bound event anchors, future/missing
+anchor behavior, historical inspection and unchanged anchors across repeated
+reads. The evaluator has no live serving effect. Canonical anchor loading,
+authorized override mutation, diagnostic/selection integration, population
+measurement and rollout remain open; this is a foundation, not MR-10 completion.

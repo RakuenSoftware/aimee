@@ -301,6 +301,39 @@ func exerciseAssertionSearchReplay(t *testing.T, ctx context.Context, tx pgx.Tx,
 	if !vectorFound {
 		t.Fatal("vector-only candidate missing", got)
 	}
+	// The public typed endpoint evaluates obligations over the actual scoped
+	// PostgreSQL selection; vector retrieval is healthy for this fixture.
+	coverageArgs := map[string]any{"operation": "typed-context", "query": "AssertionAtlas", "project": "assertion-local",
+		"enable_observations": false, "enable_approved_procedures": false, "channel_budgets": map[string]int{"total": 4096, "current_assertions": 4096},
+		"evidence_requirements": evidenceRequirementSet{SchemaVersion: 1, TaskRevision: "replay:1", QueryMode: "current_state", Obligations: []evidenceObligation{{Subject: "AssertionAtlas", Relation: "deployment_state"}}}}
+	coverageCall := func() typedContextResult {
+		t.Helper()
+		raw, _ := json.Marshal(coverageArgs)
+		out := runHostRuntime(t, handler, string(raw))
+		var result typedContextResult
+		if err := json.Unmarshal([]byte(out["json"].(string)), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	covered := coverageCall()
+	if covered.Sufficiency != "complete" || covered.Coverage == nil || len(covered.Coverage.Roles[0].Retained) != 1 || covered.Coverage.Roles[0].Retained[0] != fmt.Sprint(current) {
+		t.Fatal("actual scoped role not covered", covered.Coverage, covered.Reason)
+	}
+	coverageArgs["context_limits"] = map[string]any{"schema_version": 1, "max_context_bytes": 0}
+	dropped := coverageCall()
+	if dropped.Sufficiency != "insufficient" || dropped.Coverage.Roles[0].Status != "budget_dropped" {
+		t.Fatal("packed-away evidence still complete", dropped.Coverage)
+	}
+	delete(coverageArgs, "context_limits")
+	exec(`SAVEPOINT coverage_hidden; RESET ROLE`)
+	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance,evidence_hash) VALUES($1,'memory',$2,'supports','coverage-hidden')`, current, "memory:"+fmt.Sprint(private))
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	hiddenCoverage := coverageCall()
+	if hiddenCoverage.Sufficiency == "complete" || len(hiddenCoverage.Coverage.Roles[0].Retained) != 0 {
+		t.Fatal("hidden parent establishes coverage", hiddenCoverage.Coverage)
+	}
+	exec(`ROLLBACK TO SAVEPOINT coverage_hidden; RELEASE SAVEPOINT coverage_hidden`)
 	before := len(executor.seen)
 	got = call()
 	if got["indexed_assertions"] != float64(0) || len(executor.seen) != before+1 {

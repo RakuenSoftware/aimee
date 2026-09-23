@@ -139,6 +139,15 @@ neither the complete provider request nor source freshness. Typed context keeps
 packing diagnostics outside the prompt, renders reviewed procedures once, and
 reports unknown task coverage until requirements are evaluated.
 
+Typed context optionally accepts `evidence_requirements` schema 1 with a bounded
+`task_revision`, `query_mode: current_state`, and up to 16 subject/relation
+obligations. The Go owner reports role coverage over retained, versioned current
+assertions. Missing, budget-dropped, conflicted and unavailable roles differ from
+ranking confidence. Repacking reevaluates coverage and cannot cure an earlier
+conflict by dropping evidence. Other query modes remain unknown. This opt-in
+coverage describes the memory projection; it does not authorize actions, prove
+answer correctness, attest provider dispatch, or replace source revalidation.
+
 The host's assembly allocation is an inherited ceiling: an explicit byte cap may
 reduce it but cannot increase it. An absent cap inherits that ceiling. Versioned
 limits reject duplicate fields (including escaped aliases), case aliases, null

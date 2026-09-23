@@ -1379,6 +1379,9 @@ set_config('aimee.correlation_id',$9,true)`,
 		if request.TypedContext == nil || request.Assertions == nil || request.Query == "" || request.Limit != 32 {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
+		if p := request.TypedContext.Requirements; p != nil && !p.valid() {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
 		for name := range typedBudgetDefaults {
 			n, ok := request.TypedContext.Budgets[name]
 			if !ok || n < 0 || n > 4096 {

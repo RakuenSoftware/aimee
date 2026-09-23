@@ -60,3 +60,11 @@ Unavailable indexing and no matching evidence are distinct states. An unresolved
 Ship truthful states before adding restrictive exploration. Shadow the requirement planner against reviewed fixtures and real task samples. Recovery starts opt-in with low bounded work. A rollback may disable automatic recovery but must retain honest missing/degraded states.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+## Implementation evidence — 2026-09-23
+
+The [current-state coverage slice](../../validation/memory-evidence-coverage-2026-09-23.md)
+adds an opt-in bounded requirement set, owner-versioned retained-assertion role
+checks and post-packing reevaluation. Unsupported query shapes remain unknown.
+Timeline planning, independent-origin roles, bounded recovery and broader host
+integration remain open; this does not certify MR-05.

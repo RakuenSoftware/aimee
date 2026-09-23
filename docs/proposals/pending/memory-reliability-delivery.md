@@ -462,3 +462,14 @@ standalone export inventory for lifecycle mutations. The existing ownership
 validator and an actual independent memory export build cover packaging.
 These are additional acceptance dependencies; all 18 proposals remain open
 against their frozen clauses.
+
+[Current-state evidence coverage](../../validation/memory-evidence-coverage-2026-09-23.md)
+now evaluates bounded subject/relation obligations against the actual retained
+owner-versioned assertions and reevaluates outer packing. Restricted-role replay
+covers hidden parents and budget-dropped evidence. Timeline planning, independent
+origins and recovery are still open; no frozen proposal is certified by this slice.
+
+MR-10 now has a pure Go shadow evaluator with bounded policy artifacts and
+owner-version/event-bound anchors. Boundary, precedence, unknown-anchor and
+nonrenewal fixtures pass. It is not wired into serving or public diagnostics;
+canonical anchor admission and gated rollout remain open.

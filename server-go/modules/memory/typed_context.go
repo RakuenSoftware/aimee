@@ -16,12 +16,13 @@ import (
 )
 
 type typedContextOptions struct {
-	ContextLimits *ContextLimits  `json:"context_limits,omitempty"`
-	Enabled       bool            `json:"enabled"`
-	Flags         map[string]bool `json:"flags"`
-	Budgets       map[string]int  `json:"budgets"`
-	Turns         []string        `json:"turns"`
-	Latest        string          `json:"latest"`
+	Requirements  *evidenceRequirementSet `json:"evidence_requirements,omitempty"`
+	ContextLimits *ContextLimits          `json:"context_limits,omitempty"`
+	Enabled       bool                    `json:"enabled"`
+	Flags         map[string]bool         `json:"flags"`
+	Budgets       map[string]int          `json:"budgets"`
+	Turns         []string                `json:"turns"`
+	Latest        string                  `json:"latest"`
 }
 
 var typedChannelOrder = []string{"current_assertions", "historical_assertions", "episodes", "summaries", "observations", "approved_procedures", "working_context"}
@@ -58,6 +59,10 @@ type typedWatermark struct {
 	Reason       string `json:"reason,omitempty"`
 }
 type typedContextResult struct {
+	Requirements       *evidenceRequirementSet `json:"evidence_requirements,omitempty"`
+	Coverage           *evidenceCoverage       `json:"evidence_coverage,omitempty"`
+	coverageCandidates []typedItem
+	coveragePrior      *evidenceCoverage
 	Accounting         ContextAccounting        `json:"context_accounting"`
 	ProjectionVersion  int                      `json:"projection_schema_version"`
 	SelectionDigest    string                   `json:"selection_digest"`
@@ -139,6 +144,13 @@ func handleTypedContextResult(options handlerOptions, invocation bus.ModuleInvoc
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	cfg := typedOptions(args)
+	if raw, present := args["evidence_requirements"]; present {
+		var err error
+		cfg.Requirements, err = decodeEvidenceRequirements(raw)
+		if err != nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+	}
 	if raw, present := args["context_limits"]; present {
 		if json.Unmarshal(raw, &cfg.ContextLimits) != nil || cfg.ContextLimits == nil {
 			return nil, bus.ModuleStatusInvalidRequest
@@ -177,7 +189,7 @@ func handleTypedContextResult(options handlerOptions, invocation bus.ModuleInvoc
 }
 func newTypedContext(request DataRequest) *typedContextResult {
 	cfg := request.TypedContext
-	result := &typedContextResult{Status: "ok", Enabled: cfg.Enabled, Budget: cfg.Budgets["total"], Channels: map[string]*typedChannel{}, Trace: []typedPackTrace{}, MissingContext: request.Project == "" && request.Workspace == "", limits: cfg.ContextLimits}
+	result := &typedContextResult{Requirements: cfg.Requirements, Status: "ok", Enabled: cfg.Enabled, Budget: cfg.Budgets["total"], Channels: map[string]*typedChannel{}, Trace: []typedPackTrace{}, MissingContext: request.Project == "" && request.Workspace == "", limits: cfg.ContextLimits}
 	for _, name := range typedChannelOrder {
 		status := "disabled"
 		if cfg.Flags[name] {
@@ -195,6 +207,9 @@ func (r *typedContextResult) trace(name, id string, tokens int, included bool, r
 	r.Trace = append(r.Trace, typedPackTrace{name, id, tokens, decision, reason})
 }
 func (r *typedContextResult) add(name string, item typedItem) {
+	if r.Requirements != nil && name == "current_assertions" {
+		r.coverageCandidates = append(r.coverageCandidates, item)
+	}
 	c := r.Channels[name]
 	tokens := typedEstimate(item.text)
 	include := c.Enabled && c.Used+tokens <= c.Budget && r.Used+tokens <= r.Budget
@@ -402,6 +417,7 @@ func (r *typedContextResult) finish() error {
 		r.Sufficiency = "unknown"
 		r.Reason = "authorized evidence present; task requirements have not been evaluated"
 	}
+	r.evaluateCoverage()
 	return nil
 }
 
@@ -427,6 +443,7 @@ func (r *typedContextResult) fitProjectionBytes(limit int) error {
 		r.Accounting.Boundary = "typed_memory_projection"
 		r.ProjectionDigest = r.Accounting.Digest
 		r.SelectionDigest = typedSelectionDigest(r.ProjectionDigest, r.Retained)
+		r.evaluateCoverage()
 	}
 	return nil
 }
@@ -436,16 +453,18 @@ func (r *typedContextResult) fitProjectionBytes(limit int) error {
 // consistency, not current authorization or provider dispatch.
 func decodeTypedProjection(raw string) (*typedContextResult, error) {
 	var input struct {
-		SelectionDigest string               `json:"selection_digest"`
-		Availability    string               `json:"retrieval_availability"`
-		Status          string               `json:"status"`
-		Version         int                  `json:"projection_schema_version"`
-		Digest          string               `json:"projection_digest"`
-		Bytes           int                  `json:"rendered_bytes"`
-		Rendered        string               `json:"rendered_context"`
-		Budget          int                  `json:"total_budget_tokens"`
-		Accounting      ContextAccounting    `json:"context_accounting"`
-		Retained        []typedProjectionRef `json:"retained_items"`
+		Requirements    *evidenceRequirementSet `json:"evidence_requirements"`
+		Coverage        *evidenceCoverage       `json:"evidence_coverage"`
+		SelectionDigest string                  `json:"selection_digest"`
+		Availability    string                  `json:"retrieval_availability"`
+		Status          string                  `json:"status"`
+		Version         int                     `json:"projection_schema_version"`
+		Digest          string                  `json:"projection_digest"`
+		Bytes           int                     `json:"rendered_bytes"`
+		Rendered        string                  `json:"rendered_context"`
+		Budget          int                     `json:"total_budget_tokens"`
+		Accounting      ContextAccounting       `json:"context_accounting"`
+		Retained        []typedProjectionRef    `json:"retained_items"`
 		Channels        map[string]struct {
 			Items []json.RawMessage `json:"items"`
 		} `json:"channels"`
@@ -468,11 +487,19 @@ func decodeTypedProjection(raw string) (*typedContextResult, error) {
 		return invalid()
 	}
 	cfg := typedOptions(commandArgs{})
+	cfg.Requirements = input.Requirements
+	if cfg.Requirements != nil && !cfg.Requirements.valid() {
+		return invalid()
+	}
 	cfg.Budgets["total"] = input.Budget
 	for _, name := range typedChannelOrder {
 		cfg.Flags[name] = true
 	}
 	r := newTypedContext(DataRequest{TypedContext: cfg})
+	r.coveragePrior = input.Coverage
+	if cfg.Requirements != nil && (input.Coverage == nil || input.Coverage.SelectionDigest != input.SelectionDigest) {
+		return invalid()
+	}
 	for name := range input.Channels {
 		if r.Channels[name] == nil {
 			return invalid()
@@ -492,7 +519,11 @@ func decodeTypedProjection(raw string) (*typedContextResult, error) {
 			}
 			seen[key] = true
 			r.Channels[name].Items = append(r.Channels[name].Items, value)
-			r.Channels[name].selected = append(r.Channels[name].selected, typedItem{value: value, id: ref.ID, source: ref.Source})
+			item := typedItem{value: value, id: ref.ID, source: ref.Source}
+			r.Channels[name].selected = append(r.Channels[name].selected, item)
+			if name == "current_assertions" && r.Requirements != nil {
+				r.coverageCandidates = append(r.coverageCandidates, item)
+			}
 			n++
 		}
 	}
