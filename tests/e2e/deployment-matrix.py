@@ -333,13 +333,22 @@ def future_index_admission_gate(kb, check):
     mid = int(sql(f"""INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,valid_from)
         VALUES('L2','fact','{key}','I ride my bicycle to the office every morning.',
           'project','{key}',(clock_timestamp()+interval '45 seconds')::text) RETURNING id"""))
+    parent = int(sql(f"""INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+        VALUES('L2','fact','{key}-parent','parent','project','{key}') RETURNING id"""))
+    def linked_read():
+        code, result = kb.kb_request('/v1/actions/memory.search_graph',
+            dict(query=key, project=key, scope_context=True, limit=16))
+        return code, [r for r in result.get('relations', []) if r.get('memory_id') == parent and r.get('target') == key]
     try:
+        sql(f"INSERT INTO memory_links(source_id,target_id,relation) VALUES({parent},{mid},'related_to')")
         ready = False
         deadline = time.monotonic() + 40
         while time.monotonic() < deadline:
             ready = sql(f"""SELECT count(*) FROM memories m JOIN memory_embeddings e ON e.point_id=m.id
                 WHERE m.id={mid} AND m.valid_from::timestamptz>clock_timestamp()
                 AND EXISTS(SELECT 1 FROM kb_async_jobs j WHERE j.kind='memory_index' AND j.document_id=m.id AND j.status='done')
+                AND EXISTS(SELECT 1 FROM kb_async_jobs j WHERE j.kind='memory_index' AND j.document_id={parent} AND j.status='done')
+                AND EXISTS(SELECT 1 FROM memory_relations r WHERE r.memory_id={parent} AND r.dst_entity='{key}')
                 AND EXISTS(SELECT 1 FROM memory_relation_consumer_positions c JOIN memory_collection_generations g
                   USING(scope_type,scope_value) WHERE c.scope_type='project' AND c.scope_value='{key}' AND c.generation=g.generation)""").strip() == '1'
             if ready:
@@ -349,6 +358,9 @@ def future_index_admission_gate(kb, check):
         args = dict(id=mid, project=key, scope_context=True)
         code, before = kb.kb_request('/v1/actions/memory.get', args)
         check('Pre-indexing cannot grant an early current read', before.get('kind') == 'not_found')
+        code, early_relations = linked_read()
+        check('Prepared future linked input remains hidden before activation', code == 200 and not early_relations)
+        relation_id = sql(f"SELECT id FROM memory_relations WHERE memory_id={parent} AND dst_entity='{key}'")
         version = sql(f"SELECT record_revision FROM memories WHERE id={mid}")
         indexed_at = sql(f"SELECT indexed_at FROM vector_index_ops WHERE point_id={mid}")
         deadline = time.monotonic() + 50
@@ -363,8 +375,13 @@ def future_index_admission_gate(kb, check):
         check('Activation needs neither another canonical write nor another embedding',
               sql(f"SELECT record_revision FROM memories WHERE id={mid}") == version and
               sql(f"SELECT indexed_at FROM vector_index_ops WHERE point_id={mid}") == indexed_at)
+        code, live_relations = linked_read()
+        check('Clock-only activation exposes the prepared copied relation',
+              code == 200 and len(live_relations) == 1 and str(live_relations[0].get('id')) == relation_id)
     finally:
-        sql(f"DELETE FROM memories WHERE id={mid}")
+        sql(f"""DELETE FROM memory_lineage WHERE object_type='relation' AND object_id IN
+            (SELECT id FROM memory_relations WHERE memory_id={parent});
+            DELETE FROM memories WHERE id IN({mid},{parent})""")
 
 
 def typed_source_version_gate(kb, check):

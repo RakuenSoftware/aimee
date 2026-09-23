@@ -167,6 +167,26 @@ func exerciseDerivedRelationsReplay(t *testing.T, ctx context.Context, tx pgx.Tx
 		}
 	}
 
+	// Prepare future-valid linked text now, while its direct input fence withholds
+	// it. Activation must not depend on a later unrelated canonical mutation.
+	if _, err := tx.Exec(ctx, `SAVEPOINT future_link_input`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE memories SET valid_from='2099-01-01' WHERE id=$1`, public); err != nil {
+		t.Fatal(err)
+	}
+	rebuildLinked()
+	checkLinked(false)
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memory_relations r JOIN memory_lineage d
+ ON d.object_type='relation' AND d.object_id=r.id AND d.source_kind='memory-relation-input-v2'
+ JOIN memories m ON m.id=$2 WHERE r.memory_id=$1 AND r.dst_entity='shared-target'
+ AND d.source_ref::jsonb->>'record_id'=m.id::text
+ AND d.source_ref::jsonb->>'record_revision'=m.record_revision::text`, id, public).Scan(&count); err != nil || count != 1 {
+		t.Fatal("future linked input not prepared", count, err)
+	}
+	if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT future_link_input; RELEASE SAVEPOINT future_link_input`); err != nil {
+		t.Fatal(err)
+	}
 	// Identical relation text from two linked origins keeps both observations;
 	// the healthy origin must not mask expiry of the other required input.
 	if _, err := tx.Exec(ctx, `SAVEPOINT linked_union`); err != nil {

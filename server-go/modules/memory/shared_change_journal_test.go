@@ -598,6 +598,11 @@ func TestSharedLinkChangeJournal(t *testing.T) {
 	expect(3, 4)
 	exec(`INSERT INTO memory_links VALUES(4,1,2,'related',1,''); DELETE FROM memories WHERE id=2`)
 	expect(1, 7)
+	// The target sorts before the source. Cascading link deletion must not
+	// rewrite a source that the outer statement is also about to erase.
+	exec(`INSERT INTO memories(id,key,content,scope_type,scope_value) VALUES
+ (4,'bulk-target','target','project','alpha'),(5,'bulk-source','source','project','alpha');
+ INSERT INTO memory_links VALUES(5,5,4,'related',1,''); DELETE FROM memories WHERE id IN(4,5)`)
 	var mismatches int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories m WHERE
  m.record_revision<>(SELECT max(record_revision) FROM memory_invalidation_outbox o WHERE o.memory_id=m.id)`).Scan(&mismatches); err != nil || mismatches != 0 {

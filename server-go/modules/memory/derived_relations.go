@@ -113,7 +113,7 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 	}
 	rows, err = s.db.Query(ctx, `SELECT l.relation,target.key,target.content,target.id,target.record_revision,l.id FROM memory_links l
  JOIN memories target ON target.id=l.target_id JOIN memories source ON source.id=l.source_id
- WHERE l.source_id=$1 AND `+currentMemorySQL("target.")+` AND
+ WHERE l.source_id=$1 AND `+indexableMemorySQL("target.")+` AND `+memoryUnexpiredSQL("target.")+` AND
  (target.scope_type='global' OR (target.scope_type=source.scope_type AND target.scope_value=source.scope_value))
  ORDER BY l.id LIMIT 64`, id)
 	if err != nil {

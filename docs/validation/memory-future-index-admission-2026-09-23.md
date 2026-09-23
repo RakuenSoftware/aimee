@@ -22,12 +22,19 @@ vector while current reads and direct vector queries withhold it; suppression
 blocks both whole-record and unit model calls. The
 [exported owner](memory-future-index-admission-2026-09-23/export.txt) also passes.
 
-Fresh deployment validation remains pending. A new fixture waits through an
-actual 45-second validity boundary after the real background worker settles,
-then checks that current access changes without another canonical revision or
-embedding write. That fixture does not certify historical semantic recall.
-Full generation coverage, durable activation of
-copied relationships, rollback and release-time receipts remain open. These
+Fresh T1 candidate `d5b3980f2` passes **134/134 checks**, including an actual
+45-second validity boundary after the real background worker settles. Current
+access changes without another canonical revision or embedding write. The
+[raw verdicts](memory-future-index-admission-2026-09-23/fresh/T1/topology.json)
+and [three image identities](memory-future-index-admission-2026-09-23/fresh/image-identities.json)
+are retained; the actual application provider cap is 32,768 bytes. Application
+image: `sha256:03e39b52ade17017c893feefccea152e5404eba659ad4a133a80d920ba97234a`.
+The database is schema-34 `aimee-pr2990-postgres:d0e3c5752`, with the released
+0.4.5 embedder. The harness exits zero and removes its containers. T2 was not
+rerun for this intermediate candidate; combined T1/T2 validation of the copied
+relationship activation follow-up remains pending. This test does not certify
+historical semantic recall.
+Full generation coverage, rollback and release-time receipts remain open. These
 functional suite timings are not matched performance measurements.
 
 A follow-up applies the same active/unsuppressed admission to generation inputs,
@@ -42,5 +49,19 @@ passes in 132.763 seconds; [export](memory-future-index-admission-2026-09-23/ree
 also passes. The first follow-up run exposed a multi-statement prepared-query
 mistake in the new fixture, corrected before the passing run; its
 [diagnostic](memory-future-index-admission-2026-09-23/reembed-fixture-failure.txt)
-is retained. Fresh validation must use this final follow-up, not the earlier
+is retained. The fresh T1 receipt above uses this follow-up, not the earlier
 `f28d6b8ce` commit alone.
+
+Linked relation generation now also prepares authorized, unsuppressed future-valid
+inputs ahead of time, while continuing to exclude expired inputs. Every copied
+input's existing current-time/revision fence still applies at serving. Consequently
+a clock-only boundary can expose the prepared relationship without an unrelated
+mutation or timer-driven rewrite. The expanded real-clock fixture checks both
+its early omission and later appearance with the same relation identity.
+Restricted-role replay proves the copy is prepared but withheld; the
+[final PostgreSQL race suite](memory-future-index-admission-2026-09-23/linked-future-race.txt)
+passes in 138.321 seconds, and
+[export](memory-future-index-admission-2026-09-23/linked-future-export.txt) passes.
+An additional bulk-cascade regression confirms the existing link journal handles
+erasing both endpoints in one statement. No schema change is needed. Combined
+fresh T1/T2 validation of this follow-up remains pending.

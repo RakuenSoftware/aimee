@@ -521,9 +521,16 @@ all nine images and three actual provider caps captured.
 separates active input processing from current recall, preventing premature retry
 exhaustion. Whole-record/unit model work blocks suppressed inputs, while raw
 vector results enforce current canonical eligibility before limits. PostgreSQL/race
-and export checks pass; real-clock deployment validation remains pending.
+and export checks pass. Fresh T1 `d5b3980f2` passes **134/134 checks**, including
+actual clock-only activation with no new write or embedding. Its three images
+and actual provider cap are captured.
 
 Generation backfill/cutover now share active/unsuppressed input admission, including
 suppression after a draft was already prepared. Other raw vector families retain
 their own owner contract. The final PostgreSQL/race suite passes in 132.763 seconds;
-fresh future-valid validation remains pending.
+the fresh T1 real-clock evidence is recorded above.
+
+Future-valid copied relations are now prepared ahead of time under index admission,
+then withheld by their direct input fences until applicable. The final PostgreSQL
+race suite passes in 138.321 seconds; combined fresh T1/T2 real-clock graph
+validation remains pending. This follow-up keeps shared schema 34.
