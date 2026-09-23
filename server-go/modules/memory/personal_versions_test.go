@@ -60,7 +60,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 		t.Fatal("private schema missing")
 	}
 	exec(base[a:b] + read("../aimee/families/schema_personal_memory_changes.sql"))
-	exec(`INSERT INTO user_memories(id,key,content,confidence,source_session) VALUES(42,'private','original',.9,'original-session')`)
+	exec(`INSERT INTO user_memories(id,key,content,confidence,source_session) VALUES(42,'private','original',.9,'original-session'); INSERT INTO user_memories(id,key,content,lifecycle_state,valid_until) VALUES(43,'pending fixture','pending','pending',NULL),(44,'expired fixture','expired','active',now())`)
 	exec(read("../aimee/families/schema_personal_memory_versions.sql"))
 	// Older PostgreSQL restart reconciliation restored blanket grants after
 	// migrations. The repair migration must remove them from existing stores.
@@ -136,8 +136,53 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 			t.Fatalf("private recall payload/revision: %+v %v", rows, err)
 		}
 	}
+	checkRelease := func(version *MemoryRecordVersion, channel string, want bool) {
+		t.Helper()
+		tx := begin(conn)
+		defer tx.Rollback(context.Background())
+		backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementServer}
+		request := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("a", 32), Sources: []typedProjectionRef{{Channel: channel, ID: version.RecordID, Source: &typedSourceVersion{Kind: "user_memory_record", Version: *version, MemoryParentState: "observed"}}}}
+		eligible, err := backend.revalidatePersonalSources(ctx, request)
+		if err != nil || eligible != want {
+			t.Fatalf("private release eligible=%v want=%v err=%v", eligible, want, err)
+		}
+		args := commandArgs{}
+		args["revalidation"], _ = json.Marshal(request)
+		options := handlerOptions{placement: PlacementServer, data: backend}
+		encoded, status := handlePersonalSourceRevalidation(options, bus.ModuleInvocation{}, args)
+		raw, err := bus.DecodeCommandResult(encoded)
+		var reply struct {
+			Status   string
+			Eligible bool
+			CheckID  string `json:"check_id"`
+			Digest   string `json:"sources_digest"`
+		}
+		if status != bus.ModuleStatusOK || err != nil || json.Unmarshal(raw, &reply) != nil || reply.Status != "ok" || reply.Eligible != want || reply.CheckID != request.CheckID || reply.Digest != releaseDigest(request.Sources) {
+			t.Fatalf("private owner answer: %s %v %v", raw, status, err)
+		}
+		if _, status := handlePersonalSourceRevalidation(options, bus.ModuleInvocation{PrincipalRef: 1}, args); status != bus.ModuleStatusCapabilityAbsent {
+			t.Fatal("public caller reached private revalidation", status)
+		}
+		options.placement = PlacementKB
+		if _, status := handlePersonalSourceRevalidation(options, bus.ModuleInvocation{}, args); status != bus.ModuleStatusCapabilityAbsent {
+			t.Fatal("shared owner reached private revalidation", status)
+		}
+	}
+	for _, fixture := range []struct {
+		id      int64
+		channel string
+		want    bool
+	}{{43, "native_preferences", false}, {43, "native_open_commitments", true}, {44, "native_preferences", false}} {
+		version := MemoryRecordVersion{SchemaVersion: 1, RecordID: fmt.Sprint(fixture.id)}
+		if err := conn.QueryRow(ctx, "SELECT record_revision::text,(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1) FROM user_memories WHERE id=$1", fixture.id).Scan(&version.RecordRevision, &version.OwnerID); err != nil {
+			t.Fatal(err)
+		}
+		checkRelease(&version, fixture.channel, fixture.want)
+	}
 	original := get()
 	assertRecall(original)
+	checkRelease(original.Version, "native_preferences", true)
+	checkRelease(original.Version, "native_open_commitments", false)
 	if original.Version.RecordRevision != "1" {
 		t.Fatal(original)
 	}
@@ -148,6 +193,8 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	}
 	current := get()
 	assertRecall(current)
+	checkRelease(original.Version, "native_preferences", false)
+	checkRelease(current.Version, "native_preferences", true)
 	if current.Version.RecordRevision != "2" || current.Content != "corrected" {
 		t.Fatal(current)
 	}
@@ -160,6 +207,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	}
 	wrongOwner := *original.Version
 	wrongOwner.OwnerID = "00000000-0000-0000-0000-000000000001"
+	checkRelease(&wrongOwner, "native_preferences", false)
 	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: &wrongOwner}); status != bus.ModuleStatusOK || len(out.Records) != 0 {
 		t.Fatal("wrong owner history", status, out)
 	}
@@ -271,7 +319,9 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	}
 	// Current revocation gates all old payloads. Retirement permits explicit
 	// historical inspection, but ordinary recall remains current-only.
+	beforeRevocation := get()
 	exec(`UPDATE user_memories SET lifecycle_state='rejected' WHERE id=42`)
+	checkRelease(beforeRevocation.Version, "native_preferences", false)
 	if out, status := call(DataRequest{Operation: "get", ID: 42, AtVersion: original.Version}); status != bus.ModuleStatusOK || len(out.Records) != 0 {
 		t.Fatal("revoked parent released history", status, out)
 	}
@@ -283,6 +333,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 		t.Fatal("retained revision missing", status, out)
 	}
 	exec(`DELETE FROM user_memories WHERE id=42`)
+	checkRelease(beforeRevocation.Version, "native_preferences", false)
 	if scalar(`SELECT count(*) FROM user_memory_versions`) != 0 {
 		t.Fatal("parent erasure retained private payload")
 	}

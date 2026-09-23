@@ -101,3 +101,23 @@ idempotent retry. The [exported build](memory-receipt-verification-2026-09-23/ca
 and ownership/bus guards pass. Fresh full-matrix validation of this follow-up is
 pending. It adds one bounded owner confirmation per persisted observation; no
 matched latency or throughput claim has yet been established.
+
+
+## Fresh cache candidate matrix
+
+Application and harness `904f1488b` passed **1,652/1,652** fresh checks:
+[1,043 T2](memory-receipt-verification-2026-09-23/cache-fresh/T2/topology.json)
+and [609 T3](memory-receipt-verification-2026-09-23/cache-fresh/T3/topology.json).
+Both runners exited successfully. The expanded native fixture checks committed
+preparation/admission at provider arrival, exact-body verification and retained
+ledger stages after SIGKILL/restart. The deliberately missing acknowledgement
+remains missing. This candidate still labels native input versions unavailable;
+newer native-source work is not certified by these earlier results.
+
+[All nine identities](memory-receipt-verification-2026-09-23/cache-fresh/image-identities.json)
+match application SHA `60270fffb15cb4f3d3a5b921c3a1e9f2f7466cedc4fedd80e8dfc14a0c8f19dd`,
+schema-34 database SHA `23c6ec9c2ba1c9d14e6fe5bb94f37914571159e80397fd09701a0c6b37fa9db5`,
+and released embedder SHA `a2652e92cf2f68d684b56b44b8eed37ab0701ff1867eb1c59d3c2abb79917c85`.
+All three configured provider byte caps are present. CT100's application,
+database and embedder remain on released 0.4.5 and healthy; local thin-client
+version and connectivity were checked again during this run.

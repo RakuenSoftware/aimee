@@ -1356,6 +1356,16 @@ set_config('aimee.correlation_id',$9,true)`,
 				err = errors.New("memory: CSS conventions exceed response capacity")
 			}
 		}
+	case "personal-source-revalidate":
+		backend, ok := options.data.(*postgresDataStore)
+		if invocation.PrincipalRef != 0 || options.placement != PlacementServer || !ok || !request.Revalidation.valid() {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var eligible bool
+		eligible, err = backend.revalidatePersonalSources(ctx, request.Revalidation)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "eligible": eligible, "check_id": request.Revalidation.CheckID, "sources_digest": releaseDigest(request.Revalidation.Sources)})
+		}
 	case "source-revalidate":
 		backend, ok := options.data.(*postgresDataStore)
 		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil || !request.Revalidation.valid() {

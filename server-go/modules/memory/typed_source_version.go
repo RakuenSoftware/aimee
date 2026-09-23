@@ -57,8 +57,12 @@ func validTypedSource(ref typedProjectionRef) bool {
 		if ref.Channel != "episodes" || ref.Source.MemoryParentState != "observed" || len(ref.Source.MemoryParents) != 1 {
 			return false
 		}
+	case "user_memory_record":
+		if (ref.Channel != "native_identity" && ref.Channel != "native_preferences" && ref.Channel != "native_active_context" && ref.Channel != "native_open_commitments") || len(ref.Source.MemoryParents) != 0 || ref.Source.MemoryParentState != "observed" {
+			return false
+		}
 	case "memory_record":
-		if ref.Channel != "memory_previews" || len(ref.Source.MemoryParents) != 0 {
+		if (ref.Channel != "memory_previews" && ref.Channel != "native_identity" && ref.Channel != "native_preferences" && ref.Channel != "native_active_context" && ref.Channel != "native_open_commitments") || len(ref.Source.MemoryParents) != 0 {
 			return false
 		}
 	case "memory_summary":

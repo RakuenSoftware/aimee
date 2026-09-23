@@ -63,6 +63,12 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
 
 /* This fixture isolates agent refusal propagation. The native ingress fixture
  * and deployment test exercise the real Go plan and durable WORM adapter. */
+int ingress_preinject_accept_native_projection(const cJSON *projection)
+{
+   assert(cJSON_IsObject(projection));
+   return 0;
+}
+
 int ingress_preinject_prepare_attempt(const void *body, size_t length, const char *route,
                                       const char *provider, const char *model, char attempt[33])
 {

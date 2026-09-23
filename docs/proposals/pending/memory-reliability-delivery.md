@@ -572,3 +572,11 @@ No MR-06 or program completion is claimed by these component checks.
 now accompany private/shared ordinary and shared activation-selected payloads
 from the same statement snapshot. Full PostgreSQL race and export checks pass.
 Native retained-source binding and mixed-owner release revalidation remain open.
+
+[Native retained-source release](../../validation/memory-native-source-release-2026-09-23.md)
+adds selection commitments and request-bound mixed-owner checks before each
+provider attempt. Private references stay on the Server. Missing/stale owner
+answers refuse dispatch; private expiry and pending lifecycle retain their own
+contracts. Local PostgreSQL, native and export checks pass; fresh-image validation
+and remaining unversioned channels/post-check race work stay open. The preceding
+receipt-cache candidate separately passed 1,652/1,652 T2/T3 checks.

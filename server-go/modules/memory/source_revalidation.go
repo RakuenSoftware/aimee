@@ -74,7 +74,9 @@ func buildSourceRevalidationSQL() string {
  THEN r.ref->>'stable_id' ELSE r.ref#>>'{source_version,memory_parents,0,record_id}' END)::bigint
  AND m.record_revision::text=CASE WHEN r.ref#>>'{source_version,record_kind}'='memory_record'
  THEN r.ref#>>'{source_version,version,record_revision}' ELSE r.ref#>>'{source_version,memory_parents,0,record_revision}' END
- AND ` + currentMemorySQL("m.") + ` AND ($2::text='' OR (m.scope_type=$2 AND m.scope_value=$3))
+ AND (CASE WHEN r.ref->>'channel'='native_open_commitments'
+ THEN m.lifecycle_state='pending' AND m.activation_suppressed=0 AND ` + memoryValiditySQL("m.") + `
+ ELSE ` + currentMemorySQL("m.") + ` END) AND ($2::text='' OR (m.scope_type=$2 AND m.scope_value=$3))
  AND CASE r.ref#>>'{source_version,record_kind}'
  WHEN 'memory_record' THEN true
  WHEN 'memory_episode' THEN EXISTS (SELECT 1 FROM memory_episodes e WHERE e.id=(r.ref->>'stable_id')::bigint

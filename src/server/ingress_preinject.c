@@ -112,6 +112,27 @@ static void ingress_release_context(cJSON *request, const request_context_t *con
    cJSON_AddStringToObject(request, "caller_subject", context->caller_subject);
 }
 
+/* Forward accepted Go projection metadata without interpreting its source policy. */
+int ingress_preinject_accept_native_projection(const cJSON *projection)
+{
+   const request_context_t *context = request_context_get();
+   if (!context)
+      return 0;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "native-source-release");
+   ingress_release_context(request, context);
+   kb_client_memory_scope_context_apply(request);
+   cJSON_AddItemToObject(request, "native_projection", cJSON_Duplicate(projection, 1));
+   cJSON *response = ingress_command(request, 1);
+   const char *ticket =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "source_release_ticket"));
+   int rc = ticket ? request_context_set_source_release(ticket) : -1;
+   cJSON_Delete(response);
+   if (rc != 0)
+      (void)request_context_refuse_assembly("unavailable");
+   return rc;
+}
+
 /* The host carries opaque owner requests and responses. Source policy, version
  * comparison, scope selection and response validation all remain in Go. */
 int ingress_preinject_revalidate_sources(void)
@@ -124,13 +145,20 @@ int ingress_preinject_revalidate_sources(void)
    ingress_release_context(request, context);
    cJSON *plan = ingress_command(request, 1);
    const cJSON *owner_request = cJSON_GetObjectItemCaseSensitive(plan, "request");
-   if (!cJSON_IsObject(owner_request))
+   const cJSON *local_request = cJSON_GetObjectItemCaseSensitive(plan, "local_request");
+   if ((!cJSON_IsObject(owner_request) && !cJSON_IsObject(local_request)) ||
+       (owner_request && !cJSON_IsObject(owner_request)) ||
+       (local_request && !cJSON_IsObject(local_request)))
    {
       (void)request_context_refuse_assembly("unavailable");
       cJSON_Delete(plan);
       return -1;
    }
-   char *raw = kb_v1_action_request("memory.revalidate_sources", cJSON_Duplicate(owner_request, 1));
+   cJSON *local_response =
+       local_request ? ingress_command(cJSON_Duplicate(local_request, 1), 1) : NULL;
+   char *raw = owner_request ? kb_v1_action_request("memory.revalidate_sources",
+                                                    cJSON_Duplicate(owner_request, 1))
+                             : NULL;
    cJSON_Delete(plan);
    cJSON *owner_response = raw ? cJSON_Parse(raw) : NULL;
    free(raw);
@@ -139,6 +167,8 @@ int ingress_preinject_revalidate_sources(void)
    ingress_release_context(request, context);
    cJSON_AddItemToObject(request, "owner_response",
                          owner_response ? owner_response : cJSON_CreateNull());
+   cJSON_AddItemToObject(request, "local_response",
+                         local_response ? local_response : cJSON_CreateNull());
    cJSON *response = ingress_command(request, 1);
    int admitted = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "admitted"));
    cJSON_Delete(response);

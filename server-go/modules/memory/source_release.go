@@ -32,6 +32,7 @@ type sourceReleaseEntry struct {
 	sources                                      json.RawMessage
 	workspace, project, binding, digest, pending string
 	admitted                                     string
+	pendingLocalDigest, pendingSharedDigest      string
 	previous                                     string
 	expires                                      time.Time
 }
@@ -79,7 +80,7 @@ func (s *sourceReleaseState) expire(now time.Time) {
 
 func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) (string, error) {
 	refs := []typedProjectionRef{}
-	for _, name := range []string{"facts_projection", "typed_projection", "memory_projection"} {
+	for _, name := range []string{"facts_projection", "typed_projection", "memory_projection", "native_projection"} {
 		if projection, ok := assembly[name].(map[string]any); ok {
 			for _, ref := range projection["retained_items"].([]typedProjectionRef) {
 				// Unversioned channels remain explicitly outside this source check.
@@ -208,25 +209,60 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 			return commandResult(commandError("unavailable", "source check unavailable"))
 		}
 		entry.pending = check
-		return commandResult(map[string]any{"status": "ok", "request": map[string]any{
-			"scope_context": true, "include_all": false, "workspace": entry.workspace, "project": entry.project,
-			"revalidation": map[string]any{"schema_version": 1, "check_id": check, "sources": entry.sources}}})
-	}
-	var reply struct {
-		Status   string `json:"status"`
-		Eligible bool   `json:"eligible"`
-		CheckID  string `json:"check_id"`
-		Digest   string `json:"sources_digest"`
+		var refs []typedProjectionRef
+		if json.Unmarshal(entry.sources, &refs) != nil {
+			return commandResult(commandError("unavailable", "source release data unavailable"))
+		}
+		local, shared := []typedProjectionRef{}, []typedProjectionRef{}
+		for _, ref := range refs {
+			if ref.Source.Kind == "user_memory_record" {
+				local = append(local, ref)
+			} else {
+				shared = append(shared, ref)
+			}
+		}
+		entry.pendingLocalDigest, entry.pendingSharedDigest = "", ""
+		result := map[string]any{"status": "ok"}
+		revalidation := func(refs []typedProjectionRef) sourceRevalidation {
+			return sourceRevalidation{SchemaVersion: 1, CheckID: check, Sources: refs}
+		}
+		if len(local) > 0 {
+			entry.pendingLocalDigest = releaseDigest(local)
+			result["local_request"] = map[string]any{"operation": "personal-source-revalidate", "revalidation": revalidation(local)}
+		}
+		if len(shared) > 0 {
+			entry.pendingSharedDigest = releaseDigest(shared)
+			result["request"] = map[string]any{"scope_context": true, "include_all": false, "workspace": entry.workspace, "project": entry.project, "revalidation": revalidation(shared)}
+		}
+		return commandResult(result)
 	}
 	entry.admitted = ""
 	check := entry.pending
-	entry.pending = "" // one owner answer per attempt; every retry rechecks the owner
-	if json.Unmarshal(args["owner_response"], &reply) != nil || check == "" || reply.Status != "ok" || reply.CheckID != check || reply.Digest != entry.digest {
+	localDigest, sharedDigest := entry.pendingLocalDigest, entry.pendingSharedDigest
+	entry.pending, entry.pendingLocalDigest, entry.pendingSharedDigest = "", "", "" // one answer set per attempt
+	if check == "" || (localDigest == "" && sharedDigest == "") {
 		return commandResult(commandError("unavailable", "source owner answer unavailable"))
 	}
-	if !reply.Eligible {
+	eligible := true
+	for _, part := range []struct{ field, digest string }{{"local_response", localDigest}, {"owner_response", sharedDigest}} {
+		if part.digest == "" {
+			continue
+		}
+		var reply struct {
+			Status   string `json:"status"`
+			Eligible bool   `json:"eligible"`
+			CheckID  string `json:"check_id"`
+			Digest   string `json:"sources_digest"`
+		}
+		if json.Unmarshal(args[part.field], &reply) != nil || reply.Status != "ok" || reply.CheckID != check || reply.Digest != part.digest {
+			return commandResult(commandError("unavailable", "source owner answer unavailable"))
+		}
+		eligible = eligible && reply.Eligible
+	}
+	if !eligible {
 		return commandResult(commandError("stale_context", "retained memory source changed or is no longer visible"))
 	}
+
 	entry.admitted = check
 	return commandResult(map[string]any{"status": "ok", "admitted": true, "boundary": "source_revalidation"})
 }

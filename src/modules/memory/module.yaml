@@ -176,6 +176,7 @@
     "server-go/modules/memory/personal_proposals.go",
     "server-go/modules/memory/personal_retry.go",
     "server-go/modules/memory/personal_versions.go",
+    "server-go/modules/memory/personal_source_revalidation.go",
     "server-go/modules/memory/deletion_retry.go",
     "server-go/modules/memory/source_release.go",
     "server-go/modules/memory/source_revalidation.go",

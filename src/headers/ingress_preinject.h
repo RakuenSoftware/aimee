@@ -24,10 +24,11 @@
 
 /* Authenticated transport for Go-owned source revalidation at the wire fence. */
 int ingress_preinject_revalidate_sources(void);
+int ingress_preinject_accept_native_projection(const cJSON *projection);
 void ingress_preinject_finish_sources(void);
 /* Bind one final provider attempt through Go and synchronously accept its
- * preparation/admission in the existing WORM owner. Empty attempt means no
- * versioned source handle was present; no receipt coverage is implied. */
+ * preparation/admission in the existing WORM owner. Empty attempt means the
+ * request did not require a memory receipt; no receipt coverage is implied. */
 int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const char *route,
                                       const char *provider, const char *model, char attempt[33]);
 int ingress_preinject_observe_attempt(const char *attempt, int http_status, const char *response,

@@ -104,6 +104,10 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return handleIngressPlan(options.gateway, args)
 	case "ingress-assemble":
 		return handleIngressAssembly(options.gateway, args)
+	case "native-source-release":
+		return handleNativeSourceRelease(&options.gateway.releases, args)
+	case "personal-source-revalidate":
+		return handlePersonalSourceRevalidation(options, invocation, args)
 	case "source-release-plan", "source-release-result", "source-release-finish", "source-release-discard", "provider-receipt-plan", "provider-receipt-observe", "provider-receipt-stored":
 		return handleSourceRelease(&options.gateway.releases, args)
 	case "ingress-task-packet":

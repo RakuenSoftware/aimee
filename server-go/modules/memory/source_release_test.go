@@ -219,6 +219,13 @@ func exerciseSourceRevalidationReplay(t *testing.T, ctx context.Context, tx pgx.
 		}
 	}
 	check(true)
+	parentVersion := refs[0].Source.MemoryParents[0]
+	native := typedProjectionRef{Channel: "native_active_context", ID: parentVersion.RecordID, Source: &typedSourceVersion{Kind: "memory_record", Version: parentVersion, MemoryParentState: "observed"}}
+	request.Sources = []typedProjectionRef{native}
+	check(true)
+	request.Sources[0].Channel = "native_open_commitments"
+	check(false) // an active record cannot substitute for a pending commitment
+	request.Sources = refs
 	id, parent := refs[0].ID, refs[0].Source.MemoryParents[0].RecordID
 	for _, query := range []string{
 		`UPDATE entity_edges SET version=version+1 WHERE id=` + id,
@@ -275,4 +282,92 @@ func exerciseSourceRevalidationReplay(t *testing.T, ctx context.Context, tx pgx.
 	exec(`UPDATE memory_episodes SET episode_text='new episode' WHERE id=$1`, ep.ID)
 	check(false)
 	exec("ROLLBACK TO SAVEPOINT release_episode; RELEASE SAVEPOINT release_episode")
+}
+
+func TestNativeMixedOwnerReleaseRequiresBothAnswers(t *testing.T) {
+	for _, scenario := range []string{"both", "private-only", "missing-local", "missing-shared", "swapped", "private-stale", "shared-stale", "old-answer"} {
+		t.Run(scenario, func(t *testing.T) {
+			state := &sourceReleaseState{}
+			args := sourceReleaseArgs(map[string]any{"request_id": "native-request", "principal": "native-user", "project": "app"})
+			private := releaseTestRef()
+			private.Channel = "native_preferences"
+			private.Source.Kind = "user_memory_record"
+			shared := releaseTestRef()
+			shared.Channel = "native_identity"
+			shared.Source.Kind = "memory_record"
+			shared.Source.Version.OwnerID = "00000000-0000-4000-8000-000000000002"
+			p := nativeProjectionForText("accepted native context", 1000)
+			p.Sources = []typedProjectionRef{private}
+			if scenario != "private-only" {
+				p.Sources = append(p.Sources, shared)
+			}
+			p.SelectionDigest = releaseDigest(p.Sources)
+			args["native_projection"], _ = json.Marshal(p)
+			encoded, status := handleNativeSourceRelease(state, args)
+			raw, err := bus.DecodeCommandResult(encoded)
+			var accepted map[string]any
+			if status != bus.ModuleStatusOK || err != nil || json.Unmarshal(raw, &accepted) != nil || accepted["status"] != "ok" {
+				t.Fatal(string(raw), status, err)
+			}
+			args["source_release_ticket"], _ = json.Marshal(accepted["source_release_ticket"])
+			args["operation"] = json.RawMessage(`"source-release-plan"`)
+			plan := sourceReleaseCall(t, state, args)
+			local := plan["local_request"].(map[string]any)
+			localRaw, _ := json.Marshal(local["revalidation"])
+			var localCheck sourceRevalidation
+			if json.Unmarshal(localRaw, &localCheck) != nil || len(localCheck.Sources) != 1 || localCheck.Sources[0].Source.Kind != "user_memory_record" {
+				t.Fatal("private routing", string(localRaw))
+			}
+			answer := func(check sourceRevalidation) map[string]any {
+				return map[string]any{"status": "ok", "eligible": true, "check_id": check.CheckID, "sources_digest": releaseDigest(check.Sources)}
+			}
+			localReply := answer(localCheck)
+			sharedReply := map[string]any{}
+			if scenario == "private-only" {
+				if _, present := plan["request"]; present {
+					t.Fatal("private references sent to KB", plan)
+				}
+			} else {
+				remote := plan["request"].(map[string]any)
+				remoteRaw, _ := json.Marshal(remote["revalidation"])
+				var sharedCheck sourceRevalidation
+				if json.Unmarshal(remoteRaw, &sharedCheck) != nil || len(sharedCheck.Sources) != 1 || sharedCheck.Sources[0].Source.Kind != "memory_record" || sharedCheck.CheckID != localCheck.CheckID {
+					t.Fatal("mixed routing", string(remoteRaw))
+				}
+				sharedReply = answer(sharedCheck)
+			}
+			switch scenario {
+			case "missing-local":
+				localReply = nil
+			case "missing-shared":
+				sharedReply = nil
+			case "swapped":
+				localReply, sharedReply = sharedReply, localReply
+			case "private-stale":
+				localReply["eligible"] = false
+			case "shared-stale":
+				sharedReply["eligible"] = false
+			case "old-answer":
+				sourceReleaseCall(t, state, args)
+			}
+			args["operation"] = json.RawMessage(`"source-release-result"`)
+			args["local_response"], _ = json.Marshal(localReply)
+			args["owner_response"], _ = json.Marshal(sharedReply)
+			result := sourceReleaseCall(t, state, args)
+			want := scenario == "both" || scenario == "private-only"
+			if (result["admitted"] == true) != want {
+				t.Fatal(scenario, result)
+			}
+			if sourceReleaseCall(t, state, args)["admitted"] == true {
+				t.Fatal("owner answers reused")
+			}
+			p.SelectionDigest = "changed"
+			args["native_projection"], _ = json.Marshal(p)
+			encoded, _ = handleNativeSourceRelease(state, args)
+			raw, _ = bus.DecodeCommandResult(encoded)
+			if strings.Contains(string(raw), `"status":"ok"`) {
+				t.Fatal("changed selection accepted", string(raw))
+			}
+		})
+	}
 }

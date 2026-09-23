@@ -1,6 +1,7 @@
 #include "aimee.h"
 #include "wire_fence.h"
 #include "request_context.h"
+#include "ingress_preinject.h"
 #include "server.h"
 #include "agent_admission.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
@@ -1654,6 +1655,12 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
    {
       if (error && error_len)
          snprintf(error, error_len, "memory context refused: invalid_projection");
+      return -1;
+   }
+   if (text[0] && ingress_preinject_accept_native_projection(projection) != 0)
+   {
+      if (error && error_len)
+         snprintf(error, error_len, "memory context refused: source release unavailable");
       return -1;
    }
    ctx_append_bytes(buf, cap, pos, text, strlen(text));

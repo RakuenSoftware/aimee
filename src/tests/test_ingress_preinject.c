@@ -18,6 +18,8 @@
 #include "support/module_runtime_fixture.h"
 
 static int g_runtime_failure;
+static int g_private_source_fixture;
+static int g_private_source_calls;
 static int g_scope_active;
 static int g_evidence_enabled;
 static int g_assembly_budget = 1200;
@@ -60,6 +62,25 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 500);
    const char *operation =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
+   if (g_private_source_fixture && operation && !strcmp(operation, "personal-source-revalidate"))
+   {
+      g_private_source_calls++;
+      const cJSON *revalidation = cJSON_GetObjectItemCaseSensitive(request, "revalidation");
+      const cJSON *sources = cJSON_GetObjectItemCaseSensitive(revalidation, "sources");
+      assert(cJSON_GetArraySize(sources) == 1);
+      char *raw = cJSON_PrintUnformatted(sources);
+      char digest[65];
+      assert(raw && aimee_sha256_hex(raw, strlen(raw), digest) == 0);
+      free(raw);
+      *result = cJSON_CreateObject();
+      cJSON_AddStringToObject(*result, "status", "ok");
+      cJSON_AddBoolToObject(*result, "eligible", g_private_source_fixture == 1);
+      cJSON_AddStringToObject(
+          *result, "check_id",
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(revalidation, "check_id")));
+      cJSON_AddStringToObject(*result, "sources_digest", digest);
+      return 1;
+   }
    if (operation && !strcmp(operation, "provider-receipt-stored"))
    {
       g_receipt_stored_calls++;
@@ -1447,8 +1468,52 @@ static void test_durable_provider_attempt(void)
         "distinct");
 }
 
+/* The actual Go plan is used; only the private database-owner transport is a
+ * fixture. PostgreSQL tests independently exercise that owner's SQL policy. */
+static void test_native_private_source_transport(void)
+{
+   request_context_t context = {0};
+   strcpy(context.request_id, "native-private-source");
+   strcpy(context.principal, "native-private-user");
+   request_context_set(&context);
+   cJSON *projection = cJSON_CreateObject();
+   cJSON_AddNumberToObject(projection, "schema_version", 1);
+   cJSON_AddStringToObject(projection, "text", "private context");
+   cJSON_AddNumberToObject(projection, "rendered_bytes", 15);
+   cJSON_AddNumberToObject(projection, "max_context_bytes", 100);
+   char digest[72] = "sha256:";
+   assert(aimee_sha256_hex("private context", 15, digest + 7) == 0);
+   cJSON_AddStringToObject(projection, "digest", digest);
+   cJSON *sources = cJSON_Parse(
+       "[{\"channel\":\"native_preferences\",\"stable_id\":\"9007199254740993\",\"source_version\":"
+       "{\"record_kind\":\"user_memory_record\",\"version\":{\"schema_version\":1,\"owner_id\":"
+       "\"00000000-0000-4000-8000-000000000001\",\"record_id\":\"9007199254740993\",\"record_"
+       "revision\":\"2\"},\"memory_parent_state\":\"observed\"}}]");
+   assert(sources);
+   char *raw = cJSON_PrintUnformatted(sources);
+   assert(raw && aimee_sha256_hex(raw, strlen(raw), digest) == 0);
+   free(raw);
+   cJSON_AddStringToObject(projection, "selection_digest", digest);
+   cJSON_AddItemToObject(projection, "retained_items", sources);
+   assert(ingress_preinject_accept_native_projection(projection) == 0);
+   assert(request_context_get()->memory_source_release[0]);
+   int shared_calls = g_source_check_calls;
+   g_private_source_fixture = 1;
+   assert(ingress_preinject_revalidate_sources() == 0);
+   g_private_source_fixture = 2;
+   assert(ingress_preinject_revalidate_sources() != 0);
+   assert_context_dispatch_refused("stale_context");
+   assert(g_private_source_calls == 2 && g_source_check_calls == shared_calls);
+   g_private_source_fixture = 0;
+   ingress_preinject_finish_sources();
+   cJSON_Delete(projection);
+   request_context_clear();
+   puts("native private sources remain local and stale owner answers refuse dispatch");
+}
+
 int main(void)
 {
+   test_native_private_source_transport();
    test_durable_provider_attempt();
    test_unversioned_provider_body_receipt();
    test_source_revalidation_at_provider_fence();

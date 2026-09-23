@@ -228,6 +228,9 @@ def inside(output):
         status, stored = api('/v1/memory/store', dict(key='identity:' + prefix, content=content))
         check('native fixture stores complete private identity', status == 200 and stored.get('status') == 'ok')
         memory_id = stored['id']
+        version_status, versioned = api('/v1/memory/get', dict(id=str(memory_id), include_version=True))
+        observed_version = versioned.get('memory', {}).get('version')
+        check('native fixture reads its private source version', version_status == 200 and isinstance(observed_version, dict))
         before = len(captures)
         result, _ = run('healthy native run')
         check('healthy native run completes', result.get('status') == 'completed' and 'NATIVE_MEMORY_OK' in list(strings(result)))
@@ -242,10 +245,12 @@ def inside(output):
               verification.get('evidence', {}).get('binding_commitment') == 'matched' and
               verification.get('evidence', {}).get('payload_correspondence') == 'matched' and
               verification.get('evidence', {}).get('source_commitment') == 'matched')
-        check('unversioned native memory remains an explicit receipt coverage gap',
-              verification.get('source_coverage') == 'no_versioned_source_handle' and
-              prepared['binding'].get('sources') == [] and
-              prepared['binding'].get('source_check_id') == '')
+        check('native receipt binds the retained private revision and fresh source check',
+              verification.get('source_coverage') == 'retained_versioned_inputs' and
+              len(prepared['binding'].get('source_check_id', '')) == 32 and
+              any(ref.get('source_version', {}).get('record_kind') == 'user_memory_record' and
+                  ref.get('source_version', {}).get('version') == observed_version
+                  for ref in prepared['binding'].get('sources', [])))
         check('supplied receipt does not claim producer or chain authentication',
               verification.get('evidence', {}).get('authenticated_producer') == 'unavailable' and
               verification.get('evidence', {}).get('chain_included') == 'not_checked' and

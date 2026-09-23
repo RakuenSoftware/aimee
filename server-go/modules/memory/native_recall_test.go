@@ -112,3 +112,39 @@ func TestNativeRecallAllocationValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeRecallRetainedVersionSelection(t *testing.T) {
+	b := nativeRecallFixture()
+	private := Record{ID: 9007199254740993, Scope: Scope{Type: ScopeUser}, Content: "private retained", Version: &MemoryRecordVersion{SchemaVersion: 1, OwnerID: "00000000-0000-0000-0000-000000000001", RecordID: "9007199254740993", RecordRevision: "9007199254740995"}}
+	shared := Record{ID: private.ID, Content: "shared omitted", Version: &MemoryRecordVersion{SchemaVersion: 1, OwnerID: "00000000-0000-0000-0000-000000000002", RecordID: private.Version.RecordID, RecordRevision: "2"}}
+	b.Identity = recallItems([]Record{private})
+	prefix, _, err := projectNativeRecall(b, maxDataBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Preferences = recallItems([]Record{shared})
+	limited, n, err := projectNativeRecall(b, prefix.Bytes)
+	if err != nil || n != 1 || len(limited.Sources) != 1 || limited.Sources[0].Source.Kind != "user_memory_record" || limited.Sources[0].ID != private.Version.RecordID || limited.Sources[0].Source.Version != *private.Version || limited.SelectionDigest != releaseDigest(limited.Sources) {
+		t.Fatalf("retained private source: %+v %d %v", limited, n, err)
+	}
+	full, _, err := projectNativeRecall(b, maxDataBody)
+	if err != nil || len(full.Sources) != 2 || full.Sources[1].Source.Kind != "memory_record" || full.SelectionDigest == limited.SelectionDigest {
+		t.Fatalf("mixed owners: %+v %v", full, err)
+	}
+	changed := *private.Version
+	changed.RecordRevision = "9007199254740996"
+	b.Identity[0].Version = &changed
+	revised, _, err := projectNativeRecall(b, prefix.Bytes)
+	if err != nil || revised.Text != limited.Text || revised.Digest != limited.Digest || revised.SelectionDigest == limited.SelectionDigest {
+		t.Fatal("version change not independently committed", err)
+	}
+	b.Identity[0].Store = "unknown"
+	if _, _, err := projectNativeRecall(b, maxDataBody); err == nil {
+		t.Fatal("unknown owner placement accepted")
+	}
+	b.Identity[0].Version = nil
+	unversioned, _, err := projectNativeRecall(b, prefix.Bytes)
+	if err != nil || len(unversioned.Sources) != 0 || unversioned.SelectionDigest != releaseDigest([]typedProjectionRef{}) {
+		t.Fatal("invented legacy source evidence", err)
+	}
+}
