@@ -1473,6 +1473,7 @@ static const struct
     {"memory.benchmark", marshal_memory_benchmark},
     {"memory.delete", marshal_memory_delete},
     {"memory.supersede", marshal_memory_supersede},
+    {"memory.hygiene", marshal_memory_hygiene},
     {"memory.get", marshal_memory_get},
     {"memory.identity", marshal_memory_identity},
     {"memory.list", marshal_memory_list},

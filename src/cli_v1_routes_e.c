@@ -250,6 +250,71 @@ cJSON *marshal_memory_search(int argc, char **argv)
    return req;
 }
 
+/* Decode CLI spelling only. Scope authorization and all budget policy remain
+ * in the Go owner. Unsupported options must not silently become a dry run. */
+cJSON *marshal_memory_hygiene(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.hygiene");
+   for (int i = 0; i < argc; i++)
+   {
+      const char *arg = argv[i];
+      if (!strcmp(arg, "--json"))
+         continue;
+      if (!strcmp(arg, "--dry-run"))
+      {
+         if (cJSON_HasObjectItem(req, "dry_run"))
+            goto invalid;
+         cJSON_AddBoolToObject(req, "dry_run", 1);
+         continue;
+      }
+      const char *value = strchr(arg, '=');
+      size_t length = value ? (size_t)(value - arg) : strlen(arg);
+      const char *field = length == 7 && !strncmp(arg, "--scope", length)       ? "scope"
+                          : length == 10 && !strncmp(arg, "--max-rows", length) ? "max_rows"
+                          : length == 19 && !strncmp(arg, "--max-content-bytes", length)
+                              ? "max_content_bytes"
+                              : NULL;
+      if (!field || cJSON_HasObjectItem(req, field))
+         goto invalid;
+      if (value)
+         value++;
+      else if (++i < argc)
+         value = argv[i];
+      else
+         goto invalid;
+      if (!strcmp(field, "scope"))
+      {
+         const char *colon = strchr(value, ':');
+         if (!colon || colon == value || !colon[1])
+            goto invalid;
+         char *type = strndup(value, (size_t)(colon - value));
+         if (!type)
+            goto invalid;
+         cJSON *scope = cJSON_AddObjectToObject(req, "scope");
+         cJSON_AddStringToObject(scope, "type", type);
+         cJSON_AddStringToObject(scope, "value", colon + 1);
+         free(type);
+      }
+      else
+      {
+         cJSON *number = cJSON_ParseWithOpts(value, NULL, 1);
+         if (!cJSON_IsNumber(number))
+         {
+            cJSON_Delete(number);
+            goto invalid;
+         }
+         cJSON_AddItemToObject(req, field, number);
+      }
+   }
+   if (cJSON_HasObjectItem(req, "scope") && cJSON_HasObjectItem(req, "dry_run"))
+      return req;
+invalid:
+   cJSON_Delete(req);
+   fprintf(stderr, "aimee: usage: aimee memory hygiene --scope <type:value> --dry-run "
+                   "[--max-rows N] [--max-content-bytes N] [--json]\n");
+   return NULL;
+}
+
 /* `aimee memory recall [task] [--task T] [--query Q] [--session-start]
  * [--limit-tokens N]` -> POST /v1/memory/recall. task_hint is required by the
  * endpoint; fall back to a generic hint so the command always succeeds. */

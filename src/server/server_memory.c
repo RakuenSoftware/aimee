@@ -190,6 +190,7 @@ int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                                         "invalid hygiene request", NULL));
    }
    cJSON_DeleteItemFromObjectCaseSensitive(request, "method");
+   cJSON_DeleteItemFromObjectCaseSensitive(request, "protocol_version");
    char *raw = kb_v1_action_request("memory.hygiene", request);
    cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
                        ? cJSON_ParseWithOpts(raw, NULL, 1)

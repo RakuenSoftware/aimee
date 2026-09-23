@@ -507,6 +507,32 @@ static void test_memory_get_as_of_is_wired(void)
  * none of them.
  *
  * An explicit --task must still win, so no existing invocation changes. */
+static void test_memory_hygiene_explicit_scope(void)
+{
+   char *args[] = {"--scope",       "project:example:subscope", "--dry-run",
+                   "--max-rows=12", "--max-content-bytes",      "1000",
+                   "--json"};
+   cJSON *request = marshal_memory_hygiene(7, args);
+   assert(request);
+   cJSON *scope = cJSON_GetObjectItemCaseSensitive(request, "scope");
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(scope, "type")->valuestring, "project"));
+   assert(
+       !strcmp(cJSON_GetObjectItemCaseSensitive(scope, "value")->valuestring, "example:subscope"));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "dry_run")));
+   assert(cJSON_GetObjectItemCaseSensitive(request, "max_rows")->valueint == 12);
+   assert(cJSON_GetObjectItemCaseSensitive(request, "max_content_bytes")->valueint == 1000);
+   assert(!cJSON_HasObjectItem(request, "cwd"));
+   cJSON_Delete(request);
+   assert(!marshal_memory_hygiene(2, args));
+   const char *bad[] = {"--apply",          "--auto-apply",          "--dry-run=false", "--sql",
+                        "--max-rows=5junk", "--scope=project:other", "--store=user"};
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+   {
+      char *argv[] = {"--scope=project:example", "--dry-run", (char *)bad[i]};
+      assert(!marshal_memory_hygiene(3, argv));
+   }
+}
+
 static void test_memory_recall_query_feeds_the_hint(void)
 {
    char *q[] = {(char *)"--query=nightly export manifest"};
@@ -607,6 +633,7 @@ int main(void)
    test_memory_store_keeps_unquoted_content();
    test_memory_get_as_of_is_wired();
    test_memory_recall_query_feeds_the_hint();
+   test_memory_hygiene_explicit_scope();
    test_kb_status_warns_about_undrainable_queue();
    test_config_deploy_env_is_routed();
    test_unknown_command_is_safe();

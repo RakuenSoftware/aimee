@@ -161,6 +161,7 @@ Stored memory.
 Subcommands:
 
 ```
+  hygiene          Preview duplicate candidates (--scope type:value --dry-run)
   search           Search stored memory
   store            Store a memory
   list             List memories

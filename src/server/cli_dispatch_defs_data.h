@@ -22,6 +22,7 @@
     {"memory", "prefer", "memory.prefer", "memory.user_capture", NULL, 60000},
     {"memory", "archive", "memory.archive", "memory.user_capture", NULL, 60000},
     {"memory", "list", "memory.list", NULL, "memories", 60000},
+    {"memory", "hygiene", "memory.hygiene", NULL, NULL, 60000},
     {"memory", "get", "memory.get", NULL, NULL, 60000},
     {"memory", "delete", "memory.delete", NULL, NULL, 60000},
     {"memory", "supersede", "memory.supersede", NULL, NULL, 60000},

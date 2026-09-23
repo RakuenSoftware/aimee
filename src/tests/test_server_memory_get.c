@@ -585,7 +585,7 @@ static void test_search_owner_transport(void)
 static void test_hygiene_owner_transport(void)
 {
    cJSON *request =
-       cJSON_Parse("{\"method\":\"memory.hygiene\",\"dry_run\":true,"
+       cJSON_Parse("{\"method\":\"memory.hygiene\",\"protocol_version\":1,\"dry_run\":true,"
                    "\"scope\":{\"type\":\"project\",\"value\":\"explicit\"},\"max_rows\":2,"
                    "\"max_content_bytes\":128,\"operation\":\"delete\"}");
    hygiene_reply = "{\"status\":\"ok\",\"dry_run\":true,\"findings\":[{\"id\":9007199254740993}]}";
@@ -593,6 +593,7 @@ static void test_hygiene_owner_transport(void)
    assert(!strcmp(search_wire_reply, hygiene_reply));
    cJSON *expected = cJSON_Duplicate(request, 1);
    cJSON_DeleteItemFromObjectCaseSensitive(expected, "method");
+   cJSON_DeleteItemFromObjectCaseSensitive(expected, "protocol_version");
    assert(cJSON_Compare(expected, hygiene_request, 1));
    assert(cJSON_HasObjectItem(request, "method"));
    cJSON_Delete(expected);

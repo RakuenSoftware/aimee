@@ -136,6 +136,9 @@ class Gate:
                     ('unbounded', dict(max_rows=0)), ('private', dict(store='user'))]:
                 code, rejected = self.call('hygiene', dict(request, **override))
                 self.check('hygiene refuses ' + name, code == 400 and rejected.get('kind') == 'invalid_argument', [code, rejected])
+            cli = self.cli('hygiene', '--scope', 'project:' + scope, '--dry-run', '--max-rows', '64')
+            self.check('CLI hygiene preserves explicit scope and findings', cli.get('scope') == request['scope']
+                and cli.get('findings') == findings and cli.get('dry_run') is True, cli)
             self.check('hygiene leaves canonical fixtures unchanged', before == self.sql(snapshot))
         finally:
             self.sql(f"DELETE FROM memories WHERE scope_value IN ('{scope}','{scope}-hidden')")

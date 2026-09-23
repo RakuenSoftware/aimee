@@ -51,6 +51,7 @@
      "  remove <path>    Unregister a workspace\n"
      "  serve <id>       Run the authorized remote-workspace request loop\n"},
     {"memory", "Stored memory", AIMEE_CMD_TIER_CORE, 0,
+     "  hygiene          Preview duplicate candidates (--scope type:value --dry-run)\n"
      "  search           Search stored memory\n"
      "  store            Store a memory\n"
      "  list             List memories\n"

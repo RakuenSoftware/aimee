@@ -30,5 +30,9 @@ also passed. Fresh deployment tests are pending.
 
 MR-14 remains open: proposal persistence and rejection deduplication, narrow worker
 roles, resumable jobs, scheduling, model detectors, task-projection cleanup and
-review application are not implemented by this preview. CLI/MCP and private
-hygiene surfaces are not claimed. Released CT100 remains on 0.4.5.
+review application are not implemented by this preview. The candidate thinclient supports
+`aimee memory hygiene --scope project:example --dry-run --json`, with optional
+`--max-rows` and `--max-content-bytes`. It preserves scope values containing
+colons and refuses duplicate flags, missing dry-run, unsupported options and
+malformed numbers. Native marshalling/transport tests pass; fresh CLI validation
+is pending. MCP and private hygiene surfaces are not claimed. Released CT100 remains on 0.4.5.

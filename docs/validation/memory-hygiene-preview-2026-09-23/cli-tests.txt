@@ -1,0 +1,33 @@
+  every MCP tool has CLI dispatch; ast-grep has a first-class alias
+test_cli_v1_subcommands
+  unquoted memory content is kept whole, not truncated to word one
+aimee: usage: aimee memory hygiene --scope <type:value> --dry-run [--max-rows N] [--max-content-bytes N] [--json]
+aimee: usage: aimee memory hygiene --scope <type:value> --dry-run [--max-rows N] [--max-content-bytes N] [--json]
+aimee: usage: aimee memory hygiene --scope <type:value> --dry-run [--max-rows N] [--max-content-bytes N] [--json]
+aimee: usage: aimee memory hygiene --scope <type:value> --dry-run [--max-rows N] [--max-content-bytes N] [--json]
+aimee: usage: aimee memory hygiene --scope <type:value> --dry-run [--max-rows N] [--max-content-bytes N] [--json]
+aimee: usage: aimee memory hygiene --scope <type:value> --dry-run [--max-rows N] [--max-content-bytes N] [--json]
+aimee: usage: aimee memory hygiene --scope <type:value> --dry-run [--max-rows N] [--max-content-bytes N] [--json]
+aimee: usage: aimee memory hygiene --scope <type:value> --dry-run [--max-rows N] [--max-content-bytes N] [--json]
+  memory get --as-of reaches the server and prints its answer
+  memory recall --query feeds the hint the server reads
+  kb status warns when the queue has nothing to drain it
+  config deploy-env is routed to the thin client
+  unknown command is safe (no sentinel walk)
+  known commands list their subcommands
+  list formatting ok
+  small buffer truncates without overflow
+  bare / match-any rows excluded
+  kb status surfaces backlog, failures, and degraded verdict
+  agent.list prints each agent's roles
+  agent.roles prints the stored roles, not "enabled"
+  agent.roles read does not claim a write
+aimee: workspace.remove needs confirmation and stdin is not a terminal.
+  The indexed corpus is NOT deleted: documents stay in the knowledge base and stay searchable.
+  Re-run with --confirm.
+aimee: 'workspace.remove' could not reach the aimee-server /v1 endpoint (is the server running? check aimee.api.client_endpoint / AIMEE_API_ENDPOINT for a remote target).
+aimee: 'workspace.list' has no /v1 route
+  agent.personas prints the stored personas, not "enabled"
+  async run preserves dispatch error message
+  workspace remove refuses without --confirm on a non-tty
+test_cli_v1_subcommands: all passed
