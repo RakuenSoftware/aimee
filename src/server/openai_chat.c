@@ -1421,15 +1421,17 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    int ra = config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
    int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
    int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
-   int http_status = http_retry_post_context_bytes(url, auth_header, wire_body.data, wire_body.len,
+   int http_status = http_retry_post_guarded_bytes(url, auth_header, wire_body.data, wire_body.len,
                                                    &response_body, agent->timeout_ms, extra_headers,
-                                                   ra, rb, rm, agent->provider, agent->model, NULL);
+                                                   ra, rb, rm, agent->provider, agent->model, NULL,
+                                                   wire_fence_revalidate_sources);
    /* The gateway safety net, before mbox is released: it holds the array the
     * restore writes back into. The module decides and trips its breaker, so a
     * reduction the provider rejects stops repeating on later turns. The single
     * resend of THIS turn is not wired here either -- same reason as the Anthropic
     * buffered path: the wire body is built once above. */
-   if (gw_buffered_after_status(mbox, "input", http_status, &gwmc) == GW_POST_RESEND)
+   if (http_status != HTTP_RETRY_ADMISSION_REFUSED &&
+       gw_buffered_after_status(mbox, "input", http_status, &gwmc) == GW_POST_RESEND)
       aimee_log(LOG_INFO, "economizer.gateway",
                 "seam=gateway upstream=%d restored to pristine and breaker tripped; the "
                 "single resend of this turn is not wired yet",
@@ -1442,6 +1444,12 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    gw_mutate_ctx_free(&gwmc);
    cJSON_Delete(gw_raw);
 
+   if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
+   {
+      snprintf(error, error_cap, "%s", wire_fence_last_error());
+      free(response_body);
+      return -1;
+   }
    if (http_status != 200 || !response_body)
    {
       openai_upstream_error_message(http_status, response_body, error, error_cap);

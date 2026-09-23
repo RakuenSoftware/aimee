@@ -8,7 +8,7 @@
  * Retryable status codes map through failover_classify()/failover_action().
  * The current backoff-compatible set remains 408, 409, 429, 500, 502, 503, 504.
  * Non-retryable (fail immediately): 400, 401, 403, 404, and all other 4xx.
- * Network errors (http_status < 0) are always retryable.
+ * Network errors are retryable; local admission refusal is not.
  */
 
 /* Default retry parameters */
@@ -22,7 +22,7 @@
 #define HTTP_RETRY_MODEL_LOADING_MAX_ATTEMPTS 8
 
 /* Returns 1 if the HTTP status code is retryable, 0 otherwise.
- * Network errors (status < 0) are always retryable. */
+ * Negative network status is retryable except HTTP_RETRY_ADMISSION_REFUSED. */
 int http_should_retry(int http_status);
 
 /* Returns 1 when a response body is the provider's transient model-warmup
@@ -56,6 +56,20 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
                                   const char *extra_headers, int max_attempts, int base_ms,
                                   int max_ms, const char *provider, const char *model,
                                   const char *session_id);
+
+/* An admission refusal is local and must never trigger provider failover. */
+#define HTTP_RETRY_ADMISSION_REFUSED (-2)
+typedef int (*http_retry_admit_cb_t)(void);
+
+/* The caller has admitted the first attempt. Before each resend, after backoff,
+ * invoke the explicit admission callback. A nonzero result stops without sending
+ * or reporting a provider failure. Ordinary HTTP callers have no callback, so
+ * an owner's HTTP revalidation request cannot recursively invoke this gate. */
+int http_retry_post_guarded_bytes(const char *url, const char *auth_header, const void *body,
+                                  size_t body_len, char **response_buf, int timeout_ms,
+                                  const char *extra_headers, int max_attempts, int base_ms,
+                                  int max_ms, const char *provider, const char *model,
+                                  const char *session_id, http_retry_admit_cb_t admit_retry);
 
 /* Register a thread-local progress callback invoked after every model HTTP
  * attempt (decoupled from db1: the server side installs a callback that bumps the

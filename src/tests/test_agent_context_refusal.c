@@ -22,6 +22,7 @@ static int refuse_after;
 static int provider_calls;
 static int final_response;
 static int malformed_projection;
+static int transport_refuse;
 
 int http_retry_post_context_bytes(const char *url, const char *auth_header, const void *body,
                                   size_t body_len, char **response_buf, int timeout_ms,
@@ -58,6 +59,31 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
             provider_calls, provider_calls);
    *response_buf = strdup(reply);
    return 200;
+}
+
+int http_retry_post_guarded_bytes(const char *url, const char *auth_header, const void *body,
+                                  size_t body_len, char **response_buf, int timeout_ms,
+                                  const char *extra_headers, int max_attempts, int base_ms,
+                                  int max_ms, const char *provider, const char *model,
+                                  const char *session_id, http_retry_admit_cb_t admit_retry)
+{
+   assert(admit_retry);
+   if (transport_refuse)
+   {
+      provider_calls++;
+      if (transport_refuse == 2 && provider_calls == 1)
+      {
+         *response_buf = strdup("{}");
+         return 400; /* enter the model fallback before its retry is refused */
+      }
+      assert(request_context_refuse_assembly("stale_context") == 0);
+      assert(admit_retry() != 0);
+      *response_buf = NULL;
+      return HTTP_RETRY_ADMISSION_REFUSED;
+   }
+   return http_retry_post_context_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
+                                        extra_headers, max_attempts, base_ms, max_ms, provider,
+                                        model, session_id);
 }
 
 int http_retry_post_context(const char *url, const char *auth_header, const char *body,
@@ -298,6 +324,34 @@ int main(void)
    assert(recalls == 1 && provider_calls == 1);
    assert(result.response && strstr(result.response, "Fixture completed."));
    free(result.response);
+   for (int fallback = 0; fallback <= 1; fallback++)
+   {
+      request_context_t retry_context = {0};
+      request_context_set(&retry_context);
+      recalls = provider_calls = 0;
+      transport_refuse = fallback ? 2 : 1;
+      snprintf(agent.fallback_model, sizeof(agent.fallback_model), "%s",
+               fallback ? "fallback" : "");
+      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
+                                             0, &result);
+      assert(rc == AGENT_RC_CONTEXT_REFUSED && !result.success);
+      assert(provider_calls == (fallback ? 2 : 1));
+      assert(strcmp(result.stop_reason, "context_refused") == 0);
+      assert(strcmp(result.error, "stale_context") == 0);
+      assert(!agent_rc_should_try_another(rc, result.error));
+      free(result.response);
+      /* The non-tool execution path must preserve the same refusal contract. */
+      request_context_set(&retry_context);
+      provider_calls = 0;
+      rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+      assert(rc == AGENT_RC_CONTEXT_REFUSED && !result.success);
+      assert(provider_calls == (fallback ? 2 : 1));
+      assert(strcmp(result.stop_reason, "context_refused") == 0);
+      assert(strcmp(result.error, "stale_context") == 0);
+      assert(!agent_rc_should_try_another(rc, result.error));
+      free(result.response);
+      request_context_clear();
+   }
    puts("agent context refusal: passed");
    return 0;
 }

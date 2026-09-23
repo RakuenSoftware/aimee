@@ -44,6 +44,9 @@ extern "C"
                          size_t pristine_len, wire_fence_t **snapshot,
                          wire_fence_bytes_t *selected);
 
+   /* Relay the source owner's current admission before resending frozen bytes. */
+   int wire_fence_revalidate_sources(void);
+
    /* Stable failure kind for the current thread's last selection attempt. */
    const char *wire_fence_last_error(void);
    int wire_fence_error_http_status(const char *error);

@@ -53,6 +53,8 @@ void http_set_progress_cb(http_progress_cb_t cb)
 
 int http_should_retry(int http_status)
 {
+   if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
+      return 0;
    failover_reason_t reason = failover_classify(NULL, http_status, NULL);
    return reason != FAILOVER_UNKNOWN && failover_reason_uses_backoff(reason);
 }
@@ -142,6 +144,17 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
                                   int max_ms, const char *provider, const char *model,
                                   const char *session_id)
 {
+   return http_retry_post_guarded_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
+                                        extra_headers, max_attempts, base_ms, max_ms, provider,
+                                        model, session_id, NULL);
+}
+
+int http_retry_post_guarded_bytes(const char *url, const char *auth_header, const void *body,
+                                  size_t body_len, char **response_buf, int timeout_ms,
+                                  const char *extra_headers, int max_attempts, int base_ms,
+                                  int max_ms, const char *provider, const char *model,
+                                  const char *session_id, http_retry_admit_cb_t admit_retry)
+{
    if (max_attempts <= 0)
       max_attempts = 1; /* at least one attempt */
 
@@ -168,6 +181,9 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
          free(*response_buf);
          *response_buf = NULL;
       }
+
+      if (attempt > 0 && admit_retry && admit_retry() != 0)
+         return HTTP_RETRY_ADMISSION_REFUSED;
 
       aimee_log(LOG_INFO, "http_retry",
                 "attempt %d/%d: POST %s (provider=%s model=%s timeout=%dms)", attempt + 1,

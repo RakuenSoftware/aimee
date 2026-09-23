@@ -223,7 +223,28 @@ static void capture_request_body(int client, int output)
 
 /* The bytes API must reuse the caller's exact pointer+length on every retry.
  * Embedded NUL makes an accidental strlen wrapper observable. */
-static void test_exact_length_body_is_identical_across_retries(void)
+static int retry_admissions;
+static int retry_refused;
+static int64_t first_attempt_finished_ms;
+static int admit_test_retry(void)
+{
+   struct timespec now;
+   clock_gettime(CLOCK_MONOTONIC, &now);
+   int64_t elapsed = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000 - first_attempt_finished_ms;
+   assert(elapsed >= 20); /* gate runs after backoff, not before the source can change */
+   assert(g_progress_calls == 1);
+   retry_admissions++;
+   return retry_refused;
+}
+static void record_first_attempt(void)
+{
+   struct timespec now;
+   clock_gettime(CLOCK_MONOTONIC, &now);
+   first_attempt_finished_ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+   g_progress_calls++;
+}
+
+static void test_exact_length_body_is_identical_across_retries(int refused)
 {
    int srv = socket(AF_INET, SOCK_STREAM, 0);
    assert(srv >= 0);
@@ -244,7 +265,7 @@ static void test_exact_length_body_is_identical_across_retries(void)
    if (child == 0)
    {
       close(captured[0]);
-      for (int attempt = 0; attempt < 2; attempt++)
+      for (int attempt = 0; attempt < (refused ? 1 : 2); attempt++)
       {
          int client = accept(srv, NULL, NULL);
          assert(client >= 0);
@@ -267,12 +288,22 @@ static void test_exact_length_body_is_identical_across_retries(void)
    snprintf(url, sizeof(url), "http://127.0.0.1:%d/x", ntohs(addr.sin_port));
    const unsigned char expected[] = {'{', '"', 'x', '"', ':', '"', 'a', 0, 'b', '"', '}'};
    char *resp = NULL;
-   assert(http_retry_post_context_bytes(url, NULL, expected, sizeof(expected), &resp, 1000, NULL, 2,
-                                        1, 1, "test", "test-model", NULL) == 200);
+   g_progress_calls = retry_admissions = 0;
+   retry_refused = refused;
+   http_set_progress_cb(record_first_attempt);
+   int result =
+       http_retry_post_guarded_bytes(url, NULL, expected, sizeof(expected), &resp, 1000, NULL, 2,
+                                     20, 20, "test", "test-model", NULL, admit_test_retry);
+   http_set_progress_cb(NULL);
+   assert(result == (refused ? HTTP_RETRY_ADMISSION_REFUSED : 200));
+   assert(retry_admissions == 1);
+   assert(g_progress_calls == (refused ? 1 : 2));
+   if (refused)
+      assert(resp == NULL); /* previous provider failure cannot masquerade as the refusal */
    free(resp);
    close(srv);
 
-   for (int attempt = 0; attempt < 2; attempt++)
+   for (int attempt = 0; attempt < (refused ? 1 : 2); attempt++)
    {
       uint32_t body_len = 0;
       unsigned char body[sizeof(expected)];
@@ -285,7 +316,7 @@ static void test_exact_length_body_is_identical_across_retries(void)
    int status = 0;
    assert(waitpid(child, &status, 0) == child);
    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
-   printf("  PASS: test_exact_length_body_is_identical_across_retries\n");
+   printf("  PASS: frozen retry body and post-backoff admission (refused=%d)\n", refused);
 }
 
 /* --- http_should_retry tests --- */
@@ -293,6 +324,7 @@ static void test_exact_length_body_is_identical_across_retries(void)
 static void test_retryable_status_codes(void)
 {
    /* Network errors are always retryable */
+   assert(http_should_retry(HTTP_RETRY_ADMISSION_REFUSED) == 0);
    assert(http_should_retry(-1) == 1);
    assert(http_should_retry(-999) == 1);
 
@@ -491,7 +523,8 @@ int main(void)
    test_provider_specific_failover_classification();
    test_progress_cb_fires_per_attempt();
    test_stall_caps_retries();
-   test_exact_length_body_is_identical_across_retries();
+   test_exact_length_body_is_identical_across_retries(0);
+   test_exact_length_body_is_identical_across_retries(1);
    test_inflight_http_observes_parallel_cancel();
 
    printf("all http_retry tests passed.\n");

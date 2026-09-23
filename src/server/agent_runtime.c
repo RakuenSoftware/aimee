@@ -1,4 +1,5 @@
 #include "aimee.h"
+#include "wire_fence.h"
 #include "server.h"
 #include "agent_admission.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
@@ -1330,9 +1331,12 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    int ra = config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
    int rb = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
    int rm = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
-   int http_status = http_retry_post_context(url, auth_header, body, &response_body,
-                                             agent->timeout_ms, extra_headers, ra, rb, rm,
-                                             agent->provider, agent->model, session_id());
+   int http_status = wire_fence_revalidate_sources() != 0
+                         ? HTTP_RETRY_ADMISSION_REFUSED
+                         : http_retry_post_guarded_bytes(
+                               url, auth_header, body, strlen(body), &response_body,
+                               agent->timeout_ms, extra_headers, ra, rb, rm, agent->provider,
+                               agent->model, session_id(), wire_fence_revalidate_sources);
    free(body);
    if (active_delegation_stopped(stop_reason, sizeof(stop_reason)))
    {
@@ -1363,9 +1367,12 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       cJSON_Delete(fb_req);
       if (fb_body)
       {
-         http_status = http_retry_post_context(url, auth_header, fb_body, &response_body,
-                                               agent->timeout_ms, extra_headers, ra, rb, rm,
-                                               fb_agent.provider, fb_agent.model, session_id());
+         http_status = wire_fence_revalidate_sources() != 0
+                           ? HTTP_RETRY_ADMISSION_REFUSED
+                           : http_retry_post_guarded_bytes(
+                                 url, auth_header, fb_body, strlen(fb_body), &response_body,
+                                 agent->timeout_ms, extra_headers, ra, rb, rm, fb_agent.provider,
+                                 fb_agent.model, session_id(), wire_fence_revalidate_sources);
          free(fb_body);
       }
    }
@@ -1381,6 +1388,13 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
        (int)((end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000);
    aimee_log(LOG_INFO, "agent_runtime", "model call end: http=%d ms=%d provider=%s model=%s",
              http_status, out->latency_ms, agent->provider, agent->model);
+   if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
+   {
+      snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+      snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
+      free(response_body);
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
    if (http_status < 0 || !response_body)
    {
       snprintf(out->error, sizeof(out->error),

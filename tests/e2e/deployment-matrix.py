@@ -338,7 +338,7 @@ def future_index_admission_gate(kb, check):
     def linked_read():
         code, result = kb.kb_request('/v1/actions/memory.search_graph',
             dict(query=key, project=key, scope_context=True, limit=16))
-        return code, [r for r in result.get('relations', []) if r.get('memory_id') == parent and r.get('target') == key]
+        return code, [r for r in result.get('relations', []) if r.get('memory_id') == parent and r.get('dst_entity') == key]
     try:
         sql(f"INSERT INTO memory_links(source_id,target_id,relation) VALUES({parent},{mid},'related_to')")
         ready = False

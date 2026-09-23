@@ -5770,6 +5770,9 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_context_refusal.o \
+                                $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
+                                $(OBJDIR)/server/agent_runtime_liveness.o \
+                                $(OBJDIR)/modules/translation/aimee_backend_responses.o \
                                  $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                 $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                 $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/ir/aimee_ir.o \

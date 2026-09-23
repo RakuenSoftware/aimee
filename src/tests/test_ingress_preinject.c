@@ -1219,6 +1219,20 @@ static void test_source_revalidation_at_provider_fence(void)
             }
          }
    assert(g_source_check_calls == 30); /* every attempt rechecks; Go outage cannot dispatch */
+   /* The first provider send was admitted. A retry must ask the owner again:
+    * unchanged sources remain usable, but an intervening mutation or outage
+    * cannot reuse the earlier admission of the same frozen body. */
+   for (int mode = 0; mode <= 5; mode++)
+   {
+      g_runtime_failure = g_source_check_mode = 0;
+      request_context_set(&context);
+      assert(wire_fence_revalidate_sources() == 0);
+      g_source_check_mode = mode;
+      g_runtime_failure = mode == 5;
+      assert(wire_fence_revalidate_sources() == (mode == 0 ? 0 : WIRE_FENCE_CONTEXT_REFUSED));
+      if (mode)
+         assert_context_dispatch_refused(mode == 1 ? "stale_context" : "unavailable");
+   }
    g_runtime_failure = g_source_check_mode = g_fact_projection = 0;
    request_context_set(&context);
    ingress_preinject_finish_sources();

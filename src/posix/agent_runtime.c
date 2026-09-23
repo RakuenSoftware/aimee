@@ -1084,9 +1084,9 @@ native_provider_http:
          free(body);
          break;
       }
-      int http_status = http_retry_post_context_bytes(
+      int http_status = http_retry_post_guarded_bytes(
           url, auth_header, wire_body.data, wire_body.len, &response_body, per_call, extra_headers,
-          ra, rb, rm, agent->provider, fb_agent.model, session_id);
+          ra, rb, rm, agent->provider, fb_agent.model, session_id, wire_fence_revalidate_sources);
       api_call_count++;
       {
          int dj = agent_get_durable_job_id();
@@ -1095,6 +1095,14 @@ native_provider_http:
       }
       free(body);
       wire_fence_destroy(wire_snapshot);
+
+      if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
+      {
+         context_refused = 1;
+         snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+         snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
+         break;
+      }
 
       /* Model fallback on first turn: if 400, retry with fallback_model */
       if (http_status == 400 && turn == 0 && fb_agent.fallback_model[0])
@@ -1141,9 +1149,10 @@ native_provider_http:
                free(fb_body);
                break;
             }
-            http_status = http_retry_post_context_bytes(
+            http_status = http_retry_post_guarded_bytes(
                 url, auth_header, fb_wire_body.data, fb_wire_body.len, &response_body, per_call,
-                extra_headers, ra, rb, rm, fb_agent.provider, fb_agent.model, session_id);
+                extra_headers, ra, rb, rm, fb_agent.provider, fb_agent.model, session_id,
+                wire_fence_revalidate_sources);
             api_call_count++;
             {
                int dj = agent_get_durable_job_id();
@@ -1153,6 +1162,14 @@ native_provider_http:
             free(fb_body);
             wire_fence_destroy(fb_snapshot);
          }
+      }
+
+      if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
+      {
+         context_refused = 1;
+         snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
+         snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
+         break;
       }
 
       /* Update provider health cache */

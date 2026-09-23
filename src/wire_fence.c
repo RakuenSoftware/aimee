@@ -93,6 +93,19 @@ int wire_fence_create(wire_fence_route_t route, const void *pristine, size_t pri
    return 0;
 }
 
+int wire_fence_revalidate_sources(void)
+{
+   const request_context_t *context = request_context_get ? request_context_get() : NULL;
+   if (context && (context->context_refused || (context->memory_source_release[0] &&
+                                                (!ingress_preinject_revalidate_sources ||
+                                                 ingress_preinject_revalidate_sources() != 0))))
+   {
+      last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
+      return WIRE_FENCE_CONTEXT_REFUSED;
+   }
+   return 0;
+}
+
 int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pristine,
                       size_t pristine_len, wire_fence_t **snapshot, wire_fence_bytes_t *selected)
 {
@@ -138,12 +151,8 @@ int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pri
          return -1;
       }
    }
-   if (context && context->memory_source_release[0] &&
-       (!ingress_preinject_revalidate_sources || ingress_preinject_revalidate_sources() != 0))
-   {
-      last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
+   if (wire_fence_revalidate_sources() != 0)
       return WIRE_FENCE_CONTEXT_REFUSED;
-   }
    if (!proof_gated)
    {
       selected->data = pristine;

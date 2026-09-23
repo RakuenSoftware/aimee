@@ -534,3 +534,9 @@ Future-valid copied relations are now prepared ahead of time under index admissi
 then withheld by their direct input fences until applicable. The final PostgreSQL
 race suite passes in 138.321 seconds; combined fresh T1/T2 real-clock graph
 validation remains pending. This follow-up keeps shared schema 34.
+
+[Provider retry admission](../../validation/memory-provider-retry-admission-2026-09-23.md)
+rechecks the Go source owner after backoff before native or buffered Responses
+resends. A local refusal remains `context_refused` through native primary and
+model-fallback paths. Socket, real-Go ingress and agent propagation tests pass;
+durable provider receipts and the post-check mutation race remain open.

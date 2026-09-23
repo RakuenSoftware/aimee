@@ -74,6 +74,7 @@ def inside(output, budget_benchmark=False):
     timings = []
     idle_cpu = None
     responses_ids = {}
+    retry_state = dict(remaining=0)
     lock = threading.Lock()
 
     def check(name, passed):
@@ -98,6 +99,17 @@ def inside(output, budget_benchmark=False):
             body = json.loads(raw)
             with lock:
                 captures.append((self.path, raw, body))
+                retry_failure = retry_state['remaining'] > 0
+                if retry_failure:
+                    retry_state['remaining'] -= 1
+            if retry_failure:
+                data = b'{"error":{"message":"Synthetic transient failure"}}'
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if self.path.endswith('/messages'):
                 response = dict(id='memory-boundary-message', type='message', role='assistant',
                     model=body['model'], content=[dict(type='text', text='MEMORY_BOUNDARY_OK')],
@@ -229,6 +241,19 @@ def inside(output, budget_benchmark=False):
                 if frontend in ('chat', 'responses', 'responses_stream'):
                     check(name + ' includes standing memory guidance exactly once',
                           sum(text.count('explore-with: aimee answers CODE questions') for text in values) == 1)
+                if frontend == 'responses':
+                    with lock:
+                        retry_state['remaining'] = 1
+                        before_retry = len(captures)
+                    retry_status, retry_response = api(path, body)
+                    with lock:
+                        retry_captures = captures[before_retry:]
+                    check(name + ' recovers from one transient provider failure',
+                          retry_status == 200 and any('MEMORY_BOUNDARY_OK' in text
+                                                     for text in strings(retry_response)))
+                    check(name + ' performs exactly one admitted resend', len(retry_captures) == 2)
+                    check(name + ' resend preserves exact serialized bytes',
+                          all(item[1] == raw for item in retry_captures))
                 # Count the actual serialized provider body, including wrappers, tools,
                 # memory and escaped Unicode. Headers never become provider JSON.
                 exact_limit = json.dumps(dict(schema_version=1, max_request_bytes=len(raw)))
