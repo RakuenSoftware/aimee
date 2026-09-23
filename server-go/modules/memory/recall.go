@@ -308,7 +308,7 @@ func (s *postgresDataStore) recallHardRules(ctx context.Context, byteBudget int)
 	minimum, _ := json.Marshal(recallRule{})
 	maxRows := byteBudget/len(minimum) + 1
 	rows, err := s.db.Query(ctx, `WITH candidates AS MATERIALIZED (
- SELECT id,polarity,title,description,weight FROM rules WHERE directive_type='hard'
+ SELECT id,polarity,title,description,weight FROM rules WHERE directive_type='hard' AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+`
  ORDER BY weight DESC,title,id LIMIT $2
 ), bounded AS (
  SELECT *,SUM(octet_length(polarity)::bigint+octet_length(title)+octet_length(description))

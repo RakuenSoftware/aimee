@@ -141,10 +141,25 @@ def inside(output):
                             os.kill(owner_pid, signal.SIGSTOP)
                     except Exception as exc:
                         provider_errors.append(type(exc).__name__ + ': ' + str(exc))
+            if scenario == 'correction-before-retry' and ordinal == 1:
+                try:
+                    status, current = api('/v1/memory/get', dict(id=str(memory_id), include_version=True))
+                    version = current.get('memory', {}).get('version')
+                    if status != 200 or not isinstance(version, dict):
+                        raise RuntimeError('retry correction could not read current version')
+                    status, corrected = api('/v1/memory/supersede', dict(
+                        old_id=str(memory_id), new_content=content + ' corrected before retry',
+                        expected_version=version))
+                    if status != 200 or corrected.get('status') != 'ok':
+                        raise RuntimeError('retry correction was not committed')
+                except Exception as exc:
+                    provider_errors.append(type(exc).__name__ + ': ' + str(exc))
+                response = dict(error=dict(message='retryable fixture response after source correction'))
             if scenario == 'provider-error':
                 response = dict(error=dict(message=provider_failure))
             data = json.dumps(response, ensure_ascii=False).encode()
-            self.send_response(400 if scenario == 'provider-error' else 200)
+            self.send_response(500 if scenario == 'correction-before-retry' else
+                               400 if scenario == 'provider-error' else 200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
@@ -166,7 +181,7 @@ def inside(output):
                 runs.append(dict(name=name, run_id=run_id, status=result['status'],
                     elapsed_seconds=time.monotonic()-started, provider_requests=len(captures)-before,
                     provider_request_bytes=request_sizes[before:],
-                    refusal_kinds=[kind for kind in ('request_budget_exceeded', 'unavailable')
+                    refusal_kinds=[kind for kind in ('request_budget_exceeded', 'unavailable', 'stale_context')
                                    if any(kind in text for text in strings(events))]))
                 return result, events
             time.sleep(0.1)
@@ -316,6 +331,12 @@ def inside(output):
             json.dumps(dict(error=dict(message=provider_failure)), ensure_ascii=False) in text
             for text in strings(events)))
         check('permanent provider error is not retried', len(captures) == before + 1)
+        before = len(captures)
+        result, events = run('private correction before transport retry', mode='correction-before-retry')
+        check('provider fixture commits correction before retryable response', not provider_errors)
+        check('private correction refuses stale native transport retry', result.get('status') == 'failed' and
+              any('stale_context' in text for text in strings(events)))
+        check('corrected private source prevents a second provider send', len(captures) == before + 1)
         attempts = [entry['attempt_id'] for entry, _ in receipt_captures if entry is not None]
         check('every actual native send has separate durable admission',
               len(attempts) == len(captures) and len(set(attempts)) == len(attempts))
@@ -324,7 +345,7 @@ def inside(output):
             observations = [ledger.execute('SELECT detail FROM audit_event WHERE event_id=?',
                 ('memory.provider.' + attempt + '.acknowledged',)).fetchone() for attempt in attempts]
         check('completed native transports retain durable response observations',
-              all(row and json.loads(row[0]).get('http_status') in (200, 400)
+              all(row and json.loads(row[0]).get('http_status') in (200, 400, 500)
                   for attempt, row in zip(attempts, observations) if attempt not in expected_unresolved))
         check('owner outage leaves admitted transport unresolved without invented acknowledgement',
               len(expected_unresolved) == 1 and all(row is None

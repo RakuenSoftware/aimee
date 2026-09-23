@@ -221,6 +221,23 @@ func exerciseRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 			t.Fatal(r)
 		}
 	}
+	// Expired high-priority rules cannot occupy the cap or protected allocation.
+	exec(`SAVEPOINT recall_expired_rules`)
+	exec(`INSERT INTO rules(polarity,title,description,weight,directive_type,expires_at,created_at,updated_at)
+ SELECT 'negative','Expired protected '||n,repeat('expired policy ',3000),100,'hard',CURRENT_TIMESTAMP::text,pg_now_text(),pg_now_text() FROM generate_series(1,40) n`)
+	expired, _ := recall("backend migration", 8192, false, "")
+	if len(expired.AlwaysOnRules) != 1 || expired.AlwaysOnRules[0].Title != "Recall hard rule" {
+		t.Fatal("expired rule occupied protected context", expired.AlwaysOnRules)
+	}
+	exec(`UPDATE rules SET expires_at=CURRENT_TIMESTAMP::text,description='verbose wordy unnecessary vague commit'`)
+	expiryBackend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+	if n, err := expiryBackend.ExtractAntiPatterns(ctx, "feedback"); err != nil || n != 0 {
+		t.Fatal("expired rule became new anti-pattern", n, err)
+	}
+	if n, err := expiryBackend.LearnStyle(ctx); err != nil || n != 0 {
+		t.Fatal("expired rule became learned preference", n, err)
+	}
+	exec(`ROLLBACK TO SAVEPOINT recall_expired_rules; RELEASE SAVEPOINT recall_expired_rules`)
 	// More hard rules than either former row cap must all survive. Even an
 	// oversized lowest-priority rule must refuse, not hide behind the cap.
 	exec(`SAVEPOINT recall_many_rules`)

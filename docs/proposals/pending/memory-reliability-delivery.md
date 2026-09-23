@@ -580,3 +580,10 @@ answers refuse dispatch; private expiry and pending lifecycle retain their own
 contracts. Local PostgreSQL, native and export checks pass; fresh-image validation
 and remaining unversioned channels/post-check race work stay open. The preceding
 receipt-cache candidate separately passed 1,652/1,652 T2/T3 checks.
+
+The native source-release candidate passed its focused 49-check fresh Server
+fixture, including actual private revision commitments and forced host restart.
+[Rule expiry](../../validation/memory-rule-expiry-2026-09-23.md) now applies before
+protected recall allocation and before new feedback/style derivation. Full local
+PostgreSQL/race tests pass; the next image also adds a real private-correction
+between provider attempts regression. Existing derivative invalidation remains open.

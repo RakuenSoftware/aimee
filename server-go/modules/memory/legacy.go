@@ -268,7 +268,7 @@ func (s *postgresDataStore) ExtractAntiPatterns(ctx context.Context, source stri
 		query = `WITH inserted AS (
  INSERT INTO anti_patterns(pattern,description,source,source_ref,confidence)
  SELECT r.title,r.description,'feedback','rule:'||r.id::text,0.8 FROM rules r
- WHERE r.polarity='negative' AND r.title<>'' AND NOT EXISTS
+ WHERE r.polarity='negative' AND r.title<>'' AND ` + memoryUnexpiredAtSQL("r.expires_at", "CURRENT_TIMESTAMP") + ` AND NOT EXISTS
   (SELECT 1 FROM anti_patterns a WHERE a.source_ref='rule:'||r.id::text)
  RETURNING 1) SELECT count(*) FROM inserted`
 	case "failure":
@@ -324,7 +324,7 @@ func containsAny(text string, values []string) bool {
 
 func (s *postgresDataStore) LearnStyle(ctx context.Context) (int, error) {
 	rows, err := s.db.Query(ctx, `SELECT polarity,description FROM rules
-WHERE polarity IN ('positive','negative') ORDER BY id DESC LIMIT 256`)
+WHERE polarity IN ('positive','negative') AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+` ORDER BY id DESC LIMIT 256`)
 	if err != nil {
 		return 0, err
 	}
