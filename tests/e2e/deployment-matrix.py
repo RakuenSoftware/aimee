@@ -927,6 +927,20 @@ def main():
             code, body = kb.kb_request('/v1/actions/memory.store', dict(key='shared-e2e-' + uuid.uuid4().hex,
                 content='Synthetic shared deployment fixture'))
             check('KB shared memory module stores a record', code == 200 and body.get('status') == 'ok')
+            code, preview = kb.kb_request('/v1/actions/memory.hygiene', dict(
+                dry_run=True, scope=dict(type='global', value='_global'), max_rows=16))
+            check('Direct KB hygiene accepts its authenticated action envelope',
+                  code == 200 and preview.get('status') == 'ok' and preview.get('dry_run') is True
+                  and isinstance(preview.get('findings'), list) and preview.get('rows_compared', 0) >= 1
+                  and preview.get('canonical_writes') == 0 and preview.get('proposal_writes') == 0)
+            code, rejected = kb.kb_request('/v1/actions/memory.hygiene', dict(
+                dry_run=True, scope=dict(type='global', value='_global'), operation='delete'))
+            check('Direct KB hygiene still rejects domain mutation arguments',
+                  code == 400 and rejected.get('kind') == 'invalid_argument')
+            code, rejected = kb.kb_request('/v1/actions/memory.verify_receipt', dict(prepared_receipt={}))
+            check('Direct KB receipt verification reaches strict receipt validation',
+                  code == 400 and rejected.get('message') == 'prepared receipt does not match the supported schema')
+
             for confidence in (-1, 1.01, False, None, 'invalid', [], {}):
                 code, body = kb.kb_request('/v1/actions/memory.store', dict(
                     key='invalid-confidence-e2e', content='Synthetic shared fixture',

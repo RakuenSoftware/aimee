@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 
 	store "github.com/JBailes/aimee/server-go/db"
 )
@@ -18,10 +19,11 @@ type briefingFact struct {
 }
 
 type briefingActivity struct {
-	SessionID     string `json:"session_id"`
-	Summary       string `json:"summary"`
-	ReferenceTime string `json:"reference_time"`
-	CreatedAt     string `json:"created_at"`
+	Source        *typedSourceVersion `json:"source_version,omitempty"`
+	SessionID     string              `json:"session_id"`
+	Summary       string              `json:"summary"`
+	ReferenceTime string              `json:"reference_time"`
+	CreatedAt     string              `json:"created_at"`
 }
 
 type briefingEntity struct {
@@ -103,7 +105,8 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
 	}
 	b := briefingBundle{Facts: []briefingFact{}, Activity: []briefingActivity{}, Entities: []briefingEntity{}, Style: style, BriefingStyle: style, LimitTokens: min(max(tokens, 64), 8192)}
 	rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence,
- evidence_strength,observation_count,COALESCE(NULLIF(last_used_at,''),updated_at)
+ evidence_strength,observation_count,COALESCE(NULLIF(last_used_at,''),updated_at),
+ (SELECT owner_id::text FROM memory_collection_owner WHERE id=1),record_revision::text
  FROM memories WHERE `+currentMemorySQL("")+`
  AND tier IN ('L2','L3','L4','L5') AND kind<>'scratch' AND COALESCE(sensitivity,'normal')<>'secret'
  ORDER BY `+queryScopeOrder+`,(confidence+evidence_strength) DESC,observation_count DESC,use_count DESC,id DESC LIMIT $1`, factLimit)
@@ -113,9 +116,15 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
 	for rows.Next() {
 		var f briefingFact
 		r := &f.Record
-		if err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &f.EvidenceStrength, &f.ObservationCount, &f.LastSeenAt); err != nil {
+		r.Version = &MemoryRecordVersion{SchemaVersion: 1}
+		if err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &f.EvidenceStrength, &f.ObservationCount, &f.LastSeenAt, &r.Version.OwnerID, &r.Version.RecordRevision); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		r.Version.RecordID = strconv.FormatInt(r.ID, 10)
+		if !r.Version.validFor(r.ID) {
+			rows.Close()
+			return nil, fmt.Errorf("memory: briefing source version unavailable")
 		}
 		f.RecallRecord = recallItems([]Record{*r})[0]
 		f.Salience = r.Confidence + f.EvidenceStrength + 0.2*math.Log1p(float64(max(f.ObservationCount, 0)))
@@ -127,22 +136,35 @@ func (s *postgresDataStore) BriefingBundle(ctx context.Context, tokens int) (jso
 		return nil, err
 	}
 	rows, err = s.db.Query(ctx, `WITH ranked AS (
- SELECT e.source_session,e.episode_text,e.reference_time,e.created_at,`+queryScopeOrder+` AS scope_rank,
+ SELECT e.source_session,e.episode_text,e.reference_time,e.created_at,
+ e.id::text AS episode_id,e.record_revision::text AS episode_revision,
+ m.id::text AS parent_id,m.record_revision::text AS parent_revision,
+ (SELECT owner_id::text FROM memory_collection_owner WHERE id=1) AS owner_id,`+queryScopeOrder+` AS scope_rank,
  row_number() OVER(PARTITION BY e.source_session ORDER BY `+queryScopeOrder+`,e.created_at DESC,e.id DESC) AS rn
  FROM memory_episodes e JOIN memories m ON m.id=e.memory_id
  WHERE e.source_session<>'' AND `+currentMemorySQL("m.")+`
  AND COALESCE(m.sensitivity,'normal')<>'secret')
- SELECT source_session,COALESCE(episode_text,''),COALESCE(reference_time,''),COALESCE(created_at,'') FROM ranked WHERE rn=1
+ SELECT source_session,COALESCE(episode_text,''),COALESCE(reference_time,''),COALESCE(created_at,''),
+ episode_id,episode_revision,parent_id,parent_revision,owner_id FROM ranked WHERE rn=1
  ORDER BY scope_rank,created_at DESC,source_session DESC LIMIT $1`, activityLimit)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var a briefingActivity
-		if err = rows.Scan(&a.SessionID, &a.Summary, &a.ReferenceTime, &a.CreatedAt); err != nil {
+		source := &typedSourceVersion{Kind: "memory_episode", Version: MemoryRecordVersion{SchemaVersion: 1}, MemoryParents: []MemoryRecordVersion{{SchemaVersion: 1}}, MemoryParentState: "observed"}
+		parent := &source.MemoryParents[0]
+		if err = rows.Scan(&a.SessionID, &a.Summary, &a.ReferenceTime, &a.CreatedAt,
+			&source.Version.RecordID, &source.Version.RecordRevision, &parent.RecordID, &parent.RecordRevision, &source.Version.OwnerID); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		parent.OwnerID = source.Version.OwnerID
+		if !validTypedSource(typedProjectionRef{Channel: "episodes", ID: source.Version.RecordID, Source: source}) {
+			rows.Close()
+			return nil, fmt.Errorf("memory: briefing episode source version unavailable")
+		}
+		a.Source = source
 		b.Activity = append(b.Activity, a)
 	}
 	err = rows.Err()

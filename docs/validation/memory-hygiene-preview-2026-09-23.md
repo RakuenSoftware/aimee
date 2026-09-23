@@ -36,3 +36,23 @@ review application are not implemented by this preview. The candidate thinclient
 colons and refuses duplicate flags, missing dry-run, unsupported options and
 malformed numbers. Native marshalling/transport tests pass; fresh CLI validation
 is pending. MCP and private hygiene surfaces are not claimed. Released CT100 remains on 0.4.5.
+
+## Fresh transport failure and repair
+
+The first linked T2 candidate `13191c410` failed its positive hygiene tests: KB
+action dispatch adds a `method` field, which the strict domain argument allowlist
+rejected. The [failed evidence](memory-hygiene-preview-2026-09-23/initial-failed-T2/T2/shared-memory.json)
+is retained. Mutation refusals, canonical immutability and outage refusal passed;
+this was not a passing deployment matrix.
+
+Strict hygiene and receipt-verification handlers now validate and remove only a
+matching method and optional protocol version 1 before validating domain fields.
+Unsupported metadata and domain extras still fail. Actual non-owner replay now
+includes the KB transport envelope. The fresh matrix checks direct KB hygiene
+early, as well as Server HTTP and candidate CLI paths. Repaired-image results
+remain pending.
+
+The transport-envelope repair passed its PostgreSQL/runtime-role and strict
+handler race tests in [110.796 seconds](memory-hygiene-preview-2026-09-23/envelope-race.txt).
+The preceding candidate `ed2a7ae1d` separately passed its KB-free T3 suite;
+T3 does not exercise the KB hygiene path and cannot certify the repair.

@@ -44,6 +44,30 @@ func (c *Client) Command(ctx context.Context, trace uint64, verb string, args js
 
 type commandArgs map[string]json.RawMessage
 
+// KB action/NDJSON dispatch carries its selected method in the argument envelope.
+// Strict domain handlers may remove only validated transport metadata; all other
+// fields remain visible to their allowlist. Direct module calls need neither.
+func commandDomainArgs(args commandArgs, method string) (commandArgs, bool) {
+	out := make(commandArgs, len(args))
+	for key, raw := range args {
+		switch key {
+		case "method":
+			var selected string
+			if json.Unmarshal(raw, &selected) != nil || selected != method {
+				return nil, false
+			}
+		case "protocol_version":
+			var version int
+			if json.Unmarshal(raw, &version) != nil || version != 1 {
+				return nil, false
+			}
+		default:
+			out[key] = raw
+		}
+	}
+	return out, true
+}
+
 func (args commandArgs) stringOr(name, fallback string) string {
 	var value string
 	if raw, ok := args[name]; ok && string(raw) != "null" && json.Unmarshal(raw, &value) == nil {

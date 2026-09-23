@@ -138,3 +138,26 @@ func TestReceiptVerificationDetectsChangedCommitmentsWithoutAuthenticatingForger
 		}
 	}
 }
+
+func TestStrictCommandsValidateTransportEnvelope(t *testing.T) {
+	prepared := verificationPrepared(t, []byte("exact body"))
+	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
+	for _, tc := range []struct {
+		metadata map[string]any
+		want     string
+	}{
+		{map[string]any{"method": "memory.verify_receipt", "protocol_version": 1}, "ok"},
+		{map[string]any{"method": "memory.hygiene"}, "error"},
+		{map[string]any{"method": nil}, "error"},
+		{map[string]any{"protocol_version": nil}, "error"},
+		{map[string]any{"protocol_version": 2}, "error"},
+		{map[string]any{"protocol_version": "1"}, "error"},
+		{map[string]any{"method": "memory.verify_receipt", "operation": "delete"}, "error"},
+	} {
+		tc.metadata["prepared_receipt"] = json.RawMessage(prepared)
+		result := runPublicCommand(t, client, "verify_receipt", string(mustReceiptJSON(t, tc.metadata)))
+		if result["status"] != tc.want {
+			t.Fatal(tc.metadata, result)
+		}
+	}
+}

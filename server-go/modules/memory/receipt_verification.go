@@ -149,6 +149,11 @@ func handleReceiptVerification(_ handlerOptions, invocation bus.ModuleInvocation
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
+	var envelopeOK bool
+	args, envelopeOK = commandDomainArgs(args, "memory.verify_receipt")
+	if !envelopeOK {
+		return commandResult(commandError("invalid_argument", "invalid receipt verification transport envelope"))
+	}
 	for key := range args {
 		if key != "prepared_receipt" && key != "payload_base64" {
 			return commandResult(commandError("invalid_argument", "receipt verification accepts prepared_receipt and optional payload_base64 only"))

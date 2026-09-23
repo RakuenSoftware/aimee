@@ -3600,6 +3600,48 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/hygiene:
+    post:
+      summary: Preview exact-content duplicate candidates in one shared scope
+      description: >-
+        Read-only preview. Creates no proposals and changes no canonical records.
+        Row and content limits bound the compared window; partial coverage and
+        unvisited content are explicit. Findings carry expected source versions
+        and remain candidates requiring review. No auto-apply mode is available.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [dry_run, scope]
+              properties:
+                dry_run: { type: boolean, enum: [true] }
+                scope:
+                  type: object
+                  required: [type, value]
+                  properties:
+                    type: { type: string, enum: [project, workspace, global] }
+                    value: { type: string, minLength: 1, maxLength: 1024, description: "Explicit scope value; global requires _global." }
+                max_rows: { type: integer, minimum: 1, maximum: 128, default: 64 }
+                max_content_bytes: { type: integer, minimum: 1, maximum: 32768, default: 16384 }
+      responses:
+        "200":
+          description: Bounded read-only findings with scope, revisions, budgets and coverage
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid scope, budgets, mutation option or unsupported argument
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Owner unavailable; no coverage result is asserted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/search:
     post:
       summary: Keyword-search memories

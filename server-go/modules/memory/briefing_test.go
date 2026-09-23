@@ -137,11 +137,58 @@ func exerciseBriefingReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handle
 	if len(b.Entities) != 2 || b.Entities[0].Name != "caroline" || b.Entities[0].Mentions != 2 {
 		t.Fatal(b.Entities)
 	}
+	var owner, revision string
+	if err := tx.QueryRow(ctx, `SELECT o.owner_id::text,m.record_revision::text FROM memory_collection_owner o,memories m WHERE o.id=1 AND m.id=$1`, local).Scan(&owner, &revision); err != nil {
+		t.Fatal(err)
+	}
+	for _, fact := range b.Facts {
+		if fact.Version == nil || !fact.Version.validFor(fact.ID) || fact.Version.OwnerID != owner {
+			t.Fatal("unversioned briefing fact", fact)
+		}
+	}
+	if b.Facts[0].Version.RecordRevision != revision {
+		t.Fatal("briefing did not retain read revision", b.Facts[0])
+	}
+	for _, activity := range b.Activity {
+		if activity.Source == nil || !validTypedSource(typedProjectionRef{Channel: "episodes", ID: activity.Source.Version.RecordID, Source: activity.Source}) {
+			t.Fatal("unversioned briefing episode", activity)
+		}
+	}
 	exerciseBriefingViewsReplay(t, handler, b)
 	_, again := run(0)
 	if string(raw) != string(again) {
 		t.Fatal("not deterministic")
 	}
+	// Episode payload edits and parent edits are separate evidence transitions.
+	previous := b.Activity[1].Source
+	checkEpisode := func(source *typedSourceVersion, want bool) {
+		t.Helper()
+		backend := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+		request := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("a", 32), Sources: []typedProjectionRef{{Channel: "episodes", ID: source.Version.RecordID, Source: source}}}
+		got, err := backend.revalidateSources(ctx, request, Scope{Type: "project", Value: "brief-project"})
+		if err != nil || got != want {
+			t.Fatal("briefing episode source release", got, want, err)
+		}
+	}
+	checkEpisode(previous, true)
+	exec(`UPDATE memory_episodes SET episode_text='corrected briefing episode' WHERE id=$1::bigint`, previous.Version.RecordID)
+	changed, _ := run(0)
+	if changed.Activity[1].Summary != "corrected briefing episode" || changed.Activity[1].Source.Version.RecordRevision == previous.Version.RecordRevision || changed.Activity[1].Source.MemoryParents[0] != previous.MemoryParents[0] {
+		t.Fatal("episode revision detached from returned payload", changed.Activity)
+	}
+	checkEpisode(previous, false)
+	checkEpisode(changed.Activity[1].Source, true)
+	previousParent := changed.Activity[1].Source
+	episodeRevision := changed.Activity[1].Source.Version
+	exec(`UPDATE memories SET content='corrected briefing fact' WHERE id=$1`, local)
+	changed, _ = run(0)
+	if changed.Facts[0].Content != "corrected briefing fact" || changed.Facts[0].Version.RecordRevision == revision || changed.Activity[1].Source.Version != episodeRevision || changed.Activity[1].Source.MemoryParents[0].RecordRevision == previous.MemoryParents[0].RecordRevision {
+		t.Fatal("parent revision missing from briefing", changed)
+	}
+	checkEpisode(previousParent, false)
+	checkEpisode(changed.Activity[1].Source, true)
+	exec(`UPDATE memories SET content='brief:local' WHERE id=$1`, local)
+	exec(`UPDATE memory_episodes SET episode_text='local episode' WHERE id=$1::bigint`, previous.Version.RecordID)
 	b, _ = run(64)
 	if len(b.Activity) != 0 || len(b.Entities) != 0 {
 		t.Fatal(b)

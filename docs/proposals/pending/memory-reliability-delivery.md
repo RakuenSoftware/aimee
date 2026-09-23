@@ -314,7 +314,7 @@ worktree without `--project` against the existing remote service.
 | MR-11 embeddings | Pinned identity/current hashes, versioned rebuild/cutover/rollback | Full freshness/temporal-activation acceptance under concurrent rebuild/failure |
 | MR-12 views | Go briefing/alerts and visible parent checks | Named view/claim-card contracts and full scoped collection-generation cache identity |
 | MR-13 task projections | No release claim | Audience intersection, disposable provenance and promotion gates |
-| MR-14 hygiene | Existing lint/review surfaces | Proposal-only privileged boundary and rejected-proposal deduplication |
+| MR-14 hygiene | Bounded, explicitly scoped, SELECT-only exact-duplicate preview with current revisions, partial coverage, Server HTTP and candidate CLI transport | Durable proposals/rejection deduplication, narrow worker roles, resumable jobs/scheduling, additional detectors and projection cleanup |
 | MR-15 outcomes | Existing feedback/workflow and learning paths | Verified application versus exposure, delayed outcomes and complete task cost |
 | MR-16 actions | Existing host authorization boundaries | Exact action evidence reauthorization, idempotent effects and composition budgets |
 | MR-17 retries | No release claim | Clean reasoning context with retained real-action journal and replay prevention |
@@ -600,3 +600,11 @@ checks, including private correction before retry and forced-host-loss receipts.
 adds the first MR-14 read-only exact-duplicate detector with explicit shared scope,
 row/content budgets, versioned candidate findings and honest partial coverage.
 It does not yet persist proposals, resume jobs, schedule work or run model detectors.
+
+[Briefing source revisions](../../validation/memory-briefing-versions-2026-09-23.md)
+now bind facts and recent episode summaries to their same-statement owner/record
+and direct-parent revisions. Non-owner PostgreSQL tests verify that parent/child
+edits invalidate the old source references. Aggregate entities and transitive
+closure remain open. The first hygiene image exposed a strict-handler transport
+envelope mismatch; its failed evidence is retained and a narrow repair is under
+validation rather than counted as passing.

@@ -2594,10 +2594,10 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "dccc48c336f317720a650303a2755d7a0c8ab1b30a0af42eaf041d7f2aa8d6b9",
+      "sha256": "f7c04c160727d2ad3923a352f791161875c2770b019fc88e229d47948bca0721",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "f8661d95202267f318ad9d0f2d59fd74530f5678d86be7ee4ef820851b504e5b"
+        "api/openapi-server-v1.yaml": "f2e28f0f8171251cc487725ec88d96dea324f14797f1d22181c751aafa86fd80"
       }
     }
   }

@@ -15,7 +15,7 @@ func TestHygieneRejectsMutationAndUnboundedInputs(t *testing.T) {
 	valid := `"dry_run":true,"scope":{"type":"project","value":"hygiene"}`
 	for _, args := range []string{`{}`, `{"dry_run":false}`, `{"dry_run":true}`, `{"dry_run":true,"scope":{"type":"user","value":"_user"}}`,
 		`{` + valid + `,"auto_apply":true}`, `{` + valid + `,"operation":"delete"}`, `{` + valid + `,"sql":"DELETE FROM memories"}`,
-		`{` + valid + `,"include_all":true}`, `{` + valid + `,"max_rows":0}`, `{` + valid + `,"max_rows":129}`,
+		`{` + valid + `,"method":"memory.delete"}`, `{` + valid + `,"protocol_version":2}`, `{` + valid + `,"include_all":true}`, `{` + valid + `,"max_rows":0}`, `{` + valid + `,"max_rows":129}`,
 		`{` + valid + `,"max_rows":1.5}`, `{` + valid + `,"max_rows":null}`, `{` + valid + `,"max_content_bytes":32769}`,
 		`{` + valid + `,"max_content_bytes":null}`} {
 		result := runPublicCommand(t, client, "hygiene", args)
@@ -28,6 +28,11 @@ func TestHygieneRejectsMutationAndUnboundedInputs(t *testing.T) {
 	if result["kind"] != "unavailable" || result["findings"] != nil {
 		t.Fatal("outage became empty coverage", result)
 	}
+	result = runPublicCommand(t, client, "hygiene", `{`+valid+`,"method":"memory.hygiene","protocol_version":1}`)
+	if result["kind"] != "unavailable" {
+		t.Fatal("valid KB transport metadata rejected", result)
+	}
+
 }
 
 func exerciseHygienePreviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler bus.ModuleHandler) {
@@ -65,7 +70,7 @@ func exerciseHygienePreviewReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	client := clientForHandler(t, handler)
 	preview := func(rows, bytes int) hygienePreview {
 		t.Helper()
-		raw, err := client.Command(ctx, 73, "hygiene", json.RawMessage(fmt.Sprintf(`{"dry_run":true,"scope":{"type":"project","value":"hygiene-visible"},"max_rows":%d,"max_content_bytes":%d}`, rows, bytes)))
+		raw, err := client.Command(ctx, 73, "hygiene", json.RawMessage(fmt.Sprintf(`{"method":"memory.hygiene","protocol_version":1,"dry_run":true,"scope":{"type":"project","value":"hygiene-visible"},"max_rows":%d,"max_content_bytes":%d}`, rows, bytes)))
 		var result hygienePreview
 		if err != nil || json.Unmarshal(raw, &result) != nil || result.Status != "ok" {
 			t.Fatalf("hygiene preview %s %v", raw, err)

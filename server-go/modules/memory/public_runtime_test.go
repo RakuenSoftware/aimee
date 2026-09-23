@@ -53,7 +53,9 @@ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',source_session text DEFAULT '',ttl_at text DEFAULT '',
  sensitivity text DEFAULT 'normal',evidence_strength double precision DEFAULT 0.5,observation_count int DEFAULT 1,last_used_at text,
  created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text(),valid_from text DEFAULT '',valid_until text DEFAULT '');
-CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,memory_id bigint,source_session text,episode_text text,reference_time text,created_at text DEFAULT pg_now_text());
+CREATE TEMP TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,memory_id bigint,source_session text,episode_text text,reference_time text,created_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE memory_entities(memory_id bigint,entity text);
 CREATE TEMP TABLE memory_conflicts(id bigint,memory_a bigint,memory_b bigint,detected_at text,resolved int,resolution text);
 CREATE TEMP TABLE memory_links(id bigint,source_id bigint,target_id bigint,relation text);
@@ -68,7 +70,7 @@ INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity) SELECT 1,
 INSERT INTO tasks(id,parent_id,title) VALUES (1,0,'release app'),(2,1,'update changelog');
 CREATE ROLE memory_runtime_test NOINHERIT NOBYPASSRLS;
 GRANT USAGE ON SCHEMA runtime_command_test TO memory_runtime_test;
-GRANT SELECT ON memory_links,memory_lineage,memories,memory_episodes,memory_entities,memory_conflicts,memory_relations,tasks TO memory_runtime_test;
+GRANT SELECT ON memory_collection_owner,memory_links,memory_lineage,memories,memory_episodes,memory_entities,memory_conflicts,memory_relations,tasks TO memory_runtime_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY test_memory_visibility ON memories USING
  (scope_type='global' OR current_setting('aimee.memory_scope_all',true)='1' OR

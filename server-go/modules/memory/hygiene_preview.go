@@ -147,6 +147,11 @@ func handleHygienePreview(options handlerOptions, invocation bus.ModuleInvocatio
 	if options.placement != PlacementKB {
 		return nil, bus.ModuleStatusCapabilityAbsent
 	}
+	var ok bool
+	args, ok = commandDomainArgs(args, "memory.hygiene")
+	if !ok {
+		return invalid()
+	}
 	for key := range args {
 		if key != "dry_run" && key != "scope" && key != "max_rows" && key != "max_content_bytes" {
 			return invalid()
