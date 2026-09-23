@@ -177,6 +177,40 @@ static cJSON *kb_memory_owner_command(const char *method, const cJSON *req,
                                          "KB memory owner unavailable or invalid response", NULL);
 }
 
+/* Hygiene has an explicit structured scope. Forward its arguments unchanged
+ * for the Go owner to validate; ambient workspace state must not widen it. */
+int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *request = cJSON_Duplicate(req, 1);
+   if (!cJSON_IsObject(request))
+   {
+      cJSON_Delete(request);
+      return send_and_free(conn, server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                                        "invalid hygiene request", NULL));
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(request, "method");
+   char *raw = kb_v1_action_request("memory.hygiene", request);
+   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+                       ? cJSON_ParseWithOpts(raw, NULL, 1)
+                       : NULL;
+   cJSON *reply = NULL;
+   if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "ok") &&
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(parsed, "dry_run")) &&
+       cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parsed, "findings")))
+      reply = cJSON_CreateRaw(raw);
+   else if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "error") &&
+            cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "kind")))
+      reply = memory_owner_error_reply(raw, parsed);
+   cJSON_Delete(parsed);
+   free(raw);
+   return send_and_free(
+       conn,
+       reply ? reply
+             : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                      "KB hygiene owner unavailable or invalid response", NULL));
+}
+
 /* The runtime envelope quotes the owner's JSON so cJSON never rewrites its
  * integer tokens. Only the Go owner shapes private command results. */
 static cJSON *user_memory_owner_command_as(const char *operation, const cJSON *req,

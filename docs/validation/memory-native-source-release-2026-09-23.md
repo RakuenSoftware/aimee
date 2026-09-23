@@ -58,5 +58,5 @@ schema-34 database SHA `23c6ec9c2ba1c9d14e6fe5bb94f37914571159e80397fd09701a0c6b
 and released embedder SHA `a2652e92cf2f68d684b56b44b8eed37ab0701ff1867eb1c59d3c2abb79917c85`.
 The configured operator cap remains 32,768 bytes. This focused test does not
 replace the full T2/T3 matrix. A further fixture now corrects a private source
-before returning HTTP 500 and requires refusal before any stale retry; execution
-of that additional scenario is pending.
+before returning HTTP 500 and requires refusal before any stale retry; that scenario passed in both topologies of the subsequent
+[1,662-check matrix](memory-rule-expiry-2026-09-23.md).

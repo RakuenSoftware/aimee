@@ -32,7 +32,8 @@ const (
 )
 
 type DataRequest struct {
-	AssemblyBudgetBytes json.RawMessage `json:"assembly_budget_bytes,omitempty"`
+	HygienePreview      *hygienePreviewRequest `json:"hygiene_preview,omitempty"`
+	AssemblyBudgetBytes json.RawMessage        `json:"assembly_budget_bytes,omitempty"`
 	assemblyBytes       *int
 
 	CorrectionReview *correctionReviewRequest `json:"correction_review,omitempty"`
@@ -1020,6 +1021,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if request.HygienePreview != nil && request.Operation != "hygiene-preview" {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
 	if request.Changes != nil && request.Operation != "change-feed" {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -1355,6 +1359,16 @@ set_config('aimee.correlation_id',$9,true)`,
 			if len(response.Payload) > maxDataBody {
 				err = errors.New("memory: CSS conventions exceed response capacity")
 			}
+		}
+	case "hygiene-preview":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || transaction == nil || !explicitScope || request.IncludeAll || !request.HygienePreview.valid() {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var preview hygienePreview
+		preview, err = backend.previewHygiene(ctx, scope, request.HygienePreview)
+		if err == nil {
+			response.Payload, err = json.Marshal(preview)
 		}
 	case "personal-source-revalidate":
 		backend, ok := options.data.(*postgresDataStore)

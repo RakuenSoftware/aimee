@@ -593,3 +593,10 @@ now accompany graph and optional PageRank neighbor payloads from the same read.
 Fusion preserves earlier candidate evidence rather than attaching newer versions
 to older text. Full PostgreSQL/race and export checks pass; graph-path dependency
 checks and the other unversioned retrieval lanes remain open.
+
+The combined native-source and rule-expiry candidate completed all 1,662 T2/T3
+checks, including private correction before retry and forced-host-loss receipts.
+[Bounded hygiene preview](../../validation/memory-hygiene-preview-2026-09-23.md)
+adds the first MR-14 read-only exact-duplicate detector with explicit shared scope,
+row/content budgets, versioned candidate findings and honest partial coverage.
+It does not yet persist proposals, resume jobs, schedule work or run model detectors.

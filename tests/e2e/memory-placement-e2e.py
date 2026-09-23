@@ -94,6 +94,52 @@ class Gate:
         self.check(name + ' owner envelope', code == 200 and len(documents) == 1 and isinstance(documents[0], dict))
         return documents[0] if len(documents) == 1 and isinstance(documents[0], dict) else {}
 
+    def hygiene_preview(self):
+        scope = self.prefix + '-hygiene'
+        content = 'duplicate candidate ' + scope
+        self.sql(f"""INSERT INTO memories(key,content,scope_type,scope_value)
+            VALUES('{scope}-a','{content}','project','{scope}'),
+                  ('{scope}-b','{content}','project','{scope}'),
+                  ('{scope}-c','unique candidate','project','{scope}'),
+                  ('{scope}-hidden','{content}','project','{scope}-hidden'),
+                  ('{scope}-expired','{content}','project','{scope}');
+            UPDATE memories SET valid_until=(CURRENT_TIMESTAMP-interval '1 day')::text
+            WHERE key='{scope}-expired'""")
+        request = dict(dry_run=True, scope=dict(type='project', value=scope),
+                       max_rows=64, max_content_bytes=16384)
+        snapshot = f"SELECT id,key,content,lifecycle_state,valid_from,valid_until FROM memories WHERE scope_value LIKE '{scope}%' ORDER BY id"
+        before = self.sql(snapshot)
+        try:
+            result = self.good('bounded hygiene HTTP preview', self.call('hygiene', request))
+            findings = result.get('findings', [])
+            targets = [v for f in findings for v in f.get('expected_versions', [])]
+            ids = self.sql(f"SELECT id FROM memories WHERE key IN ('{scope}-a','{scope}-b') ORDER BY id").splitlines()
+            self.check('hygiene keeps exact scope and eligible duplicate revisions',
+                len(findings) == 1 and sorted(v.get('record_id') for v in targets) == sorted(ids)
+                and all(v.get('record_revision') and v.get('owner_id') for v in targets)
+                and result.get('rows_compared') == 3 and result.get('partial') is False, result)
+            self.check('hygiene labels candidate-only findings without leaking content',
+                all(f.get('uncertainty') == 'candidate_only' for f in findings)
+                and content not in json.dumps(result) and result.get('canonical_writes') == 0
+                and result.get('proposal_writes') == 0, result)
+            repeated = self.good('hygiene repeat preview', self.call('hygiene', request))
+            self.check('hygiene findings are stable on repeated read', repeated.get('findings') == findings)
+            limited = self.good('hygiene bounded partial preview', self.call('hygiene', dict(request, max_rows=1)))
+            self.check('hygiene row limit cannot claim clean full coverage', limited.get('partial') is True
+                and limited.get('unvisited') == 'remaining_eligible_content_unknown'
+                and limited.get('rows_compared') == 1 and limited.get('findings') == [], limited)
+            limited = self.good('hygiene bounded content preview', self.call('hygiene', dict(request, max_content_bytes=1)))
+            self.check('hygiene byte limit reports unvisited content', limited.get('partial') is True
+                and limited.get('rows_compared') == 0 and limited.get('findings') == [], limited)
+            for name, override in [('apply', dict(dry_run=False)), ('mutation', dict(operation='delete')),
+                    ('sql', dict(sql='DELETE FROM memories')), ('all', dict(include_all=True)),
+                    ('unbounded', dict(max_rows=0)), ('private', dict(store='user'))]:
+                code, rejected = self.call('hygiene', dict(request, **override))
+                self.check('hygiene refuses ' + name, code == 400 and rejected.get('kind') == 'invalid_argument', [code, rejected])
+            self.check('hygiene leaves canonical fixtures unchanged', before == self.sql(snapshot))
+        finally:
+            self.sql(f"DELETE FROM memories WHERE scope_value IN ('{scope}','{scope}-hidden')")
+
     def protected_recall(self):
         # Seed the existing rules owner directly in this disposable fixture.
         # This checks packing, not authorization to promote a rule to hard.
@@ -915,6 +961,7 @@ class Gate:
         return all(c['passed'] for c in self.checks)
 
     def run(self):
+        self.hygiene_preview()
         before = self.digest()
         content = 'Personal fixture user@local.invalid 🦊 ' + 'long note αβ ' * 500
         written = self.good('local store', self.call('store', dict(key=self.prefix, content=content)))
@@ -1005,6 +1052,9 @@ class Gate:
             self.good('local store works with KB offline', self.call('store', dict(key=self.prefix + '-offline', content='private offline fixture')))
             code, body = self.call('list', {'store': 'kb'})
             self.check('explicit KB outage is an HTTP failure', code >= 500 and body.get('status') == 'error', [code, body])
+            code, body = self.call('hygiene', dict(dry_run=True, scope=dict(type='project', value=self.prefix)))
+            self.check('hygiene KB outage cannot report a clean scan', code >= 500
+                and body.get('kind') == 'unavailable' and 'findings' not in body, [code, body])
         finally:
             self.docker('start', self.args.kb)
         self.good('KB recovers', self.wait('get', dict(id=mid, store='kb', scope='all')))

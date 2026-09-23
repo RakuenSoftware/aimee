@@ -164,6 +164,7 @@ has_schema_privilege(current_user,'public','CREATE') OR
 	exerciseBriefingReplay(t, ctx, tx, handler)
 	exerciseAlertsReplay(t, ctx, tx, handler)
 	exerciseRecallReplay(t, ctx, tx, handler)
+	exerciseHygienePreviewReplay(t, ctx, tx, handler)
 	exerciseMutationAuditReplay(t, ctx, tx, backend.(*postgresDataStore))
 	exerciseReflectionReplay(t, ctx, tx, backend.(*postgresDataStore))
 	call := func(request DataRequest) DataResponse {

@@ -18,11 +18,13 @@ preferences. Existing current-rule packing and overflow tests remain in place.
 The [full PostgreSQL race suite](memory-rule-expiry-2026-09-23/full-race.txt)
 passes in 138.331 seconds, and the [exported owner build](memory-rule-expiry-2026-09-23/export.txt)
 passes. Ownership, C/bus boundaries, descriptors and documentation guards pass.
-Fresh-image validation is pending. No proposal completion is claimed, and CT100
-remains on released 0.4.5.
+Pinned application/harness `cdafbd67c` passed **1,662/1,662** deployment checks:
+[1,048 T2 checks](memory-rule-expiry-2026-09-23/fresh/T2/topology.json) and
+[614 T3 checks](memory-rule-expiry-2026-09-23/fresh/T3/topology.json).
+Both runners exited successfully. Both topologies committed a private correction
+before a retryable HTTP 500 and refused any second provider request. The matrix
+also covers durable receipt survival after forced host restart. All nine image
+identities and three configured 32,768-byte provider caps were captured.
 
-
-Pinned application/harness `cdafbd67c` has passed [614/614 T3 checks](memory-rule-expiry-2026-09-23/fresh/T3/topology.json),
-including a committed private correction before a retryable HTTP 500 and refusal
-before any second provider request. The runner exited successfully. The parallel
-T2 run is still pending; this is not a complete matrix claim.
+This certifies that pinned candidate, not later graph or hygiene changes.
+No proposal completion is claimed. CT100 remains on released 0.4.5.

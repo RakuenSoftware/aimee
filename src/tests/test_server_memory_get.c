@@ -183,8 +183,16 @@ void kb_client_memory_scope_context_apply(cJSON *request)
    cJSON_AddBoolToObject(request, "scope_context", 1);
    cJSON_AddStringToObject(request, "project", "test-project");
 }
+static const char *hygiene_reply;
+static cJSON *hygiene_request;
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
+   if (!strcmp(method, "memory.hygiene"))
+   {
+      cJSON_Delete(hygiene_request);
+      hygiene_request = request;
+      return hygiene_reply ? strdup(hygiene_reply) : NULL;
+   }
    if (!strcmp(method, "memory.get"))
    {
       calls++;
@@ -574,6 +582,39 @@ static void test_search_owner_transport(void)
    cJSON_Delete(request);
 }
 
+static void test_hygiene_owner_transport(void)
+{
+   cJSON *request =
+       cJSON_Parse("{\"method\":\"memory.hygiene\",\"dry_run\":true,"
+                   "\"scope\":{\"type\":\"project\",\"value\":\"explicit\"},\"max_rows\":2,"
+                   "\"max_content_bytes\":128,\"operation\":\"delete\"}");
+   hygiene_reply = "{\"status\":\"ok\",\"dry_run\":true,\"findings\":[{\"id\":9007199254740993}]}";
+   handle_memory_hygiene(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, hygiene_reply));
+   cJSON *expected = cJSON_Duplicate(request, 1);
+   cJSON_DeleteItemFromObjectCaseSensitive(expected, "method");
+   assert(cJSON_Compare(expected, hygiene_request, 1));
+   assert(cJSON_HasObjectItem(request, "method"));
+   cJSON_Delete(expected);
+   /* Unknown/mutation arguments reach the owner and its refusal reaches HTTP. */
+   hygiene_reply = "{\"status\":\"error\",\"kind\":\"invalid_argument\"}";
+   handle_memory_hygiene(NULL, NULL, request);
+   assert(strstr(search_wire_reply, "\"http_status\":400"));
+   const char *bad[] = {NULL, "{}", "[]", "{\"status\":\"ok\",\"findings\":[]}",
+                        "{\"status\":\"ok\",\"dry_run\":true,\"findings\":[]} trailing"};
+   for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+   {
+      hygiene_reply = bad[i];
+      handle_memory_hygiene(NULL, NULL, request);
+      assert(strstr(search_wire_reply, "unavailable"));
+   }
+   cJSON_Delete(hygiene_request);
+   hygiene_request = NULL;
+   cJSON_Delete(request);
+   free(search_wire_reply);
+   search_wire_reply = NULL;
+}
+
 static void test_read_owner_refusal(void)
 {
    cJSON *request = cJSON_CreateObject();
@@ -904,6 +945,7 @@ int main(void)
    test_search_owner_transport();
    test_get_delete_owner_envelopes();
    test_read_owner_refusal();
+   test_hygiene_owner_transport();
    test_personal_recall_owner_envelope();
    test_private_command_envelopes();
    test_shared_supersede_authority();
