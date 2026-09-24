@@ -43,7 +43,8 @@ def main():
                     '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', f"""
                     WITH inserted AS (INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES
                     ('L2','fact','{key}-visible','{key}-visible-content','{kind}','{key}'),
-                    ('L2','fact','{key}-hidden','{key}-hidden-content','{kind}','{key}-foreign') RETURNING id,key)
+                    ('L2','fact','{key}-hidden','{key}-hidden-content','{kind}','{key}-foreign'),
+                    ('L2','fact','{key}-global','{key}-global-content','global','_global') RETURNING id,key)
                     SELECT json_object_agg(key,id::text) FROM inserted"""))
                 visible, hidden = rows[key+'-visible'], rows[key+'-hidden']
                 def call(verb, body):
@@ -59,7 +60,11 @@ def main():
                 code, body = call('list', dict(scope_context=True, include_all=True))
                 wire = json.dumps(body)
                 check(kind+' include_all stays within verified audience', code == 200 and body.get('status') == 'ok'
-                      and key+'-visible-content' in wire and key+'-hidden-content' not in wire)
+                      and key+'-visible-content' in wire and key+'-global-content' in wire and key+'-hidden-content' not in wire)
+                code, body = call('find_facts_scoped', dict(query=key,scope_type=kind,scope_value=key))
+                wire = json.dumps(body)
+                check(kind+' explicit exact scope still excludes global records', code == 200 and body.get('status') == 'ok'
+                      and key+'-visible-content' in wire and key+'-global-content' not in wire and key+'-hidden-content' not in wire)
                 code, body = call('validity', dict(id=visible))
                 check(kind+' actorless credential gains no user diagnostic authority', code == 200 and body.get('kind') == 'unauthorized')
                 # Alternate visible/hidden reads through the live owner and its pool.

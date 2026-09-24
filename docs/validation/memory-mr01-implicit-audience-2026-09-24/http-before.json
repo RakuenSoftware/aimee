@@ -1,0 +1,27 @@
+[
+  {
+    "name": "project verified scope is inherited by unscoped get",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 1",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 2",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 3",
+    "passed": true
+  },
+  {
+    "name": "project include_all stays within verified audience",
+    "passed": false
+  },
+  {
+    "name": "scoped HTTP regression completed",
+    "passed": false,
+    "error": "project include_all stays within verified audience"
+  }
+]

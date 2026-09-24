@@ -144,6 +144,30 @@ SET LOCAL ROLE aimee_store_runtime`)
 			t.Fatal("query mode current eligibility", mode, got)
 		}
 	}
+	for _, verb := range []string{"top_l2_facts", "load_eval_corpus", "list_session_scope_priority", "list_session_scope_priority_like", "search_facts_patterns_by_keyword"} {
+		args, _ := json.Marshal(map[string]any{"scope_context": true, "project": "eligibility-local", "max": 3, "pattern": "%eligibilityneedle%", "keyword": "%eligibilityneedle%"})
+		result := runPublicCommand(t, client, verb, string(args))
+		rows, ok := result["memories"].([]any)
+		if result["status"] != "ok" || !ok || len(rows) != len(expectedIDs) {
+			t.Fatal("common fixture public query lane", verb, result)
+		}
+		for _, row := range rows {
+			if !expectedIDs[int64(row.(map[string]any)["id"].(float64))] {
+				t.Fatal("public query lane admitted excluded fixture", verb, row)
+			}
+		}
+	}
+	argsDiagnostic, _ := json.Marshal(map[string]any{"query": "eligibilityneedle", "scope_type": "project", "scope_value": "eligibility-local", "limit": 64})
+	diagnostic := runPublicCommand(t, client, "diagnose_scoped", string(argsDiagnostic))
+	diagnosticRows, ok := diagnostic["rows"].([]any)
+	if diagnostic["status"] != "ok" || !ok || len(diagnosticRows) != len(expectedIDs) {
+		t.Fatal("common fixture diagnostic lane", diagnostic)
+	}
+	for _, row := range diagnosticRows {
+		if !expectedIDs[int64(row.(map[string]any)["memory"].(map[string]any)["id"].(float64))] {
+			t.Fatal("diagnostic admitted excluded fixture", row)
+		}
+	}
 	// History is a retained-version view, not an escape hatch for erased or
 	// unauthorized content. Exercise explicit scope on the public command.
 	for key := range ids {

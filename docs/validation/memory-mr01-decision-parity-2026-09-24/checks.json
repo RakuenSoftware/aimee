@@ -1,0 +1,202 @@
+[
+  {
+    "name": "user serving/diagnostic agreement current",
+    "passed": true
+  },
+  {
+    "name": "user exact owner/revision observation current",
+    "passed": true
+  },
+  {
+    "name": "kb serving/diagnostic agreement current",
+    "passed": true
+  },
+  {
+    "name": "kb exact owner/revision observation current",
+    "passed": true
+  },
+  {
+    "name": "Equivalent Server/KB domain decision current",
+    "passed": true
+  },
+  {
+    "name": "user serving/diagnostic agreement expired",
+    "passed": true
+  },
+  {
+    "name": "user exact owner/revision observation expired",
+    "passed": true
+  },
+  {
+    "name": "kb serving/diagnostic agreement expired",
+    "passed": true
+  },
+  {
+    "name": "kb exact owner/revision observation expired",
+    "passed": true
+  },
+  {
+    "name": "Equivalent Server/KB domain decision expired",
+    "passed": true
+  },
+  {
+    "name": "user serving/diagnostic agreement superseded",
+    "passed": true
+  },
+  {
+    "name": "user exact owner/revision observation superseded",
+    "passed": true
+  },
+  {
+    "name": "kb serving/diagnostic agreement superseded",
+    "passed": true
+  },
+  {
+    "name": "kb exact owner/revision observation superseded",
+    "passed": true
+  },
+  {
+    "name": "Equivalent Server/KB domain decision superseded",
+    "passed": true
+  },
+  {
+    "name": "user serving/diagnostic agreement archived",
+    "passed": true
+  },
+  {
+    "name": "user exact owner/revision observation archived",
+    "passed": true
+  },
+  {
+    "name": "kb serving/diagnostic agreement archived",
+    "passed": true
+  },
+  {
+    "name": "kb exact owner/revision observation archived",
+    "passed": true
+  },
+  {
+    "name": "Equivalent Server/KB domain decision archived",
+    "passed": true
+  },
+  {
+    "name": "user serving/diagnostic agreement quarantined",
+    "passed": true
+  },
+  {
+    "name": "user exact owner/revision observation quarantined",
+    "passed": true
+  },
+  {
+    "name": "kb serving/diagnostic agreement quarantined",
+    "passed": true
+  },
+  {
+    "name": "kb exact owner/revision observation quarantined",
+    "passed": true
+  },
+  {
+    "name": "Equivalent Server/KB domain decision quarantined",
+    "passed": true
+  },
+  {
+    "name": "user serving/diagnostic agreement deleted",
+    "passed": true
+  },
+  {
+    "name": "user exact owner/revision observation deleted",
+    "passed": true
+  },
+  {
+    "name": "kb serving/diagnostic agreement deleted",
+    "passed": true
+  },
+  {
+    "name": "kb exact owner/revision observation deleted",
+    "passed": true
+  },
+  {
+    "name": "Equivalent Server/KB domain decision deleted",
+    "passed": true
+  },
+  {
+    "name": "user serving/diagnostic agreement revoked",
+    "passed": true
+  },
+  {
+    "name": "user exact owner/revision observation revoked",
+    "passed": true
+  },
+  {
+    "name": "kb serving/diagnostic agreement revoked",
+    "passed": true
+  },
+  {
+    "name": "kb exact owner/revision observation revoked",
+    "passed": true
+  },
+  {
+    "name": "Equivalent Server/KB domain decision revoked",
+    "passed": true
+  },
+  {
+    "name": "user serving/diagnostic agreement rejected",
+    "passed": true
+  },
+  {
+    "name": "user exact owner/revision observation rejected",
+    "passed": true
+  },
+  {
+    "name": "kb serving/diagnostic agreement rejected",
+    "passed": true
+  },
+  {
+    "name": "kb exact owner/revision observation rejected",
+    "passed": true
+  },
+  {
+    "name": "Equivalent Server/KB domain decision rejected",
+    "passed": true
+  },
+  {
+    "name": "user serving/diagnostic agreement retired",
+    "passed": true
+  },
+  {
+    "name": "user exact owner/revision observation retired",
+    "passed": true
+  },
+  {
+    "name": "kb serving/diagnostic agreement retired",
+    "passed": true
+  },
+  {
+    "name": "kb exact owner/revision observation retired",
+    "passed": true
+  },
+  {
+    "name": "Equivalent Server/KB domain decision retired",
+    "passed": true
+  },
+  {
+    "name": "user serving/diagnostic agreement unknown",
+    "passed": true
+  },
+  {
+    "name": "user exact owner/revision observation unknown",
+    "passed": true
+  },
+  {
+    "name": "kb serving/diagnostic agreement unknown",
+    "passed": true
+  },
+  {
+    "name": "kb exact owner/revision observation unknown",
+    "passed": true
+  },
+  {
+    "name": "Equivalent Server/KB domain decision unknown",
+    "passed": true
+  }
+]

@@ -143,16 +143,34 @@ func exerciseDerivedEligibilityReplay(t *testing.T, ctx context.Context, tx pgx.
 		{"expired", "", now.Add(-time.Second).Format(time.RFC3339Nano), "active", 0, false},
 		{"suppressed", "", "", "active", 1, false},
 		{"retired", "", "", "retired", 0, false},
+		{"superseded", "", "", "superseded", 0, false},
+		{"archived", "", "", "archived", 0, false},
+		{"quarantined", "", "", "quarantined", 0, false},
+		{"deleted", "", "", "deleted", 0, false},
+		{"revoked", "", "", "revoked", 0, false},
+		{"rejected", "", "", "rejected", 0, false},
+		{"cross-scope", "", "", "active", 0, false},
 	} {
 		t.Log("derived serving boundary:", tc.name)
-		exec(`UPDATE memories SET valid_from=$1,valid_until=$2,lifecycle_state=$3,activation_suppressed=$4 WHERE id=$5`, tc.from, tc.until, tc.lifecycle, tc.suppressed, parent)
+		fixtureScope := subject
+		if tc.name == "cross-scope" {
+			fixtureScope = subject + "-foreign"
+		}
+		// Setup may move the fixture out of the runtime audience. Restore the
+		// non-owner role before every serving query below.
+		exec(`RESET ROLE`)
+		exec(`UPDATE memories SET valid_from=$1,valid_until=$2,lifecycle_state=$3,activation_suppressed=$4,scope_value=$6 WHERE id=$5`, tc.from, tc.until, tc.lifecycle, tc.suppressed, parent, fixtureScope)
 		// This fixture tests visibility independently of producer freshness.
 		// Re-observe the unchanged source under the transaction's held parent lock.
 		if err := backend.pinDerivedSummaryInputs(ctx, parent); err != nil {
 			t.Fatal(err)
 		}
+		exec(`SET LOCAL ROLE aimee_store_runtime`)
 		check(tc.want)
 	}
+	exec(`RESET ROLE`)
+	exec(`UPDATE memories SET scope_value=$1 WHERE id=$2`, subject, parent)
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
 	// A second eligible parent cannot authorize the expired source. This is
 	// independent of both RLS and the first parent's continued visibility.
 	exec(`UPDATE memories SET lifecycle_state='active',activation_suppressed=0,valid_until=pg_now_text() WHERE id=$1`, parent)

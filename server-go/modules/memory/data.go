@@ -1071,6 +1071,10 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 			return encoded, bus.ModuleStatusOK
 		}
 	}
+	// Preserve the caller's query shape: an inherited credential restriction is
+	// an audience bound, not an explicit exact-scope request. Ordinary audience
+	// reads retain shared/global rows while RLS excludes foreign projects.
+	explicitScope := request.Scope.Type != "" || request.Scope.Value != ""
 	if caller := options.commandContext; options.placement == PlacementKB && caller != nil {
 		if err := bindVerifiedScope(&request, caller.ScopeKind, caller.ScopeID); err != nil {
 			if request.Operation == "validity" {
@@ -1081,7 +1085,6 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 	}
-	explicitScope := request.Scope.Type != "" || request.Scope.Value != ""
 	if options.placement == PlacementKB && !explicitScope {
 		if request.Project != "" {
 			request.Scope = Scope{Type: ScopeProject, Value: request.Project}

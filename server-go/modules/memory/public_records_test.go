@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -90,7 +91,8 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB})))
+	handler := NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}))
+	client := clientForHandler(t, handler)
 	run := func(verb, args string) map[string]any {
 		t.Helper()
 		r := runPublicCommand(t, client, verb, args)
@@ -125,6 +127,21 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 				t.Fatal(row)
 			}
 		}
+	}
+	// Credential restrictions narrow the audience without turning an implicit
+	// audience query into an exact-scope query that loses public/global rows.
+	caller := bus.CommandContext{Authenticated: true, Principal: "credential:fixture", ScopeKind: "project", ScopeID: "private"}
+	listed, status := invokeContextCommand(t, handler, 0, caller, "list", `{"limit":64}`)
+	rows, ok := listed["memories"].([]any)
+	if status != bus.ModuleStatusOK || !ok || len(rows) != 2 {
+		t.Fatal("verified audience lost global or admitted foreign records", listed, status)
+	}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[row.(map[string]any)["key"].(string)] = true
+	}
+	if !seen["private-key"] || !seen["global-key"] {
+		t.Fatal("verified audience changed shared visibility", seen)
 	}
 	full := run("find_facts_visible", `{"query":"release","project":"app"}`)["facts"].([]any)
 	if len(full) != 1 || full[0].(map[string]any)["content"] != record["content"] {

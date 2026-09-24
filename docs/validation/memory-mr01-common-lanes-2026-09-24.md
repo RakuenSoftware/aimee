@@ -32,3 +32,15 @@ or PageRank operations; their isolated lane evidence is the runtime replay above
 This is MR-01/A6 evidence and additional A1/A2 coverage. It does not certify all
 advertised endpoints, all derived inputs, historical reconstruction or the final
 provider-release boundary; MR-01 remains active.
+
+The [expanded runtime replay](memory-mr01-common-lanes-2026-09-24/expanded-surfaces-race.txt)
+passes in 175.902 seconds. The canonical fixture additionally exercises
+`top_l2_facts`, `load_eval_corpus`, `list_session_scope_priority`,
+`list_session_scope_priority_like`, `search_facts_patterns_by_keyword` and
+`diagnose_scoped` through their public command handlers. The derived fixture adds
+superseded, archived, quarantined, deleted, revoked, rejected and cross-scope
+states to its existing time/suppression cases. All 13 serving checks (episodes,
+cards, summaries, scenes/members, relations, profiles, assertions, CSS conventions,
+watermarks and graph feedback) continue to exclude the ineligible parent. Setup
+moves the parent using the owner role; each serving check restores and uses the
+non-owner runtime role.
