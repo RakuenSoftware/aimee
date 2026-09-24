@@ -28,11 +28,13 @@ const (
 type ReduceReason int
 
 const (
-	ReduceReasonNone       ReduceReason = iota // no lever enabled at this seam
-	ReduceReasonReduced                        // reduction applied
-	ReduceReasonMeasured                       // measure-only: metrics computed, not mutated
-	ReduceReasonSkipNoGain                     // foldable tokens below MinGainTokens
-	ReduceReasonAlready                        // provenance: a prior seam already reduced
+	ReduceReasonNone        ReduceReason = iota // no lever enabled at this seam
+	ReduceReasonReduced                         // reduction applied
+	ReduceReasonMeasured                        // measure-only: metrics computed, not mutated
+	ReduceReasonSkipNoGain                      // foldable tokens below MinGainTokens
+	ReduceReasonAlready                         // provenance: a prior seam already reduced
+	ReduceReasonProtected                       // protected message changed; use original
+	ReduceReasonNotAdmitted                     // candidate failed dispatch admission
 )
 
 // PriceRates are the per-token provider rates the freeze guardrail needs.
@@ -196,6 +198,9 @@ func recallTrack(original *JSONValue, evictedCount int, cfg *ReduceConfig, st *R
 		evictedCount = n
 	}
 	for i := 0; i < evictedCount; i++ {
+		if protectedMessage(original.At(i)) {
+			continue
+		}
 		st.Recall.AddFromText(PrintJSONUnformatted(original.At(i)))
 	}
 	if st.Recall.Len() == 0 || n == 0 {
@@ -235,7 +240,7 @@ func recallInject(reduced *JSONValue, out *ReduceResult) {
 		"them; it is PAGEABLE, not lost:\n")
 	body.WriteString(out.RecallHint)
 	note := NewObject()
-	note.Set("role", NewString("user"))
+	note.Set("role", NewString("assistant"))
 	note.Set("content", NewString(body.String()))
 	reduced.Append(note)
 }
@@ -374,6 +379,15 @@ func Reduce(messages *JSONValue, systemPrompt string, seam Seam, cfg *ReduceConf
 	// Publish the compress-only result when the fold was disabled or no-opped.
 	if compressedOwned != nil && out.Messages == nil {
 		out.Messages = compressedOwned
+	}
+
+	if out.Mutated && !protectedContextPreserved(messages, out.Messages) {
+		out.Messages, out.Mutated, out.Reason = nil, false, ReduceReasonProtected
+		out.ReducedTokens, out.RemovedTokens = baseline, 0
+		if st != nil {
+			st.Reduced = false
+		}
+		return out
 	}
 
 	// Recompute the reduced/removed forecast once, over whatever view a lever

@@ -285,6 +285,8 @@ func (s *postgresDataStore) ExtractAntiPatterns(ctx context.Context, source stri
 	return count, err
 }
 
+// Escalation makes repeated observations visible as soft guidance. Hit counts
+// do not authenticate an author or authorize creation of a protected hard rule.
 func (s *postgresDataStore) EscalateAntiPatterns(ctx context.Context, threshold int) (int, error) {
 	if threshold <= 0 {
 		threshold = 5
@@ -292,9 +294,9 @@ func (s *postgresDataStore) EscalateAntiPatterns(ctx context.Context, threshold 
 	var count int
 	err := s.db.QueryRow(ctx, `WITH inserted AS (
  INSERT INTO rules(polarity,title,description,weight,domain,directive_type,created_at,updated_at)
- SELECT 'negative',a.pattern,a.description,10,'anti-pattern','hard',pg_now_text(),pg_now_text()
+ SELECT 'negative',a.pattern,a.description,10,'anti-pattern','soft',pg_now_text(),pg_now_text()
  FROM anti_patterns a WHERE a.hit_count >= $1 AND NOT EXISTS
-  (SELECT 1 FROM rules r WHERE r.polarity='negative' AND r.title=a.pattern AND r.directive_type='hard')
+  (SELECT 1 FROM rules r WHERE r.polarity='negative' AND r.title=a.pattern AND (r.directive_type='hard' OR r.domain='anti-pattern'))
  RETURNING 1) SELECT count(*) FROM inserted`, threshold).Scan(&count)
 	return count, err
 }

@@ -64,6 +64,9 @@ INSERT INTO rules(polarity,title,description,created_at,updated_at) VALUES
 	if run("anti_pattern_escalate", `{"hit_threshold":6}`) != 0 || run("anti_pattern_escalate", `{}`) != 1 || run("anti_pattern_escalate", `{}`) != 0 {
 		t.Fatal("escalation threshold or deduplication failed")
 	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM rules WHERE title='runtime-dangerous-command' AND directive_type='soft'`).Scan(&count); err != nil || count != 1 {
+		t.Fatal("automatic observations were promoted to protected rules", count, err)
+	}
 	if run("memory_learn_style", `{}`) < 1 {
 		t.Fatal("style learning produced no preference")
 	}

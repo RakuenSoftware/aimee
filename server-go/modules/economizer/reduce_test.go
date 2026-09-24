@@ -12,8 +12,8 @@ func makeMessages(rounds int) *JSONValue {
 	arr := NewArray()
 	for i := 0; i < rounds; i++ {
 		arr.Append(mkUser("please read the file and summarize the relevant section in detail"))
-		arr.Append(mkAsst("here is a fairly long assistant turn that adds bytes to the transcript " +
-			"so the fold-eligible prefix carries real token volume across many turns of the session"))
+		arr.Append(mkAsst(strings.Repeat("here is a fairly long assistant turn that adds bytes to the transcript "+
+			"so the fold-eligible prefix carries real token volume across many turns of the session", 4)))
 	}
 	return arr
 }
@@ -160,7 +160,11 @@ func TestReducePrefixStableAcrossTurns(t *testing.T) {
 		st.Reduced = false // next turn is a fresh request, not a second seam
 
 		if out.Mutated && out.Messages != nil {
-			prefix := PrintJSONUnformatted(out.Messages.At(0))
+			retained := out.RetainedMsgs
+			if cfg.RecallInject && out.RecallHint != "" {
+				retained++
+			}
+			prefix := foldPrefix(out.Messages, retained)
 			if prevPrefix != "" {
 				if out.Epochs == prevEpochs {
 					// No epoch advance -> the cache MUST still be warm.

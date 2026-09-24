@@ -150,6 +150,18 @@ func exerciseCognifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
 	if n := scalar(`SELECT count(*) FROM rules WHERE title='cognify-alice:editor'`); n != 1 {
 		t.Fatal("global behavioral rule missing", n)
 	}
+	if _, err := tx.Exec(ctx, `UPDATE rules SET directive_type='hard',description='Do not erase CASE_7.',weight=91 WHERE title='cognify-alice:editor'`); err != nil {
+		t.Fatal(err)
+	}
+	if r := call("cognify", global, "cognify-visible"); r["status"] != "ok" {
+		t.Fatal(r)
+	}
+	if n := scalar(`SELECT count(*) FROM rules WHERE title='cognify-alice:editor' AND directive_type='hard' AND description='Do not erase CASE_7.' AND weight=91`); n != 1 {
+		t.Fatal("model extraction rewrote protected rule", n)
+	}
+	if n := scalar(`SELECT count(*) FROM rules WHERE title='cognify-alice:editor'`); n != 1 {
+		t.Fatal("protected collision produced duplicate rule", n)
+	}
 	// Public counts cannot reveal another project's queue.
 	async = true
 	before := calls

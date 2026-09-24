@@ -162,11 +162,13 @@ type ReduceResponse struct {
 }
 
 var reduceReasonNames = map[ReduceReason]string{
-	ReduceReasonNone:       "none",
-	ReduceReasonReduced:    "reduced",
-	ReduceReasonMeasured:   "measured",
-	ReduceReasonSkipNoGain: "skip_no_gain",
-	ReduceReasonAlready:    "already",
+	ReduceReasonNone:        "none",
+	ReduceReasonReduced:     "reduced",
+	ReduceReasonMeasured:    "measured",
+	ReduceReasonSkipNoGain:  "skip_no_gain",
+	ReduceReasonAlready:     "already",
+	ReduceReasonProtected:   "protected_context_changed",
+	ReduceReasonNotAdmitted: "reduction_not_admitted",
 }
 
 // NewHandler serves the economizer's reduce stage.
@@ -294,6 +296,16 @@ func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store State
 	st := restoreState(store, stats, req.StateKey)
 
 	out := Reduce(messages, req.SystemPrompt, seam, cfg, st)
+
+	// Native callers install any returned mutated array. Apply the same shrink
+	// and tool-pair admission as the gateway before exposing that candidate.
+	if seam == SeamDelegate && out.Mutated && GWShouldApply(true, &out, ReduceErrNone, MessageHistoryRepair) != GWBypassNone {
+		out.Messages, out.Mutated, out.Reason = nil, false, ReduceReasonNotAdmitted
+		out.ReducedTokens, out.RemovedTokens = out.BaselineTokens, 0
+		if st != nil {
+			st.Reduced = false
+		}
+	}
 
 	resp := ReduceResponse{
 		Mutated:        out.Mutated,

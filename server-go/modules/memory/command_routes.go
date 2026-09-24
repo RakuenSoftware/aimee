@@ -52,7 +52,7 @@ var kbCommandRoutes = []commandRoute{
 	{"memory", "explain_match", "Explain a memory's match to a query.", handleDiagnosticCommand, true},
 	{"maintenance", "anti_pattern_extract_from_feedback", "Learn anti-patterns from feedback.", handleRuntimeCommand, true},
 	{"maintenance", "anti_pattern_extract_from_failures", "Learn anti-patterns from failed decisions.", handleRuntimeCommand, true},
-	{"maintenance", "anti_pattern_escalate", "Promote repeated anti-patterns into rules.", handleRuntimeCommand, true},
+	{"maintenance", "anti_pattern_escalate", "Promote repeated anti-patterns into soft guidance.", handleRuntimeCommand, true},
 	{"maintenance", "memory_learn_style", "Learn response style preferences.", handleRuntimeCommand, true},
 	{"maintenance", "scan_conversations", "Import conversation observations.", handleRuntimeCommand, true},
 	{"memory", "find_facts_visible", "Find facts in the active project, workspace and global scope.", handleRecordCommand, true},

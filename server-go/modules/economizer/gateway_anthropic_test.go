@@ -129,7 +129,7 @@ func TestGatewayFreezeHoldsAcrossAnthropicTurns(t *testing.T) {
 		if !out.Mutated || out.Messages == nil {
 			continue
 		}
-		prefix := PrintJSONUnformatted(out.Messages.At(0))
+		prefix := foldPrefix(out.Messages, out.RetainedMsgs)
 		if prevPrefix != "" && out.Epochs == prevEpochs {
 			if prefix != prevPrefix {
 				t.Fatalf("turn %d: the frozen prefix changed without an epoch advance; "+
@@ -165,7 +165,7 @@ func TestGatewayFreezeSurvivesStateRoundTrip(t *testing.T) {
 	if !first.Mutated || first.Messages == nil {
 		t.Fatal("first gateway fold did not engage")
 	}
-	firstPrefix := PrintJSONUnformatted(first.Messages.At(0))
+	firstPrefix := foldPrefix(first.Messages, first.RetainedMsgs)
 
 	// Round-trip through exactly what the seam stores.
 	blob, ok := SerializeState(st)
@@ -183,7 +183,7 @@ func TestGatewayFreezeSurvivesStateRoundTrip(t *testing.T) {
 		t.Fatal("second gateway fold did not engage after reload")
 	}
 	if second.Epochs == first.Epochs {
-		if got := PrintJSONUnformatted(second.Messages.At(0)); got != firstPrefix {
+		if got := foldPrefix(second.Messages, second.RetainedMsgs); got != firstPrefix {
 			t.Error("the frozen prefix changed across a state reload without an epoch " +
 				"advance; the persisted boundary is not being honoured")
 		}

@@ -118,7 +118,7 @@ def inside(output):
                 choices=[dict(index=0, message=dict(role='assistant', content='NATIVE_MEMORY_OK'),
                               finish_reason='stop')],
                 usage=dict(prompt_tokens=11, completion_tokens=2, total_tokens=13))
-            if scenario in ('refresh-update', 'refresh-outage') and ordinal <= 5:
+            if scenario in ('refresh-update', 'refresh-outage', 'protected-fold') and ordinal <= 5:
                 # Distinct real reads avoid repeated-call detection. The fifth
                 # reply is withheld until the memory state changes, so refresh
                 # and provider dispatch cannot race the test's intervention.
@@ -165,11 +165,11 @@ def inside(output):
             self.end_headers()
             self.wfile.write(data)
 
-    def run(name, limits=None, mode='single'):
+    def run(name, limits=None, mode='single', input_text=None):
         nonlocal scenario, scenario_start
         started, before = time.monotonic(), len(captures)
         scenario, scenario_start = mode, before
-        status, created = api('/v1/runs', dict(model=prefix, input='Read the native memory fixture ' + prefix,
+        status, created = api('/v1/runs', dict(model=prefix, input=input_text or 'Read the native memory fixture ' + prefix,
                                               max_output_tokens=32), limits)
         check(name + ' queues a real asynchronous worker', status == 200 and bool(created.get('id')))
         run_id = created['id']
@@ -333,6 +333,36 @@ def inside(output):
               len(captures) == before + 1)
         check('refresh recovery retains both committed identities', all(
             any(value in text for text in strings(captures[-1])) for value in (content, refreshed_content)))
+        # MR-03: force a real native history reduction and verify complete
+        # user constraints after optional tool bodies exceed the excerpt size.
+        fold_settings = dict(economizer_mode=2, fold_retained_msgs=4,
+                             fold_min_fold_msgs=4, fold_excerpt_bytes=40)
+        previous_fold = {key: config('get', key)['value'] for key in fold_settings}
+        protected = ('Background context; ' * 80 +
+                     'Do not delete. Limit 7. Deadline 2030-01-02. Keep CASE_83_界🦊.')
+        try:
+            for key, value in fold_settings.items():
+                config('set', key, json.dumps(value))
+            for turn in range(1, 6):
+                (Path(fixture_files.name) / f'{turn}.txt').write_text(
+                    f'Native refresh evidence {turn}: {prefix}\n' + 'optional source detail; ' * 60)
+            before = len(captures)
+            result, _ = run('protected native fold', mode='protected-fold', input_text=protected)
+            check('protected native fold completes through five real tool calls',
+                  result.get('status') == 'completed' and len(captures) == before + 6)
+            check('native reduction preserves complete user constraint bytes', all(
+                any(protected in text for text in strings(body)) for body in captures[before:]))
+            check('native provider observes actual optional history reduction', any(
+                'optional folded history' in text for text in strings(captures[-1])))
+            check('native generated history is not promoted to user instructions', all(
+                message.get('role') == 'assistant'
+                for message in captures[-1].get('messages', [])
+                if any('optional folded history' in text for text in strings(message))))
+        finally:
+            for key, value in previous_fold.items():
+                config('set', key, json.dumps(value))
+            for turn in range(1, 6):
+                (Path(fixture_files.name) / f'{turn}.txt').write_text(f'Native refresh evidence {turn}: {prefix}\n')
         before = len(captures)
         result, events = run('native provider error', mode='provider-error')
         check('provider failure terminates without a successful response', result.get('status') == 'failed')
