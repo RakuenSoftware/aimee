@@ -3,6 +3,8 @@ package memory
 import (
 	"fmt"
 	"strings"
+
+	"github.com/JBailes/aimee/server-go/bus"
 )
 
 // Placement is the data-ownership role of this instance of the shared memory
@@ -122,4 +124,57 @@ func bindVerifiedScope(request *DataRequest, kind, id string) error {
 		request.Workspace = authorized.Value
 	}
 	return nil
+}
+
+// EligibilityContext is constructed after credential narrowing, never decoded
+// from model arguments. Purpose is the selected owner operation. The database
+// transaction owns the request clock; temporal anchors cannot change authority.
+// RevocationGenerations are the exact observed root/parent revisions when a
+// retained selection is checked. Selection reads obtain them with their rows;
+// there is deliberately no invented global generation for unrelated records.
+type EligibilityContext struct {
+	Principal, TransportIdentity, Authority string
+	AuthorizedAudience, Scope               Scope
+	Workspace, Project, Purpose, QueryMode  string
+	ValidAt, BelievedAt, PolicyVersion      string
+	IncludeAll                              bool
+	RevocationGenerations                   []MemoryRecordVersion
+}
+
+func eligibilityContext(request DataRequest, scope Scope, caller *bus.CommandContext) EligibilityContext {
+	c := EligibilityContext{Principal: "system:model-inference", TransportIdentity: "internal", Authority: "model",
+		Scope: scope, Workspace: request.Workspace, Project: request.Project, Purpose: request.Operation,
+		QueryMode: "current", PolicyVersion: currentEligibilityPolicy, IncludeAll: request.IncludeAll}
+	if caller != nil && caller.Authenticated {
+		c.Principal, c.TransportIdentity = caller.Principal, caller.TransportIdentity
+		c.AuthorizedAudience = Scope{Type: caller.ScopeKind, Value: caller.ScopeID}
+		if c.TransportIdentity == "" {
+			c.TransportIdentity = c.Principal
+		}
+		if (request.Authority == AuthorityUser && caller.UserAuthority) || request.Operation == "restore" {
+			c.Authority = "user"
+		}
+	}
+	if request.ReadPolicy != nil {
+		c.QueryMode, c.ValidAt, c.BelievedAt = request.ReadPolicy.Mode, request.ReadPolicy.ValidAt, request.ReadPolicy.BelievedAt
+	} else if request.AsOf != "" {
+		c.QueryMode, c.ValidAt = "inspection", request.AsOf
+	} else if a := request.Assertions; a != nil {
+		c.ValidAt, c.BelievedAt = a.ValidAt, a.BelievedAt
+		if a.Historical || a.ValidAt != "" || a.BelievedAt != "" {
+			c.QueryMode = "historical"
+		}
+	}
+	if request.AtVersion != nil {
+		c.QueryMode = "exact_version"
+	}
+	if r := request.Revalidation; r != nil {
+		for _, ref := range r.Sources {
+			if ref.Source != nil {
+				c.RevocationGenerations = append(c.RevocationGenerations, ref.Source.Version)
+				c.RevocationGenerations = append(c.RevocationGenerations, ref.Source.MemoryParents...)
+			}
+		}
+	}
+	return c
 }

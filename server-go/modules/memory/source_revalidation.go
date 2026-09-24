@@ -48,14 +48,23 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 	}
 	var count int
 	query := sourceRevalidationSQL
+	structured, rules, auxiliary := false, false, false
 	for _, ref := range request.Sources {
-		if ref.Source.Kind == "memory_rule" || ref.Source.Kind == "memory_rule_collection" {
-			query = ruleSourceRevalidationSQL
-			break
+		switch ref.Source.Kind {
+		case "learning_observation", "learning_procedure", "memory_relation":
+			auxiliary = true
+		case "memory_rule", "memory_rule_collection":
+			rules = true
+		case "memory_directive", "memory_reminder":
+			structured = true
 		}
-		if ref.Source.Kind == "memory_directive" || ref.Source.Kind == "memory_reminder" {
-			query = structuredSourceRevalidationSQL
-		}
+	}
+	if auxiliary {
+		query = auxiliarySourceRevalidationSQL
+	} else if rules {
+		query = ruleSourceRevalidationSQL
+	} else if structured {
+		query = structuredSourceRevalidationSQL
 	}
 	if request.SendGuard == "acquire" {
 		query = strings.ReplaceAll(query, "CURRENT_TIMESTAMP", "clock_timestamp()")
@@ -81,6 +90,37 @@ var ruleSourceRevalidationSQL = strings.Replace(structuredSourceRevalidationSQL,
  AND directive_type='hard' AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+`
  AND record_revision::text=r.ref#>>'{source_version,version,record_revision}')
  WHEN 'memory_directive'`, 1)
+
+// Auxiliary learning tables have explicit scope fields instead of memory-row
+// RLS. Read them against the authenticated transaction audience and exact scope.
+var auxiliarySourceScopeSQL = strings.NewReplacer(
+	"$1", "(current_setting('aimee.memory_scope_all',true)='1')",
+	"$2", "COALESCE(current_setting('aimee.memory_workspace',true),'')",
+	"$3", "COALESCE(current_setting('aimee.memory_project',true),'')",
+	"$4", "$2::text", "$5", "$3::text",
+).Replace(typedScopeSQL)
+
+var auxiliarySourceRevalidationSQL = strings.Replace(ruleSourceRevalidationSQL,
+	" WHEN 'memory_rule_collection'", ` WHEN 'learning_observation' THEN EXISTS (
+ SELECT 1 FROM learning_observations WHERE observation_id=r.ref->>'stable_id'
+ AND memory_record_id::text=r.ref#>>'{source_version,version,record_id}'
+ AND record_revision::text=r.ref#>>'{source_version,version,record_revision}'
+ AND status='active' AND `+auxiliarySourceScopeSQL+`)
+ WHEN 'learning_procedure' THEN EXISTS (
+ SELECT 1 FROM (SELECT id,record_revision,state,sink,action_json,
+ (CASE WHEN action_json IS JSON OBJECT THEN action_json::jsonb ELSE '{}'::jsonb END)->>'scope_kind' AS scope_kind,
+ (CASE WHEN action_json IS JSON OBJECT THEN action_json::jsonb ELSE '{}'::jsonb END)->>'scope_id' AS scope_id
+ FROM learning_proposals) p WHERE id=(r.ref->>'stable_id')::bigint
+ AND record_revision::text=r.ref#>>'{source_version,version,record_revision}'
+ AND state='committed' AND sink='artifact' AND action_json IS JSON OBJECT AND `+auxiliarySourceScopeSQL+`)
+ WHEN 'memory_relation' THEN EXISTS (
+ SELECT 1 FROM memory_relations relation WHERE id=(r.ref#>>'{source_version,version,record_id}')::bigint
+ AND record_revision::text=r.ref#>>'{source_version,version,record_revision}'
+ AND (lower(src_entity)=lower(r.ref->>'stable_id') OR lower(dst_entity)=lower(r.ref->>'stable_id'))
+ AND `+currentRelationInputsSQL("relation")+` AND `+relationValidityAtSQL("relation.", "CURRENT_TIMESTAMP")+`
+ AND EXISTS(SELECT 1 FROM memories m WHERE m.id=relation.memory_id AND `+currentMemorySQL("m.")+` AND ($2::text='' OR (m.scope_type=$2 AND m.scope_value=$3)))
+ AND (`+relationSourceParentsSQL("relation")+`)::jsonb=COALESCE(r.ref#>'{source_version,memory_parents}','[]'::jsonb))
+ WHEN 'memory_rule_collection'`, 1)
 
 func buildSourceRevalidationSQL(structured bool) string {
 	filter := strings.NewReplacer(

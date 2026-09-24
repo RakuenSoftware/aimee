@@ -393,7 +393,7 @@ def main():
                       and result.get('status') == 'ok' and result.get('profile',{}).get('relation_count') == 0,elapsed)
             sql(f"UPDATE memory_relations SET valid_at='2020-01-01T09:00:00+09:00',invalid_at='2020-01-02T09:00:00+09:00' WHERE memory_id={ids['current']}")
             for at,wanted in [('2020-01-01T00:00:00Z',{ids['current']}),('2020-01-02T00:00:00Z',set())]:
-                code,result,elapsed=call('search_graph_as_of',dict(query=key,project=key,as_of=at))
+                code,result,elapsed=call('search_graph_as_of',dict(query=key+'-current',project=key,as_of=at))
                 check('Relation historical offset instant '+at,code == 200 and result.get('status') == 'ok'
                       and {int(row['memory_id']) for row in result.get('relations',[])} == wanted,elapsed)
             code,result,elapsed=call('search_graph_as_of',dict(query=key,project=key,as_of='now'))
@@ -500,11 +500,66 @@ def main():
                     selected={int(row['memory_id']) for row in rows if int(row['memory_id']) in set(native_ids.values())}
                     check('Common native '+section+' '+audience+' lifecycle and scope',code==200
                           and result.get('status')=='ok' and selected=={native_ids[native_key+'-'+state]},elapsed)
+            auxiliary_key=key+'-auxiliary'
+            auxiliary_parent=int(sql(f"INSERT INTO memories(key,content,scope_type,scope_value) VALUES('{auxiliary_key}','summary parent','project','{key}') RETURNING id"))
+            auxiliary_relation=int(sql(f"INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text) VALUES({auxiliary_parent},'{auxiliary_key}','uses','target','Original entity summary') RETURNING id"))
+            signal_id=int(sql("INSERT INTO learning_signals(signal_type) VALUES('mr01-typed-fixture') RETURNING id"))
+            procedure_id=int(sql(f"INSERT INTO learning_proposals(signal_id,sink,state,target_key,action_json) VALUES({signal_id},'artifact','committed','{auxiliary_key}',jsonb_build_object('scope_kind','project','scope_id','{key}','step','Original procedure')::text) RETURNING id"))
+            sql(f"""INSERT INTO learning_observations(observation_id,scope_kind,scope_id,observation_type,summary,status,synthesis_policy_version)
+              VALUES('{auxiliary_key}','project','{key}','recurring_failure','Original observation','active','fixture'),
+                    ('{auxiliary_key}-foreign','project','{key}-foreign','recurring_failure','Foreign observation','active','fixture');
+              INSERT INTO learning_proposals(signal_id,sink,state,target_key,action_json) VALUES({signal_id},'artifact','committed','{auxiliary_key}-foreign',jsonb_build_object('scope_kind','project','scope_id','{key}-foreign','step','Foreign procedure')::text);
+              UPDATE kb_async_jobs SET status='done' WHERE kind='memory_index' AND document_id={auxiliary_parent}""")
+            def auxiliary_projection():
+                code,result,_=call('assemble_typed_context',dict(query=auxiliary_key,project=key,
+                    enable_semantic_assertions=False,enable_summaries=True,channel_budgets=dict(
+                        total=4096,summaries=1024,observations=1024,approved_procedures=1024)))
+                if code!=200 or result.get('status')!='ok': raise RuntimeError('auxiliary projection unavailable')
+                return result
+            def auxiliary_eligible(refs):
+                code,result,_=call('revalidate_sources',dict(project=key,revalidation=dict(schema_version=1,check_id=uuid.uuid4().hex,sources=refs)))
+                if code!=200 or result.get('status')!='ok': raise RuntimeError('auxiliary revalidation unavailable')
+                return result.get('eligible')
+            projection=auxiliary_projection();refs=projection.get('retained_items',[])
+            check('All persistent auxiliary channels observe scoped sources',len(refs)==3
+                  and projection.get('source_version_state')=='record_versions_observed'
+                  and {ref['channel'] for ref in refs}=={'summaries','observations','approved_procedures'}
+                  and all(ref.get('source_version') for ref in refs) and 'Foreign observation' not in json.dumps(projection)
+                  and 'Foreign procedure' not in json.dumps(projection))
+            check('Auxiliary typed observations pass release revalidation',auxiliary_eligible(refs) is True)
+            sql(f"UPDATE learning_observations SET status='retired' WHERE observation_id='{auxiliary_key}'")
+            check('Observation retirement invalidates release',auxiliary_eligible(refs) is False)
+            check('Retired observation is absent from new projection','observations' not in {ref['channel'] for ref in auxiliary_projection().get('retained_items',[])})
+            sql(f"UPDATE learning_observations SET status='active' WHERE observation_id='{auxiliary_key}'")
+            refs=auxiliary_projection()['retained_items']
+            sql(f"UPDATE learning_proposals SET state='archived' WHERE id={procedure_id}")
+            check('Procedure withdrawal invalidates release',auxiliary_eligible(refs) is False)
+            check('Withdrawn procedure is absent from new projection','approved_procedures' not in {ref['channel'] for ref in auxiliary_projection().get('retained_items',[])})
+            sql(f"UPDATE learning_proposals SET state='committed' WHERE id={procedure_id}")
+            refs=auxiliary_projection()['retained_items']
+            sql(f"UPDATE memories SET lifecycle_state='revoked' WHERE id={auxiliary_parent}")
+            check('Summary parent revocation invalidates release',auxiliary_eligible(refs) is False)
+            check('Revoked summary parent is absent from new projection','summaries' not in {ref['channel'] for ref in auxiliary_projection().get('retained_items',[])})
+            sql(f"UPDATE memories SET lifecycle_state='active' WHERE id={auxiliary_parent}")
+            refs=auxiliary_projection()['retained_items'];guard_id=uuid.uuid4().hex
+            code,acquired,_=call('revalidate_sources',dict(project=key,revalidation=dict(schema_version=1,check_id=guard_id,sources=refs,send_guard='acquire')))
+            check('Auxiliary sources acquire final send protection',code==200 and acquired.get('eligible') is True and acquired.get('guard_schema_version')==2)
+            try:
+                for label,query in [('observation',f"UPDATE learning_observations SET summary='raced' WHERE observation_id='{auxiliary_key}'"),
+                                    ('procedure',f"UPDATE learning_proposals SET state='archived' WHERE id={procedure_id}"),
+                                    ('summary',f"UPDATE memory_relations SET fact_text='raced' WHERE id={auxiliary_relation}")]:
+                    refused=False
+                    try: sql(query)
+                    except RuntimeError as error: refused='memory provider send in progress' in str(error)
+                    check('Guard blocks '+label+' mutation after admission',refused)
+            finally:
+                code,released,_=call('revalidate_sources',dict(project=key,revalidation=dict(schema_version=1,check_id=guard_id,sources=None,send_guard='release')))
+            check('Auxiliary send completes explicitly',code==200 and released.get('send_guard')=='released')
             history_key=key+'-history'
             history_values=[]
             for state in states:
                 lifecycle=state if state in ('superseded','archived','quarantined','deleted','revoked') else 'active'
-                scope=key+'-foreign' if state=='cross-scope' else key
+                scope=history_key+'-foreign' if state=='cross-scope' else history_key
                 start='2020-03-01T00:00:00Z' if state=='future' else '2020-01-01T00:00:00Z'
                 end='2020-02-01T00:00:00Z' if state=='expired' else '2020-04-01T00:00:00Z'
                 history_values.append(f"('L2','fact','{history_key}-{state}','retained old {state}','project','{scope}','{lifecycle}',{int(state=='suppressed')},'{start}','{end}')")
@@ -512,6 +567,10 @@ def main():
               INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,authority_rank,status) VALUES('{history_key}','assert','fixture','system',100,'open');
               INSERT INTO entity_edges(source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence_class,confidence,authority_rank,valid_from,valid_until,asserted_at,commit_id)
                 SELECT '{history_key}','uses',key,'semantic','world_fact','persistent','A',.9,80,'2020-01-01T00:00:00Z','2020-04-01T00:00:00Z','2020-01-01T00:00:00Z','{history_key}' FROM memories WHERE key LIKE '{history_key}-%';
+              INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,
+                  after_lifecycle,after_confidence,after_authority_rank,after_version)
+                SELECT '{history_key}',id,'assert',0,1,'persistent',confidence,80,1
+                FROM entity_edges WHERE commit_id='{history_key}';
               INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance)
                 SELECT e.id,'memory','memory:'||m.id::text,'supports' FROM entity_edges e JOIN memories m ON m.key=e.target WHERE e.source='{history_key}';
               INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,valid_at,invalid_at)
@@ -520,22 +579,23 @@ def main():
               SELECT json_object_agg(key,id) FROM memories WHERE key LIKE '{history_key}-%'; COMMIT"""))
             historical_wanted={history_key+'-'+state for state in ('current','superseded','archived')}
             at='2020-02-01T00:00:00Z'
-            code,result,elapsed=call('search_assertions',dict(query=history_key,project=key,valid_at=at,limit=64))
+            code,result,elapsed=call('search_assertions',dict(query=history_key,project=history_key,valid_at=at,limit=64))
+            (args.output/'historical-assertions.json').write_text(json.dumps(result,indent=2)+'\n')
             check('Historical assertions use requested-time parent eligibility',code==200 and result.get('status')=='ok'
                   and {row['object'] for row in result.get('assertions',[])}==historical_wanted,elapsed)
-            code,result,elapsed=call('search_graph_as_of',dict(query=history_key,project=key,as_of=at,limit=64))
+            code,result,elapsed=call('search_graph_as_of',dict(query=history_key,project=history_key,as_of=at,limit=64))
             check('Historical relations use requested-time parent eligibility',code==200 and result.get('status')=='ok'
                   and {int(row['memory_id']) for row in result.get('relations',[])}=={history_ids[name] for name in historical_wanted},elapsed)
-            code,result,elapsed=call('assemble_typed_context',dict(query=history_key,project=key,valid_at=at,
+            code,result,elapsed=call('assemble_typed_context',dict(query=history_key,project=history_key,valid_at=at,
                 enable_historical=True,enable_observations=False,enable_approved_procedures=False,
                 channel_budgets=dict(total=4096,historical_assertions=4096)))
             refs=result.get('retained_items',[])
             check('Historical typed projection retains authorized old parents',code==200 and result.get('status')=='ok'
                   and len(refs)==3 and {int(parent['record_id']) for ref in refs for parent in ref['source_version'].get('memory_parents',[])}=={history_ids[name] for name in historical_wanted},elapsed)
-            code,revalidated,_=call('revalidate_sources',dict(project=key,revalidation=dict(schema_version=1,check_id=uuid.uuid4().hex,sources=refs)))
+            code,revalidated,_=call('revalidate_sources',dict(project=history_key,revalidation=dict(schema_version=1,check_id=uuid.uuid4().hex,sources=refs)))
             check('Historical typed release preserves requested-time policy',code==200 and revalidated.get('eligible') is True)
             sql(f"UPDATE memories SET lifecycle_state='revoked' WHERE id={history_ids[history_key+'-superseded']}")
-            code,revalidated,_=call('revalidate_sources',dict(project=key,revalidation=dict(schema_version=1,check_id=uuid.uuid4().hex,sources=refs)))
+            code,revalidated,_=call('revalidate_sources',dict(project=history_key,revalidation=dict(schema_version=1,check_id=uuid.uuid4().hex,sources=refs)))
             check('Revocation after historical selection refuses release',code==200 and revalidated.get('eligible') is False)
         identities = []
         for name in (kb.application,kb.postgres,kb.embedder):

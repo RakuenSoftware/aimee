@@ -1325,18 +1325,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 			}
 			transaction = backend.auditTransaction(transaction)
 			defer transaction.Rollback(context.Background())
-			principal, authority, transport := "system:model-inference", "model", "internal"
-			if caller := options.commandContext; caller != nil && caller.Authenticated {
-				principal, transport = caller.Principal, caller.TransportIdentity
-				if transport == "" {
-					transport = principal
-				}
-				// The initiator and the content's authority are separate. Merely
-				// authenticating a model request never upgrades its content.
-				if (request.Authority == AuthorityUser && caller.UserAuthority) || request.Operation == "restore" {
-					authority = "user"
-				}
-			}
+			eligibility := eligibilityContext(request, scope, options.commandContext)
 			// These are bounded request queries, including nested source fences.
 			// Compiling their expressions with PostgreSQL JIT can exceed the
 			// whole request latency budget before any rows are read. Keep this
@@ -1351,10 +1340,16 @@ set_config('aimee.memory_scope_all',$5,true),
 set_config('aimee.principal',$6,true),
 set_config('aimee.authority',$7,true),
 set_config('aimee.transport_identity',$8,true),
-set_config('aimee.correlation_id',$9,true)`,
-				string(scope.Type), scope.Value, request.Workspace, request.Project,
-				map[bool]string{false: "0", true: "1"}[request.IncludeAll],
-				principal, authority, transport, strconv.FormatUint(invocation.TraceID, 10))
+set_config('aimee.correlation_id',$9,true),
+set_config('aimee.memory_purpose',$10,true),
+set_config('aimee.memory_policy_version',$11,true),
+set_config('aimee.memory_query_mode',$12,true),
+set_config('aimee.memory_valid_at',$13,true),
+set_config('aimee.memory_believed_at',$14,true)`,
+				eligibility.Scope.Type, eligibility.Scope.Value, eligibility.Workspace, eligibility.Project,
+				map[bool]string{false: "0", true: "1"}[eligibility.IncludeAll],
+				eligibility.Principal, eligibility.Authority, eligibility.TransportIdentity, strconv.FormatUint(invocation.TraceID, 10),
+				eligibility.Purpose, eligibility.PolicyVersion, eligibility.QueryMode, eligibility.ValidAt, eligibility.BelievedAt)
 			if err != nil {
 				return nil, bus.ModuleStatusInternal
 			}

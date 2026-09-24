@@ -56,7 +56,11 @@ func projectNativeRecall(b recallBundle, limit int) (nativeRecallProjection, int
 	}
 	var out strings.Builder
 	if len(b.AlwaysOnRules) > 0 {
-		rules, err := json.Marshal(b.AlwaysOnRules)
+		visibleRules := append([]recallRule(nil), b.AlwaysOnRules...)
+		for i := range visibleRules {
+			visibleRules[i].Source = nil
+		}
+		rules, err := json.Marshal(visibleRules)
 		if err != nil {
 			return p, 0, err
 		}

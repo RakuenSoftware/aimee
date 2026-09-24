@@ -22,6 +22,18 @@ func directiveSourceParentsSQL(table string) string {
  FROM memories m CROSS JOIN memory_collection_owner o WHERE o.id=1 AND m.id IN (` + table + `.memory_a_id,` + table + `.memory_b_id,` + table + `.resolution_memory_id)), '[]'::jsonb)::text`
 }
 
+// The summary payload and every directly copied relation input are observed
+// together. One extra parent makes overflow explicit instead of certifying a prefix.
+func relationSourceParentsSQL(alias string) string {
+	return `COALESCE((SELECT jsonb_agg(jsonb_build_object('schema_version',1,'owner_id',o.owner_id::text,
+ 'record_id',parent.id::text,'record_revision',parent.record_revision::text) ORDER BY parent.id)
+ FROM (SELECT m.id,m.record_revision FROM memories m WHERE m.id=` + alias + `.memory_id OR m.id IN (
+ SELECT ((CASE WHEN dep.source_kind='memory-relation-input-v2' THEN dep.source_ref::jsonb END)->>'record_id')::bigint
+ FROM memory_lineage dep WHERE dep.object_type='relation' AND dep.object_id=` + alias + `.id
+ AND dep.source_kind='memory-relation-input-v2')
+ ORDER BY m.id LIMIT 65) parent CROSS JOIN memory_collection_owner o WHERE o.id=1),'[]'::jsonb)::text`
+}
+
 func structuredSourceColumns(table string) string {
 	parents := `'[]'::text`
 	if table == "epistemic_directives" {
@@ -79,6 +91,24 @@ func validTypedSource(ref typedProjectionRef) bool {
 	}
 	owner := ref.Source.Version.OwnerID
 	switch ref.Source.Kind {
+	case "learning_observation", "memory_relation":
+		channel := "observations"
+		if ref.Source.Kind == "memory_relation" {
+			channel = "summaries"
+		}
+		if ref.Channel != channel || ref.ID == "" || len(ref.ID) > 1024 || ref.Source.MemoryParentState != "observed" {
+			return false
+		}
+		if ref.Source.Kind == "learning_observation" && len(ref.Source.MemoryParents) != 0 {
+			return false
+		}
+		if ref.Source.Kind == "memory_relation" && len(ref.Source.MemoryParents) == 0 {
+			return false
+		}
+	case "learning_procedure":
+		if ref.Channel != "approved_procedures" || ref.Source.MemoryParentState != "observed" || len(ref.Source.MemoryParents) != 0 {
+			return false
+		}
 	case "memory_rule", "memory_rule_collection":
 		channel := "native_rules"
 		if ref.Source.Kind == "memory_rule_collection" {
@@ -131,7 +161,11 @@ func validTypedSource(ref typedProjectionRef) bool {
 	default:
 		return false
 	}
-	id, err := strconv.ParseInt(ref.ID, 10, 64)
+	recordID := ref.ID
+	if ref.Source.Kind == "learning_observation" || ref.Source.Kind == "memory_relation" {
+		recordID = ref.Source.Version.RecordID
+	}
+	id, err := strconv.ParseInt(recordID, 10, 64)
 	if err != nil || !ref.Source.Version.validFor(id) || len(ref.Source.MemoryParents) > maxTypedMemoryParents {
 		return false
 	}
@@ -152,6 +186,23 @@ func validTypedSourceItem(ref typedProjectionRef, raw json.RawMessage) bool {
 	}
 	if ref.Source == nil {
 		return true
+	}
+	switch ref.Source.Kind {
+	case "learning_observation":
+		var item struct {
+			ID string `json:"observation_id"`
+		}
+		return json.Unmarshal(raw, &item) == nil && item.ID == ref.ID
+	case "learning_procedure":
+		var item struct {
+			ID json.Number `json:"proposal_id"`
+		}
+		return json.Unmarshal(raw, &item) == nil && item.ID.String() == ref.ID
+	case "memory_relation":
+		var item struct {
+			Entity string `json:"entity"`
+		}
+		return json.Unmarshal(raw, &item) == nil && item.Entity == ref.ID
 	}
 	if ref.Source.Kind == "memory_episode" {
 		var episode struct {

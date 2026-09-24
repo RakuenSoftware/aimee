@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	store "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
@@ -567,7 +568,7 @@ func typedScopeParams(request DataRequest, exact Scope) []any {
 	return []any{request.IncludeAll, request.Workspace, request.Project, exact.Type, exact.Value}
 }
 func (s *postgresDataStore) typedObservations(ctx context.Context, request DataRequest, exact Scope) ([]typedItem, error) {
-	rows, err := s.db.Query(ctx, `SELECT observation_id,observation_type,title,summary,confidence,evidence_count FROM learning_observations WHERE status='active' AND `+typedScopeSQL+` ORDER BY refreshed_at DESC,observation_id LIMIT 64`, typedScopeParams(request, exact)...)
+	rows, err := s.db.Query(ctx, `SELECT observation_id,observation_type,title,summary,confidence,evidence_count,memory_record_id,record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1) FROM learning_observations WHERE status='active' AND `+typedScopeSQL+` ORDER BY refreshed_at DESC,observation_id LIMIT 64`, typedScopeParams(request, exact)...)
 	if err != nil {
 		return nil, err
 	}
@@ -576,16 +577,21 @@ func (s *postgresDataStore) typedObservations(ctx context.Context, request DataR
 	for rows.Next() {
 		var id, kind, title, summary string
 		var confidence float64
-		var evidence int64
-		if err = rows.Scan(&id, &kind, &title, &summary, &confidence, &evidence); err != nil {
+		var evidence, recordID int64
+		var owner, revision string
+		if err = rows.Scan(&id, &kind, &title, &summary, &confidence, &evidence, &recordID, &revision, &owner); err != nil {
 			return nil, err
 		}
-		items = append(items, typedItem{value: map[string]any{"observation_id": id, "type": kind, "title": title, "summary": summary, "confidence": confidence, "evidence_count": evidence, "authority": "derived_read_only"}, id: id, text: summary})
+		source, err := structuredSource("learning_observation", owner, revision, "[]", recordID)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, typedItem{source: source, value: map[string]any{"observation_id": id, "type": kind, "title": title, "summary": summary, "confidence": confidence, "evidence_count": evidence, "authority": "derived_read_only"}, id: id, text: summary})
 	}
 	return items, rows.Err()
 }
 func (s *postgresDataStore) typedProcedures(ctx context.Context, request DataRequest, exact Scope) ([]typedItem, error) {
-	rows, err := s.db.Query(ctx, `WITH proposals AS (SELECT id,target_key,action_json,CASE WHEN action_json IS JSON OBJECT THEN action_json::jsonb ELSE '{}'::jsonb END AS action FROM learning_proposals WHERE state='committed' AND sink='artifact'), scoped AS (SELECT *,COALESCE(action->>'scope_kind','') AS scope_kind,COALESCE(action->>'scope_id','') AS scope_id FROM proposals) SELECT id,target_key,action_json FROM scoped WHERE action_json IS JSON OBJECT AND `+typedScopeSQL+` ORDER BY id DESC LIMIT 32`, typedScopeParams(request, exact)...)
+	rows, err := s.db.Query(ctx, `WITH proposals AS (SELECT id,target_key,action_json,record_revision,CASE WHEN action_json IS JSON OBJECT THEN action_json::jsonb ELSE '{}'::jsonb END AS action FROM learning_proposals WHERE state='committed' AND sink='artifact'), scoped AS (SELECT *,COALESCE(action->>'scope_kind','') AS scope_kind,COALESCE(action->>'scope_id','') AS scope_id FROM proposals) SELECT id,target_key,action_json,record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1) FROM scoped WHERE action_json IS JSON OBJECT AND `+typedScopeSQL+` ORDER BY id DESC LIMIT 32`, typedScopeParams(request, exact)...)
 	if err != nil {
 		return nil, err
 	}
@@ -593,11 +599,15 @@ func (s *postgresDataStore) typedProcedures(ctx context.Context, request DataReq
 	var items []typedItem
 	for rows.Next() {
 		var id int64
-		var key, action string
-		if err = rows.Scan(&id, &key, &action); err != nil {
+		var key, action, revision, owner string
+		if err = rows.Scan(&id, &key, &action, &revision, &owner); err != nil {
 			return nil, err
 		}
-		items = append(items, typedItem{value: map[string]any{"proposal_id": id, "target_key": key, "state": "committed", "procedure": json.RawMessage(action)}, id: strconv.FormatInt(id, 10), text: action})
+		source, err := structuredSource("learning_procedure", owner, revision, "[]", id)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, typedItem{source: source, value: map[string]any{"proposal_id": id, "target_key": key, "state": "committed", "procedure": json.RawMessage(action)}, id: strconv.FormatInt(id, 10), text: action})
 	}
 	return items, rows.Err()
 }
@@ -679,21 +689,15 @@ func (s *postgresDataStore) assembleTypedContext(ctx context.Context, trace uint
 		}
 	}
 	if !invalid && cfg.Flags["summaries"] {
-		var profile EntityProfile
-		err := s.typedRead(ctx, func() error {
-			var err error
-			profile, err = s.entityProfile(ctx, request.Query, exact)
-			if errors.Is(err, ErrMemoryNotFound) {
-				return nil
-			}
-			return err
-		})
+		var item *typedItem
+		err := s.typedRead(ctx, func() error { var e error; item, e = s.typedRelationSummary(ctx, request.Query, exact); return e })
 		if err != nil {
 			r.fail("summaries", "entity summary unavailable")
-		} else if profile.Summary != "" {
-			r.add("summaries", typedItem{value: map[string]any{"entity": profile.Entity, "summary": profile.Summary, "authority": "derived_noncanonical"}, id: profile.Entity, text: profile.Summary})
+		} else if item != nil {
+			r.add("summaries", *item)
 		}
 	}
+
 	for _, channel := range []struct {
 		name, reason string
 		load         func(context.Context, DataRequest, Scope) ([]typedItem, error)
@@ -729,4 +733,31 @@ func (s *postgresDataStore) assembleTypedContext(ctx context.Context, trace uint
 		r.Reason = "invalid temporal request; no context assembled"
 	}
 	return *r, nil
+}
+
+func (s *postgresDataStore) typedRelationSummary(ctx context.Context, entity string, exact Scope) (*typedItem, error) {
+	var id int64
+	var text, owner, revision, parents string
+	err := s.db.QueryRow(ctx, `SELECT r.id,r.fact_text,o.owner_id::text,r.record_revision::text,`+relationSourceParentsSQL("r")+`
+ FROM memory_relations r JOIN memories m ON m.id=r.memory_id CROSS JOIN memory_collection_owner o
+ WHERE o.id=1 AND `+currentMemorySQL("m.")+` AND `+currentRelationInputsSQL("r")+` AND `+relationValidityAtSQL("r.", "CURRENT_TIMESTAMP")+`
+ AND ($2='' OR (m.scope_type=$2 AND m.scope_value=$3)) AND (lower(r.src_entity)=lower($1) OR lower(r.dst_entity)=lower($1))
+ ORDER BY `+domainScopeRankSQL+` DESC,r.weight DESC,r.created_at DESC,r.id DESC LIMIT 1`, entity, exact.Type, exact.Value).Scan(&id, &text, &owner, &revision, &parents)
+	if store.IsNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if text == "" {
+		return nil, nil
+	}
+	source, err := structuredSource("memory_relation", owner, revision, parents, id)
+	if err != nil {
+		return nil, err
+	}
+	if !validTypedSource(typedProjectionRef{Channel: "summaries", ID: entity, Source: source}) {
+		return nil, errors.New("summary source contract unavailable")
+	}
+	return &typedItem{value: map[string]any{"entity": entity, "summary": text, "authority": "derived_noncanonical"}, id: entity, text: text, source: source}, nil
 }

@@ -1,0 +1,25 @@
+[
+  {
+    "name": "Historical assertions use requested-time parent eligibility",
+    "passed": true,
+    "elapsed_ms": 602.092
+  },
+  {
+    "name": "Historical relations use requested-time parent eligibility",
+    "passed": true,
+    "elapsed_ms": 126.464
+  },
+  {
+    "name": "Historical typed projection retains authorized old parents",
+    "passed": true,
+    "elapsed_ms": 317.793
+  },
+  {
+    "name": "Historical typed release preserves requested-time policy",
+    "passed": true
+  },
+  {
+    "name": "Revocation after historical selection refuses release",
+    "passed": true
+  }
+]

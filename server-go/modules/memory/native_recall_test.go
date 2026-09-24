@@ -148,3 +148,13 @@ func TestNativeRecallRetainedVersionSelection(t *testing.T) {
 		t.Fatal("invented legacy source evidence", err)
 	}
 }
+
+func TestNativeRuleMetadataStaysOutsidePrompt(t *testing.T) {
+	b := nativeRecallFixture()
+	source := &typedSourceVersion{Kind: "memory_rule", Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: "00000000-0000-0000-0000-000000000001", RecordID: "1", RecordRevision: "7"}, MemoryParentState: "observed"}
+	b.AlwaysOnRules = []recallRule{{ID: 1, Title: "Required", Description: "Keep the complete constraint", Source: source}}
+	p, _, err := projectNativeRecall(b, 4096)
+	if err != nil || len(p.Sources) != 1 || p.Sources[0].Source != source || !strings.Contains(p.Text, "Keep the complete constraint") || strings.Contains(p.Text, "record_revision") || b.AlwaysOnRules[0].Source != source {
+		t.Fatalf("rule projection lost content or separated evidence: %+v %v", p, err)
+	}
+}

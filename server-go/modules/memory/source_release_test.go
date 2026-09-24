@@ -561,7 +561,7 @@ func TestSourceSendStorageBarrierPostgres(t *testing.T) {
 	}()
 	exec(admin, "SET search_path="+quoted+",public")
 	exec(other, "SET search_path="+quoted+",public")
-	names := []string{"rules", "memories", "memory_collection_owner", "memory_units", "memory_lineage", "memory_episodes", "memory_summaries", "derived_memory_dependencies", "entity_edges", "fact_evidence", "epistemic_directives", "prospective_memories"}
+	names := []string{"memory_links", "memory_scopes", "learning_observations", "learning_proposals", "memory_relations", "rules", "memories", "memory_collection_owner", "memory_units", "memory_lineage", "memory_episodes", "memory_summaries", "derived_memory_dependencies", "entity_edges", "fact_evidence", "epistemic_directives", "prospective_memories"}
 	for _, name := range names {
 		exec(admin, "CREATE TABLE "+name+"(id integer PRIMARY KEY,value integer NOT NULL DEFAULT 0,use_count integer NOT NULL DEFAULT 0)")
 	}
@@ -609,6 +609,15 @@ func TestSourceSendStorageBarrierPostgres(t *testing.T) {
 	if e := <-acquired; e != nil {
 		t.Fatal(e)
 	}
+	// Owner-maintained links and audience tags also participate in source
+	// eligibility. Their TRUNCATE path must not bypass row-level revision hooks.
+	exec(admin, "RESET ROLE")
+	for _, table := range names {
+		if _, e := admin.Exec(ctx, "TRUNCATE "+table); e == nil || !strings.Contains(e.Error(), "55P03") {
+			t.Fatalf("guarded truncate %s: %v", table, e)
+		}
+	}
+	exec(admin, "SET ROLE "+qrole)
 	var value int
 	if e := admin.QueryRow(ctx, "SELECT value FROM memories WHERE id=1").Scan(&value); e != nil || value != 1 {
 		t.Fatal("new source state unavailable", value, e)
@@ -916,5 +925,128 @@ func TestHistoricalMemoryEvidencePostgres(t *testing.T) {
 		exec("SET LOCAL ROLE aimee_store_runtime")
 		check(false)
 		exec("ROLLBACK TO SAVEPOINT history_exclusion;RELEASE SAVEPOINT history_exclusion")
+	}
+}
+
+func TestAuxiliaryTypedSourceObservationsPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, e := tx.Exec(ctx, q, args...); e != nil {
+			t.Fatal(e)
+		}
+	}
+	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$;
+ GRANT USAGE ON SCHEMA public TO aimee_store_runtime;GRANT SELECT ON ALL TABLES IN SCHEMA public TO aimee_store_runtime;
+ GRANT EXECUTE ON FUNCTION memory_send_guard_begin(TEXT,INTEGER),memory_send_guard_end(TEXT) TO aimee_store_runtime;
+ SELECT set_config('aimee.memory_scope_all','1',true),set_config('jit','off',true)`)
+	const key = "typed-auxiliary-source"
+	var parent, relation, signal, procedure int64
+	insert := func(q string, id *int64, args ...any) {
+		t.Helper()
+		if e := tx.QueryRow(ctx, q, args...).Scan(id); e != nil {
+			t.Fatal(e)
+		}
+	}
+	insert(`INSERT INTO memories(key,content,scope_type,scope_value) VALUES($1,'source','project',$1) RETURNING id`, &parent, key)
+	insert(`INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text) VALUES($1,$2,'uses','target','original summary') RETURNING id`, &relation, parent, key)
+	insert(`INSERT INTO learning_signals(signal_type) VALUES('typed-source-fixture') RETURNING id`, &signal)
+	insert(`INSERT INTO learning_proposals(signal_id,sink,state,target_key,action_json) VALUES($1,'artifact','committed',$2,jsonb_build_object('scope_kind','project','scope_id',$2::text,'step','original procedure')::text) RETURNING id`, &procedure, signal, key)
+	exec(`INSERT INTO learning_observations(observation_id,scope_kind,scope_id,observation_type,summary,status,synthesis_policy_version) VALUES($1,'project',$1,'recurring_failure','original observation','active','fixture')`, key)
+	exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_project',$1,true)`, key)
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}
+	refs := []typedProjectionRef{}
+	appendItem := func(channel string, item typedItem) {
+		t.Helper()
+		ref := typedProjectionRef{Channel: channel, ID: item.id, Source: item.source}
+		raw, _ := json.Marshal(item.value)
+		if ref.Source == nil || !validTypedSourceItem(ref, raw) {
+			t.Fatal("auxiliary source missing", ref)
+		}
+		refs = append(refs, ref)
+	}
+	observations, e := backend.typedObservations(ctx, DataRequest{Project: key}, Scope{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, item := range observations {
+		if item.id == key {
+			appendItem("observations", item)
+		}
+	}
+	procedures, e := backend.typedProcedures(ctx, DataRequest{Project: key}, Scope{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, item := range procedures {
+		if item.id == fmt.Sprint(procedure) {
+			appendItem("approved_procedures", item)
+		}
+	}
+	summary, e := backend.typedRelationSummary(ctx, key, Scope{})
+	if e != nil || summary == nil {
+		t.Fatal("summary observation", summary, e)
+	}
+	appendItem("summaries", *summary)
+	if len(refs) != 3 {
+		t.Fatal("incomplete auxiliary sources", refs)
+	}
+	request := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("9", 32), Sources: refs}
+	check := func(want bool) {
+		t.Helper()
+		ok, e := backend.revalidateSources(ctx, request, Scope{})
+		if e != nil || ok != want {
+			t.Fatal("auxiliary revalidation", ok, want, e)
+		}
+	}
+	check(true)
+	for _, q := range []string{
+		`UPDATE learning_observations SET summary='changed' WHERE observation_id='` + key + `'`,
+		`UPDATE learning_observations SET status='retired' WHERE observation_id='` + key + `'`,
+		`UPDATE learning_observations SET scope_id='foreign' WHERE observation_id='` + key + `'`,
+		fmt.Sprintf(`UPDATE learning_proposals SET state='archived' WHERE id=%d`, procedure),
+		fmt.Sprintf(`UPDATE learning_proposals SET action_json=jsonb_set(action_json::jsonb,'{step}','"changed"')::text WHERE id=%d`, procedure),
+		fmt.Sprintf(`UPDATE memory_relations SET fact_text='changed' WHERE id=%d`, relation),
+		fmt.Sprintf(`UPDATE memories SET content='changed' WHERE id=%d`, parent),
+		fmt.Sprintf(`UPDATE memories SET lifecycle_state='revoked' WHERE id=%d`, parent),
+		fmt.Sprintf(`UPDATE memories SET scope_value='foreign' WHERE id=%d`, parent),
+	} {
+		exec("SAVEPOINT auxiliary_change;RESET ROLE")
+		exec(q)
+		exec("SET LOCAL ROLE aimee_store_runtime")
+		check(false)
+		exec("ROLLBACK TO SAVEPOINT auxiliary_change;RELEASE SAVEPOINT auxiliary_change")
+		check(true)
+	}
+	request.SendGuard = "acquire"
+	if ok, e := backend.guardedSourceRevalidation(ctx, request, Scope{}); e != nil || !ok {
+		t.Fatal("auxiliary guard", ok, e)
+	}
+	for _, q := range []string{`UPDATE learning_observations SET summary='raced' WHERE observation_id='` + key + `'`, fmt.Sprintf(`UPDATE learning_proposals SET state='archived' WHERE id=%d`, procedure), fmt.Sprintf(`UPDATE memory_relations SET fact_text='raced' WHERE id=%d`, relation)} {
+		exec("SAVEPOINT refused_auxiliary;RESET ROLE")
+		if _, e := tx.Exec(ctx, q); e == nil || !strings.Contains(e.Error(), "55P03") {
+			t.Fatal("unguarded auxiliary mutation", e)
+		}
+		exec("ROLLBACK TO SAVEPOINT refused_auxiliary;RELEASE SAVEPOINT refused_auxiliary;SET LOCAL ROLE aimee_store_runtime")
+	}
+	request.SendGuard = "release"
+	request.Sources = nil
+	if ok, e := backend.guardedSourceRevalidation(ctx, request, Scope{}); e != nil || !ok {
+		t.Fatal("auxiliary completion", ok, e)
 	}
 }

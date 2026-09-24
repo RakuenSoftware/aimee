@@ -1,0 +1,215 @@
+2026/09/24 15:44:36 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:44:36 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:44:36 memory data failure operation="get" trace=0 status=5 class=internal
+2026/09/24 15:44:36 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:44:36 memory data failure operation="get" trace=0 status=5 class=internal
+2026/09/24 15:44:36 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:44:36 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:44:36 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:44:40 memory data failure operation="correction-review" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:44:43 memory data failure operation="other" trace=0 status=5 class=sqlstate_P0001
+2026/09/24 15:44:43 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:44:44 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:44:45 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:44:45 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/24 15:44:47 memory data failure operation="correction-review" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:44:47 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:44:48 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:44:48 memory data failure operation="delete" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:44:48 memory data failure operation="store" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:44:48 memory data failure operation="store" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:44:48 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:44:50 memory data failure operation="other" trace=73 status=5 class=sqlstate_23514
+2026/09/24 15:44:50 memory data failure operation="other" trace=73 status=5 class=sqlstate_42501
+2026/09/24 15:44:50 memory data failure operation="get" trace=73 status=5 class=internal
+2026/09/24 15:44:50 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/24 15:44:50 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:50 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:50 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/24 15:44:50 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:50 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:50 memory data failure operation="other" trace=0 status=5 class=sqlstate_22008
+2026/09/24 15:44:50 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:50 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:50 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/24 15:44:50 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/24 15:44:51 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/24 15:44:51 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:51 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:51 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/24 15:44:51 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:51 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:51 memory data failure operation="other" trace=0 status=5 class=sqlstate_22008
+2026/09/24 15:44:51 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:51 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:51 memory data failure operation="other" trace=0 status=5 class=sqlstate_42P01
+2026/09/24 15:44:51 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/24 15:44:51 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/24 15:44:54 memory data failure operation="update-as" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:44:54 memory data failure operation="insert-epistemic" trace=73 status=5 class=sqlstate_23514
+2026/09/24 15:44:54 memory data failure operation="insert-epistemic" trace=73 status=5 class=sqlstate_23514
+2026/09/24 15:44:54 memory data failure operation="insert-epistemic" trace=0 status=5 class=internal
+2026/09/24 15:44:54 memory data failure operation="supersede" trace=73 status=5 class=sqlstate_23514
+2026/09/24 15:44:55 memory data failure operation="insert-epistemic" trace=73 status=5 class=internal
+2026/09/24 15:44:55 memory data failure operation="insert-epistemic" trace=73 status=5 class=internal
+2026/09/24 15:44:55 memory data failure operation="update-as" trace=73 status=5 class=internal
+2026/09/24 15:44:55 memory data failure operation="get" trace=0 status=5 class=sqlstate_42P01
+2026/09/24 15:44:55 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:55 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:55 memory data failure operation="store" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:55 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:55 memory data failure operation="delete" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:55 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:44:55 memory data failure operation="compose-recall" trace=0 status=5 class=internal
+2026/09/24 15:44:55 memory data failure operation="compose-recall" trace=0 status=5 class=internal
+2026/09/24 15:44:55 memory data failure operation="compose-recall" trace=0 status=5 class=sqlstate_42P01
+2026/09/24 15:44:55 memory data failure operation="recall-bundle" trace=0 status=5 class=sqlstate_25P02
+2026/09/24 15:45:07 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:45:07 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:45:07 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:45:07 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:45:07 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:45:07 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:45:07 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:45:07 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:45:07 memory data failure operation="vector-rebuild" trace=0 status=5 class=internal
+2026/09/24 15:45:07 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:45:07 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:45:07 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:45:07 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:45:07 memory data failure operation="update-as" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:45:08 memory data failure operation="delete-as" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:45:08 memory data failure operation="delete-as" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:45:08 memory data failure operation="insert-epistemic" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:45:08 memory data failure operation="insert-epistemic" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:45:08 memory data failure operation="other" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:45:08 memory data failure operation="other" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:45:08 memory data failure operation="other" trace=0 status=5 class=sqlstate_P0001
+2026/09/24 15:45:08 memory data failure operation="other" trace=0 status=5 class=sqlstate_P0001
+2026/09/24 15:45:08 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:45:08 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:45:08 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:45:08 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:45:08 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:45:09 memory data failure operation="assertion-search" trace=73 status=5 class=sqlstate_22007
+2026/09/24 15:45:09 memory data failure operation="assertion-search" trace=73 status=5 class=sqlstate_22007
+2026/09/24 15:45:09 memory data failure operation="assertion-search" trace=73 status=5 class=sqlstate_22008
+2026/09/24 15:45:09 memory data failure operation="assertion-search" trace=0 status=5 class=sqlstate_42501
+2026/09/24 15:45:09 memory data failure operation="assertion-search" trace=73 status=5 class=sqlstate_42501
+--- FAIL: TestMemoryRuntimeRoleReplay (3.48s)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: permission denied for table memory_embeddings (SQLSTATE 42501)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: new row for relation "memory_mutation_receipts" violates check constraint "retry_fixture_fail" (SQLSTATE 23514)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: new row for relation "fact_graph_commits" violates check constraint "retry_fixture_admission" (SQLSTATE 23514)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: new row for relation "fact_graph_commits" violates check constraint "retry_fixture_admission" (SQLSTATE 23514)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: new row for relation "memory_mutation_receipts" violates check constraint "deletion_fixture_fail" (SQLSTATE 23514)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: new row for relation "memory_mutation_receipts" violates check constraint "deletion_fixture_fail" (SQLSTATE 23514)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: new row for relation "memory_mutation_receipts" violates check constraint "creation_fixture_fail" (SQLSTATE 23514)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: new row for relation "memory_mutation_receipts" violates check constraint "creation_fixture_fail" (SQLSTATE 23514)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: new row for relation "memory_mutation_receipts" violates check constraint "lifecycle_fixture_fail" (SQLSTATE 23514)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: new row for relation "memory_mutation_receipts" violates check constraint "lifecycle_fixture_fail" (SQLSTATE 23514)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: demotion action fixture (SQLSTATE P0001)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:42: runtime SQL exec: ERROR: cursor fixture failure (SQLSTATE P0001)
+    runtime_role_test.go:34: runtime SQL: ERROR: permission denied for table trace_mining_log (SQLSTATE 42501)
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:151: derived serving boundary: unbounded
+    runtime_role_test.go:151: derived serving boundary: inclusive offset
+    runtime_role_test.go:151: derived serving boundary: exclusive offset
+    runtime_role_test.go:151: derived serving boundary: future fraction
+    runtime_role_test.go:151: derived serving boundary: unexpired fraction
+    runtime_role_test.go:151: derived serving boundary: expired
+    runtime_role_test.go:151: derived serving boundary: suppressed
+    runtime_role_test.go:151: derived serving boundary: retired
+    runtime_role_test.go:151: derived serving boundary: superseded
+    runtime_role_test.go:151: derived serving boundary: archived
+    runtime_role_test.go:151: derived serving boundary: quarantined
+    runtime_role_test.go:151: derived serving boundary: deleted
+    runtime_role_test.go:151: derived serving boundary: revoked
+    runtime_role_test.go:151: derived serving boundary: rejected
+    runtime_role_test.go:151: derived serving boundary: cross-scope
+    runtime_role_test.go:153: approved_procedures {"context_accounting":{"schema_version":1,"boundary":"typed_memory_projection","unit":"utf8_bytes","count_state":"exact","token_count_state":"unavailable","max_context_bytes":1048576,"rendered_bytes":566,"digest":"sha256:77e677a012b403612c64f039eb8f9089ac2fcf8aacfd74af894fcff90c299ae1"},"projection_schema_version":1,"selection_digest":"sha256:2e58936ff92dd7c397afd88d566cbc9290e17f28d9d803b26ed3f449da125c01","projection_digest":"sha256:77e677a012b403612c64f039eb8f9089ac2fcf8aacfd74af894fcff90c299ae1","rendered_bytes":566,"token_count_state":"unavailable","retained_items":[{"channel":"episodes","stable_id":"9007199254743001","source_version":{"record_kind":"memory_episode","version":{"schema_version":1,"owner_id":"1dc8309c-3707-4585-b11a-f6c22409437d","record_id":"9007199254743001","record_revision":"1"},"memory_parents":[{"schema_version":1,"owner_id":"1dc8309c-3707-4585-b11a-f6c22409437d","record_id":"173396","record_revision":"1"}],"memory_parent_state":"observed"}},{"channel":"summaries","stable_id":"typed-fixture","source_version":{"record_kind":"memory_relation","version":{"schema_version":1,"owner_id":"1dc8309c-3707-4585-b11a-f6c22409437d","record_id":"16264","record_revision":"1"},"memory_parents":[{"schema_version":1,"owner_id":"1dc8309c-3707-4585-b11a-f6c22409437d","record_id":"173396","record_revision":"1"}],"memory_parent_state":"observed"}},{"channel":"working_context","stable_id":"turn:0"}],"source_version_state":"partial","retrieval_availability":"degraded","status":"ok","default_injection":true,"total_budget_tokens":4096,"used_tokens":16,"rendered_tokens":142,"channels":{"approved_procedures":{"enabled":true,"budget_tokens":500,"used_tokens":0,"status":"degraded","reason":"reviewed procedure store unavailable","items":[]},"current_assertions":{"enabled":false,"budget_tokens":800,"used_tokens":0,"status":"disabled","items":[]},"episodes":{"enabled":true,"budget_tokens":500,"used_tokens":7,"status":"ok","items":[{"episode_key":"typed-fixture","excerpt":"typed-fixture episode 界","reference_time":"2026-01-01","source_session":"session","stable_id":"9007199254743001","trust":"untrusted_data"}]},"historical_assertions":{"enabled":false,"budget_tokens":400,"used_tokens":0,"status":"disabled","items":[]},"observations":{"enabled":true,"budget_tokens":500,"used_tokens":0,"status":"degraded","reason":"observation synthesis unavailable","items":[]},"summaries":{"enabled":true,"budget_tokens":300,"used_tokens":5,"status":"ok","items":[{"authority":"derived_noncanonical","entity":"typed-fixture","summary":"visible summary 界"}]},"working_context":{"enabled":true,"budget_tokens":500,"used_tokens":4,"status":"ok","items":[{"authority":"ephemeral_untrusted_data","stable_id":"turn:0","text":"recent 界 turn"}]}},"packing_trace":[{"channel":"episodes","stable_id":"9007199254743001","estimated_tokens":7,"decision":"included","reason":"ranked evidence fit channel and total budgets"},{"channel":"summaries","stable_id":"typed-fixture","estimated_tokens":5,"decision":"included","reason":"ranked evidence fit channel and total budgets"},{"channel":"working_context","stable_id":"turn:0","estimated_tokens":4,"decision":"included","reason":"ranked evidence fit channel and total budgets"}],"watermark":{"durable_at":"2026-01-02","observations_at":"2026-01-02","latest_turn_at":"2026-01-03","durable_lag":true,"status":"known"},"context_sufficiency":"unknown","sufficiency_reason":"a requested channel degraded; task requirements have not been evaluated","rendered_context":"\u003cmemory_data trust=\"untrusted\" authorization=\"none\"\u003e{\"episodes\":[{\"episode_key\":\"typed-fixture\",\"excerpt\":\"typed-fixture episode 界\",\"reference_time\":\"2026-01-01\",\"source_session\":\"session\",\"stable_id\":\"9007199254743001\",\"trust\":\"untrusted_data\"}],\"summaries\":[{\"authority\":\"derived_noncanonical\",\"entity\":\"typed-fixture\",\"summary\":\"visible summary 界\"}],\"working_context\":[{\"authority\":\"ephemeral_untrusted_data\",\"stable_id\":\"turn:0\",\"text\":\"recent 界 turn\"}]}\u003c/memory_data\u003e\n\u003capproved_procedures authority=\"reviewed\" authorization=\"none\"\u003e[]\u003c/approved_procedures\u003e","active_context_missing":false}
+2026/09/24 15:45:10 memory data failure operation="other" trace=0 status=5 class=sqlstate_23514
+2026/09/24 15:45:10 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/24 15:48:01 memory data failure operation="vector-search" trace=0 status=5 class=sqlstate_42P01
+2026/09/24 15:48:02 memory data failure operation="vector-search" trace=0 status=5 class=sqlstate_42P01
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	206.332s
+FAIL

@@ -18462,6 +18462,35 @@ $memory_proposal_grants$;
 -- creates these objects, so the Go migrator's default privileges do not cover
 -- them. Grant only the memory domain's relations, never the Vault/control or
 -- WORM ledgers; RLS remains enabled and DDL stays with the schema owner.
+-- BEGIN typed auxiliary source revisions
+ALTER TABLE learning_observations ADD COLUMN IF NOT EXISTS memory_record_id BIGINT GENERATED ALWAYS AS IDENTITY;
+CREATE UNIQUE INDEX IF NOT EXISTS learning_observation_memory_record_id ON learning_observations(memory_record_id);
+ALTER TABLE learning_observations ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK(record_revision>0);
+CREATE OR REPLACE FUNCTION memory_assign_observation_revision() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+BEGIN
+ IF TG_OP='INSERT' THEN NEW.record_revision:=1; RETURN NEW; END IF;
+ IF NEW.memory_record_id<>OLD.memory_record_id THEN RAISE EXCEPTION 'observation source identity is immutable'; END IF;
+ IF (to_jsonb(NEW)-ARRAY['record_revision','refreshed_at','learning_observations_fts_tsv']) IS DISTINCT FROM
+    (to_jsonb(OLD)-ARRAY['record_revision','refreshed_at','learning_observations_fts_tsv']) THEN
+  NEW.record_revision:=OLD.record_revision+1;
+ ELSE NEW.record_revision:=OLD.record_revision;
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_observation_record_revision ON learning_observations;
+CREATE TRIGGER memory_observation_record_revision BEFORE INSERT OR UPDATE ON learning_observations
+ FOR EACH ROW EXECUTE FUNCTION memory_assign_observation_revision();
+ALTER TABLE learning_proposals ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK(record_revision>0);
+DROP TRIGGER IF EXISTS memory_procedure_record_revision ON learning_proposals;
+CREATE TRIGGER memory_procedure_record_revision BEFORE INSERT OR UPDATE ON learning_proposals
+ FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{learning_proposals_fts_tsv}');
+ALTER TABLE memory_relations ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK(record_revision>0);
+DROP TRIGGER IF EXISTS memory_relation_record_revision ON memory_relations;
+CREATE TRIGGER memory_relation_record_revision BEFORE INSERT OR UPDATE ON memory_relations
+ FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{memory_relations_fts_tsv}');
+-- END typed auxiliary source revisions
+
 DO $memory_store_grants$
 DECLARE
   relation_name TEXT;
@@ -18521,8 +18550,8 @@ BEGIN
   GRANT USAGE, SELECT ON SEQUENCE fact_evidence_id_seq, rel_types_id_seq, ontology_evaluations_id_seq TO aimee_store_runtime;
   -- Typed memory context reads reviewed learning outputs; it cannot mutate or approve them.
   GRANT SELECT(observation_id,scope_kind,scope_id,observation_type,title,summary,status,
-    confidence,evidence_count,refreshed_at) ON learning_observations TO aimee_store_runtime;
-  GRANT SELECT(id,sink,state,target_key,action_json) ON learning_proposals TO aimee_store_runtime;
+    confidence,evidence_count,refreshed_at,memory_record_id,record_revision) ON learning_observations TO aimee_store_runtime;
+  GRANT SELECT(id,sink,state,target_key,action_json,record_revision) ON learning_proposals TO aimee_store_runtime;
   GRANT SELECT(id,from_id,into_id,undone), INSERT(from_id,into_id), UPDATE(undone) ON entity_merges TO aimee_store_runtime;
   GRANT USAGE,SELECT ON SEQUENCE entity_merges_id_seq TO aimee_store_runtime;
   GRANT SELECT(id,name_norm,status,priority), INSERT(name_norm,status,priority), UPDATE(status,priority) ON entity_name_conflicts TO aimee_store_runtime;
@@ -18548,31 +18577,6 @@ BEGIN
 END
 $memory_store_grants$;
 
--- Schema build metadata (recorded LAST, after every object above, so its presence
--- at the current values proves a complete, current migration). A HARDENED-tier
--- runtime kb connects as a non-owner role that CANNOT apply DDL; it reads these to
--- verify (read-only, db2_verify_pre_provisioned) that the schema it is serving
--- against was fully migrated at a compatible embedding dimension and is not stale,
--- and fails closed otherwise. Recorded here (not in C) so a plain
--- `psql -f schema.sql` migrate records them too.
---
--- schema_embedding_dim: DO NOTHING keeps the authoritative C record-or-check drift
--- guard in charge on the dev auto-apply path (it refuses a re-apply at a different
--- dim); on a one-shot migrate this is simply the recorded build dim.
-INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', '__EMBED_DIM__')
-  ON CONFLICT (key) DO NOTHING;
--- Reader readiness is a SOFTWARE capability, not the operator's enable switch.
--- Recording it here makes upgrades declare the completed six-slice reader path
--- while leaving both content tables' RLS flags unchanged. kb_content_scope_enable()
--- still refuses until every content row has an exact projects.kb_project.
-INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
-  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
--- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
--- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
--- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '34')
-  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
-
 -- BEGIN recall rule revisions
 ALTER TABLE rules ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK(record_revision>0);
 DROP TRIGGER IF EXISTS memory_rule_record_revision ON rules;
@@ -18597,6 +18601,8 @@ DROP TRIGGER IF EXISTS memory_rule_collection_revision ON rules;
 CREATE TRIGGER memory_rule_collection_revision AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON rules
  FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_rule_change();
 -- END recall rule revisions
+
+
 
 -- BEGIN memory send guards
 -- A durable send guard survives owner/connection loss. Mutations take a shared
@@ -18752,4 +18758,49 @@ DROP TRIGGER IF EXISTS memory_send_guard ON rules;
 CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON rules FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
 DROP TRIGGER IF EXISTS memory_send_truncate_guard ON rules;
 CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON rules FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON learning_observations;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON learning_observations FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON learning_observations;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON learning_observations FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON learning_proposals;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON learning_proposals FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON learning_proposals;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON learning_proposals FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_relations;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_relations FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_relations;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_relations FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_links;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_links FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_links;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_links FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON memory_scopes;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON memory_scopes FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_scopes;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_scopes FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
 -- END memory send guards
+
+-- Schema build metadata (recorded LAST, after every object above, so its presence
+-- at the current values proves a complete, current migration). A HARDENED-tier
+-- runtime kb connects as a non-owner role that CANNOT apply DDL; it reads these to
+-- verify (read-only, db2_verify_pre_provisioned) that the schema it is serving
+-- against was fully migrated at a compatible embedding dimension and is not stale,
+-- and fails closed otherwise. Recorded here (not in C) so a plain
+-- `psql -f schema.sql` migrate records them too.
+--
+-- schema_embedding_dim: DO NOTHING keeps the authoritative C record-or-check drift
+-- guard in charge on the dev auto-apply path (it refuses a re-apply at a different
+-- dim); on a one-shot migrate this is simply the recorded build dim.
+INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', '__EMBED_DIM__')
+  ON CONFLICT (key) DO NOTHING;
+-- Reader readiness is a SOFTWARE capability, not the operator's enable switch.
+-- Recording it here makes upgrades declare the completed six-slice reader path
+-- while leaving both content tables' RLS flags unchanged. kb_content_scope_enable()
+-- still refuses until every content row has an exact projects.kb_project.
+INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+-- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
+-- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
+-- kb started against an older schema fails closed.
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '35')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

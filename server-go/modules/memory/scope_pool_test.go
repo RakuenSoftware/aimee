@@ -169,7 +169,12 @@ func TestMemoryScopeConcurrentPoolReuse(t *testing.T) {
    AND COALESCE(current_setting('aimee.memory_scope_value',true),'')=''
    AND COALESCE(current_setting('aimee.memory_project',true),'')=''
    AND COALESCE(current_setting('aimee.memory_scope_all',true),'')=''
-   AND COALESCE(current_setting('aimee.principal',true),'')=''`).Scan(&clean)
+   AND COALESCE(current_setting('aimee.principal',true),'')=''
+   AND COALESCE(current_setting('aimee.memory_purpose',true),'')=''
+   AND COALESCE(current_setting('aimee.memory_policy_version',true),'')=''
+   AND COALESCE(current_setting('aimee.memory_query_mode',true),'')=''
+   AND COALESCE(current_setting('aimee.memory_valid_at',true),'')=''
+   AND COALESCE(current_setting('aimee.memory_believed_at',true),'')=''`).Scan(&clean)
 		if err != nil || !clean {
 			t.Error("request context survived pool release", err)
 		}
