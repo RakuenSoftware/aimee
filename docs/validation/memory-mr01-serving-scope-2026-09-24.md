@@ -44,3 +44,14 @@ and both disposable stacks were removed. Image identities are retained for
 [project](memory-mr01-serving-scope-2026-09-24/http-after/project/image-identities.json)
 and [workspace](memory-mr01-serving-scope-2026-09-24/http-after/workspace/image-identities.json).
 The corrected application image is `sha256:c7947dd951c66e9c30cab2be99a41e4eb6cebbaafdf6f5cf0624c057a75fd4f6`.
+
+## Full fresh deployment receipt for the scope fix
+
+Candidate `7eb4cf3b1` completed both deployment runners with actual exit zero:
+**1714/1714 checks** (T2 1097, T3 617). The
+[enrolled Server/KB receipt](memory-mr01-serving-scope-2026-09-24/fresh/T2/topology.json)
+and [KB-free Server receipt](memory-mr01-serving-scope-2026-09-24/fresh/T3/topology.json)
+include provider-boundary and asynchronous native refusal/recovery checks.
+All [nine container identities and three provider byte caps](memory-mr01-serving-scope-2026-09-24/fresh/image-identities.json)
+were captured while live. Application SHA matches the scoped HTTP receipt above;
+PostgreSQL remains on schema 34. Both disposable topology stacks were removed.

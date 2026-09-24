@@ -1,0 +1,18 @@
+[
+  {
+    "name": "Each baseline scope/denial/rollback case behaves as specified",
+    "passed": true
+  },
+  {
+    "name": "Actual runtime has live non-owner non-superuser NOBYPASSRLS connections",
+    "passed": true
+  },
+  {
+    "name": "288 concurrent mixed-scope requests isolate results after success and rollback",
+    "passed": true
+  },
+  {
+    "name": "Sequential requests remain correct after concurrent rollback workload",
+    "passed": true
+  }
+]

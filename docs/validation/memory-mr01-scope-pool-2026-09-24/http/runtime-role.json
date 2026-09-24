@@ -1,0 +1,6 @@
+{
+  "superuser": false,
+  "bypass_rls": false,
+  "owns_memories": false,
+  "live_connections": 2
+}
