@@ -159,6 +159,11 @@ def main():
                 check('Console effectiveness retains '+audience+' restriction', code == 200
                       and result.get('status') == 'ok' and display.get('total') == total
                       and display.get('effectiveness',{}).get('low_effectiveness') == total, elapsed)
+                code,result = kb.kb_request('/v1/actions/dashboard.memory_stats',dict(**{audience:value}))
+                scopes=result.get('payload',{}).get('scopes',[])
+                check('Dashboard transport retains '+audience+' and authorized endpoints', code == 200
+                      and result.get('status') == 'ok' and sum(row['count'] for row in scopes) == total
+                      and sum(row['conflicted_memories'] for row in scopes) == 2*conflicts)
             sql(f"""INSERT INTO epistemic_directives(question,topic,cause,priority,memory_a_id)
               SELECT '{key}-question-'||key,'{key}','user_follow_up',
                 CASE WHEN key IN ('{key}-current','{key}-workspace') THEN 1 ELSE 100 END,id

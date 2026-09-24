@@ -79,6 +79,14 @@ def main():
                 check(kind+' request text cannot grant diagnostic authority',
                       code == 403 and 'decision' not in body,
                       dict(http_status=code,kind=body.get('kind'),decision_present='decision' in body))
+                for variant in ({},dict(include_all=True)):
+                    code, body = kb.kb_request('/v1/actions/dashboard.memory_stats',variant)
+                    scopes = body.get('payload',{}).get('scopes',[])
+                    check(kind+' dashboard preserves verified scope '+str(len(variant)), code == 200
+                          and body.get('status') == 'ok' and sum(row['count'] for row in scopes) == 2
+                          and sum(row['count'] for row in scopes if row['scope'] == kind) == 1)
+                code,body = kb.kb_request('/v1/actions/dashboard.memory_stats',dict(command_context=forged,**forged))
+                check(kind+' dashboard rejects forged authority',code == 403 and 'payload' not in body)
                 # Alternate visible/hidden reads through the live owner and its pool.
                 def sample(index):
                     wants_visible = index % 2 == 0

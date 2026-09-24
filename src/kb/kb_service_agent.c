@@ -417,13 +417,6 @@ int kb_handle_anti_pattern_bump(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to bump anti-pattern");
 }
 
-int kb_handle_dashboard_memory_stats(int fd, cJSON *req)
-{
-   (void)req;
-   cJSON *resp = db2_kb_service_dashboard_memory_stats_json();
-   return kb_reply_or_error(fd, resp, "failed to fetch dashboard memory stats");
-}
-
 int kb_handle_dashboard_logs(int fd, cJSON *req)
 {
    (void)req;

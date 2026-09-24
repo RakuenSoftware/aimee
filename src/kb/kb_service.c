@@ -774,6 +774,36 @@ static cJSON *kb_command_context(void)
    return context;
 }
 
+/* Preserve the public dashboard envelope while forwarding untrusted arguments
+ * and verifier-owned authority separately to the Go memory owner. */
+int kb_handle_dashboard_memory_stats(int fd, cJSON *req)
+{
+   cJSON *args = cJSON_Duplicate(req, 1);
+   cJSON *context = kb_command_context();
+   cJSON *response = NULL;
+   if (!args || !context)
+   {
+      cJSON_Delete(args);
+      cJSON_Delete(context);
+      return kb_send_error(fd, "command context unavailable");
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "operation");
+   cJSON_AddStringToObject(args, "operation", "stats-dashboard");
+   int dispatched = aimee_module_commands_dispatch_internal_context_timeout(
+       "memory.runtime", args, context, 60000, &response);
+   cJSON_Delete(args);
+   cJSON_Delete(context);
+   if (dispatched <= 0)
+   {
+      cJSON_Delete(response);
+      return kb_send_error(fd, "command module unavailable");
+   }
+   cJSON *payload = cJSON_DetachItemFromObjectCaseSensitive(response, "dashboard");
+   if (payload)
+      cJSON_AddItemToObject(response, "payload", payload);
+   return kb_reply_or_error(fd, response, "failed to fetch dashboard memory stats");
+}
+
 static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
 {
    ctx->last_session_rpc_ts = (long)time(NULL);

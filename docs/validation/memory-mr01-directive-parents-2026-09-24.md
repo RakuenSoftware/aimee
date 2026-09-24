@@ -19,7 +19,11 @@ questions. The [HTTP reproduction](memory-mr01-directive-parents-2026-09-24/http
 on `b866f1ac0` fails the first directive check after scoped statistics pass.
 The [full memory race suite and export build](memory-mr01-directive-parents-2026-09-24/full-race-export.txt)
 pass in 211.766 and 4.784 seconds. Boundary, ownership, descriptor, inventory,
-proposal-link and documentation guards pass. Corrected process validation is pending.
+proposal-link and documentation guards pass. The [corrected HTTP fixture](memory-mr01-directive-parents-2026-09-24/http-checks.json)
+passes all 58 checks on `7a73b3bc0`, including matched and fallback directive
+recall for project and workspace audiences. [Running image identities](memory-mr01-directive-parents-2026-09-24/http-image-identities.json)
+are recorded; the candidate image digest is
+`16b39d3124a2c6a2b255764194cb4037cff641e9373e03c018931e414151f30e`.
 
 This repair covers serving selection. It does not certify operator directive
 lists, mutation authorization, durable source observations for directive text,

@@ -1,0 +1,292 @@
+[
+  {
+    "name": "Common fixture lexical/list find_facts",
+    "passed": true,
+    "elapsed_ms": 199.458
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_visible",
+    "passed": true,
+    "elapsed_ms": 168.182
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_scoped",
+    "passed": true,
+    "elapsed_ms": 174.968
+  },
+  {
+    "name": "Common fixture lexical/list list",
+    "passed": true,
+    "elapsed_ms": 137.264
+  },
+  {
+    "name": "Common fixture compatibility search and windows",
+    "passed": true,
+    "elapsed_ms": 161.141
+  },
+  {
+    "name": "Common fixture query route top_l2_facts",
+    "passed": true,
+    "elapsed_ms": 130.077
+  },
+  {
+    "name": "Common fixture query route load_eval_corpus",
+    "passed": true,
+    "elapsed_ms": 124.886
+  },
+  {
+    "name": "Common fixture query route list_session_scope_priority",
+    "passed": true,
+    "elapsed_ms": 129.152
+  },
+  {
+    "name": "Common fixture query route list_session_scope_priority_like",
+    "passed": true,
+    "elapsed_ms": 132.033
+  },
+  {
+    "name": "Common fixture query route search_facts_patterns_by_keyword",
+    "passed": true,
+    "elapsed_ms": 133.096
+  },
+  {
+    "name": "Common fixture diagnostic retrieval",
+    "passed": true,
+    "elapsed_ms": 174.64
+  },
+  {
+    "name": "Common fixture recall bundle with legacy project",
+    "passed": true,
+    "elapsed_ms": 172.868
+  },
+  {
+    "name": "Common fixture assembled project context",
+    "passed": true,
+    "elapsed_ms": 138.546
+  },
+  {
+    "name": "Common fixture assembled workspace context",
+    "passed": true,
+    "elapsed_ms": 128.805
+  },
+  {
+    "name": "Legacy project applies without scope_context",
+    "passed": true,
+    "elapsed_ms": 149.701
+  },
+  {
+    "name": "Legacy workspace applies without scope_context",
+    "passed": true,
+    "elapsed_ms": 159.926
+  },
+  {
+    "name": "Explicit include_all false restricts to shared audience",
+    "passed": true,
+    "elapsed_ms": 139.469
+  },
+  {
+    "name": "Malformed project cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 109.874
+  },
+  {
+    "name": "Malformed workspace cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 110.458
+  },
+  {
+    "name": "Malformed scope_context cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 95.883
+  },
+  {
+    "name": "Malformed include_all cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 97.818
+  },
+  {
+    "name": "Common fixture graph-only evidence-backed traversal",
+    "passed": true,
+    "elapsed_ms": 149.754
+  },
+  {
+    "name": "Common fixture current current",
+    "passed": true,
+    "elapsed_ms": 128.454
+  },
+  {
+    "name": "Common fixture historical current",
+    "passed": true,
+    "elapsed_ms": 130.587
+  },
+  {
+    "name": "Common fixture current future",
+    "passed": true,
+    "elapsed_ms": 113.996
+  },
+  {
+    "name": "Common fixture historical future",
+    "passed": true,
+    "elapsed_ms": 134.667
+  },
+  {
+    "name": "Common fixture current expired",
+    "passed": true,
+    "elapsed_ms": 122.7
+  },
+  {
+    "name": "Common fixture historical expired",
+    "passed": true,
+    "elapsed_ms": 150.586
+  },
+  {
+    "name": "Common fixture current suppressed",
+    "passed": true,
+    "elapsed_ms": 155.666
+  },
+  {
+    "name": "Common fixture historical suppressed",
+    "passed": true,
+    "elapsed_ms": 122.613
+  },
+  {
+    "name": "Common fixture current superseded",
+    "passed": true,
+    "elapsed_ms": 140.949
+  },
+  {
+    "name": "Common fixture historical superseded",
+    "passed": true,
+    "elapsed_ms": 135.344
+  },
+  {
+    "name": "Common fixture current archived",
+    "passed": true,
+    "elapsed_ms": 125.114
+  },
+  {
+    "name": "Common fixture historical archived",
+    "passed": true,
+    "elapsed_ms": 115.328
+  },
+  {
+    "name": "Common fixture current quarantined",
+    "passed": true,
+    "elapsed_ms": 123.899
+  },
+  {
+    "name": "Common fixture historical quarantined",
+    "passed": true,
+    "elapsed_ms": 140.455
+  },
+  {
+    "name": "Common fixture current deleted",
+    "passed": true,
+    "elapsed_ms": 146.62
+  },
+  {
+    "name": "Common fixture historical deleted",
+    "passed": true,
+    "elapsed_ms": 117.445
+  },
+  {
+    "name": "Common fixture current revoked",
+    "passed": true,
+    "elapsed_ms": 124.546
+  },
+  {
+    "name": "Common fixture historical revoked",
+    "passed": true,
+    "elapsed_ms": 138.465
+  },
+  {
+    "name": "Common fixture current cross-scope",
+    "passed": true,
+    "elapsed_ms": 128.817
+  },
+  {
+    "name": "Common fixture historical cross-scope",
+    "passed": true,
+    "elapsed_ms": 144.106
+  },
+  {
+    "name": "Legacy graph query honors project",
+    "passed": true,
+    "elapsed_ms": 141.473
+  },
+  {
+    "name": "Legacy graph query honors workspace",
+    "passed": true,
+    "elapsed_ms": 130.654
+  },
+  {
+    "name": "Legacy provenance audience current",
+    "passed": true,
+    "elapsed_ms": 138.248
+  },
+  {
+    "name": "Legacy provenance audience cross-scope",
+    "passed": true,
+    "elapsed_ms": 136.704
+  },
+  {
+    "name": "Legacy link audience excludes foreign endpoints",
+    "passed": true,
+    "elapsed_ms": 144.691
+  },
+  {
+    "name": "Legacy conflict audience excludes foreign parents",
+    "passed": true,
+    "elapsed_ms": 132.485
+  },
+  {
+    "name": "Operator statistics honor project without current-only filtering",
+    "passed": true,
+    "elapsed_ms": 130.027
+  },
+  {
+    "name": "Console effectiveness retains project restriction",
+    "passed": true,
+    "elapsed_ms": 122.272
+  },
+  {
+    "name": "Operator statistics honor workspace without current-only filtering",
+    "passed": true,
+    "elapsed_ms": 119.366
+  },
+  {
+    "name": "Console effectiveness retains workspace restriction",
+    "passed": true,
+    "elapsed_ms": 129.147
+  },
+  {
+    "name": "Directive matched recall requires every current project parent",
+    "passed": true,
+    "elapsed_ms": 183.452
+  },
+  {
+    "name": "Directive fallback recall requires every current project parent",
+    "passed": true,
+    "elapsed_ms": 164.284
+  },
+  {
+    "name": "Directive matched recall requires every current workspace parent",
+    "passed": true,
+    "elapsed_ms": 156.122
+  },
+  {
+    "name": "Directive fallback recall requires every current workspace parent",
+    "passed": true,
+    "elapsed_ms": 176.399
+  },
+  {
+    "name": "Activated derived card admits observed current input",
+    "passed": true,
+    "elapsed_ms": 199.195
+  },
+  {
+    "name": "Activated derived card refuses revoked input",
+    "passed": true,
+    "elapsed_ms": 199.737
+  }
+]
