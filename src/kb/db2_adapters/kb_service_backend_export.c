@@ -29,7 +29,8 @@ cJSON *db2_kb_service_memory_export_filtered_json(const char *workspace, const c
        snprintf(sql, sizeof(sql),
                 "SELECT m.id, m.tier, m.kind, m.key, m.content, m.confidence, "
                 "m.use_count, m.lifecycle_state, m.created_at, m.updated_at, m.source_session, "
-                "COALESCE((SELECT ms.scope_value FROM memory_scopes ms "
+                "COALESCE(CASE WHEN m.scope_type = 'workspace' THEN m.scope_value END, "
+                "         (SELECT ms.scope_value FROM memory_scopes ms "
                 "          WHERE ms.memory_id = m.id AND ms.scope_type = 'workspace' "
                 "          ORDER BY ms.scope_value LIMIT 1), "
                 "         (SELECT mw.workspace FROM memory_workspaces mw "
@@ -44,14 +45,15 @@ cJSON *db2_kb_service_memory_export_filtered_json(const char *workspace, const c
       param_idx++;
       params[n_params++] = workspace;
       offset += snprintf(sql + offset, sizeof(sql) - (size_t)offset,
-                         " AND (EXISTS (SELECT 1 FROM memory_scopes msf "
+                         " AND ((m.scope_type = 'workspace' AND m.scope_value = $%d) "
+                         "      OR EXISTS (SELECT 1 FROM memory_scopes msf "
                          "              WHERE msf.memory_id = m.id "
                          "                AND msf.scope_type = 'workspace' "
                          "                AND msf.scope_value = $%d) "
                          "      OR EXISTS (SELECT 1 FROM memory_workspaces mwf "
                          "                 WHERE mwf.memory_id = m.id "
                          "                   AND mwf.workspace = $%d))",
-                         param_idx, param_idx);
+                         param_idx, param_idx, param_idx);
    }
    if (filter_kind)
    {
