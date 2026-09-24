@@ -86,6 +86,46 @@ SET LOCAL ROLE aimee_store_runtime`)
 		}
 		check(verb, args)
 	}
+	// Reuse this exact lifecycle/scope population in independent dense-only and
+	// graph-only lanes. Perfect vectors and graph links cannot admit a record
+	// that the lexical lane excludes.
+	exec(`RESET ROLE; SELECT set_config('aimee.memory_scope_all','1',true)`)
+	var dimension int
+	if err := tx.QueryRow(ctx, `SELECT atttypmod FROM pg_attribute WHERE attrelid='memory_embeddings'::regclass AND attname='embedding'`).Scan(&dimension); err != nil {
+		t.Fatal(err)
+	}
+	vector := make([]float64, dimension)
+	vector[0] = 1
+	encodedVector, _ := json.Marshal(vector)
+	allIDs := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		allIDs = append(allIDs, id)
+		exec(`INSERT INTO memory_embeddings(point_id,embedding,record_type,primary_scope,project,kind,payload_json)
+ SELECT id,$2::vector,'memory',scope_type,scope_value,kind,'{}' FROM memories WHERE id=$1`, id, string(encodedVector))
+		if id != ids["open"] {
+			exec(`INSERT INTO memory_links(source_id,target_id,relation) VALUES($1,$2,'depends_on')`, ids["open"], id)
+		}
+	}
+	exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_scope_type','project',true),set_config('aimee.memory_scope_value','eligibility-local',true),set_config('aimee.memory_project','eligibility-local',true); SET LOCAL ROLE aimee_store_runtime`)
+	expectedIDs := map[int64]bool{ids["open"]: true, ids["utc-boundary"]: true, ids["offset-boundary"]: true}
+	dense, err := bound.SearchVectors(ctx, vector, "memory", "", "eligibility-local", false, 64)
+	if err != nil || len(dense) != len(expectedIDs) {
+		t.Fatal("common fixture dense-only eligibility", dense, err)
+	}
+	for _, hit := range dense {
+		if !expectedIDs[hit.ID] {
+			t.Fatal("dense-only lane admitted excluded fixture", hit)
+		}
+	}
+	graph, err := bound.pageRank(ctx, DataRequest{Scope: Scope{Type: ScopeProject, Value: "eligibility-local"}, Project: "eligibility-local", PageRank: &pageRankRequest{IDs: allIDs, Iterations: 8, Weight: 1, Relations: []string{"depends_on"}}}, true)
+	if err != nil || len(graph.Scores) != len(expectedIDs) {
+		t.Fatal("common fixture graph-only eligibility", graph, err)
+	}
+	for _, score := range graph.Scores {
+		if !expectedIDs[score.ID] {
+			t.Fatal("graph-only lane admitted excluded fixture", score)
+		}
+	}
 	// Legacy session/query modes must apply the same gate before their limit.
 	// Ineligible rows have equal priority and later IDs; filtering after LIMIT
 	// would starve the three eligible fixtures rather than returning them.

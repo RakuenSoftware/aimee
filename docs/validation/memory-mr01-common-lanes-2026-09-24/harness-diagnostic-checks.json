@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Common fixture lexical/list find_facts",
+    "passed": true,
+    "elapsed_ms": 215.233
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_visible",
+    "passed": true,
+    "elapsed_ms": 175.56
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_scoped",
+    "passed": true,
+    "elapsed_ms": 174.286
+  },
+  {
+    "name": "Common fixture lexical/list list",
+    "passed": true,
+    "elapsed_ms": 146.203
+  },
+  {
+    "name": "Common fixture dense-only perfect matches",
+    "passed": false,
+    "elapsed_ms": 104.571
+  },
+  {
+    "name": "common fixture completed",
+    "passed": false,
+    "error": "Common fixture dense-only perfect matches"
+  }
+]
