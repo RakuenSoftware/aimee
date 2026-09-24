@@ -118,6 +118,46 @@ def application_metadata_is_private(stack):
     return not any(name in forbidden or name.endswith(('_PASSWORD', '_API_KEY', '_TOKEN', '_PRIVATE_KEY')) for name in names)
 
 
+def graph_intermediate_scope_gate(kb, check):
+    """MR-01/A3: a visible endpoint cannot authorize a hidden bridge."""
+    key = 'mr01-bridge-' + uuid.uuid4().hex
+    def sql(query):
+        return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+    sql(f"""BEGIN;
+      INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES
+        ('L2','fact','{key}-visible','visible graph evidence','project','{key}'),
+        ('L2','fact','{key}-hidden','hidden graph evidence','project','{key}-private');
+      INSERT INTO entity_edges(source,relation,target) VALUES
+        ('{key}-root','calls','{key}-middle'),('{key}-middle','calls','{key}-target');
+      INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance)
+        SELECT e.id,'memory','memory:'||m.id::text,'supports' FROM entity_edges e JOIN memories m
+        ON m.key=CASE WHEN e.source='{key}-root' THEN '{key}-hidden' ELSE '{key}-visible' END
+        WHERE e.source IN ('{key}-root','{key}-middle');
+      COMMIT""")
+    def walk():
+        return kb.kb_request('/v1/actions/memory.ontology', dict(
+            action='walk', entity=key+'-root', hops=2, scope_context=True, project=key))
+    def withheld(label):
+        code, body = walk()
+        wire = json.dumps(body)
+        check(label, code == 200 and body.get('status') == 'ok' and body.get('entries') == []
+              and key+'-middle' not in wire and key+'-target' not in wire)
+    try:
+        withheld('Graph HTTP hides the intermediate and target behind unauthorized evidence')
+        sql(f"""UPDATE fact_evidence f SET source_id='memory:'||m.id::text FROM memories m,entity_edges e
+          WHERE f.assertion_id=e.id AND e.source='{key}-root' AND m.key='{key}-visible'""")
+        code, body = walk()
+        check('Graph HTTP restores the authorized two-hop path', code == 200 and body.get('status') == 'ok'
+              and len(body.get('entries', [])) == 2)
+        sql(f"""UPDATE fact_evidence f SET source_id='memory:'||m.id::text FROM memories m,entity_edges e
+          WHERE f.assertion_id=e.id AND e.source='{key}-root' AND m.key='{key}-hidden'""")
+        withheld('Graph HTTP withholds the previously visible path after scope loss')
+    finally:
+        sql(f"""DELETE FROM entity_edges WHERE source IN ('{key}-root','{key}-middle');
+          DELETE FROM memories WHERE key IN ('{key}-visible','{key}-hidden')""")
+
+
 def legacy_query_eligibility_gate(kb, check):
     key = 'legacy-current-' + uuid.uuid4().hex
     def sql(query):
@@ -1093,6 +1133,7 @@ def main():
             linked_relation_input_gate(kb, check)
             relation_consumer_rebuild_gate(kb, check)
             future_index_admission_gate(kb, check)
+            graph_intermediate_scope_gate(kb, check)
             legacy_query_eligibility_gate(kb, check)
             preview_source_version_gate(kb, check)
             evidence_exact_identity_gate(kb, check)

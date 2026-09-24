@@ -74,7 +74,7 @@ func TestValidityServingParityPostgres(t *testing.T) {
 			}
 			body, _ := json.Marshal(args)
 			result, status := invokeContextCommand(t, handler, 0, caller, "validity", string(body))
-			if status != bus.ModuleStatusOK || result["status"] != "ok" {
+			if status != bus.ModuleStatusOK || result["status"] != "ok" || result["store"] != map[Placement]string{PlacementServer: "user", PlacementKB: "kb"}[placement] {
 				t.Fatal(placement, id, result, status)
 			}
 			encoded, _ := json.Marshal(result["decision"])

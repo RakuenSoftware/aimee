@@ -582,6 +582,23 @@ static void test_search_owner_transport(void)
    cJSON_Delete(request);
 }
 
+static void test_private_validity_owner_transport(void)
+{
+   cJSON *request = cJSON_Parse("{\"method\":\"memory.validity\",\"id\":\"42\"}");
+   private_command_operation = "user-validity";
+   private_command_reply = "{\"status\":\"ok\",\"store\":\"user\",\"decision\":{\"eligible\":true}}";
+   handle_memory_validity(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, private_command_reply));
+   private_command_reply = "{\"status\":\"ok\",\"decision\":{\"eligible\":true}}";
+   handle_memory_validity(NULL, NULL, request);
+   assert(strstr(search_wire_reply, "unavailable"));
+   private_command_operation = NULL;
+   private_command_reply = NULL;
+   cJSON_Delete(request);
+   free(search_wire_reply);
+   search_wire_reply = NULL;
+}
+
 static void test_validity_owner_transport(void)
 {
    cJSON *request = cJSON_Parse("{\"method\":\"memory.validity\",\"protocol_version\":1,"
@@ -966,6 +983,7 @@ int main(void)
    test_search_owner_transport();
    test_get_delete_owner_envelopes();
    test_read_owner_refusal();
+   test_private_validity_owner_transport();
    test_validity_owner_transport();
    test_hygiene_owner_transport();
    test_personal_recall_owner_envelope();

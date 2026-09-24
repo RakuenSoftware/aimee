@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"os"
@@ -99,6 +100,9 @@ INSERT INTO entity_edges(id,source,relation,target,weight) SELECT i,'root','call
 INSERT INTO fact_evidence(assertion_id,source_id) SELECT i,'memory:2' FROM generate_series(100,160)i;
 INSERT INTO entity_edges(id,source,relation,target,weight) SELECT 1000+i,'wide','calls','wide-'||i,100-i FROM generate_series(1,50)i;
 INSERT INTO entity_edges(id,source,relation,target) SELECT 2000+i*3+j,'wide-'||i,'calls','leaf-'||i||'-'||j FROM generate_series(1,50)i CROSS JOIN generate_series(1,3)j;
+INSERT INTO entity_edges(id,source,relation,target) VALUES
+ (9001,'bridge-root','calls','forbidden-middle'),(9002,'forbidden-middle','calls','permitted-target');
+INSERT INTO fact_evidence(assertion_id,source_id) VALUES(9001,'memory:2'),(9002,'memory:1');
 CREATE ROLE memory_ontology_test NOINHERIT NOBYPASSRLS;
 GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO memory_ontology_test;
 GRANT USAGE ON SCHEMA ontology_walk_test TO memory_ontology_test;
@@ -115,6 +119,19 @@ SET LOCAL ROLE memory_ontology_test;`)
 		}
 		return r
 	}
+	// A visible final edge cannot authorize traversal through a hidden first
+	// edge. Neither the intermediate identity nor the reachable target leaks.
+	blocked := run("bridge-root", `,"hops":2`)
+	wire, _ := json.Marshal(blocked)
+	if len(blocked["entries"].([]any)) != 0 || strings.Contains(string(wire), "forbidden-middle") || strings.Contains(string(wire), "permitted-target") {
+		t.Fatal("hidden intermediate admitted or disclosed", blocked)
+	}
+	sql(`RESET ROLE; UPDATE fact_evidence SET source_id='memory:1' WHERE assertion_id=9001; SET LOCAL ROLE memory_ontology_test`)
+	admitted := run("bridge-root", `,"hops":2`)
+	if len(admitted["entries"].([]any)) != 2 {
+		t.Fatal("authorized two-hop path lost", admitted)
+	}
+	sql(`RESET ROLE; UPDATE fact_evidence SET source_id='memory:2' WHERE assertion_id=9001; SET LOCAL ROLE memory_ontology_test`)
 	result := run("root", "")
 	entries := result["entries"].([]any)
 	if len(entries) != 7 {

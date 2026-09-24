@@ -43,3 +43,14 @@ remain unable to widen their scope. The
 [service-scope race regression](memory-validity-2026-09-24/service-scope-race.txt)
 and [export](memory-validity-2026-09-24/service-scope-export.txt) pass. The initial
 `1bc49fc19` image is superseded for deployment validation by this correction.
+
+The first fresh `49274b8c5` T3 run failed at the new personal validity HTTP
+check: the private host's established success contract requires `store: user`,
+which the diagnostic omitted. The [failed raw gate](memory-validity-2026-09-24/first-fresh/T3/local-memory.json)
+is retained. The Go owner now labels both placements explicitly. The native
+regression covers the real private forwarding helper and rejects the original
+missing-label envelope. [Targeted race](memory-validity-2026-09-24/envelope-race.txt),
+[export](memory-validity-2026-09-24/envelope-export.txt) and
+[native transport](memory-validity-2026-09-24/envelope-native.txt) checks pass.
+Fresh deployment must be rerun on this correction; the failed image is not a
+passing release candidate.

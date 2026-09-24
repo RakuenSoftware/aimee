@@ -1380,7 +1380,7 @@ set_config('aimee.correlation_id',$9,true)`,
 		var decision EligibilityDecision
 		decision, err = backend.validity(ctx, request.ID, readResult)
 		if err == nil {
-			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "decision": decision})
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "store": map[Placement]string{PlacementServer: "user", PlacementKB: "kb"}[options.placement], "decision": decision})
 		}
 	case "css-convention-sync", "css-conventions":
 		backend, ok := options.data.(*postgresDataStore)
