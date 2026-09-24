@@ -62,6 +62,32 @@ static void operator_policy(const char *value)
 #endif
 }
 
+static void test_external_backend_cannot_ignore_hard_limits(void)
+{
+   memset(&context, 0, sizeof(context));
+   operator_policy(NULL);
+   have_context = 1;
+   assert(wire_fence_external_backend() == 0);
+   for (int present = -1; present <= 1; present += 2)
+   {
+      context.request_budget_present = present;
+      assert(wire_fence_external_backend() == -1);
+      assert(strcmp(wire_fence_last_error(), "request_budget_unavailable") == 0);
+   }
+   context.request_budget_present = 0;
+   operator_policy("opaque operator policy");
+   have_context = 0;
+   assert(wire_fence_external_backend() == -1);
+   operator_policy(NULL);
+   assert(wire_fence_external_backend() == 0);
+   have_context = 1;
+   context.context_refused = 1;
+   strcpy(context.context_refusal_kind, "protected_context_overflow");
+   assert(wire_fence_external_backend() == WIRE_FENCE_CONTEXT_REFUSED);
+   assert(strcmp(wire_fence_last_error(), "protected_context_overflow") == 0);
+   memset(&context, 0, sizeof(context));
+}
+
 static void test_hard_budget_refuses_without_selected_bytes(void)
 {
    const char *errors[] = {NULL,
@@ -371,6 +397,7 @@ static void test_stream_receipt_admission_and_commitment(void)
 
 int main(void)
 {
+   test_external_backend_cannot_ignore_hard_limits();
    test_stream_receipt_admission_and_commitment();
    operator_policy(NULL);
    test_source_handle_requires_host_transport();

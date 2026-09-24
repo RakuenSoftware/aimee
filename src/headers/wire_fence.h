@@ -44,6 +44,10 @@ extern "C"
                          size_t pristine_len, wire_fence_t **snapshot,
                          wire_fence_bytes_t *selected);
 
+   /* External backends hide provider serialization. Refuse declared hard
+    * limits there instead of claiming an unobservable request was counted. */
+   int wire_fence_external_backend(void);
+
    /* Relay the source owner's current admission before resending frozen bytes. */
    int wire_fence_revalidate_sources(void);
 

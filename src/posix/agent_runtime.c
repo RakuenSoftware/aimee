@@ -445,8 +445,15 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
     * workspace is detached, so a thin-client `claude` agent runs the standard
     * `claude` CLI over tmux on the client — no `claude -p` involved. */
    if (strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+   {
+      if (wire_fence_external_backend() != 0)
+      {
+         snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
+         return -1;
+      }
       return agent_execute_cli_session(agent, network, system_prompt, user_prompt, max_tokens,
                                        temperature, out);
+   }
 
    /* Dispatch to provider-CLI backend. Some legacy provider-CLI configs now
     * bridge into Aimee's native HTTP provider loop instead of spawning a CLI. */
@@ -467,8 +474,15 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
          goto native_provider_http;
       }
       if (adapter)
+      {
+         if (wire_fence_external_backend() != 0)
+         {
+            snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
+            return -1;
+         }
          return provider_cli_adapter_execute(adapter, agent, run_cmd_get_cwd(), system_prompt,
                                              user_prompt, out);
+      }
       snprintf(out->error, sizeof(out->error),
                "provider-cli: unknown cli_kind '%s' (expected: codex, claude, mistral, "
                "mistral-plan, vibe-plan)",

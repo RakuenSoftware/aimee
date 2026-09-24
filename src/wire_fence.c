@@ -110,6 +110,23 @@ int wire_fence_revalidate_sources(void)
    return 0;
 }
 
+int wire_fence_external_backend(void)
+{
+   const request_context_t *context = request_context_get ? request_context_get() : NULL;
+   if (context && context->context_refused)
+   {
+      last_error = context->context_refusal_kind[0] ? context->context_refusal_kind : "unavailable";
+      return WIRE_FENCE_CONTEXT_REFUSED;
+   }
+   const char *policy = getenv("AIMEE_PROVIDER_CONTEXT_LIMITS");
+   if ((policy && *policy) || (context && context->request_budget_present))
+   {
+      last_error = "request_budget_unavailable";
+      return -1;
+   }
+   return 0;
+}
+
 int wire_fence_select(int proof_gated, wire_fence_route_t route, const void *pristine,
                       size_t pristine_len, wire_fence_t **snapshot, wire_fence_bytes_t *selected)
 {

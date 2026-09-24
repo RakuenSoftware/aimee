@@ -46,3 +46,16 @@ native fixture forces a real fold through five tool calls and independently
 checks provider-visible protected bytes and summary provenance. Provider fixtures
 also exercise literal-zero token caps and token reserves, which must refuse
 explicitly when provider-bound counting is unavailable.
+
+## Unobservable external backends
+
+The final route audit found that tmux/provider-CLI execution can occur before
+native HTTP serialization. Those external backends cannot attest their eventual
+provider request size. Their native-run and direct compute entry points now
+refuse caller or operator hard limits with `request_budget_unavailable`. Existing
+context refusals also survive this routing boundary. Native HTTP adapters still
+reach normal final-body admission; unbounded external calls retain their prior
+behavior. [Native fence tests](memory-mr03-protected-2026-09-24/native-fence.txt)
+cover absent, malformed, literal-present and inherited limits. The live fixture
+uses `/bin/false` as its external command so even a regression cannot contact an
+external model provider.

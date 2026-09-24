@@ -185,7 +185,7 @@ def inside(output):
                 runs.append(dict(name=name, run_id=run_id, status=result['status'],
                     elapsed_seconds=time.monotonic()-started, provider_requests=len(captures)-before,
                     provider_request_bytes=request_sizes[before:],
-                    refusal_kinds=[kind for kind in ('request_budget_exceeded', 'unavailable', 'stale_context')
+                    refusal_kinds=[kind for kind in ('request_budget_exceeded', 'request_budget_unavailable', 'unavailable', 'stale_context')
                                    if any(kind in text for text in strings(events))]))
                 return result, events
             time.sleep(0.1)
@@ -363,6 +363,21 @@ def inside(output):
                 config('set', key, json.dumps(value))
             for turn in range(1, 6):
                 (Path(fixture_files.name) / f'{turn}.txt').write_text(f'Native refresh evidence {turn}: {prefix}\n')
+        native_roster = roster.read_bytes()
+        try:
+            for backend in ('tmux-cli', 'provider-cli'):
+                external = json.loads(native_roster)
+                external['models'][0].update(backend=backend, cli_kind='claude', cli_cmd='/bin/false')
+                roster.write_text(json.dumps(external))
+                before = len(captures)
+                result, events = run('unobservable ' + backend,
+                                     dict(schema_version=1, max_request_bytes=0))
+                check(backend + ' refuses unobservable final request accounting',
+                      result.get('status') == 'failed' and any(
+                          'request_budget_unavailable' in text for text in strings(events)))
+                check(backend + ' accounting refusal sends no provider request', len(captures) == before)
+        finally:
+            roster.write_bytes(native_roster)
         before = len(captures)
         result, events = run('native provider error', mode='provider-error')
         check('provider failure terminates without a successful response', result.get('status') == 'failed')

@@ -1,3 +1,4 @@
+#include "wire_fence.h"
 /* server_compute.c: compute-layer handlers (tool.execute, delegate, chat.send_stream) */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -999,6 +1000,11 @@ void delegate_worker(void *arg)
                            max_cost_usd < 0.0 ? "max_cost_usd cannot be negative" : cost_err);
                   cli_cost_failed = 1;
                }
+            }
+            if (!cli_cost_failed && wire_fence_external_backend() != 0)
+            {
+               snprintf(result.error, sizeof(result.error), "%s", wire_fence_last_error());
+               cli_cost_failed = 1;
             }
             int rc = cli_cost_failed
                          ? -1
