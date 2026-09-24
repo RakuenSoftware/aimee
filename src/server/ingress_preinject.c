@@ -19,6 +19,7 @@
 #include "aimee_sha256.h"
 #include <aimee/audit/audit_worm.h>
 #include <stdbool.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -204,11 +205,8 @@ static int ingress_send_guard_released(const cJSON *response)
    return status && !strcmp(status, "ok") && guard && !strcmp(guard, "released");
 }
 
-void ingress_preinject_release_send_guard(void *state)
+static int ingress_complete_send_guard(cJSON *plan)
 {
-   cJSON *plan = state;
-   if (!plan)
-      return;
    /* Release is idempotent. A lost answer is retried, never interpreted as
     * proof that protection expired or that provider dispatch did not occur. */
    for (int attempt = 0; attempt < 3; ++attempt)
@@ -235,11 +233,95 @@ void ingress_preinject_release_send_guard(void *state)
           !cJSON_GetObjectItemCaseSensitive(plan, "release_request"))
          break;
    }
-   if (cJSON_GetObjectItemCaseSensitive(plan, "local_release_request") ||
-       cJSON_GetObjectItemCaseSensitive(plan, "release_request"))
+   return !cJSON_GetObjectItemCaseSensitive(plan, "local_release_request") &&
+          !cJSON_GetObjectItemCaseSensitive(plan, "release_request");
+}
+
+typedef struct
+{
+   cJSON *plan;
+   request_context_t context;
+   int has_context;
+} ingress_pending_completion_t;
+
+static pthread_mutex_t ingress_completion_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int ingress_pending_completions;
+
+/* This is transport retry only: retain the owner's opaque idempotent completion
+ * and verified request frame. A timeout never grants mutation permission. */
+static void *ingress_retry_send_completion(void *opaque)
+{
+   ingress_pending_completion_t *pending = opaque;
+   request_context_set(pending->has_context ? &pending->context : NULL);
+   int completed = 0;
+   for (int attempt = 0; attempt < 60 && !completed; ++attempt)
+   {
+      struct timespec delay = {1, 0};
+      while (nanosleep(&delay, &delay) != 0 && errno == EINTR)
+      {
+      }
+      completed = ingress_complete_send_guard(pending->plan);
+   }
+   if (!completed)
       aimee_log(
           LOG_ERROR, "memory",
           "send completion unresolved; storage guard remains active pending sending-host recovery");
+   request_context_clear();
+   cJSON_Delete(pending->plan);
+   memset(&pending->context, 0, sizeof(pending->context));
+   free(pending);
+   pthread_mutex_lock(&ingress_completion_mutex);
+   --ingress_pending_completions;
+   pthread_mutex_unlock(&ingress_completion_mutex);
+   return NULL;
+}
+
+void ingress_preinject_release_send_guard(void *state)
+{
+   cJSON *plan = state;
+   if (!plan)
+      return;
+   if (ingress_complete_send_guard(plan))
+   {
+      cJSON_Delete(plan);
+      return;
+   }
+   /* Drop source observations; recovery needs only token-only completions. */
+   cJSON_DeleteItemFromObjectCaseSensitive(plan, "request");
+   cJSON_DeleteItemFromObjectCaseSensitive(plan, "local_request");
+   ingress_pending_completion_t *pending = calloc(1, sizeof(*pending));
+   if (pending)
+   {
+      pending->plan = plan;
+      const request_context_t *context = request_context_get();
+      if (context)
+      {
+         pending->context = *context;
+         pending->has_context = 1;
+      }
+      pthread_mutex_lock(&ingress_completion_mutex);
+      int available = ingress_pending_completions < 128;
+      if (available)
+         ++ingress_pending_completions;
+      pthread_mutex_unlock(&ingress_completion_mutex);
+      pthread_t thread;
+      if (available && pthread_create(&thread, NULL, ingress_retry_send_completion, pending) == 0)
+      {
+         pthread_detach(thread);
+         return;
+      }
+      if (available)
+      {
+         pthread_mutex_lock(&ingress_completion_mutex);
+         --ingress_pending_completions;
+         pthread_mutex_unlock(&ingress_completion_mutex);
+      }
+      memset(&pending->context, 0, sizeof(pending->context));
+      free(pending);
+   }
+   aimee_log(LOG_ERROR, "memory",
+             "send completion retry unavailable; storage guard remains active pending sending-host "
+             "recovery");
    cJSON_Delete(plan);
 }
 

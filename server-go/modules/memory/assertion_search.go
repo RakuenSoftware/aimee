@@ -150,11 +150,16 @@ func handleAssertionSearch(options handlerOptions, invocation bus.ModuleInvocati
 	return commandResult(response.Payload)
 }
 
-// Every live memory evidence locator must resolve to a visible, active parent.
+// Every live memory evidence locator must resolve to a visible parent under
+// the requested read policy. Explicit history permits retained old versions;
+// it never bypasses erasure, revocation, quarantine, or scope checks.
 // LEFT JOIN is intentional: RLS-hidden parents must deny the derived assertion,
 // including assertions with a second, visible source. Apply exact scope before
 // the candidate cap, even when the host has include-all authority.
-var assertionVisible = currentMemoryEvidenceSQL("e", `$5='' OR (m.scope_type=$5 AND m.scope_value=$6)`, true)
+var assertionParentPolicy = `(CASE WHEN $1<>'' OR $2<>'' THEN (` +
+	historicalMemoryInspectionSQL("m.") + ` AND ` + memoryValidityAtSQL("m.", "COALESCE("+memoryTimeSQL("$2::text")+",CURRENT_TIMESTAMP)") + `)
+ WHEN $3 THEN (` + historicalMemoryInspectionSQL("m.") + `) ELSE (` + currentMemorySQL("m.") + `) END)`
+var assertionVisible = memoryEvidenceSQL("e", `$5='' OR (m.scope_type=$5 AND m.scope_value=$6)`, true, assertionParentPolicy)
 
 // Belief time and world-valid time are independent half-open intervals. Do not
 // truncate stored fractions or discard offsets when comparing either axis.

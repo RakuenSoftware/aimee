@@ -427,7 +427,12 @@ SET LOCAL ROLE memory_domain_test;`)
 			key = "edges"
 		}
 		got := run(verb, `{"query":"hidden-entity","entity":"hidden-entity","as_of":"2026-09-01","scope_context":true,"project":"app"}`)
-		if len(got[key].([]any)) != 0 {
+		rows := got[key].([]any)
+		if verb == "search_graph_as_of" {
+			if len(rows) != 1 || rows[0].(map[string]any)["dst_entity"] != "archived" {
+				t.Fatalf("historical retained-parent set: %v", got)
+			}
+		} else if len(rows) != 0 {
 			t.Fatalf("%s recalled retired parents: %v", verb, got)
 		}
 		got = run(verb, `{"query":"rank-entity","entity":"rank-entity","as_of":"2026-09-01","limit":1,"scope_context":true,"project":"app"}`)

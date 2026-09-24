@@ -82,10 +82,15 @@ func (s *postgresDataStore) RelationSearch(ctx context.Context, query, asOf stri
 	if err := s.requireKBDomain(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents+`) SELECT `+relationColumns+` FROM memory_relations r
+	parentPolicy := currentMemorySQL("m.")
+	if asOf != "" {
+		parentPolicy = historicalMemoryInspectionSQL("m.") + ` AND ` + memoryValidityAtSQL("m.", memoryTimeSQL("$2::text"))
+	}
+	visible := `SELECT m.id,` + domainScopeRankSQL + ` AS scope_rank FROM memories m WHERE ` + parentPolicy
+	rows, err := s.db.Query(ctx, `WITH visible AS (`+visible+`) SELECT `+relationColumns+` FROM memory_relations r
 WHERE ($1='' OR src_entity ILIKE '%'||$1||'%' OR relation ILIKE '%'||$1||'%' OR
 dst_entity ILIKE '%'||$1||'%' OR fact_text ILIKE '%'||$1||'%')
-AND memory_id IN (SELECT id FROM visible) AND `+currentRelationInputsSQL("r")+`
+AND memory_id IN (SELECT id FROM visible) AND `+relationInputsSQL("r", parentPolicy)+`
 AND `+relationValidityAtSQL("r.", "COALESCE("+memoryTimeSQL("$2::text")+",CURRENT_TIMESTAMP)")+`
 ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,weight DESC,CASE WHEN valid_at<>'' THEN 1 ELSE 0 END DESC,created_at DESC LIMIT $3`, query, asOf, limit)
 	if err != nil {

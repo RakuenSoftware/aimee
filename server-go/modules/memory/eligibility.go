@@ -3,7 +3,7 @@ package memory
 // Versioned current-state KB eligibility, evaluated before lane limits. The
 // storage transaction supplies one stable request clock through CURRENT_TIMESTAMP.
 // Scope/RLS and evidence-specific admission remain additional mandatory gates.
-const currentEligibilityPolicy = "current-validity-v10"
+const currentEligibilityPolicy = "current-validity-v11"
 
 // KB timestamps historically mix UTC wall time and RFC3339 offsets. Normalize
 // both at the adapter; invalid nonempty timestamps raise a query error rather
@@ -98,6 +98,10 @@ func memoryUnexpiredSQL(prefix string) string {
 // predicates are fixed owner SQL, never request text. This is serving policy,
 // not review admission.
 func currentMemoryEvidenceSQL(edgeAlias, scopePredicate string, liveOnly bool) string {
+	return memoryEvidenceSQL(edgeAlias, scopePredicate, liveOnly, currentMemorySQL("m."))
+}
+
+func memoryEvidenceSQL(edgeAlias, scopePredicate string, liveOnly bool, parentPolicy string) string {
 	if scopePredicate == "" {
 		scopePredicate = "TRUE"
 	}
@@ -109,7 +113,7 @@ func currentMemoryEvidenceSQL(edgeAlias, scopePredicate string, liveOnly bool) s
 	// PostgreSQL from replacing these few probes with a scan of all visible
 	// memories under RLS. Eligibility is evaluated inside that identity lookup.
 	return `NOT EXISTS(SELECT 1 FROM fact_evidence f LEFT JOIN LATERAL (
- SELECT m.id FROM memories m WHERE m.id=` + memoryLocatorIDSQL("f.source_id") + ` AND ` + currentMemorySQL("m.") + ` AND (` + scopePredicate + `) LIMIT 1
+ SELECT m.id FROM memories m WHERE m.id=` + memoryLocatorIDSQL("f.source_id") + ` AND ` + parentPolicy + ` AND (` + scopePredicate + `) LIMIT 1
  ) m ON TRUE
  WHERE f.assertion_id=` + edgeAlias + `.id AND f.source_kind='memory'` + evidence + ` AND m.id IS NULL)`
 }
@@ -130,6 +134,10 @@ func memoryLocatorIDSQL(column string) string {
 // generator-owned row with no input observations waits for canonical reindexing.
 // Authored relations retain their existing parent policy.
 func currentRelationInputsSQL(alias string) string {
+	return relationInputsSQL(alias, currentMemorySQL("m."))
+}
+
+func relationInputsSQL(alias, parentPolicy string) string {
 	dependency := `(CASE WHEN dep.source_kind='memory-relation-input-v2' THEN dep.source_ref::jsonb END)`
 	return `(NOT EXISTS(SELECT 1 FROM memory_lineage own WHERE own.object_type='relation'
  AND own.object_id=` + alias + `.id AND own.source_kind='memory-index-v1') OR EXISTS(
@@ -138,7 +146,7 @@ func currentRelationInputsSQL(alias string) string {
  AND NOT EXISTS(SELECT 1 FROM memory_lineage dep LEFT JOIN LATERAL (
  SELECT m.id FROM memories m WHERE m.id=(` + dependency + `->>'record_id')::bigint
  AND m.record_revision::text=` + dependency + `->>'record_revision'
- AND ` + currentMemorySQL("m.") + `
+ AND ` + parentPolicy + `
  AND (NOT (` + dependency + ` ? 'link_id') OR EXISTS(SELECT 1 FROM memory_links input_link
  WHERE input_link.id=(` + dependency + `->>'link_id')::bigint
  AND input_link.source_id=` + alias + `.memory_id AND input_link.target_id=m.id

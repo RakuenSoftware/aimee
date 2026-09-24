@@ -839,3 +839,82 @@ func TestHardRuleSourceObservationsPostgres(t *testing.T) {
 		t.Fatal("rule completion", ok, e)
 	}
 }
+
+func TestHistoricalMemoryEvidencePostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, e := tx.Exec(ctx, q, args...); e != nil {
+			t.Fatal(e)
+		}
+	}
+	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$;
+ GRANT USAGE ON SCHEMA public TO aimee_store_runtime;GRANT SELECT ON ALL TABLES IN SCHEMA public TO aimee_store_runtime;
+ SELECT set_config('aimee.memory_scope_all','1',true)`)
+	const key = "historical-evidence-mr01"
+	var parent, edge int64
+	if err = tx.QueryRow(ctx, `INSERT INTO memories(key,content,scope_type,scope_value,lifecycle_state,valid_from,valid_until)
+ VALUES($1,'retained old version','project',$1,'superseded','2026-01-01T00:00:00Z','2026-03-01T00:00:00Z') RETURNING id`, key).Scan(&parent); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,authority_rank,status) VALUES($1,'assert','test','system',100,'open')`, key)
+	if err = tx.QueryRow(ctx, `INSERT INTO entity_edges(source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence_class,confidence,authority_rank,valid_from,valid_until,asserted_at,commit_id)
+ VALUES($1,'uses','old target','semantic','world_fact','persistent','A',.9,80,'2026-01-01T00:00:00Z','2026-03-01T00:00:00Z','2026-01-01T00:00:00Z',$1) RETURNING id`, key).Scan(&edge); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance) VALUES($1,'memory','memory:'||$2::bigint::text,'supports')`, edge, parent)
+	exec(`INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,valid_at,invalid_at) VALUES($1,$2,'uses','old target','2026-01-01T00:00:00Z','2026-03-01T00:00:00Z')`, parent, key)
+	exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_project',$1,true)`, key)
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}
+	at := "2026-02-01T00:00:00Z"
+	request := DataRequest{Assertions: &assertionSearchRequest{ValidAt: at}, TypedContext: &typedContextOptions{}}
+	hits, e := backend.assertionCandidates(ctx, request, Scope{}, key, 10, "")
+	if e != nil || len(hits) != 1 {
+		t.Fatalf("authorized historical assertion: %d %v", len(hits), e)
+	}
+	source := hits[0].sourceVersion()
+	source.ReadPolicy = &sourceReadPolicy{ValidAt: at}
+	retained := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("f", 32), Sources: []typedProjectionRef{{Channel: "historical_assertions", ID: fmt.Sprint(edge), Source: source}}}
+	check := func(want bool) {
+		t.Helper()
+		ok, e := backend.revalidateSources(ctx, retained, Scope{})
+		if e != nil || ok != want {
+			t.Fatal("historical release", ok, want, e)
+		}
+		rows, e := backend.assertionCandidates(ctx, request, Scope{}, key, 10, "")
+		if e != nil || (len(rows) == 1) != want {
+			t.Fatal("historical candidate exclusion", len(rows), want, e)
+		}
+		rels, e := backend.RelationSearch(ctx, key, at, 10)
+		if e != nil || (len(rels) == 1) != want {
+			t.Fatal("historical relation", len(rels), want, e)
+		}
+	}
+	check(true)
+	current := DataRequest{Assertions: &assertionSearchRequest{}}
+	if rows, e := backend.assertionCandidates(ctx, current, Scope{}, key, 10, ""); e != nil || len(rows) != 0 {
+		t.Fatal("historical assertion reentered current recall", rows, e)
+	}
+	for _, change := range []string{"lifecycle_state='deleted'", "lifecycle_state='revoked'", "lifecycle_state='quarantined'", "scope_value='foreign'", "valid_until='2026-02-01T00:00:00Z'"} {
+		exec("SAVEPOINT history_exclusion;RESET ROLE")
+		exec("UPDATE memories SET "+change+" WHERE id=$1", parent)
+		exec("SET LOCAL ROLE aimee_store_runtime")
+		check(false)
+		exec("ROLLBACK TO SAVEPOINT history_exclusion;RELEASE SAVEPOINT history_exclusion")
+	}
+}

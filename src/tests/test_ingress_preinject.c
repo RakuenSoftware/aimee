@@ -12,6 +12,7 @@
 #include "wire_fence.h"
 #include <limits.h>
 #include <unistd.h>
+#include <stdatomic.h>
 #include <sqlite3.h>
 #include "aimee_sha256.h"
 #include <aimee/audit/audit_worm.h>
@@ -56,8 +57,8 @@ static int g_long_preview;
 static int g_assembly_failure;
 static int g_typed_unavailable;
 
-static int g_guard_cleanup_mode, g_guard_local_calls, g_guard_shared_calls;
-static int g_guard_local_failures, g_guard_shared_failures;
+static _Atomic int g_guard_cleanup_mode, g_guard_local_calls, g_guard_shared_calls;
+static _Atomic int g_guard_local_failures, g_guard_shared_failures;
 static const char *guard_completion_reply(int call, int failures)
 {
    return call <= failures ? "{\"status\":\"ok\"}"
@@ -1549,6 +1550,15 @@ static void test_send_guard_completion_retries(void)
       ingress_preinject_release_send_guard(plan);
       assert(g_guard_local_calls == (failure ? 3 : 2));
       assert(g_guard_shared_calls == 3);
+      if (failure)
+      {
+         /* The owner returns after the synchronous callback has given up.
+          * Only explicit completion acknowledgements finish the background retry. */
+         for (int waited = 0; waited < 300 && (g_guard_local_calls < 4 || g_guard_shared_calls < 4);
+              ++waited)
+            usleep(10000);
+         assert(g_guard_local_calls == 4 && g_guard_shared_calls == 4);
+      }
       g_guard_cleanup_mode = 0;
    }
    puts("send completion retries unresolved owners and requires explicit release acknowledgement");

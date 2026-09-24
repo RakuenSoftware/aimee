@@ -10,9 +10,9 @@ window; it no longer grants permission to mutate protected source records.
 
 Both owners acknowledge guard protocol version 2. The host refuses older
 expiring-lease acknowledgements. Completion needs only the opaque check token,
-not the retained source payload. Each unacknowledged owner is retried three times;
+not the retained source payload. Each unacknowledged owner is retried three times synchronously;
 a generic successful response is insufficient without the release acknowledgement.
-An unresolved completion is logged and remains protected in storage. Private
+The first native outage run exposed a persistent guard after the owner recovered. The host now retains only the opaque completion requests and verified caller frame, then retries in a bounded background worker (60 rounds, at most 128 pending workers). Explicit owner acknowledgements are still required. Exhaustion or process loss leaves protection active for operator recovery. Private
 migration 35 appends the change without changing migration 34's checksum.
 
 Hard-rule retrieval observes both individual rule revisions and the collection
@@ -53,7 +53,7 @@ pass transient retries and unresolved completion. The
 [rule/source targeted suite](memory-mr01-send-completion-2026-09-24/rule-targeted-race.txt)
 passes in 14.380 seconds, including restricted runtime roles, empty collection
 invalidation, rule edit/restore, deletion and protected mutation refusal.
-The combined [full race suite and export build](memory-mr01-send-completion-2026-09-24/combined-race-export.txt) passed in 352.067 and 5.890 seconds. Native context refusal also passed. The first combined run exposed an outdated synthetic rule schema and a tiny protected allocation that no longer fits the mandatory revision metadata; its [failure log](memory-mr01-send-completion-2026-09-24/first-combined-failure.txt) is retained. The fixture now supplies the current schema and verifies explicit overflow at 128 tokens; no source contract is silently dropped. Fresh process recovery and expanded native-channel fixtures remain pending.
+The combined [full race suite and export build](memory-mr01-send-completion-2026-09-24/combined-race-export.txt) passed in 352.067 and 5.890 seconds. Native context refusal also passed. The first combined run exposed an outdated synthetic rule schema and a tiny protected allocation that no longer fits the mandatory revision metadata; its [failure log](memory-mr01-send-completion-2026-09-24/first-combined-failure.txt) is retained. The fixture now supplies the current schema and verifies explicit overflow at 128 tokens; no source contract is silently dropped. The [183-check HTTP run](memory-mr01-send-completion-2026-09-24/http/checks.json) passed on `c5212162e`, including owner termination, database restart, verified stopped-owner recovery, and both audiences for identity, preference and pending-commitment recall. The later native outage run failed on a mutation blocked by an unresolved completion; [failure evidence](memory-mr01-send-completion-2026-09-24/native-before/native-async.json) is retained. The background completion repair passes its native acknowledgement/recovery test; its new-image replay remains pending.
 
 These results alone do not certify MR-01. Remaining endpoint/temporal contracts
 and final Server/KB parity are tracked in the

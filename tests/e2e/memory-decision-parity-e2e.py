@@ -87,15 +87,16 @@ def main():
                   and responses[0]['checked_version']['owner_id']!=responses[1]['checked_version']['owner_id'])
             observed.append(dict(state=state,server=left,kb=right))
         for store in ('user','kb'):
-            for verb,field in [('list','memories'),('search','facts')]:
+            for verb,field in [('list','memories'),('search','facts'),('recall','active_context')]:
                 request=dict(store=store,query=prefix,limit=32)
                 if verb=='search':request['keywords']=[prefix]
+                if verb=='recall':request.update(task_hint=prefix,limit_tokens=8192)
                 if store=='kb':request['project']=prefix
                 code,result=gate.call(verb,request)
-                rows=result.get(field,[])
+                rows=result.get('recall',{}).get(field,[]) if verb=='recall' else result.get(field,[])
                 fixture_rows=[row for row in rows if row.get('key','').startswith(prefix+'-')]
                 check(store+' common lifecycle fixture '+verb,code==200 and result.get('status')=='ok'
-                      and {str(row['id']) for row in fixture_rows}=={current_ids[store]})
+                      and {str(row['memory_id'] if verb=='recall' else row['id']) for row in fixture_rows}=={current_ids[store]})
         (args.output/'domain-decisions.json').write_text(json.dumps(observed,indent=2)+'\n')
         identities=[]
         for stack in stacks:

@@ -295,8 +295,10 @@ def main():
                         subprocess.run(['docker','restart',kb.postgres],check=True,stdout=subprocess.DEVNULL)
                         deadline=time.monotonic()+90
                         while time.monotonic()<deadline:
-                            probe=subprocess.run(['docker','exec',kb.postgres,'pg_isready','-U','postgres'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-                            if probe.returncode==0: break
+                            try:
+                                if sql('SELECT 1') == '1': break
+                            except RuntimeError:
+                                pass
                             time.sleep(1)
                         check('Unresolved guard survives owner termination and database restart',
                               sql(f"SELECT count(*) FROM memory_send_leases WHERE token='{guard_id}'") == '1')
@@ -498,6 +500,43 @@ def main():
                     selected={int(row['memory_id']) for row in rows if int(row['memory_id']) in set(native_ids.values())}
                     check('Common native '+section+' '+audience+' lifecycle and scope',code==200
                           and result.get('status')=='ok' and selected=={native_ids[native_key+'-'+state]},elapsed)
+            history_key=key+'-history'
+            history_values=[]
+            for state in states:
+                lifecycle=state if state in ('superseded','archived','quarantined','deleted','revoked') else 'active'
+                scope=key+'-foreign' if state=='cross-scope' else key
+                start='2020-03-01T00:00:00Z' if state=='future' else '2020-01-01T00:00:00Z'
+                end='2020-02-01T00:00:00Z' if state=='expired' else '2020-04-01T00:00:00Z'
+                history_values.append(f"('L2','fact','{history_key}-{state}','retained old {state}','project','{scope}','{lifecycle}',{int(state=='suppressed')},'{start}','{end}')")
+            history_ids=json.loads(sql("BEGIN; INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,lifecycle_state,activation_suppressed,valid_from,valid_until) VALUES "+','.join(history_values)+f""";
+              INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,authority_rank,status) VALUES('{history_key}','assert','fixture','system',100,'open');
+              INSERT INTO entity_edges(source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence_class,confidence,authority_rank,valid_from,valid_until,asserted_at,commit_id)
+                SELECT '{history_key}','uses',key,'semantic','world_fact','persistent','A',.9,80,'2020-01-01T00:00:00Z','2020-04-01T00:00:00Z','2020-01-01T00:00:00Z','{history_key}' FROM memories WHERE key LIKE '{history_key}-%';
+              INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance)
+                SELECT e.id,'memory','memory:'||m.id::text,'supports' FROM entity_edges e JOIN memories m ON m.key=e.target WHERE e.source='{history_key}';
+              INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,valid_at,invalid_at)
+                SELECT id,'{history_key}','uses',key,'2020-01-01T00:00:00Z','2020-04-01T00:00:00Z' FROM memories WHERE key LIKE '{history_key}-%';
+              UPDATE kb_async_jobs SET status='done' WHERE kind='memory_index' AND document_id IN (SELECT id FROM memories WHERE key LIKE '{history_key}-%');
+              SELECT json_object_agg(key,id) FROM memories WHERE key LIKE '{history_key}-%'; COMMIT"""))
+            historical_wanted={history_key+'-'+state for state in ('current','superseded','archived')}
+            at='2020-02-01T00:00:00Z'
+            code,result,elapsed=call('search_assertions',dict(query=history_key,project=key,valid_at=at,limit=64))
+            check('Historical assertions use requested-time parent eligibility',code==200 and result.get('status')=='ok'
+                  and {row['object'] for row in result.get('assertions',[])}==historical_wanted,elapsed)
+            code,result,elapsed=call('search_graph_as_of',dict(query=history_key,project=key,as_of=at,limit=64))
+            check('Historical relations use requested-time parent eligibility',code==200 and result.get('status')=='ok'
+                  and {int(row['memory_id']) for row in result.get('relations',[])}=={history_ids[name] for name in historical_wanted},elapsed)
+            code,result,elapsed=call('assemble_typed_context',dict(query=history_key,project=key,valid_at=at,
+                enable_historical=True,enable_observations=False,enable_approved_procedures=False,
+                channel_budgets=dict(total=4096,historical_assertions=4096)))
+            refs=result.get('retained_items',[])
+            check('Historical typed projection retains authorized old parents',code==200 and result.get('status')=='ok'
+                  and len(refs)==3 and {int(parent['record_id']) for ref in refs for parent in ref['source_version'].get('memory_parents',[])}=={history_ids[name] for name in historical_wanted},elapsed)
+            code,revalidated,_=call('revalidate_sources',dict(project=key,revalidation=dict(schema_version=1,check_id=uuid.uuid4().hex,sources=refs)))
+            check('Historical typed release preserves requested-time policy',code==200 and revalidated.get('eligible') is True)
+            sql(f"UPDATE memories SET lifecycle_state='revoked' WHERE id={history_ids[history_key+'-superseded']}")
+            code,revalidated,_=call('revalidate_sources',dict(project=key,revalidation=dict(schema_version=1,check_id=uuid.uuid4().hex,sources=refs)))
+            check('Revocation after historical selection refuses release',code==200 and revalidated.get('eligible') is False)
         identities = []
         for name in (kb.application,kb.postgres,kb.embedder):
             value = json.loads(matrix.command('docker','inspect',name))[0]
