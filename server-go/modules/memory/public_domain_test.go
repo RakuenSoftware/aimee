@@ -354,6 +354,31 @@ SET LOCAL ROLE memory_domain_test;`)
 			}
 		}
 	})
+	t.Run("scoped statistics preserve operator lifecycle coverage", func(t *testing.T) {
+		stats := run("stats", `{"project":"app"}`)["stats"].(map[string]any)
+		if stats["total"] != float64(5) || stats["conflicts"] != float64(300) {
+			t.Error("scoped statistics include foreign rows or omit retained states", stats)
+		}
+	})
+	t.Run("scoped console effectiveness", func(t *testing.T) {
+		result := run("stats", `{"project":"app","view":"console","effectiveness":true}`)
+		display := result["display"].(map[string]any)
+		if display["total"] != float64(5) || display["effectiveness"].(map[string]any)["low_effectiveness"] != float64(5) {
+			t.Error("console statistics widened the audience", display)
+		}
+	})
+	t.Run("scoped dashboard conflict endpoints", func(t *testing.T) {
+		dashboard := run("stats_dashboard", `{"project":"app"}`)["dashboard"].(map[string]any)
+		var count, conflicted float64
+		for _, item := range dashboard["scopes"].([]any) {
+			row := item.(map[string]any)
+			count += row["count"].(float64)
+			conflicted += row["conflicted_memories"].(float64)
+		}
+		if count != 5 || conflicted != 600 {
+			t.Error("dashboard exposed foreign rows or hidden conflict endpoints", count, conflicted)
+		}
+	})
 	for _, verb := range []string{"entity_edges", "search_graph", "search_graph_as_of"} {
 		result := run(verb, `{"entity":"app","query":"app","as_of":"2026-09-01","scope_context":true,"project":"app"}`)
 		key := "relations"

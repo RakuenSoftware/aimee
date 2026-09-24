@@ -54,6 +54,7 @@ def main():
                 values.append(f"('L2','fact','{key}-{state}','{key} {state}','project','{scope}','{life}',{int(state=='suppressed')})")
             values.append(f"('L2','fact','{key}-workspace','{key} workspace','workspace','{key}-team','active',0)")
             ids = json.loads(sql("BEGIN; INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,lifecycle_state,activation_suppressed) VALUES "+','.join(values)+f""";
+              UPDATE memories SET effectiveness=0.1 WHERE key LIKE '{key}-%';
               UPDATE memories SET valid_from=(now()+interval '1 day')::text WHERE key='{key}-future';
               UPDATE memories SET valid_until=(now()-interval '1 day')::text WHERE key='{key}-expired';
               INSERT INTO memory_provenance(memory_id,session_id,action,details,created_at)
@@ -147,6 +148,22 @@ def main():
             code,result,elapsed = call('list_conflicts',dict(project=key,max=256))
             check('Legacy conflict audience excludes foreign parents', code == 200 and result.get('status') == 'ok'
                   and not any(int(row[k]) in foreign_ids for row in result.get('conflicts',[]) for k in ('memory_a','memory_b')), elapsed)
+            for audience,value,total,conflicts in [('project',key,9,8),('workspace',key+'-team',1,0)]:
+                code,result,elapsed = call('stats',dict(**{audience:value}))
+                stats=result.get('stats',{})
+                check('Operator statistics honor '+audience+' without current-only filtering',
+                      code == 200 and result.get('status') == 'ok' and stats.get('total') == total
+                      and stats.get('conflicts') == conflicts, elapsed)
+                code,result,elapsed = call('stats',dict(view='console',effectiveness=True,**{audience:value}))
+                display=result.get('display',{})
+                check('Console effectiveness retains '+audience+' restriction', code == 200
+                      and result.get('status') == 'ok' and display.get('total') == total
+                      and display.get('effectiveness',{}).get('low_effectiveness') == total, elapsed)
+                code,result,elapsed = call('stats_dashboard',dict(**{audience:value}))
+                scopes=result.get('dashboard',{}).get('scopes',[])
+                check('Dashboard excludes hidden '+audience+' conflict endpoints', code == 200
+                      and result.get('status') == 'ok' and sum(row['count'] for row in scopes) == total
+                      and sum(row['conflicted_memories'] for row in scopes) == 2*conflicts, elapsed)
             card_id = int(sql(f"""BEGIN;
               INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
                 VALUES('L1','episode','{key}-derived','{key}-derived copied current input','project','{key}');

@@ -169,8 +169,10 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		request.Operation = "health"
 	case "stats_dashboard":
 		request.Operation = "stats-dashboard"
+		scoped = commandScope(args, &request)
 	case "stats":
 		request.Operation = "stats"
+		scoped = commandScope(args, &request)
 	default:
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -326,7 +328,10 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 			var effectiveness bool
 			_ = json.Unmarshal(args["effectiveness"], &effectiveness)
 			if effectiveness {
-				data, status := handleData(options, invocation, []byte(`{"operation":"effectiveness-stats","include_all":true}`))
+				extraRequest := request
+				extraRequest.Operation = "effectiveness-stats"
+				encoded, _ := json.Marshal(extraRequest)
+				data, status := handleData(options, invocation, encoded)
 				var extra DataResponse
 				if status == bus.ModuleStatusOK && json.Unmarshal(data, &extra) == nil && extra.Effectiveness != nil {
 					e := extra.Effectiveness
