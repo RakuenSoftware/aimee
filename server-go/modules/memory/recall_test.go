@@ -169,6 +169,19 @@ func exerciseRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 		return b, envelope.Recall
 	}
 	b, _ := recall("backend migration", 8192, false, "")
+	exec(`SAVEPOINT legacy_scope_recall`)
+	legacy := runPublicCommand(t, client, "recall", `{"task_hint":"backend migration","limit_tokens":8192,"project":"recall-project"}`)
+	encodedLegacy, _ := json.Marshal(legacy["recall"])
+	var legacyBundle recallBundle
+	if legacy["status"] != "ok" || json.Unmarshal(encodedLegacy, &legacyBundle) != nil || len(legacyBundle.Identity) != 3 || strings.Contains(string(encodedLegacy), "private-project") {
+		t.Fatal("legacy project argument did not constrain recall", legacy)
+	}
+	for _, record := range legacyBundle.Identity {
+		if record.ID != self && record.ID != role && record.ID != identity {
+			t.Fatal("legacy project recall admitted a foreign identity", record)
+		}
+	}
+	exec(`ROLLBACK TO SAVEPOINT legacy_scope_recall; RELEASE SAVEPOINT legacy_scope_recall`)
 	if len(b.Identity) != 3 || b.Identity[0].ID != self || b.Identity[1].ID != role || b.Identity[2].ID != identity {
 		t.Fatalf("identity prefixes/scope: %+v", b.Identity)
 	}

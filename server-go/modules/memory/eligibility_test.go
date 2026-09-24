@@ -97,18 +97,25 @@ SET LOCAL ROLE aimee_store_runtime`)
 	vector := make([]float64, dimension)
 	vector[0] = 1
 	encodedVector, _ := json.Marshal(vector)
+	eligibleVector := append([]float64(nil), vector...)
+	eligibleVector[0], eligibleVector[1] = 0.8, 0.6
+	encodedEligibleVector, _ := json.Marshal(eligibleVector)
 	allIDs := make([]int64, 0, len(ids))
 	for _, id := range ids {
 		allIDs = append(allIDs, id)
+		encoded := encodedVector
+		if id == ids["open"] || id == ids["utc-boundary"] || id == ids["offset-boundary"] {
+			encoded = encodedEligibleVector
+		}
 		exec(`INSERT INTO memory_embeddings(point_id,embedding,record_type,primary_scope,project,kind,payload_json)
- SELECT id,$2::vector,'memory',scope_type,scope_value,kind,'{}' FROM memories WHERE id=$1`, id, string(encodedVector))
+ SELECT id,$2::vector,'memory',scope_type,scope_value,kind,'{}' FROM memories WHERE id=$1`, id, string(encoded))
 		if id != ids["open"] {
 			exec(`INSERT INTO memory_links(source_id,target_id,relation) VALUES($1,$2,'depends_on')`, ids["open"], id)
 		}
 	}
 	exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_scope_type','project',true),set_config('aimee.memory_scope_value','eligibility-local',true),set_config('aimee.memory_project','eligibility-local',true); SET LOCAL ROLE aimee_store_runtime`)
 	expectedIDs := map[int64]bool{ids["open"]: true, ids["utc-boundary"]: true, ids["offset-boundary"]: true}
-	dense, err := bound.SearchVectors(ctx, vector, "memory", "", "eligibility-local", false, 64)
+	dense, err := bound.SearchVectors(ctx, vector, "memory", "", "eligibility-local", false, len(expectedIDs))
 	if err != nil || len(dense) != len(expectedIDs) {
 		t.Fatal("common fixture dense-only eligibility", dense, err)
 	}
@@ -118,7 +125,7 @@ SET LOCAL ROLE aimee_store_runtime`)
 		}
 	}
 	graph, err := bound.pageRank(ctx, DataRequest{Scope: Scope{Type: ScopeProject, Value: "eligibility-local"}, Project: "eligibility-local", PageRank: &pageRankRequest{IDs: allIDs, Iterations: 8, Weight: 1, Relations: []string{"depends_on"}}}, true)
-	if err != nil || len(graph.Scores) != len(expectedIDs) {
+	if err != nil || len(graph.Scores) != len(expectedIDs) || graph.Candidates != len(expectedIDs) || graph.Edges != 4 {
 		t.Fatal("common fixture graph-only eligibility", graph, err)
 	}
 	for _, score := range graph.Scores {

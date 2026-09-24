@@ -34,7 +34,9 @@ func TestDomainPublicScope(t *testing.T) {
 		scoped, all        bool
 		workspace, project string
 	}{
-		{`{"include_all":false,"workspace":"ignored"}`, false, true, "", ""},
+		{`{"include_all":false,"workspace":"legacy"}`, true, false, "legacy", ""},
+		{`{"project":"legacy"}`, true, false, "", "legacy"},
+		{`{"include_all":false}`, true, false, "", ""},
 		{`{"scope_context":true,"workspace":"repo","project":"app","scope":{"type":"global"}}`, true, false, "repo", "app"},
 		{`{"scope_context":true,"include_all":true}`, true, true, "", ""},
 	} {

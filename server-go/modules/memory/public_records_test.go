@@ -15,6 +15,10 @@ func TestRecordPublicValidation(t *testing.T) {
 	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, nil)))
 	for _, tt := range []struct{ verb, args string }{
 		{"get", `{"id":0}`}, {"get", `{"id":1.5}`}, {"fact_history", `{}`},
+		{"find_facts", `{"query":"key","project":{}}`},
+		{"find_facts", `{"query":"key","workspace":null}`},
+		{"find_facts", `{"query":"key","scope_context":"yes"}`},
+		{"find_facts", `{"query":"key","include_all":1}`},
 		{"get", `{"id":"9007199254740993x","view":"console"}`},
 		{"get", `{"id":9007199254740993,"view":"console"}`},
 		{"list_session_scope_priority_like", `{"pattern":null}`}, {"search_facts_patterns_by_keyword", `{}`},
@@ -125,6 +129,25 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 			row := rows[i].(map[string]any)
 			if row["key"] != key || len(row) != 16 {
 				t.Fatal(row)
+			}
+		}
+	}
+	for _, sample := range []struct {
+		args    string
+		allowed map[string]bool
+	}{
+		{`{"query":"key","project":"private"}`, map[string]bool{"private-key": true, "global-key": true}},
+		{`{"query":"key","workspace":"team"}`, map[string]bool{"workspace-key": true, "global-key": true}},
+		{`{"query":"key","include_all":false}`, map[string]bool{"global-key": true}},
+	} {
+		result := run("find_facts", sample.args)
+		rows := result["facts"].([]any)
+		if len(rows) != len(sample.allowed) {
+			t.Fatal("legacy scope argument was ignored", sample.args, result)
+		}
+		for _, row := range rows {
+			if !sample.allowed[row.(map[string]any)["key"].(string)] {
+				t.Fatal("legacy scope argument admitted foreign row", sample.args, row)
 			}
 		}
 	}

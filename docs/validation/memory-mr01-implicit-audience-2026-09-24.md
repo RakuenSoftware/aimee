@@ -13,6 +13,6 @@ shared/global visibility policy. Explicit exact-scope reads stay exact. The
 passes, including the prior foreign-project refusal regression. The [full race suite and export](memory-mr01-implicit-audience-2026-09-24/full-race-export.txt)
 pass (212.213 seconds for race, 5.309 seconds for export). The
 [HTTP regression on the prior image](memory-mr01-implicit-audience-2026-09-24/http-before.json)
-also reproduces the global-visibility loss. Updated scoped HTTP evidence remains
-pending. No schema or native policy changes
+also reproduces the global-visibility loss. [Updated scoped HTTP evidence](memory-mr01-implicit-audience-2026-09-24/http-after/checks.json)
+passes all 16 checks and 128 concurrent requests on candidate `7099bf52c`. No schema or native policy changes
 are introduced.

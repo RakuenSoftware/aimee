@@ -129,6 +129,9 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if json.Unmarshal(body, &args) != nil || args == nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if options.placement == PlacementKB && !validCommandScopeArgs(args) {
+		return commandResult(commandError("invalid_argument", "scope arguments require strings and boolean flags"))
+	}
 	if _, exists := args["read_policy"]; exists && verb != "get" && verb != "runtime" {
 		return commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get"))
 	}
@@ -416,13 +419,7 @@ func handleRecallCommand(options handlerOptions, invocation bus.ModuleInvocation
 	}
 	_ = json.Unmarshal(args["session_start"], &request.SessionStart)
 	request.LimitTokens = recallTokenLimit(request.LimitTokens, request.SessionStart)
-	var scoped bool
-	_ = json.Unmarshal(args["scope_context"], &scoped)
-	if scoped {
-		request.Workspace, request.Project = args.stringOr("workspace", ""), args.stringOr("project", "")
-		request.IncludeAll = false
-		_ = json.Unmarshal(args["include_all"], &request.IncludeAll)
-	}
+	scoped := commandScope(args, &request)
 	encoded, err := json.Marshal(request)
 	if err != nil {
 		return nil, bus.ModuleStatusInternal

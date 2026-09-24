@@ -5,7 +5,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import secrets
 import subprocess
 import time
 import uuid
@@ -36,7 +35,6 @@ def main():
                AIMEE_PROVIDER_CONTEXT_LIMITS=json.dumps(dict(schema_version=1, max_request_bytes=32768)))
     key = 'mr01-lanes-' + uuid.uuid4().hex
     kb = matrix.Stack('kb', env, args.output)
-    kb.env['AIMEE_KB_API_BEARER_TOKEN'] = 'scope:project:' + key + ':' + secrets.token_hex(32)
     def sql(query):
         return matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
             '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
@@ -54,6 +52,7 @@ def main():
                 life = state if state in ('superseded','archived','quarantined','deleted','revoked') else 'active'
                 scope = key+'-foreign' if state == 'cross-scope' else key
                 values.append(f"('L2','fact','{key}-{state}','{key} {state}','project','{scope}','{life}',{int(state=='suppressed')})")
+            values.append(f"('L2','fact','{key}-workspace','{key} workspace','workspace','{key}-team','active',0)")
             ids = json.loads(sql("BEGIN; INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,lifecycle_state,activation_suppressed) VALUES "+','.join(values)+f""";
               UPDATE memories SET valid_from=(now()+interval '1 day')::text WHERE key='{key}-future';
               UPDATE memories SET valid_until=(now()-interval '1 day')::text WHERE key='{key}-expired';
@@ -65,6 +64,7 @@ def main():
               UPDATE kb_async_jobs SET status='done' WHERE kind='memory_index' AND document_id IN
                 (SELECT id FROM memories WHERE key LIKE '{key}-%');
               SELECT json_object_agg(key,id) FROM memories WHERE key LIKE '{key}-%'; COMMIT"""))
+            workspace_id = ids[key+'-workspace']
             ids = {state: ids[key+'-'+state] for state in states}
             for verb in ('find_facts','find_facts_visible','find_facts_scoped','list'):
                 body = dict(query=key,scope_context=True,project=key,limit=64)
@@ -74,6 +74,17 @@ def main():
                 records = result.get('memories' if verb == 'list' else 'facts', [])
                 check('Common fixture lexical/list '+verb, code == 200 and result.get('status') == 'ok'
                       and {int(row['id']) for row in records} == {ids['current']}, elapsed)
+            for audience, value, expected in [('project',key,ids['current']),('workspace',key+'-team',workspace_id)]:
+                code, result, elapsed = call('find_facts',dict(query=key,**{audience:value},limit=64))
+                check('Legacy '+audience+' applies without scope_context', code == 200 and result.get('status') == 'ok'
+                      and {int(row['id']) for row in result.get('facts',[])} == {expected}, elapsed)
+            code,result,elapsed = call('find_facts',dict(query=key,include_all=False))
+            check('Explicit include_all false restricts to shared audience', code == 200
+                  and result.get('status') == 'ok' and result.get('facts') == [], elapsed)
+            for field,value in [('project',{}),('workspace',None),('scope_context','yes'),('include_all',1)]:
+                code,result,elapsed = call('find_facts',dict(query=key,**{field:value}))
+                check('Malformed '+field+' cannot become all-scope retrieval', code == 200
+                      and result.get('kind') == 'invalid_argument' and 'facts' not in result, elapsed)
             code, result, elapsed = call('ontology',dict(action='walk',entity=key+'-root',
                 scope_context=True,project=key,hops=1))
             check('Common fixture graph-only evidence-backed traversal', code == 200 and result.get('status') == 'ok'

@@ -36,13 +36,38 @@ func (args commandArgs) decimalID(name string) (int64, bool) {
 	return args.positiveID(name)
 }
 
+func validCommandScopeArgs(args commandArgs) bool {
+	for _, key := range []string{"workspace", "project"} {
+		if raw, exists := args[key]; exists {
+			var value *string
+			if json.Unmarshal(raw, &value) != nil || value == nil {
+				return false
+			}
+		}
+	}
+	for _, key := range []string{"scope_context", "include_all"} {
+		if raw, exists := args[key]; exists {
+			var value *bool
+			if json.Unmarshal(raw, &value) != nil || value == nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func commandScope(args commandArgs, request *DataRequest) bool {
 	var scoped bool
 	_ = json.Unmarshal(args["scope_context"], &scoped)
+	workspace, project := args.stringOr("workspace", ""), args.stringOr("project", "")
+	// Legacy callers may supply an audience without the newer context marker.
+	// Honor those values instead of silently changing the query to all scopes.
+	scoped = scoped || workspace != "" || project != ""
 	request.IncludeAll = !scoped
+	_ = json.Unmarshal(args["include_all"], &request.IncludeAll)
+	scoped = scoped || !request.IncludeAll
 	if scoped {
-		request.Workspace, request.Project = args.stringOr("workspace", ""), args.stringOr("project", "")
-		_ = json.Unmarshal(args["include_all"], &request.IncludeAll)
+		request.Workspace, request.Project = workspace, project
 	}
 	return scoped
 }

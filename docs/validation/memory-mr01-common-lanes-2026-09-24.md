@@ -44,3 +44,9 @@ cards, summaries, scenes/members, relations, profiles, assertions, CSS conventio
 watermarks and graph feedback) continue to exclude the ineligible parent. Setup
 moves the parent using the owner role; each serving check restores and uses the
 non-owner runtime role.
+
+The [stronger backfill replay](memory-mr01-common-lanes-2026-09-24/lane-backfill-race.txt)
+passes in 231.914 seconds. Excluded vectors have perfect similarity while the
+three eligible vectors score lower; LIMIT 3 still returns all three eligible
+identities. PageRank admits exactly three nodes and four directed edges, excluding
+hidden parents and their edges before ranking.
