@@ -1,0 +1,202 @@
+[
+  {
+    "name": "Common fixture lexical/list find_facts",
+    "passed": true,
+    "elapsed_ms": 172.46
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_visible",
+    "passed": true,
+    "elapsed_ms": 143.941
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_scoped",
+    "passed": true,
+    "elapsed_ms": 180.579
+  },
+  {
+    "name": "Common fixture lexical/list list",
+    "passed": true,
+    "elapsed_ms": 133.026
+  },
+  {
+    "name": "Common fixture compatibility search and windows",
+    "passed": true,
+    "elapsed_ms": 151.185
+  },
+  {
+    "name": "Common fixture query route top_l2_facts",
+    "passed": true,
+    "elapsed_ms": 140.271
+  },
+  {
+    "name": "Common fixture query route load_eval_corpus",
+    "passed": true,
+    "elapsed_ms": 150.08
+  },
+  {
+    "name": "Common fixture query route list_session_scope_priority",
+    "passed": true,
+    "elapsed_ms": 130.597
+  },
+  {
+    "name": "Common fixture query route list_session_scope_priority_like",
+    "passed": true,
+    "elapsed_ms": 123.358
+  },
+  {
+    "name": "Common fixture query route search_facts_patterns_by_keyword",
+    "passed": true,
+    "elapsed_ms": 136.189
+  },
+  {
+    "name": "Common fixture diagnostic retrieval",
+    "passed": true,
+    "elapsed_ms": 148.92
+  },
+  {
+    "name": "Common fixture recall bundle with legacy project",
+    "passed": true,
+    "elapsed_ms": 173.706
+  },
+  {
+    "name": "Legacy project applies without scope_context",
+    "passed": true,
+    "elapsed_ms": 153.309
+  },
+  {
+    "name": "Legacy workspace applies without scope_context",
+    "passed": true,
+    "elapsed_ms": 137.028
+  },
+  {
+    "name": "Explicit include_all false restricts to shared audience",
+    "passed": true,
+    "elapsed_ms": 139.97
+  },
+  {
+    "name": "Malformed project cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 106.431
+  },
+  {
+    "name": "Malformed workspace cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 110.607
+  },
+  {
+    "name": "Malformed scope_context cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 95.664
+  },
+  {
+    "name": "Malformed include_all cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 107.313
+  },
+  {
+    "name": "Common fixture graph-only evidence-backed traversal",
+    "passed": true,
+    "elapsed_ms": 130.962
+  },
+  {
+    "name": "Common fixture current current",
+    "passed": true,
+    "elapsed_ms": 136.019
+  },
+  {
+    "name": "Common fixture historical current",
+    "passed": true,
+    "elapsed_ms": 118.637
+  },
+  {
+    "name": "Common fixture current future",
+    "passed": true,
+    "elapsed_ms": 119.949
+  },
+  {
+    "name": "Common fixture historical future",
+    "passed": true,
+    "elapsed_ms": 111.796
+  },
+  {
+    "name": "Common fixture current expired",
+    "passed": true,
+    "elapsed_ms": 125.234
+  },
+  {
+    "name": "Common fixture historical expired",
+    "passed": true,
+    "elapsed_ms": 131.59
+  },
+  {
+    "name": "Common fixture current suppressed",
+    "passed": true,
+    "elapsed_ms": 131.403
+  },
+  {
+    "name": "Common fixture historical suppressed",
+    "passed": true,
+    "elapsed_ms": 129.422
+  },
+  {
+    "name": "Common fixture current superseded",
+    "passed": true,
+    "elapsed_ms": 135.579
+  },
+  {
+    "name": "Common fixture historical superseded",
+    "passed": true,
+    "elapsed_ms": 136.402
+  },
+  {
+    "name": "Common fixture current archived",
+    "passed": true,
+    "elapsed_ms": 133.647
+  },
+  {
+    "name": "Common fixture historical archived",
+    "passed": true,
+    "elapsed_ms": 153.371
+  },
+  {
+    "name": "Common fixture current quarantined",
+    "passed": true,
+    "elapsed_ms": 119.95
+  },
+  {
+    "name": "Common fixture historical quarantined",
+    "passed": true,
+    "elapsed_ms": 118.546
+  },
+  {
+    "name": "Common fixture current deleted",
+    "passed": true,
+    "elapsed_ms": 130.293
+  },
+  {
+    "name": "Common fixture historical deleted",
+    "passed": true,
+    "elapsed_ms": 120.706
+  },
+  {
+    "name": "Common fixture current revoked",
+    "passed": true,
+    "elapsed_ms": 137.826
+  },
+  {
+    "name": "Common fixture historical revoked",
+    "passed": true,
+    "elapsed_ms": 116.382
+  },
+  {
+    "name": "Common fixture current cross-scope",
+    "passed": true,
+    "elapsed_ms": 126.167
+  },
+  {
+    "name": "Common fixture historical cross-scope",
+    "passed": true,
+    "elapsed_ms": 130.32
+  }
+]

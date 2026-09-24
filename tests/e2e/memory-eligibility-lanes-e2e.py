@@ -74,6 +74,23 @@ def main():
                 records = result.get('memories' if verb == 'list' else 'facts', [])
                 check('Common fixture lexical/list '+verb, code == 200 and result.get('status') == 'ok'
                       and {int(row['id']) for row in records} == {ids['current']}, elapsed)
+            code,result,elapsed = call('search',dict(query=key,keywords=[key],view='server',
+                scope_context=True,project=key,limit=32))
+            check('Common fixture compatibility search and windows', code == 200 and result.get('status') == 'ok'
+                  and {int(row['id']) for row in result.get('facts',[])} == {ids['current']}
+                  and len(result.get('windows',[])) == 1, elapsed)
+            for verb in ('top_l2_facts','load_eval_corpus','list_session_scope_priority',
+                         'list_session_scope_priority_like','search_facts_patterns_by_keyword'):
+                code,result,elapsed = call(verb,dict(scope_context=True,project=key,max=64,
+                    pattern='%'+key+'%',keyword='%'+key+'%'))
+                check('Common fixture query route '+verb, code == 200 and result.get('status') == 'ok'
+                      and {int(row['id']) for row in result.get('memories',[])} == {ids['current']}, elapsed)
+            code,result,elapsed = call('diagnose_scoped',dict(query=key,scope_type='project',scope_value=key,limit=64))
+            check('Common fixture diagnostic retrieval', code == 200 and result.get('status') == 'ok'
+                  and {int(row['memory']['id']) for row in result.get('rows',[])} == {ids['current']}, elapsed)
+            code,result,elapsed = call('recall',dict(task_hint=key,project=key,limit_tokens=8192))
+            check('Common fixture recall bundle with legacy project', code == 200 and result.get('status') == 'ok'
+                  and {int(row['memory_id']) for row in result.get('recall',{}).get('active_context',[])} == {ids['current']}, elapsed)
             for audience, value, expected in [('project',key,ids['current']),('workspace',key+'-team',workspace_id)]:
                 code, result, elapsed = call('find_facts',dict(query=key,**{audience:value},limit=64))
                 check('Legacy '+audience+' applies without scope_context', code == 200 and result.get('status') == 'ok'
@@ -99,6 +116,31 @@ def main():
                     check('Common fixture '+mode+' '+state, code == 200 and
                           ((result.get('status') == 'ok' and int(result['memory']['id']) == ids[state]) if allowed
                            else result.get('kind') == 'not_found' and 'memory' not in result), elapsed)
+            card_id = int(sql(f"""BEGIN;
+              INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+                VALUES('L1','episode','{key}-derived','{key}-derived copied current input','project','{key}');
+              INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text,is_episode_card)
+                SELECT id,'episode_card','fixture','derived current input',1 FROM memories WHERE key='{key}-derived';
+              INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+                SELECT 'memory_unit',u.id,'episode-card-input-v1',jsonb_build_object(
+                  'schema_version',1,'owner_id',o.owner_id::text,'parent_revision',m.record_revision::text,
+                  'unit_digest',encode(sha256(convert_to(jsonb_build_array(u.unit_type,u.unit_key,u.unit_text,u.memory_kind,u.weight)::text,'UTF8')),'hex'),
+                  'inputs',jsonb_build_array(jsonb_build_object('record_id',p.id::text,'record_revision',p.record_revision::text)))::text
+                FROM memory_units u JOIN memories m ON m.id=u.memory_id
+                CROSS JOIN memory_collection_owner o CROSS JOIN memories p
+                WHERE m.key='{key}-derived' AND o.id=1 AND p.id={ids['current']};
+              UPDATE kb_async_jobs SET status='done' WHERE kind='memory_index' AND document_id IN
+                (SELECT id FROM memories WHERE key='{key}-derived');
+              SELECT id FROM memories WHERE key='{key}-derived'; COMMIT"""))
+            for revoked in (False,True):
+                if revoked:
+                    sql(f"UPDATE memories SET lifecycle_state='revoked' WHERE id={ids['current']}")
+                code,result,elapsed = call('recall',dict(task_hint=key+'-derived',project=key,limit_tokens=8192,
+                    activation=dict(current_turn=100,rows=[])))
+                expected = set() if revoked else {card_id}
+                check('Activated derived card '+('refuses revoked input' if revoked else 'admits observed current input'),
+                      code == 200 and result.get('status') == 'ok'
+                      and {int(row['memory_id']) for row in result.get('recall',{}).get('active_context',[])} == expected, elapsed)
         identities = []
         for name in (kb.application,kb.postgres,kb.embedder):
             value = json.loads(matrix.command('docker','inspect',name))[0]

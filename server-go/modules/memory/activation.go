@@ -90,7 +90,7 @@ AND $%d-a.last_turn<=m.activation_sticky_turns)`, turnParam)
   $%d-a.last_turn>m.activation_cooldown_turns)) AS eligible
  FROM memories m LEFT JOIN jsonb_to_recordset($%d::jsonb)
  AS a(memory_id bigint,last_turn bigint) ON a.memory_id=m.id
- WHERE m.lifecycle_state='%s' AND `+memoryValiditySQL("m.")+` AND (%s)
+ WHERE m.lifecycle_state='%s' AND `+memoryValiditySQL("m.")+` AND `+currentEpisodeCardInputsSQL("m.", false)+` AND (%s)
 ), served AS (
  SELECT * FROM candidates WHERE eligible
  ORDER BY scope_rank,confidence+CASE WHEN sticky THEN 0.04 ELSE 0 END DESC,

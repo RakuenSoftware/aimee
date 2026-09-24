@@ -16,3 +16,9 @@ pass (212.213 seconds for race, 5.309 seconds for export). The
 also reproduces the global-visibility loss. [Updated scoped HTTP evidence](memory-mr01-implicit-audience-2026-09-24/http-after/checks.json)
 passes all 16 checks and 128 concurrent requests on candidate `7099bf52c`. No schema or native policy changes
 are introduced.
+
+The [fresh deployment receipts](memory-mr01-implicit-audience-2026-09-24/fresh/T2/topology.json)
+pass 1714/1714 checks (T2: 1097; T3: 617). Both runners exit zero and
+remove their stacks. Captured image identities bind nine containers to the
+candidate and its pinned dependencies; three provider capability captures are
+retained. Released CT100 remains on healthy 0.4.5 containers.

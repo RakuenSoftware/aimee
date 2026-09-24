@@ -1,0 +1,14 @@
+--- FAIL: TestArchiveCommandsPostgres (0.07s)
+    public_archive_test.go:217: activated card input fence [{<nil> 0xc000118c00 false <nil> false false [] 0 0 0 false 0 0 15 {project app} L1 episode episode-card:session Episode: Session session
+        Participants: (none)
+        Places: (none)
+        Events:
+        shared conventions
+        project details
+        Outcomes:
+        (none)
+        Open threads:
+        (none) 0.8}] 0 <nil>
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.081s
+FAIL

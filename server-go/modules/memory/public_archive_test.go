@@ -34,7 +34,7 @@ CREATE FUNCTION archive_command_test.pg_now_text() RETURNS text LANGUAGE sql AS 
 SET LOCAL search_path TO pg_temp,archive_command_test,public;
 CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,key text,content text,tier text DEFAULT 'L2',kind text DEFAULT 'fact',epistemic_kind text DEFAULT 'world_fact',
  scope_type text DEFAULT 'global',scope_value text DEFAULT '_global',confidence double precision DEFAULT 0.8,use_count int DEFAULT 0,
- source_session text DEFAULT 'session',provenance_category text DEFAULT '',artifact_ref text DEFAULT '',lifecycle_state text DEFAULT 'active',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text(),UNIQUE(kind,key,scope_type,scope_value),valid_from text DEFAULT '',valid_until text DEFAULT '',activation_suppressed int DEFAULT 0);
+ source_session text DEFAULT 'session',provenance_category text DEFAULT '',artifact_ref text DEFAULT '',lifecycle_state text DEFAULT 'active',created_at text DEFAULT pg_now_text(),updated_at text DEFAULT pg_now_text(),UNIQUE(kind,key,scope_type,scope_value),valid_from text DEFAULT '',valid_until text DEFAULT '',activation_suppressed int DEFAULT 0,activation_sticky_turns bigint DEFAULT 0,activation_cooldown_turns bigint DEFAULT 0,activation_delay_turns bigint DEFAULT 0);
 CREATE TEMP TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
 INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text);
@@ -180,6 +180,24 @@ SET LOCAL ROLE memory_archive_test;`)
 	if err := tx.QueryRow(ctx, `SELECT memory_id FROM memory_units WHERE id=$1`, int64(private["memory_unit_id"].(float64))).Scan(&cardParent); err != nil {
 		t.Fatal(err)
 	}
+	checkActivatedCard := func(want int) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, `SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_scope_type','project',true),set_config('aimee.memory_scope_value','app',true)`); err != nil {
+			t.Fatal(err)
+		}
+		records, _, _, err := backend.recallActivated(ctx, &ActivationSnapshot{CurrentTurn: 100, Rows: []ActivationRow{}},
+			"m.id=$1", 1, false, false, cardParent)
+		if err != nil || len(records) != want {
+			t.Fatal("activated card input fence", records, want, err)
+		}
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL ROLE memory_archive_test"); err != nil {
+		t.Fatal(err)
+	}
+	checkActivatedCard(1)
+	if _, err := tx.Exec(ctx, "RESET ROLE"); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name, mutation string
 		cards          int
@@ -196,6 +214,7 @@ SET LOCAL ROLE memory_archive_test;`)
 		if _, err := tx.Exec(ctx, "SAVEPOINT card_input_observation; "+tc.mutation+"; SET LOCAL ROLE memory_archive_test"); err != nil {
 			t.Fatal(err)
 		}
+		checkActivatedCard(0)
 		listed := run("episode_cards", args)
 		cards, ok := listed["cards"].([]any)
 		if listed["status"] != "ok" || !ok || len(cards) != tc.cards {
