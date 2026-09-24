@@ -367,7 +367,12 @@ def inside(output):
         try:
             for backend in ('tmux-cli', 'provider-cli'):
                 external = json.loads(native_roster)
-                external['models'][0].update(backend=backend, cli_kind='claude', cli_cmd='/bin/false')
+                # Reach the execution fence, not the primary-only/client-only
+                # routing guards. Claude provider-cli normalizes to tmux, so
+                # use ACP for the distinct external adapter path.
+                external['models'][0].update(backend=backend,
+                    cli_kind='claude' if backend == 'tmux-cli' else 'acp',
+                    cli_cmd='/bin/false', primary_only=False, is_server_hosted=True)
                 roster.write_text(json.dumps(external))
                 before = len(captures)
                 result, events = run('unobservable ' + backend,
