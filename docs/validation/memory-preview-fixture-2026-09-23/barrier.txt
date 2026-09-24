@@ -1,0 +1,93 @@
+PASS Legacy query current eligibility before limits: top_l2_facts
+PASS Legacy query current eligibility before limits: list_session_scope_priority
+PASS Legacy query current eligibility before limits: list_session_scope_priority_like
+PASS Legacy query current eligibility before limits: search_facts_patterns_by_keyword
+PASS Legacy query current eligibility before limits: load_eval_corpus
+PASS Historical eligibility and explicit scope before limit 64
+PASS Historical eligibility and explicit scope before limit 3
+PASS History treats wildcard characters as literal identity
+Iteration 0
+PASS Preview withholds unobserved summary and retains canonical fallback
+PASS Preview commits exact rendered bytes and selected source versions
+PASS Preview preserves large summary ID and canonical parent revision
+PASS Preview fallback binds its canonical source
+PASS Preview final source check accepts current sources
+PASS Preview final source check refuses hidden sources
+PASS Preview no-op dependency reset requires producer observation
+PASS Preview observed no-op preserves source revision
+PASS Preview final source check refuses independently edited summary
+PASS Preview edited summary cannot acquire freshness from a new read
+PASS Preview producer observation binds revised summary without inventing parent change
+PASS Preview final source check accepts refreshed summary
+PASS Preview parent edit invalidates previously observed summary
+PASS Preview stale summary cannot borrow the new parent revision
+PASS Preview current canonical fallback passes after parent edit
+PASS Preview final source check refuses changed canonical fallback
+Iteration 1
+PASS Preview withholds unobserved summary and retains canonical fallback
+PASS Preview commits exact rendered bytes and selected source versions
+PASS Preview preserves large summary ID and canonical parent revision
+PASS Preview fallback binds its canonical source
+PASS Preview final source check accepts current sources
+PASS Preview final source check refuses hidden sources
+PASS Preview no-op dependency reset requires producer observation
+PASS Preview observed no-op preserves source revision
+PASS Preview final source check refuses independently edited summary
+PASS Preview edited summary cannot acquire freshness from a new read
+PASS Preview producer observation binds revised summary without inventing parent change
+PASS Preview final source check accepts refreshed summary
+PASS Preview parent edit invalidates previously observed summary
+PASS Preview stale summary cannot borrow the new parent revision
+PASS Preview current canonical fallback passes after parent edit
+PASS Preview final source check refuses changed canonical fallback
+Iteration 2
+PASS Preview withholds unobserved summary and retains canonical fallback
+PASS Preview commits exact rendered bytes and selected source versions
+PASS Preview preserves large summary ID and canonical parent revision
+PASS Preview fallback binds its canonical source
+PASS Preview final source check accepts current sources
+PASS Preview final source check refuses hidden sources
+PASS Preview no-op dependency reset requires producer observation
+PASS Preview observed no-op preserves source revision
+PASS Preview final source check refuses independently edited summary
+PASS Preview edited summary cannot acquire freshness from a new read
+PASS Preview producer observation binds revised summary without inventing parent change
+PASS Preview final source check accepts refreshed summary
+PASS Preview parent edit invalidates previously observed summary
+PASS Preview stale summary cannot borrow the new parent revision
+PASS Preview current canonical fallback passes after parent edit
+PASS Preview final source check refuses changed canonical fallback
+Iteration 3
+PASS Preview withholds unobserved summary and retains canonical fallback
+PASS Preview commits exact rendered bytes and selected source versions
+PASS Preview preserves large summary ID and canonical parent revision
+PASS Preview fallback binds its canonical source
+PASS Preview final source check accepts current sources
+PASS Preview final source check refuses hidden sources
+PASS Preview no-op dependency reset requires producer observation
+PASS Preview observed no-op preserves source revision
+PASS Preview final source check refuses independently edited summary
+PASS Preview edited summary cannot acquire freshness from a new read
+PASS Preview producer observation binds revised summary without inventing parent change
+PASS Preview final source check accepts refreshed summary
+PASS Preview parent edit invalidates previously observed summary
+PASS Preview stale summary cannot borrow the new parent revision
+PASS Preview current canonical fallback passes after parent edit
+PASS Preview final source check refuses changed canonical fallback
+Iteration 4
+PASS Preview withholds unobserved summary and retains canonical fallback
+PASS Preview commits exact rendered bytes and selected source versions
+PASS Preview preserves large summary ID and canonical parent revision
+PASS Preview fallback binds its canonical source
+PASS Preview final source check accepts current sources
+PASS Preview final source check refuses hidden sources
+PASS Preview no-op dependency reset requires producer observation
+PASS Preview observed no-op preserves source revision
+PASS Preview final source check refuses independently edited summary
+PASS Preview edited summary cannot acquire freshness from a new read
+PASS Preview producer observation binds revised summary without inventing parent change
+PASS Preview final source check accepts refreshed summary
+PASS Preview parent edit invalidates previously observed summary
+PASS Preview stale summary cannot borrow the new parent revision
+PASS Preview current canonical fallback passes after parent edit
+PASS Preview final source check refuses changed canonical fallback

@@ -813,6 +813,11 @@ int handle_entities_unmerge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "entities.unmerge");
 }
+int handle_memory_validity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.validity");
+}
+
 int handle_memory_hygiene(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.hygiene");

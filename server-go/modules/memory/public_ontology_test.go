@@ -64,7 +64,13 @@ func TestPublicOntologyWalkPostgres(t *testing.T) {
 	sql(`CREATE SCHEMA ontology_walk_test;
 CREATE FUNCTION ontology_walk_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
 SET LOCAL search_path TO pg_temp,ontology_walk_test,public;
-CREATE TEMP TABLE memories(id bigint PRIMARY KEY,scope_type text,scope_value text,tier text DEFAULT 'L2',kind text DEFAULT 'fact',key text DEFAULT '',content text DEFAULT '',confidence float8 DEFAULT 1,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
+CREATE TEMP TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,scope_type text,scope_value text,tier text DEFAULT 'L2',kind text DEFAULT 'fact',key text DEFAULT '',content text DEFAULT '',confidence float8 DEFAULT 1,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
 CREATE TEMP TABLE entity_edges(id bigint PRIMARY KEY,source text,relation text,target text,relation_id int DEFAULT 5,subject_kind int DEFAULT 1,object_kind int DEFAULT 1,weight int DEFAULT 10,edge_class text DEFAULT 'associative',suppressed int DEFAULT 0,superseded_at text DEFAULT '',invalidated_at text DEFAULT '',lifecycle_state text DEFAULT 'persistent',valid_from text DEFAULT '',valid_until text DEFAULT '',edge_origin text DEFAULT '',projection_generation_id bigint);
 CREATE TEMP TABLE fact_evidence(assertion_id bigint,source_id text,source_kind text DEFAULT 'memory',invalidated_at text DEFAULT '',stance text DEFAULT 'supports');
 CREATE TEMP TABLE projects(name text,lifecycle_state text DEFAULT 'current');
@@ -94,6 +100,7 @@ INSERT INTO fact_evidence(assertion_id,source_id) SELECT i,'memory:2' FROM gener
 INSERT INTO entity_edges(id,source,relation,target,weight) SELECT 1000+i,'wide','calls','wide-'||i,100-i FROM generate_series(1,50)i;
 INSERT INTO entity_edges(id,source,relation,target) SELECT 2000+i*3+j,'wide-'||i,'calls','leaf-'||i||'-'||j FROM generate_series(1,50)i CROSS JOIN generate_series(1,3)j;
 CREATE ROLE memory_ontology_test NOINHERIT NOBYPASSRLS;
+GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO memory_ontology_test;
 GRANT USAGE ON SCHEMA ontology_walk_test TO memory_ontology_test;
 GRANT SELECT ON memories,entity_edges,fact_evidence,projects,code_projection_generations TO memory_ontology_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;

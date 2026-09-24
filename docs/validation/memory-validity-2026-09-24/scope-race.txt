@@ -1,0 +1,21 @@
+=== RUN   TestPublicCommandDiscovery
+--- PASS: TestPublicCommandDiscovery (0.00s)
+=== RUN   TestMemoryScopeConcurrentPoolReuse
+--- PASS: TestMemoryScopeConcurrentPoolReuse (0.18s)
+=== RUN   TestValidityServingParityPostgres
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:34: runtime SQL: aimee: no rows in result set
+--- PASS: TestValidityServingParityPostgres (0.08s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	1.306s

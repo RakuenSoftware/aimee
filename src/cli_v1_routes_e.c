@@ -252,6 +252,48 @@ cJSON *marshal_memory_search(int argc, char **argv)
 
 /* Decode CLI spelling only. Scope authorization and all budget policy remain
  * in the Go owner. Unsupported options must not silently become a dry run. */
+cJSON *marshal_memory_validity(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.validity");
+   for (int i = 0; i < argc; i++)
+   {
+      const char *arg = argv[i];
+      if (!strcmp(arg, "--json"))
+         continue;
+      if (strncmp(arg, "--", 2))
+      {
+         if (cJSON_HasObjectItem(req, "id"))
+            goto invalid;
+         cJSON_AddStringToObject(req, "id", arg);
+         continue;
+      }
+      const char *value = strchr(arg, '=');
+      size_t length = value ? (size_t)(value - arg) : strlen(arg);
+      const char *field = length == 6 && !strncmp(arg, "--mode", length) ? "mode"
+                          : length == 10 && !strncmp(arg, "--valid-at", length) ? "valid_at"
+                          : length == 13 && !strncmp(arg, "--believed-at", length) ? "believed_at"
+                          : length == 7 && !strncmp(arg, "--store", length) ? "store"
+                          : length == 9 && !strncmp(arg, "--project", length) ? "project"
+                          : length == 11 && !strncmp(arg, "--workspace", length) ? "workspace"
+                          : NULL;
+      if (!field || cJSON_HasObjectItem(req, field))
+         goto invalid;
+      if (value)
+         value++;
+      else if (++i < argc)
+         value = argv[i];
+      else
+         goto invalid;
+      cJSON_AddStringToObject(req, field, value);
+   }
+   if (!cJSON_HasObjectItem(req, "id"))
+      goto invalid;
+   return req;
+invalid:
+   cJSON_Delete(req);
+   return NULL;
+}
+
 cJSON *marshal_memory_hygiene(int argc, char **argv)
 {
    cJSON *req = marshal_no_args("memory.hygiene");

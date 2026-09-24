@@ -66,6 +66,10 @@ func TestRecordPublicPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA record_command_test;
 CREATE FUNCTION record_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
 SET LOCAL search_path TO pg_temp,record_command_test,public;
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
  epistemic_kind text DEFAULT 'world_fact',scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT 'answer questions',last_used_at text DEFAULT '',source_session text DEFAULT 'session-1',provenance_category text DEFAULT 'human',
@@ -415,6 +419,7 @@ INSERT INTO memories(key) SELECT 'row-'||i FROM generate_series(1,110) i;`)
 	}
 	// Verify visibility with a real non-owner connection, including metadata.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_record_test NOINHERIT NOBYPASSRLS;
+GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO memory_record_test;
 GRANT USAGE ON SCHEMA record_command_test TO memory_record_test;
 GRANT SELECT,UPDATE ON memories TO memory_record_test;
 GRANT SELECT ON memory_collection_owner,memory_summaries,derived_memory_dependencies TO memory_record_test;

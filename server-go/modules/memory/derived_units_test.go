@@ -47,9 +47,12 @@ func exerciseDerivedUnitsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	first := seed("unit-first", "units-visible")
 	second := seed("unit-second", "units-visible")
 	hidden := seed("unit-hidden", "units-hidden")
+	// Preserve the legacy unobserved card on its own parent. Such a card must
+	// not authorize serving or embedding an otherwise ordinary source record.
+	cardParent := seed("unit-preserved-card", "units-visible")
 	var card int64
 	if err := tx.QueryRow(ctx, `INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text,is_episode_card)
- VALUES($1,'episode_card','preserved','Preserve this episode card.',1) RETURNING id`, first).Scan(&card); err != nil {
+ VALUES($1,'episode_card','preserved','Preserve this episode card.',1) RETURNING id`, cardParent).Scan(&card); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref) VALUES('unit',$1,'memory','memory:original')`, card); err != nil {

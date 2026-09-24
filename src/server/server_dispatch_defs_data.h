@@ -91,6 +91,7 @@
     {"facts.retract", handle_facts_retract},
     {"entities.merge", handle_entities_merge},
     {"entities.unmerge", handle_entities_unmerge},
+    {"memory.validity", handle_memory_validity},
     {"memory.hygiene", handle_memory_hygiene},
     {"memory.read", handle_memory_read},
     {"memory.benchmark", handle_memory_benchmark},

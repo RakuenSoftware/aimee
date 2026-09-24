@@ -90,6 +90,7 @@ cJSON *marshal_memory_delete(int argc, char **argv);
 cJSON *marshal_memory_supersede(int argc, char **argv);
 cJSON *marshal_memory_list(int argc, char **argv);
 cJSON *marshal_memory_read(int argc, char **argv);
+cJSON *marshal_memory_validity(int argc, char **argv);
 cJSON *marshal_memory_hygiene(int argc, char **argv);
 cJSON *marshal_memory_recall(int argc, char **argv);
 cJSON *marshal_memory_search(int argc, char **argv);

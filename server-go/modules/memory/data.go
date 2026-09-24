@@ -541,8 +541,7 @@ func (s *postgresDataStore) getAtVersioned(ctx context.Context, scope Scope, id 
 		}
 		err := s.db.QueryRow(ctx, `SELECT `+columns+`
 FROM user_memories
-WHERE id = $1 AND lifecycle_state = 'active'
-  AND (valid_until IS NULL OR valid_until > now())`, id).
+WHERE id = $1 AND `+personalCurrentMemorySQL(""), id).
 			Scan(destinations...)
 		if store.IsNoRows(err) {
 			return Record{}, ErrMemoryNotFound
@@ -1059,7 +1058,11 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 	var readResult *MemoryReadResult
 	if request.ReadPolicy != nil {
-		readResult = request.ReadPolicy.validate(options.placement, request.Operation, request.AsOf)
+		operation := request.Operation
+		if operation == "validity" {
+			operation = "get"
+		}
+		readResult = request.ReadPolicy.validate(options.placement, operation, request.AsOf)
 		if readResult.ErrorCode != "" {
 			encoded, encodeErr := json.Marshal(DataResponse{Read: readResult, Records: []Record{}})
 			if encodeErr != nil {
@@ -1321,7 +1324,12 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 					authority = "user"
 				}
 			}
+			// These are bounded request queries, including nested source fences.
+			// Compiling their expressions with PostgreSQL JIT can exceed the
+			// whole request latency budget before any rows are read. Keep this
+			// setting transaction-local; pooled connections retain their default.
 			_, err = transaction.Exec(ctx, `SELECT
+set_config('jit','off',true),
 set_config('aimee.memory_scope_type',$1,true),
 set_config('aimee.memory_scope_value',$2,true),
 set_config('aimee.memory_workspace',$3,true),
@@ -1344,6 +1352,33 @@ set_config('aimee.correlation_id',$9,true)`,
 	}
 
 	switch request.Operation {
+	case "validity":
+		caller := options.commandContext
+		if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" || invocation.PrincipalRef != 0 {
+			response.Payload, _ = json.Marshal(commandError("unauthorized", "validity diagnostics require an authenticated user purpose"))
+			break
+		}
+		if request.ID <= 0 || readResult == nil || request.IncludeAll {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if options.placement == PlacementKB && caller.ScopeKind != "" {
+			authorized, scopeErr := normalizeScope(PlacementKB, Scope{Type: caller.ScopeKind, Value: caller.ScopeID})
+			if scopeErr != nil || scope != authorized ||
+				(request.Project != "" && (authorized.Type != ScopeProject || request.Project != authorized.Value)) ||
+				(request.Workspace != "" && (authorized.Type != ScopeWorkspace || request.Workspace != authorized.Value)) {
+				response.Payload, _ = json.Marshal(commandError("unauthorized", "diagnostic scope exceeds authenticated scope"))
+				break
+			}
+		}
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var decision EligibilityDecision
+		decision, err = backend.validity(ctx, request.ID, readResult)
+		if err == nil {
+			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "decision": decision})
+		}
 	case "css-convention-sync", "css-conventions":
 		backend, ok := options.data.(*postgresDataStore)
 		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil {

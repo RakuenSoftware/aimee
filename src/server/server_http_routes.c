@@ -1681,6 +1681,7 @@ const http_route_t g_v1_routes[] = {
     /* Memory read family (hub-migration P1), dispatch-backed; caps derived from
      * the op (memory.* reads -> CAP_MEMORY_READ). memory.store (write) is not
      * exposed here. (memory.recall above keeps its bespoke native handler.) */
+    {"POST", "/v1/memory/validity", NULL, RM_EXACT, "memory.validity", 0, rh_dispatch_op},
     {"POST", "/v1/memory/hygiene", NULL, RM_EXACT, "memory.hygiene", 0, rh_dispatch_op},
     {"POST", "/v1/memory/search", NULL, RM_EXACT, "memory.search", 0, rh_dispatch_op},
     {"POST", "/v1/memory/list", NULL, RM_EXACT, "memory.list", 0, rh_dispatch_op},

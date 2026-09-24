@@ -59,6 +59,10 @@ func TestStorePublicPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA store_command_test;
 CREATE FUNCTION store_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
 SET LOCAL search_path TO pg_temp,store_command_test,public;
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memories(id bigserial PRIMARY KEY,key text,content text,tier text,kind text,epistemic_kind text,
  scope_type text,scope_value text,confidence double precision,confidence_ceiling double precision,use_count int DEFAULT 0,
  lifecycle_state text,activation_suppressed int DEFAULT 0,archive_reason text DEFAULT '',use_cases text DEFAULT '',last_used_at text DEFAULT '',source_session text DEFAULT '',provenance_category text DEFAULT '',
@@ -453,6 +457,7 @@ VALUES($1,$2,'exact integer fixture','L2','fact','world_fact','project','exact-i
 	}
 	// Replacement under a non-owner role cannot reach a different project's source.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_store_test NOINHERIT NOBYPASSRLS;
+GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO memory_store_test;
 GRANT USAGE ON SCHEMA store_command_test TO memory_store_test;
 GRANT SELECT ON memory_collection_owner,derived_memory_dependencies TO memory_store_test;
 GRANT SELECT,UPDATE,DELETE,INSERT ON memories,memory_rejection_tombstones,memory_links,memory_scopes,memory_summaries,memory_fact_actors,kb_async_jobs TO memory_store_test;

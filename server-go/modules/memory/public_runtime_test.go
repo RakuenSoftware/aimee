@@ -48,6 +48,8 @@ func TestRuntimePublicPostgres(t *testing.T) {
 CREATE FUNCTION runtime_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
 CREATE FUNCTION runtime_command_test.aimee_utc_text_timestamptz(t text) RETURNS timestamptz LANGUAGE sql AS $$ SELECT t::timestamptz $$;
 SET LOCAL search_path TO pg_temp,runtime_command_test,public;
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
 CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,key text,content text DEFAULT 'content',tier text DEFAULT 'L2',kind text DEFAULT 'fact',
  scope_type text DEFAULT 'project',scope_value text DEFAULT 'app',confidence double precision DEFAULT 1,use_count int DEFAULT 2,
  lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,use_cases text DEFAULT '',source_session text DEFAULT '',ttl_at text DEFAULT '',
@@ -60,6 +62,7 @@ CREATE TEMP TABLE memory_entities(memory_id bigint,entity text);
 CREATE TEMP TABLE memory_conflicts(id bigint,memory_a bigint,memory_b bigint,detected_at text,resolved int,resolution text);
 CREATE TEMP TABLE memory_links(id bigint,source_id bigint,target_id bigint,relation text);
 CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
 CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
 CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text DEFAULT '',valid_at text DEFAULT '',invalid_at text DEFAULT '',weight double precision DEFAULT 1.5,created_at text DEFAULT pg_now_text());
@@ -71,6 +74,7 @@ INSERT INTO memory_entities(memory_id,entity) VALUES (1,'app'),(3,'secret');
 INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity) SELECT 1,'app','uses','tool-'||i FROM generate_series(1,280) i;
 INSERT INTO tasks(id,parent_id,title) VALUES (1,0,'release app'),(2,1,'update changelog');
 CREATE ROLE memory_runtime_test NOINHERIT NOBYPASSRLS;
+GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO memory_runtime_test;
 GRANT USAGE ON SCHEMA runtime_command_test TO memory_runtime_test;
 GRANT SELECT ON memory_collection_owner,memory_summaries,derived_memory_dependencies,memory_links,memory_lineage,memories,memory_episodes,memory_entities,memory_conflicts,memory_relations,tasks TO memory_runtime_test;
 ALTER TABLE memories ENABLE ROW LEVEL SECURITY;

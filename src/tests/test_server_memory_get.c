@@ -187,7 +187,7 @@ static const char *hygiene_reply;
 static cJSON *hygiene_request;
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
-   if (!strcmp(method, "memory.hygiene"))
+   if (!strcmp(method, "memory.hygiene") || !strcmp(method, "memory.validity"))
    {
       cJSON_Delete(hygiene_request);
       hygiene_request = request;
@@ -582,6 +582,26 @@ static void test_search_owner_transport(void)
    cJSON_Delete(request);
 }
 
+static void test_validity_owner_transport(void)
+{
+   cJSON *request = cJSON_Parse("{\"method\":\"memory.validity\",\"protocol_version\":1,"
+                               "\"store\":\"kb\",\"id\":\"9007199254740993\",\"project\":\"example\"}");
+   hygiene_reply = "{\"status\":\"ok\",\"decision\":{\"eligible\":false,\"checked_version\":{\"record_id\":\"9007199254740993\"}}}";
+   handle_memory_validity(NULL, NULL, request);
+   assert(!strcmp(search_wire_reply, hygiene_reply));
+   assert(!cJSON_HasObjectItem(hygiene_request, "store"));
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(hygiene_request, "project")->valuestring,
+                  "example"));
+   hygiene_reply = NULL;
+   handle_memory_validity(NULL, NULL, request);
+   assert(strstr(search_wire_reply, "unavailable"));
+   cJSON_Delete(hygiene_request);
+   hygiene_request = NULL;
+   cJSON_Delete(request);
+   free(search_wire_reply);
+   search_wire_reply = NULL;
+}
+
 static void test_hygiene_owner_transport(void)
 {
    cJSON *request =
@@ -946,6 +966,7 @@ int main(void)
    test_search_owner_transport();
    test_get_delete_owner_envelopes();
    test_read_owner_refusal();
+   test_validity_owner_transport();
    test_hygiene_owner_transport();
    test_personal_recall_owner_envelope();
    test_private_command_envelopes();

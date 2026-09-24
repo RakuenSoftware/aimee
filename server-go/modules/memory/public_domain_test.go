@@ -69,7 +69,11 @@ func TestDomainPublicPostgres(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA domain_command_test;
  CREATE FUNCTION domain_command_test.pg_now_text(shift text DEFAULT '0 seconds') RETURNS text LANGUAGE sql AS $$ SELECT (now()+shift::interval)::text $$;
  SET LOCAL search_path TO pg_temp,domain_command_test,public;
- CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,tier text,kind text,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),last_used_at text,use_count int DEFAULT 0,confidence double precision DEFAULT 1,effectiveness double precision DEFAULT 0.2);
+ CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,tier text,kind text,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '',created_at text DEFAULT pg_now_text(),last_used_at text,use_count int DEFAULT 0,confidence double precision DEFAULT 1,effectiveness double precision DEFAULT 0.2);
  INSERT INTO memories(id,tier,kind,scope_type,scope_value) VALUES (1,'L2','fact','global','_global'),(2,'L1','episode','workspace','repo'),(3,'L2','preference','project','app');
  CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text);
  INSERT INTO memory_scopes VALUES (1,'workspace','repo'),(1,'project','app');
@@ -85,6 +89,7 @@ func TestDomainPublicPostgres(t *testing.T) {
  CREATE TEMP TABLE memory_episodes(id bigserial PRIMARY KEY,record_revision bigint DEFAULT 1,memory_id bigint,episode_key text,episode_text text,source_session text,reference_time text,created_at text DEFAULT pg_now_text());
  INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session,reference_time) VALUES (2,'release','release recap','session','2026-09-01');
  CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
 CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
 CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text,valid_at text,invalid_at text,weight double precision,created_at text DEFAULT pg_now_text());
@@ -96,7 +101,7 @@ CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,epi
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB})))
+	client := clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB})))
 	run := func(verb, args string) map[string]any {
 		t.Helper()
 		r := runPublicCommand(t, client, verb, args)
@@ -283,6 +288,7 @@ CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,epi
 	// Derived rows have no RLS of their own. Query through the parent memory
 	// policy, with a real non-owner connection and transaction-local scope.
 	_, err = tx.Exec(ctx, `CREATE ROLE memory_domain_test NOINHERIT NOBYPASSRLS;
+GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO memory_domain_test;
 GRANT USAGE ON SCHEMA domain_command_test TO memory_domain_test;
 GRANT SELECT ON memory_lineage,memory_summaries,derived_memory_dependencies,memories,memory_scopes,memory_conflicts,memory_relations,memory_episodes,memory_provenance,memory_links,memory_entities,entity_edges,fact_evidence TO memory_domain_test;
 GRANT INSERT,DELETE ON memory_links TO memory_domain_test;

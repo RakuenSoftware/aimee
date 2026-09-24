@@ -25,7 +25,13 @@ func TestSceneCommandsPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memories(id bigint PRIMARY KEY,key text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
+	_, err = tx.Exec(ctx, `CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
+CREATE TEMP TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,key text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
  INSERT INTO memories(id,key,scope_value,lifecycle_state) VALUES(1,repeat('long-key',100),'app','active'),(2,'hidden','private','active'),(3,'retired','app','rejected');
  INSERT INTO memories(id,key,scope_value,lifecycle_state) SELECT n,'member-'||n,'app','active' FROM generate_series(4,604)n;
  CREATE TEMP TABLE memory_scenes(id bigint PRIMARY KEY,workspace_id text,turn_count int,created_at text);
@@ -34,6 +40,7 @@ func TestSceneCommandsPostgres(t *testing.T) {
  INSERT INTO memory_scene_members VALUES(1,1,1),(1,2,0.5),(2,2,1),(3,3,1);
  INSERT INTO memory_scene_members SELECT 1,n,0.1 FROM generate_series(4,604)n;
  CREATE ROLE scene_command_test NOINHERIT NOBYPASSRLS;
+GRANT SELECT ON memory_units,memory_lineage,memory_collection_owner TO scene_command_test;
  GRANT SELECT ON memories,memory_scenes,memory_scene_members TO scene_command_test;
  ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
  CREATE POLICY scene_visibility ON memories USING(current_setting('aimee.memory_scope_all',true)='1' OR scope_value=current_setting('aimee.memory_scope_value',true));

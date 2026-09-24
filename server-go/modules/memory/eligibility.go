@@ -3,7 +3,7 @@ package memory
 // Versioned current-state KB eligibility, evaluated before lane limits. The
 // storage transaction supplies one stable request clock through CURRENT_TIMESTAMP.
 // Scope/RLS and evidence-specific admission remain additional mandatory gates.
-const currentEligibilityPolicy = "current-validity-v8"
+const currentEligibilityPolicy = "current-validity-v9"
 
 // KB timestamps historically mix UTC wall time and RFC3339 offsets. Normalize
 // both at the adapter; invalid nonempty timestamps raise a query error rather
@@ -27,10 +27,18 @@ func memoryValiditySQL(prefix string) string {
 // This never grants serving authority: recall still applies currentMemorySQL.
 // Suppression and non-active lifecycle states prohibit this indexing route.
 func indexableMemorySQL(prefix string) string {
+	return baseIndexableMemorySQL(prefix) + ` AND ` + currentEpisodeCardInputsSQL(prefix, false)
+}
+
+func baseIndexableMemorySQL(prefix string) string {
 	return prefix + `lifecycle_state='active' AND ` + prefix + `activation_suppressed=0`
 }
 
 func currentMemorySQL(prefix string) string {
+	return baseCurrentMemorySQL(prefix) + ` AND ` + currentEpisodeCardInputsSQL(prefix, false)
+}
+
+func baseCurrentMemorySQL(prefix string) string {
 	return prefix + `lifecycle_state='active' AND ` + prefix + `activation_suppressed=0 AND ` + memoryValiditySQL(prefix)
 }
 
@@ -40,6 +48,10 @@ func currentMemorySQL(prefix string) string {
 // Revocation, quarantine, rejection and deletion must never become inspectable
 // simply because the caller supplied an as_of value. Unknown states fail closed.
 func historicalMemoryInspectionSQL(prefix string) string {
+	return baseHistoricalMemoryInspectionSQL(prefix) + ` AND ` + currentEpisodeCardInputsSQL(prefix, true)
+}
+
+func baseHistoricalMemoryInspectionSQL(prefix string) string {
 	return `(` + prefix + `lifecycle_state IN ('superseded','archived','retired') OR (` +
 		prefix + `lifecycle_state='active' AND ` + prefix + `activation_suppressed=0))`
 }
@@ -164,4 +176,38 @@ func currentUnitInputsSQL(alias string) string {
  SELECT 1 FROM memory_summaries unit_summary WHERE unit_summary.id=(` + input + `->>'summary_id')::bigint
  AND unit_summary.memory_id=unit_parent.id AND unit_summary.record_revision::text=` + input + `->>'summary_revision'
  AND ` + summaryCurrentInputsSQL("unit_summary", "unit_parent") + `))))`
+}
+
+// Episode cards are generated only from non-card canonical inputs. Keep that
+// bounded producer contract at every serving gate: a missing observation cannot
+// turn an old card into an independently authored fact. Historical inspection
+// permits retained inputs but still excludes erased/revoked/hidden sources.
+func currentEpisodeCardInputsSQL(prefix string, historical bool) string {
+	if prefix == "" {
+		prefix = "memories."
+	}
+	parentPolicy := baseCurrentMemorySQL("card_parent.")
+	if historical {
+		parentPolicy = baseHistoricalMemoryInspectionSQL("card_parent.")
+	}
+	observation := `(CASE WHEN card_observation.source_kind='episode-card-input-v1' THEN card_observation.source_ref::jsonb END)`
+	return `NOT EXISTS(SELECT 1 FROM memory_units card_unit
+ WHERE card_unit.memory_id=` + prefix + `id AND card_unit.is_episode_card=1 AND card_unit.unit_type='episode_card'
+ AND NOT EXISTS(SELECT 1 FROM memory_lineage card_observation
+ WHERE card_observation.object_type='memory_unit' AND card_observation.object_id=card_unit.id
+ AND card_observation.source_kind='episode-card-input-v1'
+ AND ` + observation + `->>'schema_version'='1'
+ AND ` + observation + `->>'owner_id'=(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
+ AND ` + observation + `->>'parent_revision'=` + prefix + `record_revision::text
+ AND ` + observation + `->>'unit_digest'=` + unitInputDigestSQL("card_unit") + `
+ AND jsonb_typeof(` + observation + `->'inputs')='array'
+ AND jsonb_array_length(` + observation + `->'inputs') BETWEEN 1 AND 200
+ AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(` + observation + `->'inputs')='array'
+ THEN ` + observation + `->'inputs' ELSE '[]'::jsonb END) card_input
+ LEFT JOIN LATERAL (SELECT card_parent.id FROM memories card_parent
+ WHERE card_parent.id=(card_input->>'record_id')::bigint
+ AND card_parent.record_revision::text=card_input->>'record_revision'
+ AND ` + parentPolicy + `
+ AND NOT EXISTS(SELECT 1 FROM memory_units ancestor_card WHERE ancestor_card.memory_id=card_parent.id AND ancestor_card.is_episode_card=1)
+ LIMIT 1) required_input ON TRUE WHERE required_input.id IS NULL)))`
 }

@@ -33,9 +33,13 @@ func TestVectorSearchDimensionsAndScopePostgres(t *testing.T) {
 			defer tx.Rollback(ctx)
 			_, err = tx.Exec(ctx, fmt.Sprintf(`CREATE EXTENSION IF NOT EXISTS vector; CREATE SCHEMA vector_search_test; SET LOCAL search_path TO pg_temp,vector_search_test,public;
 CREATE FUNCTION vector_search_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
+CREATE TEMP TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
+INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
 CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,scope_type text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
-CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8);
+CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
+CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
 CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
 CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
 CREATE TEMP TABLE memory_embeddings(point_id bigint PRIMARY KEY,embedding vector(%d),record_type text,primary_scope text,workspace text,project text,kind text,payload_json text);

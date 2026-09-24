@@ -185,6 +185,14 @@ def legacy_query_eligibility_gate(kb, check):
 
 def preview_source_version_gate(kb, check):
     """Exact canonical and summary versions through the authenticated Go owner."""
+    # Prevent the change-journal consumer from re-enqueuing fixture jobs. The
+    # fixture also consumes its jobs atomically, so an already-running index
+    # batch cannot pick them up after this barrier is acquired.
+    with paused_relation_consumer(kb):
+        _preview_source_version_gate(kb, check)
+
+
+def _preview_source_version_gate(kb, check):
     key = 'preview-source-' + uuid.uuid4().hex
     summary_id = 9007199254740993 + uuid.uuid4().int % 1000000000
     def sql(query):
@@ -196,6 +204,8 @@ def preview_source_version_gate(kb, check):
           ('L2','fact','{key}-fallback','fallback content','project','{key}');
         INSERT INTO memory_summaries(id,memory_id,scope,summary)
           SELECT {summary_id},id,'headline','exact headline' FROM memories WHERE key='{key}-headline';
+        UPDATE kb_async_jobs SET status='done' WHERE kind='memory_index' AND document_id IN
+          (SELECT id FROM memories WHERE key IN ('{key}-headline','{key}-fallback'));
         SELECT json_build_object('owner_id',(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
           'parent_id',id::text,'parent_revision',record_revision::text) FROM memories WHERE key='{key}-headline';
         COMMIT"""))
@@ -259,7 +269,13 @@ def preview_source_version_gate(kb, check):
               fresh_summary.get('version', {}).get('record_revision') == '2' and fresh_summary.get('memory_parents') == summary.get('memory_parents'))
         code, result = revalidate(fresh_refs)
         check('Preview final source check accepts refreshed summary', code == 200 and result.get('eligible') is True)
-        sql(f"UPDATE memories SET content='revised canonical parent' WHERE key='{key}-headline'")
+        # Atomically consume only fixture jobs: this gate exercises serving of
+        # deliberately stale summaries, independently of asynchronous repair.
+        sql(f"""BEGIN;
+          UPDATE memories SET content='revised canonical parent' WHERE key='{key}-headline';
+          UPDATE kb_async_jobs SET status='done' WHERE kind='memory_index' AND document_id IN
+            (SELECT id FROM memories WHERE key='{key}-headline');
+          COMMIT""")
         code, result = revalidate(fresh_refs)
         check('Preview parent edit invalidates previously observed summary', code == 200 and result.get('eligible') is False)
         code, after = previews()
@@ -268,7 +284,11 @@ def preview_source_version_gate(kb, check):
               len(fresh_refs) == 2 and all(r.get('source_version', {}).get('record_kind') == 'memory_record' for r in fresh_refs))
         code, result = revalidate(fresh_refs)
         check('Preview current canonical fallback passes after parent edit', code == 200 and result.get('eligible') is True)
-        sql(f"UPDATE memories SET content='revised fallback' WHERE key='{key}-fallback'")
+        sql(f"""BEGIN;
+          UPDATE memories SET content='revised fallback' WHERE key='{key}-fallback';
+          UPDATE kb_async_jobs SET status='done' WHERE kind='memory_index' AND document_id IN
+            (SELECT id FROM memories WHERE key='{key}-fallback');
+          COMMIT""")
         code, result = revalidate(fresh_refs)
         check('Preview final source check refuses changed canonical fallback', code == 200 and result.get('eligible') is False)
     finally:

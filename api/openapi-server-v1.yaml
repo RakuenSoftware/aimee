@@ -3600,6 +3600,60 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/validity:
+    post:
+      summary: Inspect the serving eligibility decision for one memory
+      description: >-
+        Requires an authenticated user diagnostic purpose. Reports the serving
+        predicate, checked revision and exclusion reasons without memory text.
+        Missing and unauthorized records have the same response. Evidence and
+        authority remain unknown unless established separately. This observation
+        does not authorize a later provider dispatch. Historical mode requires
+        an absolute valid_at and is currently supported by the KB placement;
+        unsupported temporal reconstruction returns unsupported_mode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [id]
+              properties:
+                id: { type: string, pattern: '^[1-9][0-9]*$' }
+                store: { type: string, enum: [user, kb], default: user }
+                mode: { type: string, enum: [current, historical], default: current }
+                valid_at: { type: string }
+                believed_at: { type: string, description: Unsupported reconstruction is refused explicitly. }
+                project: { type: string }
+                workspace: { type: string }
+                scope:
+                  type: object
+                  required: [type]
+                  properties:
+                    type: { type: string, enum: [global, project, workspace] }
+                    value: { type: string }
+      responses:
+        "200":
+          description: Versioned eligibility decision; no record payload
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid arguments or unsupported temporal mode
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "401":
+          description: Diagnostic purpose not authorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Memory owner unavailable; no fallback decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/hygiene:
     post:
       summary: Preview exact-content duplicate candidates in one shared scope

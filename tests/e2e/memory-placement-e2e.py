@@ -407,6 +407,14 @@ class Gate:
         old_id = int(stored['id'])
         observed = self.good('shared versioned HTTP get', self.call('get', dict(store='kb', id=old_id, include_version=True)))
         version = observed['memory']['version']
+        diagnostic = self.good('shared validity HTTP decision', self.call('validity',
+            dict(store='kb', id=str(old_id), mode='current'))).get('decision', {})
+        self.check('shared validity matches serving revision without disclosing text',
+            diagnostic.get('eligible') is True and diagnostic.get('checked_version') == version
+            and diagnostic.get('evidence_state') == 'unknown' and 'content' not in diagnostic)
+        cli_decision = self.cli('validity', str(old_id), '--store=kb', '--mode=current').get('decision', {})
+        self.check('shared validity CLI agrees with HTTP',
+            cli_decision.get('eligible') is True and cli_decision.get('checked_version') == version)
         self.check('shared version binds exact identity and owner', version['schema_version'] == 1 and
                    version['record_id'] == str(old_id) and isinstance(version['record_revision'], str))
         before = self.shared_changes(old_id)
@@ -569,6 +577,14 @@ class Gate:
         observed = self.good('personal HTTP versioned get', self.call('get',
             dict(id=mid, include_version=True)))['memory']
         version = observed['version']
+        diagnostic = self.good('personal validity HTTP decision', self.call('validity',
+            dict(id=str(mid), mode='current'))).get('decision', {})
+        self.check('personal validity matches serving revision without disclosing text',
+            diagnostic.get('eligible') is True and diagnostic.get('checked_version') == version
+            and diagnostic.get('evidence_state') == 'unknown' and 'content' not in diagnostic)
+        cli_decision = self.cli('validity', str(mid), '--mode=current').get('decision', {})
+        self.check('personal validity CLI agrees with HTTP',
+            cli_decision.get('eligible') is True and cli_decision.get('checked_version') == version)
         self.check('personal version uses owner and exact decimal identifiers',
             version['schema_version'] == 1 and version['record_id'] == str(mid) and
             version['record_revision'] == '1' and len(version['owner_id']) == 36)

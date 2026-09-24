@@ -27,5 +27,9 @@ passes in 254.529 seconds. The initial fixture-schema failures are retained
 separately; the corrected fixtures include collection identity and row revisions.
 The [export build](memory-read-observations-2026-09-23/export.txt) passes in 4.950
 seconds, and ownership, module-boundary, descriptor, inventory and documentation
-checks pass. Fresh deployment validation remains pending; no proposal completion
-is claimed.
+checks pass. Combined candidate `9868d3a69` passes 1,702 deployment verdicts:
+1,088 T2 after preview-fixture isolation and 614 T3. The initial failed T2 evidence
+is retained separately. The corrected T2 uses the updated preview harness;
+these results do not exercise the later episode-card or validity changes.
+The complete nine-container identity attestation was not captured for this run,
+so it is not a fully attested release receipt. No proposal completion is claimed.

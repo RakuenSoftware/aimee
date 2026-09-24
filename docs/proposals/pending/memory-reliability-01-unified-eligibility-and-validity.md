@@ -18,7 +18,7 @@ Implement the shared eligibility decision in `server-go/modules/memory` and use 
 
 ## Implemented foundation
 
-The Go `current-validity-v8` predicate now applies active lifecycle, explicit
+The Go `current-validity-v9` predicate now applies active lifecycle, explicit
 suppression and half-open valid time before lexical, active-version whole-record
 semantic, unit/temporal semantic, graph/PageRank parent, compatibility-window,
 recall-bundle, activation and briefing limits. Pending commitments use the same

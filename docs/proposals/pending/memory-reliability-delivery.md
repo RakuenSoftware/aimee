@@ -23,6 +23,13 @@ or replace the C bus.
 ## Post-merge execution
 
 Completion of all MR-01–18 implementation and acceptance work is the active goal.
+Execution is sequential by proposal, as requested on 2026-09-24: complete MR-01,
+then MR-02, continuing numerically through MR-18. MR-01 is the sole active
+proposal. Previously implemented work for later proposals is retained, but new
+work on those proposals waits for the preceding proposal's closeout. Integration
+work required to satisfy the active proposal and its validation remains in scope.
+The [MR-01 closeout checklist](memory-reliability-01-closeout.md) maps its seven
+frozen acceptance clauses and required diagnostics to evidence and open gaps.
 PRs #2988 and #2989 have merged. All remaining proposal implementation and
 evidence now accumulate in [PR #2990](https://github.com/RakuenSoftware/aimee/pull/2990),
 retargeted to `testing`. Push the continuing work to its existing

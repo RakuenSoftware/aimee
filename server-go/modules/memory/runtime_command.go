@@ -40,6 +40,12 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return runtimeJSONText(commandResult(commandError("unsupported_mode", "read_policy is supported only for exact-ID get")))
 	}
 	switch operation {
+	case "user-validity":
+		if options.placement != PlacementServer {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		delete(args, "operation")
+		return runtimeJSONText(handleValidityCommand(options, invocation, "validity", args))
 	case "user-correction-proposals", "user-correction-review":
 		if options.placement != PlacementServer {
 			return nil, bus.ModuleStatusCapabilityAbsent

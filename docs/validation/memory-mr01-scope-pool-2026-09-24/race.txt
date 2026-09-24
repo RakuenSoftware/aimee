@@ -1,0 +1,4 @@
+=== RUN   TestMemoryScopeConcurrentPoolReuse
+--- PASS: TestMemoryScopeConcurrentPoolReuse (0.19s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	1.198s

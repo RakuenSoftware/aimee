@@ -337,6 +337,44 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, user_memory_owner_command("user-search", req));
 }
 
+/* Placement selection and opaque transport only; Go owns the diagnostic. */
+int handle_memory_validity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   int selection = server_memory_store_selection(req);
+   if (selection < 0)
+      return send_and_free(conn, memory_bad_store());
+   cJSON *request = cJSON_Duplicate(req, 1);
+   if (!cJSON_IsObject(request))
+   {
+      cJSON_Delete(request);
+      return send_and_free(conn, server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                                        "invalid validity request", NULL));
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(request, "store");
+   if (!selection)
+   {
+      cJSON *reply = user_memory_owner_command_as("user-validity", request,
+                          server_account_memory_authority(server_request_account()));
+      cJSON_Delete(request);
+      return send_and_free(conn, reply);
+   }
+   char *raw = kb_v1_action_request("memory.validity", request);
+   cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
+                       ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   cJSON *reply = NULL;
+   if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "ok") &&
+       cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(parsed, "decision")))
+      reply = cJSON_CreateRaw(raw);
+   else if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "error") &&
+            cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "kind")))
+      reply = memory_owner_error_reply(raw, parsed);
+   cJSON_Delete(parsed);
+   free(raw);
+   return send_and_free(conn, reply ? reply : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+                                      "KB validity owner unavailable or invalid response", NULL));
+}
+
 static cJSON *kb_memory_store_command(const cJSON *req, memory_authority_t authority)
 {
    return kb_memory_owner_command("memory.store", req, authority, "id", cJSON_Number);

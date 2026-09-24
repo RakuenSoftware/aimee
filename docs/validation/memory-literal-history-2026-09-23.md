@@ -12,5 +12,7 @@ passes in 3.546 seconds, including current and superseded versions of a literal
 wildcard key and exclusion of an unrelated predecessor. The fresh deployment
 harness adds the equivalent authenticated HTTP check. The
 [export build](memory-literal-history-2026-09-23/export.txt) passes in 5.079 seconds;
-ownership and module-boundary checks pass. Combined fresh validation remains
-pending; no broader timeline or proposal completion is claimed.
+ownership and module-boundary checks pass. Combined fresh validation passes 1,702 T2/T3 verdicts, as recorded in the
+[read-observation report](memory-read-observations-2026-09-23.md), including its
+fixture repair and incomplete image-identity attestation. No broader timeline
+or proposal completion is claimed.

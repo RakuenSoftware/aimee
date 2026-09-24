@@ -382,22 +382,24 @@ func (s *postgresDataStore) GenerateEpisodeCard(ctx context.Context, session str
 	if err != nil {
 		return 0, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT id,key,content,scope_type,scope_value FROM memories m
+	rows, err := s.db.Query(ctx, `SELECT id,key,content,scope_type,scope_value,record_revision::text,
+(SELECT owner_id::text FROM memory_collection_owner WHERE id=1) FROM memories m
 WHERE source_session=$1 AND `+currentMemorySQL("m.")+`
  AND NOT EXISTS (SELECT 1 FROM memory_units u WHERE u.memory_id=m.id AND u.is_episode_card=1)
-ORDER BY id LIMIT 201`, session)
+ORDER BY id LIMIT 201 FOR SHARE OF m`, session)
 	if err != nil {
 		return 0, err
 	}
 	type source struct {
-		id           int64
-		key, content string
-		scope        Scope
+		id              int64
+		key, content    string
+		revision, owner string
+		scope           Scope
 	}
 	var sources []source
 	for rows.Next() {
 		var item source
-		if err := rows.Scan(&item.id, &item.key, &item.content, &item.scope.Type, &item.scope.Value); err != nil {
+		if err := rows.Scan(&item.id, &item.key, &item.content, &item.scope.Type, &item.scope.Value, &item.revision, &item.owner); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -452,9 +454,10 @@ ORDER BY id LIMIT 201`, session)
 		return 0, err
 	}
 	var unitID int64
-	var created bool
+	var parentRevision string
+	var created, eligible bool
 	err = s.db.QueryRow(ctx, `WITH existing AS (
- SELECT u.id FROM memory_units u JOIN memories m ON m.id=u.memory_id
+ SELECT u.id,m.record_revision::text AS parent_revision,(`+currentMemorySQL("m.")+`) AS eligible FROM memory_units u JOIN memories m ON m.id=u.memory_id
  WHERE m.key=$1 AND m.source_session=$3 AND m.lifecycle_state='active'
    AND u.unit_type='episode_card' AND u.unit_key=$3 AND u.is_episode_card=1
  AND m.scope_type=$4 AND m.scope_value=$5
@@ -462,18 +465,35 @@ ORDER BY id LIMIT 201`, session)
 ), parent AS (
  INSERT INTO memories(tier,kind,epistemic_kind,key,content,confidence,source_session,scope_type,scope_value,lifecycle_state)
  SELECT 'L1','episode','episode',$1,$2,0.8,$3,$4,$5,'active'
- WHERE NOT EXISTS(SELECT 1 FROM existing) RETURNING id
+ WHERE NOT EXISTS(SELECT 1 FROM existing) RETURNING id,record_revision
 ), created AS (
  INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text,weight,memory_kind,is_episode_card)
- SELECT id,'episode_card',$3,$2,1.0,'episodic',1 FROM parent RETURNING id
+ SELECT id,'episode_card',$3,$2,1.0,'episodic',1 FROM parent RETURNING id,memory_id
 )
-SELECT id,false FROM existing UNION ALL SELECT id,true FROM created LIMIT 1`,
-		"episode-card:"+session, card.text(), session, scope.Type, scope.Value).Scan(&unitID, &created)
+SELECT id,parent_revision,false,eligible FROM existing UNION ALL
+ SELECT c.id,p.record_revision::text,true,true FROM created c JOIN parent p ON p.id=c.memory_id LIMIT 1`,
+		"episode-card:"+session, card.text(), session, scope.Type, scope.Value).Scan(&unitID, &parentRevision, &created, &eligible)
 	if err != nil {
 		return 0, err
 	}
 	if !created {
+		if !eligible {
+			return 0, errors.New("memory: existing episode card inputs are stale; regeneration requires a new reviewed artifact")
+		}
 		return unitID, nil
+	}
+	inputs := make([]map[string]string, 0, len(sources))
+	for _, item := range sources {
+		inputs = append(inputs, map[string]string{"record_id": fmt.Sprint(item.id), "record_revision": item.revision})
+	}
+	observation, err := json.Marshal(map[string]any{"schema_version": 1, "owner_id": sources[0].owner, "parent_revision": parentRevision, "inputs": inputs})
+	if err != nil {
+		return 0, err
+	}
+	if _, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref,confidence)
+ SELECT 'memory_unit',u.id,'episode-card-input-v1',($2::jsonb || jsonb_build_object('unit_digest',`+unitInputDigestSQL("u")+`))::text,0.8
+ FROM memory_units u WHERE u.id=$1`, unitID, string(observation)); err != nil {
+		return 0, err
 	}
 	for _, item := range sources {
 		_, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref,confidence)
