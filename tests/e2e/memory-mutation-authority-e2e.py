@@ -84,9 +84,11 @@ def main():
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
             check('database blocks two-step protection downgrade ' + kind, guard.returncode != 0)
         code, exported = action('kb.export', dict(workspace=workspace))
+        (args.output / 'export-response.json').write_text(json.dumps([code, exported], indent=2) + '\n')
         kinds = {row['key']: row.get('epistemic_kind') for row in exported.get('memories', [])}
         check('export retains protected kinds for subsequent import', code == 200 and all(
             kinds.get(prefix + '-import-' + kind) == kind for kind in ('episode', 'policy')))
+        check('export excludes unrelated scopes', set(kinds) == {prefix+'-import-episode', prefix+'-import-policy'})
         for bad in (None, 42, {}, '', 'invented'):
             code, result = action('memory.store', dict(key=prefix+'-bad', content='bad kind', epistemic_kind=bad))
             check('invalid imported kind is refused ' + repr(bad), result.get('kind') == 'invalid_argument')

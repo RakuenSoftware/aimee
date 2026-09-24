@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -112,6 +113,33 @@ func TestMutationMaintenanceAuthority(t *testing.T) {
 		if err != nil || n != -1 {
 			t.Fatalf("fold destroyed authoritative source: %d %v", n, err)
 		}
+	}
+	exec(`INSERT INTO memories(tier,kind,epistemic_kind,key,content,scope_type,scope_value)
+ VALUES('L2','fact','policy','mr02-export','protected exported text','workspace','mr02-export-workspace'),
+ ('L2','fact','policy','mr02-export-foreign','foreign protected text','workspace','mr02-foreign-workspace')`)
+	exported, err := backend.exportFiltered(ctx, filteredExportRequest{Workspace: "mr02-export-workspace"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		Memories []struct {
+			Key           string
+			EpistemicKind string `json:"epistemic_kind"`
+			Workspace     string
+		}
+	}
+	if json.Unmarshal(exported, &envelope) != nil || len(envelope.Memories) != 1 || envelope.Memories[0].Key != "mr02-export" || envelope.Memories[0].EpistemicKind != "policy" || envelope.Memories[0].Workspace != "mr02-export-workspace" {
+		t.Fatal("export lost scope or protection", string(exported))
+	}
+
+	owner, err := NewPostgresDataStore(runtimeRoleDB{evalQueryer{tx}, t}, PlacementKB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := runHostRuntime(t, NewHandler(nil, WithDataStore(PlacementKB, owner)), `{"operation":"export-filtered","workspace":"mr02-export-workspace","include_archived":false}`)
+	text, ok := host["json"].(string)
+	if !ok || json.Unmarshal([]byte(text), &envelope) != nil || len(envelope.Memories) != 1 || envelope.Memories[0].Key != "mr02-export" {
+		t.Fatal("host export lost scoped rows", host)
 	}
 }
 

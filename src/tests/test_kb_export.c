@@ -34,6 +34,21 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
    return dispatch_result < 0 ? -1 : 1;
 }
 
+static int export_dispatch_result = 1;
+int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+{
+   assert(strcmp(method, "memory.runtime") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
+                 "export-filtered") == 0);
+   if (export_dispatch_result < 0)
+   {
+      *result = NULL;
+      return -1;
+   }
+   *result = cJSON_Parse("{\"json\":\"{\\\"status\\\":\\\"ok\\\",\\\"memories\\\":[]}\"}");
+   return 1;
+}
+
 static cJSON *sample_export(void)
 {
    cJSON *root = cJSON_CreateObject();
@@ -209,6 +224,11 @@ int main(void)
    printf("kb_export:\n");
    test_obsidian_frontmatter_links_and_sanitation();
    test_json_render_parseable_with_schema_version();
+   cJSON *owner_export = db2_kb_service_memory_export_filtered_json("import-ws", "all", NULL, 0);
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(owner_export, "memories")));
+   cJSON_Delete(owner_export);
+   export_dispatch_result = -1;
+   assert(db2_kb_service_memory_export_filtered_json("import-ws", "all", NULL, 0) == NULL);
    test_import_dry_run_parse_contract();
    printf("All kb_export tests passed.\n");
    return 0;

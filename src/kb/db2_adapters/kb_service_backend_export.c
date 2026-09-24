@@ -3,11 +3,6 @@
 
 #include "kb_service_backend_export.h"
 #include "module_commands.h"
-#include "../headers/aimee.h" /* memory_t for memory_query.h */
-#include "kb_service_backend.h"
-#include "db2_internal.h"
-#include "db_postgres.h"
-#include "memory_query.h"
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,183 +12,28 @@
 cJSON *db2_kb_service_memory_export_filtered_json(const char *workspace, const char *kind,
                                                   const char *since_iso, int include_archived)
 {
-   char sql[2048];
-   int param_idx = 0;
-   const char *params[4];
-   int n_params = 0;
-   int filter_kind = kind && kind[0] && strcmp(kind, "all") != 0;
-
-   /* Build SELECT with optional filters. Keep workspace lookup as scalar subqueries
-    * to avoid duplicate rows when a memory carries multiple scope tags. */
-   int offset =
-       snprintf(sql, sizeof(sql),
-                "SELECT m.id, m.tier, m.kind, m.key, m.content, m.confidence, "
-                "m.use_count, m.lifecycle_state, m.created_at, m.updated_at, m.source_session, "
-                "COALESCE(CASE WHEN m.scope_type = 'workspace' THEN m.scope_value END, "
-                "         (SELECT ms.scope_value FROM memory_scopes ms "
-                "          WHERE ms.memory_id = m.id AND ms.scope_type = 'workspace' "
-                "          ORDER BY ms.scope_value LIMIT 1), "
-                "         (SELECT mw.workspace FROM memory_workspaces mw "
-                "          WHERE mw.memory_id = m.id ORDER BY mw.workspace LIMIT 1), '') "
-                "AS workspace, m.epistemic_kind "
-                "FROM memories m");
-
-   offset += snprintf(sql + offset, sizeof(sql) - (size_t)offset, " WHERE 1=1");
-
+   cJSON *request = cJSON_CreateObject(), *response = NULL;
+   if (!request)
+      return NULL;
+   cJSON_AddStringToObject(request, "operation", "export-filtered");
    if (workspace)
-   {
-      param_idx++;
-      params[n_params++] = workspace;
-      offset += snprintf(sql + offset, sizeof(sql) - (size_t)offset,
-                         " AND ((m.scope_type = 'workspace' AND m.scope_value = $%d) "
-                         "      OR EXISTS (SELECT 1 FROM memory_scopes msf "
-                         "              WHERE msf.memory_id = m.id "
-                         "                AND msf.scope_type = 'workspace' "
-                         "                AND msf.scope_value = $%d) "
-                         "      OR EXISTS (SELECT 1 FROM memory_workspaces mwf "
-                         "                 WHERE mwf.memory_id = m.id "
-                         "                   AND mwf.workspace = $%d))",
-                         param_idx, param_idx, param_idx);
-   }
-   if (filter_kind)
-   {
-      param_idx++;
-      params[n_params++] = kind;
-      offset +=
-          snprintf(sql + offset, sizeof(sql) - (size_t)offset, " AND m.kind = $%d", param_idx);
-   }
+      cJSON_AddStringToObject(request, "workspace", workspace);
+   if (kind)
+      cJSON_AddStringToObject(request, "kind", kind);
    if (since_iso)
+      cJSON_AddStringToObject(request, "since", since_iso);
+   cJSON_AddBoolToObject(request, "include_archived", include_archived);
+   int rc = aimee_module_commands_dispatch_internal("memory.runtime", request, &response);
+   cJSON_Delete(request);
+   const char *raw = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "json"));
+   cJSON *result = rc > 0 && raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+   cJSON_Delete(response);
+   if (!cJSON_IsObject(result))
    {
-      param_idx++;
-      params[n_params++] = since_iso;
-      offset += snprintf(sql + offset, sizeof(sql) - (size_t)offset, " AND m.created_at >= $%d",
-                         param_idx);
-   }
-   if (!include_archived)
-   {
-      offset +=
-          snprintf(sql + offset, sizeof(sql) - (size_t)offset, " AND m.lifecycle_state = 'active'");
-   }
-
-   offset += snprintf(sql + offset, sizeof(sql) - (size_t)offset, " ORDER BY m.id");
-
-   void *conn = db2_conn();
-   if (!conn)
-      return NULL;
-
-   char errbuf[256];
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, errbuf, sizeof(errbuf));
-   if (!st)
-      return NULL;
-
-   /* Bind parameters in order */
-   for (int i = 0; i < n_params; i++)
-   {
-      char pname[16];
-      snprintf(pname, sizeof(pname), "$%d", i + 1);
-      aimee_pg_bind_text(st, pname, params[i]);
-   }
-
-   cJSON *memories_arr = cJSON_CreateArray();
-   int count = 0;
-
-   aimee_pg_step_t r;
-   while ((r = aimee_pg_step(st, errbuf, sizeof(errbuf))) == AIMEE_PG_ROW)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      if (!obj)
-      {
-         cJSON_Delete(memories_arr);
-         aimee_pg_finalize(st);
-         return NULL;
-      }
-
-      cJSON_AddNumberToObject(obj, "id", (double)aimee_pg_column_int64(st, 0));
-      cJSON_AddStringToObject(obj, "tier", aimee_pg_column_text(st, 1));
-      cJSON_AddStringToObject(obj, "kind", aimee_pg_column_text(st, 2));
-      cJSON_AddStringToObject(obj, "key", aimee_pg_column_text(st, 3));
-      cJSON_AddStringToObject(obj, "content", aimee_pg_column_text(st, 4));
-      cJSON_AddNumberToObject(obj, "confidence", aimee_pg_column_double(st, 5));
-      cJSON_AddNumberToObject(obj, "use_count", (double)aimee_pg_column_int64(st, 6));
-      cJSON_AddStringToObject(obj, "lifecycle_state", aimee_pg_column_text(st, 7));
-      cJSON_AddStringToObject(obj, "created_at", aimee_pg_column_text(st, 8));
-      cJSON_AddStringToObject(obj, "updated_at", aimee_pg_column_text(st, 9));
-      cJSON_AddStringToObject(obj, "source_session", aimee_pg_column_text(st, 10));
-      cJSON_AddStringToObject(obj, "workspace", aimee_pg_column_text(st, 11));
-      cJSON_AddStringToObject(obj, "epistemic_kind", aimee_pg_column_text(st, 12));
-
-      cJSON_AddItemToArray(memories_arr, obj);
-      count++;
-   }
-
-   if (r == AIMEE_PG_ERR)
-   {
-      cJSON_Delete(memories_arr);
-      aimee_pg_finalize(st);
+      cJSON_Delete(result);
       return NULL;
    }
-
-   aimee_pg_finalize(st);
-
-   /* Query entity_profiles */
-   st = aimee_pg_prepare(conn,
-                         "SELECT entity_id, canonical_name, observation_count, card_json "
-                         "FROM entity_profiles ORDER BY entity_id",
-                         errbuf, sizeof(errbuf));
-   cJSON *entities_arr = cJSON_CreateArray();
-
-   if (st)
-   {
-      while ((r = aimee_pg_step(st, errbuf, sizeof(errbuf))) == AIMEE_PG_ROW)
-      {
-         cJSON *obj = cJSON_CreateObject();
-         if (!obj)
-         {
-            cJSON_Delete(entities_arr);
-            aimee_pg_finalize(st);
-            cJSON_Delete(memories_arr);
-            return NULL;
-         }
-
-         cJSON_AddStringToObject(obj, "entity_id", aimee_pg_column_text(st, 0));
-         cJSON_AddStringToObject(obj, "canonical_name", aimee_pg_column_text(st, 1));
-         cJSON_AddNumberToObject(obj, "observation_count", (double)aimee_pg_column_int64(st, 2));
-         cJSON_AddStringToObject(obj, "card_json", aimee_pg_column_text(st, 3));
-
-         cJSON_AddItemToArray(entities_arr, obj);
-      }
-      aimee_pg_finalize(st);
-   }
-
-   /* Build exported_at timestamp */
-   char exported_at_buf[64];
-   time_t now = time(NULL);
-   struct tm *tm = gmtime(&now);
-   strftime(exported_at_buf, sizeof(exported_at_buf), "%Y-%m-%dT%H:%M:%SZ", tm);
-
-   /* Build response envelope */
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-   {
-      cJSON_Delete(memories_arr);
-      cJSON_Delete(entities_arr);
-      return NULL;
-   }
-
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "schema_version", "1");
-   cJSON_AddStringToObject(resp, "exported_at", exported_at_buf);
-   if (workspace && workspace[0])
-      cJSON_AddStringToObject(resp, "workspace", workspace);
-   if (kind && kind[0])
-      cJSON_AddStringToObject(resp, "kind", kind);
-   if (since_iso && since_iso[0])
-      cJSON_AddStringToObject(resp, "since", since_iso);
-   cJSON_AddItemToObject(resp, "memories", memories_arr);
-   cJSON_AddItemToObject(resp, "entity_profiles", entities_arr);
-   cJSON_AddNumberToObject(resp, "count", (double)count);
-
-   return resp;
+   return result;
 }
 
 int db2_kb_service_memory_import_json(cJSON *memories_arr, const char *workspace_override,

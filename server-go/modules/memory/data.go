@@ -32,6 +32,7 @@ const (
 )
 
 type DataRequest struct {
+	FilteredExport      *filteredExportRequest `json:"filtered_export,omitempty"`
 	HygienePreview      *hygienePreviewRequest `json:"hygiene_preview,omitempty"`
 	AssemblyBudgetBytes json.RawMessage        `json:"assembly_budget_bytes,omitempty"`
 	assemblyBytes       *int
@@ -1044,6 +1045,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if request.FilteredExport != nil && request.Operation != "export-filtered" {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
 	if request.HygienePreview != nil && request.Operation != "hygiene-preview" {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
@@ -1970,6 +1974,15 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		var block string
 		count, block, err = sessions.FoldSession(ctx, request.SessionID)
 		response.Count, response.Block = &count, &block
+	case "export-filtered":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		if request.FilteredExport == nil || len(request.FilteredExport.Workspace) > 1024 || len(request.FilteredExport.Kind) > 64 || len(request.FilteredExport.Since) > 64 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		response.Payload, err = backend.exportFiltered(ctx, *request.FilteredExport)
 	case "export-records", "export-decisions-jsonl", "export-jsonl":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusInvalidRequest

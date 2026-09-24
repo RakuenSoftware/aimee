@@ -30,3 +30,14 @@ registering it, the exported owner builds and its tests pass in 5.517 seconds.
 The workspace export adapter also now includes primary-scope workspace rows.
 Final process validation remains pending; the [eight-gate checklist](../proposals/pending/memory-reliability-02-closeout.md)
 tracks MR-02 completion. The original 123-clause acceptance inventory is unchanged.
+
+
+The actual HTTP fixture exposed the legacy C export path returning
+`kb.export: export failed`. Filtered export now runs in the Go owner's scoped
+transaction; C only forwards request and response. Memory payloads retain
+`epistemic_kind`, primary workspace and exact IDs. Entity metadata is rebuilt
+from the exported parents, and unversioned global profile-card payloads are
+omitted (`card_json` stays `{}`); they cannot establish a scoped source. The
+packaged non-owner fixture verifies protected kinds and foreign-workspace
+exclusion through both the store and host runtime. Native transport refuses an
+unavailable owner without database fallback. Final image/process replay follows.
