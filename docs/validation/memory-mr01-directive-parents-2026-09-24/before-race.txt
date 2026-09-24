@@ -1,0 +1,8 @@
+--- FAIL: TestDirectiveParentEligibilityPostgres (0.05s)
+    --- FAIL: TestDirectiveParentEligibilityPostgres/matched (0.00s)
+        public_directives_test.go:221: ineligible directive parent survived before limit [{429 directive-parent-eligibility future directive-parent-eligibility   user_follow_up 100 open 137700 0 0   0    2026-09-24 09:35:35 2026-09-24 09:35:35}] 428 <nil>
+    --- FAIL: TestDirectiveParentEligibilityPostgres/recall (0.00s)
+        public_directives_test.go:221: ineligible directive parent survived before limit [{437 directive-parent-eligibility cross-scope directive-parent-eligibility   user_follow_up 100 open 137708 0 0   0    2026-09-24 09:35:35 2026-09-24 09:35:35}] 428 <nil>
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.060s
+FAIL

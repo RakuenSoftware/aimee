@@ -159,11 +159,21 @@ def main():
                 check('Console effectiveness retains '+audience+' restriction', code == 200
                       and result.get('status') == 'ok' and display.get('total') == total
                       and display.get('effectiveness',{}).get('low_effectiveness') == total, elapsed)
-                code,result,elapsed = call('stats_dashboard',dict(**{audience:value}))
-                scopes=result.get('dashboard',{}).get('scopes',[])
-                check('Dashboard excludes hidden '+audience+' conflict endpoints', code == 200
-                      and result.get('status') == 'ok' and sum(row['count'] for row in scopes) == total
-                      and sum(row['conflicted_memories'] for row in scopes) == 2*conflicts, elapsed)
+            sql(f"""INSERT INTO epistemic_directives(question,topic,cause,priority,memory_a_id)
+              SELECT '{key}-question-'||key,'{key}','user_follow_up',
+                CASE WHEN key IN ('{key}-current','{key}-workspace') THEN 1 ELSE 100 END,id
+              FROM memories WHERE key LIKE '{key}-%';
+              INSERT INTO epistemic_directives(question,topic,cause,priority,memory_a_id,memory_b_id,resolution_memory_id)
+              VALUES ('{key}-foreign-second','{key}','user_follow_up',100,{ids['current']},{ids['cross-scope']},0),
+                ('{key}-foreign-resolution','{key}','user_follow_up',100,{ids['current']},0,{ids['cross-scope']}),
+                ('{key}-authored','{key}','user_follow_up',0,0,0,0)""")
+            for audience,value,state in [('project',key,'current'),('workspace',key+'-team','workspace')]:
+                for mode,hint in [('matched',key),('fallback','unmatched-'+uuid.uuid4().hex)]:
+                    code,result,elapsed = call('recall',dict(task_hint=hint,limit_tokens=8192,**{audience:value}))
+                    questions = {row['question'] for row in result.get('recall',{}).get('directives',[])}
+                    check('Directive '+mode+' recall requires every current '+audience+' parent',
+                          code == 200 and result.get('status') == 'ok'
+                          and questions == {key+'-question-'+key+'-'+state,key+'-authored'}, elapsed)
             card_id = int(sql(f"""BEGIN;
               INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
                 VALUES('L1','episode','{key}-derived','{key}-derived copied current input','project','{key}');

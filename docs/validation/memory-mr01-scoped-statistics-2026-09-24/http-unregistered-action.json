@@ -1,0 +1,7 @@
+{
+  "http_status": 404,
+  "response": {
+    "status": "error",
+    "message": "unknown method"
+  }
+}

@@ -29,6 +29,11 @@ func TestDirectivePublicPostgresLifecycle(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA directive_test;
  CREATE FUNCTION directive_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
  SET LOCAL search_path TO pg_temp,directive_test,public;
+ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,
+ lifecycle_state text DEFAULT 'active',activation_suppressed bigint DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
+ CREATE TEMP TABLE memory_units(id bigint,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int);
+ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+ CREATE TEMP TABLE memory_collection_owner(id int,owner_id uuid);
  CREATE TEMP TABLE epistemic_directives(id bigserial PRIMARY KEY, question text, topic text DEFAULT '',
  anchor_entity text DEFAULT '',anchor_file text DEFAULT '',cause text,priority bigint DEFAULT 50,
  state text DEFAULT 'open',memory_a_id bigint DEFAULT 0,memory_b_id bigint DEFAULT 0,
@@ -143,4 +148,97 @@ func TestDirectivePublicValidation(t *testing.T) {
 			t.Fatal(result)
 		}
 	}
+}
+
+// Referenced memories remain mandatory inputs even when the directive itself
+// is open and unexpired. Exercise the packaged non-owner runtime and pre-limit
+// backfill independently of directive expiry and ranking.
+func TestDirectiveParentEligibilityPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL for packaged directive parent replay")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+ CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS;
+ END IF; END $$;
+ GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+ GRANT SELECT ON memories,memory_scopes,memory_units,memory_lineage,memory_collection_owner,epistemic_directives TO aimee_store_runtime;
+ UPDATE epistemic_directives SET state='suppressed';
+ SELECT set_config('aimee.memory_scope_all','1',true)`)
+	const project = "directive-parent-eligibility"
+	var wanted, currentParent, foreignParent int64
+	for _, state := range []string{"current", "future", "expired", "suppressed", "superseded", "archived", "quarantined", "deleted", "revoked", "cross-scope"} {
+		lifecycle, scope, suppressed, priority := "active", project, 0, 100
+		switch state {
+		case "superseded", "archived", "quarantined", "deleted", "revoked":
+			lifecycle = state
+		case "cross-scope":
+			scope = project + "-foreign"
+		case "suppressed":
+			suppressed = 1
+		case "current":
+			priority = 1
+		}
+		var parent, id int64
+		if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,lifecycle_state,activation_suppressed,valid_from,valid_until)
+ VALUES('L2','fact',$1,'directive parent','project',$2,$3,$4,
+ CASE WHEN $5='future' THEN (CURRENT_TIMESTAMP+interval '1 day')::text ELSE '' END,
+ CASE WHEN $5='expired' THEN CURRENT_TIMESTAMP::text ELSE '' END) RETURNING id`, project+"-"+state, scope, lifecycle, suppressed, state).Scan(&parent); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO epistemic_directives(question,topic,cause,priority,memory_a_id)
+ VALUES($1,$2,'user_follow_up',$3,$4) RETURNING id`, project+" "+state, project, priority, parent).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if state == "current" {
+			wanted, currentParent = id, parent
+		}
+		if state == "cross-scope" {
+			foreignParent = parent
+		}
+	}
+	// Each parent position is mandatory, including mixed authorized/foreign inputs.
+	exec(`INSERT INTO epistemic_directives(question,topic,cause,priority,memory_a_id,memory_b_id,resolution_memory_id)
+ VALUES('foreign second parent',$1,'user_follow_up',100,$2,$3,0),
+ ('foreign resolution parent',$1,'user_follow_up',100,$2,0,$3),
+ ('missing parent',$1,'user_follow_up',100,-1,0,0),
+ ('authored without parents',$1,'user_follow_up',0,0,0,0)`, project, currentParent, foreignParent)
+	exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_project',$1,true),
+ set_config('aimee.memory_scope_type','project',true),set_config('aimee.memory_scope_value',$1,true)`, project)
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}
+	for name, query := range map[string]func() ([]Directive, error){
+		"matched": func() ([]Directive, error) { return backend.DirectiveMatch(ctx, project, "", "", 1) },
+		"recall":  func() ([]Directive, error) { return backend.recallOpenDirectives(ctx, 1) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			rows, err := query()
+			if err != nil || len(rows) != 1 || rows[0].ID != wanted {
+				t.Error("ineligible directive parent survived before limit", rows, wanted, err)
+			}
+		})
+	}
+	rows, err := backend.DirectiveMatch(ctx, project, "", "", 100)
+	if err != nil || len(rows) != 2 || rows[0].ID != wanted || rows[1].Question != "authored without parents" {
+		t.Error("parentless authoring compatibility or all-parent eligibility changed", rows, err)
+	}
+
 }

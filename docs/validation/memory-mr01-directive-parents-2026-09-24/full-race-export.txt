@@ -1,0 +1,6 @@
+ok  	github.com/JBailes/aimee/server-go/modules/memory	211.766s
+.
+----------------------------------------------------------------------
+Ran 1 test in 4.784s
+
+OK

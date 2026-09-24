@@ -351,7 +351,7 @@ SELECT id,CASE WHEN text_bytes <= $1 THEN polarity ELSE '' END,
 
 func (s *postgresDataStore) recallOpenDirectives(ctx context.Context, limit int) ([]Directive, error) {
 	rows, err := s.db.Query(ctx, `SELECT `+directiveColumns+` FROM epistemic_directives WHERE state='open'
- AND `+memoryUnexpiredSQL("")+`
+ AND `+memoryUnexpiredSQL("")+` AND `+currentDirectiveParentsSQL("epistemic_directives")+`
  ORDER BY priority DESC,created_at DESC,id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err

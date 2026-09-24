@@ -189,6 +189,17 @@ WHERE state='open' AND `+memoryTimeSQL("valid_until")+`<=CURRENT_TIMESTAMP`)
 	return count, nil
 }
 
+// Open questions may quote their referenced memories. Every nonzero parent
+// must remain current and visible; an unrelated visible input cannot authorize
+// another hidden input. Unlinked authored questions retain their own lifecycle.
+func currentDirectiveParentsSQL(alias string) string {
+	return `NOT EXISTS(SELECT 1 FROM (VALUES (` + alias + `.memory_a_id),
+ (` + alias + `.memory_b_id),(` + alias + `.resolution_memory_id)) directive_input(id)
+ WHERE directive_input.id IS DISTINCT FROM 0 AND NOT EXISTS(
+ SELECT 1 FROM memories directive_parent WHERE directive_parent.id=directive_input.id
+ AND ` + currentMemorySQL("directive_parent.") + ` LIMIT 1))`
+}
+
 func (s *postgresDataStore) DirectiveMatch(ctx context.Context, turn, entity, file string, limit int) ([]Directive, error) {
 	started := time.Now()
 	defer runtimeMetricState.directiveCalls.observe(started)
@@ -197,6 +208,7 @@ func (s *postgresDataStore) DirectiveMatch(ctx context.Context, turn, entity, fi
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+directiveColumns+` FROM epistemic_directives
 WHERE state='open' AND `+memoryUnexpiredSQL("")+`
+AND `+currentDirectiveParentsSQL("epistemic_directives")+`
 AND (($2<>'' AND lower(anchor_entity)=lower($2)) OR
      ($3<>'' AND lower(anchor_file)=lower($3)) OR
      ($1<>'' AND (lower(question) LIKE '%'||lower($1)||'%' OR
