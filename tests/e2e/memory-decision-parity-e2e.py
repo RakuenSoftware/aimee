@@ -97,6 +97,11 @@ def main():
                 fixture_rows=[row for row in rows if row.get('key','').startswith(prefix+'-')]
                 check(store+' common lifecycle fixture '+verb,code==200 and result.get('status')=='ok'
                       and {str(row['memory_id'] if verb=='recall' else row['id']) for row in fixture_rows}=={current_ids[store]})
+                if verb=='recall':
+                    check(store+' active context observes exact release versions',len(fixture_rows)==1
+                          and fixture_rows[0].get('version',{}).get('record_id')==current_ids[store]
+                          and bool(fixture_rows[0].get('version',{}).get('record_revision'))
+                          and bool(fixture_rows[0].get('version',{}).get('owner_id')))
         (args.output/'domain-decisions.json').write_text(json.dumps(observed,indent=2)+'\n')
         identities=[]
         for stack in stacks:

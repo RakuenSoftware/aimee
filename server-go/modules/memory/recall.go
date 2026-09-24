@@ -201,6 +201,18 @@ func (s *postgresDataStore) recallBundleActivated(ctx context.Context, query str
 		if err != nil {
 			return nil, err
 		}
+		// Search chooses IDs from lexical and optional dense lanes. Observe the
+		// final payload and its version together before composing native context.
+		ids := make([]int64, len(active))
+		for i := range active {
+			ids[i] = active[i].ID
+		}
+		active, err = s.readRecallRecords(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence`+s.recallVersionColumns()+`
+FROM `+s.recallSource()+` WHERE lifecycle_state='active' AND id=ANY($1::text::bigint[])
+ORDER BY array_position($1::text::bigint[],id)`, memoryIDsParameter(ids))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if s.placement == PlacementKB && query != "" {
 		lexical := active

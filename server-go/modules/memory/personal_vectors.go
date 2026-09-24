@@ -204,6 +204,11 @@ func (s *postgresDataStore) embedPersonalRecord(ctx context.Context, record Reco
 }
 
 func (p *personalVectors) search(ctx context.Context, query, kind, tier string, limit int) ([]Record, error) {
+	return p.searchWithStore(ctx, p.db, query, kind, tier, limit)
+}
+
+// Candidate reads share the calling owner transaction and its request clock.
+func (p *personalVectors) searchWithStore(ctx context.Context, db store.Queryer, query, kind, tier string, limit int) ([]Record, error) {
 	endpoint, err := p.endpointCurrent()
 	if err != nil {
 		return nil, err
@@ -230,7 +235,7 @@ func (p *personalVectors) search(ctx context.Context, query, kind, tier string, 
 	if err != nil || after != serving {
 		return nil, errors.New("embedding service changed during recall")
 	}
-	rows, err := p.db.Query(ctx, `SELECT m.id,m.tier,m.kind,m.key,m.content,m.confidence
+	rows, err := db.Query(ctx, `SELECT m.id,m.tier,m.kind,m.key,m.content,m.confidence
 FROM user_memories m JOIN user_memory_vectors v ON v.memory_id=m.id
 WHERE m.lifecycle_state='active' AND (m.valid_until IS NULL OR m.valid_until>now())
 AND v.serving_id=$1 AND v.content_fingerprint=md5(m.key||chr(31)||m.content)

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
@@ -104,6 +105,9 @@ func TestPersonalVectorPrivacyAndMutationRegression(t *testing.T) {
 	schema := string(raw)
 	a, b := strings.Index(schema, "CREATE TABLE IF NOT EXISTS user_memories ("), strings.Index(schema, "CREATE INDEX IF NOT EXISTS user_memories_recall")
 	if _, err = tx.Exec(ctx, strings.Replace(schema[a:b], "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE", 1)+`
+ALTER TABLE user_memories ADD COLUMN record_revision bigint NOT NULL DEFAULT 1;
+CREATE TEMP TABLE user_memory_collection_generation(id int,owner_id uuid);
+INSERT INTO user_memory_collection_generation VALUES(1,'00000000-0000-4000-8000-000000000001');
 CREATE TEMP TABLE memories(id bigint,content text);
 INSERT INTO memories VALUES(42,'shared secret must never be embedded by the personal owner');
 INSERT INTO user_memories(id,key,content) VALUES(42,'private-location','I keep my bicycle in the garden shed'),(43,'unrelated','unrelated astronomy');`); err != nil {
@@ -188,5 +192,42 @@ INSERT INTO user_memories(id,key,content) VALUES(42,'private-location','I keep m
 	records, err = s.Search(ctx, Scope{Type: ScopeUser, Value: "_user"}, "astronomy", "", "", 5)
 	if err != nil || len(records) != 1 || records[0].ID != 43 {
 		t.Fatal("embedder outage lost local lexical recall")
+	}
+	// Exercise the public recall producer, not manually invented source refs.
+	rawBundle, err := s.recallBundleActivated(ctx, "astronomy", 8192, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bundle recallBundle
+	if json.Unmarshal(rawBundle, &bundle) != nil {
+		t.Fatal("invalid recall")
+	}
+	projection, _, err := projectNativeRecall(bundle, 32768)
+	if err != nil || len(projection.Sources) != 1 || projection.Sources[0].Channel != "native_active_context" || projection.Sources[0].Source.Version.RecordID != "43" {
+		t.Fatalf("private active context lacks observed version: %+v %v", projection, err)
+	}
+	check := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("d", 32), Sources: projection.Sources}
+	if ok, err := s.revalidatePersonalSources(ctx, check); err != nil || !ok {
+		t.Fatal("fresh private source", ok, err)
+	}
+	if _, err := tx.Exec(ctx, "UPDATE user_memories SET content='edited astronomy after selection',record_revision=record_revision+1 WHERE id=43"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.revalidatePersonalSources(ctx, check); err != nil || ok {
+		t.Fatal("edited private source admitted", ok, err)
+	}
+	// A vector SQL failure must not abort the surrounding read transaction or
+	// consume the already available lexical result.
+	executor.fail = false
+	s.db = evalQueryer{tx}
+	if _, err := tx.Exec(ctx, "ALTER TABLE user_memory_vectors RENAME TO unavailable_vectors"); err != nil {
+		t.Fatal(err)
+	}
+	records, err = s.Search(ctx, Scope{Type: ScopeUser, Value: "_user"}, "astronomy", "", "", 5)
+	if err != nil || len(records) != 1 || records[0].ID != 43 {
+		t.Fatal("vector SQL failure poisoned lexical recall", records, err)
+	}
+	if _, err := tx.Exec(ctx, "ALTER TABLE unavailable_vectors RENAME TO user_memory_vectors"); err != nil {
+		t.Fatal(err)
 	}
 }

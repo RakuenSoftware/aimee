@@ -800,9 +800,25 @@ ORDER BY (lower(key)=lower($7)) DESC,
 		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline)/2 < budget {
 			budget = time.Until(deadline) / 2
 		}
+		_, transactional := s.db.(store.Tx)
+		if transactional {
+			if _, err := s.db.Exec(ctx, "SAVEPOINT personal_vectors"); err != nil {
+				return nil, err
+			}
+		}
 		semanticCtx, cancel := context.WithTimeout(ctx, budget)
-		semantic, err := s.personal.search(semanticCtx, query, kind, tier, limit)
+		semantic, err := s.personal.searchWithStore(semanticCtx, s.db, query, kind, tier, limit)
 		cancel()
+		if transactional {
+			if err != nil {
+				if _, rollbackErr := s.db.Exec(ctx, "ROLLBACK TO SAVEPOINT personal_vectors"); rollbackErr != nil {
+					return nil, rollbackErr
+				}
+			}
+			if _, releaseErr := s.db.Exec(ctx, "RELEASE SAVEPOINT personal_vectors"); releaseErr != nil {
+				return nil, releaseErr
+			}
+		}
 		if err == nil {
 			lanes.add(semantic, laneSemantic)
 			records = fuseRanked(ctx, records, semantic, limit, "lexical", "semantic")
@@ -1317,7 +1333,8 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	// transaction now, so the non-owner runtime sees precisely this request's
 	// rows and pooled connections cannot retain another request's scope.
 	var transaction store.Tx
-	if backend, ok := options.data.(*postgresDataStore); ok && (options.placement == PlacementKB || (request.Operation == "personal-source-revalidate" && request.Revalidation != nil && request.Revalidation.SendGuard != "")) {
+	privateRead := options.placement == PlacementServer && (request.Operation == "get" || request.Operation == "list" || request.Operation == "search" || request.Operation == "validity" || request.Operation == "recall-bundle" || request.Operation == "personal-source-revalidate")
+	if backend, ok := options.data.(*postgresDataStore); ok && (options.placement == PlacementKB || privateRead) {
 		if db, ok := backend.db.(store.DB); ok {
 			transaction, err = db.Begin(ctx)
 			if err != nil {
