@@ -52,15 +52,6 @@ def main():
                 code, exported = kb.kb_request('/v1/actions/kb.export', {})
                 check(kind+' export inherits verified scope', code == 200 and exported.get('status') == 'ok'
                       and key+'-visible-content' in json.dumps(exported) and key+'-hidden-content' not in json.dumps(exported))
-                imported = dict(tier='L2',kind='fact',epistemic_kind='policy',key=key+'-import',content='imported scope policy',authority='user',provenance_category='user_stated')
-                code, result = kb.kb_request('/v1/actions/kb.import', dict(memories=[imported]))
-                check(kind+' import accepts verified audience', code == 200 and result.get('imported') == 1)
-                observed = json.loads(matrix.command('docker','exec',kb.postgres,'psql','-U','postgres','-d','aimee_store','-X','-qAt','-c',
-                    f"SELECT json_build_array(scope_type,scope_value,provenance_category,epistemic_kind) FROM memories WHERE key='{key}-import'"))
-                check(kind+' import preserves scope and model origin', observed == [kind,key,'agent_message','policy'])
-                code, refused = kb.kb_request('/v1/actions/kb.import', dict(workspace=key+'-foreign',memories=[dict(imported,key=key+'-forged')]))
-                check(kind+' import cannot widen credential scope', refused.get('status') != 'ok')
-
                 def call(verb, body):
                     return kb.kb_request('/v1/actions/memory.'+verb, body)
                 code, body = call('get', dict(id=visible))
@@ -118,6 +109,15 @@ def main():
                 with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
                     results = list(pool.map(sample, range(64)))
                 check(kind+' concurrent live owner requests preserve scope (64 calls)', all(results))
+                imported = dict(tier='L2',kind='fact',epistemic_kind='policy',key=key+'-import',content='imported scope policy',authority='user',provenance_category='user_stated')
+                code, result = kb.kb_request('/v1/actions/kb.import', dict(memories=[imported]))
+                check(kind+' import accepts verified audience', code == 200 and result.get('imported') == 1)
+                observed = json.loads(matrix.command('docker','exec',kb.postgres,'psql','-U','postgres','-d','aimee_store','-X','-qAt','-c',
+                    f"SELECT json_build_array(scope_type,scope_value,provenance_category,epistemic_kind) FROM memories WHERE key='{key}-import'"))
+                check(kind+' import preserves scope and model origin', observed == [kind,key,'agent_message','policy'])
+                code, refused = kb.kb_request('/v1/actions/kb.import', dict(workspace=key+'-foreign',memories=[dict(imported,key=key+'-forged')]))
+                check(kind+' import cannot widen credential scope', refused.get('status') != 'ok')
+
                 identities = []
                 for name in (kb.application, kb.postgres, kb.embedder):
                     value = json.loads(matrix.command('docker','inspect',name))[0]

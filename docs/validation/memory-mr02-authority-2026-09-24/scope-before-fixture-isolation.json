@@ -1,0 +1,68 @@
+[
+  {
+    "name": "project export inherits verified scope",
+    "passed": true
+  },
+  {
+    "name": "project import accepts verified audience",
+    "passed": true
+  },
+  {
+    "name": "project import preserves scope and model origin",
+    "passed": true
+  },
+  {
+    "name": "project import cannot widen credential scope",
+    "passed": true
+  },
+  {
+    "name": "project verified scope is inherited by unscoped get",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 5",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 6",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 7",
+    "passed": true
+  },
+  {
+    "name": "project include_all stays within verified audience",
+    "passed": true
+  },
+  {
+    "name": "project explicit exact scope still excludes global records",
+    "passed": true
+  },
+  {
+    "name": "project actorless credential gains no user diagnostic authority",
+    "passed": true
+  },
+  {
+    "name": "project request text cannot replace verified audience",
+    "passed": true
+  },
+  {
+    "name": "project request text cannot grant diagnostic authority",
+    "passed": true,
+    "observation": {
+      "http_status": 403,
+      "kind": null,
+      "decision_present": false
+    }
+  },
+  {
+    "name": "project dashboard preserves verified scope 0",
+    "passed": false
+  },
+  {
+    "name": "scoped HTTP regression completed",
+    "passed": false,
+    "error": "project dashboard preserves verified scope 0"
+  }
+]
