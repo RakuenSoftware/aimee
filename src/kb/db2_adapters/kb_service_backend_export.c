@@ -34,7 +34,7 @@ cJSON *db2_kb_service_memory_export_filtered_json(const char *workspace, const c
                 "          ORDER BY ms.scope_value LIMIT 1), "
                 "         (SELECT mw.workspace FROM memory_workspaces mw "
                 "          WHERE mw.memory_id = m.id ORDER BY mw.workspace LIMIT 1), '') "
-                "AS workspace "
+                "AS workspace, m.epistemic_kind "
                 "FROM memories m");
 
    offset += snprintf(sql + offset, sizeof(sql) - (size_t)offset, " WHERE 1=1");
@@ -118,6 +118,7 @@ cJSON *db2_kb_service_memory_export_filtered_json(const char *workspace, const c
       cJSON_AddStringToObject(obj, "updated_at", aimee_pg_column_text(st, 9));
       cJSON_AddStringToObject(obj, "source_session", aimee_pg_column_text(st, 10));
       cJSON_AddStringToObject(obj, "workspace", aimee_pg_column_text(st, 11));
+      cJSON_AddStringToObject(obj, "epistemic_kind", aimee_pg_column_text(st, 12));
 
       cJSON_AddItemToArray(memories_arr, obj);
       count++;
@@ -207,6 +208,7 @@ int db2_kb_service_memory_import_json(cJSON *memories_arr, const char *workspace
    {
       cJSON *tier_j = cJSON_GetObjectItemCaseSensitive(item, "tier");
       cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(item, "kind");
+      cJSON *epistemic_j = cJSON_GetObjectItemCaseSensitive(item, "epistemic_kind");
       cJSON *key_j = cJSON_GetObjectItemCaseSensitive(item, "key");
       cJSON *content_j = cJSON_GetObjectItemCaseSensitive(item, "content");
       cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(item, "confidence");
@@ -226,6 +228,8 @@ int db2_kb_service_memory_import_json(cJSON *memories_arr, const char *workspace
             return -1;
          cJSON_AddStringToObject(request, "tier", tier);
          cJSON_AddStringToObject(request, "kind", kind_j->valuestring);
+         if (epistemic_j)
+            cJSON_AddItemToObject(request, "epistemic_kind", cJSON_Duplicate(epistemic_j, 1));
          cJSON_AddStringToObject(request, "key", key_j->valuestring);
          cJSON_AddStringToObject(request, "content", content_j->valuestring);
          cJSON_AddNumberToObject(request, "confidence", confidence);

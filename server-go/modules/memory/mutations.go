@@ -227,6 +227,12 @@ var (
 	errRequiresRevocation     = errors.New("memory: instruction and policy memories require revocation")
 )
 
+// Automatic writers have no human correction authority. Keep this predicate
+// aligned with model replacement admission, including unknown legacy origins.
+func automaticMutationSQL(prefix string) string {
+	return prefix + "provenance_category='agent_message' AND " + prefix + "epistemic_kind NOT IN ('episode','experience','instruction','policy')"
+}
+
 func admitMemoryReplacement(epistemic, origin string, authority int) error {
 	switch epistemic {
 	case "episode", "experience":

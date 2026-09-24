@@ -16117,6 +16117,10 @@ CREATE TRIGGER memory_governance_promotion_guard BEFORE INSERT OR UPDATE OF gove
 CREATE OR REPLACE FUNCTION memory_epistemic_mutation_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+ IF NEW.epistemic_kind IS DISTINCT FROM OLD.epistemic_kind AND
+    OLD.epistemic_kind IN ('episode','experience','instruction','policy') THEN
+   RAISE EXCEPTION '% protection cannot be removed in place; annotate or revoke and replace',OLD.epistemic_kind;
+ END IF;
  IF NEW.content IS DISTINCT FROM OLD.content AND
     OLD.epistemic_kind IN ('episode','experience') THEN
    RAISE EXCEPTION '% memories are immutable; add an annotation',OLD.epistemic_kind;
@@ -18802,5 +18806,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '35')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '36')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

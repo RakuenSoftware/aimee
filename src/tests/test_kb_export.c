@@ -23,6 +23,10 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
                  "import-ws") == 0);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "session_id")),
                  "test") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "epistemic_kind")),
+                 "policy") == 0);
+   assert(!cJSON_GetObjectItemCaseSensitive(args, "authority"));
+   assert(!cJSON_GetObjectItemCaseSensitive(args, "provenance_category"));
    dispatch_calls++;
    *result = dispatch_result < 0
                  ? NULL
@@ -168,7 +172,8 @@ static void test_import_dry_run_parse_contract(void)
    assert(f);
    fputs("{\"schema_version\":\"1\",\"memories\":[{\"tier\":\"L2\",\"kind\":\"fact\","
          "\"key\":\"portable-memory\",\"content\":\"portable content\","
-         "\"confidence\":0.75,\"source_session\":\"test\"}]}\n",
+         "\"confidence\":0.75,\"source_session\":\"test\",\"epistemic_kind\":\"policy\","
+         "\"authority\":\"user\",\"provenance_category\":\"user_stated\"}]}\n",
          f);
    fclose(f);
 

@@ -668,7 +668,7 @@ func (s *postgresDataStore) Feedback(ctx context.Context, scope Scope, ids []int
 
 func (s *postgresDataStore) Maintenance(ctx context.Context, scope Scope) (int, int, int, error) {
 	table := "memories"
-	where := "scope_type = $1 AND scope_value = $2 AND "
+	where := "scope_type = $1 AND scope_value = $2 AND lifecycle_state='active' AND (" + automaticMutationSQL("") + ") AND "
 	args := []any{scope.Type, scope.Value}
 	stamp := "pg_now_text()"
 	expiryCutoff := "pg_now_text('-90 days')"

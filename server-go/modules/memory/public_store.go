@@ -47,6 +47,12 @@ func handleStoreCommand(options handlerOptions, invocation bus.ModuleInvocation,
 	if strings.TrimSpace(request.Key) == "" || strings.TrimSpace(request.Content) == "" {
 		return invalid("memory.store requires non-empty key and content")
 	}
+	if raw, exists := args["epistemic_kind"]; exists {
+		var kind string
+		if json.Unmarshal(raw, &kind) != nil || kind == "" {
+			return invalid("epistemic_kind must be a string")
+		}
+	}
 	if !validEpistemicKinds[request.EpistemicKind] {
 		return invalid("invalid epistemic_kind")
 	}

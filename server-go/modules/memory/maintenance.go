@@ -103,7 +103,7 @@ func (s *postgresDataStore) countMemories(ctx context.Context) (int64, error) {
 }
 
 func (s *postgresDataStore) maintenanceChange(ctx context.Context, query string) (int, error) {
-	tag, err := s.db.Exec(ctx, query)
+	tag, err := s.db.Exec(ctx, query+" AND ("+automaticMutationSQL("")+")")
 	if err != nil {
 		return 0, err
 	}
