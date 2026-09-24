@@ -1,0 +1,598 @@
+[
+  {
+    "name": "Common fixture lexical/list find_facts",
+    "passed": true,
+    "elapsed_ms": 188.892
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_visible",
+    "passed": true,
+    "elapsed_ms": 150.83
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_scoped",
+    "passed": true,
+    "elapsed_ms": 142.754
+  },
+  {
+    "name": "Common fixture lexical/list list",
+    "passed": true,
+    "elapsed_ms": 141.835
+  },
+  {
+    "name": "Common fixture compatibility search and windows",
+    "passed": true,
+    "elapsed_ms": 175.357
+  },
+  {
+    "name": "Common fixture query route top_l2_facts",
+    "passed": true,
+    "elapsed_ms": 153.657
+  },
+  {
+    "name": "Common fixture query route load_eval_corpus",
+    "passed": true,
+    "elapsed_ms": 125.965
+  },
+  {
+    "name": "Common fixture query route list_session_scope_priority",
+    "passed": true,
+    "elapsed_ms": 152.602
+  },
+  {
+    "name": "Common fixture query route list_session_scope_priority_like",
+    "passed": true,
+    "elapsed_ms": 135.144
+  },
+  {
+    "name": "Common fixture query route search_facts_patterns_by_keyword",
+    "passed": true,
+    "elapsed_ms": 128.632
+  },
+  {
+    "name": "Common fixture diagnostic retrieval",
+    "passed": true,
+    "elapsed_ms": 134.808
+  },
+  {
+    "name": "Common fixture recall bundle with legacy project",
+    "passed": true,
+    "elapsed_ms": 170.987
+  },
+  {
+    "name": "Common fixture assembled project context",
+    "passed": true,
+    "elapsed_ms": 138.864
+  },
+  {
+    "name": "Common fixture assembled workspace context",
+    "passed": true,
+    "elapsed_ms": 138.695
+  },
+  {
+    "name": "Legacy project applies without scope_context",
+    "passed": true,
+    "elapsed_ms": 154.25
+  },
+  {
+    "name": "Legacy workspace applies without scope_context",
+    "passed": true,
+    "elapsed_ms": 141.387
+  },
+  {
+    "name": "Explicit include_all false restricts to shared audience",
+    "passed": true,
+    "elapsed_ms": 139.467
+  },
+  {
+    "name": "Malformed project cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 103.272
+  },
+  {
+    "name": "Malformed workspace cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 99.938
+  },
+  {
+    "name": "Malformed scope_context cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 115.511
+  },
+  {
+    "name": "Malformed include_all cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 109.271
+  },
+  {
+    "name": "Common fixture graph-only evidence-backed traversal",
+    "passed": true,
+    "elapsed_ms": 123.596
+  },
+  {
+    "name": "Common fixture current current",
+    "passed": true,
+    "elapsed_ms": 128.852
+  },
+  {
+    "name": "Common fixture historical current",
+    "passed": true,
+    "elapsed_ms": 125.37
+  },
+  {
+    "name": "Common fixture current future",
+    "passed": true,
+    "elapsed_ms": 126.371
+  },
+  {
+    "name": "Common fixture historical future",
+    "passed": true,
+    "elapsed_ms": 134.839
+  },
+  {
+    "name": "Common fixture current expired",
+    "passed": true,
+    "elapsed_ms": 121.655
+  },
+  {
+    "name": "Common fixture historical expired",
+    "passed": true,
+    "elapsed_ms": 115.085
+  },
+  {
+    "name": "Common fixture current suppressed",
+    "passed": true,
+    "elapsed_ms": 131.99
+  },
+  {
+    "name": "Common fixture historical suppressed",
+    "passed": true,
+    "elapsed_ms": 117.322
+  },
+  {
+    "name": "Common fixture current superseded",
+    "passed": true,
+    "elapsed_ms": 130.984
+  },
+  {
+    "name": "Common fixture historical superseded",
+    "passed": true,
+    "elapsed_ms": 127.923
+  },
+  {
+    "name": "Common fixture current archived",
+    "passed": true,
+    "elapsed_ms": 104.77
+  },
+  {
+    "name": "Common fixture historical archived",
+    "passed": true,
+    "elapsed_ms": 123.24
+  },
+  {
+    "name": "Common fixture current quarantined",
+    "passed": true,
+    "elapsed_ms": 128.698
+  },
+  {
+    "name": "Common fixture historical quarantined",
+    "passed": true,
+    "elapsed_ms": 121.07
+  },
+  {
+    "name": "Common fixture current deleted",
+    "passed": true,
+    "elapsed_ms": 113.609
+  },
+  {
+    "name": "Common fixture historical deleted",
+    "passed": true,
+    "elapsed_ms": 114.259
+  },
+  {
+    "name": "Common fixture current revoked",
+    "passed": true,
+    "elapsed_ms": 152.027
+  },
+  {
+    "name": "Common fixture historical revoked",
+    "passed": true,
+    "elapsed_ms": 151.312
+  },
+  {
+    "name": "Common fixture current cross-scope",
+    "passed": true,
+    "elapsed_ms": 110.633
+  },
+  {
+    "name": "Common fixture historical cross-scope",
+    "passed": true,
+    "elapsed_ms": 127.299
+  },
+  {
+    "name": "Legacy graph query honors project",
+    "passed": true,
+    "elapsed_ms": 145.119
+  },
+  {
+    "name": "Legacy graph query honors workspace",
+    "passed": true,
+    "elapsed_ms": 124.392
+  },
+  {
+    "name": "Legacy provenance audience current",
+    "passed": true,
+    "elapsed_ms": 125.661
+  },
+  {
+    "name": "Legacy provenance audience cross-scope",
+    "passed": true,
+    "elapsed_ms": 114.163
+  },
+  {
+    "name": "Legacy link audience excludes foreign endpoints",
+    "passed": true,
+    "elapsed_ms": 118.265
+  },
+  {
+    "name": "Legacy conflict audience excludes foreign parents",
+    "passed": true,
+    "elapsed_ms": 107.368
+  },
+  {
+    "name": "Operator statistics honor project without current-only filtering",
+    "passed": true,
+    "elapsed_ms": 127.149
+  },
+  {
+    "name": "Console effectiveness retains project restriction",
+    "passed": true,
+    "elapsed_ms": 129.412
+  },
+  {
+    "name": "Dashboard transport retains project and authorized endpoints",
+    "passed": true
+  },
+  {
+    "name": "Operator statistics honor workspace without current-only filtering",
+    "passed": true,
+    "elapsed_ms": 131.577
+  },
+  {
+    "name": "Console effectiveness retains workspace restriction",
+    "passed": true,
+    "elapsed_ms": 135.116
+  },
+  {
+    "name": "Dashboard transport retains workspace and authorized endpoints",
+    "passed": true
+  },
+  {
+    "name": "Directive matched recall requires every current project parent",
+    "passed": true,
+    "elapsed_ms": 168.045
+  },
+  {
+    "name": "Directive fallback recall requires every current project parent",
+    "passed": true,
+    "elapsed_ms": 176.451
+  },
+  {
+    "name": "Session directive briefing retains project parent scope",
+    "passed": true
+  },
+  {
+    "name": "Directive matched recall requires every current workspace parent",
+    "passed": true,
+    "elapsed_ms": 168.436
+  },
+  {
+    "name": "Directive fallback recall requires every current workspace parent",
+    "passed": true,
+    "elapsed_ms": 151.408
+  },
+  {
+    "name": "Session directive briefing retains workspace parent scope",
+    "passed": true
+  },
+  {
+    "name": "Derived episode parent current",
+    "passed": true,
+    "elapsed_ms": 127.873
+  },
+  {
+    "name": "Diagnostic match explanation current parent current",
+    "passed": true,
+    "elapsed_ms": 150.635
+  },
+  {
+    "name": "Derived scene members parent current",
+    "passed": true,
+    "elapsed_ms": 122.926
+  },
+  {
+    "name": "Retained fact history audience and erasure current",
+    "passed": true,
+    "elapsed_ms": 145.228
+  },
+  {
+    "name": "Derived episode parent future",
+    "passed": true,
+    "elapsed_ms": 143.252
+  },
+  {
+    "name": "Diagnostic match explanation current parent future",
+    "passed": true,
+    "elapsed_ms": 116.43
+  },
+  {
+    "name": "Derived scene members parent future",
+    "passed": true,
+    "elapsed_ms": 148.232
+  },
+  {
+    "name": "Retained fact history audience and erasure future",
+    "passed": true,
+    "elapsed_ms": 124.852
+  },
+  {
+    "name": "Derived episode parent expired",
+    "passed": true,
+    "elapsed_ms": 123.144
+  },
+  {
+    "name": "Diagnostic match explanation current parent expired",
+    "passed": true,
+    "elapsed_ms": 119.792
+  },
+  {
+    "name": "Derived scene members parent expired",
+    "passed": true,
+    "elapsed_ms": 107.846
+  },
+  {
+    "name": "Retained fact history audience and erasure expired",
+    "passed": true,
+    "elapsed_ms": 142.597
+  },
+  {
+    "name": "Derived episode parent suppressed",
+    "passed": true,
+    "elapsed_ms": 122.119
+  },
+  {
+    "name": "Diagnostic match explanation current parent suppressed",
+    "passed": true,
+    "elapsed_ms": 110.214
+  },
+  {
+    "name": "Derived scene members parent suppressed",
+    "passed": true,
+    "elapsed_ms": 137.683
+  },
+  {
+    "name": "Retained fact history audience and erasure suppressed",
+    "passed": true,
+    "elapsed_ms": 117.189
+  },
+  {
+    "name": "Derived episode parent superseded",
+    "passed": true,
+    "elapsed_ms": 148.446
+  },
+  {
+    "name": "Diagnostic match explanation current parent superseded",
+    "passed": true,
+    "elapsed_ms": 138.005
+  },
+  {
+    "name": "Derived scene members parent superseded",
+    "passed": true,
+    "elapsed_ms": 139.491
+  },
+  {
+    "name": "Retained fact history audience and erasure superseded",
+    "passed": true,
+    "elapsed_ms": 124.633
+  },
+  {
+    "name": "Derived episode parent archived",
+    "passed": true,
+    "elapsed_ms": 152.469
+  },
+  {
+    "name": "Diagnostic match explanation current parent archived",
+    "passed": true,
+    "elapsed_ms": 125.77
+  },
+  {
+    "name": "Derived scene members parent archived",
+    "passed": true,
+    "elapsed_ms": 132.282
+  },
+  {
+    "name": "Retained fact history audience and erasure archived",
+    "passed": true,
+    "elapsed_ms": 150.854
+  },
+  {
+    "name": "Derived episode parent quarantined",
+    "passed": true,
+    "elapsed_ms": 141.905
+  },
+  {
+    "name": "Diagnostic match explanation current parent quarantined",
+    "passed": true,
+    "elapsed_ms": 124.591
+  },
+  {
+    "name": "Derived scene members parent quarantined",
+    "passed": true,
+    "elapsed_ms": 115.564
+  },
+  {
+    "name": "Retained fact history audience and erasure quarantined",
+    "passed": true,
+    "elapsed_ms": 100.953
+  },
+  {
+    "name": "Derived episode parent deleted",
+    "passed": true,
+    "elapsed_ms": 106.653
+  },
+  {
+    "name": "Diagnostic match explanation current parent deleted",
+    "passed": true,
+    "elapsed_ms": 120.292
+  },
+  {
+    "name": "Derived scene members parent deleted",
+    "passed": true,
+    "elapsed_ms": 139.529
+  },
+  {
+    "name": "Retained fact history audience and erasure deleted",
+    "passed": true,
+    "elapsed_ms": 104.889
+  },
+  {
+    "name": "Derived episode parent revoked",
+    "passed": true,
+    "elapsed_ms": 117.354
+  },
+  {
+    "name": "Diagnostic match explanation current parent revoked",
+    "passed": true,
+    "elapsed_ms": 104.972
+  },
+  {
+    "name": "Derived scene members parent revoked",
+    "passed": true,
+    "elapsed_ms": 116.438
+  },
+  {
+    "name": "Retained fact history audience and erasure revoked",
+    "passed": true,
+    "elapsed_ms": 130.205
+  },
+  {
+    "name": "Derived episode parent cross-scope",
+    "passed": true,
+    "elapsed_ms": 125.206
+  },
+  {
+    "name": "Diagnostic match explanation current parent cross-scope",
+    "passed": true,
+    "elapsed_ms": 122.993
+  },
+  {
+    "name": "Derived scene members parent cross-scope",
+    "passed": true,
+    "elapsed_ms": 118.819
+  },
+  {
+    "name": "Retained fact history audience and erasure cross-scope",
+    "passed": true,
+    "elapsed_ms": 118.812
+  },
+  {
+    "name": "Derived entity_edges current project parents",
+    "passed": true,
+    "elapsed_ms": 122.688
+  },
+  {
+    "name": "Derived search_graph current project parents",
+    "passed": true,
+    "elapsed_ms": 117.727
+  },
+  {
+    "name": "Derived scene list current project parents",
+    "passed": true,
+    "elapsed_ms": 120.991
+  },
+  {
+    "name": "Derived entity profile current project aggregates",
+    "passed": true,
+    "elapsed_ms": 139.173
+  },
+  {
+    "name": "Briefing facts activity and entities retain project parents",
+    "passed": true,
+    "elapsed_ms": 145.098
+  },
+  {
+    "name": "Derived entity_edges current workspace parents",
+    "passed": true,
+    "elapsed_ms": 127.922
+  },
+  {
+    "name": "Derived search_graph current workspace parents",
+    "passed": true,
+    "elapsed_ms": 121.032
+  },
+  {
+    "name": "Derived scene list current workspace parents",
+    "passed": true,
+    "elapsed_ms": 126.014
+  },
+  {
+    "name": "Derived entity profile current workspace aggregates",
+    "passed": true,
+    "elapsed_ms": 122.221
+  },
+  {
+    "name": "Briefing facts activity and entities retain workspace parents",
+    "passed": true,
+    "elapsed_ms": 160.093
+  },
+  {
+    "name": "Relation future interval excludes entity_edges",
+    "passed": true,
+    "elapsed_ms": 135.069
+  },
+  {
+    "name": "Relation future interval excludes search_graph",
+    "passed": true,
+    "elapsed_ms": 134.151
+  },
+  {
+    "name": "Relation future interval excludes profile aggregate",
+    "passed": true,
+    "elapsed_ms": 149.38
+  },
+  {
+    "name": "Relation expired interval excludes entity_edges",
+    "passed": true,
+    "elapsed_ms": 142.488
+  },
+  {
+    "name": "Relation expired interval excludes search_graph",
+    "passed": true,
+    "elapsed_ms": 115.364
+  },
+  {
+    "name": "Relation expired interval excludes profile aggregate",
+    "passed": true,
+    "elapsed_ms": 139.972
+  },
+  {
+    "name": "Relation historical offset instant 2020-01-01T00:00:00Z",
+    "passed": true,
+    "elapsed_ms": 142.044
+  },
+  {
+    "name": "Relation historical offset instant 2020-01-02T00:00:00Z",
+    "passed": true,
+    "elapsed_ms": 115.092
+  },
+  {
+    "name": "Relation historical query rejects relative time",
+    "passed": true,
+    "elapsed_ms": 98.547
+  },
+  {
+    "name": "common fixture completed",
+    "passed": false,
+    "error": "fixture SQL failed: ERROR:  semantic assertion mutation committed without its evidence event"
+  }
+]

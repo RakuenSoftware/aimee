@@ -36,8 +36,15 @@ def main():
     key = 'mr01-lanes-' + uuid.uuid4().hex
     kb = matrix.Stack('kb', env, args.output)
     def sql(query):
-        return matrix.command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
-            '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+        result = subprocess.run(['docker','exec',kb.postgres,'psql','-U','postgres',
+            '-d','aimee_store','-X','-qAt','-v','ON_ERROR_STOP=1','-c',query],
+            text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=60)
+        if result.returncode:
+            # Only this synthetic SQL fixture is diagnosed; bootstrap commands
+            # retain the matrix helper's credential-safe error handling.
+            reason=result.stderr.splitlines()[0] if result.stderr else 'no diagnostic'
+            raise RuntimeError('fixture SQL failed: '+reason)
+        return result.stdout.strip()
     def call(verb, body):
         started = time.monotonic()
         code, result = kb.kb_request('/v1/actions/memory.'+verb, body)
@@ -252,6 +259,37 @@ def main():
             code,result,elapsed=call('search_graph_as_of',dict(query=key,project=key,as_of='now'))
             check('Relation historical query rejects relative time',code == 200 and result.get('kind') == 'invalid_argument',elapsed)
             sql(f"UPDATE memory_relations SET valid_at='',invalid_at='' WHERE memory_id={ids['current']}")
+            sql(f"""BEGIN;
+              INSERT INTO fact_graph_commits(commit_id,operation,actor_principal,actor_role,authority_rank,status)
+                VALUES('{key}','assert','fixture','system',100,'open');
+              INSERT INTO entity_edges(source,relation,target,edge_class,assertion_kind,lifecycle_state,confidence_class,confidence,authority_rank,commit_id)
+                SELECT '{key}-root','uses',key,'semantic','world_fact','persistent','A',.9,80,'{key}'
+                FROM memories WHERE key LIKE '{key}-%';
+              INSERT INTO fact_graph_changes(commit_id,assertion_id,action,existed_before,existed_after,
+                  after_lifecycle,after_confidence,after_authority_rank,after_version)
+                SELECT '{key}',id,'assert',0,1,'persistent',confidence,80,1
+                FROM entity_edges WHERE commit_id='{key}';
+              INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance)
+                SELECT e.id,'memory','memory:'||m.id::text,'supports' FROM entity_edges e JOIN memories m ON e.target=m.key
+                WHERE e.commit_id='{key}'; COMMIT""")
+            for audience,value,state in [('project',key,'current'),('workspace',key+'-team','workspace')]:
+                expected=key+'-'+state
+                code,result,elapsed=call('search_assertions',dict(query=key,**{audience:value},limit=64))
+                check('Semantic assertion search retains '+audience+' parents',code == 200 and result.get('status') == 'ok'
+                      and {row['object'] for row in result.get('assertions',[])} == {expected},elapsed)
+                for verb,field in [('facts','facts'),('context_block','block')]:
+                    code,result,elapsed=call(verb,dict(query=key+'-root',**{audience:value}))
+                    (args.output/(verb+'-'+audience+'.json')).write_text(json.dumps(result,indent=2)+'\n')
+                    content=result.get(field,'')
+                    check('Semantic '+verb+' retains '+audience+' parents',code == 200 and result.get('status') == 'ok'
+                          and expected in content and not any(key+'-'+other in content for other in states+['workspace'] if other != state),elapsed)
+                code,result,elapsed=call('assemble_typed_context',dict(query=key,**{audience:value},enable_episodes=True,
+                    channel_budgets=dict(total=8192,current_assertions=2048,episodes=2048)))
+                channels=result.get('channels',{})
+                (args.output/('typed-'+audience+'.json')).write_text(json.dumps(result,indent=2)+'\n')
+                check('Typed assertion and episode channels retain '+audience+' parents',code == 200 and result.get('status') == 'ok'
+                      and {row['object'] for row in channels.get('current_assertions',{}).get('items',[])} == {expected}
+                      and {row['episode_key'] for row in channels.get('episodes',{}).get('items',[])} == {expected},elapsed)
             card_id = int(sql(f"""BEGIN;
               INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
                 VALUES('L1','episode','{key}-derived','{key}-derived copied current input','project','{key}');

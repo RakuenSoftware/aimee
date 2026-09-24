@@ -23,9 +23,18 @@ old edge. The [HTTP reproduction](memory-mr01-relation-validity-2026-09-24/http-
 on `50282c8ba` passes the preceding lifecycle/derived fixture and then admits a
 future relation through entity edges. The final [full race suite and exported owner build](memory-mr01-relation-validity-2026-09-24/full-race-export.txt)
 pass in 285.406 and 5.310 seconds after both producer repairs below.
-Corrected HTTP validation is pending. The expanded candidate fixture includes
-121 checks, adding briefing and match-explanation coverage to the common
-population as well as the relation interval regression.
+The [corrected HTTP fixture](memory-mr01-relation-validity-2026-09-24/http-after.json)
+passes all 129 checks on `6fab64fb4`, with [actual image identities](memory-mr01-relation-validity-2026-09-24/image-identities.json).
+It adds briefing, match explanations, semantic assertion search, fact recall,
+context blocks and typed assertion/episode channels across project and workspace
+audiences to the common population and relation interval regression.
+
+Two fixture failures are retained: the initial semantic setup omitted the
+required journal event, and the first fact query omitted the full entity name.
+The corrected fixture records the assertion audit event and queries the entity
+by its full name; application enforcement was unchanged for these corrections.
+CT100 server, PostgreSQL and embedder remain healthy on released 0.4.5 after
+approximately 24 hours. Draft images remain confined to CT109.
 
 The [first full suite](memory-mr01-relation-validity-2026-09-24/producer-frame-before.txt) exposed a producer dependency: semantic-frame time hints
 such as `sep 12` had been copied into governed relation bounds. The producer now
