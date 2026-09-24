@@ -1,0 +1,17 @@
+[
+  {
+    "name": "aimee-e2e-kb-dd457215e8-aimee-kb-1",
+    "image": "sha256:d48d047a10c99d3a903ac3151fb2d3cd51c62d0ab9b3f7e4d459f1ec17c97f3b",
+    "configured_image": "aimee-pr2990:7f00fb84d"
+  },
+  {
+    "name": "aimee-e2e-kb-dd457215e8-aimee-store-db-1",
+    "image": "sha256:23c6ec9c2ba1c9d14e6fe5bb94f37914571159e80397fd09701a0c6b37fa9db5",
+    "configured_image": "aimee-pr2990-postgres:d0e3c5752"
+  },
+  {
+    "name": "aimee-e2e-kb-dd457215e8-aimee-embedder-1",
+    "image": "sha256:a2652e92cf2f68d684b56b44b8eed37ab0701ff1867eb1c59d3c2abb79917c85",
+    "configured_image": "ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5"
+  }
+]

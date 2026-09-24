@@ -157,6 +157,12 @@ $(TESTPREFIX)/unit-test-server-management-listener-live: \
 	$(TESTLINK) -o $@ $^ $(L_SERVER)
 
 # Common object sets for tests
+$(TESTPREFIX)/unit-test-http-send-guard: $(OBJDIR)/tests/test_http_send_guard.o \
+                 $(OBJDIR)/posix/agent_bridge.o $(OBJDIR)/proxy_bootstrap.o \
+                 $(OBJDIR)/log.o $(OBJDIR)/cJSON.o $(OBJDIR)/platform_random.o \
+                 $(OBJDIR)/modules/vault/runtime_secret.o $(PLATFORM_BASIC_OBJS) $(CORE_CONNECTION_LIB)
+	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
+
 TEST_CORE_OBJS = $(OBJDIR)/tests/support/providers_module_stub.o $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/client_config.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/interaction_event_names.o \
                  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
                  $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o \
@@ -484,6 +490,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-core-connect-budget \
                $(TESTPREFIX)/unit-test-kb-sidecar-identity \
                $(TESTPREFIX)/unit-test-synthesis-mtls-client \
+               $(TESTPREFIX)/unit-test-http-send-guard \
                $(TESTPREFIX)/unit-test-workspace-scope \
                $(TESTPREFIX)/unit-test-workspace-migration \
                $(TESTPREFIX)/unit-test-webuser-runtime \

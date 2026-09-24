@@ -20,6 +20,10 @@ expiry, state transitions, counters, and one-shot acknowledgement. The
 exposed two test-fixture issues, corrected before the passing run: a missing
 collection-owner row and overlapping migration extraction markers.
 
-The HTTP fixture adds 16 structured-source checks; candidate process validation
-is pending. These versions do not close the post-check mutation race. MR-01 A5
+The [fresh-process HTTP fixture](memory-mr01-structured-sources-2026-09-24/checks.json)
+passed all 153 checks on application `7f00fb84d`, including 16 new checks across
+project and workspace audiences for source capture, counters, directive and
+reminder edits, edit-and-restore invalidation, and refreshed observations.
+[Image identities](memory-mr01-structured-sources-2026-09-24/image-identities.json)
+record the actual application and dependency images. These versions do not close the post-check mutation race. MR-01 A5
 and overall closeout remain open.

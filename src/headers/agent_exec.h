@@ -398,6 +398,22 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
 int agent_http_post_bytes(const char *url, const char *auth_header, const void *body,
                           size_t body_len, char **response_buf, int timeout_ms,
                           const char *extra_headers);
+/* Per-call send guard. Acquisition runs after connection setup and request
+ * construction, immediately before the first request write. Release runs on
+ * both refusal and write completion, before reading a provider response. Nested
+ * ordinary HTTP requests never inherit this guard. */
+typedef struct
+{
+   void *context;
+   int (*acquire)(void *context);
+   void (*release)(void *context, int write_status);
+   /* Optional acquisition + write budget, starting before acquire. The
+    * response retains the caller's original request deadline. */
+   int send_timeout_ms;
+} agent_http_send_guard_t;
+int agent_http_post_guarded_bytes(const char *url, const char *auth_header, const void *body,
+                                  size_t body_len, char **response_buf, int timeout_ms,
+                                  const char *extra_headers, const agent_http_send_guard_t *guard);
 int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers);
@@ -419,6 +435,10 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
 int agent_http_post_stream_bytes(const char *url, const char *auth_header, const void *body,
                                  size_t body_len, agent_http_stream_cb callback, void *userdata,
                                  int timeout_ms, const char *extra_headers);
+int agent_http_post_stream_guarded_bytes(const char *url, const char *auth_header, const void *body,
+                                         size_t body_len, agent_http_stream_cb callback,
+                                         void *userdata, int timeout_ms, const char *extra_headers,
+                                         const agent_http_send_guard_t *guard);
 int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms);
 void agent_http_init(void);
 void agent_http_cleanup(void);
