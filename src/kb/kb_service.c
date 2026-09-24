@@ -737,7 +737,7 @@ static const struct
 
 /* Only verifier-owned request state becomes command context. User arguments
  * remain a separate field on the wire and cannot replace this identity. */
-static cJSON *kb_command_context(void)
+cJSON *kb_service_command_context(void)
 {
    cJSON *context = cJSON_CreateObject();
    if (!context)
@@ -780,7 +780,7 @@ static int kb_handle_memory_runtime_view(int fd, cJSON *req, const char *operati
                                          const char *field, const char *public_field)
 {
    cJSON *args = cJSON_Duplicate(req, 1);
-   cJSON *context = kb_command_context();
+   cJSON *context = kb_service_command_context();
    cJSON *response = NULL;
    if (!args || !context)
    {
@@ -856,7 +856,7 @@ static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
          return kb_rpc_table[i].fn(fd, req);
 
    cJSON *module_response = NULL;
-   cJSON *command_context = kb_command_context();
+   cJSON *command_context = kb_service_command_context();
    if (!command_context)
       return kb_send_error(fd, "command context unavailable");
    int dispatched = aimee_module_commands_dispatch_raw_context(method->valuestring, req,

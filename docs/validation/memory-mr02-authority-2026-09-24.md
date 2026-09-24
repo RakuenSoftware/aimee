@@ -41,3 +41,11 @@ omitted (`card_json` stays `{}`); they cannot establish a scoped source. The
 packaged non-owner fixture verifies protected kinds and foreign-workspace
 exclusion through both the store and host runtime. Native transport refuses an
 unavailable owner without database fallback. Final image/process replay follows.
+
+
+The native adapters now pass the KB verifier's captured request context explicitly
+for both import and export. Body authority fields stay separate from that trusted
+context. The native regression checks scope forwarding; the scoped-credential
+HTTP fixture covers inherited project/workspace audience and foreign import
+refusal. The final Go owner race suite passes in 235.243 seconds and exported
+owner verification in 6.214 seconds. Fresh image validation is still pending.

@@ -44,6 +44,10 @@ struct kb_service_ctx
    long last_session_rpc_ts;
 };
 
+/* Owned copy of the current request's verifier-supplied authority and scope. */
+struct cJSON;
+struct cJSON *kb_service_command_context(void);
+
 int kb_service_init(kb_service_ctx_t *ctx);
 void kb_service_shutdown(kb_service_ctx_t *ctx);
 void kb_worker_notify(kb_service_ctx_t *ctx);

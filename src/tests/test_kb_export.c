@@ -15,9 +15,18 @@
  * command failures before accepting a row as imported. */
 static int dispatch_result = 1;
 static int dispatch_calls;
-int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON **result)
+cJSON *kb_service_command_context(void)
+{
+   return cJSON_Parse(
+       "{\"authenticated\":true,\"scope_kind\":\"workspace\",\"scope_id\":\"import-ws\"}");
+}
+
+int aimee_module_commands_dispatch_context(const char *method, const cJSON *args,
+                                           const cJSON *context, cJSON **result)
 {
    assert(strcmp(method, "memory.store") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(context, "scope_id")),
+                 "import-ws") == 0);
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(args, "scope_context")));
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "workspace")),
                  "import-ws") == 0);
@@ -35,9 +44,14 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
 }
 
 static int export_dispatch_result = 1;
-int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
+int aimee_module_commands_dispatch_internal_context_timeout(const char *method, const cJSON *args,
+                                                            const cJSON *context, int timeout_ms,
+                                                            cJSON **result)
 {
    assert(strcmp(method, "memory.runtime") == 0);
+   assert(timeout_ms == 60000);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(context, "scope_id")),
+                 "import-ws") == 0);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "operation")),
                  "export-filtered") == 0);
    if (export_dispatch_result < 0)

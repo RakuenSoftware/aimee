@@ -1,0 +1,3 @@
+aimee-aimee-embedder-1	ghcr.io/rakuensoftware/aimee-embedder-a25m:0.4.5	Up 29 hours (healthy)
+aimee-aimee-server-1	ghcr.io/rakuensoftware/aimee:0.4.5	Up 29 hours (healthy)
+aimee-aimee-store-db-1	ghcr.io/rakuensoftware/aimee-postgres:0.4.5	Up 29 hours (healthy)

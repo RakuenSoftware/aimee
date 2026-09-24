@@ -1389,7 +1389,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -1553,7 +1552,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_reasoning.c",
         "src/tests/aimee_pg_sqlite_shim.c",
         "src/tests/test_db2.c",
@@ -1622,7 +1620,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
         "src/kb/kb_service_code_embed.c",
@@ -1717,7 +1714,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -1910,7 +1906,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -2110,7 +2105,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -2289,7 +2283,6 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -4923,7 +4916,6 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_agent.c",
-        "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -19931,7 +19923,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "a3206f7073d1b2a7a8efb90e2615c44fd178ed2c5bb58d3b75675a0d2525062b",
+  "fingerprint": "29c4d3cd5ff6356e482dd1610ff7acd297d0a4e0835e8d176ebaffba4636a296",
   "module": "db2",
   "schema_version": 1,
   "summary": {

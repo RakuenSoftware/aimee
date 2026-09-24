@@ -3,6 +3,7 @@
 
 #include "kb_service_backend_export.h"
 #include "module_commands.h"
+#include "kb_service.h"
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,7 +24,15 @@ cJSON *db2_kb_service_memory_export_filtered_json(const char *workspace, const c
    if (since_iso)
       cJSON_AddStringToObject(request, "since", since_iso);
    cJSON_AddBoolToObject(request, "include_archived", include_archived);
-   int rc = aimee_module_commands_dispatch_internal("memory.runtime", request, &response);
+   cJSON *context = kb_service_command_context();
+   if (!context)
+   {
+      cJSON_Delete(request);
+      return NULL;
+   }
+   int rc = aimee_module_commands_dispatch_internal_context_timeout("memory.runtime", request,
+                                                                    context, 60000, &response);
+   cJSON_Delete(context);
    cJSON_Delete(request);
    const char *raw = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "json"));
    cJSON *result = rc > 0 && raw ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
@@ -81,7 +90,14 @@ int db2_kb_service_memory_import_json(cJSON *memories_arr, const char *workspace
             cJSON_AddBoolToObject(request, "scope_context", 1);
             cJSON_AddStringToObject(request, "workspace", workspace_override);
          }
-         (void)aimee_module_commands_dispatch("memory.store", request, &r);
+         cJSON *context = kb_service_command_context();
+         if (!context)
+         {
+            cJSON_Delete(request);
+            return -1;
+         }
+         (void)aimee_module_commands_dispatch_context("memory.store", request, context, &r);
+         cJSON_Delete(context);
          cJSON_Delete(request);
          const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "status"));
          int ok = status && strcmp(status, "ok") == 0;
