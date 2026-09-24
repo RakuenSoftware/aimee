@@ -235,6 +235,38 @@ def main():
                 sql(f"UPDATE prospective_memories SET action_text='{key}-action' WHERE id={reminder_id}")
                 check('Structured '+audience+' reminder restore cannot revive earlier revision',eligible(refs) is False)
                 check('Structured '+audience+' reminder refresh admits a new decision',eligible(structured_refs()) is True)
+                refs=structured_refs()
+                guard_id=uuid.uuid4().hex
+                def guard(mode, selected=refs):
+                    return call('revalidate_sources',dict(**{audience:value},revalidation=dict(
+                        schema_version=1,check_id=guard_id,sources=selected,send_guard=mode)))
+                code,admission,elapsed=guard('acquire')
+                check('Send guard '+audience+' durably acquires current sources',code == 200
+                      and admission.get('eligible') is True and admission.get('send_guard') == 'acquired'
+                      and admission.get('lease_ms') == 5000,elapsed)
+                try:
+                    refused=False
+                    try:
+                        sql(f"UPDATE epistemic_directives SET question='{key}-guarded-edit' WHERE id={directive_id}")
+                    except RuntimeError as error:
+                        refused='memory provider send in progress' in str(error)
+                    check('Send guard '+audience+' blocks edit after admission',refused)
+                    sql(f"UPDATE epistemic_directives SET surfaced_count=surfaced_count+1 WHERE id={directive_id}")
+                    check('Send guard '+audience+' preserves recall accounting',eligible(refs) is True)
+                finally:
+                    code,released,elapsed=guard('release')
+                check('Send guard '+audience+' releases before later work',code == 200
+                      and released.get('send_guard') == 'released',elapsed)
+                sql(f"UPDATE epistemic_directives SET question='{key}-guarded-edit' WHERE id={directive_id}")
+                check('Send guard '+audience+' later edit invalidates earlier decision',eligible(refs) is False)
+                guard_id=uuid.uuid4().hex
+                code,stale,elapsed=guard('acquire')
+                check('Send guard '+audience+' refuses stale reacquisition',code == 200
+                      and stale.get('eligible') is False and 'send_guard' not in stale,elapsed)
+                sql(f"UPDATE epistemic_directives SET question='{question}' WHERE id={directive_id}")
+                check('Send guard '+audience+' refusal rolls back its lease',eligible(structured_refs()) is True)
+                (args.output/('send-guard-'+audience+'.json')).write_text(json.dumps(dict(
+                    sources=refs,admission=admission,release=released,stale_reacquisition=stale),indent=2)+'\n')
             # Reuse the same parent population for derived and retained-version views.
             scenes=json.loads(sql(f"""BEGIN;
               INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session)

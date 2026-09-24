@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -25,13 +26,21 @@ func (s *postgresDataStore) revalidatePersonalSources(ctx context.Context, reque
 		return false, err
 	}
 	var count int
-	err = s.db.QueryRow(ctx, `SELECT count(*) FROM jsonb_array_elements($1::jsonb) r(ref)
+	query := `SELECT count(*) FROM jsonb_array_elements($1::jsonb) r(ref)
  WHERE r.ref#>>'{source_version,version,owner_id}'=(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1)
  AND EXISTS (SELECT 1 FROM user_memories m
  WHERE m.id=(r.ref->>'stable_id')::bigint
  AND m.record_revision::text=r.ref#>>'{source_version,version,record_revision}'
  AND m.lifecycle_state=CASE WHEN r.ref->>'channel'='native_open_commitments' THEN 'pending' ELSE 'active' END
- AND (m.valid_until IS NULL OR m.valid_until>now()))`, string(raw)).Scan(&count)
+ AND (m.valid_until IS NULL OR m.valid_until>now()))`
+	if request.SendGuard == "acquire" {
+		query = strings.ReplaceAll(query, "now()", "clock_timestamp()")
+	}
+	err = s.db.QueryRow(ctx, query, string(raw)).Scan(&count)
+	if err == nil && count == len(request.Sources) && request.SendGuard == "acquire" {
+		query = strings.ReplaceAll(query, "clock_timestamp()", "(clock_timestamp()+interval '5 seconds')")
+		err = s.db.QueryRow(ctx, query, string(raw)).Scan(&count)
+	}
 	return err == nil && count == len(request.Sources), err
 }
 

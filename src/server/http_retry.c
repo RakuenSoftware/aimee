@@ -205,8 +205,12 @@ int http_retry_post_observed_bytes(const char *url, const char *auth_header, con
                 model ? model : "?", timeout_ms);
 
       int64_t attempt_start_ms = retry_now_ms();
-      http_status = agent_http_post_bytes(url, auth_header, body, body_len, response_buf,
-                                          timeout_ms, extra_headers);
+      http_status =
+          observer && observer->send_guard
+              ? agent_http_post_guarded_bytes(url, auth_header, body, body_len, response_buf,
+                                              timeout_ms, extra_headers, observer->send_guard)
+              : agent_http_post_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
+                                      extra_headers);
       int64_t attempt_ms = retry_now_ms() - attempt_start_ms;
       if (observer && observer->after)
          observer->after(observer->context, http_status, *response_buf,

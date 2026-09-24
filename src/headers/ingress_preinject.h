@@ -24,6 +24,8 @@
 
 /* Authenticated transport for Go-owned source revalidation at the wire fence. */
 int ingress_preinject_revalidate_sources(void);
+int ingress_preinject_acquire_send_guard(void **state);
+void ingress_preinject_release_send_guard(void *state);
 int ingress_preinject_accept_native_projection(const cJSON *projection);
 void ingress_preinject_finish_sources(void);
 /* Bind one final provider attempt through Go and synchronously accept its

@@ -246,8 +246,23 @@ static void record_first_attempt(void)
 
 typedef struct
 {
-   int before, after, refuse;
+   int before, after, refuse, guard_acquires, guard_releases;
 } observed_attempts_t;
+static int observed_send_acquire(void *context)
+{
+   observed_attempts_t *state = context;
+   assert(state->before == state->after + 1);
+   assert(state->guard_acquires == state->guard_releases);
+   state->guard_acquires++;
+   return 0;
+}
+static void observed_send_release(void *context, int status)
+{
+   observed_attempts_t *state = context;
+   assert(status == 0 && state->guard_acquires == state->guard_releases + 1);
+   assert(state->before == state->after + 1);
+   state->guard_releases++;
+}
 static int observe_before(void *context, const void *body, size_t length)
 {
    observed_attempts_t *state = context;
@@ -328,12 +343,17 @@ static void test_exact_length_body_is_identical_across_retries(int refused)
    retry_refused = refused;
    http_set_progress_cb(record_first_attempt);
    observed_attempts_t state = {0};
+   agent_http_send_guard_t guard = {.context = &state,
+                                    .acquire = observed_send_acquire,
+                                    .release = observed_send_release,
+                                    .send_timeout_ms = 500};
    http_retry_observer_t observer = {
-       .context = &state, .before = observe_before, .after = observe_after};
+       .context = &state, .before = observe_before, .after = observe_after, .send_guard = &guard};
    int result = http_retry_post_observed_bytes(url, NULL, expected, sizeof(expected), &resp, 1000,
                                                NULL, 2, 20, 20, "test", "test-model", NULL,
                                                admit_test_retry, &observer);
    assert(state.before == (refused ? 1 : 2) && state.after == state.before);
+   assert(state.guard_acquires == state.before && state.guard_releases == state.before);
    http_set_progress_cb(NULL);
    assert(result == (refused ? HTTP_RETRY_ADMISSION_REFUSED : 200));
    assert(retry_admissions == 1);

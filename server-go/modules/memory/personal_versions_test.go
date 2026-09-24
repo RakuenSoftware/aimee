@@ -68,6 +68,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	exec(read("../aimee/families/schema_personal_memory_acl.sql"))
 	exec(read("../aimee/families/schema_personal_memory_authority.sql"))
 	exec(read("../aimee/families/schema_personal_memory_proposals.sql"))
+	exec(read("../aimee/families/schema_personal_memory_send_guards.sql"))
 	scalar := func(sql string) int64 {
 		t.Helper()
 		var n int64
@@ -146,6 +147,18 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 		if err != nil || eligible != want {
 			t.Fatalf("private release eligible=%v want=%v err=%v", eligible, want, err)
 		}
+		if _, err := tx.Exec(ctx, "SAVEPOINT send_guard"); err != nil {
+			t.Fatal(err)
+		}
+		request.SendGuard = "acquire"
+		guarded, guardErr := backend.guardedSourceRevalidation(ctx, request, Scope{})
+		if guardErr != nil || guarded != want {
+			t.Fatal("private guarded observation", guarded, want, guardErr)
+		}
+		if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT send_guard; RELEASE SAVEPOINT send_guard"); err != nil {
+			t.Fatal(err)
+		}
+		request.SendGuard = ""
 		args := commandArgs{}
 		args["revalidation"], _ = json.Marshal(request)
 		options := handlerOptions{placement: PlacementServer, data: backend}

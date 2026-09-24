@@ -74,11 +74,13 @@ int http_retry_post_guarded_bytes(const char *url, const char *auth_header, cons
 /* Explicit per-call observer; no process-global or thread-global mutable hook.
  * before runs after backoff on EVERY attempt and must durably admit the handoff.
  * after observes only actual transport returns; it cannot undo network effects. */
+struct agent_http_send_guard;
 typedef struct
 {
    void *context;
    int (*before)(void *context, const void *body, size_t length);
    void (*after)(void *context, int status, const char *response, size_t length);
+   const struct agent_http_send_guard *send_guard;
 } http_retry_observer_t;
 int http_retry_post_observed_bytes(const char *url, const char *auth_header, const void *body,
                                    size_t body_len, char **response_buf, int timeout_ms,

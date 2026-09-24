@@ -1,0 +1,3 @@
+2026-09-24T12:14:49Z ERROR agent_http: send_request failed: 127.0.0.1:49449
+2026-09-24T12:14:49Z ERROR agent_http: send_request failed: 127.0.0.1:56379
+http_send_guard: buffered/streaming refusal, release-before-response and nested calls pass

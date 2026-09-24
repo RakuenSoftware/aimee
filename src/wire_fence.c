@@ -206,7 +206,31 @@ typedef struct
    wire_fence_route_t route;
    const char *provider, *model;
    char attempt[33];
+   void *send_guard_state;
 } wire_attempt_t;
+
+extern int ingress_preinject_acquire_send_guard(void **) __attribute__((weak));
+extern void ingress_preinject_release_send_guard(void *) __attribute__((weak));
+static int wire_send_acquire(void *opaque)
+{
+   wire_attempt_t *attempt = opaque;
+   if (!ingress_preinject_acquire_send_guard || !ingress_preinject_release_send_guard)
+      return -1;
+   return ingress_preinject_acquire_send_guard(&attempt->send_guard_state);
+}
+static void wire_send_release(void *opaque, int status)
+{
+   (void)status;
+   wire_attempt_t *attempt = opaque;
+   if (ingress_preinject_release_send_guard)
+      ingress_preinject_release_send_guard(attempt->send_guard_state);
+   attempt->send_guard_state = NULL;
+}
+static int wire_send_guard_required(void)
+{
+   const request_context_t *context = request_context_get ? request_context_get() : NULL;
+   return context && context->memory_source_release[0];
+}
 
 static int wire_attempt_before(void *opaque, const void *body, size_t length)
 {
@@ -249,8 +273,14 @@ int wire_fence_post(const char *url, const char *auth_header, const void *body, 
                     const char *model, const char *session_id, wire_fence_route_t route)
 {
    wire_attempt_t attempt = {.route = route, .provider = provider, .model = model};
-   http_retry_observer_t observer = {
-       .context = &attempt, .before = wire_attempt_before, .after = wire_attempt_after};
+   agent_http_send_guard_t guard = {.context = &attempt,
+                                    .acquire = wire_send_acquire,
+                                    .release = wire_send_release,
+                                    .send_timeout_ms = 4500};
+   http_retry_observer_t observer = {.context = &attempt,
+                                     .before = wire_attempt_before,
+                                     .after = wire_attempt_after,
+                                     .send_guard = wire_send_guard_required() ? &guard : NULL};
    return http_retry_post_observed_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
                                          extra_headers, max_attempts, base_ms, max_ms, provider,
                                          model, session_id, NULL, &observer);
@@ -294,8 +324,17 @@ int wire_fence_post_stream(const char *url, const char *auth_header, const void 
       last_error = "unavailable";
       return HTTP_RETRY_ADMISSION_REFUSED;
    }
-   int status = agent_http_post_stream_bytes(url, auth_header, body, body_len, wire_stream_chunk,
-                                             &stream, timeout_ms, extra_headers);
+   agent_http_send_guard_t guard = {.context = &attempt,
+                                    .acquire = wire_send_acquire,
+                                    .release = wire_send_release,
+                                    .send_timeout_ms = 4500};
+   int status =
+       wire_send_guard_required()
+           ? agent_http_post_stream_guarded_bytes(url, auth_header, body, body_len,
+                                                  wire_stream_chunk, &stream, timeout_ms,
+                                                  extra_headers, &guard)
+           : agent_http_post_stream_bytes(url, auth_header, body, body_len, wire_stream_chunk,
+                                          &stream, timeout_ms, extra_headers);
    unsigned char raw[32];
    unsigned int length = 0;
    char digest[65];

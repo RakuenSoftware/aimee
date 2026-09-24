@@ -135,13 +135,17 @@ int ingress_preinject_accept_native_projection(const cJSON *projection)
 
 /* The host carries opaque owner requests and responses. Source policy, version
  * comparison, scope selection and response validation all remain in Go. */
-int ingress_preinject_revalidate_sources(void)
+static int ingress_revalidate_sources(void **guard_state)
 {
+   if (guard_state)
+      *guard_state = NULL;
    const request_context_t *context = request_context_get();
    if (!context || !context->memory_source_release[0])
       return 0;
    cJSON *request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "operation", "source-release-plan");
+   if (guard_state)
+      cJSON_AddBoolToObject(request, "send_guard", 1);
    ingress_release_context(request, context);
    cJSON *plan = ingress_command(request, 1);
    const cJSON *owner_request = cJSON_GetObjectItemCaseSensitive(plan, "request");
@@ -159,7 +163,10 @@ int ingress_preinject_revalidate_sources(void)
    char *raw = owner_request ? kb_v1_action_request("memory.revalidate_sources",
                                                     cJSON_Duplicate(owner_request, 1))
                              : NULL;
-   cJSON_Delete(plan);
+   if (guard_state)
+      *guard_state = plan;
+   else
+      cJSON_Delete(plan);
    cJSON *owner_response = raw ? cJSON_Parse(raw) : NULL;
    free(raw);
    request = cJSON_CreateObject();
@@ -175,6 +182,32 @@ int ingress_preinject_revalidate_sources(void)
    if (!admitted)
       (void)request_context_refuse_assembly("unavailable");
    return admitted ? 0 : -1;
+}
+
+int ingress_preinject_revalidate_sources(void)
+{
+   return ingress_revalidate_sources(NULL);
+}
+
+int ingress_preinject_acquire_send_guard(void **state)
+{
+   if (!state)
+      return -1;
+   return ingress_revalidate_sources(state);
+}
+
+void ingress_preinject_release_send_guard(void *state)
+{
+   cJSON *plan = state;
+   if (!plan)
+      return;
+   const cJSON *local = cJSON_GetObjectItemCaseSensitive(plan, "local_release_request");
+   const cJSON *shared = cJSON_GetObjectItemCaseSensitive(plan, "release_request");
+   if (cJSON_IsObject(local))
+      cJSON_Delete(ingress_command(cJSON_Duplicate(local, 1), 0));
+   if (cJSON_IsObject(shared))
+      free(kb_v1_action_request("memory.revalidate_sources", cJSON_Duplicate(shared, 1)));
+   cJSON_Delete(plan);
 }
 
 /* The Go owner supplies canonical metadata. This adapter cannot interpret or

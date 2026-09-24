@@ -1317,7 +1317,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	// transaction now, so the non-owner runtime sees precisely this request's
 	// rows and pooled connections cannot retain another request's scope.
 	var transaction store.Tx
-	if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB {
+	if backend, ok := options.data.(*postgresDataStore); ok && (options.placement == PlacementKB || (request.Operation == "personal-source-revalidate" && request.Revalidation != nil && request.Revalidation.SendGuard != "")) {
 		if db, ok := backend.db.(store.DB); ok {
 			transaction, err = db.Begin(ctx)
 			if err != nil {
@@ -1429,19 +1429,15 @@ set_config('aimee.correlation_id',$9,true)`,
 		if err == nil {
 			response.Payload, err = json.Marshal(preview)
 		}
-	case "personal-source-revalidate":
+	case "personal-source-revalidate", "source-revalidate":
 		backend, ok := options.data.(*postgresDataStore)
-		if invocation.PrincipalRef != 0 || options.placement != PlacementServer || !ok || !request.Revalidation.valid() {
-			return nil, bus.ModuleStatusInvalidRequest
+		private := request.Operation == "personal-source-revalidate"
+		if !private && request.Revalidation != nil && request.Revalidation.SendGuard != "" && !sourceSendGuardAllowed(options.commandContext) {
+			return nil, bus.ModuleStatusCapabilityAbsent
 		}
-		var eligible bool
-		eligible, err = backend.revalidatePersonalSources(ctx, request.Revalidation)
-		if err == nil {
-			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "eligible": eligible, "check_id": request.Revalidation.CheckID, "sources_digest": releaseDigest(request.Revalidation.Sources)})
-		}
-	case "source-revalidate":
-		backend, ok := options.data.(*postgresDataStore)
-		if invocation.PrincipalRef != 0 || options.placement != PlacementKB || !ok || transaction == nil || !request.Revalidation.valid() {
+		if invocation.PrincipalRef != 0 || !ok || !request.Revalidation.valid() ||
+			(private && options.placement != PlacementServer) || (!private && options.placement != PlacementKB) ||
+			((!private || request.Revalidation.SendGuard != "") && transaction == nil) {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		exact := Scope{}
@@ -1449,10 +1445,12 @@ set_config('aimee.correlation_id',$9,true)`,
 			exact = scope
 		}
 		var eligible bool
-		eligible, err = backend.revalidateSources(ctx, request.Revalidation, exact)
+		eligible, err = backend.guardedSourceRevalidation(ctx, request.Revalidation, exact)
+		if request.Revalidation.SendGuard == "acquire" && (!eligible || err != nil) {
+			rollbackOnly = true
+		}
 		if err == nil {
-			response.Payload, err = json.Marshal(map[string]any{"status": "ok", "eligible": eligible,
-				"check_id": request.Revalidation.CheckID, "sources_digest": releaseDigest(request.Revalidation.Sources)})
+			response.Payload, err = json.Marshal(sourceGuardResponse(request.Revalidation, eligible))
 		}
 	case "typed-context":
 		backend, ok := options.data.(*postgresDataStore)

@@ -151,6 +151,7 @@
     "server-go/modules/aimee/families/schema_personal_memory_retirement_retries.sql",
     "server-go/modules/aimee/families/schema_personal_memory_retries.sql",
     "server-go/modules/aimee/families/schema_personal_memory_versions.sql",
+    "server-go/modules/aimee/families/schema_personal_memory_send_guards.sql",
     "server-go/modules/aimee/families/schema_pki.sql",
     "server-go/modules/aimee/families/schema_roundtable.sql",
     "server-go/modules/aimee/families/schema_runtime.sql",

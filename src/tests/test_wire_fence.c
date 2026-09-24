@@ -1,4 +1,5 @@
 #include "wire_fence.h"
+#include "agent_exec.h"
 #include "http_retry.h"
 #include "aimee_sha256.h"
 #include "request_context.h"
@@ -241,6 +242,31 @@ static void test_source_handle_requires_host_transport(void)
    memset(&context, 0, sizeof(context));
 }
 
+static int send_acquires, send_releases, send_refuse;
+int ingress_preinject_acquire_send_guard(void **state)
+{
+   send_acquires++;
+   *state = &send_acquires;
+   return send_refuse ? -1 : 0;
+}
+void ingress_preinject_release_send_guard(void *state)
+{
+   assert(state == &send_acquires);
+   send_releases++;
+}
+int agent_http_post_stream_guarded_bytes(const char *url, const char *auth, const void *body,
+                                         size_t length, agent_http_stream_cb callback, void *data,
+                                         int timeout, const char *extra,
+                                         const agent_http_send_guard_t *guard)
+{
+   assert(guard && guard->send_timeout_ms == 4500);
+   int status = guard->acquire(guard->context) == 0 ? 0 : -2;
+   guard->release(guard->context, status);
+   if (status)
+      return status;
+   return agent_http_post_stream_bytes(url, auth, body, length, callback, data, timeout, extra);
+}
+
 static int stream_before_calls, stream_after_calls, stream_transport_calls;
 static int stream_refuse, stream_abort, stream_after_failure;
 static int stream_observed_status;
@@ -294,13 +320,15 @@ static int consume_stream(const char *bytes, size_t length, void *unused)
 static void test_stream_receipt_admission_and_commitment(void)
 {
    for (int route = 1; route <= 3; route++)
-      for (int scenario = 0; scenario < 7; scenario++)
+      for (int scenario = 0; scenario < 8; scenario++)
       {
          memset(&context, 0, sizeof(context));
          have_context = scenario != 5;
          context.memory_receipt_required = scenario == 4;
-         if (scenario < 4)
+         if (scenario < 4 || scenario == 7)
             strcpy(context.memory_source_release, "0123456789abcdef0123456789abcdef");
+         send_refuse = scenario == 7;
+         send_acquires = send_releases = 0;
          stream_refuse = scenario == 1;
          stream_abort = scenario == 2;
          stream_after_failure = scenario == 3 ? -1 : 0;
@@ -315,6 +343,14 @@ static void test_stream_receipt_admission_and_commitment(void)
             assert(!stream_transport_calls && !stream_after_calls && !stream_consumed);
             continue;
          }
+         if (send_refuse)
+         {
+            assert(status == HTTP_RETRY_ADMISSION_REFUSED && !stream_transport_calls &&
+                   !stream_consumed);
+            assert(send_acquires == 1 && send_releases == 1 && stream_after_calls == 1);
+            continue;
+         }
+         assert(send_acquires == (scenario < 4 ? 1 : 0) && send_releases == send_acquires);
          assert(status == (stream_abort ? -1 : 200) && stream_transport_calls == 1);
          assert(stream_consumed == (stream_abort ? 3 : sizeof(stream_bytes)));
          if (scenario >= 5)

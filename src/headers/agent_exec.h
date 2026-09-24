@@ -402,7 +402,7 @@ int agent_http_post_bytes(const char *url, const char *auth_header, const void *
  * construction, immediately before the first request write. Release runs on
  * both refusal and write completion, before reading a provider response. Nested
  * ordinary HTTP requests never inherit this guard. */
-typedef struct
+typedef struct agent_http_send_guard
 {
    void *context;
    int (*acquire)(void *context);

@@ -37,6 +37,23 @@ __attribute__((weak)) int agent_http_post_stream_bytes(const char *url, const ch
                                  extra_headers);
 }
 
+__attribute__((weak)) int agent_http_post_stream_guarded_bytes(const char *url, const char *auth,
+                                                               const void *body, size_t length,
+                                                               agent_http_stream_cb callback,
+                                                               void *data, int timeout,
+                                                               const char *extra,
+                                                               const agent_http_send_guard_t *guard)
+{
+   if (guard)
+   {
+      int status = guard->acquire(guard->context) == 0 ? 0 : -2;
+      guard->release(guard->context, status);
+      if (status)
+         return status;
+   }
+   return agent_http_post_stream_bytes(url, auth, body, length, callback, data, timeout, extra);
+}
+
 /* Shape tests model one HTTP return; retry/backoff uses the real socket tests.
  * Keep observer callbacks live so these fixtures can assert admission failures
  * and their terminal SSE event rather than bypassing the provider boundary. */
@@ -49,7 +66,15 @@ http_retry_post_observed_bytes(const char *url, const char *auth, const void *bo
 {
    if (observer && observer->before && observer->before(observer->context, body, length) != 0)
       return HTTP_RETRY_ADMISSION_REFUSED;
-   int status = agent_http_post_bytes(url, auth, body, length, response, timeout, extra);
+   int status = 0;
+   if (observer && observer->send_guard)
+   {
+      const agent_http_send_guard_t *guard = observer->send_guard;
+      status = guard->acquire(guard->context) == 0 ? 0 : -2;
+      guard->release(guard->context, status);
+   }
+   if (!status)
+      status = agent_http_post_bytes(url, auth, body, length, response, timeout, extra);
    if (observer && observer->after)
       observer->after(observer->context, status, *response, *response ? strlen(*response) : 0);
    return status;

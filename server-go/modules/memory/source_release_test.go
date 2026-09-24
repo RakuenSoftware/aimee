@@ -398,6 +398,7 @@ func TestStructuredRecallSourceObservationsPostgres(t *testing.T) {
 	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
  CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$;
  GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+ GRANT EXECUTE ON FUNCTION memory_send_guard_begin(TEXT,INTEGER),memory_send_guard_end(TEXT) TO aimee_store_runtime;
  GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO aimee_store_runtime;
  SELECT set_config('aimee.memory_scope_all','1',true),set_config('jit','off',true)`)
 	const key = "structured-source-observation"
@@ -484,5 +485,230 @@ func TestStructuredRecallSourceObservationsPostgres(t *testing.T) {
 		check(false)
 		exec(`ROLLBACK TO SAVEPOINT structured_change; RELEASE SAVEPOINT structured_change`)
 		check(true)
+	}
+	exec("SET LOCAL ROLE aimee_store_runtime; SAVEPOINT guarded_observation")
+	request.SendGuard = "acquire"
+	if eligible, e := backend.guardedSourceRevalidation(ctx, request, Scope{}); e != nil || !eligible {
+		t.Fatal("guarded sources", eligible, e)
+	}
+	exec("UPDATE epistemic_directives SET surfaced_count=surfaced_count+1 WHERE id=$1", directive)
+	exec("SAVEPOINT refused_write; RESET ROLE")
+	if _, e := tx.Exec(ctx, "UPDATE prospective_memories SET action_text='raced' WHERE id=$1", reminder); e == nil || !strings.Contains(e.Error(), "55P03") {
+		t.Fatal("guarded edit admitted", e)
+	}
+	exec("ROLLBACK TO SAVEPOINT refused_write; RELEASE SAVEPOINT refused_write")
+	request.SendGuard = "release"
+	if _, e := backend.guardedSourceRevalidation(ctx, request, Scope{}); e != nil {
+		t.Fatal(e)
+	}
+	exec("ROLLBACK TO SAVEPOINT guarded_observation; RELEASE SAVEPOINT guarded_observation; RESET ROLE")
+	// A currently valid source that expires during the send window is refused.
+	exec("SAVEPOINT expiring_guard")
+	exec("UPDATE prospective_memories SET valid_until=(clock_timestamp()+interval '2 seconds')::text WHERE id=$1", reminder)
+	exec("SET LOCAL ROLE aimee_store_runtime")
+	fresh, e := backend.prospectiveMatch(ctx, key, "", "", 8, true)
+	if e != nil || len(fresh) != 1 {
+		t.Fatal(fresh, e)
+	}
+	expiryRequest := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("d", 32), Sources: []typedProjectionRef{{Channel: "native_reminders", ID: fmt.Sprint(reminder), Source: fresh[0].Source}}}
+	if eligible, e := backend.revalidateSources(ctx, expiryRequest, Scope{}); e != nil || !eligible {
+		t.Fatal("current expiry fixture", eligible, e)
+	}
+	expiryRequest.SendGuard = "acquire"
+	if eligible, e := backend.guardedSourceRevalidation(ctx, expiryRequest, Scope{}); e != nil || eligible {
+		t.Fatal("expiring source admitted", eligible, e)
+	}
+	exec("ROLLBACK TO SAVEPOINT expiring_guard; RELEASE SAVEPOINT expiring_guard")
+}
+
+// The shipping storage barrier is tested independently of the HTTP guard. A
+// passing result here is not evidence that provider call sites hold a lease.
+func TestSourceSendStorageBarrierPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("packaged PostgreSQL required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	admin, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(context.Background())
+	other, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close(context.Background())
+	schema := fmt.Sprintf("send_guard_%d", time.Now().UnixNano())
+	quoted := pgx.Identifier{schema}.Sanitize()
+	role := schema + "_runtime"
+	qrole := pgx.Identifier{role}.Sanitize()
+	exec := func(c *pgx.Conn, sql string, args ...any) {
+		t.Helper()
+		if _, e := c.Exec(ctx, sql, args...); e != nil {
+			t.Fatal(e)
+		}
+	}
+	exec(admin, "CREATE SCHEMA "+quoted)
+	exec(admin, "CREATE ROLE "+qrole+" NOLOGIN NOSUPERUSER NOBYPASSRLS")
+	defer func() {
+		_, _ = admin.Exec(context.Background(), "ROLLBACK; RESET ROLE; DROP SCHEMA "+quoted+" CASCADE; DROP ROLE "+qrole)
+	}()
+	exec(admin, "SET search_path="+quoted+",public")
+	exec(other, "SET search_path="+quoted+",public")
+	names := []string{"memories", "memory_collection_owner", "memory_units", "memory_lineage", "memory_episodes", "memory_summaries", "derived_memory_dependencies", "entity_edges", "fact_evidence", "epistemic_directives", "prospective_memories"}
+	for _, name := range names {
+		exec(admin, "CREATE TABLE "+name+"(id integer PRIMARY KEY,value integer NOT NULL DEFAULT 0,use_count integer NOT NULL DEFAULT 0)")
+	}
+	raw, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	a := strings.Index(source, "-- BEGIN memory send guards")
+	b := strings.Index(source, "-- END memory send guards")
+	if a < 0 || b < a {
+		t.Fatal("shipping send barrier missing")
+	}
+	ddl := source[a:b]
+	exec(admin, ddl)
+	exec(admin, ddl)
+	exec(admin, "INSERT INTO memories(id) VALUES(1),(2)")
+	exec(admin, "GRANT USAGE ON SCHEMA "+quoted+" TO "+qrole)
+	exec(admin, "GRANT SELECT,UPDATE ON memories TO "+qrole)
+	exec(admin, "GRANT EXECUTE ON FUNCTION memory_send_guard_begin(TEXT,INTEGER),memory_send_guard_end(TEXT) TO "+qrole)
+	exec(admin, "SET ROLE "+qrole)
+	exec(other, "SET ROLE "+qrole)
+	denied := func(sql string) {
+		t.Helper()
+		if _, e := other.Exec(ctx, sql); e == nil {
+			t.Fatalf("unexpected admission: %s", sql)
+		}
+	}
+	denied("SELECT token FROM memory_send_leases")
+	denied("UPDATE memory_send_barrier SET blocked_until='-infinity'")
+	token := strings.Repeat("a", 32)
+	second := strings.Repeat("b", 32)
+	exec(admin, "BEGIN")
+	exec(admin, "UPDATE memories SET value=value+1 WHERE id=1")
+	// Independent ordinary mutations retain compatible shared barrier locks.
+	exec(other, "UPDATE memories SET value=value+1 WHERE id=2")
+	acquired := make(chan error, 1)
+	go func() { _, e := other.Exec(ctx, "SELECT memory_send_guard_begin($1,5000)", token); acquired <- e }()
+	select {
+	case e := <-acquired:
+		t.Fatalf("acquired while mutation uncommitted: %v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+	exec(admin, "COMMIT")
+	if e := <-acquired; e != nil {
+		t.Fatal(e)
+	}
+	var value int
+	if e := admin.QueryRow(ctx, "SELECT value FROM memories WHERE id=1").Scan(&value); e != nil || value != 1 {
+		t.Fatal("new source state unavailable", value, e)
+	}
+	exec(other, "CREATE TEMP TABLE memory_send_barrier(id integer,blocked_until timestamptz); INSERT INTO memory_send_barrier VALUES(1,'-infinity')")
+	denied("UPDATE memories SET value=value+1 WHERE id=1")
+	exec(other, "DROP TABLE pg_temp.memory_send_barrier")
+
+	denied("UPDATE memories SET value=value+1 WHERE id=1")
+	exec(other, "UPDATE memories SET use_count=use_count+1 WHERE id=1")
+	exec(admin, "SELECT memory_send_guard_begin($1,5000)", second)
+	exec(other, "SELECT memory_send_guard_end($1)", token)
+	denied("UPDATE memories SET value=value+1 WHERE id=1")
+	exec(other, "SELECT memory_send_guard_end($1)", strings.Repeat("c", 32))
+	denied("UPDATE memories SET value=value+1 WHERE id=1")
+	exec(other, "SELECT memory_send_guard_end($1)", second)
+	exec(other, "UPDATE memories SET value=value+1 WHERE id=1")
+	exec(admin, "BEGIN; SELECT memory_send_guard_begin('"+token+"',5000); ROLLBACK")
+	exec(other, "UPDATE memories SET value=value+1 WHERE id=1")
+	// An old repeatable-read snapshot cannot ignore a later committed lease.
+	exec(admin, "BEGIN ISOLATION LEVEL REPEATABLE READ")
+	exec(admin, "SELECT * FROM memories")
+	exec(other, "SELECT memory_send_guard_begin($1,5000)", token)
+	if _, e := admin.Exec(ctx, "UPDATE memories SET value=value+1 WHERE id=1"); e == nil || !strings.Contains(e.Error(), "40001") {
+		t.Fatal("old snapshot did not refuse", e)
+	}
+	exec(admin, "ROLLBACK")
+	// Losing the acquiring connection does not release the durable lease.
+	if e := other.Close(ctx); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := admin.Exec(ctx, "UPDATE memories SET value=value+1 WHERE id=1"); e == nil {
+		t.Fatal("disconnect released lease")
+	}
+	// Automatic cleanup is bounded; the host's acquisition/write budget is
+	// shorter than this fixed storage duration and starts before acquisition.
+	exec(admin, "SELECT pg_sleep(5.1)")
+	exec(admin, "UPDATE memories SET value=value+1 WHERE id=1")
+}
+
+func TestSourceReleaseSendGuardAcknowledgement(t *testing.T) {
+	for _, scenario := range []string{"acquired", "missing-guard", "wrong-duration", "ineligible"} {
+		t.Run(scenario, func(t *testing.T) {
+			state := &sourceReleaseState{}
+			args := sourceReleaseArgs(map[string]any{"request_id": "guarded", "principal": "owner", "project": "app"})
+			ref := releaseTestRef()
+			ticket, err := state.prepare(args, map[string]any{"facts_projection": map[string]any{"retained_items": []typedProjectionRef{ref}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			args["source_release_ticket"], _ = json.Marshal(ticket)
+			args["operation"] = json.RawMessage(`"source-release-plan"`)
+			args["send_guard"] = json.RawMessage(`true`)
+			plan := sourceReleaseCall(t, state, args)
+			acquire := plan["request"].(map[string]any)["revalidation"].(map[string]any)
+			release := plan["release_request"].(map[string]any)["revalidation"].(map[string]any)
+			if acquire["send_guard"] != "acquire" || release["send_guard"] != "release" || acquire["check_id"] != release["check_id"] {
+				t.Fatal(plan)
+			}
+			reply := map[string]any{"status": "ok", "eligible": true, "check_id": acquire["check_id"], "sources_digest": releaseDigest([]typedProjectionRef{ref}), "send_guard": "acquired", "lease_ms": 5000}
+			switch scenario {
+			case "missing-guard":
+				delete(reply, "send_guard")
+			case "wrong-duration":
+				reply["lease_ms"] = 4000
+			case "ineligible":
+				reply["eligible"] = false
+			}
+			args["operation"] = json.RawMessage(`"source-release-result"`)
+			args["owner_response"], _ = json.Marshal(reply)
+			result := sourceReleaseCall(t, state, args)
+			if (result["admitted"] == true) != (scenario == "acquired") {
+				t.Fatal(result)
+			}
+		})
+	}
+}
+
+func TestSourceSendGuardRequiresHostAuthority(t *testing.T) {
+	for _, row := range []struct {
+		caller *bus.CommandContext
+		want   bool
+	}{
+		{nil, false}, {&bus.CommandContext{Principal: "caller"}, false},
+		{&bus.CommandContext{Authenticated: true, Principal: "caller"}, false},
+		{&bus.CommandContext{Authenticated: true, Principal: "owner", UserAuthority: true}, true},
+		{&bus.CommandContext{Authenticated: true, Principal: "host", ScopeKind: "service", ScopeID: "server"}, true},
+		{&bus.CommandContext{Authenticated: true, Principal: "host", ScopeKind: "service"}, false},
+		{&bus.CommandContext{Authenticated: true, Principal: "user", UserAuthority: true, ScopeKind: "project", ScopeID: "app"}, false},
+		{&bus.CommandContext{Authenticated: true, Principal: "user", UserAuthority: true, ScopeKind: "workspace", ScopeID: "team"}, false},
+	} {
+		if sourceSendGuardAllowed(row.caller) != row.want {
+			t.Fatal(row)
+		}
+		if row.want {
+			continue
+		}
+		for _, mode := range []string{"acquire", "release"} {
+			args := sourceReleaseArgs(map[string]any{"principal": "forged-owner", "scope_kind": "service", "scope_id": "server", "scope_context": true, "project": "app", "revalidation": sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("a", 32), SendGuard: mode, Sources: []typedProjectionRef{releaseTestRef()}}})
+			encoded, status := handleSourceRevalidation(handlerOptions{placement: PlacementKB, commandContext: row.caller}, bus.ModuleInvocation{}, "revalidate_sources", args)
+			body, err := bus.DecodeCommandResult(encoded)
+			if status != bus.ModuleStatusOK || err != nil || !strings.Contains(string(body), `"unauthorized"`) {
+				t.Fatal(status, err, string(body))
+			}
+		}
 	}
 }

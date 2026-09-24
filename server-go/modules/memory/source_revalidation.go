@@ -14,11 +14,12 @@ const maxReleaseSources = 512
 type sourceRevalidation struct {
 	SchemaVersion int                  `json:"schema_version"`
 	CheckID       string               `json:"check_id"`
+	SendGuard     string               `json:"send_guard,omitempty"`
 	Sources       []typedProjectionRef `json:"sources"`
 }
 
 func (r *sourceRevalidation) valid() bool {
-	if r == nil || r.SchemaVersion != 1 || !releaseTokenValid(r.CheckID) || len(r.Sources) == 0 || len(r.Sources) > maxReleaseSources {
+	if r == nil || (r.SendGuard != "" && r.SendGuard != "acquire" && r.SendGuard != "release") || r.SchemaVersion != 1 || !releaseTokenValid(r.CheckID) || len(r.Sources) == 0 || len(r.Sources) > maxReleaseSources {
 		return false
 	}
 	for _, ref := range r.Sources {
@@ -50,7 +51,14 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 			break
 		}
 	}
+	if request.SendGuard == "acquire" {
+		query = strings.ReplaceAll(query, "CURRENT_TIMESTAMP", "clock_timestamp()")
+	}
 	err = s.db.QueryRow(ctx, query, string(refs), exact.Type, exact.Value).Scan(&count)
+	if err == nil && count == len(request.Sources) && request.SendGuard == "acquire" {
+		query = strings.ReplaceAll(query, "clock_timestamp()", "(clock_timestamp()+interval '5 seconds')")
+		err = s.db.QueryRow(ctx, query, string(refs), exact.Type, exact.Value).Scan(&count)
+	}
 	return err == nil && count == len(request.Sources), err
 }
 
@@ -119,6 +127,10 @@ func handleSourceRevalidation(options handlerOptions, invocation bus.ModuleInvoc
 	if json.Unmarshal(args["revalidation"], &request.Revalidation) != nil || !request.Revalidation.valid() {
 		return commandResult(commandError("invalid_argument", "invalid source revalidation"))
 	}
+	if request.Revalidation.SendGuard != "" && !sourceSendGuardAllowed(options.commandContext) {
+		return commandResult(commandError("unauthorized", "send guards require a verified service or owner"))
+	}
+
 	if !commandScope(args, &request) || request.IncludeAll {
 		return commandResult(commandError("invalid_argument", "source revalidation requires scoped context"))
 	}
@@ -132,4 +144,41 @@ func handleSourceRevalidation(options handlerOptions, invocation bus.ModuleInvoc
 		return nil, bus.ModuleStatusInternal
 	}
 	return commandResult(response.Payload)
+}
+
+// The caller owns a storage transaction, including rollback on refusal. The
+// lease and its successful source observation must commit together.
+func (s *postgresDataStore) guardedSourceRevalidation(ctx context.Context, request *sourceRevalidation, exact Scope) (bool, error) {
+	if request.SendGuard == "release" {
+		_, err := s.db.Exec(ctx, "SELECT memory_send_guard_end($1)", request.CheckID)
+		return err == nil, err
+	}
+	if request.SendGuard == "acquire" {
+		if _, err := s.db.Exec(ctx, "SELECT memory_send_guard_begin($1,5000)", request.CheckID); err != nil {
+			return false, err
+		}
+	}
+	if s.placement == PlacementServer {
+		return s.revalidatePersonalSources(ctx, request)
+	}
+	return s.revalidateSources(ctx, request, exact)
+}
+func sourceGuardResponse(request *sourceRevalidation, eligible bool) map[string]any {
+	result := map[string]any{"status": "ok", "eligible": eligible, "check_id": request.CheckID, "sources_digest": releaseDigest(request.Sources)}
+	if eligible && request.SendGuard == "acquire" {
+		result["send_guard"] = "acquired"
+		result["lease_ms"] = 5000
+	}
+	if eligible && request.SendGuard == "release" {
+		result["send_guard"] = "released"
+	}
+	return result
+}
+
+// Read-scoped credentials cannot acquire a store-wide mutation barrier. This
+// authority comes from the verified host frame, never the request arguments.
+func sourceSendGuardAllowed(caller *bus.CommandContext) bool {
+	return caller != nil && caller.Authenticated && caller.Principal != "" &&
+		((caller.ScopeKind == "service" && caller.ScopeID != "") ||
+			(caller.ScopeKind == "" && caller.ScopeID == "" && caller.UserAuthority))
 }

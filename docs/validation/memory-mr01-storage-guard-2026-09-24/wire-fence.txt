@@ -1,0 +1,5 @@
+provider stream receipt observation unavailable; admitted attempt outcome remains unresolved
+provider stream receipt observation unavailable; admitted attempt outcome remains unresolved
+provider stream receipt observation unavailable; admitted attempt outcome remains unresolved
+stream admission and exact incremental commitments survive partial/failed observations
+economizer_wire_snapshot: ALL PASS

@@ -2086,7 +2086,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "8931ac5452f24823c6b30f8294960391e65a79a1e09b6c897e1bf0f1765f245d"
+      "sha256": "6be233039344c3ac77a2d2aea39b2201de749844dfc19820b5af8f33fe610bfa"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2582,10 +2582,10 @@
       "symbols": [
         "db2_memory_find_facts_like"
       ],
-      "sha256": "a65bd38cb5c6a60ba61f632b67fbfad3e7bcd926c2e3cd90305192f7d1fc2247",
+      "sha256": "02418d5bc15d73db1d36f09c1d2461bda663c40800b2b608a6bd8b6c173f84b0",
       "inputs": {
         "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "273090389a9ad0076cda8ee65876ea73279ea09e33989956f37bd325fdc7307e",
+        "src/modules/db2/c/schema.sql": "3d0c7c28efef6e1787a2ccd47f7d0e6e569cb914661f175560f0c4bd74941bbf",
         "src/modules/db2/c/schema_sqlite.sql": "3d5ef4d20f1e3f2a9025e8bbc350c0d3e29f2654000f59620db51dc00ecb48a0"
       }
     },

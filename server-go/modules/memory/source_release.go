@@ -33,6 +33,7 @@ type sourceReleaseEntry struct {
 	workspace, project, binding, digest, pending string
 	admitted                                     string
 	pendingLocalDigest, pendingSharedDigest      string
+	pendingGuard                                 bool
 	previous                                     string
 	expires                                      time.Time
 }
@@ -209,6 +210,11 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 			return commandResult(commandError("unavailable", "source check unavailable"))
 		}
 		entry.pending = check
+		var guarded bool
+		if raw, present := args["send_guard"]; present && json.Unmarshal(raw, &guarded) != nil {
+			return commandResult(commandError("invalid_argument", "invalid send guard"))
+		}
+		entry.pendingGuard = guarded
 		var refs []typedProjectionRef
 		if json.Unmarshal(entry.sources, &refs) != nil {
 			return commandResult(commandError("unavailable", "source release data unavailable"))
@@ -224,20 +230,36 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 		entry.pendingLocalDigest, entry.pendingSharedDigest = "", ""
 		result := map[string]any{"status": "ok"}
 		revalidation := func(refs []typedProjectionRef) sourceRevalidation {
-			return sourceRevalidation{SchemaVersion: 1, CheckID: check, Sources: refs}
+			r := sourceRevalidation{SchemaVersion: 1, CheckID: check, Sources: refs}
+			if guarded {
+				r.SendGuard = "acquire"
+			}
+			return r
 		}
 		if len(local) > 0 {
 			entry.pendingLocalDigest = releaseDigest(local)
 			result["local_request"] = map[string]any{"operation": "personal-source-revalidate", "revalidation": revalidation(local)}
+			if guarded {
+				r := revalidation(local)
+				r.SendGuard = "release"
+				result["local_release_request"] = map[string]any{"operation": "personal-source-revalidate", "revalidation": r}
+			}
 		}
 		if len(shared) > 0 {
 			entry.pendingSharedDigest = releaseDigest(shared)
 			result["request"] = map[string]any{"scope_context": true, "include_all": false, "workspace": entry.workspace, "project": entry.project, "revalidation": revalidation(shared)}
+			if guarded {
+				r := revalidation(shared)
+				r.SendGuard = "release"
+				result["release_request"] = map[string]any{"scope_context": true, "include_all": false, "workspace": entry.workspace, "project": entry.project, "revalidation": r}
+			}
 		}
 		return commandResult(result)
 	}
 	entry.admitted = ""
 	check := entry.pending
+	guarded := entry.pendingGuard
+	entry.pendingGuard = false
 	localDigest, sharedDigest := entry.pendingLocalDigest, entry.pendingSharedDigest
 	entry.pending, entry.pendingLocalDigest, entry.pendingSharedDigest = "", "", "" // one answer set per attempt
 	if check == "" || (localDigest == "" && sharedDigest == "") {
@@ -249,12 +271,14 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 			continue
 		}
 		var reply struct {
-			Status   string `json:"status"`
-			Eligible bool   `json:"eligible"`
-			CheckID  string `json:"check_id"`
-			Digest   string `json:"sources_digest"`
+			Status      string `json:"status"`
+			Eligible    bool   `json:"eligible"`
+			CheckID     string `json:"check_id"`
+			Digest      string `json:"sources_digest"`
+			SendGuard   string `json:"send_guard"`
+			LeaseMillis int    `json:"lease_ms"`
 		}
-		if json.Unmarshal(args[part.field], &reply) != nil || reply.Status != "ok" || reply.CheckID != check || reply.Digest != part.digest {
+		if json.Unmarshal(args[part.field], &reply) != nil || reply.Status != "ok" || reply.CheckID != check || reply.Digest != part.digest || (guarded && reply.Eligible && (reply.SendGuard != "acquired" || reply.LeaseMillis != 5000)) {
 			return commandResult(commandError("unavailable", "source owner answer unavailable"))
 		}
 		eligible = eligible && reply.Eligible
