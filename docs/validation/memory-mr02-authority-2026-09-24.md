@@ -1,5 +1,8 @@
 # MR-02 mutation authority repair — 2026-09-24
 
+Final status: [MR-02 is complete](memory-mr02-closeout-2026-09-24.md). The entries
+below preserve intermediate reproductions and validation checkpoints.
+
 A packaged non-owner runtime regression reproduced automatic retirement of 14
 protected rows: user/unknown-origin facts and episodes, experiences, instructions
 and policies. Shared scheduled and compatibility maintenance now apply the same
@@ -28,7 +31,7 @@ record the component evidence. The final full race suite passes in 234.086 secon
 the new regression file missing from the explicit module source manifest; after
 registering it, the exported owner builds and its tests pass in 5.517 seconds.
 The workspace export adapter also now includes primary-scope workspace rows.
-Final process validation remains pending; the [eight-gate checklist](../proposals/pending/memory-reliability-02-closeout.md)
+Final process validation passed; the [eight-gate checklist](../proposals/pending/memory-reliability-02-closeout.md)
 tracks MR-02 completion. The original 123-clause acceptance inventory is unchanged.
 
 
@@ -40,7 +43,7 @@ from the exported parents, and unversioned global profile-card payloads are
 omitted (`card_json` stays `{}`); they cannot establish a scoped source. The
 packaged non-owner fixture verifies protected kinds and foreign-workspace
 exclusion through both the store and host runtime. Native transport refuses an
-unavailable owner without database fallback. Final image/process replay follows.
+unavailable owner without database fallback. The final image/process replay passed; see the closeout above.
 
 
 The native adapters now pass the KB verifier's captured request context explicitly
@@ -48,4 +51,20 @@ for both import and export. Body authority fields stay separate from that truste
 context. The native regression checks scope forwarding; the scoped-credential
 HTTP fixture covers inherited project/workspace audience and foreign import
 refusal. The final Go owner race suite passes in 235.243 seconds and exported
-owner verification in 6.214 seconds. Fresh image validation is still pending.
+owner verification in 6.214 seconds. Fresh image validation passed; see the closeout above.
+
+## Final process-fixture corrections
+
+The scoped fixture initially inserted its new import record before existing
+fixed-count dashboard assertions. `aa87ca198` moves only the mutating import
+checks after those assertions and pooled reads; the original counts remain
+unchanged. The corrected project/workspace fixture passed all 36 checks.
+
+The first final-image T2 run reached the native refresh-owner outage but exceeded
+the fixture's 90-second terminal-state polling window. Its
+[partial native evidence](memory-mr02-authority-2026-09-24/t2-before-outage-window-native-async.json)
+and [failed topology result](memory-mr02-authority-2026-09-24/t2-before-outage-window-topology.json)
+are retained. T3 completed that same outage case in 78.56 seconds and passed all
+617 checks. `863ae9f14` gives only the deliberately paused-owner refresh case a
+bounded 180-second observation window and records explicit timeout evidence.
+Refusal, no-sixth-send, recovery and durable receipt assertions are unchanged.

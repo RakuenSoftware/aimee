@@ -1,0 +1,77 @@
+{
+  "sources": [
+    {
+      "channel": "native_directives",
+      "stable_id": "11",
+      "source_version": {
+        "record_kind": "memory_directive",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "3d82e887-6bf7-428a-b054-bc31cf2861e5",
+          "record_id": "11",
+          "record_revision": "3"
+        },
+        "memory_parents": [
+          {
+            "schema_version": 1,
+            "owner_id": "3d82e887-6bf7-428a-b054-bc31cf2861e5",
+            "record_id": "1",
+            "record_revision": "3"
+          }
+        ],
+        "memory_parent_state": "observed"
+      }
+    },
+    {
+      "channel": "native_directives",
+      "stable_id": "14",
+      "source_version": {
+        "record_kind": "memory_directive",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "3d82e887-6bf7-428a-b054-bc31cf2861e5",
+          "record_id": "14",
+          "record_revision": "1"
+        },
+        "memory_parent_state": "observed"
+      }
+    },
+    {
+      "channel": "native_reminders",
+      "stable_id": "1",
+      "source_version": {
+        "record_kind": "memory_reminder",
+        "version": {
+          "schema_version": 1,
+          "owner_id": "3d82e887-6bf7-428a-b054-bc31cf2861e5",
+          "record_id": "1",
+          "record_revision": "3"
+        },
+        "memory_parent_state": "observed"
+      }
+    }
+  ],
+  "admission": {
+    "check_id": "1f5cdf1b8c4d4dce815d0b6028a5e012",
+    "eligible": true,
+    "guard_schema_version": 2,
+    "lease_ms": 5000,
+    "send_guard": "acquired",
+    "sources_digest": "bbcd75be7800757f74baa5088b38f52e9d4c27a9a6fe65540758f680bccb8d54",
+    "status": "ok"
+  },
+  "release": {
+    "check_id": "1f5cdf1b8c4d4dce815d0b6028a5e012",
+    "eligible": true,
+    "guard_schema_version": 2,
+    "send_guard": "released",
+    "sources_digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+    "status": "ok"
+  },
+  "stale_reacquisition": {
+    "check_id": "7e08bd8a90dd41429091b97a71de371a",
+    "eligible": false,
+    "sources_digest": "bbcd75be7800757f74baa5088b38f52e9d4c27a9a6fe65540758f680bccb8d54",
+    "status": "ok"
+  }
+}

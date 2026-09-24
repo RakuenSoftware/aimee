@@ -1,0 +1,675 @@
+[
+  {
+    "name": "KB application metadata contains no database or enrollment credential",
+    "passed": true
+  },
+  {
+    "name": "KB boots with standardized PostgreSQL and local embedding",
+    "passed": true
+  },
+  {
+    "name": "KB shared memory module stores a record",
+    "passed": true
+  },
+  {
+    "name": "Direct KB hygiene accepts its authenticated action envelope",
+    "passed": true
+  },
+  {
+    "name": "Direct KB hygiene still rejects domain mutation arguments",
+    "passed": true
+  },
+  {
+    "name": "Direct KB receipt verification reaches strict receipt validation",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence -1",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence 1.01",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence False",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence None",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence 'invalid'",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence []",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence {}",
+    "passed": true
+  },
+  {
+    "name": "KB ranked search uses its local embedding service",
+    "passed": true
+  },
+  {
+    "name": "KB graph and memory retrieval survives the deepest worker path",
+    "passed": true
+  },
+  {
+    "name": "Typed projection retains both untrusted caller turns",
+    "passed": true
+  },
+  {
+    "name": "Typed projection identity binds rendered bytes and retained IDs",
+    "passed": true
+  },
+  {
+    "name": "Typed projection obeys byte limit 0",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds exact accounting at limit 0",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds retained IDs at limit 0",
+    "passed": true
+  },
+  {
+    "name": "Zero byte typed projection emits no wrappers or retained IDs",
+    "passed": true
+  },
+  {
+    "name": "Typed projection obeys byte limit 1",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds exact accounting at limit 1",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds retained IDs at limit 1",
+    "passed": true
+  },
+  {
+    "name": "Typed projection obeys byte limit 400",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds exact accounting at limit 400",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds retained IDs at limit 400",
+    "passed": true
+  },
+  {
+    "name": "Typed byte packing preserves the earlier small item",
+    "passed": true
+  },
+  {
+    "name": "Typed projection obeys byte limit 1062",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds exact accounting at limit 1062",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds retained IDs at limit 1062",
+    "passed": true
+  },
+  {
+    "name": "Typed projection obeys byte limit 1063",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds exact accounting at limit 1063",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds retained IDs at limit 1063",
+    "passed": true
+  },
+  {
+    "name": "Typed projection retains exact-fit serialized bytes",
+    "passed": true
+  },
+  {
+    "name": "Typed projection refuses unavailable max_context_tokens",
+    "passed": true
+  },
+  {
+    "name": "Typed projection refuses unavailable max_request_tokens",
+    "passed": true
+  },
+  {
+    "name": "Typed projection refuses unavailable reserved_response_tokens",
+    "passed": true
+  },
+  {
+    "name": "Typed projection refuses unavailable reserved_tool_tokens",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects null limits without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects null byte cap without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects null token cap without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects duplicate byte cap without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects escaped duplicate cap without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects case alias without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection remains usable after malformed limit refusals",
+    "passed": true
+  },
+  {
+    "name": "Typed assembly references commit through authenticated evidence writer",
+    "passed": true
+  },
+  {
+    "name": "Typed evidence preserves exact references without invented source versions",
+    "passed": true
+  },
+  {
+    "name": "Repeated typed evidence merge preserves event identity",
+    "passed": true
+  },
+  {
+    "name": "Repeated typed evidence merge does not duplicate references",
+    "passed": true
+  },
+  {
+    "name": "Repacked typed selection joins the same turn event",
+    "passed": true
+  },
+  {
+    "name": "Distinct accepted projection identities remain distinguishable",
+    "passed": true
+  },
+  {
+    "name": "Empty typed evidence does not create a bare event",
+    "passed": true
+  },
+  {
+    "name": "Empty typed evidence trace remains explicitly unavailable",
+    "passed": true
+  },
+  {
+    "name": "Large typed evidence writer accepts the reference batch",
+    "passed": true
+  },
+  {
+    "name": "Bounded trace refuses a truncated event instead of reporting success",
+    "passed": true
+  },
+  {
+    "name": "Bounded-read refusal preserves subsequent event merge retries",
+    "passed": true
+  },
+  {
+    "name": "Typed assertion binds the exact owner record revision",
+    "passed": true
+  },
+  {
+    "name": "Typed selection digest includes source revision evidence",
+    "passed": true
+  },
+  {
+    "name": "Typed assertion binds its direct memory parent revision",
+    "passed": true
+  },
+  {
+    "name": "Typed coverage evaluates explicit current-state roles over retained evidence",
+    "passed": true
+  },
+  {
+    "name": "Typed coverage marks a packed-away role budget_dropped",
+    "passed": true
+  },
+  {
+    "name": "Unrelated retrieved evidence cannot fill a current-state obligation",
+    "passed": true
+  },
+  {
+    "name": "Missing role recovery remains a bounded host-admitted proposal",
+    "passed": true
+  },
+  {
+    "name": "Recovery cannot retry evidence removed by packing",
+    "passed": true
+  },
+  {
+    "name": "Unsupported evidence query mode remains unknown",
+    "passed": true
+  },
+  {
+    "name": "Hidden assertion cannot establish evidence coverage",
+    "passed": true
+  },
+  {
+    "name": "Unchanged typed assertion retains its source binding",
+    "passed": true
+  },
+  {
+    "name": "Final source check accepts unchanged assertion and parent",
+    "passed": true
+  },
+  {
+    "name": "Final source check refuses a newly hidden parent",
+    "passed": true
+  },
+  {
+    "name": "Final source check requires authenticated transport",
+    "passed": true
+  },
+  {
+    "name": "Changed memory parent invalidates binding with identical assertion bytes",
+    "passed": true
+  },
+  {
+    "name": "Final source check refuses parent changed after selection",
+    "passed": true
+  },
+  {
+    "name": "Final source check accepts refreshed parent binding",
+    "passed": true
+  },
+  {
+    "name": "Changed assertion revision cannot reuse the prior selection binding",
+    "passed": true
+  },
+  {
+    "name": "Omitted typed assertion claims no retained source revision",
+    "passed": true
+  },
+  {
+    "name": "Plain facts bind exact assertion and parent revisions",
+    "passed": true
+  },
+  {
+    "name": "Plain facts digest binds rendered bytes and source selection",
+    "passed": true
+  },
+  {
+    "name": "Unchanged plain facts preserve selection identity",
+    "passed": true
+  },
+  {
+    "name": "Parent revision changes plain fact binding with identical text",
+    "passed": true
+  },
+  {
+    "name": "Typed episode binds its own and parent revisions",
+    "passed": true
+  },
+  {
+    "name": "Typed episode no-op preserves revision and selection",
+    "passed": true
+  },
+  {
+    "name": "Episode provenance changes independently of its parent",
+    "passed": true
+  },
+  {
+    "name": "Parent revision binds identical rendered episode bytes",
+    "passed": true
+  },
+  {
+    "name": "Omitted typed episode claims no retained source revision",
+    "passed": true
+  },
+  {
+    "name": "Generated episode without producer observations is withheld",
+    "passed": true
+  },
+  {
+    "name": "Generated episode with exact observed inputs is served",
+    "passed": true
+  },
+  {
+    "name": "Generated episode cannot borrow a new parent revision",
+    "passed": true
+  },
+  {
+    "name": "Previously retained generated episode fails release after parent edit",
+    "passed": true
+  },
+  {
+    "name": "Linked input is initially visible on search_graph",
+    "passed": true
+  },
+  {
+    "name": "Linked input is initially visible on entity_edges",
+    "passed": true
+  },
+  {
+    "name": "Linked input is initially visible on entity_profile",
+    "passed": true
+  },
+  {
+    "name": "Linked input expiry withholds copied text on search_graph",
+    "passed": true
+  },
+  {
+    "name": "Linked input expiry withholds copied text on entity_edges",
+    "passed": true
+  },
+  {
+    "name": "Linked input expiry withholds copied text on entity_profile",
+    "passed": true
+  },
+  {
+    "name": "Linked input restoration cannot reuse old observation on search_graph",
+    "passed": true
+  },
+  {
+    "name": "Linked input restoration cannot reuse old observation on entity_edges",
+    "passed": true
+  },
+  {
+    "name": "Linked input restoration cannot reuse old observation on entity_profile",
+    "passed": true
+  },
+  {
+    "name": "Linked input fresh observed input is visible on search_graph",
+    "passed": true
+  },
+  {
+    "name": "Linked input fresh observed input is visible on entity_edges",
+    "passed": true
+  },
+  {
+    "name": "Linked input fresh observed input is visible on entity_profile",
+    "passed": true
+  },
+  {
+    "name": "Linked input deleted link withholds copied relationship on search_graph",
+    "passed": true
+  },
+  {
+    "name": "Linked input deleted link withholds copied relationship on entity_edges",
+    "passed": true
+  },
+  {
+    "name": "Linked input deleted link withholds copied relationship on entity_profile",
+    "passed": true
+  },
+  {
+    "name": "Background relation generator records current copied input",
+    "passed": true
+  },
+  {
+    "name": "Background invalidation rebuilds dependent from target mutation",
+    "passed": true
+  },
+  {
+    "name": "Background invalidation survives application restart",
+    "passed": true
+  },
+  {
+    "name": "Link-only edit rebuilds the source relation",
+    "passed": true
+  },
+  {
+    "name": "Link deletion removes the materialized dependent relation",
+    "passed": true
+  },
+  {
+    "name": "Future-valid record is indexed before its serving boundary",
+    "passed": true
+  },
+  {
+    "name": "Pre-indexing cannot grant an early current read",
+    "passed": true
+  },
+  {
+    "name": "Prepared future linked input remains hidden before activation",
+    "passed": true
+  },
+  {
+    "name": "Clock-only validity activation exposes the prepared record",
+    "passed": true
+  },
+  {
+    "name": "Activation needs neither another canonical write nor another embedding",
+    "passed": true
+  },
+  {
+    "name": "Clock-only activation exposes the prepared copied relation",
+    "passed": true
+  },
+  {
+    "name": "Graph HTTP hides the intermediate and target behind unauthorized evidence",
+    "passed": true
+  },
+  {
+    "name": "Graph HTTP restores the authorized two-hop path",
+    "passed": true
+  },
+  {
+    "name": "Graph HTTP withholds the previously visible path after scope loss",
+    "passed": true
+  },
+  {
+    "name": "Legacy query current eligibility before limits: top_l2_facts",
+    "passed": true
+  },
+  {
+    "name": "Legacy query current eligibility before limits: list_session_scope_priority",
+    "passed": true
+  },
+  {
+    "name": "Legacy query current eligibility before limits: list_session_scope_priority_like",
+    "passed": true
+  },
+  {
+    "name": "Legacy query current eligibility before limits: search_facts_patterns_by_keyword",
+    "passed": true
+  },
+  {
+    "name": "Legacy query current eligibility before limits: load_eval_corpus",
+    "passed": true
+  },
+  {
+    "name": "Historical eligibility and explicit scope before limit 64",
+    "passed": true
+  },
+  {
+    "name": "Historical eligibility and explicit scope before limit 3",
+    "passed": true
+  },
+  {
+    "name": "History treats wildcard characters as literal identity",
+    "passed": true
+  },
+  {
+    "name": "Preview withholds unobserved summary and retains canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Preview commits exact rendered bytes and selected source versions",
+    "passed": true
+  },
+  {
+    "name": "Preview preserves large summary ID and canonical parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview fallback binds its canonical source",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts current sources",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses hidden sources",
+    "passed": true
+  },
+  {
+    "name": "Preview no-op dependency reset requires producer observation",
+    "passed": true
+  },
+  {
+    "name": "Preview observed no-op preserves source revision",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses independently edited summary",
+    "passed": true
+  },
+  {
+    "name": "Preview edited summary cannot acquire freshness from a new read",
+    "passed": true
+  },
+  {
+    "name": "Preview producer observation binds revised summary without inventing parent change",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check accepts refreshed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview parent edit invalidates previously observed summary",
+    "passed": true
+  },
+  {
+    "name": "Preview stale summary cannot borrow the new parent revision",
+    "passed": true
+  },
+  {
+    "name": "Preview current canonical fallback passes after parent edit",
+    "passed": true
+  },
+  {
+    "name": "Preview final source check refuses changed canonical fallback",
+    "passed": true
+  },
+  {
+    "name": "Evidence writer accepts exact int64 source identities",
+    "passed": true
+  },
+  {
+    "name": "Evidence trace preserves adjacent large IDs and int64 maximum",
+    "passed": true
+  },
+  {
+    "name": "Evidence provenance retains exact source identity on lookup",
+    "passed": true
+  },
+  {
+    "name": "Memory outcome writer accepts exact source IDs",
+    "passed": true
+  },
+  {
+    "name": "Single memory outcome accepts int64 maximum",
+    "passed": true
+  },
+  {
+    "name": "Evidence rejects ambiguous or malformed ID case 0",
+    "passed": true
+  },
+  {
+    "name": "Invalid identity creates no partial event case 0",
+    "passed": true
+  },
+  {
+    "name": "Evidence rejects ambiguous or malformed ID case 1",
+    "passed": true
+  },
+  {
+    "name": "Invalid identity creates no partial event case 1",
+    "passed": true
+  },
+  {
+    "name": "Evidence rejects ambiguous or malformed ID case 2",
+    "passed": true
+  },
+  {
+    "name": "Invalid identity creates no partial event case 2",
+    "passed": true
+  },
+  {
+    "name": "Evidence rejects ambiguous or malformed ID case 3",
+    "passed": true
+  },
+  {
+    "name": "Invalid identity creates no partial event case 3",
+    "passed": true
+  },
+  {
+    "name": "Evidence rejects ambiguous or malformed ID case 4",
+    "passed": true
+  },
+  {
+    "name": "Invalid identity creates no partial event case 4",
+    "passed": true
+  },
+  {
+    "name": "Evidence rejects ambiguous or malformed ID case 5",
+    "passed": true
+  },
+  {
+    "name": "Invalid identity creates no partial event case 5",
+    "passed": true
+  },
+  {
+    "name": "Outcome writer never attributes a rounded numeric ID",
+    "passed": true
+  },
+  {
+    "name": "Server boots without a KB connection",
+    "passed": true
+  },
+  {
+    "name": "Server application metadata contains no database or enrollment credential",
+    "passed": true
+  },
+  {
+    "name": "KB-free personal memory regression gate",
+    "passed": true
+  },
+  {
+    "name": "Linked model correction drafts and authenticated decisions",
+    "passed": true
+  },
+  {
+    "name": "Enrolled optional KB, scope isolation, restart and outage regressions",
+    "passed": true
+  },
+  {
+    "name": "One application image and immutable first-boot identities",
+    "passed": true
+  },
+  {
+    "name": "Provider-bound memory, constraints, tools and continuation gate",
+    "passed": true
+  },
+  {
+    "name": "topology completed",
+    "passed": false,
+    "error": "python3  failed with exit 1 (unclassified)"
+  }
+]

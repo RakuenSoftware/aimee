@@ -1,0 +1,588 @@
+{
+  "checks": [
+    {
+      "name": "native fixture explicitly enables automatic recall",
+      "passed": true
+    },
+    {
+      "name": "native fixture stores complete private identity",
+      "passed": true
+    },
+    {
+      "name": "native fixture reads its private source version",
+      "passed": true
+    },
+    {
+      "name": "healthy native run queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "healthy native run completes",
+      "passed": true
+    },
+    {
+      "name": "healthy native run dispatches exactly once",
+      "passed": true
+    },
+    {
+      "name": "native provider receives complete Go memory",
+      "passed": true
+    },
+    {
+      "name": "provider arrival sees committed preparation and admission",
+      "passed": true
+    },
+    {
+      "name": "public receipt verification matches real provider bytes",
+      "passed": true
+    },
+    {
+      "name": "native receipt binds the retained private revision and fresh source check",
+      "passed": true
+    },
+    {
+      "name": "supplied receipt does not claim producer or chain authentication",
+      "passed": true
+    },
+    {
+      "name": "public receipt verification detects changed provider bytes",
+      "passed": true
+    },
+    {
+      "name": "inherited zero byte cap queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "worker preserves inherited byte refusal",
+      "passed": true
+    },
+    {
+      "name": "inherited byte refusal sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "native fixture identifies exactly one Go memory owner",
+      "passed": true
+    },
+    {
+      "name": "paused Go memory owner queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "native worker reports memory owner refusal",
+      "passed": true
+    },
+    {
+      "name": "native owner refusal sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "supervised memory restart preserves committed identity",
+      "passed": true
+    },
+    {
+      "name": "recovered native run queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "new native worker recovers and dispatches once",
+      "passed": true
+    },
+    {
+      "name": "recovered provider retains complete Go memory",
+      "passed": true
+    },
+    {
+      "name": "native context refresh queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "native refresh fixture commits its memory update",
+      "passed": true
+    },
+    {
+      "name": "native multi-turn run completes after five tool calls",
+      "passed": true
+    },
+    {
+      "name": "native refresh follows five real file reads",
+      "passed": true
+    },
+    {
+      "name": "initial context predates the new identity",
+      "passed": true
+    },
+    {
+      "name": "refreshed provider context contains the new complete identity",
+      "passed": true
+    },
+    {
+      "name": "native fixture identifies exactly one Go memory owner",
+      "passed": true
+    },
+    {
+      "name": "native refresh owner outage queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "native refresh intervention succeeds",
+      "passed": true
+    },
+    {
+      "name": "native refresh reports memory owner refusal",
+      "passed": true
+    },
+    {
+      "name": "native refresh refusal prevents a sixth provider request",
+      "passed": true
+    },
+    {
+      "name": "recovered native refresh queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "worker recovers after refresh refusal",
+      "passed": true
+    },
+    {
+      "name": "refresh recovery retains both committed identities",
+      "passed": true
+    },
+    {
+      "name": "native provider error queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "provider failure terminates without a successful response",
+      "passed": true
+    },
+    {
+      "name": "provider error events retain complete escaped diagnostics",
+      "passed": true
+    },
+    {
+      "name": "permanent provider error is not retried",
+      "passed": true
+    },
+    {
+      "name": "private correction before transport retry queues a real asynchronous worker",
+      "passed": true
+    },
+    {
+      "name": "provider fixture commits correction before retryable response",
+      "passed": true
+    },
+    {
+      "name": "private correction refuses stale native transport retry",
+      "passed": true
+    },
+    {
+      "name": "corrected private source prevents a second provider send",
+      "passed": true
+    },
+    {
+      "name": "every actual native send has separate durable admission",
+      "passed": true
+    },
+    {
+      "name": "completed native transports retain durable response observations",
+      "passed": true
+    },
+    {
+      "name": "owner outage leaves admitted transport unresolved without invented acknowledgement",
+      "passed": true
+    },
+    {
+      "name": "native fixture retires its refreshed identity",
+      "passed": true
+    },
+    {
+      "name": "native fixture retires its private identity",
+      "passed": true
+    },
+    {
+      "name": "owned Server recovers after an ungraceful process kill",
+      "passed": true
+    },
+    {
+      "name": "host crash preserves every committed provider stage exactly",
+      "passed": true
+    },
+    {
+      "name": "host recovery does not invent acknowledgement for unresolved transport",
+      "passed": true
+    }
+  ],
+  "runs": [
+    {
+      "name": "healthy native run",
+      "run_id": "run_1790265101_1",
+      "status": "completed",
+      "elapsed_seconds": 0.6182353580079507,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        23276
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "inherited zero byte cap",
+      "run_id": "run_1790265102_2",
+      "status": "failed",
+      "elapsed_seconds": 0.41716750399791636,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "request_budget_exceeded"
+      ]
+    },
+    {
+      "name": "paused Go memory owner",
+      "run_id": "run_1790265102_3",
+      "status": "failed",
+      "elapsed_seconds": 60.17013463200419,
+      "provider_requests": 0,
+      "provider_request_bytes": [],
+      "refusal_kinds": [
+        "unavailable"
+      ]
+    },
+    {
+      "name": "recovered native run",
+      "run_id": "run_1790265165_4",
+      "status": "completed",
+      "elapsed_seconds": 0.6180220249807462,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        23383
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native context refresh",
+      "run_id": "run_1790265165_5",
+      "status": "completed",
+      "elapsed_seconds": 2.625982469995506,
+      "provider_requests": 6,
+      "provider_request_bytes": [
+        23383,
+        23863,
+        24343,
+        24823,
+        25303,
+        26053
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native refresh owner outage",
+      "run_id": "run_1790265168_6",
+      "status": "failed",
+      "elapsed_seconds": 78.56209520599805,
+      "provider_requests": 5,
+      "provider_request_bytes": [
+        23653,
+        24133,
+        24613,
+        25093,
+        25573
+      ],
+      "refusal_kinds": [
+        "unavailable"
+      ]
+    },
+    {
+      "name": "recovered native refresh",
+      "run_id": "run_1790265249_7",
+      "status": "completed",
+      "elapsed_seconds": 0.6143486509972718,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        23702
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "native provider error",
+      "run_id": "run_1790265250_8",
+      "status": "failed",
+      "elapsed_seconds": 0.5112795659806579,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        23702
+      ],
+      "refusal_kinds": []
+    },
+    {
+      "name": "private correction before transport retry",
+      "run_id": "run_1790265251_9",
+      "status": "failed",
+      "elapsed_seconds": 1.6263614769850392,
+      "provider_requests": 1,
+      "provider_request_bytes": [
+        23804
+      ],
+      "refusal_kinds": [
+        "stale_context"
+      ]
+    }
+  ],
+  "receipt_attempts": [
+    "827a39fa95de1a7bc9db07245f0c83ea",
+    "e02fa724467ea3790558744bf649dc4d",
+    "6988d3b7983a2914aa05b483662fe817",
+    "3fef8e402848a9285ccbb265bef5b50d",
+    "f849931c2f0fbfe5e71b2f0af73a3735",
+    "01e8f32bcfe15909b744d4ad782448b7",
+    "6ce29ca61a35cb61ce5e29219521d2bb",
+    "1a01d0b3471107b798cef43f0efac85e",
+    "d07dfef96c12ef956a0c5ebdb3a03eef",
+    "404696a663984a9da06983febdd8cf2f",
+    "c6e558027eeae6a454c01da36fb9a492",
+    "37c9e8818fa89128f811ee15c8716d08",
+    "101ff3d869020449f69507870104040a",
+    "879df16c76d18eb389ddcf5fce0cfc59",
+    "48b220b50965f09cb42c604227bfafa3",
+    "d1cbac10bd06b8581e0669e9670e7d9d"
+  ],
+  "unresolved_attempts": [
+    "101ff3d869020449f69507870104040a"
+  ],
+  "post_crash_receipts": [
+    {
+      "sequence": "15801",
+      "event": "memory.provider.827a39fa95de1a7bc9db07245f0c83ea.prepared",
+      "detail_sha256": "e54a4d73fbcf8e7bb26555848ffac17bd0b2d45ba3f573fff2f5835e7f1c2617"
+    },
+    {
+      "sequence": "15802",
+      "event": "memory.provider.827a39fa95de1a7bc9db07245f0c83ea.dispatch_admitted",
+      "detail_sha256": "2443a407c7bab8f02a57ad5d12318184245da12165d61b0b210b57df142d279c"
+    },
+    {
+      "sequence": "15813",
+      "event": "memory.provider.827a39fa95de1a7bc9db07245f0c83ea.acknowledged",
+      "detail_sha256": "1999ac939e5d8ececcb7b57d1c61a69f1d987af4215bea1c251127fcdf906bc1"
+    },
+    {
+      "sequence": "19120",
+      "event": "memory.provider.e02fa724467ea3790558744bf649dc4d.prepared",
+      "detail_sha256": "e2cca9e8d395c259036ab409ce57c1a4687716996a6c1877aeaf4891403b4b61"
+    },
+    {
+      "sequence": "19121",
+      "event": "memory.provider.e02fa724467ea3790558744bf649dc4d.dispatch_admitted",
+      "detail_sha256": "96f428ec1d5392882c4684caea2752aaab5ed181510734748738a68b8e68680a"
+    },
+    {
+      "sequence": "19134",
+      "event": "memory.provider.e02fa724467ea3790558744bf649dc4d.acknowledged",
+      "detail_sha256": "708b6f54a26377bc1a6c61c828a0bac15d1862ec7ff2643026bfc2fd79c8e796"
+    },
+    {
+      "sequence": "19280",
+      "event": "memory.provider.6988d3b7983a2914aa05b483662fe817.prepared",
+      "detail_sha256": "96e46eab4fef1a653b9a1fb13c3575fa13e9bcbaec2c06ca5af0a915953ba626"
+    },
+    {
+      "sequence": "19281",
+      "event": "memory.provider.6988d3b7983a2914aa05b483662fe817.dispatch_admitted",
+      "detail_sha256": "9bf92eb24d897fe58fd7dcc718f1463fe7c0ef5b1cc29ac5f994b8cc9faf8054"
+    },
+    {
+      "sequence": "19292",
+      "event": "memory.provider.6988d3b7983a2914aa05b483662fe817.acknowledged",
+      "detail_sha256": "8e41aff28f7c5756a7020220b088fc90909943de4cbe07683832e744d01abb4d"
+    },
+    {
+      "sequence": "19341",
+      "event": "memory.provider.3fef8e402848a9285ccbb265bef5b50d.prepared",
+      "detail_sha256": "152824ce3346a0a662304a2d24e3a6a6c9dc8124879c181cb0f6733f6a45b500"
+    },
+    {
+      "sequence": "19342",
+      "event": "memory.provider.3fef8e402848a9285ccbb265bef5b50d.dispatch_admitted",
+      "detail_sha256": "cdfb8bd113ae2f0db21062501906d558b6481d101a1d181898a1988f316828fa"
+    },
+    {
+      "sequence": "19353",
+      "event": "memory.provider.3fef8e402848a9285ccbb265bef5b50d.acknowledged",
+      "detail_sha256": "b31684ce4b72daec95f34038e690ed5856d54a72b763ba2fe71a4f15af60c137"
+    },
+    {
+      "sequence": "19429",
+      "event": "memory.provider.f849931c2f0fbfe5e71b2f0af73a3735.prepared",
+      "detail_sha256": "2636b154d87c784ae7a77cd626ed0258256c87be572f21cec38a2ace1aef0265"
+    },
+    {
+      "sequence": "19430",
+      "event": "memory.provider.f849931c2f0fbfe5e71b2f0af73a3735.dispatch_admitted",
+      "detail_sha256": "4de43d652f76cd6a450c021cf79f11b6afe8f5e56f58561f727b2793f2d33a3a"
+    },
+    {
+      "sequence": "19449",
+      "event": "memory.provider.f849931c2f0fbfe5e71b2f0af73a3735.acknowledged",
+      "detail_sha256": "bafecf582c60f60940b8cf72b1c918d3d168b499f2031e6ad7c8381a8e578767"
+    },
+    {
+      "sequence": "19511",
+      "event": "memory.provider.01e8f32bcfe15909b744d4ad782448b7.prepared",
+      "detail_sha256": "fe63e36eecb9fea910b4486000c1c01bf21bc1424a8b3b0a6a73474c4706698c"
+    },
+    {
+      "sequence": "19512",
+      "event": "memory.provider.01e8f32bcfe15909b744d4ad782448b7.dispatch_admitted",
+      "detail_sha256": "c41316bbf7f458b8ecfe17f8c8d22245c86ace7cf7521f4c976699b6c4c4f530"
+    },
+    {
+      "sequence": "19523",
+      "event": "memory.provider.01e8f32bcfe15909b744d4ad782448b7.acknowledged",
+      "detail_sha256": "618f5593e5cc328d77273916b3e19889c9635a7495babf034ef33da187717386"
+    },
+    {
+      "sequence": "19572",
+      "event": "memory.provider.6ce29ca61a35cb61ce5e29219521d2bb.prepared",
+      "detail_sha256": "073ecaa441bb0323c23725527a9bf271b9024685f3a98433ed074af029b14c7d"
+    },
+    {
+      "sequence": "19573",
+      "event": "memory.provider.6ce29ca61a35cb61ce5e29219521d2bb.dispatch_admitted",
+      "detail_sha256": "b11be13b97133ad82f9fb45518f2b5e8fbba51f84b9f2d96946b5874002dbdde"
+    },
+    {
+      "sequence": "19588",
+      "event": "memory.provider.6ce29ca61a35cb61ce5e29219521d2bb.acknowledged",
+      "detail_sha256": "07e78da014666c255449183c39b0453d5dff230e077e39ea3e1cdc09f76212bc"
+    },
+    {
+      "sequence": "19706",
+      "event": "memory.provider.1a01d0b3471107b798cef43f0efac85e.prepared",
+      "detail_sha256": "fb99d877781414da43c32bde90f063df652428b4d7e0c8cb4fc546be69bdfd38"
+    },
+    {
+      "sequence": "19707",
+      "event": "memory.provider.1a01d0b3471107b798cef43f0efac85e.dispatch_admitted",
+      "detail_sha256": "b756c4bf11b0e756709f87b8a15d0d49a2b097456dc34b73297730471060f085"
+    },
+    {
+      "sequence": "19718",
+      "event": "memory.provider.1a01d0b3471107b798cef43f0efac85e.acknowledged",
+      "detail_sha256": "5bd38df8b9ac6c9f829a74ce2efd91618c3e8e6ded329f8bd7bb6d93f4c802a3"
+    },
+    {
+      "sequence": "19837",
+      "event": "memory.provider.d07dfef96c12ef956a0c5ebdb3a03eef.prepared",
+      "detail_sha256": "d2b59914ef2b8141e052ae695f3d4d9e6d3b2552a2b95674c837e5c465f0c4f2"
+    },
+    {
+      "sequence": "19838",
+      "event": "memory.provider.d07dfef96c12ef956a0c5ebdb3a03eef.dispatch_admitted",
+      "detail_sha256": "ced1afdcbc41442eaf6b95169c62ec433fd04de5cc50915b7ffc6a2bbbc26974"
+    },
+    {
+      "sequence": "19857",
+      "event": "memory.provider.d07dfef96c12ef956a0c5ebdb3a03eef.acknowledged",
+      "detail_sha256": "90fcf62576e44e2b6f333fffb47a0cb3784c0671326b13d0dacb8759467d0a96"
+    },
+    {
+      "sequence": "19931",
+      "event": "memory.provider.404696a663984a9da06983febdd8cf2f.prepared",
+      "detail_sha256": "afe8c580539873f4b377948b84f7da3fc594f1048963139125cac87384791131"
+    },
+    {
+      "sequence": "19932",
+      "event": "memory.provider.404696a663984a9da06983febdd8cf2f.dispatch_admitted",
+      "detail_sha256": "100fad92a994af34f2ae5a0d8ea1bcad4db708b62a9956a88c198796c4674b4d"
+    },
+    {
+      "sequence": "19946",
+      "event": "memory.provider.404696a663984a9da06983febdd8cf2f.acknowledged",
+      "detail_sha256": "c08edf85bcf96e88dd316ca5e01e00ec66c18fe83fd47ca0e797769692523dee"
+    },
+    {
+      "sequence": "20004",
+      "event": "memory.provider.c6e558027eeae6a454c01da36fb9a492.prepared",
+      "detail_sha256": "7545593c2235946a25fbf9ccc74e8ad836a8f567db6a1f1b70d320467e270980"
+    },
+    {
+      "sequence": "20005",
+      "event": "memory.provider.c6e558027eeae6a454c01da36fb9a492.dispatch_admitted",
+      "detail_sha256": "b686a7aa9fef10da7bbd45f494ae4076ee49d0a29dc1921f004f578fd25a547c"
+    },
+    {
+      "sequence": "20018",
+      "event": "memory.provider.c6e558027eeae6a454c01da36fb9a492.acknowledged",
+      "detail_sha256": "c5f20bee943a67b92313951a0bd584aa39cc0b87a71ec48ba05c11705d26522c"
+    },
+    {
+      "sequence": "20106",
+      "event": "memory.provider.37c9e8818fa89128f811ee15c8716d08.prepared",
+      "detail_sha256": "e38e253bd5228a7da5e84cc5a228dbb609d3bbb0367c75a29739d849fc170547"
+    },
+    {
+      "sequence": "20107",
+      "event": "memory.provider.37c9e8818fa89128f811ee15c8716d08.dispatch_admitted",
+      "detail_sha256": "54ccc57aa2057460c604526b469c51d61e522879b97ea6de9fa1f0700b1f0599"
+    },
+    {
+      "sequence": "20125",
+      "event": "memory.provider.37c9e8818fa89128f811ee15c8716d08.acknowledged",
+      "detail_sha256": "13efbc4554dffdc90b370fecf59e4279d767456347be500b70fb3cee8e1a4dc0"
+    },
+    {
+      "sequence": "20174",
+      "event": "memory.provider.101ff3d869020449f69507870104040a.prepared",
+      "detail_sha256": "da460e133c413f0995a46ec7d2cf3eefaf632096d90ef670151d3ca77d774eb4"
+    },
+    {
+      "sequence": "20175",
+      "event": "memory.provider.101ff3d869020449f69507870104040a.dispatch_admitted",
+      "detail_sha256": "dae4bce072a090afe13dee2ee77bcc7c0fc2b59bd42ca004d5eda8a55d8a12a7"
+    },
+    {
+      "sequence": "24234",
+      "event": "memory.provider.879df16c76d18eb389ddcf5fce0cfc59.prepared",
+      "detail_sha256": "2637d474145f3474f062b4a3708ed0749595608ca80e139d084bc3523776e831"
+    },
+    {
+      "sequence": "24235",
+      "event": "memory.provider.879df16c76d18eb389ddcf5fce0cfc59.dispatch_admitted",
+      "detail_sha256": "ede72087743499aad9116521a6354138567589bfed41fa6c385bbab54bd7e2a9"
+    },
+    {
+      "sequence": "24246",
+      "event": "memory.provider.879df16c76d18eb389ddcf5fce0cfc59.acknowledged",
+      "detail_sha256": "e641f3b091d5e7a5fe4d89b70137c73fc46025ab50a985e77dd0572655f8710e"
+    },
+    {
+      "sequence": "24388",
+      "event": "memory.provider.48b220b50965f09cb42c604227bfafa3.prepared",
+      "detail_sha256": "2fd21d70eaeb5c9e52be1de502ac87d0385fee9965fbd83be513d1dc38d0c08d"
+    },
+    {
+      "sequence": "24389",
+      "event": "memory.provider.48b220b50965f09cb42c604227bfafa3.dispatch_admitted",
+      "detail_sha256": "a488133954901bcdfcc4edb66f454d86ace5939975e1e01b1450f9862e7dbe0e"
+    },
+    {
+      "sequence": "24406",
+      "event": "memory.provider.48b220b50965f09cb42c604227bfafa3.acknowledged",
+      "detail_sha256": "b42e37b9aa01f54ffde82188c1a9bcbd84d13fd40079f640578bad9b1936cf7e"
+    },
+    {
+      "sequence": "24502",
+      "event": "memory.provider.d1cbac10bd06b8581e0669e9670e7d9d.prepared",
+      "detail_sha256": "6d911175d91c29314595b3e0ac0b241537fce2a9ffa1a6434e1d2a32f9293f0b"
+    },
+    {
+      "sequence": "24503",
+      "event": "memory.provider.d1cbac10bd06b8581e0669e9670e7d9d.dispatch_admitted",
+      "detail_sha256": "d6e020cd54574d4bc1d328147047c9ea01ac56395bf1110fa5dba0c0664ffea5"
+    },
+    {
+      "sequence": "24518",
+      "event": "memory.provider.d1cbac10bd06b8581e0669e9670e7d9d.acknowledged",
+      "detail_sha256": "af133f9d28272d634e6cb69ef6dbf7df0034a9532d003043ce39347854267062"
+    }
+  ]
+}

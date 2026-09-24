@@ -1,0 +1,10 @@
+{
+  "active_context_missing": false,
+  "alerts": {
+    "stale_pending": [],
+    "unresolved_contradictions": [],
+    "newly_superseded": [],
+    "elapsed_ms": 11.707903
+  },
+  "status": "ok"
+}
