@@ -134,7 +134,7 @@ func handleValidityCommand(options handlerOptions, invocation bus.ModuleInvocati
 		request.Scope = *scope
 	}
 	if options.placement == PlacementKB && request.Scope.Type == "" && request.Project == "" && request.Workspace == "" {
-		if caller := options.commandContext; caller != nil && caller.Authenticated && caller.ScopeKind != "" {
+		if caller := options.commandContext; caller != nil && caller.Authenticated && caller.ScopeKind != "" && caller.ScopeKind != "service" {
 			request.Scope = Scope{Type: caller.ScopeKind, Value: caller.ScopeID}
 		}
 	}

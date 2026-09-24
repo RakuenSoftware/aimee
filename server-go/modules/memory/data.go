@@ -1361,7 +1361,10 @@ set_config('aimee.correlation_id',$9,true)`,
 		if request.ID <= 0 || readResult == nil || request.IncludeAll {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
-		if options.placement == PlacementKB && caller.ScopeKind != "" {
+		// The verified service identity spans the deployment data plane, as
+		// kb_scope_authorized specifies. It still needs authenticated user
+		// purpose here, and never turns into a memory scope or include_all.
+		if options.placement == PlacementKB && caller.ScopeKind != "" && (caller.ScopeKind != "service" || caller.ScopeID == "") {
 			authorized, scopeErr := normalizeScope(PlacementKB, Scope{Type: caller.ScopeKind, Value: caller.ScopeID})
 			if scopeErr != nil || scope != authorized ||
 				(request.Project != "" && (authorized.Type != ScopeProject || request.Project != authorized.Value)) ||

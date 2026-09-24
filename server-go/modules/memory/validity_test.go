@@ -119,6 +119,22 @@ func TestValidityServingParityPostgres(t *testing.T) {
 					t.Fatal("authenticated scope widened", body, denied)
 				}
 			}
+			serviceCaller := caller
+			serviceCaller.ScopeKind, serviceCaller.ScopeID = "service", "fixture-deployment"
+			for _, sample := range []struct {
+				id      int
+				project string
+			}{{1, "visible"}, {10, "hidden"}} {
+				result, _ := invokeContextCommand(t, handler, 0, serviceCaller, "validity", fmt.Sprintf(`{"id":%d,"project":%q}`, sample.id, sample.project))
+				if result["status"] != "ok" || result["decision"].(map[string]any)["eligible"] != true {
+					t.Fatal("verified service lost data-plane access", result)
+				}
+			}
+			serviceCaller.UserAuthority = false
+			denied, _ = invokeContextCommand(t, handler, 0, serviceCaller, "validity", `{"id":1,"project":"visible"}`)
+			if denied["kind"] != "unauthorized" {
+				t.Fatal("service scope invented user purpose", denied)
+			}
 			for _, id := range []int{3, 5, 6, 7, 8, 9, 10} {
 				result, _ := invokeContextCommand(t, handler, 0, caller, "validity", fmt.Sprintf(`{"id":%d,"project":"visible","mode":"historical","valid_at":"2020-01-01"}`, id))
 				decision := result["decision"].(map[string]any)

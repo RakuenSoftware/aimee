@@ -34,3 +34,12 @@ in both placements. Execution against a fresh application image remains pending.
 The seven MR-01 acceptance gates remain tracked in the
 [closeout checklist](../proposals/pending/memory-reliability-01-closeout.md).
 This change does not close MR-01 or advance work to MR-02.
+
+Review before deployment also caught a compatibility error: a verified
+`service` identity names the managed data plane, not a memory scope. The follow-up
+preserves its existing cross-project access while still requiring authenticated
+user purpose and applying the requested memory scope. Project-bound credentials
+remain unable to widen their scope. The
+[service-scope race regression](memory-validity-2026-09-24/service-scope-race.txt)
+and [export](memory-validity-2026-09-24/service-scope-export.txt) pass. The initial
+`1bc49fc19` image is superseded for deployment validation by this correction.
