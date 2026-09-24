@@ -53,7 +53,7 @@ func TestProspectivePublicPostgresLifecycle(t *testing.T) {
 	_, err = tx.Exec(ctx, `CREATE SCHEMA prospective_test;
  CREATE FUNCTION prospective_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
  SET LOCAL search_path TO pg_temp,prospective_test,public;
- CREATE TEMP TABLE prospective_memories(id bigserial PRIMARY KEY,trigger_text text NOT NULL,
+ CREATE TEMP TABLE prospective_memories(id bigserial PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,trigger_text text NOT NULL,
  action_text text NOT NULL,anchor_entity text DEFAULT '',anchor_file text DEFAULT '',
  recurrence text DEFAULT 'once',state text DEFAULT 'armed',valid_until text DEFAULT '',
  source_session text DEFAULT '',trigger_count bigint DEFAULT 0,last_triggered_at text DEFAULT '',

@@ -245,11 +245,11 @@ FROM `+s.recallSource()+` WHERE lifecycle_state='pending' AND activation_suppres
 		if err != nil {
 			return nil, err
 		}
-		reminders, err = s.ProspectiveMatch(ctx, query, "", "", remindersCap)
+		reminders, err = s.prospectiveMatch(ctx, query, "", "", remindersCap, true)
 		if err != nil {
 			return nil, err
 		}
-		directives, err = s.DirectiveMatch(ctx, query, "", "", directivesCap)
+		directives, err = s.directiveMatch(ctx, query, "", "", directivesCap, true)
 		if err != nil {
 			return nil, err
 		}
@@ -350,11 +350,11 @@ SELECT id,CASE WHEN text_bytes <= $1 THEN polarity ELSE '' END,
 }
 
 func (s *postgresDataStore) recallOpenDirectives(ctx context.Context, limit int) ([]Directive, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+directiveColumns+` FROM epistemic_directives WHERE state='open'
+	rows, err := s.db.Query(ctx, `SELECT `+directiveColumns+structuredSourceColumns("epistemic_directives")+` FROM epistemic_directives WHERE state='open'
  AND `+memoryUnexpiredSQL("")+` AND `+currentDirectiveParentsSQL("epistemic_directives")+`
  ORDER BY priority DESC,created_at DESC,id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
-	return scanDirectiveRows(rows)
+	return scanDirectiveRows(rows, true)
 }

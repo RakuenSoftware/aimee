@@ -16,12 +16,35 @@ type typedSourceVersion struct {
 	ReadPolicy        *sourceReadPolicy     `json:"read_policy,omitempty"`
 }
 
+func directiveSourceParentsSQL(table string) string {
+	return `COALESCE((SELECT jsonb_agg(jsonb_build_object('schema_version',1,'owner_id',o.owner_id::text,
+ 'record_id',m.id::text,'record_revision',m.record_revision::text) ORDER BY m.id)
+ FROM memories m CROSS JOIN memory_collection_owner o WHERE o.id=1 AND m.id IN (` + table + `.memory_a_id,` + table + `.memory_b_id,` + table + `.resolution_memory_id)), '[]'::jsonb)::text`
+}
+
+func structuredSourceColumns(table string) string {
+	parents := `'[]'::text`
+	if table == "epistemic_directives" {
+		parents = directiveSourceParentsSQL(table)
+	}
+	return `,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),` + table + `.record_revision::text` + `,` + parents
+}
+
+func structuredSource(kind, owner, revision, parents string, id int64) (*typedSourceVersion, error) {
+	s := &typedSourceVersion{Kind: kind, Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner, RecordID: strconv.FormatInt(id, 10), RecordRevision: revision}, MemoryParentState: "observed"}
+	if err := json.Unmarshal([]byte(parents), &s.MemoryParents); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
 // Preserve the selection's temporal contract when checking it again at release.
 // Empty timestamps mean the current clock, not the original selection time.
 type sourceReadPolicy struct {
-	ValidAt    string `json:"valid_at,omitempty"`
-	BelievedAt string `json:"believed_at,omitempty"`
-	Historical bool   `json:"include_historical,omitempty"`
+	ValidAt          string `json:"valid_at,omitempty"`
+	BelievedAt       string `json:"believed_at,omitempty"`
+	Historical       bool   `json:"include_historical,omitempty"`
+	RetainedReminder bool   `json:"retained_reminder,omitempty"`
 }
 
 const maxTypedMemoryParents = 64
@@ -45,10 +68,26 @@ func validTypedSource(ref typedProjectionRef) bool {
 		// claim source-version evidence. Their byte commitments still apply.
 		return true
 	}
-	if p := ref.Source.ReadPolicy; p != nil && (ref.Source.Kind != "semantic_assertion" || ref.Channel == "facts" || !assertionTimestamp(p.ValidAt) || !assertionTimestamp(p.BelievedAt)) {
-		return false
+	if p := ref.Source.ReadPolicy; p != nil {
+		if ref.Source.Kind == "memory_reminder" {
+			if !p.RetainedReminder || p.ValidAt != "" || p.BelievedAt != "" || p.Historical {
+				return false
+			}
+		} else if ref.Source.Kind != "semantic_assertion" || ref.Channel == "facts" || p.RetainedReminder || !assertionTimestamp(p.ValidAt) || !assertionTimestamp(p.BelievedAt) {
+			return false
+		}
 	}
+	owner := ref.Source.Version.OwnerID
 	switch ref.Source.Kind {
+	case "memory_directive", "memory_reminder":
+		channel := "native_directives"
+		if ref.Source.Kind == "memory_reminder" {
+			channel = "native_reminders"
+		}
+		id, err := strconv.ParseInt(ref.ID, 10, 64)
+		if err != nil || ref.Channel != channel || ref.Source.MemoryParentState != "observed" || !ref.Source.Version.validFor(id) || (ref.Source.Kind == "memory_reminder" && len(ref.Source.MemoryParents) != 0) {
+			return false
+		}
 	case "semantic_assertion":
 		if ref.Channel != "current_assertions" && ref.Channel != "historical_assertions" && ref.Channel != "facts" {
 			return false
@@ -88,7 +127,7 @@ func validTypedSource(ref typedProjectionRef) bool {
 	var previous int64
 	for _, parent := range ref.Source.MemoryParents {
 		id, err := strconv.ParseInt(parent.RecordID, 10, 64)
-		if err != nil || id <= previous || parent.OwnerID != ref.Source.Version.OwnerID || !parent.validFor(id) {
+		if err != nil || id <= previous || parent.OwnerID != owner || !parent.validFor(id) {
 			return false
 		}
 		previous = id

@@ -18124,6 +18124,39 @@ CREATE TRIGGER memory_capture_link_delete AFTER DELETE ON memory_links
   FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_link_change();
 -- END memory link revisions
 
+-- BEGIN structured recall revisions
+-- Structured native recall revisions change for semantic edits, not usage counters.
+ALTER TABLE epistemic_directives ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK (record_revision > 0);
+DROP TRIGGER IF EXISTS memory_directive_record_revision ON epistemic_directives;
+CREATE TRIGGER memory_directive_record_revision BEFORE INSERT OR UPDATE ON epistemic_directives
+  FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{surfaced_count,last_surfaced_at,epistemic_directives_fts_tsv}');
+ALTER TABLE prospective_memories ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK (record_revision > 0);
+-- Native assembly acknowledges its selected one-shot reminder before dispatch.
+-- That usage transition is not a semantic edit of the retained action. Every
+-- other state transition, and every text/policy edit, advances the revision.
+CREATE OR REPLACE FUNCTION memory_assign_reminder_revision() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+DECLARE previous jsonb; next_value jsonb;
+BEGIN
+ IF TG_OP='INSERT' THEN NEW.record_revision:=1; RETURN NEW; END IF;
+ IF NEW.id<>OLD.id THEN RAISE EXCEPTION 'reminder identity is immutable'; END IF;
+ previous:=to_jsonb(OLD)-ARRAY['record_revision','trigger_count','last_triggered_at','updated_at','prospective_memories_fts_tsv'];
+ next_value:=to_jsonb(NEW)-ARRAY['record_revision','trigger_count','last_triggered_at','updated_at','prospective_memories_fts_tsv'];
+ IF previous IS NOT DISTINCT FROM next_value OR
+   (OLD.state='armed' AND NEW.state='triggered' AND OLD.recurrence='once'
+    AND NEW.trigger_count=OLD.trigger_count+1
+    AND (previous-'state') IS NOT DISTINCT FROM (next_value-'state')) THEN
+   NEW.record_revision:=OLD.record_revision;
+ ELSE NEW.record_revision:=OLD.record_revision+1;
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS memory_reminder_record_revision ON prospective_memories;
+CREATE TRIGGER memory_reminder_record_revision BEFORE INSERT OR UPDATE ON prospective_memories
+  FOR EACH ROW EXECUTE FUNCTION memory_assign_reminder_revision();
+
+-- END structured recall revisions
+
 -- BEGIN memory episode revisions
 -- Episode text and provenance can change independently of the canonical parent.
 -- Keep an owner revision for typed selection/release identities. No-op refreshes

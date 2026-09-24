@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -369,5 +370,119 @@ func TestNativeMixedOwnerReleaseRequiresBothAnswers(t *testing.T) {
 				t.Fatal("changed selection accepted", string(raw))
 			}
 		})
+	}
+}
+
+func TestStructuredRecallSourceObservationsPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL for structured source observations")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+ CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$;
+ GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+ GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO aimee_store_runtime;
+ SELECT set_config('aimee.memory_scope_all','1',true),set_config('jit','off',true)`)
+	const key = "structured-source-observation"
+	var parent, directive, reminder int64
+	if err = tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+ VALUES('L2','fact',$1,'parent','project',$1) RETURNING id`, key).Scan(&parent); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.QueryRow(ctx, `INSERT INTO epistemic_directives(question,topic,cause,memory_a_id)
+ VALUES($1,$1,'user_follow_up',$2) RETURNING id`, key, parent).Scan(&directive); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.QueryRow(ctx, `INSERT INTO prospective_memories(trigger_text,action_text,recurrence)
+ VALUES($1,$1,'once') RETURNING id`, key).Scan(&reminder); err != nil {
+		t.Fatal(err)
+	}
+	exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_project',$1,true)`, key)
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}
+	ds, err := backend.directiveMatch(ctx, key, "", "", 8, true)
+	if err != nil || len(ds) != 1 {
+		t.Fatalf("directives %v %v", ds, err)
+	}
+	rs, err := backend.prospectiveMatch(ctx, key, "", "", 8, true)
+	if err != nil || len(rs) != 1 {
+		t.Fatalf("reminders %v %v", rs, err)
+	}
+	bundle := recallBundle{Directives: []recallDirective{{Directive: ds[0], Text: ds[0].Question}}, Reminders: []recallReminder{{Prospective: rs[0], Text: rs[0].ActionText, MemoryID: rs[0].ID}}}
+	projection, _, err := projectNativeRecall(bundle, 8192)
+	if err != nil || len(projection.Sources) != 2 {
+		t.Fatalf("native observations %+v %v", projection, err)
+	}
+	request := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("b", 32), Sources: projection.Sources}
+	check := func(want bool) {
+		t.Helper()
+		got, err := backend.revalidateSources(ctx, request, Scope{})
+		if err != nil || got != want {
+			t.Fatalf("revalidation got=%v want=%v err=%v", got, want, err)
+		}
+	}
+	check(true)
+	// Observation metadata survives the same JSON hop used by native assembly.
+	wire, _ := json.Marshal(projection.Sources)
+	var copied []typedProjectionRef
+	if err = json.Unmarshal(wire, &copied); err != nil {
+		t.Fatal(err)
+	}
+	request.Sources = copied
+	check(true)
+	if strings.Contains(string(wire), `"version":{"schema_version":0`) {
+		t.Fatal("invented ordinal version", string(wire))
+	}
+	exec(`UPDATE epistemic_directives SET surfaced_count=surfaced_count+1,last_surfaced_at=now()::text,updated_at=now()::text WHERE id=$1`, directive)
+	exec(`UPDATE prospective_memories SET trigger_count=trigger_count+1,last_triggered_at=now()::text,updated_at=now()::text WHERE id=$1`, reminder)
+	check(true)
+	// Consuming this already-selected one-shot action is an explicit retained
+	// read policy, not permission to select a triggered reminder on a new recall.
+	exec(`SAVEPOINT consumed_reminder`)
+	if _, err := backend.ProspectiveMarkTriggered(ctx, reminder); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+	if rows, err := backend.prospectiveMatch(ctx, key, "", "", 8, true); err != nil || len(rows) != 0 {
+		t.Fatal("consumed reminder reselected", rows, err)
+	}
+	exec(`ROLLBACK TO SAVEPOINT consumed_reminder; RELEASE SAVEPOINT consumed_reminder`)
+	for _, q := range []string{
+		fmt.Sprintf(`UPDATE epistemic_directives SET question='edited after selection' WHERE id=%d`, directive),
+		fmt.Sprintf(`UPDATE epistemic_directives SET question='temporary edit' WHERE id=%d; UPDATE epistemic_directives SET question='%s' WHERE id=%d`, directive, key, directive),
+		fmt.Sprintf(`UPDATE epistemic_directives SET topic='changed topic' WHERE id=%d`, directive),
+		fmt.Sprintf(`UPDATE epistemic_directives SET state='suppressed' WHERE id=%d`, directive),
+		fmt.Sprintf(`UPDATE epistemic_directives SET valid_until=now()::text WHERE id=%d`, directive),
+		fmt.Sprintf(`UPDATE epistemic_directives SET memory_b_id=9223372036854775807 WHERE id=%d`, directive),
+		fmt.Sprintf(`UPDATE prospective_memories SET action_text='edited action' WHERE id=%d`, reminder),
+		fmt.Sprintf(`UPDATE prospective_memories SET state='triggered' WHERE id=%d`, reminder),
+		fmt.Sprintf(`UPDATE prospective_memories SET valid_until=now()::text WHERE id=%d`, reminder),
+		fmt.Sprintf(`UPDATE memories SET content='parent edited' WHERE id=%d`, parent),
+		fmt.Sprintf(`UPDATE memories SET lifecycle_state='revoked' WHERE id=%d`, parent),
+		fmt.Sprintf(`UPDATE memories SET scope_value='foreign' WHERE id=%d`, parent),
+	} {
+		exec(`SAVEPOINT structured_change; RESET ROLE`)
+		exec(q)
+		exec(`SET LOCAL ROLE aimee_store_runtime`)
+		check(false)
+		exec(`ROLLBACK TO SAVEPOINT structured_change; RELEASE SAVEPOINT structured_change`)
+		check(true)
 	}
 }

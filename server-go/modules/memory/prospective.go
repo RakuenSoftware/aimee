@@ -10,19 +10,20 @@ import (
 )
 
 type Prospective struct {
-	ID              int64  `json:"id"`
-	TriggerText     string `json:"trigger_text"`
-	ActionText      string `json:"action_text"`
-	AnchorEntity    string `json:"anchor_entity"`
-	AnchorFile      string `json:"anchor_file"`
-	Recurrence      string `json:"recurrence"`
-	State           string `json:"state"`
-	ValidUntil      string `json:"valid_until"`
-	SourceSession   string `json:"source_session"`
-	TriggerCount    int    `json:"trigger_count"`
-	LastTriggeredAt string `json:"last_triggered_at"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	Source          *typedSourceVersion `json:"source_version,omitempty"`
+	ID              int64               `json:"id"`
+	TriggerText     string              `json:"trigger_text"`
+	ActionText      string              `json:"action_text"`
+	AnchorEntity    string              `json:"anchor_entity"`
+	AnchorFile      string              `json:"anchor_file"`
+	Recurrence      string              `json:"recurrence"`
+	State           string              `json:"state"`
+	ValidUntil      string              `json:"valid_until"`
+	SourceSession   string              `json:"source_session"`
+	TriggerCount    int                 `json:"trigger_count"`
+	LastTriggeredAt string              `json:"last_triggered_at"`
+	CreatedAt       string              `json:"created_at"`
+	UpdatedAt       string              `json:"updated_at"`
 }
 
 const prospectiveColumns = `id, trigger_text, action_text, anchor_entity, anchor_file,
@@ -35,15 +36,31 @@ func scanProspective(row store.Row, out *Prospective) error {
 		&out.LastTriggeredAt, &out.CreatedAt, &out.UpdatedAt)
 }
 
-func scanProspectiveRows(rows store.Rows) ([]Prospective, error) {
+func scanProspectiveRows(rows store.Rows, observed ...bool) ([]Prospective, error) {
 	defer rows.Close()
 	items := make([]Prospective, 0)
 	for rows.Next() {
 		var item Prospective
-		if err := rows.Scan(&item.ID, &item.TriggerText, &item.ActionText, &item.AnchorEntity,
+		dest := []any{&item.ID, &item.TriggerText, &item.ActionText, &item.AnchorEntity,
 			&item.AnchorFile, &item.Recurrence, &item.State, &item.ValidUntil, &item.SourceSession,
-			&item.TriggerCount, &item.LastTriggeredAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			&item.TriggerCount, &item.LastTriggeredAt, &item.CreatedAt, &item.UpdatedAt}
+		var owner, revision, parents string
+		observe := len(observed) > 0 && observed[0]
+		if observe {
+			dest = append(dest, &owner, &revision, &parents)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
+		}
+		if observe {
+			var err error
+			item.Source, err = structuredSource("memory_reminder", owner, revision, parents, item.ID)
+			if err != nil {
+				return nil, err
+			}
+			if item.Recurrence == "once" {
+				item.Source.ReadPolicy = &sourceReadPolicy{RetainedReminder: true}
+			}
 		}
 		items = append(items, item)
 	}
@@ -134,13 +151,22 @@ WHERE state='armed' AND `+memoryTimeSQL("valid_until")+`<=CURRENT_TIMESTAMP`)
 
 func (s *postgresDataStore) ProspectiveMatch(ctx context.Context, turn, entity, file string,
 	limit int) ([]Prospective, error) {
+	return s.prospectiveMatch(ctx, turn, entity, file, limit, false)
+}
+
+func (s *postgresDataStore) prospectiveMatch(ctx context.Context, turn, entity, file string,
+	limit int, observe bool) ([]Prospective, error) {
 	started := time.Now()
 	defer runtimeMetricState.prospectiveCalls.observe(started)
 	if err := s.requireKBProspective(); err != nil {
 		return nil, err
 	}
 	turn = strings.TrimSpace(turn)
-	rows, err := s.db.Query(ctx, `SELECT `+prospectiveColumns+` FROM prospective_memories
+	columns := prospectiveColumns
+	if observe {
+		columns += structuredSourceColumns("prospective_memories")
+	}
+	rows, err := s.db.Query(ctx, `SELECT `+columns+` FROM prospective_memories
 WHERE state='armed' AND `+memoryUnexpiredSQL("")+`
 AND (($2<>'' AND lower(anchor_entity)=lower($2)) OR
      ($3<>'' AND lower(anchor_file)=lower($3)) OR
@@ -152,7 +178,7 @@ ORDER BY CASE WHEN $2<>'' AND lower(anchor_entity)=lower($2) THEN 3
 	if err != nil {
 		return nil, err
 	}
-	return scanProspectiveRows(rows)
+	return scanProspectiveRows(rows, observe)
 }
 
 func (s *postgresDataStore) ProspectiveMarkTriggered(ctx context.Context, id int64) (bool, error) {

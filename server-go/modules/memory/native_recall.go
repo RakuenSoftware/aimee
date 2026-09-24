@@ -115,10 +115,18 @@ func projectNativeRecall(b recallBundle, limit int) (nativeRecallProjection, int
 	records("Active Context", "native_active_context", b.ActiveContext)
 	records("Open Commitments", "native_open_commitments", b.OpenCommitments)
 	section("Reminders", len(b.Reminders), func(i int) (string, string, int64, *typedProjectionRef) {
-		return b.Reminders[i].Text, b.Reminders[i].Key, b.Reminders[i].MemoryID, nil
+		row := b.Reminders[i]
+		if row.Source == nil {
+			return row.Text, row.Key, row.MemoryID, nil
+		}
+		return row.Text, row.Key, row.MemoryID, &typedProjectionRef{Channel: "native_reminders", ID: strconv.FormatInt(row.ID, 10), Source: row.Source}
 	})
 	section("Directives", len(b.Directives), func(i int) (string, string, int64, *typedProjectionRef) {
-		return b.Directives[i].Text, b.Directives[i].Key, 0, nil
+		row := b.Directives[i]
+		if row.Source == nil {
+			return row.Text, row.Key, 0, nil
+		}
+		return row.Text, row.Key, 0, &typedProjectionRef{Channel: "native_directives", ID: strconv.FormatInt(row.ID, 10), Source: row.Source}
 	})
 	if count > 0 {
 		out.WriteByte('\n')

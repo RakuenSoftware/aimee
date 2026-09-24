@@ -43,15 +43,23 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 		return false, err
 	}
 	var count int
-	err = s.db.QueryRow(ctx, sourceRevalidationSQL, string(refs), exact.Type, exact.Value).Scan(&count)
+	query := sourceRevalidationSQL
+	for _, ref := range request.Sources {
+		if ref.Source.Kind == "memory_directive" || ref.Source.Kind == "memory_reminder" {
+			query = structuredSourceRevalidationSQL
+			break
+		}
+	}
+	err = s.db.QueryRow(ctx, query, string(refs), exact.Type, exact.Value).Scan(&count)
 	return err == nil && count == len(request.Sources), err
 }
 
 // Compile fixed owner SQL once. Facts inspect all evidence locators; typed
 // assertions inspect live evidence. Both share the same bounded parent probes.
-var sourceRevalidationSQL = buildSourceRevalidationSQL()
+var sourceRevalidationSQL = buildSourceRevalidationSQL(false)
+var structuredSourceRevalidationSQL = buildSourceRevalidationSQL(true)
 
-func buildSourceRevalidationSQL() string {
+func buildSourceRevalidationSQL(structured bool) string {
 	filter := strings.NewReplacer(
 		"$1", "COALESCE(r.ref#>>'{source_version,read_policy,believed_at}','')",
 		"$2", "COALESCE(r.ref#>>'{source_version,read_policy,valid_at}','')",
@@ -61,10 +69,25 @@ func buildSourceRevalidationSQL() string {
 	expectedParents := `COALESCE((SELECT jsonb_agg(jsonb_build_object('record_id',p->>'record_id',
  'record_revision',p->>'record_revision') ORDER BY (p->>'record_id')::bigint)
  FROM jsonb_array_elements(COALESCE(r.ref#>'{source_version,memory_parents}','[]'::jsonb)) p),'[]'::jsonb)`
+	structuredCases := ""
+	if structured {
+		structuredCases = ` WHEN 'memory_directive' THEN EXISTS (
+ SELECT 1 FROM epistemic_directives WHERE id=(r.ref->>'stable_id')::bigint
+ AND state='open' AND ` + memoryUnexpiredSQL("") + ` AND ` + currentDirectiveParentsSQL("epistemic_directives") + `
+ AND epistemic_directives.record_revision::text=r.ref#>>'{source_version,version,record_revision}'
+ AND (` + directiveSourceParentsSQL("epistemic_directives") + `)::jsonb=COALESCE(r.ref#>'{source_version,memory_parents}','[]'::jsonb))
+ WHEN 'memory_reminder' THEN EXISTS (
+ SELECT 1 FROM prospective_memories WHERE id=(r.ref->>'stable_id')::bigint
+ AND (state='armed' OR (state='triggered' AND recurrence='once'
+ AND COALESCE((r.ref#>>'{source_version,read_policy,retained_reminder}')::boolean,false))) AND ` + memoryUnexpiredSQL("") + `
+ AND prospective_memories.record_revision::text=r.ref#>>'{source_version,version,record_revision}')
+`
+	}
+
 	return `SELECT count(*) FROM jsonb_array_elements($1::jsonb) r(ref)
  WHERE r.ref#>>'{source_version,version,owner_id}'=(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
  AND (CASE r.ref#>>'{source_version,record_kind}'
- WHEN 'semantic_assertion' THEN EXISTS (
+` + structuredCases + ` WHEN 'semantic_assertion' THEN EXISTS (
  SELECT 1 FROM entity_edges e WHERE e.id=(r.ref->>'stable_id')::bigint
  AND e.version::text=r.ref#>>'{source_version,version,record_revision}'
  AND ` + filter + ` AND (` + assertionMemoryVersions + `)::jsonb=` + expectedParents + `)

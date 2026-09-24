@@ -34,7 +34,8 @@ func TestDirectivePublicPostgresLifecycle(t *testing.T) {
  CREATE TEMP TABLE memory_units(id bigint,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int);
  CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
  CREATE TEMP TABLE memory_collection_owner(id int,owner_id uuid);
- CREATE TEMP TABLE epistemic_directives(id bigserial PRIMARY KEY, question text, topic text DEFAULT '',
+ INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
+ CREATE TEMP TABLE epistemic_directives(id bigserial PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1, question text, topic text DEFAULT '',
  anchor_entity text DEFAULT '',anchor_file text DEFAULT '',cause text,priority bigint DEFAULT 50,
  state text DEFAULT 'open',memory_a_id bigint DEFAULT 0,memory_b_id bigint DEFAULT 0,
  resolution_memory_id bigint DEFAULT 0,evidence text DEFAULT '',source_session text DEFAULT '',

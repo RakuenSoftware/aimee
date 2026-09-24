@@ -610,3 +610,94 @@ func TestSharedLinkChangeJournal(t *testing.T) {
 	}
 	exec(`DELETE FROM memories WHERE id=1`)
 }
+
+func TestStructuredRecallRevisionUpgrade(t *testing.T) {
+	dsn := os.Getenv("AIMEE_MEMORY_EVAL_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_MEMORY_EVAL_URL")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(q string) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ident := pgx.Identifier{fmt.Sprintf("structured_upgrade_%d", time.Now().UnixNano())}.Sanitize()
+	exec(`CREATE SCHEMA ` + ident + `; SET LOCAL search_path=` + ident + `,public;
+ CREATE TABLE epistemic_directives(id bigint PRIMARY KEY,question text,surfaced_count bigint DEFAULT 0,last_surfaced_at text DEFAULT '',updated_at text DEFAULT '',
+ epistemic_directives_fts_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english',question)) STORED);
+ CREATE TABLE prospective_memories(id bigint PRIMARY KEY,action_text text,state text DEFAULT 'armed',recurrence text DEFAULT 'once',trigger_count bigint DEFAULT 0,last_triggered_at text DEFAULT '',updated_at text DEFAULT '',
+ prospective_memories_fts_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english',action_text)) STORED);
+ INSERT INTO epistemic_directives(id,question) VALUES(1,'original question');
+ INSERT INTO prospective_memories(id,action_text) VALUES(1,'original action');`)
+	raw, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(raw)
+	a, b := strings.Index(schema, "CREATE OR REPLACE FUNCTION memory_assign_record_revision()"), strings.Index(schema, "CREATE OR REPLACE FUNCTION memory_capture_record_change()")
+	if a < 0 || b < a {
+		t.Fatal("revision function absent")
+	}
+	exec(schema[a:b])
+	a, b = strings.Index(schema, "-- BEGIN structured recall revisions"), strings.Index(schema, "-- END structured recall revisions")
+	if a < 0 || b < a {
+		t.Fatal("structured revision migration absent")
+	}
+	migration := schema[a:b]
+	scalar := func(q string) int64 {
+		t.Helper()
+		var n int64
+		if err := tx.QueryRow(ctx, q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	exec(migration)
+	exec(migration)
+	for _, table := range []string{"epistemic_directives", "prospective_memories"} {
+		if scalar(`SELECT record_revision FROM `+table+` WHERE id=1`) != 1 {
+			t.Fatal("legacy revision", table)
+		}
+	}
+	exec(`UPDATE epistemic_directives SET surfaced_count=surfaced_count+1,last_surfaced_at='seen',updated_at='seen';
+ UPDATE prospective_memories SET trigger_count=trigger_count+1,last_triggered_at='seen',updated_at='seen';`)
+	for _, table := range []string{"epistemic_directives", "prospective_memories"} {
+		if scalar(`SELECT record_revision FROM `+table+` WHERE id=1`) != 1 {
+			t.Fatal("usage counter changed semantic revision", table)
+		}
+	}
+	exec(`UPDATE epistemic_directives SET question='changed',record_revision=900;
+ UPDATE epistemic_directives SET question='original question';
+ UPDATE prospective_memories SET action_text='changed',record_revision=900;
+ UPDATE prospective_memories SET action_text='original action';`)
+	exec(migration)
+	for _, table := range []string{"epistemic_directives", "prospective_memories"} {
+		if scalar(`SELECT record_revision FROM `+table+` WHERE id=1`) != 3 {
+			t.Fatal("edit/restore or reapply lost revision", table)
+		}
+	}
+	exec(`UPDATE prospective_memories SET state='triggered',trigger_count=trigger_count+1,last_triggered_at='accepted',updated_at='accepted'`)
+	if scalar(`SELECT record_revision FROM prospective_memories WHERE id=1`) != 3 {
+		t.Fatal("normal acknowledgement invalidated retained action")
+	}
+	exec(`UPDATE prospective_memories SET state='armed'`)
+	if scalar(`SELECT record_revision FROM prospective_memories WHERE id=1`) != 4 {
+		t.Fatal("rearm did not invalidate retained action")
+	}
+	exec(`UPDATE prospective_memories SET state='triggered'`)
+	if scalar(`SELECT record_revision FROM prospective_memories WHERE id=1`) != 5 {
+		t.Fatal("arbitrary state edit disguised as usage")
+	}
+}

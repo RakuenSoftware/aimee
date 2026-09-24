@@ -199,6 +199,42 @@ def main():
                       and result.get('status') == 'ok' and wanted in body and key+'-authored' in body
                       and not any(key+'-question-'+key+'-'+other in body for other in states+['workspace'] if other != state)
                       and key+'-foreign-second' not in body and key+'-foreign-resolution' not in body)
+            # Structured native rows carry the selected revisions and parent observations.
+            reminder_id=int(sql(f"INSERT INTO prospective_memories(trigger_text,action_text,recurrence) VALUES('{key}','{key}-action','repeat') RETURNING id"))
+            for audience,value,parent in [('project',key,ids['current']),('workspace',key+'-team',workspace_id)]:
+                def structured_refs():
+                    code,result,_=call('recall',dict(task_hint=key,limit_tokens=8192,**{audience:value}))
+                    if code != 200 or result.get('status') != 'ok':
+                        raise RuntimeError('structured source recall unavailable')
+                    bundle=result.get('recall',{})
+                    return [dict(channel=channel,stable_id=str(row['id']),source_version=row.get('source_version'))
+                            for field,channel in [('directives','native_directives'),('reminders','native_reminders')]
+                            for row in bundle.get(field,[])]
+                refs=structured_refs()
+                check('Structured '+audience+' recall observes roots and exact parents',len(refs) == 3
+                      and all(ref['source_version'] and ref['source_version'].get('memory_parent_state') == 'observed'
+                              and int(ref['source_version']['version']['record_revision']) > 0 for ref in refs)
+                      and {int(p['record_id']) for ref in refs for p in ref['source_version'].get('memory_parents',[])} == {parent})
+                def eligible(refs):
+                    code,result,_=call('revalidate_sources',dict(**{audience:value},revalidation=dict(
+                        schema_version=1,check_id=uuid.uuid4().hex,sources=refs)))
+                    if code != 200 or result.get('status') != 'ok':
+                        raise RuntimeError('structured source revalidation unavailable')
+                    return result.get('eligible')
+                check('Structured '+audience+' recall survives surfacing counters',eligible(refs) is True)
+                directive_id=int(next(ref['stable_id'] for ref in refs if ref['source_version'].get('memory_parents')))
+                question=sql(f"SELECT question FROM epistemic_directives WHERE id={directive_id}")
+                sql(f"UPDATE epistemic_directives SET question='{key}-changed' WHERE id={directive_id}")
+                check('Structured '+audience+' directive edit refuses earlier selection',eligible(refs) is False)
+                sql(f"UPDATE epistemic_directives SET question='{question}' WHERE id={directive_id}")
+                check('Structured '+audience+' directive restore cannot revive earlier revision',eligible(refs) is False)
+                refs=structured_refs()
+                check('Structured '+audience+' directive refresh admits a new decision',eligible(refs) is True)
+                sql(f"UPDATE prospective_memories SET action_text='{key}-changed-action' WHERE id={reminder_id}")
+                check('Structured '+audience+' reminder edit refuses earlier selection',eligible(refs) is False)
+                sql(f"UPDATE prospective_memories SET action_text='{key}-action' WHERE id={reminder_id}")
+                check('Structured '+audience+' reminder restore cannot revive earlier revision',eligible(refs) is False)
+                check('Structured '+audience+' reminder refresh admits a new decision',eligible(structured_refs()) is True)
             # Reuse the same parent population for derived and retained-version views.
             scenes=json.loads(sql(f"""BEGIN;
               INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session)

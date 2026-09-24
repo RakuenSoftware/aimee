@@ -83,10 +83,10 @@ CREATE TEMP TABLE memories (
  INSERT INTO memories(id,confidence,valid_until) SELECT n,1,now()::text FROM generate_series(20,29) n;
  INSERT INTO memories(id,confidence,lifecycle_state,valid_from) VALUES(30,1,'pending',(now()+interval '1 day')::text);
  INSERT INTO memories(id,confidence,lifecycle_state,valid_until) VALUES(31,1,'pending',now()::text);
- CREATE TEMP TABLE prospective_memories(id bigint,trigger_text text,action_text text,anchor_entity text,
+ CREATE TEMP TABLE prospective_memories(id bigint,record_revision bigint NOT NULL DEFAULT 1,trigger_text text,action_text text,anchor_entity text,
  anchor_file text,recurrence text,state text,valid_until text,source_session text,trigger_count bigint,
  last_triggered_at text,created_at text,updated_at text);
- CREATE TEMP TABLE epistemic_directives(id bigint,question text,topic text,anchor_entity text,anchor_file text,
+ CREATE TEMP TABLE epistemic_directives(id bigint,record_revision bigint NOT NULL DEFAULT 1,question text,topic text,anchor_entity text,anchor_file text,
  cause text,priority bigint,state text,memory_a_id bigint,memory_b_id bigint,resolution_memory_id bigint,
  evidence text,source_session text,surfaced_count bigint,last_surfaced_at text,resolved_at text,
  valid_until text,created_at text,updated_at text);
