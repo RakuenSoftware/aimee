@@ -1,6 +1,6 @@
 # MR-03 protected projections — 2026-09-24
 
-MR-03 remains active until final image and process verification completes. Its
+MR-03 is [complete](memory-mr03-closeout-2026-09-24.md). Its
 [six-gate checklist](../proposals/pending/memory-reliability-03-closeout.md) preserves
 the original acceptance clauses.
 
@@ -41,7 +41,7 @@ No schema migration is introduced.
 
 [Full memory race/export](memory-mr03-protected-2026-09-24/memory-race-export.txt)
 passed in 300.010 seconds, with exported-owner verification in 5.122 seconds.
-Final image/process verification remains pending. The new
+Final image/process verification passed; see the closeout above. The new
 native fixture forces a real fold through five tool calls and independently
 checks provider-visible protected bytes and summary provenance. Provider fixtures
 also exercise literal-zero token caps and token reserves, which must refuse
