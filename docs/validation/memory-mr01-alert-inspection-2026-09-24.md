@@ -20,6 +20,11 @@ The regression checks both conflict positions, historical/pending preservation,
 content. The [targeted race suite](memory-mr01-alert-inspection-2026-09-24/after-race.txt) passes in 1.255 seconds.
 The first broader [runtime replay](memory-mr01-alert-inspection-2026-09-24/runtime-timeout.txt)
 hit its existing deadline in a graph/cognification path after 306.706 seconds;
-its log is retained and the timeout is unchanged. Full-suite rerun and corrected
-HTTP validation are pending. MR-01 remains open,
+its log is retained and the timeout is unchanged. After refreshing the disposable database statistics, the unchanged [full race suite and export build](memory-mr01-alert-inspection-2026-09-24/full-race-export.txt)
+pass in 224.742 and 5.150 seconds. The [137-check HTTP fixture](memory-mr01-alert-inspection-2026-09-24/http-after.json)
+passes on `a4ad77f5d`, with [actual image identities](memory-mr01-alert-inspection-2026-09-24/image-identities.json).
+It covers both alert audiences, answer evidence, fact projection byte digests and
+exact parent sets in fact/typed source metadata, alongside all previous checks.
+The paired production thinclient still reports healthy 0.4.5 service at 87132
+seconds of uptime; the draft remains confined to CT109. MR-01 remains open,
 including the final source-check-to-transport race.
