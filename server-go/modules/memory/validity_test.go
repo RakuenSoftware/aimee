@@ -119,6 +119,22 @@ func TestValidityServingParityPostgres(t *testing.T) {
 					t.Fatal("authenticated scope widened", body, denied)
 				}
 			}
+			// A verified scope must constrain ordinary serving, not only diagnostics.
+			for _, request := range []DataRequest{
+				{Operation: "get", ID: 10, Project: "hidden", IncludeAll: true},
+				{Operation: "get", ID: 10, IncludeAll: true},
+			} {
+				raw, status := handleData(handlerOptions{placement: PlacementKB, data: backend, commandContext: &scopedCaller}, bus.ModuleInvocation{}, dataRequest(t, request))
+				var response DataResponse
+				if status == bus.ModuleStatusOK && (json.Unmarshal(raw, &response) != nil || len(response.Records) != 0) {
+					t.Fatal("ordinary serving widened verified scope", request, string(raw))
+				}
+			}
+			raw, status := handleData(handlerOptions{placement: PlacementKB, data: backend, commandContext: &scopedCaller}, bus.ModuleInvocation{}, dataRequest(t, DataRequest{Operation: "get", ID: 1, IncludeAll: true}))
+			var inherited DataResponse
+			if status != bus.ModuleStatusOK || json.Unmarshal(raw, &inherited) != nil || len(inherited.Records) != 1 {
+				t.Fatal("ordinary serving failed to inherit verified scope", status, string(raw))
+			}
 			serviceCaller := caller
 			serviceCaller.ScopeKind, serviceCaller.ScopeID = "service", "fixture-deployment"
 			for _, sample := range []struct {

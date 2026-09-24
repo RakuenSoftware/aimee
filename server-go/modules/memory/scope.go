@@ -88,3 +88,38 @@ func normalizeScope(placement Placement, scope Scope) (Scope, error) {
 		return Scope{}, fmt.Errorf("memory: invalid placement %q", placement)
 	}
 }
+
+// bindVerifiedScope narrows a data request to the host-verified credential.
+// Scope is a restriction even when a service credential has no human actor;
+// it never confers user authority. Unscoped host callers retain their existing
+// contract, and a named service identity retains deployment-wide data access.
+func bindVerifiedScope(request *DataRequest, kind, id string) error {
+	if kind == "" {
+		return nil
+	}
+	if kind == "service" && id != "" {
+		return nil
+	}
+	authorized, err := normalizeScope(PlacementKB, Scope{Type: kind, Value: id})
+	if err != nil {
+		return err
+	}
+	if request.Scope.Type != "" || request.Scope.Value != "" {
+		target, err := normalizeScope(PlacementKB, request.Scope)
+		if err != nil || target != authorized {
+			return fmt.Errorf("memory: requested scope exceeds verified scope")
+		}
+	}
+	if (request.Project != "" && (authorized.Type != ScopeProject || request.Project != authorized.Value)) ||
+		(request.Workspace != "" && (authorized.Type != ScopeWorkspace || request.Workspace != authorized.Value)) {
+		return fmt.Errorf("memory: requested audience exceeds verified scope")
+	}
+	request.Scope = authorized
+	request.IncludeAll = false
+	if authorized.Type == ScopeProject {
+		request.Project = authorized.Value
+	} else if authorized.Type == ScopeWorkspace {
+		request.Workspace = authorized.Value
+	}
+	return nil
+}

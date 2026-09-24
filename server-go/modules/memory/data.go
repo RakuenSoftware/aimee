@@ -1071,6 +1071,16 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 			return encoded, bus.ModuleStatusOK
 		}
 	}
+	if caller := options.commandContext; options.placement == PlacementKB && caller != nil {
+		if err := bindVerifiedScope(&request, caller.ScopeKind, caller.ScopeID); err != nil {
+			if request.Operation == "validity" {
+				payload, _ := json.Marshal(commandError("unauthorized", "diagnostic scope exceeds authenticated scope"))
+				encoded, _ := json.Marshal(DataResponse{Payload: payload})
+				return encoded, bus.ModuleStatusOK
+			}
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+	}
 	explicitScope := request.Scope.Type != "" || request.Scope.Value != ""
 	if options.placement == PlacementKB && !explicitScope {
 		if request.Project != "" {

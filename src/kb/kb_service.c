@@ -751,14 +751,22 @@ static cJSON *kb_command_context(void)
    const kb_request_context_t *resolved = kb_reqctx_resolved();
    if (authenticated && resolved && resolved->has_transport)
       (void)kb_identity_key(&resolved->transport, transport, sizeof(transport));
+   const char *scope_kind = NULL, *scope_id = NULL;
+   int verified_scope = kb_reqctx_verified_scope(&scope_kind, &scope_id);
+   /* Scoped credentials authenticate a transport even when they identify no
+    * human actor. Preserve their restriction without granting user authority. */
+   if (!authenticated && verified_scope && scope_kind && scope_kind[0] && scope_id && scope_id[0])
+   {
+      authenticated = 1;
+      snprintf(principal, sizeof(principal), "kb-scope:%s:%s", scope_kind, scope_id);
+   }
    if (!transport[0])
       snprintf(transport, sizeof(transport), "%s", principal);
    cJSON_AddBoolToObject(context, "authenticated", authenticated);
    cJSON_AddBoolToObject(context, "user_authority", user_authority);
    cJSON_AddStringToObject(context, "principal", authenticated ? principal : "");
    cJSON_AddStringToObject(context, "transport_identity", authenticated ? transport : "");
-   const char *scope_kind = NULL, *scope_id = NULL;
-   if (authenticated && kb_reqctx_verified_scope(&scope_kind, &scope_id))
+   if (authenticated && verified_scope)
    {
       cJSON_AddStringToObject(context, "scope_kind", scope_kind ? scope_kind : "");
       cJSON_AddStringToObject(context, "scope_id", scope_id ? scope_id : "");

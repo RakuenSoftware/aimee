@@ -1871,7 +1871,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "1378e4b1b5c58cae19ebf9d471c7dff9056c240d2ea3a204ed6366e95e40a240"
+      "sha256": "ece7a1e4af4a966026f5f6b6a1cbff03a7fa478ca3fb81b09143feea60c91568"
     },
     "src/modules/benchmarks/agent_eval_memory_transport.c": {
       "disposition": "benchmark-transport",
