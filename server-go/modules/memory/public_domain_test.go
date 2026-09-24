@@ -336,6 +336,24 @@ SET LOCAL ROLE memory_domain_test;`)
 		t.Fatal(err)
 	}
 	client = clientForHandler(t, NewHandler(nil, WithDataStore(PlacementKB, &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB})))
+	for _, tc := range []struct{ verb, args, field string }{
+		{"get_provenance", `{"memory_id":4,"project":"app"}`, "entries"},
+		{"link_query", `{"memory_id":1,"project":"app"}`, "links"},
+	} {
+		t.Run("legacy scoped "+tc.verb, func(t *testing.T) {
+			if rows := run(tc.verb, tc.args)[tc.field].([]any); len(rows) != 0 {
+				t.Error("public scoped derived read leaked private parent", tc.verb, rows)
+			}
+		})
+	}
+	t.Run("legacy scoped conflicts", func(t *testing.T) {
+		for _, row := range run("list_conflicts", `{"project":"app","max":256}`)["conflicts"].([]any) {
+			c := row.(map[string]any)
+			if c["memory_a"] == float64(4) || c["memory_b"] == float64(4) {
+				t.Error("public scoped conflict read leaked private parent", row)
+			}
+		}
+	})
 	for _, verb := range []string{"entity_edges", "search_graph", "search_graph_as_of"} {
 		result := run(verb, `{"entity":"app","query":"app","as_of":"2026-09-01","scope_context":true,"project":"app"}`)
 		key := "relations"

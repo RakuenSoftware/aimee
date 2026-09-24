@@ -56,6 +56,16 @@ def main():
             ids = json.loads(sql("BEGIN; INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,lifecycle_state,activation_suppressed) VALUES "+','.join(values)+f""";
               UPDATE memories SET valid_from=(now()+interval '1 day')::text WHERE key='{key}-future';
               UPDATE memories SET valid_until=(now()-interval '1 day')::text WHERE key='{key}-expired';
+              INSERT INTO memory_provenance(memory_id,session_id,action,details,created_at)
+                SELECT id,'fixture','observed',key,now()::text FROM memories WHERE key LIKE '{key}-%';
+              INSERT INTO memory_links(source_id,target_id,relation)
+                SELECT c.id,m.id,'depends_on' FROM memories c CROSS JOIN memories m
+                WHERE c.key='{key}-current' AND m.key LIKE '{key}-%' AND m.id<>c.id;
+              INSERT INTO memory_conflicts(memory_a,memory_b,detected_at)
+                SELECT c.id,m.id,now()::text FROM memories c CROSS JOIN memories m
+                WHERE c.key='{key}-current' AND m.key LIKE '{key}-%' AND m.id<>c.id;
+              INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity)
+                SELECT id,'{key}-root','uses',key FROM memories WHERE key LIKE '{key}-%';
               INSERT INTO entity_edges(source,relation,target)
                 SELECT '{key}-root','calls',key FROM memories WHERE key LIKE '{key}-%';
               INSERT INTO fact_evidence(assertion_id,source_kind,source_id,stance)
@@ -91,6 +101,12 @@ def main():
             code,result,elapsed = call('recall',dict(task_hint=key,project=key,limit_tokens=8192))
             check('Common fixture recall bundle with legacy project', code == 200 and result.get('status') == 'ok'
                   and {int(row['memory_id']) for row in result.get('recall',{}).get('active_context',[])} == {ids['current']}, elapsed)
+            for audience,value,label in [('project',key,'current'),('workspace',key+'-team','workspace')]:
+                code,result,elapsed = call('assemble_context',dict(task_hint=key,**{audience:value}))
+                content = result.get('context','')
+                check('Common fixture assembled '+audience+' context', code == 200 and result.get('status') == 'ok'
+                      and key+' '+label in content
+                      and not any(key+' '+state in content for state in states+['workspace'] if state != label), elapsed)
             for audience, value, expected in [('project',key,ids['current']),('workspace',key+'-team',workspace_id)]:
                 code, result, elapsed = call('find_facts',dict(query=key,**{audience:value},limit=64))
                 check('Legacy '+audience+' applies without scope_context', code == 200 and result.get('status') == 'ok'
@@ -116,6 +132,21 @@ def main():
                     check('Common fixture '+mode+' '+state, code == 200 and
                           ((result.get('status') == 'ok' and int(result['memory']['id']) == ids[state]) if allowed
                            else result.get('kind') == 'not_found' and 'memory' not in result), elapsed)
+            for audience,value,expected in [('project',key,key+'-current'),('workspace',key+'-team',key+'-workspace')]:
+                code,result,elapsed = call('query_edges',dict(entity=key+'-root',**{audience:value},max=64))
+                check('Legacy graph query honors '+audience, code == 200 and result.get('status') == 'ok'
+                      and {row['target'] for row in result.get('edges',[])} == {expected}, elapsed)
+            for state in ('current','cross-scope'):
+                code,result,elapsed = call('get_provenance',dict(memory_id=str(ids[state]),project=key))
+                check('Legacy provenance audience '+state, code == 200 and result.get('status') == 'ok'
+                      and len(result.get('entries',[])) == (1 if state == 'current' else 0), elapsed)
+            code,result,elapsed = call('link_query',dict(memory_id=str(ids['current']),project=key,max=64))
+            foreign_ids = {ids['cross-scope'],workspace_id}
+            check('Legacy link audience excludes foreign endpoints', code == 200 and result.get('status') == 'ok'
+                  and not any(int(row[k]) in foreign_ids for row in result.get('links',[]) for k in ('source_id','target_id')), elapsed)
+            code,result,elapsed = call('list_conflicts',dict(project=key,max=256))
+            check('Legacy conflict audience excludes foreign parents', code == 200 and result.get('status') == 'ok'
+                  and not any(int(row[k]) in foreign_ids for row in result.get('conflicts',[]) for k in ('memory_a','memory_b')), elapsed)
             card_id = int(sql(f"""BEGIN;
               INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
                 VALUES('L1','episode','{key}-derived','{key}-derived copied current input','project','{key}');

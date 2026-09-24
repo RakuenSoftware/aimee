@@ -170,6 +170,31 @@ SET LOCAL ROLE memory_runtime_test;`)
 			}
 		}
 	}
+	if _, err := tx.Exec(ctx, `SAVEPOINT legacy_edge_scope; RESET ROLE;
+ INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity) VALUES
+ (1,'legacy-scope','uses','allowed-app'),(3,'legacy-scope','uses','private-project');
+ SET LOCAL ROLE memory_runtime_test`); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args   string
+		target string
+	}{
+		{`{"entity":"legacy-scope","project":"app"}`, "allowed-app"},
+		{`{"entity":"legacy-scope","project":"app","scope_context":true}`, "allowed-app"},
+		{`{"entity":"legacy-scope","project":"private"}`, "private-project"},
+	} {
+		rows := run("query_edges", tc.args)["edges"].([]any)
+		if len(rows) != 1 || rows[0].(map[string]any)["target"] != tc.target {
+			t.Fatal("legacy graph audience ignored", tc.args, rows)
+		}
+	}
+	if rows := run("query_edges", `{"entity":"legacy-scope","include_all":false}`)["edges"].([]any); len(rows) != 0 {
+		t.Fatal("legacy graph shared audience ignored", rows)
+	}
+	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT legacy_edge_scope; RELEASE SAVEPOINT legacy_edge_scope"); err != nil {
+		t.Fatal(err)
+	}
 	for _, tt := range []struct {
 		args    string
 		drifted bool

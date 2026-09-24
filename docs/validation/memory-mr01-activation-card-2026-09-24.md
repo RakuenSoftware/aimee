@@ -16,5 +16,7 @@ serving checks use the existing non-owner role.
 The [full race suite and export](memory-mr01-activation-card-2026-09-24/full-race-export.txt)
 pass in 219.943 and 4.750 seconds. The [actual HTTP reproduction](memory-mr01-activation-card-2026-09-24/http-before.json)
 on `763aa8c7d` passes current-card admission, then fails the revoked-input
-exclusion check. Corrected candidate process validation is pending. This correction
+exclusion check. The [corrected candidate HTTP run](memory-mr01-activation-card-2026-09-24/http-after/checks.json)
+passes all 42 checks on `6b79ec2f2`, including valid-card admission followed by
+revoked-input exclusion. The runner exits zero and removes its disposable stack. This correction
 adds no schema or C policy changes and does not close MR-01's provider-release race.

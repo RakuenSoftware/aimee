@@ -161,6 +161,7 @@ func handleRuntimeCommand(options handlerOptions, invocation bus.ModuleInvocatio
 			return invalid("missing entity")
 		}
 		request.Operation, request.Limit = "entity-edges", args.limit("max", 128, 256)
+		scoped = commandScope(args, &request)
 	case "check_drift":
 		var ok bool
 		request.ID, ok = args.positiveID("task_id")

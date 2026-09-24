@@ -138,6 +138,7 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		} else {
 			request.Operation, request.Limit = "link-query", args.limit("max", 32, 64)
 		}
+		scoped = commandScope(args, &request)
 	case "link_create":
 		var sourceOK, targetOK bool
 		request.SourceID, sourceOK = args.decimalID("source_id")
@@ -163,6 +164,7 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 		request.Operation = "link-delete"
 	case "list_conflicts":
 		request.Operation, request.Limit = "conflict-list", args.limit("max", 64, 256)
+		scoped = commandScope(args, &request)
 	case "query_health":
 		request.Operation = "health"
 	case "stats_dashboard":

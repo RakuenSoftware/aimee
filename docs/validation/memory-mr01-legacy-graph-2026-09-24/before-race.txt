@@ -1,0 +1,7 @@
+--- FAIL: TestRuntimePublicPostgres (0.12s)
+    runtime_role_test.go:34: runtime SQL: ERROR: relation "bandit_promotions" does not exist (SQLSTATE 42P01)
+    runtime_role_test.go:34: runtime SQL: ERROR: relation "bandit_promotions" does not exist (SQLSTATE 42P01)
+    public_runtime_test.go:189: legacy graph audience ignored {"entity":"legacy-scope","project":"app"} [map[id:281 relation:uses source:legacy-scope target:allowed-app weight:1.5] map[id:282 relation:uses source:legacy-scope target:private-project weight:1.5]]
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.130s
+FAIL

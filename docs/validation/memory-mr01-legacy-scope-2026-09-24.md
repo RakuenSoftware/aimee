@@ -15,3 +15,8 @@ compatibility search/windows, diagnostic retrieval and recall over the same fixt
 The runner exited zero and removed its disposable stack. An initial expanded
 harness read active_context at the envelope root instead of inside recall; that
 harness assertion was corrected before the successful run. No schema or native policy changes are introduced.
+
+The [fresh deployment matrix](memory-mr01-legacy-scope-2026-09-24/fresh/T2/topology.json)
+passes 1714/1714 checks on `763aa8c7d` (T2: 1097; T3: 617). Both runners
+exit zero and remove their stacks. Nine container image identities and three
+provider capability captures are retained with the receipts.
