@@ -281,6 +281,7 @@
     "server-go/modules/memory/recall_composition_test.go",
     "server-go/modules/memory/native_recall_test.go",
     "server-go/modules/memory/mutation_audit_test.go",
+    "server-go/modules/memory/mutation_maintenance_test.go",
     "server-go/modules/memory/mutation_audit_tx_test.go",
     "server-go/modules/memory/workflow_observer_test.go",
     "server-go/modules/memory/wiki_test.go",

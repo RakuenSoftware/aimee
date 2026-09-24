@@ -1,0 +1,21 @@
+ok  	github.com/JBailes/aimee/server-go/modules/memory	234.086s
+E
+======================================================================
+ERROR: test_memory_export_builds_with_all_owner_sources (scripts.tests.test_export_c_process_build.CProcessBuildTests.test_memory_export_builds_with_all_owner_sources)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/virant/dev/aimee-pr2990/scripts/tests/test_export_c_process_build.py", line 95, in test_memory_export_builds_with_all_owner_sources
+    self.assertEqual((module / relative).read_bytes(), source.read_bytes())
+                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 777, in read_bytes
+    with self.open(mode='rb', buffering=0) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmpg3pex413/aimee-module-memory/server-go/modules/memory/mutation_maintenance_test.go'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.092s
+
+FAILED (errors=1)

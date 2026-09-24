@@ -24,6 +24,9 @@ the isolated replay database; append-only private migrations are unchanged.
 [passing authority regression](memory-mr02-authority-2026-09-24/authority-after.txt),
 [native import](memory-mr02-authority-2026-09-24/native-export.txt) and
 [schema upgrade/reapply](memory-mr02-authority-2026-09-24/schema-upgrade.txt)
-record the component evidence. Final full race/export and process validation are
-pending; the [eight-gate checklist](../proposals/pending/memory-reliability-02-closeout.md)
+record the component evidence. The final full race suite passes in 234.086 seconds. Export verification found
+the new regression file missing from the explicit module source manifest; after
+registering it, the exported owner builds and its tests pass in 5.517 seconds.
+The workspace export adapter also now includes primary-scope workspace rows.
+Final process validation remains pending; the [eight-gate checklist](../proposals/pending/memory-reliability-02-closeout.md)
 tracks MR-02 completion. The original 123-clause acceptance inventory is unchanged.
