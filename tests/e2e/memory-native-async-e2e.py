@@ -173,7 +173,11 @@ def inside(output):
                                               max_output_tokens=32), limits)
         check(name + ' queues a real asynchronous worker', status == 200 and bool(created.get('id')))
         run_id = created['id']
-        deadline = time.monotonic() + 90
+        # A refresh with the owner deliberately stopped can traverse both
+        # local and enrolled-KB paths before their bounded RPCs refuse. Keep
+        # the normal-run bound, but allow this outage case to finish refusing.
+        wait_seconds = 180 if mode == 'refresh-outage' else 90
+        deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
             status, result = api('/v1/runs/' + run_id)
             if status == 200 and result.get('status') in ('completed', 'failed', 'cancelled'):
@@ -185,6 +189,11 @@ def inside(output):
                                    if any(kind in text for text in strings(events))]))
                 return result, events
             time.sleep(0.1)
+        runs.append(dict(name=name, run_id=run_id, status='fixture_timeout',
+            elapsed_seconds=time.monotonic()-started, wait_seconds=wait_seconds,
+            provider_requests=len(captures)-before,
+            provider_request_bytes=request_sizes[before:]))
+        checks.append(dict(name=name + ' reaches a terminal state within fixture bound', passed=False))
         api('/v1/runs/' + run_id + '/stop', {})
         raise RuntimeError(name + ' did not reach a terminal state')
 
