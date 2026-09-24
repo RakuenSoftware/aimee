@@ -56,6 +56,16 @@ func baseHistoricalMemoryInspectionSQL(prefix string) string {
 		prefix + `lifecycle_state='active' AND ` + prefix + `activation_suppressed=0))`
 }
 
+// Operator alerts inspect unswept commitments and retained history. Their
+// purpose does not authorize erased/quarantined content, suppressed live rows,
+// unknown states or stale generated-card dependencies. Expiry remains visible
+// here because alerting on overdue commitments is part of this read contract.
+func alertMemoryInspectionSQL(prefix string) string {
+	return `(` + baseHistoricalMemoryInspectionSQL(prefix) + ` OR (` + prefix +
+		`lifecycle_state IN ('pending','fulfilled') AND ` + prefix + `activation_suppressed=0)) AND ` +
+		currentEpisodeCardInputsSQL(prefix, true)
+}
+
 // Clock expressions are fixed owner SQL or bound timestamp parameters, never
 // caller-supplied SQL. Current and historical reads share interval semantics.
 func memoryStartedAtSQL(column, clock string) string {

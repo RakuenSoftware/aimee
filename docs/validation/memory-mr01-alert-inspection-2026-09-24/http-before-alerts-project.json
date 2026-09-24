@@ -1,0 +1,155 @@
+{
+  "active_context_missing": false,
+  "alerts": {
+    "stale_pending": [],
+    "unresolved_contradictions": [
+      {
+        "id": 10,
+        "memory_a_id": 1,
+        "memory_b_id": 3,
+        "detected_at": "2026-09-24 10:38:13.309104+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 10,
+        "memory_ids": [
+          1,
+          3
+        ],
+        "topic": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b-current",
+        "a": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b current",
+        "b": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b expired"
+      },
+      {
+        "id": 9,
+        "memory_a_id": 1,
+        "memory_b_id": 2,
+        "detected_at": "2026-09-24 10:38:13.309104+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 9,
+        "memory_ids": [
+          1,
+          2
+        ],
+        "topic": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b-current",
+        "a": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b current",
+        "b": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b future"
+      },
+      {
+        "id": 6,
+        "memory_a_id": 1,
+        "memory_b_id": 9,
+        "detected_at": "2026-09-24 10:38:13.309104+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 6,
+        "memory_ids": [
+          1,
+          9
+        ],
+        "topic": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b-current",
+        "a": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b current",
+        "b": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b revoked"
+      },
+      {
+        "id": 5,
+        "memory_a_id": 1,
+        "memory_b_id": 8,
+        "detected_at": "2026-09-24 10:38:13.309104+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 5,
+        "memory_ids": [
+          1,
+          8
+        ],
+        "topic": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b-current",
+        "a": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b current",
+        "b": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b deleted"
+      },
+      {
+        "id": 4,
+        "memory_a_id": 1,
+        "memory_b_id": 7,
+        "detected_at": "2026-09-24 10:38:13.309104+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 4,
+        "memory_ids": [
+          1,
+          7
+        ],
+        "topic": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b-current",
+        "a": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b current",
+        "b": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b quarantined"
+      },
+      {
+        "id": 3,
+        "memory_a_id": 1,
+        "memory_b_id": 6,
+        "detected_at": "2026-09-24 10:38:13.309104+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 3,
+        "memory_ids": [
+          1,
+          6
+        ],
+        "topic": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b-current",
+        "a": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b current",
+        "b": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b archived"
+      },
+      {
+        "id": 2,
+        "memory_a_id": 1,
+        "memory_b_id": 5,
+        "detected_at": "2026-09-24 10:38:13.309104+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 2,
+        "memory_ids": [
+          1,
+          5
+        ],
+        "topic": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b-current",
+        "a": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b current",
+        "b": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b superseded"
+      },
+      {
+        "id": 1,
+        "memory_a_id": 1,
+        "memory_b_id": 4,
+        "detected_at": "2026-09-24 10:38:13.309104+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 1,
+        "memory_ids": [
+          1,
+          4
+        ],
+        "topic": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b-current",
+        "a": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b current",
+        "b": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b suppressed"
+      }
+    ],
+    "newly_superseded": [
+      {
+        "id": 5,
+        "scope": {
+          "type": "project",
+          "value": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b"
+        },
+        "tier": "L2",
+        "kind": "fact",
+        "key": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b-superseded",
+        "content": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b superseded",
+        "confidence": 1,
+        "memory_id": 5,
+        "text": "mr01-lanes-8955407e11f24e2b84125d6071ebaa1b superseded",
+        "superseded_at": "2026-09-24 10:38:13"
+      }
+    ],
+    "elapsed_ms": 9.612263
+  },
+  "status": "ok"
+}

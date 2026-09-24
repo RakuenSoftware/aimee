@@ -53,7 +53,7 @@ func (s *postgresDataStore) AlertsBundle(ctx context.Context, since string) (jso
 	rows, err := s.db.Query(ctx, `SELECT id,content,created_at,ttl_at,
  EXTRACT(EPOCH FROM now()-aimee_utc_text_timestamptz(created_at))/86400.0,
  EXTRACT(EPOCH FROM aimee_utc_text_timestamptz(NULLIF(ttl_at,''))-aimee_utc_text_timestamptz(created_at))/86400.0
- FROM memories WHERE lifecycle_state='pending' AND NULLIF(ttl_at,'') IS NOT NULL
+ FROM memories WHERE lifecycle_state='pending' AND `+alertMemoryInspectionSQL("")+` AND NULLIF(ttl_at,'') IS NOT NULL
  AND aimee_utc_text_timestamptz(NULLIF(ttl_at,''))>aimee_utc_text_timestamptz(created_at)
  AND now()-aimee_utc_text_timestamptz(created_at)>=0.8*(aimee_utc_text_timestamptz(NULLIF(ttl_at,''))-aimee_utc_text_timestamptz(created_at))
  ORDER BY `+queryScopeOrder+`,aimee_utc_text_timestamptz(created_at),id DESC LIMIT 50`)
@@ -73,13 +73,14 @@ func (s *postgresDataStore) AlertsBundle(ctx context.Context, since string) (jso
 	if err != nil {
 		return nil, err
 	}
-	// Both joined parents are filtered by the same runtime RLS context. A
-	// partially visible or orphaned conflict must not reveal the hidden side.
+	// Both parents require inspection eligibility as well as the runtime RLS
+	// audience. A conflict cannot restore erased or quarantined parent text.
 	rankA := strings.ReplaceAll(strings.ReplaceAll(queryScopeOrder, "scope_type", "ma.scope_type"), "scope_value", "ma.scope_value")
 	rankB := strings.ReplaceAll(strings.ReplaceAll(queryScopeOrder, "scope_type", "mb.scope_type"), "scope_value", "mb.scope_value")
 	rows, err = s.db.Query(ctx, `SELECT c.id,c.memory_a,c.memory_b,c.detected_at,COALESCE(c.resolution,''),ma.key,ma.content,mb.content
  FROM memory_conflicts c JOIN memories ma ON ma.id=c.memory_a JOIN memories mb ON mb.id=c.memory_b
- WHERE c.resolved=0 ORDER BY LEAST(`+rankA+`,`+rankB+`),c.detected_at DESC,c.id DESC LIMIT 50`)
+ WHERE c.resolved=0 AND `+alertMemoryInspectionSQL("ma.")+` AND `+alertMemoryInspectionSQL("mb.")+`
+ ORDER BY LEAST(`+rankA+`,`+rankB+`),c.detected_at DESC,c.id DESC LIMIT 50`)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +100,7 @@ func (s *postgresDataStore) AlertsBundle(ctx context.Context, since string) (jso
 		return nil, err
 	}
 	rows, err = s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence,updated_at
- FROM memories WHERE lifecycle_state='superseded'
+ FROM memories WHERE lifecycle_state='superseded' AND `+alertMemoryInspectionSQL("")+`
  AND aimee_utc_text_timestamptz(updated_at)>=COALESCE(aimee_utc_text_timestamptz(NULLIF($1,'')),now()-interval '7 days')
  ORDER BY `+queryScopeOrder+`,aimee_utc_text_timestamptz(updated_at) DESC,id DESC LIMIT 50`, since)
 	if err != nil {

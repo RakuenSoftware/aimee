@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """MR-01 common lifecycle fixture through advertised KB retrieval endpoints."""
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -106,6 +107,11 @@ def main():
             code,result,elapsed = call('diagnose_scoped',dict(query=key,scope_type='project',scope_value=key,limit=64))
             check('Common fixture diagnostic retrieval', code == 200 and result.get('status') == 'ok'
                   and {int(row['memory']['id']) for row in result.get('rows',[])} == {ids['current']}, elapsed)
+            for audience,value,wanted in [('project',key,ids['current']),('workspace',key+'-team',workspace_id)]:
+                code,result,elapsed=call('ask',dict(query=key,**{audience:value},limit=8))
+                check('Answer evidence retains '+audience+' current parents',code == 200 and result.get('status') == 'ok'
+                      and set(result.get('evidence_trace',{}).get('candidate_ids',[])) == {wanted}
+                      and set(result.get('citation_ids',[])).issubset({wanted}),elapsed)
             code,result,elapsed = call('recall',dict(task_hint=key,project=key,limit_tokens=8192))
             check('Common fixture recall bundle with legacy project', code == 200 and result.get('status') == 'ok'
                   and {int(row['memory_id']) for row in result.get('recall',{}).get('active_context',[])} == {ids['current']}, elapsed)
@@ -283,6 +289,15 @@ def main():
                     content=result.get(field,'')
                     check('Semantic '+verb+' retains '+audience+' parents',code == 200 and result.get('status') == 'ok'
                           and expected in content and not any(key+'-'+other in content for other in states+['workspace'] if other != state),elapsed)
+                    if verb == 'facts':
+                        projection=result.get('fact_projection',{})
+                        refs=projection.get('retained_items',[])
+                        parent=ids['current'] if audience == 'project' else workspace_id
+                        check('Fact projection observes only '+audience+' source versions',len(refs) == 1
+                              and projection.get('source_version_state') == 'record_versions_observed'
+                              and projection.get('projection_digest') == 'sha256:'+hashlib.sha256(content.encode()).hexdigest()
+                              and projection.get('rendered_bytes') == len(content.encode())
+                              and {int(p['record_id']) for ref in refs for p in ref['source_version']['memory_parents']} == {parent})
                 code,result,elapsed=call('assemble_typed_context',dict(query=key,**{audience:value},enable_episodes=True,
                     channel_budgets=dict(total=8192,current_assertions=2048,episodes=2048)))
                 channels=result.get('channels',{})
@@ -290,6 +305,21 @@ def main():
                 check('Typed assertion and episode channels retain '+audience+' parents',code == 200 and result.get('status') == 'ok'
                       and {row['object'] for row in channels.get('current_assertions',{}).get('items',[])} == {expected}
                       and {row['episode_key'] for row in channels.get('episodes',{}).get('items',[])} == {expected},elapsed)
+                refs=result.get('retained_items',[])
+                check('Typed projection observes only '+audience+' source versions',len(refs) == 2
+                      and result.get('source_version_state') == 'record_versions_observed'
+                      and {ref['channel'] for ref in refs} == {'current_assertions','episodes'}
+                      and all(ref['source_version'].get('memory_parent_state') == 'observed' for ref in refs)
+                      and {int(p['record_id']) for ref in refs for p in ref['source_version']['memory_parents']} == {parent})
+            for audience,value in [('project',key),('workspace',key+'-team')]:
+                code,result,elapsed=call('alerts',dict(**{audience:value}))
+                alerts=result.get('alerts',{})
+                wanted={ids[state] for state in ('future','expired','superseded','archived')} if audience == 'project' else set()
+                (args.output/('alerts-'+audience+'.json')).write_text(json.dumps(result,indent=2)+'\n')
+                check('Operator alerts retain '+audience+' history without erased parents',code == 200
+                      and result.get('status') == 'ok'
+                      and {row['memory_b_id'] for row in alerts.get('unresolved_contradictions',[])} == wanted
+                      and {row['memory_id'] for row in alerts.get('newly_superseded',[])} == ({ids['superseded']} if audience == 'project' else set()),elapsed)
             card_id = int(sql(f"""BEGIN;
               INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
                 VALUES('L1','episode','{key}-derived','{key}-derived copied current input','project','{key}');
