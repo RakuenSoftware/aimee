@@ -21,8 +21,9 @@ this follow-up changes only the transport. The [next transport reproduction](mem
 on `143b8d0dc` passes both dashboard audience checks; the
 [credential run](memory-mr01-session-briefing-2026-09-24/authority-before.json)
 passes project implicit-scope, include-all and forged-authority checks before
-failing the separate session briefing. Complete candidate validation follows
-the session transport repair.
+failing the separate session briefing. The session transport candidate `50282c8ba` passes the
+[complete 100-check common run](memory-mr01-common-derived-2026-09-24/checks.json)
+and [28 authority checks plus 128 concurrent calls](memory-mr01-session-briefing-2026-09-24/authority-after/checks.json).
 
 The common fixture now tests the advertised dashboard for both audiences.
 The credential fixture additionally checks implicit scope, attempted

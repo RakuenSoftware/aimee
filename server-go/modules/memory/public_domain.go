@@ -117,6 +117,9 @@ func handleDomainCommand(options handlerOptions, invocation bus.ModuleInvocation
 			if !ok {
 				return invalid("memory.search_graph_as_of requires as_of")
 			}
+			if _, err := parseMemoryTime(request.AsOf); err != nil {
+				return invalid(err.Error())
+			}
 		}
 		request.Operation, request.Limit = "relation-search", args.limit("limit", 10, 64)
 		scoped = commandScope(args, &request)

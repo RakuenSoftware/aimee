@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const derivedIndexSource = "memory-index-v1"
@@ -33,8 +34,7 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 	var key, content, session, valid, invalid, primary string
 	var parentRevision int64
 	if err := s.db.QueryRow(ctx, `SELECT key,content,COALESCE(source_session,''),
- COALESCE(NULLIF(valid_from,''),(SELECT ref_key FROM memory_temporal_refs WHERE memory_id=m.id
- AND granularity IN ('absolute_day','date_phrase','year') ORDER BY weight DESC,id LIMIT 1),created_at),
+ COALESCE(NULLIF(valid_from,''),created_at),
  COALESCE(valid_until,''),COALESCE((SELECT entity FROM memory_entities WHERE memory_id=m.id
  ORDER BY CASE role WHEN 'actor' THEN 0 WHEN 'subject' THEN 1 WHEN 'person' THEN 2 ELSE 3 END,weight DESC,id LIMIT 1),key),record_revision FROM memories m WHERE id=$1`, id).Scan(&key, &content, &session, &valid, &invalid, &primary, &parentRevision); err != nil {
 		return err
@@ -108,10 +108,7 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 			return err
 		}
 		fact := strings.Join([]string{f.Actor, f.Action, f.Object, f.Location, f.Time}, " ")
-		at := valid
-		if f.Time != "" {
-			at = f.Time
-		}
+		at := derivedFrameValidAt(valid, f.Time)
 		if f.Actor != "" && f.Action != "" && f.Object != "" {
 			relations = append(relations, derivedGraphRelation{f.Actor, f.Action, f.Object, fact, at, invalid, 2.4, 0, 0, 0})
 		}
@@ -119,7 +116,7 @@ func (s *postgresDataStore) replaceDerivedRelations(ctx context.Context, id int6
 			relations = append(relations, derivedGraphRelation{f.Actor, "located_at", f.Location, fact, at, invalid, 1.8, 0, 0, 0})
 		}
 		if f.Actor != "" && f.Time != "" {
-			relations = append(relations, derivedGraphRelation{f.Actor, "occurred_at", f.Time, fact, f.Time, invalid, 1.9, 0, 0, 0})
+			relations = append(relations, derivedGraphRelation{f.Actor, "occurred_at", f.Time, fact, at, invalid, 1.9, 0, 0, 0})
 		}
 	}
 	err = rows.Err()
@@ -256,4 +253,13 @@ func (s *postgresDataStore) writeDerivedRelationInputs(ctx context.Context, inpu
  WHERE NOT EXISTS(SELECT 1 FROM memory_lineage l WHERE l.object_type='relation'
  AND l.object_id=i.relation_id AND l.source_kind='memory-relation-input-v2' AND l.source_ref=i.source_ref)`, string(raw))
 	return err
+}
+
+// Frame times also contain natural-language hints such as "yesterday". Preserve
+// those in relation text/targets, but do not promote them into governed bounds.
+func derivedFrameValidAt(parent, hint string) string {
+	if parsed, err := parseMemoryTime(strings.TrimSpace(hint)); err == nil {
+		return parsed.UTC().Format(time.RFC3339Nano)
+	}
+	return parent
 }

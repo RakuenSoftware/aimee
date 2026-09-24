@@ -86,7 +86,7 @@ func (s *postgresDataStore) RelationSearch(ctx context.Context, query, asOf stri
 WHERE ($1='' OR src_entity ILIKE '%'||$1||'%' OR relation ILIKE '%'||$1||'%' OR
 dst_entity ILIKE '%'||$1||'%' OR fact_text ILIKE '%'||$1||'%')
 AND memory_id IN (SELECT id FROM visible) AND `+currentRelationInputsSQL("r")+`
-AND ($2='' OR ((valid_at='' OR valid_at<=$2) AND (invalid_at='' OR invalid_at>$2)))
+AND `+relationValidityAtSQL("r.", "COALESCE("+memoryTimeSQL("$2::text")+",CURRENT_TIMESTAMP)")+`
 ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,weight DESC,CASE WHEN valid_at<>'' THEN 1 ELSE 0 END DESC,created_at DESC LIMIT $3`, query, asOf, limit)
 	if err != nil {
 		return nil, err
@@ -100,7 +100,7 @@ func (s *postgresDataStore) EntityEdges(ctx context.Context, entity string, limi
 	}
 	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents+`) SELECT `+relationColumns+` FROM memory_relations r
 WHERE (lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1))
-AND memory_id IN (SELECT id FROM visible) AND `+currentRelationInputsSQL("r")+`
+AND memory_id IN (SELECT id FROM visible) AND `+currentRelationInputsSQL("r")+` AND `+relationValidityAtSQL("r.", "CURRENT_TIMESTAMP")+`
 ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,weight DESC,created_at DESC LIMIT $2`, entity, limit)
 	if err != nil {
 		return nil, err
@@ -117,7 +117,7 @@ func (s *postgresDataStore) entityProfile(ctx context.Context, entity string, ex
 		return result, err
 	}
 	err := s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents+` AND ($2='' OR (scope_type=$2 AND scope_value=$3))),
-visible_relations AS (SELECT * FROM memory_relations r WHERE memory_id IN (SELECT id FROM visible) AND `+currentRelationInputsSQL("r")+`)
+visible_relations AS (SELECT * FROM memory_relations r WHERE memory_id IN (SELECT id FROM visible) AND `+currentRelationInputsSQL("r")+` AND `+relationValidityAtSQL("r.", "CURRENT_TIMESTAMP")+`)
 SELECT
 (SELECT COUNT(DISTINCT memory_id) FROM memory_entities
  WHERE lower(entity)=lower($1) AND memory_id IN (SELECT id FROM visible)),

@@ -3,7 +3,7 @@ package memory
 // Versioned current-state KB eligibility, evaluated before lane limits. The
 // storage transaction supplies one stable request clock through CURRENT_TIMESTAMP.
 // Scope/RLS and evidence-specific admission remain additional mandatory gates.
-const currentEligibilityPolicy = "current-validity-v9"
+const currentEligibilityPolicy = "current-validity-v10"
 
 // KB timestamps historically mix UTC wall time and RFC3339 offsets. Normalize
 // both at the adapter; invalid nonempty timestamps raise a query error rather
@@ -68,6 +68,12 @@ func memoryUnexpiredAtSQL(column, clock string) string {
 }
 func memoryValidityAtSQL(prefix, clock string) string {
 	return memoryStartedAtSQL(prefix+"valid_from", clock) + ` AND ` + memoryUnexpiredAtSQL(prefix+"valid_until", clock)
+}
+
+// Authored/derived relations retain their own interval in addition to current
+// parent and producer-input eligibility. Legacy endpoint names differ from memories.
+func relationValidityAtSQL(prefix, clock string) string {
+	return memoryStartedAtSQL(prefix+"valid_at", clock) + ` AND ` + memoryUnexpiredAtSQL(prefix+"invalid_at", clock)
 }
 
 // Directives and reminders have an upper validity endpoint only. Matching,

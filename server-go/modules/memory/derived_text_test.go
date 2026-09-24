@@ -173,3 +173,15 @@ func exerciseDerivedTextReplay(t *testing.T, ctx context.Context, tx pgx.Tx, bac
 		t.Fatal(err)
 	}
 }
+
+func TestDerivedFrameValiditySeparatesTimeHints(t *testing.T) {
+	const parent = "2026-01-01"
+	for _, hint := range []string{"", "sep 12", "yesterday", "now", "infinity", "2026-02-30"} {
+		if got := derivedFrameValidAt(parent, hint); got != parent {
+			t.Errorf("hint %q acquired a validity bound: %q", hint, got)
+		}
+	}
+	if got := derivedFrameValidAt(parent, "2026-09-24T09:00:00.123+09:00"); got != "2026-09-24T00:00:00.123Z" {
+		t.Fatal("absolute frame time lost its instant", got)
+	}
+}

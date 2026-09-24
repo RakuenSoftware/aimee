@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -229,4 +230,118 @@ func exerciseDerivedEligibilityReplay(t *testing.T, ctx context.Context, tx pgx.
 			exec(`ROLLBACK TO SAVEPOINT malformed_derived_parent; RELEASE SAVEPOINT malformed_derived_parent`)
 		}
 	}
+}
+
+// Relation intervals are independent of their parent's validity. Query clocks
+// must compare instants, including offsets, before limits and profile counts.
+func TestRelationValidityPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL for packaged relation validity")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := tx.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const key = "relation-validity-instant"
+	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+ CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$;
+ GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+ GRANT SELECT ON ALL TABLES IN SCHEMA public TO aimee_store_runtime;
+ SELECT set_config('aimee.memory_scope_all','1',true); SET LOCAL TIME ZONE 'Asia/Tokyo'`)
+	var parent, relation int64
+	var now time.Time
+	if err := tx.QueryRow(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
+ VALUES('L2','fact',$1,'relation parent','project',$1) RETURNING id`, key).Scan(&parent); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity)
+ VALUES($1,$2,'uses','target') RETURNING id`, parent, key).Scan(&relation); err != nil {
+		t.Fatal(err)
+	}
+	exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_project',$1,true),
+ set_config('aimee.memory_scope_type','project',true),set_config('aimee.memory_scope_value',$1,true)`, key)
+	backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}
+	offset := func(at time.Time) string { return at.In(time.FixedZone("offset", 9*3600)).Format(time.RFC3339Nano) }
+	for _, tc := range []struct {
+		name, from, until string
+		want              bool
+	}{
+		{"open", "", "", true}, {"inclusive offset", offset(now), "", true},
+		{"future", offset(now.Add(time.Microsecond)), "", false},
+		{"exclusive offset", "", offset(now), false}, {"expired", "", offset(now.Add(-time.Second)), false},
+	} {
+		exec(`RESET ROLE`)
+		exec(`UPDATE memory_relations SET valid_at=$1,invalid_at=$2 WHERE id=$3`, tc.from, tc.until, relation)
+		exec(`SET LOCAL ROLE aimee_store_runtime`)
+		t.Run(tc.name, func(t *testing.T) {
+			for name, query := range map[string]func() ([]Relation, error){
+				"search": func() ([]Relation, error) { return backend.RelationSearch(ctx, key, "", 1) },
+				"edges":  func() ([]Relation, error) { return backend.EntityEdges(ctx, key, 1) },
+			} {
+				rows, err := query()
+				if err != nil || (len(rows) == 1) != tc.want || len(rows) > 1 {
+					t.Error(name, "relation interval eligibility", rows, err)
+				}
+			}
+			profile, err := backend.EntityProfile(ctx, key)
+			if tc.want && (err != nil || profile.Relations != 1) || !tc.want && !errors.Is(err, ErrMemoryNotFound) {
+				t.Error("profile interval eligibility", profile, err)
+			}
+		})
+	}
+	exec(`RESET ROLE`)
+	exec(`UPDATE memory_relations SET valid_at=$1,invalid_at=$2 WHERE id=$3`, offset(now.Add(-time.Second)), offset(now.Add(time.Second)), relation)
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	rows, err := backend.RelationSearch(ctx, key, now.UTC().Format(time.RFC3339Nano), 1)
+	if err != nil || len(rows) != 1 || rows[0].ID != relation {
+		t.Error("requested instant differs from offset spelling", rows, err)
+	}
+	// High-weight invalid relations cannot consume the only available result slot.
+	exec(`RESET ROLE`)
+	exec(`INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,weight,valid_at)
+ SELECT $1,$2,'uses','future-'||n::text,100,$3 FROM generate_series(1,5)n`, parent, key, offset(now.Add(time.Second)))
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	for _, query := range []func() ([]Relation, error){
+		func() ([]Relation, error) { return backend.RelationSearch(ctx, key, "", 1) },
+		func() ([]Relation, error) { return backend.EntityEdges(ctx, key, 1) },
+	} {
+		rows, err := query()
+		if err != nil || len(rows) != 1 || rows[0].ID != relation {
+			t.Error("invalid relation crowded out eligible row", rows, err)
+		}
+	}
+	for _, malformed := range []string{"now", "infinity", "not-a-time"} {
+		exec(`RESET ROLE`)
+		exec(`UPDATE memory_relations SET valid_at=$1 WHERE id=$2`, malformed, relation)
+		exec(`SET LOCAL ROLE aimee_store_runtime`)
+		for _, query := range []func() error{
+			func() error { _, err := backend.RelationSearch(ctx, key, "", 1); return err },
+			func() error { _, err := backend.EntityEdges(ctx, key, 1); return err },
+			func() error { _, err := backend.EntityProfile(ctx, key); return err },
+		} {
+			exec(`SAVEPOINT malformed_relation`)
+			if err := query(); err == nil {
+				t.Error("malformed relation time admitted", malformed)
+			}
+			exec(`ROLLBACK TO SAVEPOINT malformed_relation; RELEASE SAVEPOINT malformed_relation`)
+		}
+	}
+
 }

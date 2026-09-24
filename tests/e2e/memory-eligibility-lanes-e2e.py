@@ -186,6 +186,72 @@ def main():
                       and result.get('status') == 'ok' and wanted in body and key+'-authored' in body
                       and not any(key+'-question-'+key+'-'+other in body for other in states+['workspace'] if other != state)
                       and key+'-foreign-second' not in body and key+'-foreign-resolution' not in body)
+            # Reuse the same parent population for derived and retained-version views.
+            scenes=json.loads(sql(f"""BEGIN;
+              INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session)
+                SELECT id,key,key||' episode','{key}' FROM memories WHERE key LIKE '{key}-%';
+              INSERT INTO memory_entities(memory_id,entity)
+                SELECT id,'{key}-root' FROM memories WHERE key LIKE '{key}-%';
+              INSERT INTO memory_scenes(workspace_id)
+                SELECT key FROM memories WHERE key LIKE '{key}-%';
+              INSERT INTO memory_scene_members(scene_id,memory_id)
+                SELECT s.id,m.id FROM memory_scenes s JOIN memories m ON m.key=s.workspace_id
+                WHERE m.key LIKE '{key}-%';
+              SELECT json_object_agg(workspace_id,id) FROM memory_scenes WHERE workspace_id LIKE '{key}-%'; COMMIT"""))
+            for state in states:
+                code,result,elapsed=call('get_episode',dict(episode_key=key+'-'+state,project=key))
+                check('Derived episode parent '+state,code == 200 and
+                      ((result.get('status') == 'ok' and int(result['episode']['memory_id']) == ids[state])
+                       if state == 'current' else result.get('kind') == 'not_found' and 'episode' not in result),elapsed)
+                code,result,elapsed=call('explain_match',dict(query=key,memory_id=str(ids[state]),project=key))
+                check('Diagnostic match explanation current parent '+state,code == 200 and
+                      ((result.get('status') == 'ok' and int(result['row']['memory']['id']) == ids[state])
+                       if state == 'current' else result.get('kind') in ('not_found','unavailable') and 'row' not in result),elapsed)
+                code,result,elapsed=call('scene_show',dict(scene_id=scenes[key+'-'+state],project=key))
+                check('Derived scene members parent '+state,code == 200 and result.get('status') == 'ok'
+                      and {int(row['memory_id']) for row in result.get('members',[])} == ({ids[state]} if state == 'current' else set()),elapsed)
+                code,result,elapsed=call('fact_history',dict(key=key+'-'+state,project=key,max=1))
+                allowed=state in ('current','future','expired','superseded','archived')
+                check('Retained fact history audience and erasure '+state,code == 200 and result.get('status') == 'ok'
+                      and {int(row['id']) for row in result.get('history',[])} == ({ids[state]} if allowed else set()),elapsed)
+            for audience,value,state,parent in [('project',key,'current',ids['current']),('workspace',key+'-team','workspace',workspace_id)]:
+                for verb,field,extra in [('entity_edges','edges',dict(entity=key+'-root')),
+                                         ('search_graph','relations',dict(query=key))]:
+                    code,result,elapsed=call(verb,dict(**extra,**{audience:value},limit=64))
+                    check('Derived '+verb+' current '+audience+' parents',code == 200 and result.get('status') == 'ok'
+                          and {int(row['memory_id']) for row in result.get(field,[])} == {parent},elapsed)
+                code,result,elapsed=call('scene_list',dict(**{audience:value},limit=64))
+                check('Derived scene list current '+audience+' parents',code == 200 and result.get('status') == 'ok'
+                      and {int(row['id']) for row in result.get('scenes',[])} == {scenes[key+'-'+state]},elapsed)
+                code,result,elapsed=call('entity_profile',dict(entity=key+'-root',**{audience:value}))
+                profile=result.get('profile',{})
+                check('Derived entity profile current '+audience+' aggregates',code == 200 and result.get('status') == 'ok'
+                      and profile.get('mention_count') == 1 and profile.get('relation_count') == 1,elapsed)
+                code,result,elapsed=call('briefing',dict(**{audience:value},limit_tokens=8192))
+                briefing=result.get('briefing',{})
+                check('Briefing facts activity and entities retain '+audience+' parents',code == 200 and result.get('status') == 'ok'
+                      and {int(row['memory_id']) for row in briefing.get('key_facts',[])} == {parent}
+                      and {row['summary'] for row in briefing.get('recent_activity',[])} == {key+'-'+state+' episode'}
+                      and {(row['name'],row['mentions']) for row in briefing.get('active_entities',[])} == {(key+'-root',1)},elapsed)
+            for interval,from_sql,until_sql in [('future',"(now()+interval '1 day')::text","''"),
+                                                   ('expired',"''","(now()-interval '1 day')::text")]:
+                sql(f"UPDATE memory_relations SET valid_at={from_sql},invalid_at={until_sql} WHERE memory_id={ids['current']}")
+                for verb,field,extra in [('entity_edges','edges',dict(entity=key+'-root')),
+                                         ('search_graph','relations',dict(query=key))]:
+                    code,result,elapsed=call(verb,dict(**extra,project=key,limit=64))
+                    check('Relation '+interval+' interval excludes '+verb,code == 200
+                          and result.get('status') == 'ok' and result.get(field) == [],elapsed)
+                code,result,elapsed=call('entity_profile',dict(entity=key+'-root',project=key))
+                check('Relation '+interval+' interval excludes profile aggregate',code == 200
+                      and result.get('status') == 'ok' and result.get('profile',{}).get('relation_count') == 0,elapsed)
+            sql(f"UPDATE memory_relations SET valid_at='2020-01-01T09:00:00+09:00',invalid_at='2020-01-02T09:00:00+09:00' WHERE memory_id={ids['current']}")
+            for at,wanted in [('2020-01-01T00:00:00Z',{ids['current']}),('2020-01-02T00:00:00Z',set())]:
+                code,result,elapsed=call('search_graph_as_of',dict(query=key,project=key,as_of=at))
+                check('Relation historical offset instant '+at,code == 200 and result.get('status') == 'ok'
+                      and {int(row['memory_id']) for row in result.get('relations',[])} == wanted,elapsed)
+            code,result,elapsed=call('search_graph_as_of',dict(query=key,project=key,as_of='now'))
+            check('Relation historical query rejects relative time',code == 200 and result.get('kind') == 'invalid_argument',elapsed)
+            sql(f"UPDATE memory_relations SET valid_at='',invalid_at='' WHERE memory_id={ids['current']}")
             card_id = int(sql(f"""BEGIN;
               INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
                 VALUES('L1','episode','{key}-derived','{key}-derived copied current input','project','{key}');

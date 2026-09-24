@@ -1,0 +1,124 @@
+[
+  {
+    "name": "project verified scope is inherited by unscoped get",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 1",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 2",
+    "passed": true
+  },
+  {
+    "name": "project foreign record withheld 3",
+    "passed": true
+  },
+  {
+    "name": "project include_all stays within verified audience",
+    "passed": true
+  },
+  {
+    "name": "project explicit exact scope still excludes global records",
+    "passed": true
+  },
+  {
+    "name": "project actorless credential gains no user diagnostic authority",
+    "passed": true
+  },
+  {
+    "name": "project request text cannot replace verified audience",
+    "passed": true
+  },
+  {
+    "name": "project request text cannot grant diagnostic authority",
+    "passed": true,
+    "observation": {
+      "http_status": 403,
+      "kind": null,
+      "decision_present": false
+    }
+  },
+  {
+    "name": "project dashboard preserves verified scope 0",
+    "passed": true
+  },
+  {
+    "name": "project dashboard preserves verified scope 1",
+    "passed": true
+  },
+  {
+    "name": "project dashboard rejects forged authority",
+    "passed": true
+  },
+  {
+    "name": "project session briefing retains verified scope",
+    "passed": true
+  },
+  {
+    "name": "project concurrent live owner requests preserve scope (64 calls)",
+    "passed": true
+  },
+  {
+    "name": "workspace verified scope is inherited by unscoped get",
+    "passed": true
+  },
+  {
+    "name": "workspace foreign record withheld 15",
+    "passed": true
+  },
+  {
+    "name": "workspace foreign record withheld 16",
+    "passed": true
+  },
+  {
+    "name": "workspace foreign record withheld 17",
+    "passed": true
+  },
+  {
+    "name": "workspace include_all stays within verified audience",
+    "passed": true
+  },
+  {
+    "name": "workspace explicit exact scope still excludes global records",
+    "passed": true
+  },
+  {
+    "name": "workspace actorless credential gains no user diagnostic authority",
+    "passed": true
+  },
+  {
+    "name": "workspace request text cannot replace verified audience",
+    "passed": true
+  },
+  {
+    "name": "workspace request text cannot grant diagnostic authority",
+    "passed": true,
+    "observation": {
+      "http_status": 403,
+      "kind": null,
+      "decision_present": false
+    }
+  },
+  {
+    "name": "workspace dashboard preserves verified scope 0",
+    "passed": true
+  },
+  {
+    "name": "workspace dashboard preserves verified scope 1",
+    "passed": true
+  },
+  {
+    "name": "workspace dashboard rejects forged authority",
+    "passed": true
+  },
+  {
+    "name": "workspace session briefing retains verified scope",
+    "passed": true
+  },
+  {
+    "name": "workspace concurrent live owner requests preserve scope (64 calls)",
+    "passed": true
+  }
+]

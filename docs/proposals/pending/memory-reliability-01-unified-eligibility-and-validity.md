@@ -18,7 +18,7 @@ Implement the shared eligibility decision in `server-go/modules/memory` and use 
 
 ## Implemented foundation
 
-The Go `current-validity-v9` predicate now applies active lifecycle, explicit
+The Go `current-validity-v10` predicate now applies active lifecycle, explicit
 suppression and half-open valid time before lexical, active-version whole-record
 semantic, unit/temporal semantic, graph/PageRank parent, compatibility-window,
 recall-bundle, activation and briefing limits. Pending commitments use the same
@@ -69,6 +69,12 @@ limits. Existing evidence-statement and operator-review semantics are retained.
 The [validation record](../../validation/memory-derived-eligibility-2026-09-21.md)
 tracks runtime-role, public command and fresh placement results. These gates do
 not substitute for final-release version checks or certify full MR-01.
+
+Relation search, entity edges and profile aggregation also enforce each
+relation's own validity interval before limits. Requested relation times share
+the offset-aware adapter; malformed governed values fail closed. The
+[relation interval replay](../../validation/memory-mr01-relation-validity-2026-09-24.md)
+records targeted evidence and pending process checks.
 
 ## Contract
 

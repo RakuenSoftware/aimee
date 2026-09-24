@@ -17,6 +17,8 @@ func TestDomainPublicValidation(t *testing.T) {
 	for _, test := range []struct{ verb, args string }{
 		{"entity_profile", `{"entity":null}`}, {"entity_edges", `{"entity":12}`},
 		{"search_graph", `{}`}, {"search_graph_as_of", `{"query":"app"}`},
+		{"search_graph_as_of", `{"query":"app","as_of":"now"}`},
+		{"search_graph_as_of", `{"query":"app","as_of":"infinity"}`},
 		{"get_episode", `{}`}, {"get_provenance", `{"memory_id":1.5}`},
 		{"link_query", `{"memory_id":0}`}, {"link_create", `{"source_id":1,"target_id":1,"relation":"same"}`},
 		{"link_delete", `{"link_id":-1}`},
@@ -125,7 +127,7 @@ CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,epi
 		t.Fatal(past)
 	}
 	edges := run("entity_edges", `{"entity":"APP"}`)["edges"].([]any)
-	if len(edges) != 2 {
+	if len(edges) != 1 || edges[0].(map[string]any)["dst_entity"] != "new" {
 		t.Fatal(edges)
 	}
 	if rows := run("entity_edges", `{"entity":"missing"}`)["edges"].([]any); len(rows) != 0 {
