@@ -163,11 +163,17 @@ func TestCompressMatchesC(t *testing.T) {
 	}
 
 	n := r.Messages.Len()
-	last := r.Messages.At(n - 1)
-	// #2552: the conserving note is APPENDED, never prepended.
-	if last.GetString("role") != "assistant" ||
-		!strings.Contains(last.GetString("content"), "Coordinate Closet") {
-		t.Fatalf("closet note is not the final message: %s", PrintJSONUnformatted(last))
+	var last *JSONValue
+	for _, message := range r.Messages.Items {
+		if message.GetString("role") == "assistant" && strings.Contains(message.GetString("content"), "Coordinate Closet") {
+			last = message
+		}
+	}
+	if last == nil {
+		t.Fatal("identifier notice missing from retained tail")
+	}
+	if r.Messages.At(n-1).GetString("role") != compressFixture().At(compressFixture().Len()-1).GetString("role") {
+		t.Fatal("compression changed final provider role")
 	}
 	if strings.Contains(r.Messages.At(0).GetString("content"), "Coordinate Closet") {
 		t.Error("closet note must not sit at the head — that is what broke the freeze")
@@ -184,7 +190,7 @@ func TestCompressMatchesC(t *testing.T) {
 		}
 	}
 	// The retained tail kept its full bodies.
-	if body := r.Messages.At(n - 2).GetString("content"); !strings.Contains(body, "stage_5.c") ||
+	if body := r.Messages.At(n - 1).GetString("content"); !strings.Contains(body, "stage_5.c") ||
 		strings.Contains(body, "bytes omitted") {
 		t.Error("retained tail should not have been compressed")
 	}

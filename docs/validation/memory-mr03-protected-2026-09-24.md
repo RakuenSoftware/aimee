@@ -59,3 +59,10 @@ behavior. [Native fence tests](memory-mr03-protected-2026-09-24/native-fence.txt
 cover absent, malformed, literal-present and inherited limits. The live fixture
 uses `/bin/false` as its external command so even a regression cannot contact an
 external model provider.
+
+Generated evidence notices remain within the retained tail, inserted before a
+complete user turn or tool cycle. They cannot change the final provider role,
+invent an assistant prefill, split a tool pair or enter the frozen prefix. If no
+safe slot exists, compression retains the original. The strengthened
+[economizer race suite](memory-mr03-protected-2026-09-24/economizer-tail-race.txt)
+passed in 3.672 seconds.

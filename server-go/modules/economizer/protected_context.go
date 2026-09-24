@@ -50,3 +50,26 @@ func protectedContextPreserved(original, candidate *JSONValue) bool {
 	}
 	return true
 }
+
+// Insert generated evidence within the retained tail, before a clean user turn
+// or complete tool cycle. Appending assistant text would create a provider
+// prefill; appending user text would invent authority. Never enter the frozen
+// prefix or split a call from its results. No safe slot means no transform.
+func insertEvidenceNotice(messages, note *JSONValue, retained int) bool {
+	if !messages.IsArray() || retained <= 0 {
+		return false
+	}
+	minimum := messages.Len() - retained
+	if minimum < 0 {
+		minimum = 0
+	}
+	for i := messages.Len() - 1; i >= minimum; i-- {
+		if isCleanUserTurn(messages.At(i)) || isAssistantToolTurn(messages.At(i)) {
+			messages.Items = append(messages.Items, nil)
+			copy(messages.Items[i+1:], messages.Items[i:len(messages.Items)-1])
+			messages.Items[i] = note
+			return true
+		}
+	}
+	return false
+}

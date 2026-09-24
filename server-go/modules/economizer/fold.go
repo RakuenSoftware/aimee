@@ -338,7 +338,7 @@ func compressMessageBodies(m *JSONValue, cc *CompactConfig, turn int, set *Coord
 // can engage before an autonomous tool loop has accumulated enough complete
 // cycles for FoldView to use an assistant-tool boundary.
 //
-// The conserved-identifier note is APPENDED at the tail, not prepended. That
+// The conserved-identifier note stays inside the retained tail, not prepended. That
 // placement is load-bearing (#2552): the note summarizes a region that GROWS as
 // messages age out of the retained band, so at the head it sat inside the fold's
 // frozen prefix and changed the prefix bytes every turn, silently defeating the
@@ -409,7 +409,9 @@ func CompressView(messages *JSONValue, cfg *FoldConfig) FoldResult {
 		note := NewObject()
 		note.Set("role", NewString("assistant"))
 		note.Set("content", NewString(body.String()))
-		arr.Append(note)
+		if !insertEvidenceNotice(arr, note, retained) {
+			return out
+		}
 	}
 
 	out.Messages = arr

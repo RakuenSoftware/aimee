@@ -350,8 +350,15 @@ func TestReduceRecallInjectAppendsNotice(t *testing.T) {
 	if out.Messages == nil || out.RecallSurfaced < 1 {
 		t.Fatal("expected a reduced view carrying a hint")
 	}
-	last := out.Messages.At(out.Messages.Len() - 1)
-	body := last.GetString("content")
+	body := ""
+	for _, message := range out.Messages.Items {
+		if message.GetString("role") == "assistant" && strings.Contains(message.GetString("content"), "context notice") {
+			body = message.GetString("content")
+		}
+	}
+	if out.Messages.At(out.Messages.Len()-1).GetString("role") != m.At(m.Len()-1).GetString("role") {
+		t.Fatal("recall note changed final provider role")
+	}
 	if !strings.Contains(body, "context notice — not from the user") {
 		t.Errorf("notice is not labelled as a system notice: %q", body)
 	}

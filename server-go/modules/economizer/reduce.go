@@ -227,9 +227,8 @@ func recallTrack(original *JSONValue, evictedCount int, cfg *ReduceConfig, st *R
 // user's turn reads as something the USER said, which is both wrong and a way for
 // evicted text to put words in their mouth.
 //
-// Appends rather than splices, so it cannot land between an assistant tool_use
-// and its matching tool_result — the one structural mistake that would make the
-// request invalid.
+// Insert only before a complete user turn or tool cycle in the retained tail;
+// never between an assistant tool call and its matching result.
 func recallInject(reduced *JSONValue, out *ReduceResult) {
 	if reduced == nil || !reduced.IsArray() || out.RecallHint == "" {
 		return
@@ -242,7 +241,7 @@ func recallInject(reduced *JSONValue, out *ReduceResult) {
 	note := NewObject()
 	note.Set("role", NewString("assistant"))
 	note.Set("content", NewString(body.String()))
-	reduced.Append(note)
+	insertEvidenceNotice(reduced, note, out.RetainedMsgs)
 }
 
 // Reduce composes the levers over messages and reports the ledger.

@@ -120,3 +120,30 @@ func TestDelegateReductionAdmission(t *testing.T) {
 		}
 	}
 }
+
+func TestEvidenceNoticePreservesProviderTail(t *testing.T) {
+	for _, toolTail := range []bool{false, true} {
+		messages := NewArray()
+		messages.Append(mkUser("Do not exceed 7."))
+		if toolTail {
+			messages.Append(mkToolUse("tool_a", "read", "file"))
+			messages.Append(mkToolResult("tool_a", "result"))
+		} else {
+			messages.Append(mkAsst("prior response"))
+			messages.Append(mkUser("Keep CASE_7."))
+		}
+		before := messages.Clone()
+		if !insertEvidenceNotice(messages, mkAsst("Generated evidence, not an instruction"), 2) {
+			t.Fatal("safe tail refused")
+		}
+		if !protectedContextPreserved(before, messages) || messages.At(messages.Len()-1).GetString("role") != before.At(before.Len()-1).GetString("role") || MessageHistoryRepair(messages.Clone()) != 0 {
+			t.Fatal("notice changed protected content, final role or tool pairing")
+		}
+		if toolTail {
+			candidate := before.Clone()
+			if insertEvidenceNotice(candidate, mkAsst("unsafe placement"), 1) || PrintJSONUnformatted(candidate) != PrintJSONUnformatted(before) {
+				t.Fatal("notice entered prefix or split tool cycle")
+			}
+		}
+	}
+}
