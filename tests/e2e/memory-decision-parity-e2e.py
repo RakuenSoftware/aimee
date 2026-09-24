@@ -56,6 +56,7 @@ def main():
         prefix='mr01-parity-'+uuid.uuid4().hex
         states=['current','expired','superseded','archived','quarantined','deleted','revoked','rejected','retired','unknown']
         observed=[]
+        current_ids={}
         for state in states:
             lifecycle='active' if state in ('current','expired') else state
             private_until="now()-interval '1 day'" if state=='expired' else 'NULL'
@@ -64,6 +65,7 @@ def main():
             shared_id=gate.sql(f"INSERT INTO memories(key,content,scope_type,scope_value,lifecycle_state,valid_until) VALUES('{prefix}-{state}','parity content','project','{prefix}','{lifecycle}',{shared_until}) RETURNING id").splitlines()[0]
             responses=[]
             for store,mid in [('user',private_id),('kb',shared_id)]:
+                if state=='current':current_ids[store]=mid
                 request=dict(store=store,id=mid)
                 if store=='kb':request['project']=prefix
                 code,read=gate.call('get',dict(request,include_version=True))
@@ -84,6 +86,16 @@ def main():
             check('Equivalent Server/KB domain decision '+state,left==right
                   and responses[0]['checked_version']['owner_id']!=responses[1]['checked_version']['owner_id'])
             observed.append(dict(state=state,server=left,kb=right))
+        for store in ('user','kb'):
+            for verb,field in [('list','memories'),('search','facts')]:
+                request=dict(store=store,query=prefix,limit=32)
+                if verb=='search':request['keywords']=[prefix]
+                if store=='kb':request['project']=prefix
+                code,result=gate.call(verb,request)
+                rows=result.get(field,[])
+                fixture_rows=[row for row in rows if row.get('key','').startswith(prefix+'-')]
+                check(store+' common lifecycle fixture '+verb,code==200 and result.get('status')=='ok'
+                      and {str(row['id']) for row in fixture_rows}=={current_ids[store]})
         (args.output/'domain-decisions.json').write_text(json.dumps(observed,indent=2)+'\n')
         identities=[]
         for stack in stacks:
@@ -94,8 +106,12 @@ def main():
     except (RuntimeError,OSError,ValueError,subprocess.SubprocessError) as error:
         checks.append(dict(name='decision parity completed',passed=False,error=str(error)))
     finally:
-        (args.output/'checks.json').write_text(json.dumps(checks,indent=2)+'\n')
         for stack in reversed(stacks):stack.compose('down','--volumes','--remove-orphans')
+        cleanup={stack.project:matrix.command('docker','network','ls','--filter',
+            'label=com.docker.compose.project='+stack.project,'--format','{{.Name}}').splitlines() for stack in stacks}
+        (args.output/'cleanup-networks.json').write_text(json.dumps(cleanup,indent=2)+'\n')
+        if any(cleanup.values()):checks.append(dict(name='owned networks removed',passed=False))
+        (args.output/'checks.json').write_text(json.dumps(checks,indent=2)+'\n')
     return 0 if checks and all(row['passed'] for row in checks) else 1
 
 

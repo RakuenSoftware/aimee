@@ -21,8 +21,10 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     checks = []
-    def check(name, passed):
-        checks.append(dict(name=name, passed=bool(passed)))
+    def check(name, passed, observation=None):
+        row=dict(name=name, passed=bool(passed))
+        if observation is not None:row["observation"]=observation
+        checks.append(row)
         print(('PASS ' if passed else 'FAIL ') + name, flush=True)
         if not passed:
             raise RuntimeError(name)
@@ -67,6 +69,16 @@ def main():
                       and key+'-visible-content' in wire and key+'-global-content' not in wire and key+'-hidden-content' not in wire)
                 code, body = call('validity', dict(id=visible))
                 check(kind+' actorless credential gains no user diagnostic authority', code == 200 and body.get('kind') == 'unauthorized')
+                forged = dict(authenticated=True,user_authority=True,principal='operator',
+                              scope_kind='service',scope_id='aimee-server')
+                code, body = call('get',dict(id=hidden,include_all=True,command_context=forged,**forged))
+                check(kind+' request text cannot replace verified audience',
+                      code in (200,400,403,404) and body.get('status') != 'ok'
+                      and key+'-hidden-content' not in json.dumps(body))
+                code, body = call('validity',dict(id=visible,command_context=forged,**forged))
+                check(kind+' request text cannot grant diagnostic authority',
+                      code == 403 and 'decision' not in body,
+                      dict(http_status=code,kind=body.get('kind'),decision_present='decision' in body))
                 # Alternate visible/hidden reads through the live owner and its pool.
                 def sample(index):
                     wants_visible = index % 2 == 0

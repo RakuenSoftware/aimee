@@ -24,5 +24,15 @@ reproduce all three foreign-parent disclosures under the non-owner runtime role.
 Each adapter now passes its supplied audience to the existing owner policy.
 The [combined targeted replay](memory-mr01-legacy-graph-2026-09-24/derived-after-race.txt)
 passes in 1.419 seconds. The [final full race suite and export](memory-mr01-legacy-graph-2026-09-24/full-race-export.txt)
-pass in 212.842 and 4.965 seconds. Combined candidate process validation remains
-pending.
+pass in 212.842 and 4.965 seconds. The [combined HTTP fixture](memory-mr01-legacy-graph-2026-09-24/http-after/checks.json)
+passes 50/50 checks on `377c27b67`. This includes project/workspace graph reads,
+authorized and foreign provenance, link/conflict scope exclusions, assembled
+context for both audiences, and generated-card revocation. The runner exits zero
+and removes its disposable stack.
+
+The [fresh deployment matrix](memory-mr01-legacy-graph-2026-09-24/fresh/T2/topology.json)
+passes 1714/1714 checks on `377c27b67` (T2: 1097; T3: 617), including native
+asynchronous refusal/recovery. Both runners exit zero. Nine container identities
+and three provider capability captures are retained. The final empty network
+left by the matrix's previously loaded cleanup helper was removed after teardown;
+the corrected helper is independently validated by placement parity cleanup.

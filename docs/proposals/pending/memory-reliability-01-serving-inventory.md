@@ -19,7 +19,7 @@ operator inspection have different expected sets.
 | Dense vectors, unit/temporal vectors, PageRank and post-fusion filters | Independent runtime lanes with perfect invalid matches; lower-ranked eligible backfill; exact admitted graph nodes/edges | Preserve parent and dependency parity across assembly and release; these internal views are not HTTP methods |
 | Directive/reminder matching and briefing | Dedicated normalized expiry, pre-limit exclusion and malformed-time fixtures | Include applicable parent lifecycle/scope combinations in common process evidence |
 | `validity`, `diagnose_scoped`, `explain_match` | Actual Server/KB decision parity; common runtime/HTTP diagnostic retrieval | Complete diagnostic-purpose and authenticated-context audit; revalidate final candidate |
-| Private `get`, `list`, `search`, native recall and exact-version reads | Server process regression matrix; matched current lifecycle decisions; private version/source checks | Complete common fixture equivalence for every advertised private serving view and release |
+| Private `get`, `list`, `search`, native recall and exact-version reads | Server process regression matrix; matched current lifecycle decisions plus common-fixture list/search in both actual owners; private version/source checks | Complete common fixture equivalence for every advertised private serving view and release |
 | Exports, checkpoints, maintenance, reviews and statistics | Existing authorized inspection and mutation tests | Audit audience/purpose handling independently; ordinary current-serving exclusions must not erase their declared historical/operator behavior |
 
 [Common lane evidence](../../validation/memory-mr01-common-lanes-2026-09-24.md),

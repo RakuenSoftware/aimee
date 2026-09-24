@@ -71,6 +71,18 @@ class Stack:
                 *encryption, '-f', str(self.network_override))
 
     def compose(self, *args):
+        if args and args[0] == 'down' and self.role == 'server':
+            # Enrollment joins the independently owned KB to this Server's
+            # network. Compose cannot remove that network while the peer is
+            # attached, even after it removes every Server-owned container.
+            network = self.project + '_default'
+            inspected = subprocess.run(('docker','network','inspect',network),
+                stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=30)
+            if inspected.returncode == 0:
+                for identity,peer in json.loads(inspected.stdout)[0].get('Containers',{}).items():
+                    name = peer.get('Name','')
+                    if name.startswith('aimee-e2e-kb-') and name.endswith('-aimee-kb-1'):
+                        command('docker','network','disconnect',network,identity)
         return command('docker', 'compose', *self.compose_args(), *args, env=self.env)
 
     def start(self):

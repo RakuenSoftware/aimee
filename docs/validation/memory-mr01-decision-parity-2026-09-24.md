@@ -24,3 +24,11 @@ shared future/suppression/scope cases remain covered by the separate common
 fixture. This does not claim personal belief-time reconstruction, future-time
 schema support or overall MR-01 completion. A subsequent implicit-audience repair
 has its own pending candidate validation.
+
+The [current candidate run](memory-mr01-decision-parity-2026-09-24/current/checks.json)
+passes 54/54 application checks on `377c27b67`. Four additional checks reuse the
+same lifecycle population for actual Server and KB list/search routes. The
+runner exits zero; [cleanup verification](memory-mr01-decision-parity-2026-09-24/current/cleanup-networks.json)
+confirms both projects leave no networks. An initial extension incorrectly sent
+search a query string and limit 64; the corrected fixture uses the advertised
+keywords array and limit 32. This was a harness request error, not a serving failure.

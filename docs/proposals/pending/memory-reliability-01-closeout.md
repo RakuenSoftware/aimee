@@ -12,7 +12,7 @@ tests do not close an entire clause or authorize advancing to MR-02.
 | A4: concurrent pooled scope isolation under non-owner runtime | Transaction-local production settings and restricted-role fixtures | [Two-connection race replay](../../validation/memory-mr01-scope-pool-2026-09-24/race.txt) passes 288 calls from 12 callers, including rollback and cleared session settings; [Live mixed-project replay](../../validation/memory-mr01-scope-pool-2026-09-24/http/checks.json) now passes 288 requests with 12 callers, including failed-query rollback; live runtime role is verified non-owner, non-superuser and NOBYPASSRLS |
 | A5: changes after retrieval invalidate release, preserving earlier decision history | Observed source versions, revalidation on provider attempts, stale-source refusals and durable prepared/admission receipts | Close post-check mutation race and remaining unversioned channels; demonstrate retained decision history at the actual release boundary |
 | A6: equal hard gates in lexical, dense-only and graph-only lanes | Independent retrieval lanes use current eligibility; vector/PageRank regressions | [Common canonical fixture](../../validation/memory-mr01-common-lanes-2026-09-24.md) passes independent lexical, dense-only and graph-only runtime lanes; HTTP now adds 40 common-fixture checks, including legacy audiences and recall. Lower-ranked eligible vectors backfill LIMIT 3 despite better invalid matches; graph nodes/edges are checked. [Activated generated-card dependency repair](../../validation/memory-mr01-activation-card-2026-09-24.md) passes full race/export and 42 HTTP checks |
-| A7: equivalent Server/KB domain decisions; no C fallback | Shared Go owner, C-boundary guard, deployment restart/outage tests | [Ten matched lifecycle fixtures](../../validation/memory-mr01-decision-parity-2026-09-24.md) pass 50 checks against both actual owners on `7eb4cf3b1`; its 1714-check matrix covers disconnected-module refusal. Subsequent candidate changes require revalidation |
+| A7: equivalent Server/KB domain decisions; no C fallback | Shared Go owner, C-boundary guard, deployment restart/outage tests | [Ten matched lifecycle fixtures](../../validation/memory-mr01-decision-parity-2026-09-24.md) pass 54 checks against both actual owners on `377c27b67`, including list/search; its [1714-check matrix](../../validation/memory-mr01-legacy-graph-2026-09-24.md) covers disconnected-module refusal. Subsequent candidate changes require revalidation |
 
 The [validity diagnostic implementation](../../validation/memory-validity-2026-09-24.md)
 adds a structured decision/reason projection, host-scope checks and CLI/HTTP
@@ -20,8 +20,11 @@ forwarding; fresh-process validation passes 1714/1714 checks. The
 [verified-credential serving repair](../../validation/memory-mr01-serving-scope-2026-09-24.md)
 also passes its targeted HTTP regression. Required contract work
 also remains: host-bound eligibility context across all serving paths,
-privileged `include_all` admission audit, and effective or explicitly rejected
-legacy parameters. The diagnostic does not substitute for these serving gates.
+the complete purpose/policy/revocation-generation context and effective or
+explicitly rejected legacy parameters across remaining routes.
+[Host-bound authority checks](../../validation/memory-mr01-host-authority-2026-09-24.md)
+now attest that request `include_all` and forged principal fields cannot widen
+verified project/workspace credentials or grant diagnostic authority. The diagnostic does not substitute for these serving gates.
 
 Closeout requires a traceable result for every gate, current build/export and
 boundary checks, process-level placement evidence, and recorded latency and
