@@ -160,12 +160,12 @@ class Gate:
             cli = self.cli('recall', '--query', self.prefix, '--store', 'kb', '--scope', 'all', '--limit-tokens', '8192')
             self.check('CLI retains the complete hard-rule set', len([
                 r for r in cli.get('recall', {}).get('always_on_rules', []) if r['title'].startswith(prefix)]) == 20)
-            # A small hard rule survives oversized optional evidence at a budget
-            # that fits the complete rule set but cannot fit the optional row.
+            # Reserve the complete rules plus their mandatory source observations.
+            # The optional row alone exceeds the bounded serialized allocation.
             fixture = self.good('optional oversized recall fixture', self.call('store', dict(
-                store='kb', key=self.prefix+'-packing', content='optional evidence ' * 500)))
+                store='kb', key=self.prefix+'-packing', content='optional evidence ' * 1000)))
             body = self.good('hard rules survive optional trimming', self.call('recall', dict(
-                store='kb', scope='all', task_hint=self.prefix+'-packing', limit_tokens=1600)))
+                store='kb', scope='all', task_hint=self.prefix+'-packing', limit_tokens=4096)))
             bundle = body.get('recall', {})
             self.check('packing keeps complete rules and omits oversized optional row',
                 len([r for r in bundle.get('always_on_rules', []) if r['title'].startswith(prefix)]) == 20 and
