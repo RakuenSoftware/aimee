@@ -30,33 +30,6 @@ int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
 
-static int kb_handle_session_briefing_section(int fd, cJSON *req, cJSON *(*fn)(int limit),
-                                              const char *err_msg)
-{
-   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 0;
-   cJSON *resp = fn(limit);
-   if (!resp)
-      return kb_send_error(fd, err_msg);
-   int srv_rc = kb_send_response(fd, resp);
-   cJSON_Delete(resp);
-   return srv_rc;
-}
-
-int kb_handle_session_briefing_commitments(int fd, cJSON *req)
-{
-   return kb_handle_session_briefing_section(fd, req,
-                                             db2_kb_service_session_briefing_commitments_json,
-                                             "failed to render session-briefing commitments");
-}
-
-int kb_handle_session_briefing_directives(int fd, cJSON *req)
-{
-   return kb_handle_session_briefing_section(fd, req,
-                                             db2_kb_service_session_briefing_directives_json,
-                                             "failed to render session-briefing directives");
-}
-
 /* Auditable-correctness P1: record one per-turn retrieval_event keyed by the
  * caller-visible turn_id, listing the int64 memory rows surfaced into the turn.
  * The emission decision (the kb_evidence_emit_enabled flag) is made server-side

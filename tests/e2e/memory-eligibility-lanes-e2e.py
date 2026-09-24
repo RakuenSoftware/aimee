@@ -179,6 +179,13 @@ def main():
                     check('Directive '+mode+' recall requires every current '+audience+' parent',
                           code == 200 and result.get('status') == 'ok'
                           and questions == {key+'-question-'+key+'-'+state,key+'-authored'}, elapsed)
+                code,result = kb.kb_request('/v1/actions/session_briefing.directives',dict(**{audience:value},limit=32))
+                body=result.get('body','')
+                wanted=key+'-question-'+key+'-'+state
+                check('Session directive briefing retains '+audience+' parent scope', code == 200
+                      and result.get('status') == 'ok' and wanted in body and key+'-authored' in body
+                      and not any(key+'-question-'+key+'-'+other in body for other in states+['workspace'] if other != state)
+                      and key+'-foreign-second' not in body and key+'-foreign-resolution' not in body)
             card_id = int(sql(f"""BEGIN;
               INSERT INTO memories(tier,kind,key,content,scope_type,scope_value)
                 VALUES('L1','episode','{key}-derived','{key}-derived copied current input','project','{key}');

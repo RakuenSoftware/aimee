@@ -87,6 +87,14 @@ def main():
                           and sum(row['count'] for row in scopes if row['scope'] == kind) == 1)
                 code,body = kb.kb_request('/v1/actions/dashboard.memory_stats',dict(command_context=forged,**forged))
                 check(kind+' dashboard rejects forged authority',code == 403 and 'payload' not in body)
+                matrix.command('docker','exec',kb.postgres,'psql','-U','postgres','-d','aimee_store','-X','-qAt','-v','ON_ERROR_STOP=1','-c',f"""
+                  INSERT INTO epistemic_directives(question,topic,cause,memory_a_id)
+                  SELECT key||'-question','{key}','user_follow_up',id FROM memories WHERE key LIKE '{key}-%'""")
+                code,body = kb.kb_request('/v1/actions/session_briefing.directives',dict(limit=32,include_all=True))
+                block=body.get('body','')
+                check(kind+' session briefing retains verified scope',code == 200 and body.get('status') == 'ok'
+                      and key+'-visible-question' in block and key+'-global-question' in block
+                      and key+'-hidden-question' not in block)
                 # Alternate visible/hidden reads through the live owner and its pool.
                 def sample(index):
                     wants_visible = index % 2 == 0

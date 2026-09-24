@@ -17,7 +17,12 @@ without a database fallback. The external adapter ownership digest was reviewed
 and refreshed. Both changed C translation units [compile with warnings as errors](memory-mr01-dashboard-transport-2026-09-24/native-build.txt),
 and ownership, C-boundary, module-bus, descriptor and inventory checks pass.
 The existing Go statistics regression and full memory suite remain applicable;
-this follow-up changes only the transport. Candidate HTTP validation is pending.
+this follow-up changes only the transport. The [next transport reproduction](memory-mr01-session-briefing-2026-09-24/http-before.json)
+on `143b8d0dc` passes both dashboard audience checks; the
+[credential run](memory-mr01-session-briefing-2026-09-24/authority-before.json)
+passes project implicit-scope, include-all and forged-authority checks before
+failing the separate session briefing. Complete candidate validation follows
+the session transport repair.
 
 The common fixture now tests the advertised dashboard for both audiences.
 The credential fixture additionally checks implicit scope, attempted

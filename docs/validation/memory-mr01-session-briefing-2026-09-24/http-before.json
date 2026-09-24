@@ -1,0 +1,289 @@
+[
+  {
+    "name": "Common fixture lexical/list find_facts",
+    "passed": true,
+    "elapsed_ms": 197.306
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_visible",
+    "passed": true,
+    "elapsed_ms": 171.0
+  },
+  {
+    "name": "Common fixture lexical/list find_facts_scoped",
+    "passed": true,
+    "elapsed_ms": 149.896
+  },
+  {
+    "name": "Common fixture lexical/list list",
+    "passed": true,
+    "elapsed_ms": 137.961
+  },
+  {
+    "name": "Common fixture compatibility search and windows",
+    "passed": true,
+    "elapsed_ms": 165.239
+  },
+  {
+    "name": "Common fixture query route top_l2_facts",
+    "passed": true,
+    "elapsed_ms": 141.485
+  },
+  {
+    "name": "Common fixture query route load_eval_corpus",
+    "passed": true,
+    "elapsed_ms": 128.93
+  },
+  {
+    "name": "Common fixture query route list_session_scope_priority",
+    "passed": true,
+    "elapsed_ms": 145.979
+  },
+  {
+    "name": "Common fixture query route list_session_scope_priority_like",
+    "passed": true,
+    "elapsed_ms": 144.513
+  },
+  {
+    "name": "Common fixture query route search_facts_patterns_by_keyword",
+    "passed": true,
+    "elapsed_ms": 125.5
+  },
+  {
+    "name": "Common fixture diagnostic retrieval",
+    "passed": true,
+    "elapsed_ms": 149.653
+  },
+  {
+    "name": "Common fixture recall bundle with legacy project",
+    "passed": true,
+    "elapsed_ms": 189.483
+  },
+  {
+    "name": "Common fixture assembled project context",
+    "passed": true,
+    "elapsed_ms": 154.304
+  },
+  {
+    "name": "Common fixture assembled workspace context",
+    "passed": true,
+    "elapsed_ms": 143.176
+  },
+  {
+    "name": "Legacy project applies without scope_context",
+    "passed": true,
+    "elapsed_ms": 152.383
+  },
+  {
+    "name": "Legacy workspace applies without scope_context",
+    "passed": true,
+    "elapsed_ms": 177.059
+  },
+  {
+    "name": "Explicit include_all false restricts to shared audience",
+    "passed": true,
+    "elapsed_ms": 143.965
+  },
+  {
+    "name": "Malformed project cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 94.672
+  },
+  {
+    "name": "Malformed workspace cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 90.128
+  },
+  {
+    "name": "Malformed scope_context cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 99.916
+  },
+  {
+    "name": "Malformed include_all cannot become all-scope retrieval",
+    "passed": true,
+    "elapsed_ms": 119.573
+  },
+  {
+    "name": "Common fixture graph-only evidence-backed traversal",
+    "passed": true,
+    "elapsed_ms": 128.725
+  },
+  {
+    "name": "Common fixture current current",
+    "passed": true,
+    "elapsed_ms": 145.341
+  },
+  {
+    "name": "Common fixture historical current",
+    "passed": true,
+    "elapsed_ms": 132.209
+  },
+  {
+    "name": "Common fixture current future",
+    "passed": true,
+    "elapsed_ms": 152.954
+  },
+  {
+    "name": "Common fixture historical future",
+    "passed": true,
+    "elapsed_ms": 129.339
+  },
+  {
+    "name": "Common fixture current expired",
+    "passed": true,
+    "elapsed_ms": 136.981
+  },
+  {
+    "name": "Common fixture historical expired",
+    "passed": true,
+    "elapsed_ms": 136.51
+  },
+  {
+    "name": "Common fixture current suppressed",
+    "passed": true,
+    "elapsed_ms": 144.503
+  },
+  {
+    "name": "Common fixture historical suppressed",
+    "passed": true,
+    "elapsed_ms": 115.285
+  },
+  {
+    "name": "Common fixture current superseded",
+    "passed": true,
+    "elapsed_ms": 127.39
+  },
+  {
+    "name": "Common fixture historical superseded",
+    "passed": true,
+    "elapsed_ms": 137.975
+  },
+  {
+    "name": "Common fixture current archived",
+    "passed": true,
+    "elapsed_ms": 118.68
+  },
+  {
+    "name": "Common fixture historical archived",
+    "passed": true,
+    "elapsed_ms": 130.009
+  },
+  {
+    "name": "Common fixture current quarantined",
+    "passed": true,
+    "elapsed_ms": 116.437
+  },
+  {
+    "name": "Common fixture historical quarantined",
+    "passed": true,
+    "elapsed_ms": 127.414
+  },
+  {
+    "name": "Common fixture current deleted",
+    "passed": true,
+    "elapsed_ms": 119.633
+  },
+  {
+    "name": "Common fixture historical deleted",
+    "passed": true,
+    "elapsed_ms": 120.507
+  },
+  {
+    "name": "Common fixture current revoked",
+    "passed": true,
+    "elapsed_ms": 150.704
+  },
+  {
+    "name": "Common fixture historical revoked",
+    "passed": true,
+    "elapsed_ms": 102.688
+  },
+  {
+    "name": "Common fixture current cross-scope",
+    "passed": true,
+    "elapsed_ms": 123.861
+  },
+  {
+    "name": "Common fixture historical cross-scope",
+    "passed": true,
+    "elapsed_ms": 114.063
+  },
+  {
+    "name": "Legacy graph query honors project",
+    "passed": true,
+    "elapsed_ms": 133.344
+  },
+  {
+    "name": "Legacy graph query honors workspace",
+    "passed": true,
+    "elapsed_ms": 146.363
+  },
+  {
+    "name": "Legacy provenance audience current",
+    "passed": true,
+    "elapsed_ms": 123.27
+  },
+  {
+    "name": "Legacy provenance audience cross-scope",
+    "passed": true,
+    "elapsed_ms": 143.297
+  },
+  {
+    "name": "Legacy link audience excludes foreign endpoints",
+    "passed": true,
+    "elapsed_ms": 142.609
+  },
+  {
+    "name": "Legacy conflict audience excludes foreign parents",
+    "passed": true,
+    "elapsed_ms": 120.665
+  },
+  {
+    "name": "Operator statistics honor project without current-only filtering",
+    "passed": true,
+    "elapsed_ms": 128.452
+  },
+  {
+    "name": "Console effectiveness retains project restriction",
+    "passed": true,
+    "elapsed_ms": 171.884
+  },
+  {
+    "name": "Dashboard transport retains project and authorized endpoints",
+    "passed": true
+  },
+  {
+    "name": "Operator statistics honor workspace without current-only filtering",
+    "passed": true,
+    "elapsed_ms": 119.036
+  },
+  {
+    "name": "Console effectiveness retains workspace restriction",
+    "passed": true,
+    "elapsed_ms": 132.958
+  },
+  {
+    "name": "Dashboard transport retains workspace and authorized endpoints",
+    "passed": true
+  },
+  {
+    "name": "Directive matched recall requires every current project parent",
+    "passed": true,
+    "elapsed_ms": 182.63
+  },
+  {
+    "name": "Directive fallback recall requires every current project parent",
+    "passed": true,
+    "elapsed_ms": 158.578
+  },
+  {
+    "name": "Session directive briefing retains project parent scope",
+    "passed": false
+  },
+  {
+    "name": "common fixture completed",
+    "passed": false,
+    "error": "Session directive briefing retains project parent scope"
+  }
+]

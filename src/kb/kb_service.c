@@ -774,9 +774,10 @@ static cJSON *kb_command_context(void)
    return context;
 }
 
-/* Preserve the public dashboard envelope while forwarding untrusted arguments
+/* Preserve public runtime-view envelopes while forwarding untrusted arguments
  * and verifier-owned authority separately to the Go memory owner. */
-int kb_handle_dashboard_memory_stats(int fd, cJSON *req)
+static int kb_handle_memory_runtime_view(int fd, cJSON *req, const char *operation,
+                                         const char *field, const char *public_field)
 {
    cJSON *args = cJSON_Duplicate(req, 1);
    cJSON *context = kb_command_context();
@@ -788,7 +789,7 @@ int kb_handle_dashboard_memory_stats(int fd, cJSON *req)
       return kb_send_error(fd, "command context unavailable");
    }
    cJSON_DeleteItemFromObjectCaseSensitive(args, "operation");
-   cJSON_AddStringToObject(args, "operation", "stats-dashboard");
+   cJSON_AddStringToObject(args, "operation", operation);
    int dispatched = aimee_module_commands_dispatch_internal_context_timeout(
        "memory.runtime", args, context, 60000, &response);
    cJSON_Delete(args);
@@ -798,10 +799,25 @@ int kb_handle_dashboard_memory_stats(int fd, cJSON *req)
       cJSON_Delete(response);
       return kb_send_error(fd, "command module unavailable");
    }
-   cJSON *payload = cJSON_DetachItemFromObjectCaseSensitive(response, "dashboard");
+   cJSON *payload = cJSON_DetachItemFromObjectCaseSensitive(response, field);
    if (payload)
-      cJSON_AddItemToObject(response, "payload", payload);
-   return kb_reply_or_error(fd, response, "failed to fetch dashboard memory stats");
+      cJSON_AddItemToObject(response, public_field, payload);
+   return kb_reply_or_error(fd, response, "failed to fetch memory runtime view");
+}
+
+int kb_handle_dashboard_memory_stats(int fd, cJSON *req)
+{
+   return kb_handle_memory_runtime_view(fd, req, "stats-dashboard", "dashboard", "payload");
+}
+
+int kb_handle_session_briefing_directives(int fd, cJSON *req)
+{
+   return kb_handle_memory_runtime_view(fd, req, "directive-briefing", "block", "body");
+}
+
+int kb_handle_session_briefing_commitments(int fd, cJSON *req)
+{
+   return kb_handle_memory_runtime_view(fd, req, "prospective-briefing", "block", "body");
 }
 
 static int kb_handle_request(kb_service_ctx_t *ctx, int fd, cJSON *req)
