@@ -1,0 +1,7 @@
+{
+  "fixture": "Synthetic common HTTP fixture on isolated CT109, concurrent with parity; not a general performance benchmark",
+  "count": 144,
+  "median_ms": 141.912,
+  "p95_ms": 214.972,
+  "max_ms": 571.337
+}

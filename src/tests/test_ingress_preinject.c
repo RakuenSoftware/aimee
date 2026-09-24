@@ -1346,9 +1346,12 @@ static void test_preview_sources_at_provider_fence(void)
 
 static void test_unversioned_provider_body_receipt(void)
 {
-   char directory[] = "/tmp/aimee-unversioned-receipt-XXXXXX";
-   assert(mkdtemp(directory));
-   char path[512];
+   char directory[1024];
+   const char *temporary = getenv("TMPDIR");
+   int length = snprintf(directory, sizeof(directory), "%s/aimee-unversioned-receipt-XXXXXX",
+                         temporary && temporary[0] ? temporary : "/tmp");
+   assert(length > 0 && (size_t)length < sizeof(directory) && mkdtemp(directory));
+   char path[1200];
    snprintf(path, sizeof(path), "%s/receipt.db", directory);
    assert(audit_worm_init_at(path) == 0);
    request_context_t context = {0};
@@ -1404,9 +1407,12 @@ static void test_unversioned_provider_body_receipt(void)
 
 static void test_durable_provider_attempt(void)
 {
-   char directory[] = "/tmp/aimee-provider-receipt-XXXXXX";
-   assert(mkdtemp(directory));
-   char path[512];
+   char directory[1024];
+   const char *temporary = getenv("TMPDIR");
+   int length = snprintf(directory, sizeof(directory), "%s/aimee-provider-receipt-XXXXXX",
+                         temporary && temporary[0] ? temporary : "/tmp");
+   assert(length > 0 && (size_t)length < sizeof(directory) && mkdtemp(directory));
+   char path[1200];
    snprintf(path, sizeof(path), "%s/receipt.db", directory);
    assert(audit_worm_init_at(path) == 0);
    request_context_t context = {0};

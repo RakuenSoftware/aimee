@@ -509,16 +509,16 @@ static void test_memory_get_as_of_is_wired(void)
  * An explicit --task must still win, so no existing invocation changes. */
 static void test_memory_validity_arguments(void)
 {
-   char *args[] = {"9007199254740993", "--store=kb", "--project", "example",
-                   "--mode", "historical", "--valid-at=2020-01-01", "--json"};
+   char *args[] = {
+       "9007199254740993",      "--store=kb", "--project", "example", "--mode", "historical",
+       "--valid-at=2020-01-01", "--json"};
    cJSON *request = marshal_memory_validity(8, args);
    assert(request);
-   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(request, "id")->valuestring,
-                  "9007199254740993"));
-   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(request, "mode")->valuestring,
-                  "historical"));
-   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(request, "valid_at")->valuestring,
-                  "2020-01-01"));
+   assert(
+       !strcmp(cJSON_GetObjectItemCaseSensitive(request, "id")->valuestring, "9007199254740993"));
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(request, "mode")->valuestring, "historical"));
+   assert(
+       !strcmp(cJSON_GetObjectItemCaseSensitive(request, "valid_at")->valuestring, "2020-01-01"));
    assert(!cJSON_HasObjectItem(request, "cwd"));
    cJSON_Delete(request);
    char *bad[] = {"1", "--include-all"};

@@ -1,0 +1,91 @@
+{
+  "active_context_missing": false,
+  "alerts": {
+    "stale_pending": [],
+    "unresolved_contradictions": [
+      {
+        "id": 10,
+        "memory_a_id": 1,
+        "memory_b_id": 3,
+        "detected_at": "2026-09-24 14:25:49.035618+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 10,
+        "memory_ids": [
+          1,
+          3
+        ],
+        "topic": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-current",
+        "a": "mr01-lanes-d98d7a7f809242f39d600cffa228e254 current",
+        "b": "mr01-lanes-d98d7a7f809242f39d600cffa228e254 expired"
+      },
+      {
+        "id": 9,
+        "memory_a_id": 1,
+        "memory_b_id": 2,
+        "detected_at": "2026-09-24 14:25:49.035618+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 9,
+        "memory_ids": [
+          1,
+          2
+        ],
+        "topic": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-current",
+        "a": "mr01-lanes-d98d7a7f809242f39d600cffa228e254 current",
+        "b": "mr01-lanes-d98d7a7f809242f39d600cffa228e254 future"
+      },
+      {
+        "id": 3,
+        "memory_a_id": 1,
+        "memory_b_id": 6,
+        "detected_at": "2026-09-24 14:25:49.035618+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 3,
+        "memory_ids": [
+          1,
+          6
+        ],
+        "topic": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-current",
+        "a": "mr01-lanes-d98d7a7f809242f39d600cffa228e254 current",
+        "b": "mr01-lanes-d98d7a7f809242f39d600cffa228e254 archived"
+      },
+      {
+        "id": 2,
+        "memory_a_id": 1,
+        "memory_b_id": 5,
+        "detected_at": "2026-09-24 14:25:49.035618+00",
+        "resolved": false,
+        "resolution": "",
+        "conflict_id": 2,
+        "memory_ids": [
+          1,
+          5
+        ],
+        "topic": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-current",
+        "a": "mr01-lanes-d98d7a7f809242f39d600cffa228e254 current",
+        "b": "mr01-lanes-d98d7a7f809242f39d600cffa228e254 superseded"
+      }
+    ],
+    "newly_superseded": [
+      {
+        "id": 5,
+        "scope": {
+          "type": "project",
+          "value": "mr01-lanes-d98d7a7f809242f39d600cffa228e254"
+        },
+        "tier": "L2",
+        "kind": "fact",
+        "key": "mr01-lanes-d98d7a7f809242f39d600cffa228e254-superseded",
+        "content": "mr01-lanes-d98d7a7f809242f39d600cffa228e254 superseded",
+        "confidence": 1,
+        "memory_id": 5,
+        "text": "mr01-lanes-d98d7a7f809242f39d600cffa228e254 superseded",
+        "superseded_at": "2026-09-24 14:25:49"
+      }
+    ],
+    "elapsed_ms": 18.974357
+  },
+  "status": "ok"
+}

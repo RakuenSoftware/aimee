@@ -195,6 +195,14 @@ DB1_ONLY_TABLES = {
     "harness_memory",
 }
 
+# These protocols require PostgreSQL row/advisory locks. The DB2 test
+# shim cannot implement their send/replay safety contract. Both independent
+# memory owners declare their own send guard; only KB owns relation consumers.
+MEMORY_OWNER_POSTGRES_TABLES = {"memory_send_barrier", "memory_send_leases"}
+DB2_POSTGRES_ONLY_TABLES = MEMORY_OWNER_POSTGRES_TABLES | {
+    "memory_relation_consumer_positions", "memory_relation_consumer_state",
+}
+
 # Sole DB1-owned lexical index. Lives only in db1/schema.sql.
 DB1_OWNED_LEXICAL_INDEX = {"window_fts"}
 
@@ -219,12 +227,14 @@ def main() -> int:
 
     shim_shareable = db2_shim_tables - DB2_SHIM_ONLY_LEXICAL_INDEX_TABLES
     missing_in_native = shim_shareable - db2_native_tables
-    missing_in_shim = db2_native_tables - shim_shareable
+    missing_in_shim = db2_native_tables - shim_shareable - DB2_POSTGRES_ONLY_TABLES
+    missing_protocol_tables = (DB2_POSTGRES_ONLY_TABLES - db2_native_tables) | (MEMORY_OWNER_POSTGRES_TABLES - db1_tables)
+    unsupported_shim_protocols = DB2_POSTGRES_ONLY_TABLES & db2_shim_tables
 
     db1_only_in_db2_native = DB1_ONLY_TABLES & db2_native_tables
     db1_only_in_db2_shim = DB1_ONLY_TABLES & db2_shim_tables
 
-    db1_allowed = DB1_ONLY_TABLES | DB1_OWNED_LEXICAL_INDEX
+    db1_allowed = DB1_ONLY_TABLES | DB1_OWNED_LEXICAL_INDEX | MEMORY_OWNER_POSTGRES_TABLES
     db1_unexpected = db1_tables - db1_allowed
 
     issues = (
@@ -233,6 +243,8 @@ def main() -> int:
         or db1_only_in_db2_native
         or db1_only_in_db2_shim
         or db1_unexpected
+        or missing_protocol_tables
+        or unsupported_shim_protocols
     )
 
     if not issues:
@@ -242,6 +254,10 @@ def main() -> int:
         )
         return 0
 
+    if missing_protocol_tables:
+        print("schema drift: required PostgreSQL memory protocol tables absent:", sorted(missing_protocol_tables))
+    if unsupported_shim_protocols:
+        print("schema drift: PostgreSQL-only protocols cannot be advertised by the DB2 test shim:", sorted(unsupported_shim_protocols))
     if db1_unexpected:
         print(f"schema drift: non-DB1 tables present in {STORE_SCHEMA_DIR}/schema_*.sql:")
         for name in sorted(db1_unexpected):

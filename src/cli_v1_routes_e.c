@@ -269,13 +269,13 @@ cJSON *marshal_memory_validity(int argc, char **argv)
       }
       const char *value = strchr(arg, '=');
       size_t length = value ? (size_t)(value - arg) : strlen(arg);
-      const char *field = length == 6 && !strncmp(arg, "--mode", length) ? "mode"
-                          : length == 10 && !strncmp(arg, "--valid-at", length) ? "valid_at"
+      const char *field = length == 6 && !strncmp(arg, "--mode", length)           ? "mode"
+                          : length == 10 && !strncmp(arg, "--valid-at", length)    ? "valid_at"
                           : length == 13 && !strncmp(arg, "--believed-at", length) ? "believed_at"
-                          : length == 7 && !strncmp(arg, "--store", length) ? "store"
-                          : length == 9 && !strncmp(arg, "--project", length) ? "project"
-                          : length == 11 && !strncmp(arg, "--workspace", length) ? "workspace"
-                          : NULL;
+                          : length == 7 && !strncmp(arg, "--store", length)        ? "store"
+                          : length == 9 && !strncmp(arg, "--project", length)      ? "project"
+                          : length == 11 && !strncmp(arg, "--workspace", length)   ? "workspace"
+                                                                                   : NULL;
       if (!field || cJSON_HasObjectItem(req, field))
          goto invalid;
       if (value)

@@ -14,7 +14,9 @@ which the winning definition is not, so that operation could not have worked --
 and every suite was green.
 
 One table, one owner, one declaration. A family that only READS another
-family's table does not declare it.
+family's table does not declare it. The reviewed memory send-guard upgrade
+reapplies identical CREATE definitions in its own append-only migration; its
+original migration checksum must remain unchanged.
 """
 
 from __future__ import annotations
@@ -39,13 +41,28 @@ def main() -> int:
         return 1
 
     owners: dict[str, list[str]] = {}
+    definitions: dict[tuple[str, str], list[tuple[str, ...]]] = {}
     for path in files:
         text = re.sub(r"--[^\n]*", "", path.read_text())
         for m in CREATE_RE.finditer(text):
             name = (m.group(1) or m.group(2)).lower()
             owners.setdefault(name, []).append(path.name)
+            end = text.find(";", m.end())
+            statement = text[m.start():end + 1] if end >= 0 else ""
+            tokens = tuple(re.findall(r"'(?:''|[^'])*'|[a-zA-Z_][a-zA-Z_0-9]*|[^\s]", statement))
+            definitions.setdefault((name, path.name), []).append(tokens)
 
     duplicates = {t: sorted(set(f)) for t, f in owners.items() if len(set(f)) > 1}
+    # Both files belong to the same private memory owner. Permit only this
+    # exact migration pair, once per file, with identical complete CREATE SQL.
+    # An altered definition or a third declaring file still fails the gate.
+    reapply = {"schema_personal_memory_send_guards.sql",
+               "schema_personal_memory_send_guard_completion.sql"}
+    for table in ("memory_send_barrier", "memory_send_leases"):
+        if set(duplicates.get(table, ())) == reapply:
+            original, upgrade = [definitions[(table, name)] for name in sorted(reapply)]
+            if len(original) == len(upgrade) == 1 and original == upgrade and original[0]:
+                del duplicates[table]
     if duplicates:
         print("schema drift: a table is declared in more than one file.")
         print("Both files say IF NOT EXISTS, so the first to apply wins in silence:")

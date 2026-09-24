@@ -1,34 +1,24 @@
 # MR-01 closeout checklist
 
-MR-01 is the sole active proposal as of 2026-09-24. This checklist follows the
-seven clauses in the unchanged frozen acceptance inventory. Passing component
-tests do not close an entire clause or authorize advancing to MR-02.
+MR-01 is complete as of 2026-09-24. All seven unchanged frozen acceptance gates
+have implementation and validation evidence. The
+[final closeout](../../validation/memory-mr01-closeout-2026-09-24.md) records the
+exact application, harness, image, process exits and limitations.
 
-| Gate | Existing implementation/evidence | Remaining closeout work |
-|---|---|---|
-| A1: one lifecycle/scope fixture across advertised endpoints | Current eligibility predicates; packaged runtime, public command and deployment fixtures; generated-card observation repair passes full memory race and export | [Serving inventory](memory-reliability-01-serving-inventory.md) now maps route families to evidence; complete equivalent process fixtures for the remaining assembly, derived, private and diagnostic paths |
-| A2: authorized historical recall excluding erasure/foreign scope | Shared exact-ID read policy, retained fact history and private exact-version inspection | Complete advertised historical semantics and equivalence; explicitly reject unsupported belief-time reconstruction; prove erase/revoke and scope exclusions |
-| A3: no graph traversal through hidden intermediates | Eligible graph/PageRank parents and evidence checks, linked-input observations | [Restricted-role two-hop regression](../../validation/memory-mr01-graph-bridge-2026-09-24/race.txt) passes: hidden intermediate blocks both identities, visible evidence restores the path; [Equivalent HTTP fixture](../../validation/memory-validity-2026-09-24.md) now passes all three transitions on `386cfaf4c` |
-| A4: concurrent pooled scope isolation under non-owner runtime | Transaction-local production settings and restricted-role fixtures | [Two-connection race replay](../../validation/memory-mr01-scope-pool-2026-09-24/race.txt) passes 288 calls from 12 callers, including rollback and cleared session settings; [Live mixed-project replay](../../validation/memory-mr01-scope-pool-2026-09-24/http/checks.json) now passes 288 requests with 12 callers, including failed-query rollback; live runtime role is verified non-owner, non-superuser and NOBYPASSRLS |
-| A5: changes after retrieval invalidate release, preserving earlier decision history | Observed source versions, revalidation on provider attempts, stale-source refusals and durable prepared/admission receipts | Close post-check mutation race and remaining unversioned channels; demonstrate retained decision history at the actual release boundary |
-| A6: equal hard gates in lexical, dense-only and graph-only lanes | Independent retrieval lanes use current eligibility; vector/PageRank regressions | [Common canonical fixture](../../validation/memory-mr01-common-lanes-2026-09-24.md) passes independent lexical, dense-only and graph-only runtime lanes; HTTP now passes [153 common-fixture checks](../../validation/memory-mr01-structured-sources-2026-09-24.md) on `7f00fb84d`, including legacy audiences, recall, derived views, retained history, semantic/typed assembly, relation intervals and both transport boundaries. Lower-ranked eligible vectors backfill LIMIT 3 despite better invalid matches; graph nodes/edges are checked. [Activated generated-card dependency repair](../../validation/memory-mr01-activation-card-2026-09-24.md) passes full race/export and 42 HTTP checks |
-| A7: equivalent Server/KB domain decisions; no C fallback | Shared Go owner, C-boundary guard, deployment restart/outage tests | [Ten matched lifecycle fixtures](../../validation/memory-mr01-decision-parity-2026-09-24.md) pass 54 checks against both actual owners on `377c27b67`, including list/search; the newer `50282c8ba` [1714-check matrix](../../validation/memory-mr01-session-briefing-2026-09-24.md) also covers disconnected-module refusal. Subsequent candidate changes require revalidation |
+| Gate | Completed evidence |
+|---|---|
+| A1: one lifecycle/scope fixture across advertised endpoints | Final common HTTP fixture: 201 checks; matched private/shared fixture: 58 checks. The [serving inventory](memory-reliability-01-serving-inventory.md) maps ordinary, historical and inspection semantics. |
+| A2: authorized historical recall excluding erasure/foreign scope | Final common fixture includes retained historical assertion/graph parents and exact requested-time sets; erased/revoked/foreign records remain excluded. Unsupported belief-time/private modes fail explicitly. |
+| A3: no graph traversal through hidden intermediates | [Restricted-role two-hop regression](../../validation/memory-mr01-graph-bridge-2026-09-24/race.txt), equivalent HTTP transitions and final full race replay verify hidden intermediates block traversal and identity disclosure. |
+| A4: concurrent pooled scope isolation under non-owner runtime | [Two-connection race replay](../../validation/memory-mr01-scope-pool-2026-09-24/race.txt) and [live HTTP replay](../../validation/memory-mr01-scope-pool-2026-09-24/http/checks.json): 288 calls each, 12 callers, failed-query rollback and cleared settings, under non-owner/non-superuser/NOBYPASSRLS runtime. Final full race replay passes. |
+| A5: post-retrieval changes invalidate release; retain earlier history | Versioned roots, parents, auxiliary channels, private active context and hard-rule generations; durable explicit-completion guards. Final native, race and T2/T3 provider-boundary fixtures cover mutation, revocation, outage, crash and recovery with retained receipts. |
+| A6: equal hard gates across lexical, dense-only and graph-only lanes | [Independent common lanes](../../validation/memory-mr01-common-lanes-2026-09-24.md), full race replay and final HTTP exact sets verify invalid perfect matches cannot enter or displace eligible backfill; graph nodes, edges and dependencies remain gated. |
+| A7: equivalent Server/KB decisions; no C fallback | Final 58 matched process checks, 1,714 T2/T3 deployment checks, all 77 lint gates and native ingress suite pass, including disconnected-owner refusal and recovery. |
 
-The [validity diagnostic implementation](../../validation/memory-validity-2026-09-24.md)
-adds a structured decision/reason projection, host-scope checks and CLI/HTTP
-forwarding; fresh-process validation passes 1714/1714 checks. The
-[verified-credential serving repair](../../validation/memory-mr01-serving-scope-2026-09-24.md)
-also passes its targeted HTTP regression. Required contract work
-also remains: host-bound eligibility context across all serving paths,
-the complete purpose/policy/revocation-generation context and effective or
-explicitly rejected legacy parameters across remaining routes.
-[Host-bound authority checks](../../validation/memory-mr01-host-authority-2026-09-24.md)
-now attest that request `include_all` and forged principal fields cannot widen
-verified project/workspace credentials or grant diagnostic authority. The diagnostic does not substitute for these serving gates.
+The host supplies authenticated purpose/policy/scope and checked source
+revocation generations. Legacy arguments are applied or explicitly rejected;
+model text cannot widen authority. Validity diagnostics project the serving
+decision without inventing evidence or authority. Released CT100 remains healthy
+on 0.4.5; the draft application and schema were tested only on CT109.
 
-Closeout requires a traceable result for every gate, current build/export and
-boundary checks, process-level placement evidence, and recorded latency and
-exclusion behavior. Continue validating the released 0.4.5 installation while
-keeping draft application builds in the disposable validation environment.
-Do not mark MR-01 complete by deleting requirements, narrowing an advertised
-surface, or counting unrelated passing checks.
+There is no remaining MR-01 closeout work. MR-02 is next in the sequential program.

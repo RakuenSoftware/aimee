@@ -1,0 +1,32 @@
+[
+  {
+    "project": "aimee-e2e-kb-ab70d9a541",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-server-2ecd5332c0",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-kb-17a7429dfa",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-server-459d828b3d",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-server-6aa0cbd638",
+    "containers": [],
+    "networks": []
+  },
+  {
+    "project": "aimee-e2e-kb-b3c4dd5d91",
+    "containers": [],
+    "networks": []
+  }
+]

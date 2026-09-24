@@ -586,7 +586,8 @@ static void test_private_validity_owner_transport(void)
 {
    cJSON *request = cJSON_Parse("{\"method\":\"memory.validity\",\"id\":\"42\"}");
    private_command_operation = "user-validity";
-   private_command_reply = "{\"status\":\"ok\",\"store\":\"user\",\"decision\":{\"eligible\":true}}";
+   private_command_reply =
+       "{\"status\":\"ok\",\"store\":\"user\",\"decision\":{\"eligible\":true}}";
    handle_memory_validity(NULL, NULL, request);
    assert(!strcmp(search_wire_reply, private_command_reply));
    private_command_reply = "{\"status\":\"ok\",\"decision\":{\"eligible\":true}}";
@@ -601,9 +602,11 @@ static void test_private_validity_owner_transport(void)
 
 static void test_validity_owner_transport(void)
 {
-   cJSON *request = cJSON_Parse("{\"method\":\"memory.validity\",\"protocol_version\":1,"
-                               "\"store\":\"kb\",\"id\":\"9007199254740993\",\"project\":\"example\"}");
-   hygiene_reply = "{\"status\":\"ok\",\"decision\":{\"eligible\":false,\"checked_version\":{\"record_id\":\"9007199254740993\"}}}";
+   cJSON *request =
+       cJSON_Parse("{\"method\":\"memory.validity\",\"protocol_version\":1,"
+                   "\"store\":\"kb\",\"id\":\"9007199254740993\",\"project\":\"example\"}");
+   hygiene_reply = "{\"status\":\"ok\",\"decision\":{\"eligible\":false,\"checked_version\":{"
+                   "\"record_id\":\"9007199254740993\"}}}";
    handle_memory_validity(NULL, NULL, request);
    assert(!strcmp(search_wire_reply, hygiene_reply));
    assert(!cJSON_HasObjectItem(hygiene_request, "store"));

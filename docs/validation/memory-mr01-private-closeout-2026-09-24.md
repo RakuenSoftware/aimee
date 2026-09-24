@@ -18,6 +18,6 @@ The [regression fails before the repair](memory-mr01-private-closeout-2026-09-24
 and [passes after it](memory-mr01-private-closeout-2026-09-24/active-context-after.txt),
 including a real PostgreSQL vector-query error with successful lexical fallback.
 The private clock change separately passes the complete race suite in 287.221
-seconds and exported process build in 5.806 seconds. The combined final replay
-and fresh process checks remain pending. The matched Server/KB process fixture
+seconds and exported process build in 5.806 seconds. The combined final replay passes in 286.516 seconds (export: 4.816 seconds).
+The [final closeout](memory-mr01-closeout-2026-09-24.md) records all fresh process checks passing. The matched Server/KB process fixture
 now checks active-context source observations explicitly in both placements.

@@ -1,0 +1,36 @@
+{
+  "active_context_missing": false,
+  "fact_projection": {
+    "schema_version": 1,
+    "projection_digest": "sha256:4442483849e157042ecc5cb04ecdc61c6bea6ff44da4fc72a871b8a4872eebd5",
+    "selection_digest": "sha256:ba9538815578da96a6ac97015509a15718b4e193ff11487dba1c5e0aa14f0114",
+    "rendered_bytes": 60,
+    "retained_items": [
+      {
+        "channel": "facts",
+        "stable_id": "44",
+        "source_version": {
+          "record_kind": "semantic_assertion",
+          "version": {
+            "schema_version": 1,
+            "owner_id": "dbfd8ccf-fe1a-48aa-83d2-bab9c175c16d",
+            "record_id": "44",
+            "record_revision": "1"
+          },
+          "memory_parents": [
+            {
+              "schema_version": 1,
+              "owner_id": "dbfd8ccf-fe1a-48aa-83d2-bab9c175c16d",
+              "record_id": "1",
+              "record_revision": "3"
+            }
+          ],
+          "memory_parent_state": "observed"
+        }
+      }
+    ],
+    "source_version_state": "record_versions_observed"
+  },
+  "facts": "- uses: mr01-lanes-d98d7a7f809242f39d600cffa228e254-current\n",
+  "status": "ok"
+}

@@ -36,5 +36,5 @@ C-process build passes in 5.461 seconds. A final 6.776-second focused race repla
 checks auxiliary sources, request-context cleanup across pooled connections,
 native rule metadata, and every protected table’s bulk-truncate refusal. Links
 and scope tags now have direct send guards as well as their revision hooks.
-Fresh final-candidate deployment checks remain pending.
+The [final closeout](memory-mr01-closeout-2026-09-24.md) records all final-candidate deployment checks passing.
 These component passes alone do not certify MR-01.

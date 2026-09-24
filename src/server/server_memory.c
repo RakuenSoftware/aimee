@@ -354,14 +354,15 @@ int handle_memory_validity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_DeleteItemFromObjectCaseSensitive(request, "store");
    if (!selection)
    {
-      cJSON *reply = user_memory_owner_command_as("user-validity", request,
-                          server_account_memory_authority(server_request_account()));
+      cJSON *reply = user_memory_owner_command_as(
+          "user-validity", request, server_account_memory_authority(server_request_account()));
       cJSON_Delete(request);
       return send_and_free(conn, reply);
    }
    char *raw = kb_v1_action_request("memory.validity", request);
    cJSON *parsed = raw && strlen(raw) <= AIMEE_MODULE_MESSAGE_MAX_BODY
-                       ? cJSON_ParseWithOpts(raw, NULL, 1) : NULL;
+                       ? cJSON_ParseWithOpts(raw, NULL, 1)
+                       : NULL;
    cJSON *reply = NULL;
    if (cJSON_IsObject(parsed) && !strcmp(jo_cstr(parsed, "status"), "ok") &&
        cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(parsed, "decision")))
@@ -371,7 +372,10 @@ int handle_memory_validity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       reply = memory_owner_error_reply(raw, parsed);
    cJSON_Delete(parsed);
    free(raw);
-   return send_and_free(conn, reply ? reply : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
+   return send_and_free(
+       conn,
+       reply ? reply
+             : server_error_kind_json(SERVER_ERR_UNAVAILABLE,
                                       "KB validity owner unavailable or invalid response", NULL));
 }
 

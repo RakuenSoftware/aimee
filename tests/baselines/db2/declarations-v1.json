@@ -10359,8 +10359,7 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_agent.c",
-        "src/kb/kb_service_agent.c"
+        "src/kb/db2_adapters/kb_service_backend_agent.c"
       ],
       "locations": [
         {
@@ -10842,8 +10841,7 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_memory.c",
-        "src/kb/kb_service_memory.c"
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
       ],
       "locations": [
         {
@@ -10863,8 +10861,7 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_memory.c",
-        "src/kb/kb_service_memory.c"
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
       ],
       "locations": [
         {
@@ -19934,7 +19931,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "2dad996ca82c5676d8fe66a42c125d4fb95b3dd2d3ed9336e949a9ad254b42c6",
+  "fingerprint": "a3206f7073d1b2a7a8efb90e2615c44fd178ed2c5bb58d3b75675a0d2525062b",
   "module": "db2",
   "schema_version": 1,
   "summary": {
