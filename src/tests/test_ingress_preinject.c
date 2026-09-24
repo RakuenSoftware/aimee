@@ -56,12 +56,28 @@ static int g_long_preview;
 static int g_assembly_failure;
 static int g_typed_unavailable;
 
+static int g_guard_cleanup_mode, g_guard_local_calls, g_guard_shared_calls;
+static int g_guard_local_failures, g_guard_shared_failures;
+static const char *guard_completion_reply(int call, int failures)
+{
+   return call <= failures ? "{\"status\":\"ok\"}"
+                           : "{\"status\":\"ok\",\"send_guard\":\"released\"}";
+}
+
 int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJSON *request,
                                                     int timeout_ms, cJSON **result)
 {
    assert(strcmp(method, "memory.runtime") == 0 && timeout_ms == 500);
    const char *operation =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "operation"));
+   if (g_guard_cleanup_mode && operation && !strcmp(operation, "personal-source-revalidate"))
+   {
+      const cJSON *r = cJSON_GetObjectItemCaseSensitive(request, "revalidation");
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "send_guard")),
+                     "release"));
+      *result = cJSON_Parse(guard_completion_reply(++g_guard_local_calls, g_guard_local_failures));
+      return 1;
+   }
    if (g_private_source_fixture && operation && !strcmp(operation, "personal-source-revalidate"))
    {
       g_private_source_calls++;
@@ -172,6 +188,12 @@ void kb_client_memory_scope_context_apply(cJSON *request)
 static char *diagnostic_reply(const cJSON *request);
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
+   if (g_guard_cleanup_mode && !strcmp(method, "memory.revalidate_sources"))
+   {
+      cJSON_Delete(request);
+      return strdup(guard_completion_reply(++g_guard_shared_calls, g_guard_shared_failures));
+   }
+
    if (!strcmp(method, "memory.revalidate_sources"))
    {
       g_source_check_calls++;
@@ -1511,8 +1533,30 @@ static void test_native_private_source_transport(void)
    puts("native private sources remain local and stale owner answers refuse dispatch");
 }
 
+static void test_send_guard_completion_retries(void)
+{
+   for (int failure = 0; failure < 2; ++failure)
+   {
+      g_guard_cleanup_mode = 1;
+      g_guard_local_calls = g_guard_shared_calls = 0;
+      g_guard_local_failures = failure ? 3 : 1;
+      g_guard_shared_failures = failure ? 3 : 2;
+      cJSON *plan =
+          cJSON_Parse("{\"local_release_request\":{\"operation\":\"personal-source-revalidate\","
+                      "\"revalidation\":{\"send_guard\":\"release\"}},\"release_request\":{"
+                      "\"revalidation\":{\"send_guard\":\"release\"}}}");
+      assert(plan);
+      ingress_preinject_release_send_guard(plan);
+      assert(g_guard_local_calls == (failure ? 3 : 2));
+      assert(g_guard_shared_calls == 3);
+      g_guard_cleanup_mode = 0;
+   }
+   puts("send completion retries unresolved owners and requires explicit release acknowledgement");
+}
+
 int main(void)
 {
+   test_send_guard_completion_retries();
    test_native_private_source_transport();
    test_durable_provider_attempt();
    test_unversioned_provider_body_receipt();

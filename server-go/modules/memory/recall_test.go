@@ -228,7 +228,13 @@ func exerciseRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handler 
 	if tiny["kind"] != "protected_context_overflow" || tiny["recall"] != nil || count() != before {
 		t.Fatal("protected overflow lost or surfaced directive counted", tiny, surfaced)
 	}
-	for _, limit := range []int{0, 128, 600, math.MaxInt32} {
+	// Owner revision metadata is retained with mandatory rows. A budget that
+	// cannot carry that complete contract must refuse rather than omit it.
+	small := runPublicCommand(t, client, "recall", `{"task_hint":"backend migration","limit_tokens":128,"scope_context":true,"project":"recall-project"}`)
+	if small["kind"] != "protected_context_overflow" {
+		t.Fatal("mandatory source contract silently dropped", small)
+	}
+	for _, limit := range []int{0, 512, 600, math.MaxInt32} {
 		r, _ := recall("backend migration", limit, false, "")
 		if r.LimitTokens != recallTokenLimit(limit, false) || r.ApproxTokens > r.LimitTokens || len(r.AlwaysOnRules) != 1 {
 			t.Fatal(r)

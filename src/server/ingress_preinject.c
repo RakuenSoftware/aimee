@@ -196,17 +196,50 @@ int ingress_preinject_acquire_send_guard(void **state)
    return ingress_revalidate_sources(state);
 }
 
+static int ingress_send_guard_released(const cJSON *response)
+{
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "status"));
+   const char *guard =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "send_guard"));
+   return status && !strcmp(status, "ok") && guard && !strcmp(guard, "released");
+}
+
 void ingress_preinject_release_send_guard(void *state)
 {
    cJSON *plan = state;
    if (!plan)
       return;
-   const cJSON *local = cJSON_GetObjectItemCaseSensitive(plan, "local_release_request");
-   const cJSON *shared = cJSON_GetObjectItemCaseSensitive(plan, "release_request");
-   if (cJSON_IsObject(local))
-      cJSON_Delete(ingress_command(cJSON_Duplicate(local, 1), 0));
-   if (cJSON_IsObject(shared))
-      free(kb_v1_action_request("memory.revalidate_sources", cJSON_Duplicate(shared, 1)));
+   /* Release is idempotent. A lost answer is retried, never interpreted as
+    * proof that protection expired or that provider dispatch did not occur. */
+   for (int attempt = 0; attempt < 3; ++attempt)
+   {
+      const cJSON *local = cJSON_GetObjectItemCaseSensitive(plan, "local_release_request");
+      const cJSON *shared = cJSON_GetObjectItemCaseSensitive(plan, "release_request");
+      if (cJSON_IsObject(local))
+      {
+         cJSON *response = ingress_command(cJSON_Duplicate(local, 1), 0);
+         if (ingress_send_guard_released(response))
+            cJSON_DeleteItemFromObjectCaseSensitive(plan, "local_release_request");
+         cJSON_Delete(response);
+      }
+      if (cJSON_IsObject(shared))
+      {
+         char *raw = kb_v1_action_request("memory.revalidate_sources", cJSON_Duplicate(shared, 1));
+         cJSON *response = raw ? cJSON_Parse(raw) : NULL;
+         free(raw);
+         if (ingress_send_guard_released(response))
+            cJSON_DeleteItemFromObjectCaseSensitive(plan, "release_request");
+         cJSON_Delete(response);
+      }
+      if (!cJSON_GetObjectItemCaseSensitive(plan, "local_release_request") &&
+          !cJSON_GetObjectItemCaseSensitive(plan, "release_request"))
+         break;
+   }
+   if (cJSON_GetObjectItemCaseSensitive(plan, "local_release_request") ||
+       cJSON_GetObjectItemCaseSensitive(plan, "release_request"))
+      aimee_log(
+          LOG_ERROR, "memory",
+          "send completion unresolved; storage guard remains active pending sending-host recovery");
    cJSON_Delete(plan);
 }
 

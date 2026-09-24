@@ -1657,7 +1657,7 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
          snprintf(error, error_len, "memory context refused: invalid_projection");
       return -1;
    }
-   if (text[0] && ingress_preinject_accept_native_projection(projection) != 0)
+   if (ingress_preinject_accept_native_projection(projection) != 0)
    {
       if (error && error_len)
          snprintf(error, error_len, "memory context refused: source release unavailable");

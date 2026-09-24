@@ -2076,7 +2076,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "c9f9105b303a3bb9c755995bfb638a5841401d631a9c7cd540cb477333e2aff1"
+      "sha256": "01bcd6216d592b75721fb3e81a7c3ea6957dc97ba1c18366da41a06840abb106"
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2086,7 +2086,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "6be233039344c3ac77a2d2aea39b2201de749844dfc19820b5af8f33fe610bfa"
+      "sha256": "89c708dfbb6e8d29bd2afd07bd45c64f933d73cbf9af5c35b44f4674df57eed8"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2345,7 +2345,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "4cba9b96261a5a2deb120ed8cf12951e5b9b252a9f70c16eb1ab852fa09ba4b5"
+      "sha256": "220243ea71a168791c89ba9545375c7f0f102bf441b9e861b30f7184fe2f9cb3"
     },
     "src/tests/test_ir_module_plan.c": {
       "disposition": "host-fixture",
@@ -2582,10 +2582,10 @@
       "symbols": [
         "db2_memory_find_facts_like"
       ],
-      "sha256": "02418d5bc15d73db1d36f09c1d2461bda663c40800b2b608a6bd8b6c173f84b0",
+      "sha256": "de5efbda22b94a2b8f7bc658f97c68ea022cc710a25021e9c55ce41d72c3985a",
       "inputs": {
         "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "3d0c7c28efef6e1787a2ccd47f7d0e6e569cb914661f175560f0c4bd74941bbf",
+        "src/modules/db2/c/schema.sql": "617a602f0d41829ae1f5c198370609aa934b3327889c00d28602a139cad69d87",
         "src/modules/db2/c/schema_sqlite.sql": "3d5ef4d20f1e3f2a9025e8bbc350c0d3e29f2654000f59620db51dc00ecb48a0"
       }
     },

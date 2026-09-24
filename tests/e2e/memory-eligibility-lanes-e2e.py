@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """MR-01 common lifecycle fixture through advertised KB retrieval endpoints."""
 import argparse
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -52,7 +53,8 @@ def main():
         return code, result, (time.monotonic()-started)*1000
     try:
         kb.start()
-        with matrix.paused_relation_consumer(kb):
+        with contextlib.ExitStack() as fixture_guards:
+            fixture_guards.enter_context(matrix.paused_relation_consumer(kb))
             states = ['current','future','expired','suppressed','superseded','archived',
                       'quarantined','deleted','revoked','cross-scope']
             values = []
@@ -199,6 +201,31 @@ def main():
                       and result.get('status') == 'ok' and wanted in body and key+'-authored' in body
                       and not any(key+'-question-'+key+'-'+other in body for other in states+['workspace'] if other != state)
                       and key+'-foreign-second' not in body and key+'-foreign-resolution' not in body)
+            # Mandatory rule additions also invalidate an originally empty set.
+            def rule_refs():
+                code,result,_=call('recall',dict(task_hint=key,limit_tokens=8192,project=key))
+                bundle=result.get('recall',{})
+                if code != 200 or result.get('status') != 'ok':
+                    raise RuntimeError('rule source recall unavailable')
+                return [dict(channel='native_rule_collection',stable_id='1',source_version=bundle.get('rule_collection_source'))]+[
+                    dict(channel='native_rules',stable_id=str(row['id']),source_version=row.get('source_version'))
+                    for row in bundle.get('always_on_rules',[])]
+            def rules_eligible(refs):
+                code,result,_=call('revalidate_sources',dict(project=key,revalidation=dict(
+                    schema_version=1,check_id=uuid.uuid4().hex,sources=refs)))
+                if code != 200 or result.get('status') != 'ok':
+                    raise RuntimeError('rule revalidation unavailable')
+                return result.get('eligible')
+            prior_rules=rule_refs()
+            check('Hard rule collection is observed before insertion',prior_rules[0]['source_version'] is not None and rules_eligible(prior_rules) is True)
+            rule_id=int(sql(f"INSERT INTO rules(polarity,title,description,directive_type,created_at,updated_at) VALUES('must','{key}-required','Never omit this constraint','hard',now()::text,now()::text) RETURNING id"))
+            check('New mandatory rule invalidates earlier recall',rules_eligible(prior_rules) is False)
+            selected_rules=rule_refs()
+            check('Hard rule rows and collection have current observations',rules_eligible(selected_rules) is True
+                  and any(ref['stable_id'] == str(rule_id) and ref['channel'] == 'native_rules' for ref in selected_rules))
+            sql(f"UPDATE rules SET description='Changed constraint' WHERE id={rule_id}; UPDATE rules SET description='Never omit this constraint' WHERE id={rule_id}")
+            check('Hard rule edit and restoration invalidate earlier selection',rules_eligible(selected_rules) is False)
+            sql(f"DELETE FROM rules WHERE id={rule_id}")
             # Structured native rows carry the selected revisions and parent observations.
             reminder_id=int(sql(f"INSERT INTO prospective_memories(trigger_text,action_text,recurrence) VALUES('{key}','{key}-action','repeat') RETURNING id"))
             for audience,value,parent in [('project',key,ids['current']),('workspace',key+'-team',workspace_id)]:
@@ -239,11 +266,11 @@ def main():
                 guard_id=uuid.uuid4().hex
                 def guard(mode, selected=refs):
                     return call('revalidate_sources',dict(**{audience:value},revalidation=dict(
-                        schema_version=1,check_id=guard_id,sources=selected,send_guard=mode)))
+                        schema_version=1,check_id=guard_id,sources=None if mode == "release" else selected,send_guard=mode)))
                 code,admission,elapsed=guard('acquire')
                 check('Send guard '+audience+' durably acquires current sources',code == 200
                       and admission.get('eligible') is True and admission.get('send_guard') == 'acquired'
-                      and admission.get('lease_ms') == 5000,elapsed)
+                      and admission.get('lease_ms') == 5000 and admission.get('guard_schema_version') == 2,elapsed)
                 try:
                     refused=False
                     try:
@@ -253,6 +280,43 @@ def main():
                     check('Send guard '+audience+' blocks edit after admission',refused)
                     sql(f"UPDATE epistemic_directives SET surfaced_count=surfaced_count+1 WHERE id={directive_id}")
                     check('Send guard '+audience+' preserves recall accounting',eligible(refs) is True)
+                    time.sleep(5.1)
+                    refused=False
+                    try:
+                        sql(f"UPDATE epistemic_directives SET question='{key}-late-edit' WHERE id={directive_id}")
+                    except RuntimeError as error:
+                        refused='memory provider send in progress' in str(error)
+                    check('Send guard '+audience+' deadline does not unlock an unresolved send',refused)
+                    if audience == 'workspace':
+                        # No provider dispatch is initiated by this admission-only fixture.
+                        # Kill the authenticated owner, restart storage, and verify that
+                        # neither event guesses an unresolved send completed.
+                        subprocess.run(['docker','stop','--time','1',kb.application],check=True,stdout=subprocess.DEVNULL)
+                        subprocess.run(['docker','restart',kb.postgres],check=True,stdout=subprocess.DEVNULL)
+                        deadline=time.monotonic()+90
+                        while time.monotonic()<deadline:
+                            probe=subprocess.run(['docker','exec',kb.postgres,'pg_isready','-U','postgres'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                            if probe.returncode==0: break
+                            time.sleep(1)
+                        check('Unresolved guard survives owner termination and database restart',
+                              sql(f"SELECT count(*) FROM memory_send_leases WHERE token='{guard_id}'") == '1')
+                        refused=False
+                        try: sql(f"UPDATE epistemic_directives SET question='{key}-restart-race' WHERE id={directive_id}")
+                        except RuntimeError as error: refused='memory provider send in progress' in str(error)
+                        check('Restart does not admit protected mutation',refused)
+                        # Verify termination before explicit storage-owner recovery.
+                        check('Recovery verifies sending owner is stopped',subprocess.check_output(
+                            ['docker','inspect','--format','{{.State.Running}}',kb.application],text=True).strip() == 'false')
+                        sql(f"SELECT memory_send_guard_end('{guard_id}')")
+                        fixture_guards.enter_context(matrix.paused_relation_consumer(kb))
+                        subprocess.run(['docker','start',kb.application],check=True,stdout=subprocess.DEVNULL)
+                        deadline=time.monotonic()+180
+                        while time.monotonic()<deadline:
+                            health=subprocess.check_output(['docker','inspect','--format','{{.State.Health.Status}}',kb.application],text=True).strip()
+                            if health=='healthy': break
+                            time.sleep(2)
+                        check('Owner resumes after explicit orphan recovery',health=='healthy')
+
                 finally:
                     code,released,elapsed=guard('release')
                 check('Send guard '+audience+' releases before later work',code == 200
@@ -413,6 +477,27 @@ def main():
                 check('Activated derived card '+('refuses revoked input' if revoked else 'admits observed current input'),
                       code == 200 and result.get('status') == 'ok'
                       and {int(row['memory_id']) for row in result.get('recall',{}).get('active_context',[])} == expected, elapsed)
+            # Replay the same lifecycle/scope population through every native
+            # canonical section, after the graph/fact fixture has finished.
+            for section,kind,prefix in [('identity','fact','identity:'),('preferences','preference','preference:'),('open_commitments','fact','commitment:')]:
+                native_key=prefix+key+'-'+section
+                native_values=[]
+                for state in states+['workspace']:
+                    life=state if state in ('superseded','archived','quarantined','deleted','revoked') else ('pending' if section=='open_commitments' else 'active')
+                    scope_type='workspace' if state=='workspace' else 'project'
+                    scope_value=key+'-team' if state=='workspace' else key+'-foreign' if state=='cross-scope' else key
+                    native_values.append(f"('L2','{kind}','{native_key}-{state}','{native_key} {state}','{scope_type}','{scope_value}','{life}',{int(state=='suppressed')})")
+                native_ids=json.loads(sql("BEGIN; INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,lifecycle_state,activation_suppressed) VALUES "+','.join(native_values)+f""";
+                  UPDATE memories SET valid_from=(now()+interval '1 day')::text WHERE key='{native_key}-future';
+                  UPDATE memories SET valid_until=(now()-interval '1 day')::text WHERE key='{native_key}-expired';
+                  UPDATE kb_async_jobs SET status='done' WHERE kind='memory_index' AND document_id IN (SELECT id FROM memories WHERE key LIKE '{native_key}-%');
+                  SELECT json_object_agg(key,id) FROM memories WHERE key LIKE '{native_key}-%'; COMMIT"""))
+                for audience,value,state in [('project',key,'current'),('workspace',key+'-team','workspace')]:
+                    code,result,elapsed=call('recall',dict(task_hint=native_key,limit_tokens=8192,**{audience:value}))
+                    rows=result.get('recall',{}).get(section,[])
+                    selected={int(row['memory_id']) for row in rows if int(row['memory_id']) in set(native_ids.values())}
+                    check('Common native '+section+' '+audience+' lifecycle and scope',code==200
+                          and result.get('status')=='ok' and selected=={native_ids[native_key+'-'+state]},elapsed)
         identities = []
         for name in (kb.application,kb.postgres,kb.embedder):
             value = json.loads(matrix.command('docker','inspect',name))[0]

@@ -492,6 +492,10 @@ func TestStructuredRecallSourceObservationsPostgres(t *testing.T) {
 		t.Fatal("guarded sources", eligible, e)
 	}
 	exec("UPDATE epistemic_directives SET surfaced_count=surfaced_count+1 WHERE id=$1", directive)
+	if _, e := backend.ProspectiveMarkTriggered(ctx, reminder); e != nil {
+		t.Fatal("guard blocked retained reminder acknowledgement", e)
+	}
+	check(true)
 	exec("SAVEPOINT refused_write; RESET ROLE")
 	if _, e := tx.Exec(ctx, "UPDATE prospective_memories SET action_text='raced' WHERE id=$1", reminder); e == nil || !strings.Contains(e.Error(), "55P03") {
 		t.Fatal("guarded edit admitted", e)
@@ -557,7 +561,7 @@ func TestSourceSendStorageBarrierPostgres(t *testing.T) {
 	}()
 	exec(admin, "SET search_path="+quoted+",public")
 	exec(other, "SET search_path="+quoted+",public")
-	names := []string{"memories", "memory_collection_owner", "memory_units", "memory_lineage", "memory_episodes", "memory_summaries", "derived_memory_dependencies", "entity_edges", "fact_evidence", "epistemic_directives", "prospective_memories"}
+	names := []string{"rules", "memories", "memory_collection_owner", "memory_units", "memory_lineage", "memory_episodes", "memory_summaries", "derived_memory_dependencies", "entity_edges", "fact_evidence", "epistemic_directives", "prospective_memories"}
 	for _, name := range names {
 		exec(admin, "CREATE TABLE "+name+"(id integer PRIMARY KEY,value integer NOT NULL DEFAULT 0,use_count integer NOT NULL DEFAULT 0)")
 	}
@@ -639,14 +643,19 @@ func TestSourceSendStorageBarrierPostgres(t *testing.T) {
 	if _, e := admin.Exec(ctx, "UPDATE memories SET value=value+1 WHERE id=1"); e == nil {
 		t.Fatal("disconnect released lease")
 	}
-	// Automatic cleanup is bounded; the host's acquisition/write budget is
-	// shorter than this fixed storage duration and starts before acquisition.
+	// A deadline cannot prove that a paused sender will not resume. Protection
+	// survives expiry; explicit completion (or verified terminated sender
+	// recovery) is required before a mutation can proceed.
 	exec(admin, "SELECT pg_sleep(5.1)")
+	if _, e := admin.Exec(ctx, "UPDATE memories SET value=value+1 WHERE id=1"); e == nil {
+		t.Fatal("deadline released an unresolved send")
+	}
+	exec(admin, "SELECT memory_send_guard_end($1)", token)
 	exec(admin, "UPDATE memories SET value=value+1 WHERE id=1")
 }
 
 func TestSourceReleaseSendGuardAcknowledgement(t *testing.T) {
-	for _, scenario := range []string{"acquired", "missing-guard", "wrong-duration", "ineligible"} {
+	for _, scenario := range []string{"acquired", "missing-guard", "wrong-duration", "legacy-expiring-guard", "ineligible"} {
 		t.Run(scenario, func(t *testing.T) {
 			state := &sourceReleaseState{}
 			args := sourceReleaseArgs(map[string]any{"request_id": "guarded", "principal": "owner", "project": "app"})
@@ -664,10 +673,12 @@ func TestSourceReleaseSendGuardAcknowledgement(t *testing.T) {
 			if acquire["send_guard"] != "acquire" || release["send_guard"] != "release" || acquire["check_id"] != release["check_id"] {
 				t.Fatal(plan)
 			}
-			reply := map[string]any{"status": "ok", "eligible": true, "check_id": acquire["check_id"], "sources_digest": releaseDigest([]typedProjectionRef{ref}), "send_guard": "acquired", "lease_ms": 5000}
+			reply := map[string]any{"status": "ok", "eligible": true, "check_id": acquire["check_id"], "sources_digest": releaseDigest([]typedProjectionRef{ref}), "send_guard": "acquired", "lease_ms": 5000, "guard_schema_version": 2}
 			switch scenario {
 			case "missing-guard":
 				delete(reply, "send_guard")
+			case "legacy-expiring-guard":
+				delete(reply, "guard_schema_version")
 			case "wrong-duration":
 				reply["lease_ms"] = 4000
 			case "ineligible":
@@ -710,5 +721,121 @@ func TestSourceSendGuardRequiresHostAuthority(t *testing.T) {
 				t.Fatal(status, err, string(body))
 			}
 		}
+	}
+}
+
+func TestSourceSendCompletionNeedsOnlyOpaqueToken(t *testing.T) {
+	completion := sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("a", 32), SendGuard: "release"}
+	if !completion.valid() {
+		t.Fatal("completion required retained source payload")
+	}
+	completion.SendGuard = "acquire"
+	if completion.valid() {
+		t.Fatal("source-free acquisition admitted")
+	}
+	completion.SendGuard = ""
+	if completion.valid() {
+		t.Fatal("source-free inspection admitted")
+	}
+	completion.SendGuard = "release"
+	completion.CheckID = "invalid"
+	if completion.valid() {
+		t.Fatal("invalid completion token admitted")
+	}
+}
+
+func TestHardRuleSourceObservationsPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(q string) {
+		t.Helper()
+		if _, e := tx.Exec(ctx, q); e != nil {
+			t.Fatal(e)
+		}
+	}
+	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$;
+ GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+ GRANT SELECT ON ALL TABLES IN SCHEMA public TO aimee_store_runtime;
+ DELETE FROM rules;
+ GRANT SELECT ON rules,memory_collection_owner TO aimee_store_runtime;
+ GRANT EXECUTE ON FUNCTION memory_send_guard_begin(TEXT,INTEGER),memory_send_guard_end(TEXT) TO aimee_store_runtime;
+ SET LOCAL ROLE aimee_store_runtime`)
+	backend := &postgresDataStore{db: runtimeRoleDB{evalQueryer{tx}, t}, placement: PlacementKB}
+	observe := func() *sourceRevalidation {
+		t.Helper()
+		rules, collection, e := backend.recallHardRules(ctx, 32768)
+		if e != nil || collection == nil {
+			t.Fatal(e)
+		}
+		p, _, e := projectNativeRecall(recallBundle{AlwaysOnRules: rules, RuleCollection: collection}, 32768)
+		if e != nil {
+			t.Fatal(e)
+		}
+		r := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("d", 32), Sources: p.Sources}
+		if !r.valid() {
+			t.Fatal("invalid rule sources", p)
+		}
+		return r
+	}
+	check := func(r *sourceRevalidation, want bool) {
+		t.Helper()
+		got, e := backend.revalidateSources(ctx, r, Scope{})
+		if e != nil || got != want {
+			t.Fatal("rule revalidation", got, want, e)
+		}
+	}
+	empty := observe()
+	if len(empty.Sources) != 1 {
+		t.Fatal("missing empty collection observation")
+	}
+	check(empty, true)
+	exec(`RESET ROLE; INSERT INTO rules(polarity,title,description,directive_type,created_at,updated_at) VALUES('must','required','preserve this constraint','hard',now()::text,now()::text); SET LOCAL ROLE aimee_store_runtime`)
+	check(empty, false)
+	selected := observe()
+	if len(selected.Sources) != 2 {
+		t.Fatal("missing selected rule", selected)
+	}
+	check(selected, true)
+	for _, q := range []string{
+		`UPDATE rules SET description='changed'`,
+		`UPDATE rules SET description='changed';UPDATE rules SET description='preserve this constraint'`,
+		`UPDATE rules SET directive_type='soft'`,
+		`UPDATE rules SET expires_at=now()::text`,
+		`DELETE FROM rules`,
+		`INSERT INTO rules(polarity,title,directive_type,created_at,updated_at) VALUES('must','additional','hard',now()::text,now()::text)`,
+	} {
+		exec("SAVEPOINT rule_edit;RESET ROLE")
+		exec(q)
+		exec("SET LOCAL ROLE aimee_store_runtime")
+		check(selected, false)
+		exec("ROLLBACK TO SAVEPOINT rule_edit;RELEASE SAVEPOINT rule_edit")
+		check(selected, true)
+	}
+	selected.SendGuard = "acquire"
+	if ok, e := backend.guardedSourceRevalidation(ctx, selected, Scope{}); e != nil || !ok {
+		t.Fatal("rule guard", ok, e)
+	}
+	exec("SAVEPOINT refused_rule;RESET ROLE")
+	if _, e := tx.Exec(ctx, `UPDATE rules SET description='raced'`); e == nil || !strings.Contains(e.Error(), "55P03") {
+		t.Fatal("guarded rule admitted", e)
+	}
+	exec("ROLLBACK TO SAVEPOINT refused_rule;RELEASE SAVEPOINT refused_rule;SET LOCAL ROLE aimee_store_runtime")
+	selected.SendGuard = "release"
+	selected.Sources = nil
+	if ok, e := backend.guardedSourceRevalidation(ctx, selected, Scope{}); e != nil || !ok {
+		t.Fatal("rule completion", ok, e)
 	}
 }

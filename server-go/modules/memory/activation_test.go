@@ -72,8 +72,8 @@ CREATE TEMP TABLE memories (
  use_count bigint DEFAULT 0,updated_at timestamptz DEFAULT now(),
  activation_sticky_turns bigint DEFAULT 2,activation_cooldown_turns bigint DEFAULT 1,
  activation_delay_turns bigint DEFAULT 0,activation_suppressed bigint DEFAULT 0);
- CREATE TEMP TABLE memory_collection_owner(id int,owner_id uuid);
- INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-0000-0000-000000000001');
+ CREATE TEMP TABLE memory_collection_owner(id int,owner_id uuid,rules_revision bigint DEFAULT 1);
+ INSERT INTO memory_collection_owner(id,owner_id) VALUES(1,'00000000-0000-0000-0000-000000000001');
  INSERT INTO memories(id,confidence,activation_cooldown_turns,activation_delay_turns,activation_suppressed) VALUES
  (1,1,3,0,0),(2,0.99,1,3,0),(3,0.98,1,0,1),(4,0.8,1,0,0),(5,0.82,1,0,0);
  INSERT INTO memories(id,kind,key,confidence) VALUES(6,'fact','unrelated',0.7);
@@ -90,7 +90,7 @@ CREATE TEMP TABLE memories (
  cause text,priority bigint,state text,memory_a_id bigint,memory_b_id bigint,resolution_memory_id bigint,
  evidence text,source_session text,surfaced_count bigint,last_surfaced_at text,resolved_at text,
  valid_until text,created_at text,updated_at text);
- CREATE TEMP TABLE rules(id bigint,polarity text,title text,description text,weight bigint,directive_type text,expires_at text);
+ CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,polarity text,title text,description text,weight bigint,directive_type text,expires_at text);
  CREATE SCHEMA activation_test;
  CREATE FUNCTION activation_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
  SET LOCAL search_path TO pg_temp,activation_test,public;`)

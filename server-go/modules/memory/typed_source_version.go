@@ -79,6 +79,17 @@ func validTypedSource(ref typedProjectionRef) bool {
 	}
 	owner := ref.Source.Version.OwnerID
 	switch ref.Source.Kind {
+	case "memory_rule", "memory_rule_collection":
+		channel := "native_rules"
+		if ref.Source.Kind == "memory_rule_collection" {
+			channel = "native_rule_collection"
+			if ref.ID != "1" {
+				return false
+			}
+		}
+		if ref.Channel != channel || ref.Source.MemoryParentState != "observed" || len(ref.Source.MemoryParents) != 0 {
+			return false
+		}
 	case "memory_directive", "memory_reminder":
 		channel := "native_directives"
 		if ref.Source.Kind == "memory_reminder" {

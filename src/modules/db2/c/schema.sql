@@ -18573,11 +18573,36 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 INSERT INTO kb_meta (key, value) VALUES ('schema_version', '34')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
+-- BEGIN recall rule revisions
+ALTER TABLE rules ADD COLUMN IF NOT EXISTS record_revision BIGINT NOT NULL DEFAULT 1 CHECK(record_revision>0);
+DROP TRIGGER IF EXISTS memory_rule_record_revision ON rules;
+CREATE TRIGGER memory_rule_record_revision BEFORE INSERT OR UPDATE ON rules
+ FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{last_reinforced_at,rules_fts_tsv}');
+ALTER TABLE memory_collection_owner ADD COLUMN IF NOT EXISTS rules_revision BIGINT NOT NULL DEFAULT 1 CHECK(rules_revision>0);
+DO $install_rule_revision$
+DECLARE schema_name TEXT:=current_schema();
+BEGIN
+ EXECUTE format($ddl$
+ CREATE OR REPLACE FUNCTION %1$I.memory_capture_rule_change() RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,%1$I,pg_temp AS $body$
+ BEGIN
+  UPDATE memory_collection_owner SET rules_revision=rules_revision+1 WHERE id=1;
+  IF NOT FOUND THEN RAISE EXCEPTION 'memory rule owner unavailable'; END IF;
+  RETURN NULL;
+ END $body$;
+ $ddl$,schema_name);
+ REVOKE ALL ON FUNCTION memory_capture_rule_change() FROM PUBLIC;
+END $install_rule_revision$;
+DROP TRIGGER IF EXISTS memory_rule_collection_revision ON rules;
+CREATE TRIGGER memory_rule_collection_revision AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON rules
+ FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_rule_change();
+-- END recall rule revisions
+
 -- BEGIN memory send guards
--- A durable, bounded send lease survives owner/connection loss. Mutations take
--- a shared row lock; acquisition takes an exclusive row lock before its source
--- checks. The host must finish its write within a shorter monotonic budget,
--- measured BEFORE requesting either owner's lease.
+-- A durable send guard survives owner/connection loss. Mutations take a shared
+-- row lock; acquisition takes an exclusive row lock before its source checks.
+-- The deadline bounds the host write, NOT storage protection: a paused sender
+-- can resume after a deadline, so only explicit completion releases its guard.
 CREATE TABLE IF NOT EXISTS memory_send_barrier (
  id INTEGER PRIMARY KEY CHECK(id=1),
  blocked_until TIMESTAMPTZ NOT NULL DEFAULT '-infinity'
@@ -18587,6 +18612,7 @@ CREATE TABLE IF NOT EXISTS memory_send_leases (
  token TEXT PRIMARY KEY CHECK(token ~ '^[a-f0-9]{32}$'),
  expires_at TIMESTAMPTZ NOT NULL
 );
+ALTER TABLE memory_send_leases ADD COLUMN IF NOT EXISTS sender_identity TEXT NOT NULL DEFAULT '';
 DO $install_send_guard$
 DECLARE schema_name TEXT:=current_schema(); recipient record; role_name TEXT;
 BEGIN
@@ -18601,12 +18627,12 @@ BEGIN
   PERFORM set_config('synchronous_commit','on',true);
   PERFORM id FROM memory_send_barrier WHERE id=1 FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'memory send guard unavailable'; END IF;
-  DELETE FROM memory_send_leases WHERE expires_at<=clock_timestamp();
   IF (SELECT count(*) FROM memory_send_leases)>=64 THEN
    RAISE EXCEPTION 'memory send guard capacity' USING ERRCODE='55P03';
   END IF;
   lease_until:=clock_timestamp()+interval '5 seconds';
-  INSERT INTO memory_send_leases(token,expires_at) VALUES(p_token,lease_until);
+  INSERT INTO memory_send_leases(token,expires_at,sender_identity) VALUES(p_token,lease_until,
+   COALESCE(current_setting('aimee.transport_identity',true),''));
   UPDATE memory_send_barrier SET blocked_until=greatest(blocked_until,lease_until) WHERE id=1;
  END $body$;
  $ddl$,schema_name);
@@ -18636,11 +18662,21 @@ BEGIN
    (to_jsonb(OLD)-ARRAY['use_count','last_used_at','updated_at','surfaced_count','last_surfaced_at','trigger_count','last_triggered_at',TG_TABLE_NAME||'_fts_tsv']) THEN
    RETURN NEW;
   END IF;
+  -- Acknowledging an already-selected once-only reminder preserves its
+  -- revision and retained-read policy. It cannot edit or rearm the action.
+  IF TG_OP='UPDATE' AND TG_TABLE_NAME='prospective_memories'
+   AND to_jsonb(OLD)->>'state'='armed' AND to_jsonb(NEW)->>'state'='triggered'
+   AND to_jsonb(OLD)->>'recurrence'='once'
+   AND (to_jsonb(NEW)->>'trigger_count')::bigint=(to_jsonb(OLD)->>'trigger_count')::bigint+1
+   AND (to_jsonb(NEW)-ARRAY['state','trigger_count','last_triggered_at','updated_at','prospective_memories_fts_tsv']) =
+       (to_jsonb(OLD)-ARRAY['state','trigger_count','last_triggered_at','updated_at','prospective_memories_fts_tsv']) THEN
+   RETURN NEW;
+  END IF;
   -- FOR SHARE also detects an obsolete REPEATABLE READ snapshot through a
   -- serialization error after an acquisition changes this singleton row.
   SELECT blocked_until INTO until_at FROM memory_send_barrier WHERE id=1 FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'memory send guard unavailable'; END IF;
-  IF until_at>clock_timestamp() THEN
+  IF EXISTS(SELECT 1 FROM memory_send_leases) THEN
    RAISE EXCEPTION 'memory provider send in progress; retry mutation' USING ERRCODE='55P03';
   END IF;
   IF TG_OP='DELETE' THEN RETURN OLD; END IF;
@@ -18712,4 +18748,8 @@ DROP TRIGGER IF EXISTS memory_send_guard ON prospective_memories;
 CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON prospective_memories FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
 DROP TRIGGER IF EXISTS memory_send_truncate_guard ON prospective_memories;
 CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON prospective_memories FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_guard ON rules;
+CREATE TRIGGER memory_send_guard BEFORE INSERT OR UPDATE OR DELETE ON rules FOR EACH ROW EXECUTE FUNCTION memory_send_mutation_guard();
+DROP TRIGGER IF EXISTS memory_send_truncate_guard ON rules;
+CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON rules FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
 -- END memory send guards

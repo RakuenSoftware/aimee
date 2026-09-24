@@ -69,6 +69,7 @@ func TestPersonalMemoryRetainedVersions(t *testing.T) {
 	exec(read("../aimee/families/schema_personal_memory_authority.sql"))
 	exec(read("../aimee/families/schema_personal_memory_proposals.sql"))
 	exec(read("../aimee/families/schema_personal_memory_send_guards.sql"))
+	exec(read("../aimee/families/schema_personal_memory_send_guard_completion.sql"))
 	scalar := func(sql string) int64 {
 		t.Helper()
 		var n int64

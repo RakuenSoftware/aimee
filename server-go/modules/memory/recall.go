@@ -8,21 +8,22 @@ import (
 )
 
 type recallBundle struct {
-	AlwaysOnRules   []recallRule      `json:"always_on_rules"`
-	ActivationHeld  int               `json:"activation_held"`
-	Identity        []RecallRecord    `json:"identity"`
-	Preferences     []RecallRecord    `json:"preferences"`
-	ActiveContext   []RecallRecord    `json:"active_context"`
-	OpenCommitments []RecallRecord    `json:"open_commitments"`
-	Reminders       []recallReminder  `json:"reminders"`
-	Directives      []recallDirective `json:"directives"`
-	LimitTokens     int               `json:"limit_tokens"`
-	UsedTokens      int               `json:"used_tokens"`
-	ApproxTokens    int               `json:"approx_tokens"`
-	ElapsedMS       float64           `json:"elapsed_ms"`
-	BudgetExceeded  bool              `json:"budget_exceeded,omitempty"`
-	SessionStart    bool              `json:"session_start"`
-	Explain         []any             `json:"explain"`
+	RuleCollection  *typedSourceVersion `json:"rule_collection_source,omitempty"`
+	AlwaysOnRules   []recallRule        `json:"always_on_rules"`
+	ActivationHeld  int                 `json:"activation_held"`
+	Identity        []RecallRecord      `json:"identity"`
+	Preferences     []RecallRecord      `json:"preferences"`
+	ActiveContext   []RecallRecord      `json:"active_context"`
+	OpenCommitments []RecallRecord      `json:"open_commitments"`
+	Reminders       []recallReminder    `json:"reminders"`
+	Directives      []recallDirective   `json:"directives"`
+	LimitTokens     int                 `json:"limit_tokens"`
+	UsedTokens      int                 `json:"used_tokens"`
+	ApproxTokens    int                 `json:"approx_tokens"`
+	ElapsedMS       float64             `json:"elapsed_ms"`
+	BudgetExceeded  bool                `json:"budget_exceeded,omitempty"`
+	SessionStart    bool                `json:"session_start"`
+	Explain         []any               `json:"explain"`
 }
 
 func recallTokenLimit(tokens int, sessionStart bool) int {
@@ -37,11 +38,12 @@ func recallTokenLimit(tokens int, sessionStart bool) int {
 }
 
 type recallRule struct {
-	ID          int64  `json:"id"`
-	Polarity    string `json:"polarity"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Weight      int    `json:"weight"`
+	Source      *typedSourceVersion `json:"source_version,omitempty"`
+	ID          int64               `json:"id"`
+	Polarity    string              `json:"polarity"`
+	Title       string              `json:"title"`
+	Description string              `json:"description"`
+	Weight      int                 `json:"weight"`
 }
 
 // Keep the structured Go fields and the aliases used by existing prompt views.
@@ -238,10 +240,11 @@ FROM `+s.recallSource()+` WHERE lifecycle_state='pending' AND activation_suppres
 	reminders := make([]Prospective, 0)
 	directives := make([]Directive, 0)
 	rules := make([]recallRule, 0)
+	var ruleCollection *typedSourceVersion
 	// Structured reminder and directive relations currently belong to the
 	// shared schema. Their absence must not prevent recall from a user store.
 	if s.placement == PlacementKB {
-		rules, err = s.recallHardRules(ctx, tokens*4)
+		rules, ruleCollection, err = s.recallHardRules(ctx, tokens*4)
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +264,7 @@ FROM `+s.recallSource()+` WHERE lifecycle_state='pending' AND activation_suppres
 		}
 	}
 	bundle := recallBundle{Identity: recallItems(identity), Preferences: recallItems(preferences), ActiveContext: recallItems(active),
-		OpenCommitments: recallItems(commitments), AlwaysOnRules: rules, Reminders: []recallReminder{}, Directives: []recallDirective{},
+		OpenCommitments: recallItems(commitments), AlwaysOnRules: rules, RuleCollection: ruleCollection, Reminders: []recallReminder{}, Directives: []recallDirective{},
 		LimitTokens: tokens, SessionStart: sessionStart, Explain: []any{}}
 	for _, r := range reminders {
 		bundle.Reminders = append(bundle.Reminders, recallReminder{Prospective: r, MemoryID: r.ID, Kind: "reminder", Key: r.TriggerText, Text: r.ActionText, Why: "prospective matcher fired"})
@@ -300,7 +303,7 @@ FROM `+s.recallSource()+` WHERE lifecycle_state='pending' AND activation_suppres
 	return encoded, err
 }
 
-func (s *postgresDataStore) recallHardRules(ctx context.Context, byteBudget int) ([]recallRule, error) {
+func (s *postgresDataStore) recallHardRules(ctx context.Context, byteBudget int) ([]recallRule, *typedSourceVersion, error) {
 	// Every rule occupies at least this many JSON bytes, even with empty text.
 	// Fetch one beyond the maximum possible fit so a row cap cannot silently
 	// omit mandatory rules. Bound cumulative raw text before it crosses the DB bus;
@@ -308,45 +311,62 @@ func (s *postgresDataStore) recallHardRules(ctx context.Context, byteBudget int)
 	minimum, _ := json.Marshal(recallRule{})
 	maxRows := byteBudget/len(minimum) + 1
 	rows, err := s.db.Query(ctx, `WITH candidates AS MATERIALIZED (
- SELECT id,polarity,title,description,weight FROM rules WHERE directive_type='hard' AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+`
+ SELECT id,polarity,title,description,weight,record_revision FROM rules WHERE directive_type='hard' AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+`
  ORDER BY weight DESC,title,id LIMIT $2
 ), bounded AS (
  SELECT *,SUM(octet_length(polarity)::bigint+octet_length(title)+octet_length(description))
  OVER (ORDER BY weight DESC,title,id ROWS UNBOUNDED PRECEDING) AS text_bytes FROM candidates
 )
-SELECT id,CASE WHEN text_bytes <= $1 THEN polarity ELSE '' END,
+SELECT COALESCE(bounded.id,0),CASE WHEN text_bytes <= $1 THEN polarity ELSE '' END,
  CASE WHEN text_bytes <= $1 THEN title ELSE '' END,
- CASE WHEN text_bytes <= $1 THEN description ELSE '' END,weight,text_bytes > $1
- FROM bounded ORDER BY weight DESC,title,id`, byteBudget, maxRows)
+ CASE WHEN text_bytes <= $1 THEN description ELSE '' END,COALESCE(weight,0),COALESCE(text_bytes > $1,false),
+ owner_id::text,rules_revision::text,COALESCE(record_revision,1)::text
+ FROM memory_collection_owner LEFT JOIN bounded ON true WHERE memory_collection_owner.id=1 ORDER BY weight DESC,title,bounded.id`, byteBudget, maxRows)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	rules := []recallRule{}
+	var collection *typedSourceVersion
 	used := 2 // JSON array brackets; metadata is counted by the final packer.
 	for rows.Next() {
 		var r recallRule
 		var oversized bool
-		if err := rows.Scan(&r.ID, &r.Polarity, &r.Title, &r.Description, &r.Weight, &oversized); err != nil {
-			return nil, err
+		var owner, generation, revision string
+		if err := rows.Scan(&r.ID, &r.Polarity, &r.Title, &r.Description, &r.Weight, &oversized, &owner, &generation, &revision); err != nil {
+			return nil, nil, err
+		}
+		collection, err = structuredSource("memory_rule_collection", owner, generation, "[]", 1)
+		if err != nil {
+			return nil, nil, err
+		}
+		if r.ID == 0 {
+			continue
+		}
+		r.Source, err = structuredSource("memory_rule", owner, revision, "[]", r.ID)
+		if err != nil {
+			return nil, nil, err
 		}
 		if oversized {
-			return nil, protectedRecallOverflow()
+			return nil, nil, protectedRecallOverflow()
 		}
 		raw, err := json.Marshal(r)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(rules) > 0 {
 			used++
 		}
 		used += len(raw)
 		if used > byteBudget {
-			return nil, protectedRecallOverflow()
+			return nil, nil, protectedRecallOverflow()
 		}
 		rules = append(rules, r)
 	}
-	return rules, rows.Err()
+	if collection == nil && rows.Err() == nil {
+		return nil, nil, fmt.Errorf("memory rule owner unavailable")
+	}
+	return rules, collection, rows.Err()
 }
 
 func (s *postgresDataStore) recallOpenDirectives(ctx context.Context, limit int) ([]Directive, error) {

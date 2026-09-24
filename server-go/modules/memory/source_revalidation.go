@@ -19,8 +19,11 @@ type sourceRevalidation struct {
 }
 
 func (r *sourceRevalidation) valid() bool {
-	if r == nil || (r.SendGuard != "" && r.SendGuard != "acquire" && r.SendGuard != "release") || r.SchemaVersion != 1 || !releaseTokenValid(r.CheckID) || len(r.Sources) == 0 || len(r.Sources) > maxReleaseSources {
+	if r == nil || (r.SendGuard != "" && r.SendGuard != "acquire" && r.SendGuard != "release") || r.SchemaVersion != 1 || !releaseTokenValid(r.CheckID) || len(r.Sources) > maxReleaseSources {
 		return false
+	}
+	if len(r.Sources) == 0 {
+		return r.SendGuard == "release"
 	}
 	for _, ref := range r.Sources {
 		if ref.Source == nil || ref.Source.MemoryParentState != "observed" || !validTypedSource(ref) ||
@@ -46,9 +49,12 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 	var count int
 	query := sourceRevalidationSQL
 	for _, ref := range request.Sources {
+		if ref.Source.Kind == "memory_rule" || ref.Source.Kind == "memory_rule_collection" {
+			query = ruleSourceRevalidationSQL
+			break
+		}
 		if ref.Source.Kind == "memory_directive" || ref.Source.Kind == "memory_reminder" {
 			query = structuredSourceRevalidationSQL
-			break
 		}
 	}
 	if request.SendGuard == "acquire" {
@@ -66,6 +72,15 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 // assertions inspect live evidence. Both share the same bounded parent probes.
 var sourceRevalidationSQL = buildSourceRevalidationSQL(false)
 var structuredSourceRevalidationSQL = buildSourceRevalidationSQL(true)
+
+var ruleSourceRevalidationSQL = strings.Replace(structuredSourceRevalidationSQL,
+	" WHEN 'memory_directive'", ` WHEN 'memory_rule_collection' THEN EXISTS (
+ SELECT 1 FROM memory_collection_owner WHERE id=1
+ AND rules_revision::text=r.ref#>>'{source_version,version,record_revision}')
+ WHEN 'memory_rule' THEN EXISTS (SELECT 1 FROM rules WHERE id=(r.ref->>'stable_id')::bigint
+ AND directive_type='hard' AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+`
+ AND record_revision::text=r.ref#>>'{source_version,version,record_revision}')
+ WHEN 'memory_directive'`, 1)
 
 func buildSourceRevalidationSQL(structured bool) string {
 	filter := strings.NewReplacer(
@@ -167,10 +182,12 @@ func sourceGuardResponse(request *sourceRevalidation, eligible bool) map[string]
 	result := map[string]any{"status": "ok", "eligible": eligible, "check_id": request.CheckID, "sources_digest": releaseDigest(request.Sources)}
 	if eligible && request.SendGuard == "acquire" {
 		result["send_guard"] = "acquired"
+		result["guard_schema_version"] = 2
 		result["lease_ms"] = 5000
 	}
 	if eligible && request.SendGuard == "release" {
 		result["send_guard"] = "released"
+		result["guard_schema_version"] = 2
 	}
 	return result
 }

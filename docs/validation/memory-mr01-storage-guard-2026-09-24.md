@@ -35,8 +35,11 @@ remains ordered, complete and append-only (new version 34).
 Two full-suite setup failures are retained: [DDL lock ordering](memory-mr01-storage-guard-2026-09-24/first-full-migration-lock-failure.txt)
 and a [missing fixture execute grant](memory-mr01-storage-guard-2026-09-24/second-full-fixture-grant-failure.txt).
 The shipping DDL is now installed before the replay, and the restricted fixture
-explicitly grants the guard functions. The final full race/export run and the
-167-check HTTP candidate run are pending.
+explicitly grants the guard functions. The [final full memory race suite and C export build](memory-mr01-storage-guard-2026-09-24/race-export.txt)
+passed in 271.006 seconds and 5.848 seconds. The [167-check HTTP candidate run](memory-mr01-storage-guard-2026-09-24/checks.json)
+passed on `9da4735e6`, including both real owner audiences and storage mutation
+attempts during admission. [Image identities](memory-mr01-storage-guard-2026-09-24/image-identities.json)
+record the application and dependencies. The [native worker run](memory-mr01-storage-guard-2026-09-24/native/native-async.json) also passed all 53 checks on the same candidate.
 
 This does not certify MR-01 A5. Process-level concurrent-release and restart
 validation remains, along with unversioned channels and the remaining policy and

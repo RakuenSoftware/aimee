@@ -242,6 +242,7 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 			if guarded {
 				r := revalidation(local)
 				r.SendGuard = "release"
+				r.Sources = nil
 				result["local_release_request"] = map[string]any{"operation": "personal-source-revalidate", "revalidation": r}
 			}
 		}
@@ -251,6 +252,7 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 			if guarded {
 				r := revalidation(shared)
 				r.SendGuard = "release"
+				r.Sources = nil
 				result["release_request"] = map[string]any{"scope_context": true, "include_all": false, "workspace": entry.workspace, "project": entry.project, "revalidation": r}
 			}
 		}
@@ -271,14 +273,15 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 			continue
 		}
 		var reply struct {
-			Status      string `json:"status"`
-			Eligible    bool   `json:"eligible"`
-			CheckID     string `json:"check_id"`
-			Digest      string `json:"sources_digest"`
-			SendGuard   string `json:"send_guard"`
-			LeaseMillis int    `json:"lease_ms"`
+			Status             string `json:"status"`
+			Eligible           bool   `json:"eligible"`
+			CheckID            string `json:"check_id"`
+			Digest             string `json:"sources_digest"`
+			SendGuard          string `json:"send_guard"`
+			LeaseMillis        int    `json:"lease_ms"`
+			GuardSchemaVersion int    `json:"guard_schema_version"`
 		}
-		if json.Unmarshal(args[part.field], &reply) != nil || reply.Status != "ok" || reply.CheckID != check || reply.Digest != part.digest || (guarded && reply.Eligible && (reply.SendGuard != "acquired" || reply.LeaseMillis != 5000)) {
+		if json.Unmarshal(args[part.field], &reply) != nil || reply.Status != "ok" || reply.CheckID != check || reply.Digest != part.digest || (guarded && reply.Eligible && (reply.SendGuard != "acquired" || reply.LeaseMillis != 5000 || reply.GuardSchemaVersion != 2)) {
 			return commandResult(commandError("unavailable", "source owner answer unavailable"))
 		}
 		eligible = eligible && reply.Eligible
