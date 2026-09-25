@@ -30,7 +30,7 @@ func TestDirectivePublicPostgresLifecycle(t *testing.T) {
  CREATE FUNCTION directive_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;
  SET LOCAL search_path TO pg_temp,directive_test,public;
  CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,
- lifecycle_state text DEFAULT 'active',activation_suppressed bigint DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
+ lifecycle_state text DEFAULT 'active',activation_suppressed bigint DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '', scope_type text DEFAULT 'project', scope_value text DEFAULT 'visible');
  CREATE TEMP TABLE memory_units(id bigint,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int);
  CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
 GRANT SELECT ON rules TO PUBLIC;

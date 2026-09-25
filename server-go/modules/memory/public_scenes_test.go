@@ -33,7 +33,7 @@ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind t
 CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memory_collection_owner(id int PRIMARY KEY,owner_id uuid);
 INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
-CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,key text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
+CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,key text,scope_value text,lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '', scope_type text DEFAULT 'project');
  INSERT INTO memories(id,key,scope_value,lifecycle_state) VALUES(1,repeat('long-key',100),'app','active'),(2,'hidden','private','active'),(3,'retired','app','rejected');
  INSERT INTO memories(id,key,scope_value,lifecycle_state) SELECT n,'member-'||n,'app','active' FROM generate_series(4,604)n;
  CREATE TEMP TABLE memory_scenes(id bigint PRIMARY KEY,workspace_id text,turn_count int,created_at text);

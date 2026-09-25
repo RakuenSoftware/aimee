@@ -34,7 +34,7 @@ func TestMemoryEvidenceProjectionPostgres(t *testing.T) {
 		}
 	}
 	exec(`SET LOCAL jit=off; CREATE ROLE evidence_projection_test;
- CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,scope_value text DEFAULT 'visible',lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
+ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,scope_value text DEFAULT 'visible',lifecycle_state text DEFAULT 'active',activation_suppressed int DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '', scope_type text DEFAULT 'project');
  CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
  CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
 GRANT SELECT ON rules TO PUBLIC;
