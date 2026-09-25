@@ -73,6 +73,7 @@ CREATE TEMP TABLE memories (
  activation_sticky_turns bigint DEFAULT 2,activation_cooldown_turns bigint DEFAULT 1,
  activation_delay_turns bigint DEFAULT 0,activation_suppressed bigint DEFAULT 0);
  CREATE TEMP TABLE memory_collection_generations(scope_type text,scope_value text,generation bigint);
+ CREATE TEMP TABLE memory_projection_generations(scope_type text,scope_value text,memory_id bigint,generation bigint);
  CREATE TEMP TABLE memory_collection_owner(id int,owner_id uuid,rules_revision bigint DEFAULT 1);
  INSERT INTO memory_collection_owner(id,owner_id) VALUES(1,'00000000-0000-0000-0000-000000000001');
  INSERT INTO memories(id,confidence,activation_cooldown_turns,activation_delay_turns,activation_suppressed) VALUES

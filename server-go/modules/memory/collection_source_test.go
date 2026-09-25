@@ -69,6 +69,8 @@ func TestCollectionEmptyRecallInvalidatedPostgres(t *testing.T) {
 	check(true)
 	exec(`SAVEPOINT hidden_insert; RESET ROLE;
  INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,valid_from) VALUES('L2','fact','hidden constraint','hidden contradiction','project','mr04-hidden',(CURRENT_TIMESTAMP+interval '1 second')::text);
+ INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'memory',id,'memory','memory:1' FROM memories WHERE key='hidden constraint';
  SET LOCAL ROLE aimee_store_runtime`)
 	check(true)
 	afterHidden, err := backend.observeRecallCollection(ctx)
@@ -125,6 +127,32 @@ func TestCollectionEmptyRecallInvalidatedPostgres(t *testing.T) {
 	if len(retained) != 1 {
 		t.Fatal("expected one selected descendant", retained)
 	}
+	collectionBefore, err := backend.observeRecallCollection(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Sources = []typedProjectionRef{{Channel: "native_memory_collection", ID: "1", Source: collectionBefore}}
+	check(true)
+	exec(`SAVEPOINT lineage_only; RESET ROLE`)
+	exec(`INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ VALUES('memory',$1,'memory','memory:9223372036854775807')`, ids[2])
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	check(false)
+	exec(`ROLLBACK TO lineage_only; RELEASE lineage_only`)
+	check(true)
+	exec(`SAVEPOINT projection_only; RESET ROLE`)
+	exec(`INSERT INTO memory_units(memory_id,unit_type,unit_text) VALUES($1,'fact','new projected text')`, ids[2])
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	check(false)
+	exec(`ROLLBACK TO projection_only; RELEASE projection_only`)
+	check(true)
+	exec(`SAVEPOINT lineage_noop; RESET ROLE; UPDATE memory_lineage SET source_ref=source_ref; SET LOCAL ROLE aimee_store_runtime`)
+	check(true)
+	exec(`ROLLBACK TO lineage_noop; RELEASE lineage_noop`)
+	exec(`SAVEPOINT lineage_truncate; RESET ROLE; TRUNCATE memory_lineage; SET LOCAL ROLE aimee_store_runtime`)
+	check(false)
+	exec(`ROLLBACK TO lineage_truncate; RELEASE lineage_truncate`)
+	check(true)
 	request.Sources = retained
 	check(true)
 	activationCheck := func(want int) {

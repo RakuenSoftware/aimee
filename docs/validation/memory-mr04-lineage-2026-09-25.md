@@ -237,3 +237,64 @@ passed in 1.146 seconds. Schema parity, migration ordering, duplicate-table,
 module ownership and source/test registration checks passed. Production CT100
 server, database and embedder remain released 0.4.5 and healthy at 47 hours; the
 paired CLI reports HTTP 200. Fresh candidate process validation remains pending.
+
+
+## Registry and scoped lineage-generation checkpoint
+
+Shared schema 38 checks recorded memory revisions in the existing dependency
+owner. The previous predicate ignored `input_version` when the producer supplied
+no content hash. Registration now evaluates the supplied observations instead
+of asserting freshness merely because the array is nonempty. Transactional
+invalidation retains the existing queue and changeset owner. Outcome feedback
+passes its code-generation field only for code inputs, preserving legacy
+memory feedback that has no recorded memory revision.
+
+The [revision regression](memory-mr04-lineage-2026-09-25/registry-revision-red.txt)
+first returned false for a moved revision. The
+[focused replay](memory-mr04-lineage-2026-09-25/registry-lineage-generation-target.txt)
+checks revision-only invalidation, atomic rollback, duplicate queue delivery,
+stale producer replay, successful refresh and deletion.
+
+Lineage, unit, summary, chunk, episode and relation writes now advance a separate
+durable scoped counter per memory in `memory_projection_generations`. Collection observations include their sum; the
+canonical invalidation cursor does not, avoiding a rebuild loop or artificial
+journal gaps when the worker publishes its own projections. No-op updates do
+not advance it. Truncation records affected scopes before removing rows without
+aggregating retained payloads into a giant intermediate value.
+
+The [collection regression](memory-mr04-lineage-2026-09-25/lineage-collection-red.txt)
+reproduced successful validation after a lineage-only eligibility change. The
+focused replay now rejects that view and an auxiliary-text change, accepts the
+view after rollback and a no-op, detects truncation, and leaves the complete
+visible observation unchanged by hidden-scope lineage edits.
+
+Complete evidence projections report the scoped generation observed in their
+repeatable-read snapshot. The projection test verifies that a hidden collection
+head contributes neither its generation nor its count. Incomplete ancestry
+continues to withhold the generation, counts and references.
+
+The full race/export rerun is pending. An earlier full run was stopped because
+its direct SQL fixtures used PostgreSQL's default JIT rather than the production
+memory handler's `jit=off`; the rerun helper now supplies that setting explicitly.
+Generated rule serving, session compaction origins, complete producer/erasure
+coverage and fresh-process acceptance remain open. MR-04 is not closed.
+
+
+The first complete race run failed `TestSharedIndexConcurrentClaims`: a single
+projection counter per scope serialized two otherwise independent index workers.
+The revised storage uses an immutable `(scope_type, scope_value, memory_id)` key;
+its counters survive deletion and scope moves so the observed sum cannot rewind.
+RLS protects scoped reads and runtime roles cannot write the counters. The
+[real two-connection rerun](memory-mr04-lineage-2026-09-25/projection-concurrency.txt)
+passes (0.42 seconds), including abandoned-transaction recovery. Its first retry
+skipped because the failed run left two orphan test jobs; those exact jobs were
+removed from the disposable replay database before the recorded successful run.
+The [failed full-run receipt](memory-mr04-lineage-2026-09-25/projection-concurrency-full-red.txt)
+is retained. A final full-suite rerun follows this fix.
+
+
+The final [complete race/export replay](memory-mr04-lineage-2026-09-25/registry-projection-final.txt)
+passes: memory race suite 321.479 seconds, exported Go owner 5.144 seconds. Schema
+parity (249 shared tables), ALTER ordering, ownership, module boundaries, source
+and test registration, documentation and proposal links also pass. This completes
+the registry-revision and projection-generation component, not MR-04 acceptance.

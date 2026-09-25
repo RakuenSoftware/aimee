@@ -38,6 +38,10 @@ func TestMemoryEvidenceProjectionPostgres(t *testing.T) {
  CREATE TEMP TABLE memory_units(id bigint PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int DEFAULT 0);
  CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
  CREATE TEMP TABLE memory_collection_owner(id int,owner_id text);
+ CREATE TEMP TABLE memory_collection_generations(scope_type text,scope_value text,generation bigint);
+ CREATE TEMP TABLE memory_projection_generations(scope_type text,scope_value text,memory_id bigint,generation bigint);
+ INSERT INTO memory_collection_generations VALUES('project','visible',10),('project','hidden',1000);
+ INSERT INTO memory_projection_generations VALUES('project','visible',1,2),('project','hidden',9007199254740993,2000);
  CREATE TEMP TABLE memory_evidence_events(event_id text,object_kind text,object_id text,operation text);
  INSERT INTO memory_collection_owner VALUES(1,'fixture-owner');
  INSERT INTO memories(id) SELECT generate_series(1,32);
@@ -45,7 +49,18 @@ func TestMemoryEvidenceProjectionPostgres(t *testing.T) {
  INSERT INTO memory_evidence_events SELECT 'host-event-'||id,'memory',id::text,'assert' FROM memories;
  ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
  CREATE POLICY fixture_scope ON memories USING(scope_value='visible');
- GRANT SELECT ON memories,memory_units,memory_lineage,memory_collection_owner,memory_evidence_events TO evidence_projection_test`)
+ GRANT SELECT ON memories,memory_units,memory_lineage,memory_collection_owner,memory_collection_generations,memory_projection_generations,memory_evidence_events TO evidence_projection_test`)
+	schema, err := os.ReadFile("../../../src/modules/db2/c/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(schema), "CREATE OR REPLACE FUNCTION memory_row_scope_visible(")
+	end := strings.Index(string(schema)[start:], "ALTER TABLE memories ENABLE ROW LEVEL SECURITY;")
+	if start < 0 || end < 0 {
+		t.Fatal("scope owner missing")
+	}
+	exec(string(schema)[start : start+end])
+	exec(`SELECT set_config('aimee.memory_scope_all','0',true),set_config('aimee.memory_project','visible',true)`)
 	parent := func(child, source int64) {
 		exec(`INSERT INTO memory_lineage VALUES('memory',$1,'memory','memory:'||$2::bigint::text),
  ('memory',$1,'memory-cognify-input-v1',jsonb_build_object('schema_version',1,'owner_id','fixture-owner','record_id',$2::bigint::text,'record_revision','1','derived_revision','1')::text)`, child, source)
@@ -72,6 +87,9 @@ func TestMemoryEvidenceProjectionPostgres(t *testing.T) {
 		t.Fatal("public evidence envelope", public)
 	}
 	original := read(1)
+	if original["lineage_generation"] != json.Number("13") || original["generation_state"] != "observed" {
+		t.Fatal("scoped lineage generation", original)
+	}
 	if original["source_family_count"] != 1 || original["independence_state"] != "unknown" {
 		t.Fatal(original)
 	}

@@ -15726,9 +15726,19 @@ BEGIN
      COALESCE(dep->>'contribution','supporting'));
    n:=n+1;
  END LOOP;
- UPDATE derived_memory_registry SET current_status=CASE WHEN n=0 THEN 'dependencies:not-recorded'
-      ELSE 'fresh' END,updated_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
-   WHERE derived_kind=p_derived_kind AND derived_memory_id=p_derived_id;
+ -- Registration is an observation, not proof that a delayed producer still
+ -- has current inputs. Reuse the same evaluator as transactional invalidation.
+ UPDATE derived_memory_registry r SET current_status=f.status,
+   stale_cause_kind=f.cause_kind,stale_cause_id=f.cause_id,
+   updated_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
+ FROM derived_memory_freshness_for('', '') f
+ WHERE r.derived_kind=p_derived_kind AND r.derived_memory_id=p_derived_id
+   AND f.derived_kind=r.derived_kind AND f.derived_memory_id=r.derived_memory_id;
+ INSERT INTO derived_rederivation_queue(derived_kind,derived_memory_id,cause)
+ SELECT derived_kind,derived_memory_id,'registered inputs unavailable'
+ FROM derived_memory_registry WHERE derived_kind=p_derived_kind AND derived_memory_id=p_derived_id
+   AND current_status IN ('stale','unsupported')
+ ON CONFLICT(derived_kind,derived_memory_id) DO UPDATE SET cause=EXCLUDED.cause,state='pending';
  RETURN n;
 END $$;
 
@@ -16904,7 +16914,8 @@ RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
        AND x.invalidated_at='' AND x.superseded_at='' AND
        (p_version='' OR x.version::TEXT=p_version))
   WHEN p_kind='memory' THEN NOT EXISTS(SELECT 1 FROM memories x WHERE x.id::TEXT=p_id
-       AND x.lifecycle_state='active' AND (p_hash='' OR x.content_hash=p_hash))
+       AND x.lifecycle_state='active' AND (p_hash='' OR x.content_hash=p_hash)
+       AND (p_version='' OR to_jsonb(x)->>'record_revision'=p_version))
   WHEN p_kind='code_unit' THEN NOT EXISTS(SELECT 1 FROM files x WHERE x.id::TEXT=p_id
        AND (p_hash='' OR x.hash=p_hash) AND (p_version='' OR x.generation::TEXT=p_version))
   WHEN p_kind='entity' THEN NOT EXISTS(SELECT 1 FROM entity_registry x
@@ -17041,7 +17052,8 @@ WITH per_workflow AS (
    count(*) FILTER(WHERE outcome<>'useful') AS negative_n,
    count(DISTINCT authenticated_evaluator) AS evaluators,
    count(DISTINCT NULLIF(task_label,'')) AS tasks,
-   bool_or(knowledge_input_moved(subject_kind,subject_id,code_generation_at_eval::TEXT,
+   bool_or(knowledge_input_moved(subject_kind,subject_id,
+                                CASE WHEN subject_kind='code_unit' THEN code_generation_at_eval::TEXT ELSE '' END,
                                 source_hash_at_eval,'','')) AS stale
  FROM work_outcomes GROUP BY subject_kind,subject_id,scope_kind,scope_id,workflow),
 base AS (
@@ -17991,6 +18003,87 @@ END
 $memory_change_acl$;
 -- END memory change journal
 
+-- BEGIN memory lineage collection revisions
+-- Projection writes change query results without changing canonical payloads.
+-- Keep their durable scoped head separate from the canonical outbox cursor:
+-- rebuilding an index must not enqueue itself forever or manufacture feed gaps.
+CREATE TABLE IF NOT EXISTS memory_projection_generations (
+ scope_type TEXT NOT NULL,scope_value TEXT NOT NULL,memory_id BIGINT NOT NULL,
+ generation BIGINT NOT NULL CHECK(generation>0),
+ PRIMARY KEY(scope_type,scope_value,memory_id)
+);
+ALTER TABLE memory_projection_generations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_projection_generation_visible ON memory_projection_generations;
+CREATE POLICY memory_projection_generation_visible ON memory_projection_generations
+ USING(memory_row_scope_visible(scope_type,scope_value));
+REVOKE ALL ON memory_projection_generations FROM PUBLIC;
+DO $projection_generation_acl$
+DECLARE recipient RECORD;role_name TEXT;
+BEGIN
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class c,
+   LATERAL aclexplode(c.relacl) acl WHERE c.oid='memory_projection_generations'::regclass
+   AND acl.grantee<>c.relowner AND acl.grantee<>0
+ LOOP
+   role_name:=quote_ident(pg_get_userbyid(recipient.grantee));
+   EXECUTE format('REVOKE ALL ON memory_projection_generations FROM %s',role_name);
+   EXECUTE format('GRANT SELECT ON memory_projection_generations TO %s',role_name);
+ END LOOP;
+END $projection_generation_acl$;
+CREATE OR REPLACE FUNCTION memory_capture_projection_change() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE roots TEXT; changes TEXT; changed JSONB; affected RECORD;
+BEGIN
+ IF TG_OP='UPDATE' AND to_jsonb(OLD) IS NOT DISTINCT FROM to_jsonb(NEW) THEN RETURN NEW; END IF;
+ IF TG_OP='TRUNCATE' THEN
+   IF TG_TABLE_NAME='memory_lineage' THEN
+     changes:=format('SELECT jsonb_build_object(''object_type'',object_type,''object_id'',object_id) AS x FROM %I.%I',TG_TABLE_SCHEMA,TG_TABLE_NAME);
+   ELSE
+     changes:=format('SELECT jsonb_build_object(''memory_id'',memory_id) AS x FROM %I.%I',TG_TABLE_SCHEMA,TG_TABLE_NAME);
+   END IF;
+ ELSE
+   changed:=jsonb_build_array(CASE WHEN TG_OP<>'INSERT' THEN to_jsonb(OLD) END,
+                             CASE WHEN TG_OP<>'DELETE' THEN to_jsonb(NEW) END);
+   changes:='SELECT x FROM jsonb_array_elements($1) x';
+ END IF;
+ IF TG_TABLE_NAME='memory_lineage' THEN
+   roots:=format($q$
+     SELECT (x->>'object_id')::bigint AS id FROM projection_changes WHERE x->>'object_type'='memory'
+     UNION SELECT u.memory_id FROM projection_changes JOIN %1$I.memory_units u
+       ON u.id=(x->>'object_id')::bigint WHERE x->>'object_type'='memory_unit'
+     UNION SELECT e.memory_id FROM projection_changes JOIN %1$I.memory_episodes e
+       ON e.id=(x->>'object_id')::bigint WHERE x->>'object_type'='episode'
+     UNION SELECT r.memory_id FROM projection_changes JOIN %1$I.memory_relations r
+       ON r.id=(x->>'object_id')::bigint WHERE x->>'object_type'='relation'
+   $q$,TG_TABLE_SCHEMA);
+ ELSE
+   roots:='SELECT DISTINCT (x->>''memory_id'')::bigint AS id FROM projection_changes';
+ END IF;
+ FOR affected IN EXECUTE format('WITH projection_changes AS MATERIALIZED(%s) SELECT DISTINCT m.id,m.scope_type,m.scope_value FROM %I.memories m
+   JOIN (%s) roots ON roots.id=m.id ORDER BY m.scope_type,m.scope_value,m.id',changes,TG_TABLE_SCHEMA,roots) USING changed
+ LOOP
+   EXECUTE format('INSERT INTO %I.memory_projection_generations(scope_type,scope_value,memory_id,generation)
+     VALUES($1,$2,$3,1) ON CONFLICT(scope_type,scope_value,memory_id) DO UPDATE
+     SET generation=memory_projection_generations.generation+1',TG_TABLE_SCHEMA)
+     USING affected.scope_type,affected.scope_value,affected.id;
+ END LOOP;
+ IF TG_OP='TRUNCATE' THEN RETURN NULL; END IF;
+ RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END $$;
+REVOKE ALL ON FUNCTION memory_capture_projection_change() FROM PUBLIC;
+DO $memory_projection_triggers$
+DECLARE target TEXT;
+BEGIN
+ FOREACH target IN ARRAY ARRAY['memory_lineage','memory_units','memory_summaries','memory_chunks','memory_episodes','memory_relations'] LOOP
+   EXECUTE format('DROP TRIGGER IF EXISTS memory_projection_collection_revision ON %I',target);
+   EXECUTE format('CREATE TRIGGER memory_projection_collection_revision AFTER INSERT OR UPDATE OR DELETE ON %I
+     FOR EACH ROW EXECUTE FUNCTION memory_capture_projection_change()',target);
+   EXECUTE format('DROP TRIGGER IF EXISTS memory_projection_collection_truncate ON %I',target);
+   EXECUTE format('CREATE TRIGGER memory_projection_collection_truncate BEFORE TRUNCATE ON %I
+     FOR EACH STATEMENT EXECUTE FUNCTION memory_capture_projection_change()',target);
+ END LOOP;
+END $memory_projection_triggers$;
+-- END memory lineage collection revisions
+
 -- BEGIN memory relation invalidation consumer
 -- Progress is private to this projection. Applying a page queues canonical
 -- rebuilding and advances its cursor in the SAME transaction. Neither progress
@@ -18617,7 +18710,7 @@ BEGIN
   GRANT SELECT(outcome_id) ON work_outcomes TO aimee_store_runtime;
   GRANT SELECT, INSERT ON artifacts, evidence_index_ops, learning_synth_ops TO aimee_store_runtime;
   GRANT UPDATE(id,last_accessed_at) ON artifacts TO aimee_store_runtime;
-  GRANT SELECT ON memory_collection_owner, memory_collection_generations, memory_invalidation_outbox TO aimee_store_runtime;
+  GRANT SELECT ON memory_collection_owner, memory_collection_generations, memory_projection_generations, memory_invalidation_outbox TO aimee_store_runtime;
   REVOKE ALL ON memory_mutation_receipts FROM aimee_store_runtime;
   GRANT SELECT,INSERT ON memory_mutation_receipts TO aimee_store_runtime;
   GRANT SELECT,INSERT ON memory_correction_proposals TO aimee_store_runtime;
@@ -18988,5 +19081,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '37')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '38')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

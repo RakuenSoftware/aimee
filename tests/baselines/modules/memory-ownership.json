@@ -2582,11 +2582,11 @@
       "symbols": [
         "db2_memory_find_facts_like"
       ],
-      "sha256": "4d853bfba7790ad29bfe4b306f144bb8e0ba4e19c02ccf7b723a878e208ea2b2",
+      "sha256": "46abc4521a506ef2288a71ec35eab232ad4b139e5fc0b2726c0c6e53a3e364eb",
       "inputs": {
         "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "fdb4cd4db2a53d555958076b663ed9c9965624ba697ccedd6882e1c862fd32db",
-        "src/modules/db2/c/schema_sqlite.sql": "defe8cd05270d723e878cf86267c3892e313cb1d2f735229411637dd491f4916"
+        "src/modules/db2/c/schema.sql": "9ed68f300ff58f224760226896de92a007b2f6dcdff5362b6fcf7dc52e45e453",
+        "src/modules/db2/c/schema_sqlite.sql": "b63970ea339a7a0a9be969de229c0219cb82be2a6cdca0a415909173c266ea81"
       }
     },
     "src/server/openapi_server_data.h": {

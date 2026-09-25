@@ -24,8 +24,10 @@ const collectionAudienceSQL = `(CASE WHEN current_setting('aimee.memory_scope_al
 
 // Zero is a valid collection head. Version envelopes use positive revisions,
 // so revision one represents the empty generation. PostgreSQL raises on overflow.
-const collectionRevisionSQL = `(SELECT (1+COALESCE(sum(generation),0))::bigint::text
- FROM memory_collection_generations WHERE memory_row_scope_visible(scope_type,scope_value))`
+const collectionRevisionSQL = `(SELECT (1+COALESCE(sum(generation),0))::bigint::text FROM (
+ SELECT generation FROM memory_collection_generations WHERE memory_row_scope_visible(scope_type,scope_value)
+ UNION ALL SELECT generation FROM memory_projection_generations WHERE memory_row_scope_visible(scope_type,scope_value)
+ ) visible_heads)`
 
 func (s *postgresDataStore) observeRecallCollection(ctx context.Context) (*typedSourceVersion, error) {
 	var owner, revision, audience, deadline string

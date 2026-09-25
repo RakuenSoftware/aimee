@@ -108,6 +108,8 @@ BEGIN
   GRANT EXECUTE ON FUNCTION kb_audit_worm_submit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
     kb_audit_worm_pending() TO aimee_kb_runtime;
   REVOKE ALL ON TABLE kb_subject_erasure_request,memory_erasure_intents,memory_erasure_epoch FROM aimee_kb_runtime;
+  REVOKE ALL ON TABLE memory_projection_generations FROM aimee_kb_runtime;
+  GRANT SELECT ON TABLE memory_projection_generations TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_subject_erasure_begin(TEXT,TEXT,JSONB),
     kb_subject_erasure_complete(TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
 

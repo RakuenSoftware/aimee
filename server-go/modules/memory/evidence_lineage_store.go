@@ -194,6 +194,18 @@ func (s *postgresDataStore) memoryEvidence(ctx context.Context, id int64) (map[s
 		result["reasons"] = []string{"dependencies_unavailable"}
 		return result, nil
 	}
+	var generation string
+	generationSQL := `SELECT ` + collectionRevisionSQL
+	if s.placement == PlacementServer {
+		generationSQL = `SELECT (generation+1)::text FROM user_memory_collection_generation WHERE id=1`
+	}
+	if err := s.db.QueryRow(ctx, generationSQL).Scan(&generation); err != nil {
+		return nil, err
+	}
+	if n, err := strconv.ParseInt(generation, 10, 64); err != nil || n < 1 {
+		return nil, fmt.Errorf("memory: invalid lineage generation")
+	}
+	result["lineage_generation"], result["generation_state"] = json.Number(generation), "observed"
 	keys := make([]string, 0, len(revisions))
 	for key := range revisions {
 		keys = append(keys, key)
