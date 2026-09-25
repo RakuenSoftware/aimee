@@ -1,0 +1,10 @@
+{
+  "memory_race": 0,
+  "standalone_export": 0,
+  "binding_retention": 0,
+  "native_ingress": 0,
+  "native_worm": 0,
+  "lint": 0,
+  "image_build": 0,
+  "benchmark": 0
+}

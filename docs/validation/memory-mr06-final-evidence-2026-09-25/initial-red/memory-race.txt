@@ -1,0 +1,2651 @@
+=== RUN   TestActivationSnapshotValidation
+--- PASS: TestActivationSnapshotValidation (0.00s)
+=== RUN   TestActivationPostgresSelectionAndRecall
+--- PASS: TestActivationPostgresSelectionAndRecall (0.31s)
+=== RUN   TestAlertViews
+--- PASS: TestAlertViews (0.00s)
+=== RUN   TestAlertParentEligibilityPostgres
+=== RUN   TestAlertParentEligibilityPostgres/current
+=== RUN   TestAlertParentEligibilityPostgres/future
+=== RUN   TestAlertParentEligibilityPostgres/expired
+=== RUN   TestAlertParentEligibilityPostgres/suppressed
+=== RUN   TestAlertParentEligibilityPostgres/pending
+=== RUN   TestAlertParentEligibilityPostgres/fulfilled
+=== RUN   TestAlertParentEligibilityPostgres/superseded
+=== RUN   TestAlertParentEligibilityPostgres/archived
+=== RUN   TestAlertParentEligibilityPostgres/retired
+=== RUN   TestAlertParentEligibilityPostgres/quarantined
+=== RUN   TestAlertParentEligibilityPostgres/deleted
+=== RUN   TestAlertParentEligibilityPostgres/revoked
+=== RUN   TestAlertParentEligibilityPostgres/rejected
+=== RUN   TestAlertParentEligibilityPostgres/unknown
+--- PASS: TestAlertParentEligibilityPostgres (0.31s)
+    --- PASS: TestAlertParentEligibilityPostgres/current (0.05s)
+    --- PASS: TestAlertParentEligibilityPostgres/future (0.02s)
+    --- PASS: TestAlertParentEligibilityPostgres/expired (0.02s)
+    --- PASS: TestAlertParentEligibilityPostgres/suppressed (0.01s)
+    --- PASS: TestAlertParentEligibilityPostgres/pending (0.01s)
+    --- PASS: TestAlertParentEligibilityPostgres/fulfilled (0.01s)
+    --- PASS: TestAlertParentEligibilityPostgres/superseded (0.01s)
+    --- PASS: TestAlertParentEligibilityPostgres/archived (0.01s)
+    --- PASS: TestAlertParentEligibilityPostgres/retired (0.01s)
+    --- PASS: TestAlertParentEligibilityPostgres/quarantined (0.01s)
+    --- PASS: TestAlertParentEligibilityPostgres/deleted (0.01s)
+    --- PASS: TestAlertParentEligibilityPostgres/revoked (0.01s)
+    --- PASS: TestAlertParentEligibilityPostgres/rejected (0.01s)
+    --- PASS: TestAlertParentEligibilityPostgres/unknown (0.01s)
+=== RUN   TestAnswerGatePreservesNativeDecisions
+--- PASS: TestAnswerGatePreservesNativeDecisions (0.00s)
+=== RUN   TestAnswerIntentUsesWholeTerms
+--- PASS: TestAnswerIntentUsesWholeTerms (0.00s)
+=== RUN   TestDiagnosticRankingExcludesConfidence
+--- PASS: TestDiagnosticRankingExcludesConfidence (0.00s)
+=== RUN   TestAnswerPublicValidation
+--- PASS: TestAnswerPublicValidation (0.00s)
+=== RUN   TestAnswerClusterCitationsAndMissingEvidence
+--- PASS: TestAnswerClusterCitationsAndMissingEvidence (0.00s)
+=== RUN   TestAnswerCountersAndUnverifiedCuratedWarning
+--- PASS: TestAnswerCountersAndUnverifiedCuratedWarning (0.00s)
+=== RUN   TestAssertionTimestampsAndBoundary
+--- PASS: TestAssertionTimestampsAndBoundary (0.00s)
+=== RUN   TestBenchmarkContextBudget
+--- PASS: TestBenchmarkContextBudget (0.00s)
+=== RUN   TestBenchmarkContextHostBoundary
+--- PASS: TestBenchmarkContextHostBoundary (0.00s)
+=== RUN   TestBenchmarkHardNegativeArtifact
+2026/09/25 20:11:58 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 20:11:58 memory data failure operation="other" trace=0 status=5 class=internal
+--- PASS: TestBenchmarkHardNegativeArtifact (0.12s)
+=== RUN   TestBenchmarkMissRankAndFailures
+2026/09/25 20:11:58 memory data failure operation="get" trace=0 status=5 class=internal
+2026/09/25 20:11:58 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 20:11:58 memory data failure operation="get" trace=0 status=5 class=internal
+2026/09/25 20:11:58 memory data failure operation="other" trace=0 status=5 class=internal
+--- PASS: TestBenchmarkMissRankAndFailures (0.11s)
+=== RUN   TestBenchmarkDiagnosticBoundaries
+--- PASS: TestBenchmarkDiagnosticBoundaries (0.00s)
+=== RUN   TestBenchmarkFailureBuckets
+--- PASS: TestBenchmarkFailureBuckets (0.00s)
+=== RUN   TestBenchmarkScoreUsesOwnerRetrieval
+2026/09/25 20:11:58 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 20:11:58 memory data failure operation="other" trace=0 status=5 class=internal
+--- PASS: TestBenchmarkScoreUsesOwnerRetrieval (0.00s)
+=== RUN   TestBriefingBudget
+--- PASS: TestBriefingBudget (0.16s)
+=== RUN   TestBriefingText
+--- PASS: TestBriefingText (0.00s)
+=== RUN   TestMemoryJSONOutput
+--- PASS: TestMemoryJSONOutput (0.00s)
+=== RUN   TestMemoryJSONArrayFields
+--- PASS: TestMemoryJSONArrayFields (0.00s)
+=== RUN   TestGoCandidateFusionFairnessBoundsAndDuplicateVotes
+--- PASS: TestGoCandidateFusionFairnessBoundsAndDuplicateVotes (0.00s)
+=== RUN   TestClientGateAndExtractionConformance
+--- PASS: TestClientGateAndExtractionConformance (0.01s)
+=== RUN   TestClientPrivacyConformance
+--- PASS: TestClientPrivacyConformance (0.00s)
+=== RUN   TestClientDataPreservesPlacementAndLargeIDs
+=== RUN   TestClientDataPreservesPlacementAndLargeIDs/server
+=== RUN   TestClientDataPreservesPlacementAndLargeIDs/kb
+--- PASS: TestClientDataPreservesPlacementAndLargeIDs (0.00s)
+    --- PASS: TestClientDataPreservesPlacementAndLargeIDs/server (0.00s)
+    --- PASS: TestClientDataPreservesPlacementAndLargeIDs/kb (0.00s)
+=== RUN   TestClientEmbeddingsPreserveOwnerOutcomes
+--- PASS: TestClientEmbeddingsPreserveOwnerOutcomes (0.00s)
+=== RUN   TestClientNoFallbackOrRetriesOnTransportFailure
+--- PASS: TestClientNoFallbackOrRetriesOnTransportFailure (0.00s)
+=== RUN   TestClientDeadlineAndCancellation
+--- PASS: TestClientDeadlineAndCancellation (0.00s)
+=== RUN   TestClientRejectsMalformedReplies
+--- PASS: TestClientRejectsMalformedReplies (0.00s)
+=== RUN   TestClientRejectsCorruptBinaryReplies
+--- PASS: TestClientRejectsCorruptBinaryReplies (0.00s)
+=== RUN   TestClientRejectsOversizeBeforeDispatch
+--- PASS: TestClientRejectsOversizeBeforeDispatch (0.01s)
+=== RUN   TestClientConcurrentCallsKeepRequestIdentity
+--- PASS: TestClientConcurrentCallsKeepRequestIdentity (0.00s)
+=== RUN   TestClientPinnedWireRequests
+=== RUN   TestClientPinnedWireRequests/rerank
+=== RUN   TestClientPinnedWireRequests/write
+=== RUN   TestClientPinnedWireRequests/extract
+=== RUN   TestClientPinnedWireRequests/scan
+=== RUN   TestClientPinnedWireRequests/pii
+=== RUN   TestClientPinnedWireRequests/sensitivity
+=== RUN   TestClientPinnedWireRequests/commands
+--- PASS: TestClientPinnedWireRequests (0.00s)
+    --- PASS: TestClientPinnedWireRequests/rerank (0.00s)
+    --- PASS: TestClientPinnedWireRequests/write (0.00s)
+    --- PASS: TestClientPinnedWireRequests/extract (0.00s)
+    --- PASS: TestClientPinnedWireRequests/scan (0.00s)
+    --- PASS: TestClientPinnedWireRequests/pii (0.00s)
+    --- PASS: TestClientPinnedWireRequests/sensitivity (0.00s)
+    --- PASS: TestClientPinnedWireRequests/commands (0.00s)
+=== RUN   TestSensitivityRejectsImpossibleCountBeforeAllocation
+--- PASS: TestSensitivityRejectsImpossibleCountBeforeAllocation (0.00s)
+=== RUN   TestClientDataJSONPreservesResponseAndRequestBytes
+--- PASS: TestClientDataJSONPreservesResponseAndRequestBytes (0.00s)
+=== RUN   TestClientFactFailureCannotLookAccepted
+--- PASS: TestClientFactFailureCannotLookAccepted (0.00s)
+=== RUN   TestClientEmbeddingThroughOwner
+--- PASS: TestClientEmbeddingThroughOwner (0.00s)
+=== RUN   TestCodeContextAdmissionAndAnchors
+=== RUN   TestCodeContextAdmissionAndAnchors/global
+=== RUN   TestCodeContextAdmissionAndAnchors/foreign
+=== RUN   TestCodeContextAdmissionAndAnchors/fact
+=== RUN   TestCodeContextAdmissionAndAnchors/unanchored
+=== RUN   TestCodeContextAdmissionAndAnchors/symbol_substring
+=== RUN   TestCodeContextAdmissionAndAnchors/duplicate
+--- PASS: TestCodeContextAdmissionAndAnchors (0.00s)
+    --- PASS: TestCodeContextAdmissionAndAnchors/global (0.00s)
+    --- PASS: TestCodeContextAdmissionAndAnchors/foreign (0.00s)
+    --- PASS: TestCodeContextAdmissionAndAnchors/fact (0.00s)
+    --- PASS: TestCodeContextAdmissionAndAnchors/unanchored (0.00s)
+    --- PASS: TestCodeContextAdmissionAndAnchors/symbol_substring (0.00s)
+    --- PASS: TestCodeContextAdmissionAndAnchors/duplicate (0.00s)
+=== RUN   TestCodeContextDependencyAndNearMisses
+--- PASS: TestCodeContextDependencyAndNearMisses (0.00s)
+=== RUN   TestCodeContextHostBoundary
+--- PASS: TestCodeContextHostBoundary (0.00s)
+=== RUN   TestPrivateCodeIndexPublicationAndFusion
+--- PASS: TestPrivateCodeIndexPublicationAndFusion (0.06s)
+=== RUN   TestKBGraphFusionUsesInstancePolicyAndVisibility
+--- PASS: TestKBGraphFusionUsesInstancePolicyAndVisibility (0.09s)
+=== RUN   TestCodeVectorsRejectStaleContentAndModel
+--- PASS: TestCodeVectorsRejectStaleContentAndModel (0.05s)
+=== RUN   TestPrivateCodeIndexLargeGraphAndMissingFile
+--- PASS: TestPrivateCodeIndexLargeGraphAndMissingFile (0.29s)
+=== RUN   TestPrivateCodeMissingBlastRadius
+--- PASS: TestPrivateCodeMissingBlastRadius (0.03s)
+=== RUN   TestPrivateCodePublishedSpan
+--- PASS: TestPrivateCodePublishedSpan (0.03s)
+=== RUN   TestPrivateCodeManifestPublication
+--- PASS: TestPrivateCodeManifestPublication (0.04s)
+=== RUN   TestPrivateCodePublishedSpanBoundsAndDrift
+=== RUN   TestPrivateCodePublishedSpanBoundsAndDrift/defaults
+=== RUN   TestPrivateCodePublishedSpanBoundsAndDrift/unterminated_last_line
+=== RUN   TestPrivateCodePublishedSpanBoundsAndDrift/short_file_not_truncated
+=== RUN   TestPrivateCodePublishedSpanBoundsAndDrift/past_EOF
+=== RUN   TestPrivateCodePublishedSpanBoundsAndDrift/empty
+=== RUN   TestPrivateCodePublishedSpanBoundsAndDrift/hard_line_cap
+=== RUN   TestPrivateCodePublishedSpanBoundsAndDrift/byte_cap
+--- PASS: TestPrivateCodePublishedSpanBoundsAndDrift (0.05s)
+    --- PASS: TestPrivateCodePublishedSpanBoundsAndDrift/defaults (0.00s)
+    --- PASS: TestPrivateCodePublishedSpanBoundsAndDrift/unterminated_last_line (0.00s)
+    --- PASS: TestPrivateCodePublishedSpanBoundsAndDrift/short_file_not_truncated (0.00s)
+    --- PASS: TestPrivateCodePublishedSpanBoundsAndDrift/past_EOF (0.00s)
+    --- PASS: TestPrivateCodePublishedSpanBoundsAndDrift/empty (0.00s)
+    --- PASS: TestPrivateCodePublishedSpanBoundsAndDrift/hard_line_cap (0.00s)
+    --- PASS: TestPrivateCodePublishedSpanBoundsAndDrift/byte_cap (0.00s)
+=== RUN   TestCognifyRelationObservedInputsPostgres
+--- PASS: TestCognifyRelationObservedInputsPostgres (0.05s)
+=== RUN   TestCognifyRelationProducerReplay
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify 278294 cognify-visible: error not_found
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify 278293 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify 278293 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify 278295 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify 278295 cognify-visible: ok <nil>
+    cognify_relation_test.go:146: cognify call cognify 278293 cognify-visible: ok <nil>
+    cognify_relation_test.go:146: cognify call cognify 278294 cognify-private: ok <nil>
+    cognify_relation_test.go:146: cognify call cognify_status 0 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify_drain 0 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify_drain 0 cognify-visible: ok <nil>
+    cognify_relation_test.go:146: cognify call cognify 278293 cognify-visible: error disabled
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+2026/09/25 20:12:00 memory data failure operation="other" trace=0 status=5 class=internal
+    cognify_relation_test.go:146: cognify call cognify 278293 cognify-visible: error unavailable
+    cognify_relation_test.go:146: cognify call cognify 278293 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify_drain 0 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify 278295 cognify-visible: ok <nil>
+    cognify_relation_test.go:146: cognify call cognify 278293 cognify-visible: ok <nil>
+    cognify_relation_test.go:146: cognify call cognify 278293 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify_drain 0 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify_drain 0 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify_drain 0 cognify-visible: ok <nil>
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    cognify_relation_test.go:146: cognify call cognify_drain 0 cognify-visible: ok <nil>
+    cognify_relation_test.go:146: cognify call cognify_drain 0 cognify-visible: disabled <nil>
+2026/09/25 20:12:00 memory data failure operation="other" trace=0 status=5 class=internal
+    cognify_relation_test.go:146: cognify call cognify 278293 cognify-visible: error unavailable
+2026/09/25 20:12:00 memory data failure operation="other" trace=0 status=5 class=internal
+    cognify_relation_test.go:146: cognify call cognify 278293 cognify-visible: error unavailable
+--- PASS: TestCognifyRelationProducerReplay (0.98s)
+=== RUN   TestCognifiedRuleInputsPostgres
+--- PASS: TestCognifiedRuleInputsPostgres (0.23s)
+=== RUN   TestLegacyRuleProducerObservationsPostgres
+--- PASS: TestLegacyRuleProducerObservationsPostgres (0.11s)
+=== RUN   TestCognifyParser
+--- PASS: TestCognifyParser (0.01s)
+=== RUN   TestCognifyConfigurationFailsClosed
+--- PASS: TestCognifyConfigurationFailsClosed (0.00s)
+=== RUN   TestCollectionEmptyRecallInvalidatedPostgres
+--- PASS: TestCollectionEmptyRecallInvalidatedPostgres (1.62s)
+=== RUN   TestPrivateCollectionEmptyRecallInvalidatedPostgres
+--- PASS: TestPrivateCollectionEmptyRecallInvalidatedPostgres (0.04s)
+=== RUN   TestCollectionDeadlineSyntax
+--- PASS: TestCollectionDeadlineSyntax (0.00s)
+=== RUN   TestPublicCommandDiscovery
+--- PASS: TestPublicCommandDiscovery (0.00s)
+=== RUN   TestPublicEnforcedOntology
+--- PASS: TestPublicEnforcedOntology (0.00s)
+=== RUN   TestDeclareCommandsRoundTrip
+--- PASS: TestDeclareCommandsRoundTrip (0.00s)
+=== RUN   TestDeclareCommandsRejectsMalformed
+--- PASS: TestDeclareCommandsRejectsMalformed (0.00s)
+=== RUN   TestDeclareCommandsHonorsExpiredInvocation
+--- PASS: TestDeclareCommandsHonorsExpiredInvocation (0.00s)
+=== RUN   TestDeclaredCommandsAreUnique
+--- PASS: TestDeclaredCommandsAreUnique (0.00s)
+=== RUN   TestContentGate
+--- PASS: TestContentGate (0.00s)
+=== RUN   TestScreenContentCommands
+--- PASS: TestScreenContentCommands (0.00s)
+=== RUN   TestContextAssemblyExplainsRenderedRows
+--- PASS: TestContextAssemblyExplainsRenderedRows (0.00s)
+=== RUN   TestContextAssemblyWholeRowByteAllocation
+--- PASS: TestContextAssemblyWholeRowByteAllocation (0.00s)
+=== RUN   TestDataAssemblyBudgetValidation
+--- PASS: TestDataAssemblyBudgetValidation (0.00s)
+=== RUN   TestConventionText
+--- PASS: TestConventionText (0.00s)
+=== RUN   TestConventionHostBoundary
+--- PASS: TestConventionHostBoundary (0.00s)
+=== RUN   TestCoreferenceHeuristics
+--- PASS: TestCoreferenceHeuristics (0.00s)
+=== RUN   TestCorrectionProposalRuntimeReplay
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:43: runtime SQL exec: ERROR: new row for relation "knowledge_review_decisions" violates check constraint "proposal_fixture_failure" (SQLSTATE 23514)
+2026/09/25 20:12:02 memory data failure operation="correction-review" trace=0 status=5 class=sqlstate_23514
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestCorrectionProposalRuntimeReplay (0.28s)
+=== RUN   TestCorrectionProposalConcurrentReview
+=== RUN   TestCorrectionProposalConcurrentReview/approve
+=== RUN   TestCorrectionProposalConcurrentReview/reject
+--- PASS: TestCorrectionProposalConcurrentReview (0.21s)
+    --- PASS: TestCorrectionProposalConcurrentReview/approve (0.11s)
+    --- PASS: TestCorrectionProposalConcurrentReview/reject (0.10s)
+=== RUN   TestCreationKeyPublicValidation
+--- PASS: TestCreationKeyPublicValidation (0.00s)
+=== RUN   TestTypedFactCompatibilityGate
+--- PASS: TestTypedFactCompatibilityGate (0.00s)
+=== RUN   TestCSSConventionsHostBoundary
+--- PASS: TestCSSConventionsHostBoundary (0.00s)
+=== RUN   TestRecallGatePolicyLivesInGo
+--- PASS: TestRecallGatePolicyLivesInGo (0.00s)
+=== RUN   TestRecallGateDoesNotRequireADataStore
+--- PASS: TestRecallGateDoesNotRequireADataStore (0.00s)
+=== RUN   TestRedirectPolicyDoesNotRequireADataStore
+--- PASS: TestRedirectPolicyDoesNotRequireADataStore (0.00s)
+=== RUN   TestContentGateDoesNotRequireADataStore
+--- PASS: TestContentGateDoesNotRequireADataStore (0.00s)
+=== RUN   TestContentGateEmitsCleanVerdict
+--- PASS: TestContentGateEmitsCleanVerdict (0.00s)
+=== RUN   TestServerPlacementOwnsOnlyUserMemory
+--- PASS: TestServerPlacementOwnsOnlyUserMemory (0.00s)
+=== RUN   TestSearchPatternAllowsTextBetweenKeywordClusters
+--- PASS: TestSearchPatternAllowsTextBetweenKeywordClusters (0.00s)
+=== RUN   TestKBPlacementOwnsOnlyKBScopes
+--- PASS: TestKBPlacementOwnsOnlyKBScopes (0.00s)
+=== RUN   TestKBVisibleSearchExpandsScopeInGo
+--- PASS: TestKBVisibleSearchExpandsScopeInGo (0.00s)
+=== RUN   TestWorkflowIdentityIsConstructedInGo
+--- PASS: TestWorkflowIdentityIsConstructedInGo (0.00s)
+=== RUN   TestProspectiveCountsAreKBOnly
+--- PASS: TestProspectiveCountsAreKBOnly (0.00s)
+=== RUN   TestFactRecallIsImplementedByKBMemoryModule
+--- PASS: TestFactRecallIsImplementedByKBMemoryModule (0.00s)
+=== RUN   TestTemporalMemoryCheckIsImplementedByKBMemoryModule
+--- PASS: TestTemporalMemoryCheckIsImplementedByKBMemoryModule (0.00s)
+=== RUN   TestPlacementParsingIsExplicit
+--- PASS: TestPlacementParsingIsExplicit (0.00s)
+=== RUN   TestFusionIsInstanceWideAndDefaultsOn
+--- PASS: TestFusionIsInstanceWideAndDefaultsOn (0.00s)
+=== RUN   TestMemoryFailureClassDoesNotExposeErrorDetails
+--- PASS: TestMemoryFailureClassDoesNotExposeErrorDetails (0.00s)
+=== RUN   TestMemoryFailureOperationDoesNotLogUnknownInput
+--- PASS: TestMemoryFailureOperationDoesNotLogUnknownInput (0.00s)
+=== RUN   TestDemotionScore
+=== RUN   TestDemotionScore/accepted
+=== RUN   TestDemotionScore/corrected
+=== RUN   TestDemotionScore/contradicted
+=== RUN   TestDemotionScore/rolled_back
+=== RUN   TestDemotionScore/irrelevant_counts
+=== RUN   TestDemotionScore/unknown_counts
+=== RUN   TestDemotionScore/nonnumeric_weight_defaults
+=== RUN   TestDemotionScore/null_weight_defaults
+=== RUN   TestDemotionScore/null_verdict_excluded
+=== RUN   TestDemotionScore/missing_verdict_excluded
+=== RUN   TestDemotionScore/overflow_excluded
+=== RUN   TestDemotionScore/half_life_RFC
+=== RUN   TestDemotionScore/half_life_SQL
+=== RUN   TestDemotionScore/future_age_zero
+=== RUN   TestDemotionScore/default_half_life
+=== RUN   TestDemotionScore/minimum
+=== RUN   TestDemotionScore/default_minimum
+--- PASS: TestDemotionScore (0.00s)
+    --- PASS: TestDemotionScore/accepted (0.00s)
+    --- PASS: TestDemotionScore/corrected (0.00s)
+    --- PASS: TestDemotionScore/contradicted (0.00s)
+    --- PASS: TestDemotionScore/rolled_back (0.00s)
+    --- PASS: TestDemotionScore/irrelevant_counts (0.00s)
+    --- PASS: TestDemotionScore/unknown_counts (0.00s)
+    --- PASS: TestDemotionScore/nonnumeric_weight_defaults (0.00s)
+    --- PASS: TestDemotionScore/null_weight_defaults (0.00s)
+    --- PASS: TestDemotionScore/null_verdict_excluded (0.00s)
+    --- PASS: TestDemotionScore/missing_verdict_excluded (0.00s)
+    --- PASS: TestDemotionScore/overflow_excluded (0.00s)
+    --- PASS: TestDemotionScore/half_life_RFC (0.00s)
+    --- PASS: TestDemotionScore/half_life_SQL (0.00s)
+    --- PASS: TestDemotionScore/future_age_zero (0.00s)
+    --- PASS: TestDemotionScore/default_half_life (0.00s)
+    --- PASS: TestDemotionScore/minimum (0.00s)
+    --- PASS: TestDemotionScore/default_minimum (0.00s)
+=== RUN   TestDemotionPercentiles
+--- PASS: TestDemotionPercentiles (0.00s)
+=== RUN   TestDemotionRuntimeAuthority
+--- PASS: TestDemotionRuntimeAuthority (0.00s)
+=== RUN   TestDemotionPreviewAuthority
+--- PASS: TestDemotionPreviewAuthority (0.00s)
+=== RUN   TestMemoryDependencyRegistryPostgres
+--- PASS: TestMemoryDependencyRegistryPostgres (0.08s)
+=== RUN   TestRegistryTransitiveProducerInputsPostgres
+--- PASS: TestRegistryTransitiveProducerInputsPostgres (0.06s)
+=== RUN   TestRelationValidityPostgres
+=== RUN   TestRelationValidityPostgres/open
+=== RUN   TestRelationValidityPostgres/inclusive_offset
+=== RUN   TestRelationValidityPostgres/future
+=== RUN   TestRelationValidityPostgres/exclusive_offset
+=== RUN   TestRelationValidityPostgres/expired
+--- PASS: TestRelationValidityPostgres (0.53s)
+    --- PASS: TestRelationValidityPostgres/open (0.08s)
+    --- PASS: TestRelationValidityPostgres/inclusive_offset (0.05s)
+    --- PASS: TestRelationValidityPostgres/future (0.05s)
+    --- PASS: TestRelationValidityPostgres/exclusive_offset (0.05s)
+    --- PASS: TestRelationValidityPostgres/expired (0.05s)
+=== RUN   TestDerivedTextIndexes
+--- PASS: TestDerivedTextIndexes (0.00s)
+=== RUN   TestDerivedFrameValiditySeparatesTimeHints
+--- PASS: TestDerivedFrameValiditySeparatesTimeHints (0.00s)
+=== RUN   TestDerivedUnitKind
+--- PASS: TestDerivedUnitKind (0.00s)
+=== RUN   TestEmbedBatchParity
+--- PASS: TestEmbedBatchParity (0.00s)
+=== RUN   TestEmbedCommandIsHostOnly
+--- PASS: TestEmbedCommandIsHostOnly (0.00s)
+=== RUN   TestEmbedRejectsFloatOverflow
+--- PASS: TestEmbedRejectsFloatOverflow (0.00s)
+=== RUN   TestEmbedServingIdentityThroughGovernedLocalEgress
+--- PASS: TestEmbedServingIdentityThroughGovernedLocalEgress (0.00s)
+=== RUN   TestEmbedDimensionAndTruncation
+--- PASS: TestEmbedDimensionAndTruncation (0.00s)
+=== RUN   TestEmbedPostsRawTextWithThePolarityInTheQuery
+--- PASS: TestEmbedPostsRawTextWithThePolarityInTheQuery (0.00s)
+=== RUN   TestEmbedReportsTruncationRatherThanHidingIt
+--- PASS: TestEmbedReportsTruncationRatherThanHidingIt (0.00s)
+=== RUN   TestUnauthorizedIsReachabilityNotFailure
+--- PASS: TestUnauthorizedIsReachabilityNotFailure (0.00s)
+=== RUN   TestBreakerOpensAfterThreeFailuresAndSuppressesWithoutCalling
+--- PASS: TestBreakerOpensAfterThreeFailuresAndSuppressesWithoutCalling (0.00s)
+=== RUN   TestOnlyOneProbeIsGrantedWhenTheDelayElapses
+--- PASS: TestOnlyOneProbeIsGrantedWhenTheDelayElapses (0.00s)
+=== RUN   TestBackwardClockJumpDoesNotStrandTheBreakerOpen
+--- PASS: TestBackwardClockJumpDoesNotStrandTheBreakerOpen (0.00s)
+=== RUN   TestLocalRefusalReleasesTheProbeWithoutCountingAFailure
+--- PASS: TestLocalRefusalReleasesTheProbeWithoutCountingAFailure (0.00s)
+=== RUN   TestSuccessClosesAnEarlierOutage
+--- PASS: TestSuccessClosesAnEarlierOutage (0.00s)
+=== RUN   TestDelayGrowsAndIsCapped
+--- PASS: TestDelayGrowsAndIsCapped (0.00s)
+=== RUN   TestNonHTTPEmbedderRunsAsACommand
+--- PASS: TestNonHTTPEmbedderRunsAsACommand (0.00s)
+=== RUN   TestHandleEmbedRoutesThroughStageThree
+--- PASS: TestHandleEmbedRoutesThroughStageThree (0.00s)
+=== RUN   TestEntityMutationBoundary
+--- PASS: TestEntityMutationBoundary (0.00s)
+=== RUN   TestEntityMutationConcurrentPostgres
+--- PASS: TestEntityMutationConcurrentPostgres (0.04s)
+=== RUN   TestEntityAliasNormalization
+--- PASS: TestEntityAliasNormalization (0.00s)
+=== RUN   TestEntityConflictsHostBoundary
+--- PASS: TestEntityConflictsHostBoundary (0.00s)
+=== RUN   TestEpisodeCardParserAndConfiguration
+--- PASS: TestEpisodeCardParserAndConfiguration (0.00s)
+=== RUN   TestEpisodeCommandPreservesInputAndBounds
+--- PASS: TestEpisodeCommandPreservesInputAndBounds (0.02s)
+=== RUN   TestSubjectErasureTransitiveCopiesPostgres
+--- PASS: TestSubjectErasureTransitiveCopiesPostgres (0.15s)
+=== RUN   TestErasureRequiresOfflineOwnerCoverage
+--- PASS: TestErasureRequiresOfflineOwnerCoverage (0.12s)
+=== RUN   TestEvidenceCoveragePackedCurrentState
+=== RUN   TestEvidenceCoveragePackedCurrentState/unrelated_high_confidence
+=== RUN   TestEvidenceCoveragePackedCurrentState/exact_obligation
+=== RUN   TestEvidenceCoveragePackedCurrentState/budget_dropped
+=== RUN   TestEvidenceCoveragePackedCurrentState/unversioned
+=== RUN   TestEvidenceCoveragePackedCurrentState/revoked
+=== RUN   TestEvidenceCoveragePackedCurrentState/conflicting
+=== RUN   TestEvidenceCoveragePackedCurrentState/conflict_dropped
+=== RUN   TestEvidenceCoveragePackedCurrentState/degraded
+--- PASS: TestEvidenceCoveragePackedCurrentState (0.01s)
+    --- PASS: TestEvidenceCoveragePackedCurrentState/unrelated_high_confidence (0.00s)
+    --- PASS: TestEvidenceCoveragePackedCurrentState/exact_obligation (0.00s)
+    --- PASS: TestEvidenceCoveragePackedCurrentState/budget_dropped (0.00s)
+    --- PASS: TestEvidenceCoveragePackedCurrentState/unversioned (0.00s)
+    --- PASS: TestEvidenceCoveragePackedCurrentState/revoked (0.00s)
+    --- PASS: TestEvidenceCoveragePackedCurrentState/conflicting (0.00s)
+    --- PASS: TestEvidenceCoveragePackedCurrentState/conflict_dropped (0.00s)
+    --- PASS: TestEvidenceCoveragePackedCurrentState/degraded (0.00s)
+=== RUN   TestEvidenceCoverageOuterPackingCannotKeepComplete
+--- PASS: TestEvidenceCoverageOuterPackingCannotKeepComplete (0.00s)
+=== RUN   TestEvidenceRequirementsBoundedAndNoGoldIDs
+--- PASS: TestEvidenceRequirementsBoundedAndNoGoldIDs (0.00s)
+=== RUN   TestEvidenceRequirementsRejectUnboundedAndAmbiguousPlans
+--- PASS: TestEvidenceRequirementsRejectUnboundedAndAmbiguousPlans (0.00s)
+=== RUN   TestEvidenceCoverageCannotImportCompletionAsEvidence
+--- PASS: TestEvidenceCoverageCannotImportCompletionAsEvidence (0.00s)
+=== RUN   TestEvidenceRequirementsRejectAmbiguousWireShapes
+--- PASS: TestEvidenceRequirementsRejectAmbiguousWireShapes (0.00s)
+=== RUN   TestMR05FrozenCoverageEvaluation
+=== RUN   TestMR05FrozenCoverageEvaluation/current-state-positive
+=== RUN   TestMR05FrozenCoverageEvaluation/comparison-unrelated-confidence
+=== RUN   TestMR05FrozenCoverageEvaluation/comparison-missing-side
+=== RUN   TestMR05FrozenCoverageEvaluation/temporal-positive
+=== RUN   TestMR05FrozenCoverageEvaluation/temporal-unrelated-episode
+=== RUN   TestMR05FrozenCoverageEvaluation/temporal-missing-date
+=== RUN   TestMR05FrozenCoverageEvaluation/required-update-dropped
+=== RUN   TestMR05FrozenCoverageEvaluation/owner-unavailable
+=== RUN   TestMR05FrozenCoverageEvaluation/revoked-cached-source
+=== RUN   TestMR05FrozenCoverageEvaluation/copies-are-not-independent
+=== RUN   TestMR05FrozenCoverageEvaluation/unresolved-contradiction
+=== NAME  TestMR05FrozenCoverageEvaluation
+    evidence_frozen_eval_test.go:107: false_complete=0/9; deterministic_reader_answer_set_accuracy=6/11; model_answer_quality=not_measured
+--- PASS: TestMR05FrozenCoverageEvaluation (0.02s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/current-state-positive (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/comparison-unrelated-confidence (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/comparison-missing-side (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/temporal-positive (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/temporal-unrelated-episode (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/temporal-missing-date (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/required-update-dropped (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/owner-unavailable (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/revoked-cached-source (0.00s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/copies-are-not-independent (0.01s)
+    --- PASS: TestMR05FrozenCoverageEvaluation/unresolved-contradiction (0.00s)
+=== RUN   TestMemoryEvidenceProjectionPostgres
+--- PASS: TestMemoryEvidenceProjectionPostgres (0.10s)
+=== RUN   TestMemoryEvidencePublicValidation
+--- PASS: TestMemoryEvidencePublicValidation (0.00s)
+=== RUN   TestEvidenceLineageCopiesAndComposites
+--- PASS: TestEvidenceLineageCopiesAndComposites (0.00s)
+=== RUN   TestEvidenceLineageUnknownAndClaimBoundaries
+--- PASS: TestEvidenceLineageUnknownAndClaimBoundaries (0.00s)
+=== RUN   TestEvidenceLineageIncompleteTraversal
+=== RUN   TestEvidenceLineageIncompleteTraversal/missing
+=== RUN   TestEvidenceLineageIncompleteTraversal/cycle
+=== RUN   TestEvidenceLineageIncompleteTraversal/depth
+=== RUN   TestEvidenceLineageIncompleteTraversal/nodes
+=== RUN   TestEvidenceLineageIncompleteTraversal/version
+=== RUN   TestEvidenceLineageIncompleteTraversal/undeclared
+--- PASS: TestEvidenceLineageIncompleteTraversal (0.00s)
+    --- PASS: TestEvidenceLineageIncompleteTraversal/missing (0.00s)
+    --- PASS: TestEvidenceLineageIncompleteTraversal/cycle (0.00s)
+    --- PASS: TestEvidenceLineageIncompleteTraversal/depth (0.00s)
+    --- PASS: TestEvidenceLineageIncompleteTraversal/nodes (0.00s)
+    --- PASS: TestEvidenceLineageIncompleteTraversal/version (0.00s)
+    --- PASS: TestEvidenceLineageIncompleteTraversal/undeclared (0.00s)
+=== RUN   TestEvidenceLineageIndependenceRequiresCertificate
+--- PASS: TestEvidenceLineageIndependenceRequiresCertificate (0.00s)
+=== RUN   TestEvidenceLineageSharedFixtureAndConflicts
+--- PASS: TestEvidenceLineageSharedFixtureAndConflicts (0.00s)
+=== RUN   TestEvidenceLineageCurrentReleasePostgres
+--- PASS: TestEvidenceLineageCurrentReleasePostgres (0.04s)
+=== RUN   TestEvidenceRecoveryDurableRoundPostgres
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestEvidenceRecoveryDurableRoundPostgres (0.17s)
+=== RUN   TestEvidenceRecoveryProposesOnlyMissingRequiredRoles
+--- PASS: TestEvidenceRecoveryProposesOnlyMissingRequiredRoles (0.00s)
+=== RUN   TestEvidenceRecoveryDoesNotRetryBlockedEvidence
+=== RUN   TestEvidenceRecoveryDoesNotRetryBlockedEvidence/dropped
+=== RUN   TestEvidenceRecoveryDoesNotRetryBlockedEvidence/conflicting
+=== RUN   TestEvidenceRecoveryDoesNotRetryBlockedEvidence/unavailable
+=== RUN   TestEvidenceRecoveryDoesNotRetryBlockedEvidence/rounds
+=== RUN   TestEvidenceRecoveryDoesNotRetryBlockedEvidence/items
+=== RUN   TestEvidenceRecoveryDoesNotRetryBlockedEvidence/tokens
+=== RUN   TestEvidenceRecoveryDoesNotRetryBlockedEvidence/time
+--- PASS: TestEvidenceRecoveryDoesNotRetryBlockedEvidence (0.00s)
+    --- PASS: TestEvidenceRecoveryDoesNotRetryBlockedEvidence/dropped (0.00s)
+    --- PASS: TestEvidenceRecoveryDoesNotRetryBlockedEvidence/conflicting (0.00s)
+    --- PASS: TestEvidenceRecoveryDoesNotRetryBlockedEvidence/unavailable (0.00s)
+    --- PASS: TestEvidenceRecoveryDoesNotRetryBlockedEvidence/rounds (0.00s)
+    --- PASS: TestEvidenceRecoveryDoesNotRetryBlockedEvidence/items (0.00s)
+    --- PASS: TestEvidenceRecoveryDoesNotRetryBlockedEvidence/tokens (0.00s)
+    --- PASS: TestEvidenceRecoveryDoesNotRetryBlockedEvidence/time (0.00s)
+=== RUN   TestEvidenceRecoveryBudgetAdmission
+--- PASS: TestEvidenceRecoveryBudgetAdmission (0.00s)
+=== RUN   TestEvidenceRecoveryAdmissionRefusalIsStructured
+--- PASS: TestEvidenceRecoveryAdmissionRefusalIsStructured (0.00s)
+=== RUN   TestEvidenceTemporalCanonicalOwnerPostgres
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestEvidenceTemporalCanonicalOwnerPostgres (0.15s)
+=== RUN   TestEvidenceTemporalCoherenceAndPacking
+=== RUN   TestEvidenceTemporalCoherenceAndPacking/canonical_transition
+=== RUN   TestEvidenceTemporalCoherenceAndPacking/unrelated_predecessor
+=== RUN   TestEvidenceTemporalCoherenceAndPacking/future_predecessor
+=== RUN   TestEvidenceTemporalCoherenceAndPacking/unknown_change_date
+=== RUN   TestEvidenceTemporalCoherenceAndPacking/update_dropped
+=== RUN   TestEvidenceTemporalCoherenceAndPacking/history_unavailable
+--- PASS: TestEvidenceTemporalCoherenceAndPacking (0.02s)
+    --- PASS: TestEvidenceTemporalCoherenceAndPacking/canonical_transition (0.00s)
+    --- PASS: TestEvidenceTemporalCoherenceAndPacking/unrelated_predecessor (0.00s)
+    --- PASS: TestEvidenceTemporalCoherenceAndPacking/future_predecessor (0.00s)
+    --- PASS: TestEvidenceTemporalCoherenceAndPacking/unknown_change_date (0.00s)
+    --- PASS: TestEvidenceTemporalCoherenceAndPacking/update_dropped (0.00s)
+    --- PASS: TestEvidenceTemporalCoherenceAndPacking/history_unavailable (0.00s)
+=== RUN   TestEvidenceComparisonAndIndependentSupport
+--- PASS: TestEvidenceComparisonAndIndependentSupport (0.01s)
+=== RUN   TestEvidenceProcedureNeedsRetainedConstraint
+--- PASS: TestEvidenceProcedureNeedsRetainedConstraint (0.00s)
+=== RUN   TestClassifyValueMatchesTheCClassifier
+    extract_conformance_test.go:113: compared 208 tokens: none=153 ipv4=19 ipv6=15 mac=6 email=13 date=2
+--- PASS: TestClassifyValueMatchesTheCClassifier (0.00s)
+=== RUN   TestValueShapesAreDisjoint
+--- PASS: TestValueShapesAreDisjoint (0.00s)
+=== RUN   TestExtractionMatchesTheCExtractor
+    extract_conformance_test.go:211: retractions=231 possessives=1079 texts_with_triples=652 multi_triple=57
+--- PASS: TestExtractionMatchesTheCExtractor (0.01s)
+=== RUN   TestExtractPatternsRespectsMax
+--- PASS: TestExtractPatternsRespectsMax (0.00s)
+=== RUN   TestFactMaintenanceHostBoundary
+--- PASS: TestFactMaintenanceHostBoundary (0.00s)
+=== RUN   TestFactIdentity
+--- PASS: TestFactIdentity (0.00s)
+=== RUN   TestFactMutationRuntimeReplay
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:43: runtime SQL exec: ERROR: maintenance seal failure (SQLSTATE P0001)
+2026/09/25 20:12:06 memory data failure operation="other" trace=0 status=5 class=sqlstate_P0001
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: ERROR: permission denied for function kb_fact_commit_worm_seal (SQLSTATE 42501)
+2026/09/25 20:12:06 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:43: runtime SQL exec: ERROR: permission denied for function kb_fact_commit_worm_seal (SQLSTATE 42501)
+2026/09/25 20:12:06 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestFactMutationRuntimeReplay (3.00s)
+=== RUN   TestTypedFactRecallPolicyLivesInGo
+--- PASS: TestTypedFactRecallPolicyLivesInGo (0.00s)
+=== RUN   TestQueryRecallOwnsSensitiveClassification
+=== RUN   TestQueryRecallOwnsSensitiveClassification/what_is_my_email
+=== RUN   TestQueryRecallOwnsSensitiveClassification/tell_me_about_work
+=== RUN   TestQueryRecallOwnsSensitiveClassification/what_is_my_password
+=== RUN   TestQueryRecallOwnsSensitiveClassification/#00
+--- PASS: TestQueryRecallOwnsSensitiveClassification (0.00s)
+    --- PASS: TestQueryRecallOwnsSensitiveClassification/what_is_my_email (0.00s)
+    --- PASS: TestQueryRecallOwnsSensitiveClassification/tell_me_about_work (0.00s)
+    --- PASS: TestQueryRecallOwnsSensitiveClassification/what_is_my_password (0.00s)
+    --- PASS: TestQueryRecallOwnsSensitiveClassification/#00 (0.00s)
+=== RUN   TestMemoryValidAtUsesOpenBitemporalBounds
+--- PASS: TestMemoryValidAtUsesOpenBitemporalBounds (0.00s)
+=== RUN   TestTypedFactRecallRefusesPartialReads
+=== RUN   TestTypedFactRecallRefusesPartialReads/edge_discovery_unavailable
+=== RUN   TestTypedFactRecallRefusesPartialReads/entity_block_unavailable
+=== RUN   TestTypedFactRecallRefusesPartialReads/entity_block_iteration
+=== RUN   TestTypedFactRecallRefusesPartialReads/registry_unavailable
+=== RUN   TestTypedFactRecallRefusesPartialReads/registry_iteration
+=== RUN   TestTypedFactRecallRefusesPartialReads/registry_scan
+--- PASS: TestTypedFactRecallRefusesPartialReads (0.00s)
+    --- PASS: TestTypedFactRecallRefusesPartialReads/edge_discovery_unavailable (0.00s)
+    --- PASS: TestTypedFactRecallRefusesPartialReads/entity_block_unavailable (0.00s)
+    --- PASS: TestTypedFactRecallRefusesPartialReads/entity_block_iteration (0.00s)
+    --- PASS: TestTypedFactRecallRefusesPartialReads/registry_unavailable (0.00s)
+    --- PASS: TestTypedFactRecallRefusesPartialReads/registry_iteration (0.00s)
+    --- PASS: TestTypedFactRecallRefusesPartialReads/registry_scan (0.00s)
+=== RUN   TestFactWriteDecisionCombinesOntologyAndSecretBoundary
+=== RUN   TestFactWriteDecisionCombinesOntologyAndSecretBoundary/works_for
+=== RUN   TestFactWriteDecisionCombinesOntologyAndSecretBoundary/works_for#01
+=== RUN   TestFactWriteDecisionCombinesOntologyAndSecretBoundary/#00
+=== RUN   TestFactWriteDecisionCombinesOntologyAndSecretBoundary/new_attribute
+=== RUN   TestFactWriteDecisionCombinesOntologyAndSecretBoundary/api_key
+=== RUN   TestFactWriteDecisionCombinesOntologyAndSecretBoundary/private_key
+--- PASS: TestFactWriteDecisionCombinesOntologyAndSecretBoundary (0.00s)
+    --- PASS: TestFactWriteDecisionCombinesOntologyAndSecretBoundary/works_for (0.00s)
+    --- PASS: TestFactWriteDecisionCombinesOntologyAndSecretBoundary/works_for#01 (0.00s)
+    --- PASS: TestFactWriteDecisionCombinesOntologyAndSecretBoundary/#00 (0.00s)
+    --- PASS: TestFactWriteDecisionCombinesOntologyAndSecretBoundary/new_attribute (0.00s)
+    --- PASS: TestFactWriteDecisionCombinesOntologyAndSecretBoundary/api_key (0.00s)
+    --- PASS: TestFactWriteDecisionCombinesOntologyAndSecretBoundary/private_key (0.00s)
+=== RUN   TestFactWriteDecisionKeepsHistoricalGateAnswers
+--- PASS: TestFactWriteDecisionKeepsHistoricalGateAnswers (0.47s)
+=== RUN   TestFactWriteRefusesMissingOrContradictoryOwnerDecision
+=== RUN   TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null}
+=== RUN   TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null,"fact_write":null}
+=== RUN   TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null,"fact_write":{"verdict":0}}
+=== RUN   TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null,"fact_write":{"commit_allowed":true}}
+=== RUN   TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null,"fact_write":{"verdict":9,"commit_allowed":false}}
+=== RUN   TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null,"fact_write":{"verdict":1,"commit_allowed":true}}
+--- PASS: TestFactWriteRefusesMissingOrContradictoryOwnerDecision (0.00s)
+    --- PASS: TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null} (0.00s)
+    --- PASS: TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null,"fact_write":null} (0.00s)
+    --- PASS: TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null,"fact_write":{"verdict":0}} (0.00s)
+    --- PASS: TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null,"fact_write":{"commit_allowed":true}} (0.00s)
+    --- PASS: TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null,"fact_write":{"verdict":9,"commit_allowed":false}} (0.00s)
+    --- PASS: TestFactWriteRefusesMissingOrContradictoryOwnerDecision/{"records":null,"fact_write":{"verdict":1,"commit_allowed":true}} (0.00s)
+=== RUN   TestFactWriteFailureHasNoLocalAcceptance
+--- PASS: TestFactWriteFailureHasNoLocalAcceptance (0.00s)
+=== RUN   TestGateMatchesTheCGate
+    gate_conformance_test.go:89: compared 3888 cases: accept=8 reject_kind=2584 novel=972 bad_arg=324
+--- PASS: TestGateMatchesTheCGate (0.00s)
+=== RUN   TestGatewayContextPlanAuthorityAndQuery
+--- PASS: TestGatewayContextPlanAuthorityAndQuery (0.00s)
+=== RUN   TestGatewayPlanQueryBoundAndTextMode
+--- PASS: TestGatewayPlanQueryBoundAndTextMode (0.01s)
+=== RUN   TestGatewayPlanEnforcedGateAndValidation
+--- PASS: TestGatewayPlanEnforcedGateAndValidation (0.00s)
+=== RUN   TestGatewayPlanUsesOnlyHostProvidedResourceFacts
+=== RUN   TestGatewayPlanUsesOnlyHostProvidedResourceFacts/absent
+=== RUN   TestGatewayPlanUsesOnlyHostProvidedResourceFacts/empty
+=== RUN   TestGatewayPlanUsesOnlyHostProvidedResourceFacts/host_persona
+=== RUN   TestGatewayPlanUsesOnlyHostProvidedResourceFacts/other_resource
+--- PASS: TestGatewayPlanUsesOnlyHostProvidedResourceFacts (0.00s)
+    --- PASS: TestGatewayPlanUsesOnlyHostProvidedResourceFacts/absent (0.00s)
+    --- PASS: TestGatewayPlanUsesOnlyHostProvidedResourceFacts/empty (0.00s)
+    --- PASS: TestGatewayPlanUsesOnlyHostProvidedResourceFacts/host_persona (0.00s)
+    --- PASS: TestGatewayPlanUsesOnlyHostProvidedResourceFacts/other_resource (0.00s)
+=== RUN   TestGatewayPlanSessionAndTools
+--- PASS: TestGatewayPlanSessionAndTools (0.00s)
+=== RUN   TestGatewayEnableTokens
+--- PASS: TestGatewayEnableTokens (0.00s)
+=== RUN   TestGatewayGateMetricsAndAudit
+--- PASS: TestGatewayGateMetricsAndAudit (0.00s)
+=== RUN   TestGraphPathCredits
+--- PASS: TestGraphPathCredits (0.00s)
+=== RUN   TestGraphScoreParity
+--- PASS: TestGraphScoreParity (0.00s)
+=== RUN   TestNativeHostStageIdentifiersMatchGo
+--- PASS: TestNativeHostStageIdentifiersMatchGo (0.00s)
+=== RUN   TestNativeStorageGraphCodesMatchGo
+--- PASS: TestNativeStorageGraphCodesMatchGo (0.00s)
+=== RUN   TestHybridSymbolKey
+--- PASS: TestHybridSymbolKey (0.00s)
+=== RUN   TestHybridHostBoundary
+--- PASS: TestHybridHostBoundary (0.00s)
+=== RUN   TestHygieneRejectsMutationAndUnboundedInputs
+--- PASS: TestHygieneRejectsMutationAndUnboundedInputs (0.00s)
+=== RUN   TestIngressBlockNativeGoldens
+--- PASS: TestIngressBlockNativeGoldens (0.00s)
+=== RUN   TestIngressEnvelopeNoInstructionsAndConfidenceBoundaries
+--- PASS: TestIngressEnvelopeNoInstructionsAndConfidenceBoundaries (0.00s)
+=== RUN   TestIngressAssemblyBothPlacementsAndExactIDs
+--- PASS: TestIngressAssemblyBothPlacementsAndExactIDs (0.00s)
+=== RUN   TestIngressAssemblyFoldingAndBounds
+--- PASS: TestIngressAssemblyFoldingAndBounds (0.00s)
+=== RUN   TestIngressAssemblyFactsFailureAndTaskConfidence
+--- PASS: TestIngressAssemblyFactsFailureAndTaskConfidence (0.00s)
+=== RUN   TestVersionedIngressByteBudget
+--- PASS: TestVersionedIngressByteBudget (0.00s)
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/absent/kb
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/absent/server
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/inherited/kb
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/inherited/server
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/larger/kb
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/larger/server
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/equal/kb
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/equal/server
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/smaller/kb
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/smaller/server
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/zero/kb
+=== RUN   TestIngressLimitsCannotRaiseHostAllocation/zero/server
+--- PASS: TestIngressLimitsCannotRaiseHostAllocation (0.01s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/absent/kb (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/absent/server (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/inherited/kb (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/inherited/server (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/larger/kb (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/larger/server (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/equal/kb (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/equal/server (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/smaller/kb (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/smaller/server (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/zero/kb (0.00s)
+    --- PASS: TestIngressLimitsCannotRaiseHostAllocation/zero/server (0.00s)
+=== RUN   TestMemoryLimitsRejectAmbiguousWireValues
+--- PASS: TestMemoryLimitsRejectAmbiguousWireValues (0.01s)
+=== RUN   TestIngressRetainedEvidenceMatchesRenderedSelection
+--- PASS: TestIngressRetainedEvidenceMatchesRenderedSelection (0.00s)
+=== RUN   TestIngressTypedProjectionRepackingAndIdentity
+=== RUN   TestIngressTypedProjectionRepackingAndIdentity/0
+=== RUN   TestIngressTypedProjectionRepackingAndIdentity/384
+=== RUN   TestIngressTypedProjectionRepackingAndIdentity/700
+=== RUN   TestIngressTypedProjectionRepackingAndIdentity/1100
+=== RUN   TestIngressTypedProjectionRepackingAndIdentity/4096
+--- PASS: TestIngressTypedProjectionRepackingAndIdentity (0.02s)
+    --- PASS: TestIngressTypedProjectionRepackingAndIdentity/0 (0.00s)
+    --- PASS: TestIngressTypedProjectionRepackingAndIdentity/384 (0.00s)
+    --- PASS: TestIngressTypedProjectionRepackingAndIdentity/700 (0.00s)
+    --- PASS: TestIngressTypedProjectionRepackingAndIdentity/1100 (0.00s)
+    --- PASS: TestIngressTypedProjectionRepackingAndIdentity/4096 (0.00s)
+=== RUN   TestIngressFactSourceProjection
+--- PASS: TestIngressFactSourceProjection (0.00s)
+=== RUN   TestIngressRejectsMismatchedTypedProjection
+=== RUN   TestIngressRejectsMismatchedTypedProjection/rendered
+=== RUN   TestIngressRejectsMismatchedTypedProjection/selection
+=== RUN   TestIngressRejectsMismatchedTypedProjection/digest
+=== RUN   TestIngressRejectsMismatchedTypedProjection/version
+=== RUN   TestIngressRejectsMismatchedTypedProjection/channels
+=== RUN   TestIngressRejectsMismatchedTypedProjection/accounting
+=== RUN   TestIngressRejectsMismatchedTypedProjection/rows
+=== RUN   TestIngressRejectsMismatchedTypedProjection/references
+--- PASS: TestIngressRejectsMismatchedTypedProjection (0.01s)
+    --- PASS: TestIngressRejectsMismatchedTypedProjection/rendered (0.00s)
+    --- PASS: TestIngressRejectsMismatchedTypedProjection/selection (0.00s)
+    --- PASS: TestIngressRejectsMismatchedTypedProjection/digest (0.00s)
+    --- PASS: TestIngressRejectsMismatchedTypedProjection/version (0.00s)
+    --- PASS: TestIngressRejectsMismatchedTypedProjection/channels (0.00s)
+    --- PASS: TestIngressRejectsMismatchedTypedProjection/accounting (0.00s)
+    --- PASS: TestIngressRejectsMismatchedTypedProjection/rows (0.00s)
+    --- PASS: TestIngressRejectsMismatchedTypedProjection/references (0.00s)
+=== RUN   TestIngressTypedProjectionEmptyDegradedAndUnavailable
+--- PASS: TestIngressTypedProjectionEmptyDegradedAndUnavailable (0.00s)
+=== RUN   TestIngressRefusesMalformedTypedOutcome
+--- PASS: TestIngressRefusesMalformedTypedOutcome (0.00s)
+=== RUN   TestIngressRejectsAmbiguousTypedInputs
+--- PASS: TestIngressRejectsAmbiguousTypedInputs (0.00s)
+=== RUN   TestIngressPropagatesTypedOwnerRefusal
+--- PASS: TestIngressPropagatesTypedOwnerRefusal (0.00s)
+=== RUN   TestIngressPackingDispositionsEveryChannel
+--- PASS: TestIngressPackingDispositionsEveryChannel (0.00s)
+=== RUN   TestIngressPlanModesScopeAndOptOut
+--- PASS: TestIngressPlanModesScopeAndOptOut (0.00s)
+=== RUN   TestIngressPlanBudgetDoesNotConsumeTaskClaim
+--- PASS: TestIngressPlanBudgetDoesNotConsumeTaskClaim (0.00s)
+=== RUN   TestIngressVersionedBudgetBeforeTaskClaim
+--- PASS: TestIngressVersionedBudgetBeforeTaskClaim (0.00s)
+=== RUN   TestIngressTaskResultVisibilityLatencyAndRecovery
+--- PASS: TestIngressTaskResultVisibilityLatencyAndRecovery (0.00s)
+=== RUN   TestIngressPlanRuntimeAuthorityBothPlacements
+--- PASS: TestIngressPlanRuntimeAuthorityBothPlacements (0.00s)
+=== RUN   TestIngressRecallUnavailableCounterIsAtomic
+--- PASS: TestIngressRecallUnavailableCounterIsAtomic (0.00s)
+=== RUN   TestIngressTaskPacketGoldenBothPlacements
+--- PASS: TestIngressTaskPacketGoldenBothPlacements (0.00s)
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"status":"no_answer"
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"resolved":false
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"max_results":5
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"max_tokens":1201
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"item_count":1
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"decision":"no_answer"
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"accepted":false
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"confidence":1.95
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"confidence":null
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"confidence":0,
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"provenance":["system"]
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"provenance":[]
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"line_start":12.5
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"line_start":null
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"line_end":11
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"kind":"file"
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"scope":"global"
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"memory_id":-1
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"memory_id":9223372036854775808
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"anchor":{"project":"foreign"
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"file_path":"src/local.c","generation":8
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"freshness":"stale"
+=== RUN   TestIngressTaskPacketRejectsInvalidEvidence/"generation":7.5
+--- PASS: TestIngressTaskPacketRejectsInvalidEvidence (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"status":"no_answer" (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"resolved":false (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"max_results":5 (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"max_tokens":1201 (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"item_count":1 (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"decision":"no_answer" (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"accepted":false (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"confidence":1.95 (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"confidence":null (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"confidence":0, (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"provenance":["system"] (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"provenance":[] (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"line_start":12.5 (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"line_start":null (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"line_end":11 (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"kind":"file" (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"scope":"global" (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"memory_id":-1 (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"memory_id":9223372036854775808 (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"anchor":{"project":"foreign" (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"file_path":"src/local.c","generation":8 (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"freshness":"stale" (0.00s)
+    --- PASS: TestIngressTaskPacketRejectsInvalidEvidence/"generation":7.5 (0.00s)
+=== RUN   TestIngressTaskPacketChecksRowsBeyondBudget
+--- PASS: TestIngressTaskPacketChecksRowsBeyondBudget (0.00s)
+=== RUN   TestIngressTaskPacketEscapingAndFileSpan
+--- PASS: TestIngressTaskPacketEscapingAndFileSpan (0.00s)
+=== RUN   TestIngressTaskPacketInvalidRuntimeArguments
+--- PASS: TestIngressTaskPacketInvalidRuntimeArguments (0.00s)
+=== RUN   TestIngressTaskPacketIntegralJSONNumbers
+--- PASS: TestIngressTaskPacketIntegralJSONNumbers (0.00s)
+=== RUN   TestIngressTaskHistoryBothPlacements
+--- PASS: TestIngressTaskHistoryBothPlacements (0.00s)
+=== RUN   TestIngressTaskClaimsAreAtomicAndIsolated
+--- PASS: TestIngressTaskClaimsAreAtomicAndIsolated (0.00s)
+=== RUN   TestIngressTaskLRUAndTokenSemantics
+--- PASS: TestIngressTaskLRUAndTokenSemantics (0.00s)
+=== RUN   TestIngressTaskInvalidArgumentsDoNotClaim
+--- PASS: TestIngressTaskInvalidArgumentsDoNotClaim (0.00s)
+=== RUN   TestLabelAuditUsesOwnerOrderWithoutGoldInjection
+2026/09/25 20:12:08 memory data failure operation="other" trace=0 status=5 class=internal
+--- PASS: TestLabelAuditUsesOwnerOrderWithoutGoldInjection (0.00s)
+=== RUN   TestLabelCalibrationFreezesCandidatesAndCannotDeploy
+--- PASS: TestLabelCalibrationFreezesCandidatesAndCannotDeploy (0.00s)
+=== RUN   TestAuditLabelValidationAndCancellation
+--- PASS: TestAuditLabelValidationAndCancellation (0.00s)
+=== RUN   TestLaneOutcomesFinalWindow
+--- PASS: TestLaneOutcomesFinalWindow (0.00s)
+=== RUN   TestLaneOutcomesEmptyAndDegenerate
+--- PASS: TestLaneOutcomesEmptyAndDegenerate (0.00s)
+=== RUN   TestLaneAttributionDeduplicatesAndSnapshotsConcurrently
+--- PASS: TestLaneAttributionDeduplicatesAndSnapshotsConcurrently (0.00s)
+=== RUN   TestRecallLaneOutcomesRequireSuccessfulStoreSelection
+--- PASS: TestRecallLaneOutcomesRequireSuccessfulStoreSelection (0.00s)
+=== RUN   TestLifecycleVersionValidation
+--- PASS: TestLifecycleVersionValidation (0.00s)
+=== RUN   TestLifecycleVersionWaitsForConcurrentCorrection
+--- PASS: TestLifecycleVersionWaitsForConcurrentCorrection (0.10s)
+=== RUN   TestLiveBenchmarkOwner
+2026/09/25 20:12:08 memory data failure operation="other" trace=73 status=5 class=internal
+--- PASS: TestLiveBenchmarkOwner (0.02s)
+=== RUN   TestMemoryFactEvidenceUsesExactByteSpan
+--- PASS: TestMemoryFactEvidenceUsesExactByteSpan (0.00s)
+=== RUN   TestMemoryFactGroundingParity
+--- PASS: TestMemoryFactGroundingParity (0.00s)
+=== RUN   TestParseModelFactCandidatesGroundsCanonicalizesAndAssignsKinds
+--- PASS: TestParseModelFactCandidatesGroundsCanonicalizesAndAssignsKinds (0.00s)
+=== RUN   TestParseModelFactCandidatesRejectsInvalidSpans
+--- PASS: TestParseModelFactCandidatesRejectsInvalidSpans (0.00s)
+=== RUN   TestParseModelFactCandidatesTreatsMalformedAndBareEmptyAsAbstention
+--- PASS: TestParseModelFactCandidatesTreatsMalformedAndBareEmptyAsAbstention (0.00s)
+=== RUN   TestPatternFactCandidatesUseCapturedActorAndSeedKinds
+--- PASS: TestPatternFactCandidatesUseCapturedActorAndSeedKinds (0.00s)
+=== RUN   TestMemoryFactRetryIsExponentialCappedAndJittered
+--- PASS: TestMemoryFactRetryIsExponentialCappedAndJittered (0.00s)
+=== RUN   TestMemoryFactProviderUnavailableParity
+--- PASS: TestMemoryFactProviderUnavailableParity (0.00s)
+=== RUN   TestRerankConfidenceParity
+--- PASS: TestRerankConfidenceParity (0.00s)
+=== RUN   TestMemoryRejectsUnimplementedAndMalformedStages
+--- PASS: TestMemoryRejectsUnimplementedAndMalformedStages (0.00s)
+=== RUN   TestWriteStageCarriesTheGateVerdict
+--- PASS: TestWriteStageCarriesTheGateVerdict (0.01s)
+=== RUN   TestWriteStageRejectsMalformedRequests
+--- PASS: TestWriteStageRejectsMalformedRequests (0.00s)
+=== RUN   TestWriteStageHonorsCancellation
+--- PASS: TestWriteStageHonorsCancellation (0.00s)
+=== RUN   TestMemoryHonorsCancellationAfterValidation
+--- PASS: TestMemoryHonorsCancellationAfterValidation (0.00s)
+=== RUN   TestExtractStageCarriesEveryTriple
+    memory_test.go:245: carried 723 triples across 1180 texts (652 non-empty)
+--- PASS: TestExtractStageCarriesEveryTriple (0.01s)
+=== RUN   TestExtractStageRejectsMalformedRequests
+--- PASS: TestExtractStageRejectsMalformedRequests (0.00s)
+=== RUN   TestExtractStageHonorsCancellation
+--- PASS: TestExtractStageHonorsCancellation (0.00s)
+=== RUN   TestExtractStageAcceptsEmptyText
+--- PASS: TestExtractStageAcceptsEmptyText (0.00s)
+=== RUN   TestRetrieveStageCarriesTheTurnVerdict
+--- PASS: TestRetrieveStageCarriesTheTurnVerdict (0.00s)
+=== RUN   TestRetrieveStageRejectsMalformedRequests
+--- PASS: TestRetrieveStageRejectsMalformedRequests (0.00s)
+=== RUN   TestRetrieveStageHonorsCancellation
+--- PASS: TestRetrieveStageHonorsCancellation (0.00s)
+=== RUN   TestRetrieveStageClassifiesAWholeBatch
+--- PASS: TestRetrieveStageClassifiesAWholeBatch (0.00s)
+=== RUN   TestRetrieveStageRejectsMalformedBatches
+--- PASS: TestRetrieveStageRejectsMalformedBatches (0.00s)
+=== RUN   TestRetrieveStageBatchHonorsCancellation
+--- PASS: TestRetrieveStageBatchHonorsCancellation (0.00s)
+=== RUN   TestExtractStageCarriesTheTurnScan
+--- PASS: TestExtractStageCarriesTheTurnScan (0.01s)
+=== RUN   TestExtractStageRejectsMalformedScans
+--- PASS: TestExtractStageRejectsMalformedScans (0.00s)
+=== RUN   TestExtractStageScanHonorsCancellation
+--- PASS: TestExtractStageScanHonorsCancellation (0.00s)
+=== RUN   TestMutationAuditFields
+--- PASS: TestMutationAuditFields (0.00s)
+=== RUN   TestMutationAuditDeliveryFailureIsVisibleAndContentFree
+--- PASS: TestMutationAuditDeliveryFailureIsVisibleAndContentFree (0.00s)
+=== RUN   TestMutationAuditTransaction
+=== RUN   TestMutationAuditTransaction/commit
+=== RUN   TestMutationAuditTransaction/rollback
+=== RUN   TestMutationAuditTransaction/failed-commit
+--- PASS: TestMutationAuditTransaction (0.00s)
+    --- PASS: TestMutationAuditTransaction/commit (0.00s)
+    --- PASS: TestMutationAuditTransaction/rollback (0.00s)
+    --- PASS: TestMutationAuditTransaction/failed-commit (0.00s)
+=== RUN   TestMutationAuditRequestBatch
+--- PASS: TestMutationAuditRequestBatch (0.00s)
+=== RUN   TestMutationAuditBatchBound
+--- PASS: TestMutationAuditBatchBound (0.00s)
+=== RUN   TestMutationMaintenanceAuthority
+--- PASS: TestMutationMaintenanceAuthority (0.17s)
+=== RUN   TestImportEpistemicKindValidation
+--- PASS: TestImportEpistemicKindValidation (0.00s)
+=== RUN   TestIdempotencyContractValidation
+--- PASS: TestIdempotencyContractValidation (0.00s)
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/insert-epistemic/authority=1/commit=true
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/insert-epistemic/authority=1/commit=false
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/insert-epistemic/authority=0/commit=true
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/insert-epistemic/authority=0/commit=false
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/supersede/authority=1/commit=true
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/supersede/authority=1/commit=false
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/update-as/authority=1/commit=true
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/update-as/authority=1/commit=false
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/delete-as/authority=0/commit=true
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/delete-as/authority=0/commit=false
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/delete-as/authority=1/commit=true
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/delete-as/authority=1/commit=false
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/reject/authority=1/commit=true
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/reject/authority=1/commit=false
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/reject/authority=0/commit=true
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/reject/authority=0/commit=false
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/restore/authority=1/commit=true
+=== RUN   TestIdempotentMutationConcurrentCommitAndDisconnect/restore/authority=1/commit=false
+--- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect (2.41s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/insert-epistemic/authority=1/commit=true (0.13s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/insert-epistemic/authority=1/commit=false (0.14s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/insert-epistemic/authority=0/commit=true (0.13s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/insert-epistemic/authority=0/commit=false (0.14s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/supersede/authority=1/commit=true (0.14s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/supersede/authority=1/commit=false (0.16s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/update-as/authority=1/commit=true (0.14s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/update-as/authority=1/commit=false (0.16s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/delete-as/authority=0/commit=true (0.11s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/delete-as/authority=0/commit=false (0.12s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/delete-as/authority=1/commit=true (0.11s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/delete-as/authority=1/commit=false (0.13s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/reject/authority=1/commit=true (0.12s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/reject/authority=1/commit=false (0.14s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/reject/authority=0/commit=true (0.12s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/reject/authority=0/commit=false (0.13s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/restore/authority=1/commit=true (0.13s)
+    --- PASS: TestIdempotentMutationConcurrentCommitAndDisconnect/restore/authority=1/commit=false (0.14s)
+=== RUN   TestCorrectionDigestCompatibility
+--- PASS: TestCorrectionDigestCompatibility (0.00s)
+=== RUN   TestNativeRecallCompleteRulesAndWholeRows
+--- PASS: TestNativeRecallCompleteRulesAndWholeRows (0.00s)
+=== RUN   TestNativeRecallZeroAndEmptyProjection
+--- PASS: TestNativeRecallZeroAndEmptyProjection (0.00s)
+=== RUN   TestNativeRecallEnvelopeRetainedIdentity
+--- PASS: TestNativeRecallEnvelopeRetainedIdentity (0.00s)
+=== RUN   TestNativeRecallAllocationValidation
+--- PASS: TestNativeRecallAllocationValidation (0.00s)
+=== RUN   TestNativeRecallRetainedVersionSelection
+--- PASS: TestNativeRecallRetainedVersionSelection (0.00s)
+=== RUN   TestNativeRuleMetadataStaysOutsidePrompt
+--- PASS: TestNativeRuleMetadataStaysOutsidePrompt (0.00s)
+=== RUN   TestNegationTokensAndBoost
+--- PASS: TestNegationTokensAndBoost (0.00s)
+=== RUN   TestOntologyArtifactsValidation
+--- PASS: TestOntologyArtifactsValidation (0.00s)
+=== RUN   TestOntologySeedPostgres
+--- PASS: TestOntologySeedPostgres (0.03s)
+=== RUN   TestSeedCorrectionPolicies
+--- PASS: TestSeedCorrectionPolicies (0.00s)
+=== RUN   TestOntologyConsoleBoundary
+--- PASS: TestOntologyConsoleBoundary (0.00s)
+=== RUN   TestSeedTableMatchesGeneratedSnapshot
+--- PASS: TestSeedTableMatchesGeneratedSnapshot (0.00s)
+=== RUN   TestNormalizeMatchesTheCAuthority
+--- PASS: TestNormalizeMatchesTheCAuthority (0.00s)
+=== RUN   TestGateAcceptsASeededTripleWithAllowedKinds
+--- PASS: TestGateAcceptsASeededTripleWithAllowedKinds (0.00s)
+=== RUN   TestGateRejectsADisallowedKind
+--- PASS: TestGateRejectsADisallowedKind (0.00s)
+=== RUN   TestGateReportsUnseededRelationsAsNovel
+--- PASS: TestGateReportsUnseededRelationsAsNovel (0.00s)
+=== RUN   TestGateRejectsAMissingRelation
+--- PASS: TestGateRejectsAMissingRelation (0.00s)
+=== RUN   TestWildcardKindAcceptsAnything
+--- PASS: TestWildcardKindAcceptsAnything (0.00s)
+=== RUN   TestPageRankRecallConfiguration
+--- PASS: TestPageRankRecallConfiguration (0.00s)
+=== RUN   TestPageRankNativeKernelGolden
+--- PASS: TestPageRankNativeKernelGolden (0.00s)
+=== RUN   TestPageRankBoundsAndCancellation
+--- PASS: TestPageRankBoundsAndCancellation (0.00s)
+=== RUN   TestPageRankMetricsConcurrent
+--- PASS: TestPageRankMetricsConcurrent (0.00s)
+=== RUN   TestPersonalMemoryAuthority
+--- PASS: TestPersonalMemoryAuthority (0.11s)
+=== RUN   TestPersonalMemoryChangeJournal
+--- PASS: TestPersonalMemoryChangeJournal (0.10s)
+=== RUN   TestPersonalCorrectionReview
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: ERROR: new row for relation "user_memory_correction_proposals" violates check constraint "fixture_review_failure" (SQLSTATE 23514)
+2026/09/25 20:12:11 memory data failure operation="correction-review" trace=0 status=5 class=sqlstate_23514
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestPersonalCorrectionReview (0.14s)
+=== RUN   TestPersonalMutationRetry
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: ERROR: new row for relation "user_memory_mutation_receipts" violates check constraint "fixture_failure" (SQLSTATE 23514)
+2026/09/25 20:12:11 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: ERROR: new row for relation "user_memory_mutation_receipts" violates check constraint "fixture_failure" (SQLSTATE 23514)
+2026/09/25 20:12:11 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: ERROR: new row for relation "user_memory_mutation_receipts" violates check constraint "fixture_failure" (SQLSTATE 23514)
+2026/09/25 20:12:11 memory data failure operation="delete" trace=0 status=5 class=sqlstate_23514
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: ERROR: new row for relation "user_memory_mutation_receipts" violates check constraint "create_failure" (SQLSTATE 23514)
+2026/09/25 20:12:11 memory data failure operation="store" trace=0 status=5 class=sqlstate_23514
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: ERROR: new row for relation "user_memory_mutation_receipts" violates check constraint "create_failure" (SQLSTATE 23514)
+2026/09/25 20:12:11 memory data failure operation="store" trace=0 status=5 class=sqlstate_23514
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestPersonalMutationRetry (0.44s)
+=== RUN   TestPersonalRetirementReceiptUpgrade
+--- PASS: TestPersonalRetirementReceiptUpgrade (0.05s)
+=== RUN   TestPersonalVectorsRejectInvalidNumbersAndDeduplicateFusion
+--- PASS: TestPersonalVectorsRejectInvalidNumbersAndDeduplicateFusion (0.00s)
+=== RUN   TestPersonalVectorPrivacyAndMutationRegression
+--- PASS: TestPersonalVectorPrivacyAndMutationRegression (0.30s)
+=== RUN   TestPersonalMemoryRetainedVersions
+2026/09/25 20:12:11 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_23514
+--- PASS: TestPersonalMemoryRetainedVersions (0.15s)
+=== RUN   TestTurnRequestsSensitiveMatchesTheCGate
+--- PASS: TestTurnRequestsSensitiveMatchesTheCGate (0.00s)
+=== RUN   TestRelSensitivityMatchesTheCGate
+    pii_conformance_test.go:72: classified 100 labels: normal=33 pii=43 secret=24
+--- PASS: TestRelSensitivityMatchesTheCGate (0.00s)
+=== RUN   TestShouldInjectMatchesTheCGate
+--- PASS: TestShouldInjectMatchesTheCGate (0.00s)
+=== RUN   TestOnlyOneTurnCueIsRedundant
+--- PASS: TestOnlyOneTurnCueIsRedundant (0.00s)
+=== RUN   TestEmptyNormalizationCannotMatchAToken
+--- PASS: TestEmptyNormalizationCannotMatchAToken (0.00s)
+=== RUN   TestRecallGateWithholdsWhatItMust
+--- PASS: TestRecallGateWithholdsWhatItMust (0.00s)
+=== RUN   TestPreviewProjectionIntegrityAndRetention
+=== RUN   TestPreviewProjectionIntegrityAndRetention/headline
+=== RUN   TestPreviewProjectionIntegrityAndRetention/key
+=== RUN   TestPreviewProjectionIntegrityAndRetention/tier
+=== RUN   TestPreviewProjectionIntegrityAndRetention/score
+=== RUN   TestPreviewProjectionIntegrityAndRetention/revision
+=== RUN   TestPreviewProjectionIntegrityAndRetention/parent
+=== RUN   TestPreviewProjectionIntegrityAndRetention/identity
+=== RUN   TestPreviewProjectionIntegrityAndRetention/scope-policy
+--- PASS: TestPreviewProjectionIntegrityAndRetention (0.73s)
+    --- PASS: TestPreviewProjectionIntegrityAndRetention/headline (0.00s)
+    --- PASS: TestPreviewProjectionIntegrityAndRetention/key (0.00s)
+    --- PASS: TestPreviewProjectionIntegrityAndRetention/tier (0.00s)
+    --- PASS: TestPreviewProjectionIntegrityAndRetention/score (0.00s)
+    --- PASS: TestPreviewProjectionIntegrityAndRetention/revision (0.00s)
+    --- PASS: TestPreviewProjectionIntegrityAndRetention/parent (0.00s)
+    --- PASS: TestPreviewProjectionIntegrityAndRetention/identity (0.00s)
+    --- PASS: TestPreviewProjectionIntegrityAndRetention/scope-policy (0.00s)
+=== RUN   TestPersonalMemoryPrivacyRegression
+--- PASS: TestPersonalMemoryPrivacyRegression (0.11s)
+=== RUN   TestProcessResourcesConfiguration
+--- PASS: TestProcessResourcesConfiguration (0.00s)
+=== RUN   TestProcessHandlerRequiresPlacementAndStore
+--- PASS: TestProcessHandlerRequiresPlacementAndStore (0.00s)
+=== RUN   TestPrivateErasureStartupBarrier
+--- PASS: TestPrivateErasureStartupBarrier (0.10s)
+=== RUN   TestProfilePackCommands
+--- PASS: TestProfilePackCommands (0.00s)
+=== RUN   TestProfilePackDirectory
+--- PASS: TestProfilePackDirectory (0.00s)
+=== RUN   TestProviderReceiptBindingNeedsSingleFreshAdmission
+--- PASS: TestProviderReceiptBindingNeedsSingleFreshAdmission (0.00s)
+=== RUN   TestProviderReceiptObservationPreservesTransportUncertainty
+--- PASS: TestProviderReceiptObservationPreservesTransportUncertainty (0.00s)
+=== RUN   TestProviderReceiptRejectsMalformedAndOversizedBindings
+--- PASS: TestProviderReceiptRejectsMalformedAndOversizedBindings (0.00s)
+=== RUN   TestProviderReceiptResponseRepresentationCompatibility
+--- PASS: TestProviderReceiptResponseRepresentationCompatibility (0.01s)
+=== RUN   TestProviderReceiptWithoutSourceHandleIsAnExplicitGap
+--- PASS: TestProviderReceiptWithoutSourceHandleIsAnExplicitGap (0.00s)
+=== RUN   TestProviderReceiptPressureReclaimsOnlyDurablyConfirmedObservations
+--- PASS: TestProviderReceiptPressureReclaimsOnlyDurablyConfirmedObservations (0.36s)
+=== RUN   TestProviderReceiptRecoveryStages
+=== RUN   TestProviderReceiptRecoveryStages/prepared
+=== RUN   TestProviderReceiptRecoveryStages/dispatch_admitted
+=== RUN   TestProviderReceiptRecoveryStages/dispatch_started
+=== RUN   TestProviderReceiptRecoveryStages/outcome_unknown
+=== RUN   TestProviderReceiptRecoveryStages/acknowledged
+--- PASS: TestProviderReceiptRecoveryStages (0.02s)
+    --- PASS: TestProviderReceiptRecoveryStages/prepared (0.00s)
+    --- PASS: TestProviderReceiptRecoveryStages/dispatch_admitted (0.00s)
+    --- PASS: TestProviderReceiptRecoveryStages/dispatch_started (0.00s)
+    --- PASS: TestProviderReceiptRecoveryStages/outcome_unknown (0.00s)
+    --- PASS: TestProviderReceiptRecoveryStages/acknowledged (0.00s)
+=== RUN   TestProviderReceiptReplayRetention
+--- PASS: TestProviderReceiptReplayRetention (0.01s)
+=== RUN   TestArchiveCommandsPostgres
+    runtime_role_test.go:43: runtime SQL exec: ERROR: new row for relation "memory_lineage" violates check constraint "fail_lineage" (SQLSTATE 23514)
+2026/09/25 20:12:13 memory data failure operation="other" trace=73 status=5 class=sqlstate_23514
+2026/09/25 20:12:13 memory data failure operation="other" trace=73 status=5 class=sqlstate_42501
+--- PASS: TestArchiveCommandsPostgres (0.63s)
+=== RUN   TestCheckpointValidation
+--- PASS: TestCheckpointValidation (0.00s)
+=== RUN   TestPrivateCommandsPreserveEnvelopesAndScope
+=== RUN   TestPrivateCommandsPreserveEnvelopesAndScope/named=false
+=== RUN   TestPrivateCommandsPreserveEnvelopesAndScope/named=true
+--- PASS: TestPrivateCommandsPreserveEnvelopesAndScope (0.00s)
+    --- PASS: TestPrivateCommandsPreserveEnvelopesAndScope/named=false (0.00s)
+    --- PASS: TestPrivateCommandsPreserveEnvelopesAndScope/named=true (0.00s)
+=== RUN   TestPublicCommandValidation
+--- PASS: TestPublicCommandValidation (0.00s)
+=== RUN   TestPublicCommandMissingAndOutage
+2026/09/25 20:12:14 memory data failure operation="get" trace=73 status=5 class=internal
+--- PASS: TestPublicCommandMissingAndOutage (0.00s)
+=== RUN   TestCommandStageRejectsWrongPlacementAndMalformedFrames
+--- PASS: TestCommandStageRejectsWrongPlacementAndMalformedFrames (0.00s)
+=== RUN   TestDiagnosticTraceContributions
+=== RUN   TestDiagnosticTraceContributions/1
+=== PAUSE TestDiagnosticTraceContributions/1
+=== RUN   TestDiagnosticTraceContributions/2
+=== PAUSE TestDiagnosticTraceContributions/2
+=== RUN   TestDiagnosticTraceContributions/3
+=== PAUSE TestDiagnosticTraceContributions/3
+=== RUN   TestDiagnosticTraceContributions/4
+=== PAUSE TestDiagnosticTraceContributions/4
+=== RUN   TestDiagnosticTraceContributions/5
+=== PAUSE TestDiagnosticTraceContributions/5
+=== RUN   TestDiagnosticTraceContributions/6
+=== PAUSE TestDiagnosticTraceContributions/6
+=== RUN   TestDiagnosticTraceContributions/7
+=== PAUSE TestDiagnosticTraceContributions/7
+=== RUN   TestDiagnosticTraceContributions/8
+=== PAUSE TestDiagnosticTraceContributions/8
+=== RUN   TestDiagnosticTraceContributions/9
+=== PAUSE TestDiagnosticTraceContributions/9
+=== RUN   TestDiagnosticTraceContributions/10
+=== PAUSE TestDiagnosticTraceContributions/10
+=== RUN   TestDiagnosticTraceContributions/11
+=== PAUSE TestDiagnosticTraceContributions/11
+=== RUN   TestDiagnosticTraceContributions/12
+=== PAUSE TestDiagnosticTraceContributions/12
+=== RUN   TestDiagnosticTraceContributions/13
+=== PAUSE TestDiagnosticTraceContributions/13
+=== RUN   TestDiagnosticTraceContributions/14
+=== PAUSE TestDiagnosticTraceContributions/14
+=== RUN   TestDiagnosticTraceContributions/15
+=== PAUSE TestDiagnosticTraceContributions/15
+=== RUN   TestDiagnosticTraceContributions/16
+=== PAUSE TestDiagnosticTraceContributions/16
+=== CONT  TestDiagnosticTraceContributions/2
+=== CONT  TestDiagnosticTraceContributions/8
+=== CONT  TestDiagnosticTraceContributions/6
+=== CONT  TestDiagnosticTraceContributions/16
+=== CONT  TestDiagnosticTraceContributions/14
+=== CONT  TestDiagnosticTraceContributions/12
+=== CONT  TestDiagnosticTraceContributions/7
+=== CONT  TestDiagnosticTraceContributions/10
+=== CONT  TestDiagnosticTraceContributions/13
+=== CONT  TestDiagnosticTraceContributions/15
+=== CONT  TestDiagnosticTraceContributions/1
+=== CONT  TestDiagnosticTraceContributions/4
+=== CONT  TestDiagnosticTraceContributions/3
+=== CONT  TestDiagnosticTraceContributions/11
+=== CONT  TestDiagnosticTraceContributions/5
+=== CONT  TestDiagnosticTraceContributions/9
+--- PASS: TestDiagnosticTraceContributions (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/2 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/8 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/6 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/16 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/12 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/14 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/7 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/10 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/15 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/13 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/1 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/4 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/3 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/11 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/5 (0.00s)
+    --- PASS: TestDiagnosticTraceContributions/9 (0.00s)
+=== RUN   TestDiagnosticPublicValidation
+--- PASS: TestDiagnosticPublicValidation (0.00s)
+=== RUN   TestDirectivePublicPostgresLifecycle
+2026/09/25 20:12:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/25 20:12:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/25 20:12:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_22008
+2026/09/25 20:12:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:14 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+--- PASS: TestDirectivePublicPostgresLifecycle (0.19s)
+=== RUN   TestDirectivePublicValidation
+--- PASS: TestDirectivePublicValidation (0.00s)
+=== RUN   TestDirectiveParentEligibilityPostgres
+=== RUN   TestDirectiveParentEligibilityPostgres/matched
+=== RUN   TestDirectiveParentEligibilityPostgres/recall
+--- PASS: TestDirectiveParentEligibilityPostgres (0.08s)
+    --- PASS: TestDirectiveParentEligibilityPostgres/matched (0.01s)
+    --- PASS: TestDirectiveParentEligibilityPostgres/recall (0.01s)
+=== RUN   TestDomainPublicValidation
+--- PASS: TestDomainPublicValidation (0.00s)
+=== RUN   TestDomainPublicScope
+--- PASS: TestDomainPublicScope (0.00s)
+=== RUN   TestDomainPublicPostgres
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+=== RUN   TestDomainPublicPostgres/link_console
+=== RUN   TestDomainPublicPostgres/legacy_scoped_get_provenance
+=== RUN   TestDomainPublicPostgres/legacy_scoped_link_query
+=== RUN   TestDomainPublicPostgres/legacy_scoped_conflicts
+=== RUN   TestDomainPublicPostgres/scoped_statistics_preserve_operator_lifecycle_coverage
+=== RUN   TestDomainPublicPostgres/scoped_console_effectiveness
+=== RUN   TestDomainPublicPostgres/scoped_dashboard_conflict_endpoints
+=== NAME  TestDomainPublicPostgres
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestDomainPublicPostgres (0.44s)
+    --- PASS: TestDomainPublicPostgres/link_console (0.02s)
+    --- PASS: TestDomainPublicPostgres/legacy_scoped_get_provenance (0.00s)
+    --- PASS: TestDomainPublicPostgres/legacy_scoped_link_query (0.00s)
+    --- PASS: TestDomainPublicPostgres/legacy_scoped_conflicts (0.01s)
+    --- PASS: TestDomainPublicPostgres/scoped_statistics_preserve_operator_lifecycle_coverage (0.00s)
+    --- PASS: TestDomainPublicPostgres/scoped_console_effectiveness (0.00s)
+    --- PASS: TestDomainPublicPostgres/scoped_dashboard_conflict_endpoints (0.00s)
+=== RUN   TestStatisticsConsoleUnavailable
+--- PASS: TestStatisticsConsoleUnavailable (0.00s)
+=== RUN   TestPublicRetractionValidation
+--- PASS: TestPublicRetractionValidation (0.00s)
+=== RUN   TestLearningPublicValidation
+--- PASS: TestLearningPublicValidation (0.00s)
+=== RUN   TestMaintenancePublicPostgres
+--- PASS: TestMaintenancePublicPostgres (0.03s)
+=== RUN   TestMaintenanceConsoleOwner
+2026/09/25 20:12:14 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/25 20:12:14 memory data failure operation="other" trace=73 status=5 class=internal
+--- PASS: TestMaintenanceConsoleOwner (0.00s)
+=== RUN   TestModelMaintenancePlan
+--- PASS: TestModelMaintenancePlan (0.00s)
+=== RUN   TestModelMaintenanceExecutionNeverPrunes
+--- PASS: TestModelMaintenanceExecutionNeverPrunes (0.00s)
+=== RUN   TestMutationPublicContextBoundary
+--- PASS: TestMutationPublicContextBoundary (0.00s)
+=== RUN   TestMutationPublicPostgres
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestMutationPublicPostgres (0.06s)
+=== RUN   TestPublicOntologyValidation
+--- PASS: TestPublicOntologyValidation (0.00s)
+=== RUN   TestPublicOntologyWalkPostgres
+--- PASS: TestPublicOntologyWalkPostgres (0.45s)
+=== RUN   TestOntologyNames
+--- PASS: TestOntologyNames (0.00s)
+=== RUN   TestProspectivePublicValidation
+--- PASS: TestProspectivePublicValidation (0.00s)
+=== RUN   TestProspectivePublicPostgresLifecycle
+2026/09/25 20:12:15 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/25 20:12:15 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:15 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:15 memory data failure operation="other" trace=0 status=5 class=sqlstate_22007
+2026/09/25 20:12:15 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:15 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:15 memory data failure operation="other" trace=0 status=5 class=sqlstate_22008
+2026/09/25 20:12:15 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:15 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+--- PASS: TestProspectivePublicPostgresLifecycle (0.14s)
+=== RUN   TestPersonalReviewOwnerPostgres
+2026/09/25 20:12:15 memory data failure operation="other" trace=0 status=5 class=sqlstate_42P01
+--- PASS: TestPersonalReviewOwnerPostgres (0.44s)
+=== RUN   TestQueryPublicValidation
+--- PASS: TestQueryPublicValidation (0.00s)
+=== RUN   TestQueryPublicPostgres
+--- PASS: TestQueryPublicPostgres (0.12s)
+=== RUN   TestStaleInspectionEmptyAndUnavailable
+2026/09/25 20:12:16 memory data failure operation="other" trace=73 status=5 class=internal
+2026/09/25 20:12:16 memory data failure operation="other" trace=73 status=5 class=internal
+--- PASS: TestStaleInspectionEmptyAndUnavailable (0.00s)
+=== RUN   TestRecordPublicValidation
+--- PASS: TestRecordPublicValidation (0.00s)
+=== RUN   TestRecordPublicPostgres
+    runtime_role_test.go:35: runtime SQL: ERROR: relation "bandit_promotions" does not exist (SQLSTATE 42P01)
+    runtime_role_test.go:35: runtime SQL: ERROR: relation "bandit_promotions" does not exist (SQLSTATE 42P01)
+    runtime_role_test.go:35: runtime SQL: ERROR: relation "bandit_promotions" does not exist (SQLSTATE 42P01)
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: ERROR: relation "bandit_promotions" does not exist (SQLSTATE 42P01)
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestRecordPublicPostgres (2.62s)
+=== RUN   TestSessionTextBudget
+--- PASS: TestSessionTextBudget (0.00s)
+=== RUN   TestRuntimePublicValidation
+--- PASS: TestRuntimePublicValidation (0.00s)
+=== RUN   TestRuntimePublicPostgres
+    runtime_role_test.go:35: runtime SQL: ERROR: relation "bandit_promotions" does not exist (SQLSTATE 42P01)
+    runtime_role_test.go:35: runtime SQL: ERROR: relation "bandit_promotions" does not exist (SQLSTATE 42P01)
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestRuntimePublicPostgres (0.22s)
+=== RUN   TestServerSearchValidation
+--- PASS: TestServerSearchValidation (0.00s)
+=== RUN   TestSceneCommandsPostgres
+--- PASS: TestSceneCommandsPostgres (0.09s)
+=== RUN   TestStorePublicValidation
+--- PASS: TestStorePublicValidation (0.00s)
+=== RUN   TestStorePublicPostgres
+    runtime_role_test.go:43: runtime SQL exec: ERROR: new row for relation "kb_async_jobs" violates check constraint "update_enqueue_failure" (SQLSTATE 23514)
+2026/09/25 20:12:19 memory data failure operation="update-as" trace=0 status=5 class=sqlstate_23514
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:43: runtime SQL exec: ERROR: new row for relation "memory_fact_actors" violates check constraint "injected_failure" (SQLSTATE 23514)
+2026/09/25 20:12:19 memory data failure operation="insert-epistemic" trace=73 status=5 class=sqlstate_23514
+    runtime_role_test.go:43: runtime SQL exec: ERROR: new row for relation "kb_async_jobs" violates check constraint "injected_failure" (SQLSTATE 23514)
+2026/09/25 20:12:19 memory data failure operation="insert-epistemic" trace=73 status=5 class=sqlstate_23514
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+2026/09/25 20:12:19 memory data failure operation="insert-epistemic" trace=0 status=5 class=internal
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:43: runtime SQL exec: ERROR: new row for relation "kb_async_jobs" violates check constraint "fail_replacement" (SQLSTATE 23514)
+2026/09/25 20:12:19 memory data failure operation="supersede" trace=73 status=5 class=sqlstate_23514
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+2026/09/25 20:12:19 memory data failure operation="insert-epistemic" trace=73 status=5 class=internal
+2026/09/25 20:12:19 memory data failure operation="insert-epistemic" trace=73 status=5 class=internal
+2026/09/25 20:12:19 memory data failure operation="update-as" trace=73 status=5 class=internal
+--- PASS: TestStorePublicPostgres (0.52s)
+=== RUN   TestSameKeyMutationConcurrency
+--- PASS: TestSameKeyMutationConcurrency (0.06s)
+=== RUN   TestObservedRankingTrace
+=== RUN   TestObservedRankingTrace/a
+=== PAUSE TestObservedRankingTrace/a
+=== RUN   TestObservedRankingTrace/b
+=== PAUSE TestObservedRankingTrace/b
+=== RUN   TestObservedRankingTrace/c
+=== PAUSE TestObservedRankingTrace/c
+=== RUN   TestObservedRankingTrace/d
+=== PAUSE TestObservedRankingTrace/d
+=== RUN   TestObservedRankingTrace/e
+=== PAUSE TestObservedRankingTrace/e
+=== RUN   TestObservedRankingTrace/f
+=== PAUSE TestObservedRankingTrace/f
+=== RUN   TestObservedRankingTrace/g
+=== PAUSE TestObservedRankingTrace/g
+=== RUN   TestObservedRankingTrace/h
+=== PAUSE TestObservedRankingTrace/h
+=== RUN   TestObservedRankingTrace/i
+=== PAUSE TestObservedRankingTrace/i
+=== RUN   TestObservedRankingTrace/j
+=== PAUSE TestObservedRankingTrace/j
+=== RUN   TestObservedRankingTrace/k
+=== PAUSE TestObservedRankingTrace/k
+=== RUN   TestObservedRankingTrace/l
+=== PAUSE TestObservedRankingTrace/l
+=== RUN   TestObservedRankingTrace/m
+=== PAUSE TestObservedRankingTrace/m
+=== RUN   TestObservedRankingTrace/n
+=== PAUSE TestObservedRankingTrace/n
+=== RUN   TestObservedRankingTrace/o
+=== PAUSE TestObservedRankingTrace/o
+=== RUN   TestObservedRankingTrace/p
+=== PAUSE TestObservedRankingTrace/p
+=== CONT  TestObservedRankingTrace/a
+=== CONT  TestObservedRankingTrace/h
+=== CONT  TestObservedRankingTrace/d
+=== CONT  TestObservedRankingTrace/m
+=== CONT  TestObservedRankingTrace/f
+=== CONT  TestObservedRankingTrace/e
+=== CONT  TestObservedRankingTrace/k
+=== CONT  TestObservedRankingTrace/g
+=== CONT  TestObservedRankingTrace/n
+=== CONT  TestObservedRankingTrace/l
+=== CONT  TestObservedRankingTrace/p
+=== CONT  TestObservedRankingTrace/j
+=== CONT  TestObservedRankingTrace/i
+=== CONT  TestObservedRankingTrace/b
+=== CONT  TestObservedRankingTrace/o
+=== CONT  TestObservedRankingTrace/c
+--- PASS: TestObservedRankingTrace (0.00s)
+    --- PASS: TestObservedRankingTrace/a (0.00s)
+    --- PASS: TestObservedRankingTrace/d (0.00s)
+    --- PASS: TestObservedRankingTrace/h (0.00s)
+    --- PASS: TestObservedRankingTrace/m (0.00s)
+    --- PASS: TestObservedRankingTrace/f (0.00s)
+    --- PASS: TestObservedRankingTrace/e (0.00s)
+    --- PASS: TestObservedRankingTrace/k (0.00s)
+    --- PASS: TestObservedRankingTrace/g (0.00s)
+    --- PASS: TestObservedRankingTrace/l (0.00s)
+    --- PASS: TestObservedRankingTrace/n (0.00s)
+    --- PASS: TestObservedRankingTrace/p (0.00s)
+    --- PASS: TestObservedRankingTrace/j (0.00s)
+    --- PASS: TestObservedRankingTrace/b (0.00s)
+    --- PASS: TestObservedRankingTrace/o (0.00s)
+    --- PASS: TestObservedRankingTrace/i (0.00s)
+    --- PASS: TestObservedRankingTrace/c (0.00s)
+=== RUN   TestDiagnosticScoreEvidenceSeparatesEstimates
+--- PASS: TestDiagnosticScoreEvidenceSeparatesEstimates (0.00s)
+=== RUN   TestRankingTracePreviewCompatibility
+--- PASS: TestRankingTracePreviewCompatibility (0.00s)
+=== RUN   TestRankingCandidateUniverseAndNestedIsolation
+=== RUN   TestRankingCandidateUniverseAndNestedIsolation/a
+=== PAUSE TestRankingCandidateUniverseAndNestedIsolation/a
+=== RUN   TestRankingCandidateUniverseAndNestedIsolation/b
+=== PAUSE TestRankingCandidateUniverseAndNestedIsolation/b
+=== RUN   TestRankingCandidateUniverseAndNestedIsolation/c
+=== PAUSE TestRankingCandidateUniverseAndNestedIsolation/c
+=== RUN   TestRankingCandidateUniverseAndNestedIsolation/d
+=== PAUSE TestRankingCandidateUniverseAndNestedIsolation/d
+=== RUN   TestRankingCandidateUniverseAndNestedIsolation/e
+=== PAUSE TestRankingCandidateUniverseAndNestedIsolation/e
+=== RUN   TestRankingCandidateUniverseAndNestedIsolation/f
+=== PAUSE TestRankingCandidateUniverseAndNestedIsolation/f
+=== RUN   TestRankingCandidateUniverseAndNestedIsolation/g
+=== PAUSE TestRankingCandidateUniverseAndNestedIsolation/g
+=== RUN   TestRankingCandidateUniverseAndNestedIsolation/h
+=== PAUSE TestRankingCandidateUniverseAndNestedIsolation/h
+=== CONT  TestRankingCandidateUniverseAndNestedIsolation/b
+=== CONT  TestRankingCandidateUniverseAndNestedIsolation/g
+=== CONT  TestRankingCandidateUniverseAndNestedIsolation/f
+=== CONT  TestRankingCandidateUniverseAndNestedIsolation/c
+=== CONT  TestRankingCandidateUniverseAndNestedIsolation/a
+=== CONT  TestRankingCandidateUniverseAndNestedIsolation/h
+=== CONT  TestRankingCandidateUniverseAndNestedIsolation/e
+=== CONT  TestRankingCandidateUniverseAndNestedIsolation/d
+--- PASS: TestRankingCandidateUniverseAndNestedIsolation (0.00s)
+    --- PASS: TestRankingCandidateUniverseAndNestedIsolation/b (0.00s)
+    --- PASS: TestRankingCandidateUniverseAndNestedIsolation/e (0.00s)
+    --- PASS: TestRankingCandidateUniverseAndNestedIsolation/h (0.00s)
+    --- PASS: TestRankingCandidateUniverseAndNestedIsolation/a (0.00s)
+    --- PASS: TestRankingCandidateUniverseAndNestedIsolation/c (0.00s)
+    --- PASS: TestRankingCandidateUniverseAndNestedIsolation/d (0.00s)
+    --- PASS: TestRankingCandidateUniverseAndNestedIsolation/f (0.00s)
+    --- PASS: TestRankingCandidateUniverseAndNestedIsolation/g (0.00s)
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/future_schema
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/missing_schema
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/belief_time
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/diagnostic
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/search
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/mutation
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/legacy_mixed
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/current_override
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/missing_time
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/relative_time
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/bad_calendar
+=== RUN   TestMemoryReadPolicyRejectsUnimplementedSemantics/personal_history
+--- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/future_schema (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/missing_schema (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/belief_time (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/diagnostic (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/search (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/mutation (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/legacy_mixed (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/current_override (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/missing_time (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/relative_time (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/bad_calendar (0.00s)
+    --- PASS: TestMemoryReadPolicyRejectsUnimplementedSemantics/personal_history (0.00s)
+=== RUN   TestMemoryReadPolicyPublicErrors
+--- PASS: TestMemoryReadPolicyPublicErrors (0.00s)
+=== RUN   TestRecallCompositionPostgres
+2026/09/25 20:12:19 memory data failure operation="get" trace=0 status=5 class=sqlstate_42P01
+2026/09/25 20:12:19 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:19 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:19 memory data failure operation="store" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:19 memory data failure operation="supersede" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:19 memory data failure operation="delete" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:19 memory data failure operation="other" trace=0 status=5 class=sqlstate_25P02
+2026/09/25 20:12:19 memory data failure operation="compose-recall" trace=0 status=5 class=internal
+2026/09/25 20:12:19 memory data failure operation="compose-recall" trace=0 status=5 class=internal
+2026/09/25 20:12:19 memory data failure operation="compose-recall" trace=0 status=5 class=sqlstate_42P01
+2026/09/25 20:12:19 memory data failure operation="recall-bundle" trace=0 status=5 class=sqlstate_25P02
+--- PASS: TestRecallCompositionPostgres (0.15s)
+=== RUN   TestRecallBudget
+--- PASS: TestRecallBudget (0.01s)
+=== RUN   TestRecallProtectedPackingMatchesExhaustive
+--- PASS: TestRecallProtectedPackingMatchesExhaustive (7.20s)
+=== RUN   TestReceiptVerificationIndependentEvidence
+--- PASS: TestReceiptVerificationIndependentEvidence (0.20s)
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/noncanonical_number
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/nested_duplicate
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/case_alias
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/unknown
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/missing_null
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/null_string
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/source_unknown
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/wrong_stage
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/duplicate
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/source_missing
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/trailing
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/oversize
+=== RUN   TestReceiptVerificationRejectsAmbiguousSchema/future_schema
+--- PASS: TestReceiptVerificationRejectsAmbiguousSchema (0.01s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/noncanonical_number (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/nested_duplicate (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/case_alias (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/unknown (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/missing_null (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/null_string (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/source_unknown (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/wrong_stage (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/duplicate (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/source_missing (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/trailing (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/oversize (0.00s)
+    --- PASS: TestReceiptVerificationRejectsAmbiguousSchema/future_schema (0.00s)
+=== RUN   TestReceiptVerificationDetectsChangedCommitmentsWithoutAuthenticatingForgery
+--- PASS: TestReceiptVerificationDetectsChangedCommitmentsWithoutAuthenticatingForgery (0.01s)
+=== RUN   TestStrictCommandsValidateTransportEnvelope
+--- PASS: TestStrictCommandsValidateTransportEnvelope (0.00s)
+=== RUN   TestClassifyRedirect
+--- PASS: TestClassifyRedirect (0.00s)
+=== RUN   TestBashTargetsMemory
+--- PASS: TestBashTargetsMemory (0.00s)
+=== RUN   TestReflectionEvidence
+--- PASS: TestReflectionEvidence (0.00s)
+=== RUN   TestReflectionValidation
+--- PASS: TestReflectionValidation (0.00s)
+=== RUN   TestReflectionSynthesisScreening
+--- PASS: TestReflectionSynthesisScreening (2.45s)
+=== RUN   TestRelationInvalidationDurableConsumer
+--- PASS: TestRelationInvalidationDurableConsumer (0.46s)
+=== RUN   TestRetrievalCorpus
+=== RUN   TestRetrievalCorpus/kb
+    retrieval_eval_test.go:181: miss c047: bench-perf 15 percent
+    retrieval_eval_test.go:181: miss c066: server production 192
+    retrieval_eval_test.go:181: miss c067: memory tier promote access count
+    retrieval_eval_test.go:181: miss c068: auth login password
+    retrieval_eval_test.go:181: miss c069: webhook secret validation
+    retrieval_eval_test.go:181: miss c070: build output binary location
+    retrieval_eval_test.go:181: miss c071: code formatting check CI
+    retrieval_eval_test.go:181: miss c072: streaming unidirectional server client
+    retrieval_eval_test.go:181: miss c073: conflict same key different content
+    retrieval_eval_test.go:181: miss c074: turn summary agent context
+    retrieval_eval_test.go:181: miss c076: facts promoted after repeated access
+    retrieval_eval_test.go:181: miss c079: L1 entries demoted L0 full
+    retrieval_eval_test.go:181: miss c080: aimee-server binary output path
+    retrieval_eval_test.go:181: miss c081: deploy server command make
+    retrieval_eval_test.go:181: miss c082: server binary restart supervisor
+    retrieval_eval_test.go:181: miss c083: errors retried backoff HTTP
+    retrieval_eval_test.go:181: miss c084: memory L3 expiry never
+    retrieval_eval_test.go:181: miss c086: session idle re-authenticate
+    retrieval_eval_test.go:181: miss c087: oldest turns summarized long conversation
+    retrieval_eval_test.go:181: miss c088: rule weight priority high threshold
+    retrieval_eval_test.go:181: miss c090: fingerprint error repeat anti-pattern
+    retrieval_eval_test.go:181: miss c091: weekly feedback rule reinforcement
+    retrieval_eval_test.go:181: miss c092: OpenTelemetry tracing zero overhead disabled
+    retrieval_eval_test.go:181: miss c097: workspace collab rules file change trigger
+    retrieval_eval_test.go:181: miss c101: Python typing features version minimum
+    retrieval_eval_test.go:181: miss c103: MCP port config key aimee
+    retrieval_eval_test.go:181: miss c104: delegate max concurrent 8 workers
+    retrieval_eval_test.go:188: mrr=0.742857 baseline=0.642857 cases=105
+    retrieval_eval_test.go:188: ndcg_5=0.739173 baseline=0.640420 cases=105
+    retrieval_eval_test.go:188: ndcg_10=0.739173 baseline=0.640420 cases=105
+    retrieval_eval_test.go:188: recall_5=0.738095 baseline=0.642857 cases=105
+    retrieval_eval_test.go:188: recall_10=0.738095 baseline=0.642857 cases=105
+=== RUN   TestRetrievalCorpus/server
+2026/09/25 20:12:30 memory data failure operation="other" trace=0 status=5 class=sqlstate_42P01
+    retrieval_eval_test.go:149: c001: status 5
+=== NAME  TestRetrievalCorpus
+    retrieval_eval_test.go:208: ERROR: current transaction is aborted, commands ignored until end of transaction block (SQLSTATE 25P02)
+--- FAIL: TestRetrievalCorpus (0.27s)
+    --- PASS: TestRetrievalCorpus/kb (0.24s)
+    --- FAIL: TestRetrievalCorpus/server (0.00s)
+=== RUN   TestRecallSufficiency
+--- PASS: TestRecallSufficiency (0.00s)
+=== RUN   TestRuntimeCommandHostOnly
+--- PASS: TestRuntimeCommandHostOnly (0.00s)
+=== RUN   TestRuntimeConfidenceBothPlacements
+--- PASS: TestRuntimeConfidenceBothPlacements (0.00s)
+=== RUN   TestRuntimeViewsAndPrivateCommandsRejectWrongPlacementAndPeer
+--- PASS: TestRuntimeViewsAndPrivateCommandsRejectWrongPlacementAndPeer (0.00s)
+=== RUN   TestLearningMutationHostBoundary
+--- PASS: TestLearningMutationHostBoundary (0.00s)
+=== RUN   TestMemoryRuntimeRoleReplay
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+2026/09/25 20:12:30 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 20:12:30 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 20:12:30 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 20:12:30 memory data failure operation="other" trace=0 status=5 class=internal
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+2026/09/25 20:12:30 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 20:12:30 memory data failure operation="other" trace=0 status=5 class=internal
+    runtime_role_test.go:43: runtime SQL exec: ERROR: permission denied for table memory_embeddings (SQLSTATE 42501)
+2026/09/25 20:12:30 memory data failure operation="other" trace=0 status=5 class=sqlstate_42501
+2026/09/25 20:12:30 memory data failure operation="other" trace=0 status=5 class=internal
+2026/09/25 20:12:30 memory data failure operation="vector-rebuild" trace=0 status=5 class=internal
+    runtime_role_test.go:138: dense contribution or source version unavailable {278432 0xc0006c6500 not_assessed owner_admitted selected [{native_cosine_similarity_scope_priority 1 [{semantic 1 1}]} {rrf60 0.01639344262295082 [{semantic_parent 1 0.01639344262295082}]}]}
+--- FAIL: TestMemoryRuntimeRoleReplay (0.56s)
+=== RUN   TestScopeOwnerPostgres
+    runtime_role_test.go:35: runtime SQL: ERROR: new row for relation "memory_workspaces" violates check constraint "memory_workspaces_workspace_check" (SQLSTATE 23514)
+2026/09/25 20:12:30 memory data failure operation="other" trace=0 status=5 class=sqlstate_23514
+--- PASS: TestScopeOwnerPostgres (0.04s)
+=== RUN   TestMemoryScopeConcurrentPoolReuse
+--- PASS: TestMemoryScopeConcurrentPoolReuse (0.17s)
+=== RUN   TestSearchViewScope
+--- PASS: TestSearchViewScope (0.00s)
+=== RUN   TestMemorySearchText
+--- PASS: TestMemorySearchText (0.00s)
+=== RUN   TestFusionProbe
+2026/09/25 20:12:31 memory data failure operation="other" trace=0 status=5 class=internal
+--- PASS: TestFusionProbe (0.00s)
+=== RUN   TestFoldOriginsRevocationAndErase
+--- PASS: TestFoldOriginsRevocationAndErase (0.21s)
+=== RUN   TestSharedDerivedRevisionUpgrade
+=== RUN   TestSharedDerivedRevisionUpgrade/episode
+=== RUN   TestSharedDerivedRevisionUpgrade/summary
+--- PASS: TestSharedDerivedRevisionUpgrade (0.08s)
+    --- PASS: TestSharedDerivedRevisionUpgrade/episode (0.04s)
+    --- PASS: TestSharedDerivedRevisionUpgrade/summary (0.04s)
+=== RUN   TestSharedMemoryCollectionCommitOrder
+--- PASS: TestSharedMemoryCollectionCommitOrder (0.07s)
+=== RUN   TestSharedMemoryChangeJournal
+--- PASS: TestSharedMemoryChangeJournal (0.08s)
+=== RUN   TestSharedLinkChangeJournal
+--- PASS: TestSharedLinkChangeJournal (0.05s)
+=== RUN   TestStructuredRecallRevisionUpgrade
+--- PASS: TestStructuredRecallRevisionUpgrade (0.03s)
+=== RUN   TestSharedIndexConcurrentClaims
+--- PASS: TestSharedIndexConcurrentClaims (0.45s)
+=== RUN   TestSharedSemanticFloorScale
+--- PASS: TestSharedSemanticFloorScale (0.00s)
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation/unchanged
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation/changed
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation/outage
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation/wrong-check
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation/wrong-digest
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation/different-principal
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation/restart
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation/expired
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation/replay
+=== RUN   TestSourceReleaseFreshAnswerAndFailureIsolation/superseded-attempt
+--- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation (0.00s)
+    --- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation/unchanged (0.00s)
+    --- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation/changed (0.00s)
+    --- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation/outage (0.00s)
+    --- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation/wrong-check (0.00s)
+    --- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation/wrong-digest (0.00s)
+    --- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation/different-principal (0.00s)
+    --- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation/restart (0.00s)
+    --- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation/expired (0.00s)
+    --- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation/replay (0.00s)
+    --- PASS: TestSourceReleaseFreshAnswerAndFailureIsolation/superseded-attempt (0.00s)
+=== RUN   TestSourceReleaseCapacityAndAccumulation
+--- PASS: TestSourceReleaseCapacityAndAccumulation (0.00s)
+=== RUN   TestSourceReleaseConcurrentRequests
+=== RUN   TestSourceReleaseConcurrentRequests/0
+=== PAUSE TestSourceReleaseConcurrentRequests/0
+=== RUN   TestSourceReleaseConcurrentRequests/1
+=== PAUSE TestSourceReleaseConcurrentRequests/1
+=== RUN   TestSourceReleaseConcurrentRequests/2
+=== PAUSE TestSourceReleaseConcurrentRequests/2
+=== RUN   TestSourceReleaseConcurrentRequests/3
+=== PAUSE TestSourceReleaseConcurrentRequests/3
+=== RUN   TestSourceReleaseConcurrentRequests/4
+=== PAUSE TestSourceReleaseConcurrentRequests/4
+=== RUN   TestSourceReleaseConcurrentRequests/5
+=== PAUSE TestSourceReleaseConcurrentRequests/5
+=== RUN   TestSourceReleaseConcurrentRequests/6
+=== PAUSE TestSourceReleaseConcurrentRequests/6
+=== RUN   TestSourceReleaseConcurrentRequests/7
+=== PAUSE TestSourceReleaseConcurrentRequests/7
+=== RUN   TestSourceReleaseConcurrentRequests/8
+=== PAUSE TestSourceReleaseConcurrentRequests/8
+=== RUN   TestSourceReleaseConcurrentRequests/9
+=== PAUSE TestSourceReleaseConcurrentRequests/9
+=== RUN   TestSourceReleaseConcurrentRequests/10
+=== PAUSE TestSourceReleaseConcurrentRequests/10
+=== RUN   TestSourceReleaseConcurrentRequests/11
+=== PAUSE TestSourceReleaseConcurrentRequests/11
+=== RUN   TestSourceReleaseConcurrentRequests/12
+=== PAUSE TestSourceReleaseConcurrentRequests/12
+=== RUN   TestSourceReleaseConcurrentRequests/13
+=== PAUSE TestSourceReleaseConcurrentRequests/13
+=== RUN   TestSourceReleaseConcurrentRequests/14
+=== PAUSE TestSourceReleaseConcurrentRequests/14
+=== RUN   TestSourceReleaseConcurrentRequests/15
+=== PAUSE TestSourceReleaseConcurrentRequests/15
+=== RUN   TestSourceReleaseConcurrentRequests/16
+=== PAUSE TestSourceReleaseConcurrentRequests/16
+=== RUN   TestSourceReleaseConcurrentRequests/17
+=== PAUSE TestSourceReleaseConcurrentRequests/17
+=== RUN   TestSourceReleaseConcurrentRequests/18
+=== PAUSE TestSourceReleaseConcurrentRequests/18
+=== RUN   TestSourceReleaseConcurrentRequests/19
+=== PAUSE TestSourceReleaseConcurrentRequests/19
+=== RUN   TestSourceReleaseConcurrentRequests/20
+=== PAUSE TestSourceReleaseConcurrentRequests/20
+=== RUN   TestSourceReleaseConcurrentRequests/21
+=== PAUSE TestSourceReleaseConcurrentRequests/21
+=== RUN   TestSourceReleaseConcurrentRequests/22
+=== PAUSE TestSourceReleaseConcurrentRequests/22
+=== RUN   TestSourceReleaseConcurrentRequests/23
+=== PAUSE TestSourceReleaseConcurrentRequests/23
+=== RUN   TestSourceReleaseConcurrentRequests/24
+=== PAUSE TestSourceReleaseConcurrentRequests/24
+=== RUN   TestSourceReleaseConcurrentRequests/25
+=== PAUSE TestSourceReleaseConcurrentRequests/25
+=== RUN   TestSourceReleaseConcurrentRequests/26
+=== PAUSE TestSourceReleaseConcurrentRequests/26
+=== RUN   TestSourceReleaseConcurrentRequests/27
+=== PAUSE TestSourceReleaseConcurrentRequests/27
+=== RUN   TestSourceReleaseConcurrentRequests/28
+=== PAUSE TestSourceReleaseConcurrentRequests/28
+=== RUN   TestSourceReleaseConcurrentRequests/29
+=== PAUSE TestSourceReleaseConcurrentRequests/29
+=== RUN   TestSourceReleaseConcurrentRequests/30
+=== PAUSE TestSourceReleaseConcurrentRequests/30
+=== RUN   TestSourceReleaseConcurrentRequests/31
+=== PAUSE TestSourceReleaseConcurrentRequests/31
+=== RUN   TestSourceReleaseConcurrentRequests/32
+=== PAUSE TestSourceReleaseConcurrentRequests/32
+=== RUN   TestSourceReleaseConcurrentRequests/33
+=== PAUSE TestSourceReleaseConcurrentRequests/33
+=== RUN   TestSourceReleaseConcurrentRequests/34
+=== PAUSE TestSourceReleaseConcurrentRequests/34
+=== RUN   TestSourceReleaseConcurrentRequests/35
+=== PAUSE TestSourceReleaseConcurrentRequests/35
+=== RUN   TestSourceReleaseConcurrentRequests/36
+=== PAUSE TestSourceReleaseConcurrentRequests/36
+=== RUN   TestSourceReleaseConcurrentRequests/37
+=== PAUSE TestSourceReleaseConcurrentRequests/37
+=== RUN   TestSourceReleaseConcurrentRequests/38
+=== PAUSE TestSourceReleaseConcurrentRequests/38
+=== RUN   TestSourceReleaseConcurrentRequests/39
+=== PAUSE TestSourceReleaseConcurrentRequests/39
+=== RUN   TestSourceReleaseConcurrentRequests/40
+=== PAUSE TestSourceReleaseConcurrentRequests/40
+=== RUN   TestSourceReleaseConcurrentRequests/41
+=== PAUSE TestSourceReleaseConcurrentRequests/41
+=== RUN   TestSourceReleaseConcurrentRequests/42
+=== PAUSE TestSourceReleaseConcurrentRequests/42
+=== RUN   TestSourceReleaseConcurrentRequests/43
+=== PAUSE TestSourceReleaseConcurrentRequests/43
+=== RUN   TestSourceReleaseConcurrentRequests/44
+=== PAUSE TestSourceReleaseConcurrentRequests/44
+=== RUN   TestSourceReleaseConcurrentRequests/45
+=== PAUSE TestSourceReleaseConcurrentRequests/45
+=== RUN   TestSourceReleaseConcurrentRequests/46
+=== PAUSE TestSourceReleaseConcurrentRequests/46
+=== RUN   TestSourceReleaseConcurrentRequests/47
+=== PAUSE TestSourceReleaseConcurrentRequests/47
+=== RUN   TestSourceReleaseConcurrentRequests/48
+=== PAUSE TestSourceReleaseConcurrentRequests/48
+=== RUN   TestSourceReleaseConcurrentRequests/49
+=== PAUSE TestSourceReleaseConcurrentRequests/49
+=== RUN   TestSourceReleaseConcurrentRequests/50
+=== PAUSE TestSourceReleaseConcurrentRequests/50
+=== RUN   TestSourceReleaseConcurrentRequests/51
+=== PAUSE TestSourceReleaseConcurrentRequests/51
+=== RUN   TestSourceReleaseConcurrentRequests/52
+=== PAUSE TestSourceReleaseConcurrentRequests/52
+=== RUN   TestSourceReleaseConcurrentRequests/53
+=== PAUSE TestSourceReleaseConcurrentRequests/53
+=== RUN   TestSourceReleaseConcurrentRequests/54
+=== PAUSE TestSourceReleaseConcurrentRequests/54
+=== RUN   TestSourceReleaseConcurrentRequests/55
+=== PAUSE TestSourceReleaseConcurrentRequests/55
+=== RUN   TestSourceReleaseConcurrentRequests/56
+=== PAUSE TestSourceReleaseConcurrentRequests/56
+=== RUN   TestSourceReleaseConcurrentRequests/57
+=== PAUSE TestSourceReleaseConcurrentRequests/57
+=== RUN   TestSourceReleaseConcurrentRequests/58
+=== PAUSE TestSourceReleaseConcurrentRequests/58
+=== RUN   TestSourceReleaseConcurrentRequests/59
+=== PAUSE TestSourceReleaseConcurrentRequests/59
+=== RUN   TestSourceReleaseConcurrentRequests/60
+=== PAUSE TestSourceReleaseConcurrentRequests/60
+=== RUN   TestSourceReleaseConcurrentRequests/61
+=== PAUSE TestSourceReleaseConcurrentRequests/61
+=== RUN   TestSourceReleaseConcurrentRequests/62
+=== PAUSE TestSourceReleaseConcurrentRequests/62
+=== RUN   TestSourceReleaseConcurrentRequests/63
+=== PAUSE TestSourceReleaseConcurrentRequests/63
+=== CONT  TestSourceReleaseConcurrentRequests/3
+=== CONT  TestSourceReleaseConcurrentRequests/31
+=== CONT  TestSourceReleaseConcurrentRequests/47
+=== CONT  TestSourceReleaseConcurrentRequests/56
+=== CONT  TestSourceReleaseConcurrentRequests/57
+=== CONT  TestSourceReleaseConcurrentRequests/63
+=== CONT  TestSourceReleaseConcurrentRequests/62
+=== CONT  TestSourceReleaseConcurrentRequests/60
+=== CONT  TestSourceReleaseConcurrentRequests/59
+=== CONT  TestSourceReleaseConcurrentRequests/58
+=== CONT  TestSourceReleaseConcurrentRequests/61
+=== CONT  TestSourceReleaseConcurrentRequests/15
+=== CONT  TestSourceReleaseConcurrentRequests/30
+=== CONT  TestSourceReleaseConcurrentRequests/29
+=== CONT  TestSourceReleaseConcurrentRequests/28
+=== CONT  TestSourceReleaseConcurrentRequests/37
+=== CONT  TestSourceReleaseConcurrentRequests/26
+=== CONT  TestSourceReleaseConcurrentRequests/27
+=== CONT  TestSourceReleaseConcurrentRequests/25
+=== CONT  TestSourceReleaseConcurrentRequests/24
+=== CONT  TestSourceReleaseConcurrentRequests/22
+=== CONT  TestSourceReleaseConcurrentRequests/23
+=== CONT  TestSourceReleaseConcurrentRequests/20
+=== CONT  TestSourceReleaseConcurrentRequests/21
+=== CONT  TestSourceReleaseConcurrentRequests/18
+=== CONT  TestSourceReleaseConcurrentRequests/17
+=== CONT  TestSourceReleaseConcurrentRequests/19
+=== CONT  TestSourceReleaseConcurrentRequests/39
+=== CONT  TestSourceReleaseConcurrentRequests/48
+=== CONT  TestSourceReleaseConcurrentRequests/46
+=== CONT  TestSourceReleaseConcurrentRequests/45
+=== CONT  TestSourceReleaseConcurrentRequests/44
+=== CONT  TestSourceReleaseConcurrentRequests/43
+=== CONT  TestSourceReleaseConcurrentRequests/42
+=== CONT  TestSourceReleaseConcurrentRequests/40
+=== CONT  TestSourceReleaseConcurrentRequests/9
+=== CONT  TestSourceReleaseConcurrentRequests/16
+=== CONT  TestSourceReleaseConcurrentRequests/14
+=== CONT  TestSourceReleaseConcurrentRequests/13
+=== CONT  TestSourceReleaseConcurrentRequests/11
+=== CONT  TestSourceReleaseConcurrentRequests/12
+=== CONT  TestSourceReleaseConcurrentRequests/10
+=== CONT  TestSourceReleaseConcurrentRequests/8
+=== CONT  TestSourceReleaseConcurrentRequests/53
+=== CONT  TestSourceReleaseConcurrentRequests/54
+=== CONT  TestSourceReleaseConcurrentRequests/55
+=== CONT  TestSourceReleaseConcurrentRequests/52
+=== CONT  TestSourceReleaseConcurrentRequests/5
+=== CONT  TestSourceReleaseConcurrentRequests/6
+=== CONT  TestSourceReleaseConcurrentRequests/1
+=== CONT  TestSourceReleaseConcurrentRequests/2
+=== CONT  TestSourceReleaseConcurrentRequests/50
+=== CONT  TestSourceReleaseConcurrentRequests/51
+=== CONT  TestSourceReleaseConcurrentRequests/7
+=== CONT  TestSourceReleaseConcurrentRequests/0
+=== CONT  TestSourceReleaseConcurrentRequests/49
+=== CONT  TestSourceReleaseConcurrentRequests/35
+=== CONT  TestSourceReleaseConcurrentRequests/33
+=== CONT  TestSourceReleaseConcurrentRequests/32
+=== CONT  TestSourceReleaseConcurrentRequests/38
+=== CONT  TestSourceReleaseConcurrentRequests/36
+=== CONT  TestSourceReleaseConcurrentRequests/41
+=== CONT  TestSourceReleaseConcurrentRequests/4
+=== CONT  TestSourceReleaseConcurrentRequests/34
+--- PASS: TestSourceReleaseConcurrentRequests (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/58 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/3 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/31 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/28 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/62 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/63 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/57 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/30 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/29 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/26 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/15 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/56 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/47 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/59 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/60 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/61 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/37 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/27 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/24 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/25 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/22 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/23 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/20 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/39 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/21 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/18 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/17 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/19 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/13 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/46 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/45 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/44 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/43 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/48 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/40 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/16 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/42 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/12 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/9 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/14 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/11 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/1 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/5 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/10 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/8 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/53 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/2 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/54 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/55 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/52 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/6 (0.01s)
+    --- PASS: TestSourceReleaseConcurrentRequests/33 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/51 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/7 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/50 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/32 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/0 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/49 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/41 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/4 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/35 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/38 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/36 (0.00s)
+    --- PASS: TestSourceReleaseConcurrentRequests/34 (0.00s)
+=== RUN   TestSourceReleaseRejectedCandidatePreservesAcceptedSources
+--- PASS: TestSourceReleaseRejectedCandidatePreservesAcceptedSources (0.00s)
+=== RUN   TestNativeMixedOwnerReleaseRequiresBothAnswers
+=== RUN   TestNativeMixedOwnerReleaseRequiresBothAnswers/both
+=== RUN   TestNativeMixedOwnerReleaseRequiresBothAnswers/private-only
+=== RUN   TestNativeMixedOwnerReleaseRequiresBothAnswers/missing-local
+=== RUN   TestNativeMixedOwnerReleaseRequiresBothAnswers/missing-shared
+=== RUN   TestNativeMixedOwnerReleaseRequiresBothAnswers/swapped
+=== RUN   TestNativeMixedOwnerReleaseRequiresBothAnswers/private-stale
+=== RUN   TestNativeMixedOwnerReleaseRequiresBothAnswers/shared-stale
+=== RUN   TestNativeMixedOwnerReleaseRequiresBothAnswers/old-answer
+--- PASS: TestNativeMixedOwnerReleaseRequiresBothAnswers (0.01s)
+    --- PASS: TestNativeMixedOwnerReleaseRequiresBothAnswers/both (0.00s)
+    --- PASS: TestNativeMixedOwnerReleaseRequiresBothAnswers/private-only (0.00s)
+    --- PASS: TestNativeMixedOwnerReleaseRequiresBothAnswers/missing-local (0.00s)
+    --- PASS: TestNativeMixedOwnerReleaseRequiresBothAnswers/missing-shared (0.00s)
+    --- PASS: TestNativeMixedOwnerReleaseRequiresBothAnswers/swapped (0.00s)
+    --- PASS: TestNativeMixedOwnerReleaseRequiresBothAnswers/private-stale (0.00s)
+    --- PASS: TestNativeMixedOwnerReleaseRequiresBothAnswers/shared-stale (0.00s)
+    --- PASS: TestNativeMixedOwnerReleaseRequiresBothAnswers/old-answer (0.00s)
+=== RUN   TestStructuredRecallSourceObservationsPostgres
+--- PASS: TestStructuredRecallSourceObservationsPostgres (0.81s)
+=== RUN   TestSourceSendStorageBarrierPostgres
+--- PASS: TestSourceSendStorageBarrierPostgres (5.30s)
+=== RUN   TestSourceReleaseSendGuardAcknowledgement
+=== RUN   TestSourceReleaseSendGuardAcknowledgement/acquired
+=== RUN   TestSourceReleaseSendGuardAcknowledgement/missing-guard
+=== RUN   TestSourceReleaseSendGuardAcknowledgement/wrong-duration
+=== RUN   TestSourceReleaseSendGuardAcknowledgement/legacy-expiring-guard
+=== RUN   TestSourceReleaseSendGuardAcknowledgement/ineligible
+--- PASS: TestSourceReleaseSendGuardAcknowledgement (0.00s)
+    --- PASS: TestSourceReleaseSendGuardAcknowledgement/acquired (0.00s)
+    --- PASS: TestSourceReleaseSendGuardAcknowledgement/missing-guard (0.00s)
+    --- PASS: TestSourceReleaseSendGuardAcknowledgement/wrong-duration (0.00s)
+    --- PASS: TestSourceReleaseSendGuardAcknowledgement/legacy-expiring-guard (0.00s)
+    --- PASS: TestSourceReleaseSendGuardAcknowledgement/ineligible (0.00s)
+=== RUN   TestSourceSendGuardRequiresHostAuthority
+--- PASS: TestSourceSendGuardRequiresHostAuthority (0.00s)
+=== RUN   TestSourceSendCompletionNeedsOnlyOpaqueToken
+--- PASS: TestSourceSendCompletionNeedsOnlyOpaqueToken (0.00s)
+=== RUN   TestHardRuleSourceObservationsPostgres
+--- PASS: TestHardRuleSourceObservationsPostgres (0.54s)
+=== RUN   TestHistoricalMemoryEvidencePostgres
+--- PASS: TestHistoricalMemoryEvidencePostgres (0.48s)
+=== RUN   TestAuxiliaryTypedSourceObservationsPostgres
+--- PASS: TestAuxiliaryTypedSourceObservationsPostgres (0.80s)
+=== RUN   TestNativeRefreshReplacesOnlyNativeProofs
+--- PASS: TestNativeRefreshReplacesOnlyNativeProofs (0.00s)
+=== RUN   TestTracePatterns
+--- PASS: TestTracePatterns (0.00s)
+=== RUN   TestTracePatternBoundaries
+=== RUN   TestTracePatternBoundaries/below_retry_threshold
+=== RUN   TestTracePatternBoundaries/one_failure
+=== RUN   TestTracePatternBoundaries/plan_boundary
+=== RUN   TestTracePatternBoundaries/same_tool_is_not_recovery
+=== RUN   TestTracePatternBoundaries/empty_tool_interrupts_run
+=== RUN   TestTracePatternBoundaries/duplicate_recovery
+=== RUN   TestTracePatternBoundaries/plan_zero_legacy_recovery
+=== RUN   TestTracePatternBoundaries/two_of_three_plans
+=== RUN   TestTracePatternBoundaries/repeated_pair_is_one_plan
+--- PASS: TestTracePatternBoundaries (0.07s)
+    --- PASS: TestTracePatternBoundaries/below_retry_threshold (0.00s)
+    --- PASS: TestTracePatternBoundaries/one_failure (0.00s)
+    --- PASS: TestTracePatternBoundaries/plan_boundary (0.00s)
+    --- PASS: TestTracePatternBoundaries/same_tool_is_not_recovery (0.00s)
+    --- PASS: TestTracePatternBoundaries/empty_tool_interrupts_run (0.00s)
+    --- PASS: TestTracePatternBoundaries/duplicate_recovery (0.00s)
+    --- PASS: TestTracePatternBoundaries/plan_zero_legacy_recovery (0.00s)
+    --- PASS: TestTracePatternBoundaries/two_of_three_plans (0.00s)
+    --- PASS: TestTracePatternBoundaries/repeated_pair_is_one_plan (0.00s)
+=== RUN   TestTracePatternHostBoundary
+--- PASS: TestTracePatternHostBoundary (0.01s)
+=== RUN   TestTracePatternCapacityAndRefusal
+--- PASS: TestTracePatternCapacityAndRefusal (0.02s)
+=== RUN   TestTraceBatchValidation
+--- PASS: TestTraceBatchValidation (0.00s)
+=== RUN   TestTraceStoreConcurrentPostgres
+--- PASS: TestTraceStoreConcurrentPostgres (0.08s)
+=== RUN   TestTypedProjectionRendersReviewedProcedureOnce
+    typed_context_test.go:53: same evidence: previous projection 1044 bytes, current projection 280 bytes
+--- PASS: TestTypedProjectionRendersReviewedProcedureOnce (0.00s)
+=== RUN   TestTypedProjectionExactByteLimits
+=== RUN   TestTypedProjectionExactByteLimits/0
+=== RUN   TestTypedProjectionExactByteLimits/1
+=== RUN   TestTypedProjectionExactByteLimits/100
+=== RUN   TestTypedProjectionExactByteLimits/250
+=== RUN   TestTypedProjectionExactByteLimits/1589
+=== RUN   TestTypedProjectionExactByteLimits/1590
+=== RUN   TestTypedProjectionExactByteLimits/1591
+--- PASS: TestTypedProjectionExactByteLimits (0.00s)
+    --- PASS: TestTypedProjectionExactByteLimits/0 (0.00s)
+    --- PASS: TestTypedProjectionExactByteLimits/1 (0.00s)
+    --- PASS: TestTypedProjectionExactByteLimits/100 (0.00s)
+    --- PASS: TestTypedProjectionExactByteLimits/250 (0.00s)
+    --- PASS: TestTypedProjectionExactByteLimits/1589 (0.00s)
+    --- PASS: TestTypedProjectionExactByteLimits/1590 (0.00s)
+    --- PASS: TestTypedProjectionExactByteLimits/1591 (0.00s)
+=== RUN   TestTypedProjectionCachedEncodingMatchesCanonicalChannels
+--- PASS: TestTypedProjectionCachedEncodingMatchesCanonicalChannels (0.07s)
+=== RUN   TestTypedContextRefusesUnsupportedLimitsBeforeRetrieval
+--- PASS: TestTypedContextRefusesUnsupportedLimitsBeforeRetrieval (0.00s)
+=== RUN   TestTypedProjectionRepackingHasLinearSerializationWork
+--- PASS: TestTypedProjectionRepackingHasLinearSerializationWork (0.00s)
+=== RUN   TestTypedContextDefaultsAndCompleteBudget
+--- PASS: TestTypedContextDefaultsAndCompleteBudget (0.00s)
+=== RUN   TestTypedContextHostBoundary
+--- PASS: TestTypedContextHostBoundary (0.00s)
+=== RUN   TestTypedEpisodeSourceProjection
+--- PASS: TestTypedEpisodeSourceProjection (0.00s)
+=== RUN   TestTypedSourceVersionBinding
+--- PASS: TestTypedSourceVersionBinding (0.00s)
+=== RUN   TestUnitSemanticPolicyNativeWeights
+--- PASS: TestUnitSemanticPolicyNativeWeights (0.00s)
+=== RUN   TestUtilityHorizonBoundaryAndPurpose
+--- PASS: TestUtilityHorizonBoundaryAndPurpose (0.00s)
+=== RUN   TestUtilityHorizonRulePrecedenceAndDurableKinds
+--- PASS: TestUtilityHorizonRulePrecedenceAndDurableKinds (0.00s)
+=== RUN   TestUtilityHorizonUnknownAnchorsAndPolicyIdentity
+--- PASS: TestUtilityHorizonUnknownAnchorsAndPolicyIdentity (0.00s)
+=== RUN   TestValidityServingParityPostgres
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestValidityServingParityPostgres (0.19s)
+=== RUN   TestRepairUsesOwnerConfiguration
+--- PASS: TestRepairUsesOwnerConfiguration (0.00s)
+=== RUN   TestVectorSearchDimensionsAndScopePostgres
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/1024
+    runtime_role_test.go:43: runtime SQL exec: ERROR: expected 1024 dimensions, not 384 (SQLSTATE 22000)
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/1024/no-context
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/1024/visible
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/1024/exact-project
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/1024/exact-global
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/1024/all-exact
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/1024/denied-exact
+2026/09/25 20:12:40 memory data failure operation="vector-search" trace=0 status=5 class=sqlstate_42P01
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/2560
+    runtime_role_test.go:43: runtime SQL exec: ERROR: expected 2560 dimensions, not 384 (SQLSTATE 22000)
+    runtime_role_test.go:43: runtime SQL exec: ERROR: expected 2560 dimensions, not 1024 (SQLSTATE 22000)
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/2560/no-context
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/2560/visible
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/2560/exact-project
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/2560/exact-global
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/2560/all-exact
+=== RUN   TestVectorSearchDimensionsAndScopePostgres/2560/denied-exact
+2026/09/25 20:12:40 memory data failure operation="vector-search" trace=0 status=5 class=sqlstate_42P01
+--- PASS: TestVectorSearchDimensionsAndScopePostgres (0.42s)
+    --- PASS: TestVectorSearchDimensionsAndScopePostgres/1024 (0.16s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/1024/no-context (0.01s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/1024/visible (0.01s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/1024/exact-project (0.01s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/1024/exact-global (0.01s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/1024/all-exact (0.01s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/1024/denied-exact (0.01s)
+    --- PASS: TestVectorSearchDimensionsAndScopePostgres/2560 (0.26s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/2560/no-context (0.03s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/2560/visible (0.03s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/2560/exact-project (0.02s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/2560/exact-global (0.02s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/2560/all-exact (0.02s)
+        --- PASS: TestVectorSearchDimensionsAndScopePostgres/2560/denied-exact (0.02s)
+=== RUN   TestExpectedVersionValidation
+--- PASS: TestExpectedVersionValidation (0.00s)
+=== RUN   TestExpectedVersionConcurrentCorrections
+--- PASS: TestExpectedVersionConcurrentCorrections (0.10s)
+=== RUN   TestWikiRendering
+--- PASS: TestWikiRendering (0.00s)
+=== RUN   TestWikiFailures
+--- PASS: TestWikiFailures (0.11s)
+=== RUN   TestWorkflowSignals
+--- PASS: TestWorkflowSignals (0.00s)
+=== RUN   TestWorkflowWorkspace
+--- PASS: TestWorkflowWorkspace (0.00s)
+=== RUN   TestWorkflowObserverPlansAndReceipts
+--- PASS: TestWorkflowObserverPlansAndReceipts (0.00s)
+=== RUN   FuzzClientResponseDecoders
+=== RUN   FuzzClientResponseDecoders/seed#0
+=== RUN   FuzzClientResponseDecoders/seed#1
+=== RUN   FuzzClientResponseDecoders/seed#2
+=== RUN   FuzzClientResponseDecoders/seed#3
+--- PASS: FuzzClientResponseDecoders (0.00s)
+    --- PASS: FuzzClientResponseDecoders/seed#0 (0.00s)
+    --- PASS: FuzzClientResponseDecoders/seed#1 (0.00s)
+    --- PASS: FuzzClientResponseDecoders/seed#2 (0.00s)
+    --- PASS: FuzzClientResponseDecoders/seed#3 (0.00s)
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	43.529s
+FAIL

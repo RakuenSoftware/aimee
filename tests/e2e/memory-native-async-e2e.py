@@ -250,12 +250,18 @@ def inside(output):
 
     def recover():
         nonlocal owner_pid
+        previous_owner = owner_pid
         if owner_pid is not None:
             os.kill(owner_pid, signal.SIGCONT)
             os.kill(owner_pid, signal.SIGTERM)
             owner_pid = None
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
+            # A resumed owner may serve a queued read before SIGTERM finishes.
+            # That answer is not evidence that its supervised replacement is ready.
+            if previous_owner is not None and Path('/proc', str(previous_owner)).exists():
+                time.sleep(0.1)
+                continue
             status, row = api('/v1/memory/get', dict(id=str(memory_id)))
             if status == 200 and row.get('memory', {}).get('content') == content:
                 return

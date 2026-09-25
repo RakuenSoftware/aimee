@@ -1,0 +1,19 @@
+audit_worm: sealed /tmp/worm_test_moa6Hl/audit/audit-sealed-3.db crypto-only (no CAP_LINUX_IMMUTABLE / unsupported FS)
+audit_worm: sealed /tmp/worm_test_moa6Hl/audit/audit-sealed-2.db crypto-only (no CAP_LINUX_IMMUTABLE / unsupported FS)
+  test_dispatch_owner_crash: exclusive ownership and durable principal-filtered read survive SIGKILL
+  test_cross_engine_vector: ok
+  test_metric_snapshot: ok
+  test_detail_capped: ok
+  test_idempotent_outbox_delivery: ok
+  test_read_page: ok
+  test_append_and_chain: ok
+  test_worm_triggers_block_mutation: ok
+  test_cross_store_determinism: ok
+  test_tamper_detected_past_triggers: ok (row_hash mismatch at seq 1 (tampered))
+  test_timestamp_tamper_detected: ok (row_hash mismatch at seq 1 (tampered))
+  test_checkpoint_and_verify_status: ok
+  test_startup_verify_fails_closed: ok (row_hash mismatch at seq 1 (tampered))
+  test_checkpoint_bound_to_chain_key: ok (checkpoint at seq 2 has unknown/absent key or MAC)
+  test_seal_snapshot_verifies: ok (immutable=0)
+  test_sealed_snapshot_tamper_detected: ok (row_hash mismatch at seq 1 (tampered))
+all tests passed
