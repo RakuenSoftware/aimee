@@ -549,6 +549,31 @@ def future_index_admission_gate(kb, check):
             DELETE FROM memories WHERE id IN({mid},{parent})""")
 
 
+@contextlib.contextmanager
+def locked_episode_fixture_parent(kb, parent_id):
+    # The real indexer takes FOR UPDATE on this parent before replacing its
+    # generated episodes. Keep the deliberately synthetic producer row stable
+    # while testing its read fence; ordinary SELECTs and FK checks still work.
+    proc = subprocess.Popen(['docker', 'exec', '-i', kb.postgres, 'psql', '-U', 'postgres',
+                             '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1'],
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, bufsize=1)
+    try:
+        proc.stdin.write(f"BEGIN; SELECT id FROM memories WHERE id={int(parent_id)} FOR NO KEY UPDATE;\n")
+        proc.stdin.flush()
+        ready, _, _ = select.select([proc.stdout], [], [], 65)
+        if not ready or proc.stdout.readline().strip() != str(parent_id):
+            raise RuntimeError('episode fixture parent barrier unavailable')
+        yield
+    finally:
+        if proc.poll() is None:
+            try:
+                proc.communicate("ROLLBACK;\n\\q\n", timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+
+
 def typed_source_version_gate(kb, check):
     """Observe real assertion versions through the authenticated KB/Go path."""
     key = 'typed-version-' + uuid.uuid4().hex
@@ -772,18 +797,19 @@ def typed_source_version_gate(kb, check):
               episode_empty.get('retained_items') == [] and episode_empty.get('source_version_state') == 'unavailable')
         # Model an existing generator-owned row before/after its producer records
         # inputs. A serving read must never perform this observation itself.
-        sql(f"INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref) VALUES('episode',{int(episode_id)},'memory-index-v1','{fixture['parent_id']}')")
-        code, unobserved = call()
-        check('Generated episode without producer observations is withheld', code == 200 and not episode_source(unobserved))
-        sql(f"""INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
-          SELECT 'episode',e.id,'memory-episode-input-v1',jsonb_build_object(
-            'record_id',m.id::text,'record_revision',m.record_revision::text,
-            'episode_revision',e.record_revision::text,'summary_id','0','summary_revision','0')::text
-          FROM memory_episodes e JOIN memories m ON m.id=e.memory_id WHERE e.id={int(episode_id)}""")
-        code, observed = call()
-        check('Generated episode with exact observed inputs is served', code == 200 and
-              episode_source(observed).get('version') == expected_episode and matches(observed))
-        observed_refs = observed.get('retained_items', [])
+        with locked_episode_fixture_parent(kb, fixture['parent_id']):
+            sql(f"INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref) VALUES('episode',{int(episode_id)},'memory-index-v1','{fixture['parent_id']}')")
+            code, unobserved = call()
+            check('Generated episode without producer observations is withheld', code == 200 and not episode_source(unobserved))
+            sql(f"""INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+              SELECT 'episode',e.id,'memory-episode-input-v1',jsonb_build_object(
+                'record_id',m.id::text,'record_revision',m.record_revision::text,
+                'episode_revision',e.record_revision::text,'summary_id','0','summary_revision','0')::text
+              FROM memory_episodes e JOIN memories m ON m.id=e.memory_id WHERE e.id={int(episode_id)}""")
+            code, observed = call()
+            check('Generated episode with exact observed inputs is served', code == 200 and
+                  episode_source(observed).get('version') == expected_episode and matches(observed))
+            observed_refs = observed.get('retained_items', [])
         sql(f"UPDATE memories SET content='newer source must not certify old episode' WHERE id={int(fixture['parent_id'])}")
         code, stale = call()
         check('Generated episode cannot borrow a new parent revision', code == 200 and not episode_source(stale))
