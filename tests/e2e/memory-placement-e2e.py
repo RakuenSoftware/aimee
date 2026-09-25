@@ -990,14 +990,18 @@ class Gate:
 
     def run(self):
         self.hygiene_preview()
+        # Reserve above both sequences, including IDs retired by earlier gates.
+        # The colliding rows must belong to this fixture: an arbitrary existing
+        # KB row may correctly be ineligible because its source was revoked.
+        shared_frontier = int(self.sql("SELECT nextval(pg_get_serial_sequence('memories','id'))"))
+        self.personal_sql(f"SELECT setval(pg_get_serial_sequence('user_memories','id'),GREATEST(nextval(pg_get_serial_sequence('user_memories','id')),{shared_frontier}),true)")
         before = self.digest()
         content = 'Personal fixture user@local.invalid 🦊 ' + 'long note αβ ' * 500
         written = self.good('local store', self.call('store', dict(key=self.prefix, content=content)))
         mid = written['id']
         self.check('local store leaves KB unchanged', self.digest() == before)
-        # Independent sequences deliberately overlap. Preserve any existing KB
-        # row at this ID, or seed a benign shared record to create the collision.
-        self.sql(f"INSERT INTO memories(id,key,content) VALUES({mid},'{self.prefix}-kb','shared collision fixture') ON CONFLICT(id) DO NOTHING")
+        # Independent stores deliberately contain fresh records with one ID.
+        self.sql(f"INSERT INTO memories(id,key,content) VALUES({mid},'{self.prefix}-kb','shared collision fixture')")
         self.sql("SELECT setval(pg_get_serial_sequence('memories','id'),GREATEST(1,(SELECT max(id) FROM memories)),true)")
         shared = json.loads(self.sql(f"SELECT to_json(content) FROM memories WHERE id={mid}"))
         before = self.digest()
