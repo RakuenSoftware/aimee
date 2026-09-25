@@ -61,6 +61,8 @@ CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,record_revision bigint D
 CREATE TEMP TABLE memory_entities(memory_id bigint,entity text);
 CREATE TEMP TABLE memory_conflicts(id bigint,memory_a bigint,memory_b bigint,detected_at text,resolved int,resolution text);
 CREATE TEMP TABLE memory_links(id bigint,source_id bigint,target_id bigint,relation text);
+CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
 CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
 CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);

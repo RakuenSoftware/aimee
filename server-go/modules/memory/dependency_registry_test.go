@@ -110,3 +110,63 @@ func TestMemoryDependencyRegistryPostgres(t *testing.T) {
 	exec(`DELETE FROM memories WHERE id=$1`, id)
 	status("unsupported")
 }
+
+func TestRegistryTransitiveProducerInputsPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, e := tx.Exec(ctx, q, args...); e != nil {
+			t.Fatal(e)
+		}
+	}
+	exec(`SELECT set_config('aimee.memory_scope_all','1',true)`)
+	ids := make([]int64, 3)
+	for i := range ids {
+		if err = tx.QueryRow(ctx, `INSERT INTO memories(key,content) VALUES($1,'retained input') RETURNING id`, fmt.Sprintf("registry-transitive-%d", i)).Scan(&ids[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+	for i := 1; i < len(ids); i++ {
+		exec(`INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'memory',child.id,'memory-cognify-input-v1',jsonb_build_object('schema_version',1,'owner_id',o.owner_id::text,
+ 'record_id',parent.id::text,'record_revision',parent.record_revision::text,'derived_revision',child.record_revision::text)::text
+ FROM memories child,memories parent,memory_collection_owner o WHERE child.id=$1 AND parent.id=$2 AND o.id=1`, ids[i], ids[i-1])
+		if err = s.registerDerivedMemoryInputs(ctx, ids[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(want string) {
+		t.Helper()
+		for _, id := range ids[1:] {
+			var status string
+			if e := tx.QueryRow(ctx, `SELECT current_status FROM derived_memory_registry WHERE derived_kind='memory' AND derived_memory_id=$1`, fmt.Sprint(id)).Scan(&status); e != nil || status != want {
+				t.Fatal("transitive registry", id, status, want, e)
+			}
+		}
+	}
+	check("fresh")
+	exec(`SAVEPOINT interrupted_revoke`)
+	exec(`UPDATE memories SET lifecycle_state='rejected' WHERE id=$1`, ids[0])
+	check("unsupported")
+	exec(`ROLLBACK TO interrupted_revoke;RELEASE interrupted_revoke`)
+	check("fresh")
+	exec(`UPDATE memories SET lifecycle_state='rejected' WHERE id=$1`, ids[0])
+	check("unsupported")
+	exec(`SELECT derived_memory_apply_status('memory',$1)`, fmt.Sprint(ids[0]))
+	check("unsupported")
+}

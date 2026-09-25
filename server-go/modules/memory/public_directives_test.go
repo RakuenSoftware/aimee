@@ -32,7 +32,9 @@ func TestDirectivePublicPostgresLifecycle(t *testing.T) {
  CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 1,
  lifecycle_state text DEFAULT 'active',activation_suppressed bigint DEFAULT 0,valid_from text DEFAULT '',valid_until text DEFAULT '');
  CREATE TEMP TABLE memory_units(id bigint,memory_id bigint,unit_type text,unit_key text,unit_text text,memory_kind text,weight float8,is_episode_card int);
- CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+ CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
  CREATE TEMP TABLE memory_collection_owner(id int,owner_id uuid);
  INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-000000000001');
  CREATE TEMP TABLE epistemic_directives(id bigserial PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1, question text, topic text DEFAULT '',
@@ -181,7 +183,7 @@ func TestDirectiveParentEligibilityPostgres(t *testing.T) {
  CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS;
  END IF; END $$;
  GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
- GRANT SELECT ON memories,memory_scopes,memory_units,memory_lineage,memory_collection_owner,epistemic_directives TO aimee_store_runtime;
+ GRANT SELECT ON rules,memories,memory_scopes,memory_units,memory_lineage,memory_collection_owner,epistemic_directives TO aimee_store_runtime;
  UPDATE epistemic_directives SET state='suppressed';
  SELECT set_config('aimee.memory_scope_all','1',true)`)
 	const project = "directive-parent-eligibility"

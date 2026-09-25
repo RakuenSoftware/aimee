@@ -92,7 +92,9 @@ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 
  CREATE TEMP TABLE memory_links(id bigserial PRIMARY KEY,source_id bigint,target_id bigint,relation text,weight double precision DEFAULT 1,created_at text DEFAULT pg_now_text());
  CREATE TEMP TABLE memory_episodes(id bigserial PRIMARY KEY,record_revision bigint DEFAULT 1,memory_id bigint,episode_key text,episode_text text,source_session text,reference_time text,created_at text DEFAULT pg_now_text());
  INSERT INTO memory_episodes(memory_id,episode_key,episode_text,source_session,reference_time) VALUES (2,'release','release recap','session','2026-09-01');
- CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+ CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
 CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
 CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);

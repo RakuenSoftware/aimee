@@ -773,7 +773,7 @@ CREATE TABLE IF NOT EXISTS derived_memory_registry (
 CREATE TABLE IF NOT EXISTS derived_memory_dependencies (
   id INTEGER PRIMARY KEY AUTOINCREMENT, derived_kind TEXT NOT NULL,
   derived_memory_id TEXT NOT NULL, input_kind TEXT NOT NULL CHECK(input_kind IN
-    ('document','document_version','assertion','memory','code_unit','outcome','entity')),
+    ('document','document_version','assertion','memory','code_unit','outcome','entity','rule')),
   input_id TEXT NOT NULL, input_version TEXT NOT NULL DEFAULT '',
   source_hash TEXT NOT NULL DEFAULT '', extractor_version TEXT NOT NULL DEFAULT '',
   derivation_policy_version TEXT NOT NULL DEFAULT '',

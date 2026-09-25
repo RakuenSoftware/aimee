@@ -50,6 +50,7 @@
     "src/tests/test_kb_lab.c": 1,
     "src/tests/test_kb_management_runtime.c": 5,
     "src/tests/test_kb_pki.c": 3,
+    "src/tests/test_kb_rules_transport.c": 3,
     "src/tests/test_learning_synth.c": 1,
     "src/tests/test_log.c": 1,
     "src/tests/test_lsp.c": 9,

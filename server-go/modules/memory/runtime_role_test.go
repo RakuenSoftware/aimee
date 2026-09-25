@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -40,6 +41,9 @@ func (tx runtimeRoleTx) Exec(ctx context.Context, sql string, args ...any) (stor
 	tag, err := tx.evalQueryer.Exec(ctx, sql, args...)
 	if err != nil {
 		tx.t.Logf("runtime SQL exec: %v", err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			tx.t.Logf("timed SQL: %.1200s", sql)
+		}
 	}
 	return tag, err
 }

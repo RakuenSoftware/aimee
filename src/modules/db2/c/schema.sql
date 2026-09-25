@@ -7820,17 +7820,17 @@ BEGIN
        OR (object_kind IN ('document','document_version') AND object_id IN
              (SELECT x::TEXT FROM unnest(v_documents) AS x))
        OR source_document_id IN (SELECT x::TEXT FROM unnest(v_documents) AS x);
-  DELETE FROM prospective_memories WHERE source_session=ANY(v_sessions);
-  DELETE FROM epistemic_directives WHERE source_session=ANY(v_sessions);
-  DELETE FROM learning_signals WHERE source_session=ANY(v_sessions);
-  DELETE FROM tasks WHERE session_id=ANY(v_sessions);
+  DELETE FROM prospective_memories WHERE encode(sha256(convert_to(source_session,'UTF8')),'hex')=ANY(v_sessions);
+  DELETE FROM epistemic_directives WHERE encode(sha256(convert_to(source_session,'UTF8')),'hex')=ANY(v_sessions);
+  DELETE FROM learning_signals WHERE encode(sha256(convert_to(source_session,'UTF8')),'hex')=ANY(v_sessions);
+  DELETE FROM tasks WHERE encode(sha256(convert_to(session_id,'UTF8')),'hex')=ANY(v_sessions);
   DELETE FROM learning_proposals WHERE target_memory_id=ANY(v_memories);
   DELETE FROM learning_signals WHERE target_memory_id=ANY(v_memories);
   DELETE FROM learning_observations WHERE observation_id IN (
     SELECT e.observation_id FROM learning_observation_evidence e
       JOIN interaction_event_embeddings i ON i.source_event_id=e.source_event_id
-      WHERE i.session_id=ANY(v_sessions));
-  DELETE FROM interaction_event_embeddings WHERE session_id=ANY(v_sessions);
+      WHERE encode(sha256(convert_to(i.session_id,'UTF8')),'hex')=ANY(v_sessions));
+  DELETE FROM interaction_event_embeddings WHERE encode(sha256(convert_to(session_id,'UTF8')),'hex')=ANY(v_sessions);
   -- FK-backed units, summaries, episodes, history and embedding versions cascade.
   -- Copied relations and profiles can instead belong to a different root.
   DELETE FROM entity_profiles WHERE entity_id IN (
@@ -7844,7 +7844,7 @@ BEGIN
       (source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1') AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)))
       OR (source_kind='metadata' AND source_ref=ANY(ARRAY(SELECT 'memory-cognify-rule-v1:'||id::text FROM unnest(v_memories) id)))));
   DELETE FROM artifacts WHERE payload->>'memory_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id))
-    OR payload->>'session_id'=ANY(v_sessions);
+    OR encode(sha256(convert_to(payload->>'session_id','UTF8')),'hex')=ANY(v_sessions);
   DELETE FROM memories WHERE id=ANY(v_memories);
 
   DELETE FROM artifacts a WHERE EXISTS (
@@ -15763,7 +15763,7 @@ CREATE TABLE IF NOT EXISTS derived_memory_dependencies (
   derived_kind TEXT NOT NULL,
   derived_memory_id TEXT NOT NULL,
   input_kind TEXT NOT NULL CHECK(input_kind IN
-    ('document','document_version','assertion','memory','code_unit','outcome','entity')),
+    ('document','document_version','assertion','memory','code_unit','outcome','entity','rule')),
   input_id TEXT NOT NULL,
   input_version TEXT NOT NULL DEFAULT '',
   source_hash TEXT NOT NULL DEFAULT '',
@@ -15774,6 +15774,8 @@ CREATE TABLE IF NOT EXISTS derived_memory_dependencies (
   created_at TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')),
   UNIQUE(derived_kind,derived_memory_id,input_kind,input_id)
 );
+ALTER TABLE derived_memory_dependencies DROP CONSTRAINT IF EXISTS derived_memory_dependencies_input_kind_check;
+ALTER TABLE derived_memory_dependencies ADD CONSTRAINT derived_memory_dependencies_input_kind_check CHECK(input_kind IN ('document','document_version','assertion','memory','code_unit','outcome','entity','rule'));
 CREATE INDEX IF NOT EXISTS idx_derived_dep_forward
   ON derived_memory_dependencies(derived_kind,derived_memory_id);
 CREATE INDEX IF NOT EXISTS idx_derived_dep_reverse
@@ -15781,6 +15783,8 @@ CREATE INDEX IF NOT EXISTS idx_derived_dep_reverse
 CREATE TABLE IF NOT EXISTS derivation_policy_versions (
   derived_kind TEXT PRIMARY KEY, current_version TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+INSERT INTO derivation_policy_versions(derived_kind,current_version,updated_at)
+ VALUES('summary','summary-input-v1',pg_now_text()) ON CONFLICT(derived_kind) DO NOTHING;
 CREATE TABLE IF NOT EXISTS derived_rederivation_queue (
   derived_kind TEXT NOT NULL, derived_memory_id TEXT NOT NULL, cause TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','running','done','failed')),
@@ -15816,9 +15820,16 @@ BEGIN
  UPDATE derived_memory_registry r SET current_status=f.status,
    stale_cause_kind=f.cause_kind,stale_cause_id=f.cause_id,
    updated_at=to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS')
- FROM derived_memory_freshness_for('', '') f
- WHERE r.derived_kind=p_derived_kind AND r.derived_memory_id=p_derived_id
-   AND f.derived_kind=r.derived_kind AND f.derived_memory_id=r.derived_memory_id;
+ FROM (SELECT
+ CASE WHEN count(*)=0 THEN 'dependencies:not-recorded'
+ WHEN bool_or(moved AND contribution='essential') THEN 'unsupported'
+ WHEN bool_or(moved) THEN 'stale' ELSE 'fresh' END AS status,
+ COALESCE((array_agg(input_kind ORDER BY id) FILTER(WHERE moved))[1],'') AS cause_kind,
+ COALESCE((array_agg(input_id ORDER BY id) FILTER(WHERE moved))[1],'') AS cause_id
+ FROM (SELECT d.*,knowledge_input_moved(input_kind,input_id,input_version,source_hash,
+ derivation_policy_version,derived_kind) AS moved FROM derived_memory_dependencies d
+ WHERE derived_kind=p_derived_kind AND derived_memory_id=p_derived_id) inputs) f
+ WHERE r.derived_kind=p_derived_kind AND r.derived_memory_id=p_derived_id;
  INSERT INTO derived_rederivation_queue(derived_kind,derived_memory_id,cause)
  SELECT derived_kind,derived_memory_id,'registered inputs unavailable'
  FROM derived_memory_registry WHERE derived_kind=p_derived_kind AND derived_memory_id=p_derived_id
@@ -16987,6 +16998,40 @@ CREATE OR REPLACE VIEW fact_assertions_current AS
 
 -- Shared P4/P5 staleness predicate.  Outcome projection and dependency
 -- projection call this exact function so their answers cannot drift.
+-- Registry freshness is an advisory projection of recorded producer versions.
+-- Go remains the current-release authority, including audience and validity.
+CREATE OR REPLACE FUNCTION knowledge_memory_input_moved(p_id TEXT,p_version TEXT,p_hash TEXT)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+DECLARE moved BOOLEAN;
+BEGIN
+ WITH RECURSIVE walk(id,version,hash,path,depth,cycle) AS (
+  SELECT p_id,p_version,p_hash,ARRAY[p_id],0,false
+  UNION ALL
+  SELECT d.input_id,d.input_version,d.source_hash,w.path||d.input_id,w.depth+1,d.input_id=ANY(w.path)
+  FROM walk w JOIN derived_memory_dependencies d ON d.derived_kind='memory'
+   AND d.derived_memory_id=w.id AND d.input_kind='memory'
+  WHERE NOT w.cycle AND w.depth<16
+ ), bounded AS MATERIALIZED(SELECT * FROM walk LIMIT 257)
+ SELECT (SELECT count(*) FROM bounded)>256 OR EXISTS(
+ SELECT 1 FROM bounded w LEFT JOIN memories m ON m.id::text=w.id
+ WHERE m.id IS NULL OR w.cycle OR EXISTS(SELECT 1 FROM derived_memory_dependencies nonmemory WHERE nonmemory.derived_kind='memory' AND nonmemory.derived_memory_id=w.id AND nonmemory.input_kind<>'memory' AND knowledge_input_moved(nonmemory.input_kind,nonmemory.input_id,nonmemory.input_version,nonmemory.source_hash,nonmemory.derivation_policy_version,'memory')) OR
+ (w.depth=16 AND EXISTS(SELECT 1 FROM derived_memory_dependencies d
+  WHERE d.derived_kind='memory' AND d.derived_memory_id=w.id)) OR
+ EXISTS(SELECT 1 FROM derived_memory_registry r WHERE r.derived_kind='memory' AND r.derived_memory_id=w.id
+  AND NOT EXISTS(SELECT 1 FROM derived_memory_dependencies d WHERE d.derived_kind=r.derived_kind AND d.derived_memory_id=r.derived_memory_id)) OR
+ NOT ((m.lifecycle_state='active' AND (w.version='' OR to_jsonb(m)->>'record_revision'=w.version)
+       AND (w.hash='' OR m.content_hash=w.hash)) OR
+  (m.lifecycle_state='archived' AND m.activation_suppressed=0 AND EXISTS(
+   SELECT 1 FROM memory_lineage l WHERE l.object_type='memory' AND l.object_id=m.id
+   AND l.source_kind='memory-compaction-origin-v1'
+   AND l.source_ref::jsonb->>'schema_version'='1'
+   AND l.source_ref::jsonb->>'owner_id'=(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
+   AND l.source_ref::jsonb->>'compacted_revision'=to_jsonb(m)->>'record_revision'
+   AND l.source_ref::jsonb->>'record_revision'=w.version AND w.hash='')))
+ ) INTO moved;
+ RETURN moved;
+END $$;
+
 CREATE OR REPLACE FUNCTION knowledge_input_moved(p_kind TEXT,p_id TEXT,p_version TEXT,
   p_hash TEXT,p_policy_version TEXT DEFAULT '',p_derived_kind TEXT DEFAULT '')
 RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
@@ -16998,9 +17043,8 @@ RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
   WHEN p_kind='assertion' THEN NOT EXISTS(SELECT 1 FROM entity_edges x WHERE x.id::TEXT=p_id
        AND x.invalidated_at='' AND x.superseded_at='' AND
        (p_version='' OR x.version::TEXT=p_version))
-  WHEN p_kind='memory' THEN NOT EXISTS(SELECT 1 FROM memories x WHERE x.id::TEXT=p_id
-       AND x.lifecycle_state='active' AND (p_hash='' OR x.content_hash=p_hash)
-       AND (p_version='' OR to_jsonb(x)->>'record_revision'=p_version))
+  WHEN p_kind='memory' THEN knowledge_memory_input_moved(p_id,p_version,p_hash)
+  WHEN p_kind='rule' THEN NOT EXISTS(SELECT 1 FROM rules x WHERE x.id::text=p_id AND (p_version='' OR to_jsonb(x)->>'record_revision'=p_version))
   WHEN p_kind='code_unit' THEN NOT EXISTS(SELECT 1 FROM files x WHERE x.id::TEXT=p_id
        AND (p_hash='' OR x.hash=p_hash) AND (p_version='' OR x.generation::TEXT=p_version))
   WHEN p_kind='entity' THEN NOT EXISTS(SELECT 1 FROM entity_registry x
@@ -17014,13 +17058,16 @@ $$;
 CREATE OR REPLACE FUNCTION derived_memory_freshness_for(p_kind TEXT DEFAULT '',p_id TEXT DEFAULT '')
 RETURNS TABLE(derived_kind TEXT,derived_memory_id TEXT,status TEXT,cause_kind TEXT,cause_id TEXT)
 LANGUAGE sql STABLE AS $$
-WITH targets AS (
+WITH RECURSIVE affected(derived_kind,derived_memory_id) AS (
+ SELECT derived_kind,derived_memory_id FROM derived_memory_dependencies WHERE input_kind=p_kind AND input_id=p_id
+ UNION
+ SELECT d.derived_kind,d.derived_memory_id FROM derived_memory_dependencies d JOIN affected a
+ ON a.derived_kind='memory' AND d.input_kind='memory' AND d.input_id=a.derived_memory_id
+), targets AS (
  SELECT r.derived_kind,r.derived_memory_id
  FROM derived_memory_registry r
- WHERE p_kind='' OR EXISTS(SELECT 1 FROM derived_memory_dependencies x
-   WHERE x.input_kind=p_kind AND x.input_id=p_id
-     AND x.derived_kind=r.derived_kind AND x.derived_memory_id=r.derived_memory_id)),
-evaluated AS (
+ WHERE p_kind='' OR EXISTS(SELECT 1 FROM affected x WHERE x.derived_kind=r.derived_kind AND x.derived_memory_id=r.derived_memory_id)),
+evaluated AS MATERIALIZED (
  SELECT d.*,knowledge_input_moved(d.input_kind,d.input_id,d.input_version,d.source_hash,
           d.derivation_policy_version,d.derived_kind) AS moved
  FROM derived_memory_dependencies d JOIN targets t
@@ -18865,6 +18912,7 @@ BEGIN
  BEGIN
   UPDATE memory_collection_owner SET rules_revision=rules_revision+1 WHERE id=1;
   IF NOT FOUND THEN RAISE EXCEPTION 'memory rule owner unavailable'; END IF;
+  IF EXISTS(SELECT 1 FROM derived_memory_dependencies WHERE input_kind='rule') THEN PERFORM derived_memory_apply_status('',''); END IF;
   RETURN NULL;
  END $body$;
  $ddl$,schema_name);
@@ -19193,7 +19241,66 @@ DELETE FROM memories m WHERE EXISTS(SELECT 1 FROM memory_erasure_sessions i
 DELETE FROM artifacts a WHERE a.payload->>'memory_id' IN (SELECT memory_id::text FROM memory_erasure_intents)
  OR EXISTS(SELECT 1 FROM artifact_citations c JOIN memory_erasure_intents i
  ON c.source_kind='memory' AND c.source_id=i.memory_id::text WHERE c.artifact_id=a.id);
+-- Auxiliary session payloads use the same durable session receipt as memory.
+CREATE OR REPLACE FUNCTION memory_session_erasure_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE sessions TEXT[]; row_value JSONB:=to_jsonb(NEW); prior JSONB:='{}'; prohibited BOOLEAN; observed BIGINT;
+BEGIN
+ IF TG_OP='UPDATE' THEN prior:=to_jsonb(OLD); END IF;
+ sessions:=ARRAY[row_value->>'session_id',row_value->>'source_session',row_value#>>'{payload,session_id}',
+                 prior->>'session_id',prior->>'source_session',prior#>>'{payload,session_id}'];
+ EXECUTE format('SELECT generation FROM %I.memory_erasure_epoch WHERE id=1 FOR SHARE',TG_TABLE_SCHEMA) INTO STRICT observed;
+ EXECUTE format('SELECT EXISTS(SELECT 1 FROM %I.memory_erasure_sessions WHERE session_digest IN
+  (SELECT encode(sha256(convert_to(x,''UTF8'')),''hex'') FROM unnest($1::text[]) x))',TG_TABLE_SCHEMA)
+ INTO prohibited USING sessions;
+ IF prohibited THEN RAISE EXCEPTION 'session payload prohibited by surviving erasure intent' USING ERRCODE='23514'; END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION memory_session_erasure_guard() FROM PUBLIC;
+DO $session_erasure_payloads$
+DECLARE target TEXT; field TEXT;
+BEGIN
+ FOREACH target IN ARRAY ARRAY['prospective_memories','epistemic_directives','learning_signals','tasks','interaction_event_embeddings','artifacts'] LOOP
+  EXECUTE format('DROP TRIGGER IF EXISTS memory_session_erasure_guard ON %I',target);
+  EXECUTE format('CREATE TRIGGER memory_session_erasure_guard BEFORE INSERT OR UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION memory_session_erasure_guard()',target);
+  field:=CASE WHEN target='artifacts' THEN 'payload->>''session_id''' WHEN target IN ('tasks','interaction_event_embeddings') THEN 'session_id' ELSE 'source_session' END;
+  EXECUTE format('DELETE FROM %I WHERE encode(sha256(convert_to(%s,''UTF8'')),''hex'') IN (SELECT session_digest FROM memory_erasure_sessions)',target,field);
+ END LOOP;
+END $session_erasure_payloads$;
 -- END memory erasure intents
+
+-- Deterministic backfill copies existing producer observations, never today's
+-- source revision. Unobserved generated records remain dependencies:not-recorded.
+DO $memory_producer_registry_backfill$
+DECLARE target RECORD; dependencies JSONB;
+BEGIN
+ FOR target IN SELECT DISTINCT m.id FROM memories m WHERE m.cognified_memory_kind IN ('session_checkpoint','compaction_origin','rule_style')
+ OR EXISTS(SELECT 1 FROM memory_lineage l WHERE l.object_type='memory' AND l.object_id=m.id
+  AND (l.source_kind IN ('memory','memory-cognify-input-v1','memory-fold-input-v1','legacy-rule-input-v1')
+  OR (l.source_kind='metadata' AND l.source_ref LIKE 'memory-cognify-v1:%')))
+ OR EXISTS(SELECT 1 FROM memory_units u WHERE u.memory_id=m.id AND u.is_episode_card=1)
+ LOOP
+  WITH observations AS (
+   SELECT 'memory' AS kind,source_ref::jsonb AS input,source_kind AS producer FROM memory_lineage
+   WHERE object_type='memory' AND object_id=target.id AND source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1')
+   UNION ALL SELECT 'rule',source_ref::jsonb,source_kind FROM memory_lineage
+   WHERE object_type='memory' AND object_id=target.id AND source_kind='legacy-rule-input-v1'
+   UNION ALL SELECT 'memory',input,'episode-card-input-v1' FROM memory_units u JOIN memory_lineage l
+   ON l.object_type='memory_unit' AND l.object_id=u.id AND l.source_kind='episode-card-input-v1'
+   CROSS JOIN LATERAL jsonb_array_elements(l.source_ref::jsonb->'inputs') input
+   WHERE u.memory_id=target.id AND u.is_episode_card=1 AND u.unit_type='episode_card'
+  ), grouped AS (
+   SELECT kind,input->>'record_id' AS id,min(input->>'record_revision') AS revision,
+    min(producer) AS producer,count(DISTINCT input->>'record_revision') AS versions FROM observations GROUP BY kind,input->>'record_id'
+  ) SELECT COALESCE(jsonb_agg(jsonb_build_object('input_kind',kind,'input_id',id,
+    'input_version',CASE WHEN versions=1 THEN revision ELSE 'conflicting-observations' END,
+    'extractor_version',producer,'contribution','essential')),'[]'::jsonb) INTO dependencies FROM grouped;
+  -- A content-free original is an origin certificate, not a generated record
+  -- unless it itself retains derivation observations.
+  IF dependencies='[]'::jsonb AND EXISTS(SELECT 1 FROM memories WHERE id=target.id AND cognified_memory_kind='compaction_origin') THEN CONTINUE; END IF;
+  PERFORM derived_memory_declare('memory',target.id::text,dependencies,'suppress');
+ END LOOP;
+END $memory_producer_registry_backfill$;
 
 -- Schema build metadata (recorded LAST, after every object above, so its presence
 -- at the current values proves a complete, current migration). A HARDENED-tier
@@ -19217,5 +19324,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '41')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '42')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

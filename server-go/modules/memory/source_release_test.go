@@ -1056,3 +1056,49 @@ func TestAuxiliaryTypedSourceObservationsPostgres(t *testing.T) {
 		t.Fatal("auxiliary completion", ok, e)
 	}
 }
+
+func TestNativeRefreshReplacesOnlyNativeProofs(t *testing.T) {
+	state := &sourceReleaseState{}
+	args := sourceReleaseArgs(map[string]any{"request_id": "refresh", "project": "app"})
+	ingress := releaseTestRef()
+	base, err := state.prepare(args, map[string]any{"facts_projection": map[string]any{"retained_items": []typedProjectionRef{ingress}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args["source_release_ticket"], _ = json.Marshal(base)
+	old := releaseTestRef()
+	old.Channel = "native_identity"
+	old.Source.Kind = "memory_record"
+	native := func(refs []typedProjectionRef) (string, error) {
+		return state.prepare(args, map[string]any{"native_projection": map[string]any{"retained_items": refs}})
+	}
+	first, err := native([]typedProjectionRef{old})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args["source_release_ticket"], _ = json.Marshal(first)
+	fresh := releaseTestRef()
+	fresh.Channel = "native_identity"
+	fresh.Source.Kind = "memory_record"
+	fresh.Source.Version.RecordRevision = "3"
+	second, err := native([]typedProjectionRef{fresh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs []typedProjectionRef
+	if json.Unmarshal(state.entries[second].sources, &refs) != nil || len(refs) != 2 || refs[0].Channel != "facts" || refs[0].Source.Version.RecordRevision != "2" || refs[1].Source.Version.RecordRevision != "3" {
+		t.Fatal("refresh lost retained ingress or retained old native proof", refs)
+	}
+	// Candidate preparation cannot mutate the accepted old handle before integrity admission.
+	if json.Unmarshal(state.entries[first].sources, &refs) != nil || refs[1].Source.Version.RecordRevision != "2" {
+		t.Fatal("candidate rewrote accepted handle")
+	}
+	args["source_release_ticket"], _ = json.Marshal(second)
+	empty, err := native([]typedProjectionRef{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if json.Unmarshal(state.entries[empty].sources, &refs) != nil || len(refs) != 1 || refs[0].Channel != "facts" {
+		t.Fatal("empty native replacement erased ingress proof", refs)
+	}
+}

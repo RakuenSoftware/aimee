@@ -40,8 +40,13 @@ INSERT INTO memory_collection_owner VALUES(1,'00000000-0000-4000-8000-0000000000
 CREATE TEMP TABLE memory_scopes(memory_id bigint,scope_type text,scope_value text);
 CREATE TEMP TABLE memory_units(id bigserial PRIMARY KEY,memory_id bigint,unit_type text,unit_key text,unit_text text,weight double precision,memory_kind text,is_episode_card int DEFAULT 0);
 CREATE INDEX memory_units_card_fixture_idx ON memory_units(memory_id);
+CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
 CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text,confidence double precision);
 CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
+-- This command fixture isolates card admission. Registry SQL/replay is tested
+-- against the shipping schema in dependency_registry_test.go.
+CREATE FUNCTION archive_command_test.derived_memory_declare(text,text,jsonb,text) RETURNS bigint LANGUAGE sql AS $$ SELECT jsonb_array_length($3)::bigint $$;
 CREATE TEMP TABLE memory_relations(memory_id bigint,src_entity text,relation text,dst_entity text,fact_text text);
 INSERT INTO memories(key,content,scope_type,scope_value,artifact_ref) VALUES ('common','shared conventions','global','_global','README.md'),('app','project details','project','app','main.go'),('private','secret source','project','private','');
 INSERT INTO memory_scopes VALUES (2,'workspace','team');
@@ -202,6 +207,7 @@ SET LOCAL ROLE memory_archive_test;`)
 		name, mutation string
 		cards          int
 	}{
+		{"new private input", "INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,source_session) SELECT 'L2','fact','new-session-input','additional evidence','project','app',source_session FROM memories WHERE key='app'", 1},
 		{"shared input changed", "UPDATE memories SET record_revision=record_revision+1 WHERE key='common'", 0},
 		{"private input changed", "UPDATE memories SET record_revision=record_revision+1 WHERE key='app'", 1},
 		{"private input revoked", "UPDATE memories SET lifecycle_state='revoked' WHERE key='app'", 1},

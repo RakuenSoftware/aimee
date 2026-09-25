@@ -298,6 +298,9 @@ func (s *postgresDataStore) cognify(ctx context.Context, id int64, command strin
  FROM memories child,memories parent WHERE child.id=$1 AND parent.id=$2`, record.ID, id); err != nil {
 			return out, err
 		}
+		if err = s.registerDerivedMemoryInputs(ctx, record.ID); err != nil {
+			return out, err
+		}
 		// The legacy rule table is global. Scoped preferences remain scoped memories
 		// rather than being disclosed to every project through the rule channel.
 		// Model extraction may refresh soft guidance, never a protected hard rule.

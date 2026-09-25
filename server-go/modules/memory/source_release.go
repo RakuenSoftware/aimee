@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,7 +93,8 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 		}
 	}
 	previous := args.stringOr("source_release_ticket", "")
-	if len(refs) == 0 {
+	_, replaceNative := assembly["native_projection"]
+	if len(refs) == 0 && !replaceNative {
 		return previous, nil
 	}
 	token, err := releaseToken()
@@ -118,6 +120,17 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 		if json.Unmarshal(prior.sources, &old) != nil {
 			return "", errors.New("invalid previous release")
 		}
+		// The native host replaces its complete system-context block on refresh.
+		// Its proofs are replaced with that block; ingress text remains retained.
+		if replaceNative {
+			kept := old[:0]
+			for _, ref := range old {
+				if !strings.HasPrefix(ref.Channel, "native_") {
+					kept = append(kept, ref)
+				}
+			}
+			old = kept
+		}
 		refs = append(old, refs...)
 	}
 	unique := make([]typedProjectionRef, 0, len(refs))
@@ -128,6 +141,9 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 			seen[key] = true
 			unique = append(unique, ref)
 		}
+	}
+	if len(unique) == 0 {
+		return "", nil
 	}
 	request := sourceRevalidation{SchemaVersion: 1, CheckID: token, Sources: unique}
 	if !request.valid() {

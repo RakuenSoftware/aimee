@@ -3,7 +3,7 @@ package memory
 // Versioned current-state KB eligibility, evaluated before lane limits. The
 // storage transaction supplies one stable request clock through CURRENT_TIMESTAMP.
 // Scope/RLS and evidence-specific admission remain additional mandatory gates.
-const currentEligibilityPolicy = "current-validity-v16"
+const currentEligibilityPolicy = "current-validity-v17"
 
 // KB timestamps historically mix UTC wall time and RFC3339 offsets. Normalize
 // both at the adapter; invalid nonempty timestamps raise a query error rather
@@ -229,7 +229,15 @@ func currentEpisodeCardInputsSQL(prefix string, historical bool) string {
  AND ` + observation + `->>'owner_id'=(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
  AND ` + observation + `->>'parent_revision'=` + prefix + `record_revision::text
  AND ` + observation + `->>'unit_digest'=` + unitInputDigestSQL("card_unit") + `
- AND jsonb_typeof(` + observation + `->'inputs')='array'
+
+ AND ` + observation + `->>'query_policy'='episode-session-inputs-v1'
+ AND ` + observation + `->>'source_session'=to_jsonb(` + prefix[:len(prefix)-1] + `)->>'source_session'
+ AND NOT EXISTS(SELECT 1 FROM memories session_candidate
+ WHERE to_jsonb(session_candidate)->>'source_session'=` + observation + `->>'source_session'
+ AND (session_candidate.scope_type='global' OR (session_candidate.scope_type=` + prefix + `scope_type AND session_candidate.scope_value=` + prefix + `scope_value))
+ AND ` + baseCurrentMemorySQL("session_candidate.") + `
+ AND NOT EXISTS(SELECT 1 FROM memory_units other_card WHERE other_card.memory_id=session_candidate.id AND other_card.is_episode_card=1)
+ AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(` + observation + `->'inputs') selected WHERE selected->>'record_id'=session_candidate.id::text)) AND jsonb_typeof(` + observation + `->'inputs')='array'
  AND jsonb_array_length(` + observation + `->'inputs') BETWEEN 1 AND 200
  AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(` + observation + `->'inputs')='array'
  THEN ` + observation + `->'inputs' ELSE '[]'::jsonb END) card_input

@@ -63,6 +63,10 @@ func (s *postgresDataStore) writeCognifyRule(ctx context.Context, producer, inpu
 }
 
 func currentRuleInputsSQL(prefix string) string {
+	return "(" + currentCognifiedRuleInputsSQL(prefix) + ") AND (COALESCE(" + prefix + "domain,'')<>'anti-pattern' OR (" + currentLegacyRuleInputsSQL("rule", prefix, ruleInputDigestSQL(prefix)) + "))"
+}
+
+func currentCognifiedRuleInputsSQL(prefix string) string {
 	observation := `(CASE WHEN l.source_kind='memory-cognify-input-v1' THEN l.source_ref::jsonb END)`
 	return `((COALESCE(` + prefix + `domain,'')<>'memory-cognify' AND NOT EXISTS(SELECT 1 FROM memory_lineage owner WHERE owner.object_type='rule'
  AND owner.object_id=` + prefix + `id AND owner.source_kind='metadata'
@@ -85,4 +89,31 @@ func currentRuleInputsSQL(prefix string) string {
 // complete canonical rule revision and its own applicability interval.
 func ruleInputDigestSQL(prefix string) string {
 	return `encode(sha256(convert_to(jsonb_build_array(` + prefix + `title,` + prefix + `description)::text,'UTF8')),'hex')`
+}
+
+// Legacy feedback inference is permitted only from directly authored rules.
+// Unknown decision provenance remains inspectable but cannot mint guidance.
+func authoredRuleInputSQL(prefix string) string {
+	return `COALESCE(` + prefix + `domain,'') NOT IN ('memory-cognify','anti-pattern') AND ` + memoryUnexpiredAtSQL(prefix+`expires_at`, `CURRENT_TIMESTAMP`) + `
+ AND NOT EXISTS(SELECT 1 FROM memory_lineage generated WHERE generated.object_type='rule' AND generated.object_id=` + prefix + `id
+ AND (generated.source_kind='memory-cognify-input-v1' OR (generated.source_kind='metadata' AND generated.source_ref LIKE 'memory-cognify-rule-v1:%')))`
+}
+func currentLegacyRuleInputsSQL(objectType, prefix, digest string) string {
+	collection := ""
+	if objectType == "memory" {
+		collection = ` AND observed.source_ref::jsonb->>'collection_revision'=(SELECT to_jsonb(o)->>'rules_revision' FROM memory_collection_owner o WHERE id=1)`
+	}
+	return `EXISTS(SELECT 1 FROM memory_lineage observed WHERE observed.object_type='` + objectType + `' AND observed.object_id=` + prefix + `id AND observed.source_kind='legacy-rule-input-v1')
+ AND NOT EXISTS(SELECT 1 FROM memory_lineage observed LEFT JOIN rules source
+ ON source.id::text=observed.source_ref::jsonb->>'record_id'
+ AND source.record_revision::text=observed.source_ref::jsonb->>'record_revision'
+ AND ` + authoredRuleInputSQL("source.") + `
+ WHERE observed.object_type='` + objectType + `' AND observed.object_id=` + prefix + `id AND observed.source_kind='legacy-rule-input-v1'
+ AND (source.id IS NULL OR (observed.source_ref::jsonb->>'schema_version'='1'
+ AND observed.source_ref::jsonb->>'owner_id'=(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
+ AND observed.source_ref::jsonb->>'output_digest'=` + digest + collection + `) IS DISTINCT FROM TRUE))`
+}
+func memoryClaimDigestSQL(prefix string) string {
+	row := prefix[:len(prefix)-1]
+	return `encode(sha256(convert_to(jsonb_build_array(to_jsonb(` + row + `)->>'key',to_jsonb(` + row + `)->>'content')::text,'UTF8')),'hex')`
 }

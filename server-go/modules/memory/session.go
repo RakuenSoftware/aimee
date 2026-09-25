@@ -62,6 +62,7 @@ func (s *postgresDataStore) foldSession(ctx context.Context, sessionID string) (
 		return 0, "", err
 	}
 	var count int
+	var checkpointID int64
 	var summary string
 	err = s.db.QueryRow(ctx, `WITH source AS MATERIALIZED (
  SELECT id,content,lifecycle_state,scope_type,scope_value,provenance_category,epistemic_kind FROM memories
@@ -98,8 +99,8 @@ func (s *postgresDataStore) foldSession(ctx context.Context, sessionID string) (
 ), synth_queue AS (
  INSERT INTO learning_synth_ops(artifact_id) SELECT id FROM evidence
  ON CONFLICT DO NOTHING RETURNING 1
-) SELECT e.n,c.content FROM eligible e CROSS JOIN checkpoint c
-WHERE (SELECT COUNT(*) FROM lineage)=e.n`, sessionID, sources).Scan(&count, &summary)
+) SELECT e.n,c.content,c.id FROM eligible e CROSS JOIN checkpoint c
+WHERE (SELECT COUNT(*) FROM lineage)=e.n`, sessionID, sources).Scan(&count, &summary, &checkpointID)
 	if err != nil {
 		return 0, "", err
 	}
@@ -130,6 +131,9 @@ WHERE (SELECT COUNT(*) FROM lineage)=e.n`, sessionID, sources).Scan(&count, &sum
  'record_revision',original->>'revision','compacted_revision',c.record_revision::text,
  'payload_digest',original->>'digest')::text FROM compacted c
  JOIN jsonb_array_elements($1::jsonb) original ON (original->>'id')::bigint=c.id`, sources); err != nil {
+		return 0, "", err
+	}
+	if err = s.registerDerivedMemoryInputs(ctx, checkpointID); err != nil {
 		return 0, "", err
 	}
 	return count, summary, err

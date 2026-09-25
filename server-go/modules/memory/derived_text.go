@@ -527,6 +527,27 @@ func (s *postgresDataStore) pinDerivedSummaryInputs(ctx context.Context, id int6
  WHERE d.derived_kind='summary' AND d.derived_memory_id=summary.id::text
  AND d.input_kind='memory' AND d.input_id=m.id::text
  AND summary.memory_id=m.id AND m.id=$1 AND summary.scope IN ('headline','signals')`, id)
+	if err != nil {
+		return err
+	}
+	// Only these rebuilt summaries acquired new observations. Source mutations
+	// already reconcile descendants; walking that graph again per index row is
+	// both redundant and quadratic during a full rebuild.
+	_, err = s.db.Exec(ctx, `WITH evaluated AS MATERIALIZED (
+ SELECT d.*,knowledge_input_moved(d.input_kind,d.input_id,d.input_version,d.source_hash,
+ d.derivation_policy_version,d.derived_kind) AS moved
+ FROM derived_memory_dependencies d JOIN memory_summaries summary ON d.derived_kind='summary'
+ AND d.derived_memory_id=summary.id::text WHERE summary.memory_id=$1 AND summary.scope IN ('headline','signals')
+ ), fresh AS (
+ SELECT derived_kind,derived_memory_id,
+ CASE WHEN bool_or(moved AND contribution='essential') THEN 'unsupported'
+ WHEN bool_or(moved) THEN 'stale' ELSE 'fresh' END AS status,
+ COALESCE((array_agg(input_kind ORDER BY id) FILTER(WHERE moved))[1],'') AS cause_kind,
+ COALESCE((array_agg(input_id ORDER BY id) FILTER(WHERE moved))[1],'') AS cause_id
+ FROM evaluated GROUP BY derived_kind,derived_memory_id
+ ) UPDATE derived_memory_registry r SET current_status=f.status,stale_cause_kind=f.cause_kind,
+ stale_cause_id=f.cause_id,updated_at=pg_now_text() FROM fresh f
+ WHERE r.derived_kind=f.derived_kind AND r.derived_memory_id=f.derived_memory_id`, id)
 	return err
 }
 

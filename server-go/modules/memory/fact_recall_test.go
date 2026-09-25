@@ -122,7 +122,9 @@ func benchmarkVersionedFacts(b *testing.B, revalidate bool) {
  INSERT INTO fact_evidence(assertion_id,source_kind,source_id) SELECT id,'memory','memory:'||id::text FROM memories;
  CREATE INDEX ON fact_evidence(assertion_id);
  CREATE TEMP TABLE entity_registry(canonical_id bigint,status text);
- CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
+ CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,domain text DEFAULT '',expires_at text DEFAULT '');
+GRANT SELECT ON rules TO PUBLIC;
+CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind text,source_ref text);
  CREATE TEMP TABLE memory_episodes(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
  CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
 CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);

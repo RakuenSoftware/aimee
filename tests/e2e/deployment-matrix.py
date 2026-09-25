@@ -938,6 +938,54 @@ def evidence_exact_identity_gate(kb, check):
     check('Outcome writer never attributes a rounded numeric ID', code == 200 and outcome.get('written') == 0)
 
 
+def lineage_release_gate(kb, check):
+    """MR-04: shipped HTTP evidence, transitive release and restore intent."""
+    scope = 'mr04-lineage-' + uuid.uuid4().hex
+    def sql(query):
+        return command('docker', 'exec', kb.postgres, 'psql', '-U', 'postgres',
+                       '-d', 'aimee_store', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-c', query)
+    def evidence(identity):
+        code, body = kb.kb_request('/v1/actions/memory.evidence', dict(id=str(identity), project=scope, scope_context=True))
+        check('MR-04 evidence reaches the shipping scoped owner', code == 200 and body.get('schema_version') == 1)
+        return body
+    code, root = kb.kb_request('/v1/actions/memory.store', dict(key=scope+'-root', content='MR04 retained origin', project=scope, scope_context=True))
+    check('MR-04 creates a host-observed origin', code == 200 and root.get('status') == 'ok' and bool(root.get('id')))
+    root_id = int(root['id'])
+    try:
+        original = evidence(root_id)
+        check('MR-04 origin identity does not claim verified independence', original.get('source_family_count') == 1 and original.get('independent_support_count') is None)
+        ids = json.loads(sql(f"""WITH inserted AS (
+          INSERT INTO memories(key,content,scope_type,scope_value)
+          SELECT '{scope}-copy-'||n,'MR04 copied claim','project','{scope}' FROM generate_series(1,30)n RETURNING id
+        ) SELECT json_agg(id::text) FROM inserted"""))
+        sql(f"""INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+          SELECT 'memory',child.id,'memory-cognify-input-v1',jsonb_build_object('schema_version',1,
+          'owner_id',o.owner_id::text,'record_id',parent.id::text,'record_revision',parent.record_revision::text,
+          'derived_revision',child.record_revision::text)::text
+          FROM memories child,memories parent,memory_collection_owner o
+          WHERE child.scope_value='{scope}' AND child.id<>{root_id} AND parent.id={root_id} AND o.id=1""")
+        copies = [evidence(identity) for identity in ids]
+        check('MR-04 thirty copies retain one origin without adding an independent vote', all(
+            item.get('source_family_count') == 1 and item.get('origin_families') == original.get('origin_families') and
+            item.get('independent_support_count') is None for item in copies))
+        sql(f"UPDATE memories SET scope_value='{scope}-hidden' WHERE id={root_id}")
+        hidden = evidence(ids[0])
+        check('MR-04 hidden ancestor withholds identities and counts', hidden.get('lineage_state') == 'partial' and
+              hidden.get('source_family_count') is None and hidden.get('evidence') == [] and hidden.get('origin_families') == [])
+        sql(f"""BEGIN;SELECT set_config('aimee.memory_explicit_erasure','1',true);
+          DELETE FROM memories WHERE id={root_id};COMMIT""")
+        missing = evidence(ids[0])
+        check('MR-04 hidden and missing ancestors have the same public diagnostic', hidden == missing)
+        restored = subprocess.run(['docker','exec',kb.postgres,'psql','-U','postgres','-d','aimee_store','-X','-qAt','-v','ON_ERROR_STOP=1','-c',
+            f"INSERT INTO memories(id,key,content,scope_type,scope_value) VALUES({root_id},'{scope}-restore','MR04 retained origin','project','{scope}-hidden')"],
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        check('MR-04 surviving intent rejects old content restoration', restored.returncode != 0 and 'surviving erasure intent' in restored.stderr)
+        code, current = kb.kb_request('/v1/actions/memory.get',dict(id=str(ids[0]),project=scope,scope_context=True))
+        check('MR-04 missing required input suppresses current derivative release', code == 200 and current.get('memory') is None)
+    finally:
+        sql(f"DELETE FROM memories WHERE scope_value IN ('{scope}','{scope}-hidden')")
+
+
 def correction_review_gate(kb, server, placement, output):
     """Exercise the shipping KB actions and model MCP adapter on fresh stores."""
     from types import SimpleNamespace
@@ -1149,6 +1197,7 @@ def main():
             legacy_query_eligibility_gate(kb, check)
             preview_source_version_gate(kb, check)
             evidence_exact_identity_gate(kb, check)
+            lineage_release_gate(kb, check)
         if args.topology in ('T2', 'T3'):
             server = Stack('server', env, args.output)
             stacks.append(server)

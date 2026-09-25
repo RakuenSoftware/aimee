@@ -16,16 +16,55 @@
 #include "memory.h"
 #include "cJSON.h"
 #include "module_commands.h"
-#include "modules/kb_client/kb_client.h"
 #include "json_fluent.h"
 #include "aimee_sha256.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include <sys/utsname.h>
+
+/* The retained benchmark host asks the Go owner over the existing bus. */
+static int eval_current_rules(rule_t *out, int capacity)
+{
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   if (!args)
+      return 0;
+   cJSON_AddStringToObject(args, "operation", "rules-list");
+   cJSON_AddNumberToObject(args, "limit", capacity);
+   int rc = mem_eval_dispatch_diagnostic(args, &reply);
+   cJSON_Delete(args);
+   cJSON *body = rc > 0 && !strcmp(jo_cstr(reply, "status"), "ok")
+                     ? cJSON_Parse(jo_cstr(reply, "json"))
+                     : NULL;
+   cJSON_Delete(reply);
+   cJSON *rows = cJSON_GetObjectItemCaseSensitive(body, "rules");
+   int count = 0;
+   if (!strcmp(jo_cstr(body, "status"), "ok") && cJSON_IsArray(rows))
+   {
+      cJSON *row;
+      cJSON_ArrayForEach(row, rows)
+      {
+         if (count >= capacity)
+            break;
+         const cJSON *id = cJSON_GetObjectItemCaseSensitive(row, "id");
+         /* The compatibility rule_t identity is int-sized; refuse narrowing. */
+         if (!cJSON_IsNumber(id) || id->valuedouble < 1 || id->valuedouble > INT_MAX ||
+             floor(id->valuedouble) != id->valuedouble)
+            continue;
+         memset(&out[count], 0, sizeof(out[count]));
+         out[count].id = (int)id->valuedouble;
+         out[count].weight = jo_int(row, "weight", 0);
+         snprintf(out[count].title, sizeof(out[count].title), "%s", jo_cstr(row, "title"));
+         count++;
+      }
+   }
+   cJSON_Delete(body);
+   return count;
+}
 
 static const char *const k_ablation_presets[] = {
     "full", "no_rescue", "no_respond", "no_sampling", "no_normalize", "no_retry", "bare", NULL};
@@ -391,7 +430,7 @@ int eval_feedback_loop(void)
 
       /* Search for rules whose title words overlap with the failed task */
       rule_t rules[32];
-      int rcount = kb_client_rules_list(rules, 32);
+      int rcount = eval_current_rules(rules, 32);
       for (int i = 0; i < rcount; i++)
       {
          /* Check if rule title words appear in task name or error */
@@ -457,7 +496,7 @@ int eval_feedback_loop(void)
          continue;
 
       rule_t rules[32];
-      int rcount = kb_client_rules_list(rules, 32);
+      int rcount = eval_current_rules(rules, 32);
       for (int i = 0; i < rcount; i++)
       {
          char title_copy[256];

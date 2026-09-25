@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,5 +166,104 @@ func TestCognifiedRuleInputsPostgres(t *testing.T) {
 	var envelope map[string]any
 	if err != nil || json.Unmarshal(view, &envelope) != nil || envelope["status"] != "ok" {
 		t.Fatal("rule list envelope", string(view), err)
+	}
+}
+
+func TestLegacyRuleProducerObservationsPostgres(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("set AIMEE_DB2_REPLAY_URL")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, e := tx.Exec(ctx, q, args...); e != nil {
+			t.Fatal(e)
+		}
+	}
+	exec(`SELECT set_config('aimee.memory_scope_all','1',true);DELETE FROM rules;
+ INSERT INTO rules(polarity,title,description,created_at,updated_at) VALUES
+ ('negative','first feedback','too long and verbose',pg_now_text(),pg_now_text()),
+ ('negative','second feedback','wordy and too long',pg_now_text(),pg_now_text())`)
+	s := &postgresDataStore{db: evalQueryer{tx}, placement: PlacementKB}
+	if n, e := s.LearnStyle(ctx); e != nil || n != 1 {
+		t.Fatal("style producer", n, e)
+	}
+	var id int64
+	if err = tx.QueryRow(ctx, `SELECT id FROM memories WHERE key='style_verbosity'`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		var current bool
+		if e := tx.QueryRow(ctx, `SELECT (`+currentMemorySQL("m.")+`) FROM memories m WHERE id=$1`, id).Scan(&current); e != nil || current != want {
+			t.Fatal("style current", current, want, e)
+		}
+	}
+	check(true)
+	var child int64
+	if err = tx.QueryRow(ctx, `INSERT INTO memories(tier,kind,key,content) VALUES('L1','fact','style-descendant','derived style') RETURNING id`).Scan(&child); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'memory',c.id,'memory-cognify-input-v1',jsonb_build_object('schema_version',1,
+ 'owner_id',(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
+ 'record_id',p.id::text,'record_revision',p.record_revision::text,'derived_revision',c.record_revision::text)::text
+ FROM memories c,memories p WHERE c.id=$1 AND p.id=$2`, child, id)
+	checkChild := func(want bool) {
+		t.Helper()
+		var current bool
+		if e := tx.QueryRow(ctx, `SELECT (`+currentMemorySQL("m.")+`) FROM memories m WHERE id=$1`, child).Scan(&current); e != nil || current != want {
+			t.Fatal("style descendant current", current, want, e)
+		}
+	}
+	checkChild(true)
+	var dependencies int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM derived_memory_dependencies WHERE derived_kind='memory' AND derived_memory_id=$1::text AND input_kind='rule'`, fmt.Sprint(id)).Scan(&dependencies); err != nil || dependencies != 2 {
+		t.Fatal("missing style inputs", dependencies, err)
+	}
+	exec(`SAVEPOINT feedback_extract`)
+	if n, e := s.ExtractAntiPatterns(ctx, "feedback"); e != nil || n != 2 {
+		t.Fatal("feedback observation", n, e)
+	}
+	// No automatic producer may seize an existing authored title.
+	exec(`UPDATE anti_patterns SET hit_count=9`)
+	if n, e := s.EscalateAntiPatterns(ctx, 5); e != nil || n != 0 {
+		t.Fatal("authored title collision", n, e)
+	}
+	exec(`ROLLBACK TO feedback_extract;RELEASE feedback_extract`)
+	exec(`SAVEPOINT new_rule;INSERT INTO rules(polarity,title,description,created_at,updated_at) VALUES('positive','new feedback','detailed prose',pg_now_text(),pg_now_text())`)
+	check(false)
+	checkChild(false)
+	exec(`ROLLBACK TO new_rule;RELEASE new_rule`)
+	check(true)
+	exec(`SAVEPOINT source_edit;UPDATE rules SET description='changed feedback' WHERE title='first feedback'`)
+	check(false)
+	checkChild(false)
+	var status string
+	if err = tx.QueryRow(ctx, `SELECT current_status FROM derived_memory_registry WHERE derived_kind='memory' AND derived_memory_id=$1::text`, fmt.Sprint(id)).Scan(&status); err != nil || status != "unsupported" {
+		t.Fatal("style invalidation", status, err)
+	}
+	exec(`ROLLBACK TO source_edit;RELEASE source_edit`)
+	check(true)
+	exec(`SAVEPOINT missing_observation`)
+	exec(`DELETE FROM memory_lineage WHERE object_type='memory' AND object_id=$1 AND source_kind='legacy-rule-input-v1'`, id)
+	check(false)
+	checkChild(false)
+	exec(`ROLLBACK TO missing_observation;RELEASE missing_observation`)
+	// Unknown historical decision lineage never becomes authority by repetition.
+	exec(`INSERT INTO anti_patterns(pattern,description,source,source_ref,hit_count) VALUES('unobserved decision','private copied decision','failure','decision:99999',100)`)
+	if n, e := s.EscalateAntiPatterns(ctx, 5); e != nil || n != 0 {
+		t.Fatal("unknown provenance escalated", n, e)
 	}
 }

@@ -61,10 +61,10 @@ INSERT INTO rules(polarity,title,description,created_at,updated_at) VALUES
 	if _, err := tx.Exec(ctx, `UPDATE anti_patterns SET hit_count=5 WHERE pattern='runtime-dangerous-command'`); err != nil {
 		t.Fatal(err)
 	}
-	if run("anti_pattern_escalate", `{"hit_threshold":6}`) != 0 || run("anti_pattern_escalate", `{}`) != 1 || run("anti_pattern_escalate", `{}`) != 0 {
-		t.Fatal("escalation threshold or deduplication failed")
+	if run("anti_pattern_escalate", `{"hit_threshold":6}`) != 0 || run("anti_pattern_escalate", `{}`) != 0 || run("anti_pattern_escalate", `{}`) != 0 {
+		t.Fatal("unknown decision provenance must not escalate")
 	}
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM rules WHERE title='runtime-dangerous-command' AND directive_type='soft'`).Scan(&count); err != nil || count != 1 {
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM rules WHERE title='runtime-dangerous-command' AND directive_type='soft'`).Scan(&count); err != nil || count != 0 {
 		t.Fatal("automatic observations were promoted to protected rules", count, err)
 	}
 	if run("memory_learn_style", `{}`) < 1 {

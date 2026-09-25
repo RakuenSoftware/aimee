@@ -1,5 +1,7 @@
 package memory
 
+import "context"
+
 // Every declared ancestor is checked under the caller's RLS context and the
 // same statement snapshot. A bounded path walk detects cycles; exhausting either
 // bound refuses eligibility instead of silently treating a prefix as complete.
@@ -21,7 +23,8 @@ func derivedMemoryInputsForAudienceSQL(prefix string, historical bool, audience 
 	policy = "((lineage_parent.record_revision::text=walk.revision AND " + policy + ") OR (" + compactedAncestorSQL("lineage_parent.") + " AND " + compactionOriginSQL("lineage_parent.") + "->>'record_revision'=walk.revision)) AND (" + audience + ")"
 	observation := `(CASE WHEN declared.source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1') THEN declared.source_ref::jsonb END)`
 	fold := `(to_jsonb(` + prefix[:len(prefix)-1] + `)->>'cognified_memory_kind'='session_checkpoint')`
-	return `(CASE WHEN (` + fold + `) IS NOT TRUE AND NOT EXISTS(SELECT 1 FROM memory_lineage declared
+	legacy := legacyMemoryInputsSQL(prefix)
+	return `((` + legacy + `) AND (CASE WHEN (` + fold + `) IS NOT TRUE AND NOT EXISTS(SELECT 1 FROM memory_lineage declared
  WHERE declared.object_type='memory' AND declared.object_id=` + prefix + `id
  AND (declared.source_kind IN ('memory','memory-cognify-input-v1','memory-fold-input-v1')
  OR (declared.source_kind='metadata' AND declared.source_ref LIKE 'memory-cognify-v1:%')))
@@ -53,6 +56,7 @@ func derivedMemoryInputsForAudienceSQL(prefix string, historical bool, audience 
  SELECT 1 FROM bounded walk LEFT JOIN LATERAL (
  SELECT lineage_parent.id FROM memories lineage_parent WHERE lineage_parent.id=walk.id
  AND ` + policy + `
+ AND ` + legacyMemoryInputsSQL("lineage_parent.") + `
  AND ` + currentEpisodeCardInputsSQL("lineage_parent.", historical) + `
  LIMIT 1) allowed ON TRUE
  WHERE allowed.id IS NULL OR walk.cycle OR walk.valid IS DISTINCT FROM TRUE
@@ -76,7 +80,7 @@ func derivedMemoryInputsForAudienceSQL(prefix string, historical bool, audience 
  AND producer.object_id=walk.id AND producer.source_kind='metadata' AND producer.source_ref LIKE 'memory-cognify-v1:%'))
  AND NOT EXISTS(SELECT 1 FROM memory_lineage declared WHERE declared.object_type='memory'
  AND declared.object_id=walk.id AND declared.source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1'))))
- ) END)`
+ ) END))`
 }
 
 // Only an unchanged, unsuppressed archived identity may certify its former
@@ -94,4 +98,27 @@ func compactionOriginSQL(prefix string) string {
 func compactedAncestorSQL(prefix string) string {
 	return `(` + prefix + `lifecycle_state='archived' AND ` + prefix + `activation_suppressed=0 AND ` + memoryValiditySQL(prefix) + `
  AND ` + compactionOriginSQL(prefix) + ` IS NOT NULL)`
+}
+
+// Project only producer-recorded versions into the existing dependency owner.
+// A read of a newer source is never allowed to certify old derived text.
+func (s *postgresDataStore) registerDerivedMemoryInputs(ctx context.Context, id int64) error {
+	_, err := s.db.Exec(ctx, `WITH observed AS (
+ SELECT source_ref::jsonb AS input,source_kind AS producer FROM memory_lineage
+ WHERE object_type='memory' AND object_id=$1 AND source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1')
+ UNION ALL
+ SELECT input,'episode-card-input-v1' FROM memory_units u JOIN memory_lineage l
+ ON l.object_type='memory_unit' AND l.object_id=u.id AND l.source_kind='episode-card-input-v1'
+ CROSS JOIN LATERAL jsonb_array_elements(l.source_ref::jsonb->'inputs') input
+ WHERE u.memory_id=$1 AND u.is_episode_card=1 AND u.unit_type='episode_card'
+ ), distinct_inputs AS (
+ SELECT DISTINCT input->>'record_id' AS id,input->>'record_revision' AS revision,producer FROM observed
+ ) SELECT derived_memory_declare('memory',$1::text,COALESCE(jsonb_agg(jsonb_build_object(
+ 'input_kind','memory','input_id',id,'input_version',revision,'extractor_version',producer,
+ 'contribution','essential')),'[]'::jsonb),'suppress') FROM distinct_inputs`, id)
+	return err
+}
+
+func legacyMemoryInputsSQL(prefix string) string {
+	return `(CASE WHEN COALESCE(to_jsonb(` + prefix[:len(prefix)-1] + `)->>'cognified_memory_kind','')<>'rule_style' AND NOT EXISTS(SELECT 1 FROM memory_lineage legacy_owner WHERE legacy_owner.object_type='memory' AND legacy_owner.object_id=` + prefix + `id AND legacy_owner.source_kind='legacy-rule-input-v1') THEN TRUE ELSE (` + currentLegacyRuleInputsSQL("memory", prefix, memoryClaimDigestSQL(prefix)) + `) END)`
 }

@@ -166,6 +166,7 @@ Subcommands:
   store            Store a memory
   list             List memories
   get              Read a memory by id (--as-of <ts>: was it in force then?)
+  evidence <id>    Inspect authorized evidence lineage (--json)
   read             Assemble current memory context
 ```
 

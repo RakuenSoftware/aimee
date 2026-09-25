@@ -237,6 +237,8 @@ func TestErasureRequiresOfflineOwnerCoverage(t *testing.T) {
 	}
 	var memories, documents int64
 	var repeated bool
+	exec(`INSERT INTO prospective_memories(trigger_text,action_text,source_session) VALUES('private trigger','private action','mr04-late-erased-session');
+ INSERT INTO epistemic_directives(question,cause,source_session) VALUES('private directive','user_follow_up','mr04-late-erased-session')`)
 	if err = tx.QueryRow(ctx, `SELECT * FROM kb_subject_erasure_begin('mr04-required-owners-0001','mr04-erased-principal',jsonb_build_array('sha256:'||encode(sha256(convert_to('mr04-late-erased-session','UTF8')),'hex')))`).Scan(&memories, &documents, &repeated); err != nil || memories != 1 {
 		t.Fatal("missed committed private session", memories, err)
 	}
@@ -248,6 +250,16 @@ func TestErasureRequiresOfflineOwnerCoverage(t *testing.T) {
 	}
 	// Crash after receipt application but before commit cannot advance coverage.
 	exec(`SAVEPOINT crashed_owner`)
+	exec(`SAVEPOINT late_auxiliary`)
+	_, err = tx.Exec(ctx, `INSERT INTO prospective_memories(trigger_text,action_text,source_session) VALUES('late trigger','late action','mr04-late-erased-session')`)
+	exec(`ROLLBACK TO SAVEPOINT late_auxiliary; RELEASE SAVEPOINT late_auxiliary`)
+	if err == nil {
+		t.Fatal("late auxiliary producer resurrected erased session")
+	}
+	var payloads int
+	if err = tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM prospective_memories WHERE source_session='mr04-late-erased-session')+(SELECT count(*) FROM epistemic_directives WHERE source_session='mr04-late-erased-session')`).Scan(&payloads); err != nil || payloads != 0 {
+		t.Fatal("hashed receipt retained auxiliary payloads", payloads, err)
+	}
 	ack("cert:mr04-ca:a1", 2, false, false, 1)
 	exec(`ROLLBACK TO SAVEPOINT crashed_owner; RELEASE SAVEPOINT crashed_owner`)
 	var verified int
