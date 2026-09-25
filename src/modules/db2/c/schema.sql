@@ -7721,7 +7721,7 @@ BEGIN
       WHERE object_type='memory' AND source_kind='memory' AND source_ref ~ '^memory:-?[0-9]+$'
     UNION
     SELECT object_id,(source_ref::jsonb->>'record_id')::bigint FROM memory_lineage
-      WHERE object_type='memory' AND source_kind='memory-cognify-input-v1'
+      WHERE object_type='memory' AND source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1')
     UNION
     SELECT u.memory_id,(input->>'record_id')::bigint FROM memory_units u
       JOIN memory_lineage l ON l.object_type='memory_unit' AND l.object_id=u.id
@@ -7740,7 +7740,9 @@ BEGIN
     RAISE EXCEPTION 'subject erasure dependency closure exceeds bound';
   END IF;
   INSERT INTO memory_erasure_intents(memory_id,scope_type,scope_value,payload_digest)
-    SELECT id,scope_type,scope_value,encode(sha256(convert_to(content,'UTF8')),'hex')
+    SELECT id,scope_type,scope_value,COALESCE((SELECT l.source_ref::jsonb->>'payload_digest'
+ FROM memory_lineage l WHERE l.object_type='memory' AND l.object_id=memories.id
+ AND l.source_kind='memory-compaction-origin-v1' LIMIT 1),encode(sha256(convert_to(content,'UTF8')),'hex'))
     FROM memories WHERE id=ANY(v_memories) ON CONFLICT(memory_id) DO NOTHING;
   -- Only retained payloads contribute to the reported deletion count.
   SELECT count(*) INTO v_memory_count FROM memories WHERE id=ANY(v_memories);
@@ -7802,7 +7804,7 @@ BEGIN
       AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)));
   DELETE FROM rules WHERE id IN (
     SELECT object_id FROM memory_lineage WHERE object_type='rule' AND (
-      (source_kind='memory-cognify-input-v1' AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)))
+      (source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1') AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)))
       OR (source_kind='metadata' AND source_ref=ANY(ARRAY(SELECT 'memory-cognify-rule-v1:'||id::text FROM unnest(v_memories) id)))));
   DELETE FROM artifacts WHERE payload->>'memory_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id))
     OR payload->>'session_id'=ANY(v_sessions);
@@ -18652,6 +18654,36 @@ CREATE TRIGGER memory_relation_record_revision BEFORE INSERT OR UPDATE ON memory
  FOR EACH ROW EXECUTE FUNCTION memory_assign_record_revision('{memory_relations_fts_tsv}');
 -- END typed auxiliary source revisions
 
+-- Go admits and locks the bounded source set. This storage helper performs the
+-- same child cleanup as deleting the canonical row, while retaining its identity
+-- for revocation. Catalog enumeration includes future FK-owned payload stores;
+-- an unfamiliar FK action refuses the transaction instead of retaining a copy.
+CREATE OR REPLACE FUNCTION memory_compact_source_children(p_id BIGINT) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE child RECORD;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.memories m WHERE m.id=p_id
+ AND public.memory_row_scope_visible(m.scope_type,m.scope_value)) THEN
+  RAISE EXCEPTION 'compaction source unavailable';
+ END IF;
+ PERFORM 1 FROM public.memories WHERE id=p_id FOR UPDATE;
+ DELETE FROM public.memory_lineage l WHERE
+ (l.object_type='memory_unit' AND l.object_id IN(SELECT id FROM public.memory_units WHERE memory_id=p_id)) OR
+ (l.object_type='episode' AND l.object_id IN(SELECT id FROM public.memory_episodes WHERE memory_id=p_id)) OR
+ (l.object_type='relation' AND l.object_id IN(SELECT id FROM public.memory_relations WHERE memory_id=p_id));
+ FOR child IN SELECT c.conrelid::regclass AS relation,a.attname AS column_name,c.confdeltype,
+ cardinality(c.conkey) AS arity FROM pg_constraint c
+ JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=c.conkey[1]
+ WHERE c.contype='f' AND c.confrelid='public.memories'::regclass ORDER BY c.oid
+ LOOP
+  IF child.arity<>1 OR child.confdeltype<>'c' THEN
+   RAISE EXCEPTION 'unclassified compaction child constraint on %',child.relation;
+  END IF;
+  EXECUTE format('DELETE FROM %s WHERE %I=$1',child.relation,child.column_name) USING p_id;
+ END LOOP;
+END $$;
+REVOKE ALL ON FUNCTION memory_compact_source_children(BIGINT) FROM PUBLIC;
+
 DO $memory_store_grants$
 DECLARE
   relation_name TEXT;
@@ -18685,6 +18717,7 @@ BEGIN
       END IF;
     END LOOP;
   END LOOP;
+  GRANT EXECUTE ON FUNCTION memory_compact_source_children(BIGINT) TO aimee_store_runtime;
   -- Dependency freshness checks run as the caller. They need identity/version
   -- columns for every input kind, never indexed file contents or outcome bodies.
   GRANT SELECT(id,hash,generation,project_id) ON files TO aimee_store_runtime;
@@ -19005,7 +19038,7 @@ BEGIN
  IF TG_TABLE_NAME='memory_lineage' THEN
   IF NEW.source_kind='memory' AND NEW.source_ref LIKE 'memory:%' THEN
    parents:=ARRAY[substring(NEW.source_ref FROM 8)];
-  ELSIF NEW.source_kind IN ('memory-cognify-input-v1','memory-relation-input-v1','memory-relation-input-v2') THEN
+  ELSIF NEW.source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1','memory-relation-input-v1','memory-relation-input-v2') THEN
    parents:=ARRAY[NEW.source_ref::jsonb->>'record_id'];
   ELSIF NEW.source_kind='episode-card-input-v1' THEN
    SELECT COALESCE(array_agg(x->>'record_id'),'{}'::text[]) INTO parents
@@ -19030,12 +19063,15 @@ REVOKE ALL ON FUNCTION memory_erasure_dependency_guard() FROM PUBLIC;
 -- and compaction keep their existing semantics and do not silently mint erasure.
 CREATE OR REPLACE FUNCTION memory_explicit_erasure_capture() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE original_digest TEXT;
 BEGIN
  IF current_setting('aimee.memory_explicit_erasure',true) IS DISTINCT FROM '1' THEN RETURN OLD; END IF;
  EXECUTE format('UPDATE %I.memory_erasure_epoch SET generation=generation+1 WHERE id=1',TG_TABLE_SCHEMA);
+ EXECUTE format('SELECT source_ref::jsonb->>''payload_digest'' FROM %I.memory_lineage
+ WHERE object_type=''memory'' AND object_id=$1 AND source_kind=''memory-compaction-origin-v1'' LIMIT 1',TG_TABLE_SCHEMA) INTO original_digest USING OLD.id;
  EXECUTE format('INSERT INTO %I.memory_erasure_intents(memory_id,scope_type,scope_value,payload_digest)
  VALUES($1,$2,$3,$4) ON CONFLICT(memory_id) DO NOTHING',TG_TABLE_SCHEMA)
- USING OLD.id,OLD.scope_type,OLD.scope_value,encode(sha256(convert_to(OLD.content,'UTF8')),'hex');
+ USING OLD.id,OLD.scope_type,OLD.scope_value,COALESCE(original_digest,encode(sha256(convert_to(OLD.content,'UTF8')),'hex'));
  RETURN OLD;
 END $$;
 REVOKE ALL ON FUNCTION memory_explicit_erasure_capture() FROM PUBLIC;

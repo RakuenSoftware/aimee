@@ -321,3 +321,46 @@ pass: full memory race suite 243.389 seconds; exported owner 6.330 seconds.
 Shared schema is 39 and current-validity policy is v15. Legacy untagged
 producers, session compaction and complete owner erasure/process acceptance
 remain open; this checkpoint does not close MR-04.
+
+
+## Session compaction checkpoint
+
+The [healthy-fold regression](memory-mr04-lineage-2026-09-25/fold-current-red.txt)
+reproduces an unusable checkpoint after its original inputs were physically
+deleted. Folding now retains content-free archived identities with original
+ingestion events and version-bound compaction observations. Only ancestry
+checks accept those certificates; current recall excludes the archived rows.
+The originals leave L0, and storage cascades remove their indexed payloads. An
+unclassified foreign-key action refuses compaction rather than retaining an
+uninventoried copy. The bounded source set still requires the original automatic
+mutation admission and one shared scope.
+
+Checkpoint input observations preserve the original record revisions. Card
+inputs transfer before their units are removed. A canonical checkpoint marker
+prevents missing observations from silently converting it to a new original.
+Rejection still targets the original identity, invalidating its certificate and
+all required descendants. Restore refuses to activate a content-free identity.
+Erasure retains the pre-compaction payload digest, so a renamed restoration of
+the original text is prohibited without prohibiting unrelated blank records.
+
+The [runtime/authority/evidence replay](memory-mr04-lineage-2026-09-25/fold-runtime-target.txt)
+passes in 202.375 seconds. The [focused origin replay](memory-mr04-lineage-2026-09-25/fold-origin-replay.txt)
+passes in 1.197 seconds: original families survive, payload copies are removed,
+revocation and missing certificates/inputs suppress release, renamed restoration
+is rejected, and an injected failure after payload cleanup rolls back the whole
+fold. The complete race/export replay is pending. Shared schema 40 and validity
+policy v16 are isolated candidate changes. Producer-registry inventory, verified
+owner erasure coverage and fresh-process acceptance remain open.
+
+
+The first [full folding replay](memory-mr04-lineage-2026-09-25/fold-full-fixture-red.txt)
+failed only the minimal public-restore fixture: its store has no lineage table.
+Restore now checks the canonical `compaction_origin` marker, preserving the
+legacy store contract and refusing activation even if lineage metadata is lost.
+The [focused restore/origin rerun](memory-mr04-lineage-2026-09-25/fold-restore-target.txt)
+passes in 1.287 seconds. The final [complete race/export replay](memory-mr04-lineage-2026-09-25/fold-final.txt)
+passes: memory 302.999 seconds, exported owner 7.247 seconds. Module ownership,
+boundaries, source/test registration, schema parity/order, proposal links and
+whitespace checks pass. MR-04 owner coverage and final process acceptance remain
+open. Production CT100 and its database/embedder remain healthy on released
+0.4.5; the paired CLI reports the server healthy and the pre-existing KB disabled.

@@ -246,6 +246,7 @@ func (s *postgresDataStore) Restore(ctx context.Context, id int64, actor string)
 	var restored int
 	err = s.db.QueryRow(ctx, `WITH target AS (
  SELECT key,content,scope_type,scope_value FROM memories WHERE id=$1
+ AND COALESCE(to_jsonb(memories)->>'cognified_memory_kind','')<>'compaction_origin'
 ), tomb AS (
  UPDATE memory_rejection_tombstones t SET active=0,restored_at=pg_now_text(),restored_by=$2
  FROM target x WHERE t.object_kind='memory' AND t.active=1 AND t.memory_key=x.key

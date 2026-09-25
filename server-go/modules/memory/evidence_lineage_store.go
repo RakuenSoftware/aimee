@@ -57,7 +57,7 @@ func (s *postgresDataStore) memoryEvidence(ctx context.Context, id int64) (map[s
 		var local bool
 		var err error
 		if s.placement == PlacementKB {
-			err = s.db.QueryRow(ctx, `SELECT m.record_revision::text,
+			err = s.db.QueryRow(ctx, `SELECT COALESCE(`+compactionOriginSQL("m.")+`->>'record_revision',m.record_revision::text),
  (SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
  COALESCE((SELECT min(event_id) FROM memory_evidence_events e WHERE e.object_kind='memory'
  AND e.object_id=m.id::text AND e.operation='assert' HAVING count(*)=1),''),
@@ -69,7 +69,7 @@ func (s *postgresDataStore) memoryEvidence(ctx context.Context, id int64) (map[s
  ON l.object_type='memory_unit' AND l.object_id=u.id AND l.source_kind='episode-card-input-v1'
  WHERE u.memory_id=m.id AND u.is_episode_card=1 AND u.unit_type='episode_card'
  LIMIT 257) entry),'[]')
- FROM memories m WHERE m.id=$1 AND `+baseCurrentMemorySQL("m."), next).Scan(&revision, &nodeOwner, &event, &local, &raw)
+ FROM memories m WHERE m.id=$1 AND (`+baseCurrentMemorySQL("m.")+` OR (m.id<>$2 AND `+compactedAncestorSQL("m.")+`))`, next, id).Scan(&revision, &nodeOwner, &event, &local, &raw)
 		} else {
 			err = s.db.QueryRow(ctx, `SELECT m.record_revision::text,
  (SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),
@@ -117,7 +117,9 @@ func (s *postgresDataStore) memoryEvidence(ctx context.Context, id int64) (map[s
 				}
 			case "metadata":
 				producer = producer || strings.HasPrefix(row.Ref, "memory-cognify-v1:")
-			case "memory-cognify-input-v1", "episode-card-input-v1":
+			case "memory-compaction-origin-v1":
+			// Validated against the canonical archived identity in the query above.
+			case "memory-cognify-input-v1", "memory-fold-input-v1", "episode-card-input-v1":
 				var input storedLineageInput
 				if json.Unmarshal([]byte(row.Ref), &input) != nil {
 					return nil, fmt.Errorf("memory: invalid producer observation")
@@ -126,7 +128,7 @@ func (s *postgresDataStore) memoryEvidence(ctx context.Context, id int64) (map[s
 					node.Complete = false
 					continue
 				}
-				if row.Kind == "memory-cognify-input-v1" {
+				if row.Kind != "episode-card-input-v1" {
 					if input.DerivedRevision != revision {
 						node.Complete = false
 					}
