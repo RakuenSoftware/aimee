@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-09-25",
+  "reader": "deterministic_retained_current_assertion_objects_v1",
+  "cases": [
+    {"name":"current-state-positive","mode":"current_state","scenario":"current","expected_status":"complete","intentionally_incomplete":false,"answer_objects":["new-database"]},
+    {"name":"comparison-unrelated-confidence","mode":"comparison","scenario":"unrelated","expected_status":"insufficient","intentionally_incomplete":true,"answer_objects":["new-database","other-database"]},
+    {"name":"comparison-missing-side","mode":"comparison","scenario":"current","expected_status":"partial","intentionally_incomplete":true,"answer_objects":["new-database","other-database"]},
+    {"name":"temporal-positive","mode":"temporal_change","scenario":"transition","expected_status":"complete","intentionally_incomplete":false,"answer_objects":["new-database"]},
+    {"name":"temporal-unrelated-episode","mode":"temporal_change","scenario":"unrelated-predecessor","expected_status":"partial","intentionally_incomplete":true,"answer_objects":["new-database"]},
+    {"name":"temporal-missing-date","mode":"temporal_change","scenario":"unknown-date","expected_status":"partial","intentionally_incomplete":true,"answer_objects":["new-database"]},
+    {"name":"required-update-dropped","mode":"temporal_change","scenario":"dropped-update","expected_status":"insufficient","intentionally_incomplete":true,"answer_objects":["new-database"]},
+    {"name":"owner-unavailable","mode":"current_state","scenario":"unavailable","expected_status":"unknown","intentionally_incomplete":true,"answer_objects":["new-database"]},
+    {"name":"revoked-cached-source","mode":"current_state","scenario":"revoked","expected_status":"insufficient","intentionally_incomplete":true,"answer_objects":["new-database"]},
+    {"name":"copies-are-not-independent","mode":"current_state","scenario":"copies","expected_status":"unknown","intentionally_incomplete":true,"answer_objects":["new-database"]},
+    {"name":"unresolved-contradiction","mode":"current_state","scenario":"conflicted","expected_status":"insufficient","intentionally_incomplete":true,"answer_objects":["new-database"]}
+  ]
+}

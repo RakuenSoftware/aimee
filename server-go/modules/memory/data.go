@@ -32,6 +32,8 @@ const (
 )
 
 type DataRequest struct {
+	recoveryActor       string
+	recoveryRole        *evidenceRecoveryAction
 	FilteredExport      *filteredExportRequest `json:"filtered_export,omitempty"`
 	HygienePreview      *hygienePreviewRequest `json:"hygiene_preview,omitempty"`
 	AssemblyBudgetBytes json.RawMessage        `json:"assembly_budget_bytes,omitempty"`
@@ -472,6 +474,7 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
+	recoveryDB      store.DB
 	personalActor   personalActor
 	pageRankSamples *[]pageRankResult
 	recallExecutor  egress.Executor
@@ -1346,7 +1349,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 			if err != nil {
 				return nil, bus.ModuleStatusInternal
 			}
-			if request.Operation == "evidence" {
+			if request.Operation == "evidence" || (request.Operation == "typed-context" && request.TypedContext != nil && request.TypedContext.Requirements.needsOriginGroups()) {
 				if _, err = transaction.Exec(ctx, `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`); err != nil {
 					_ = transaction.Rollback(context.Background())
 					return nil, bus.ModuleStatusInternal
@@ -1384,6 +1387,7 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			}
 			bound := *backend
 			bound.db = transaction
+			bound.recoveryDB = db
 			options.data = &bound
 		}
 	}
@@ -1503,6 +1507,13 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 		if explicitScope {
 			request.Scope = scope
+		}
+		if request.TypedContext.ExecuteRecovery {
+			caller := options.commandContext
+			if caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" || request.TypedContext.Requirements == nil || request.TypedContext.Requirements.Recovery == nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			request.recoveryActor = caller.Principal
 		}
 		var result typedContextResult
 		result, err = backend.assembleTypedContext(ctx, invocation.TraceID, options.executor, request, explicitScope)

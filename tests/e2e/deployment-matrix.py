@@ -640,6 +640,38 @@ def typed_source_version_gate(kb, check):
         check('Recovery cannot retry evidence removed by packing', code == 200 and
               plan.get('state') == 'blocked' and plan.get('actions') == [] and
               any(gap.get('reason') == 'packing_budget_requires_host_revision' for gap in plan.get('remaining_gaps', [])))
+        comparison = dict(requirements, query_mode='comparison', obligations=[
+            *requirements['obligations'], dict(subject=key+'-other-side', relation='naming_convention')])
+        code, compared = call(dict(evidence_requirements=comparison))
+        check('MR-05 one retained side cannot complete a comparison', code == 200 and
+              compared.get('context_sufficiency') == 'partial' and
+              [role.get('status') for role in compared.get('evidence_coverage', {}).get('roles', [])] == ['satisfied', 'missing'])
+        code, temporal = call(dict(evidence_requirements=dict(requirements, query_mode='temporal_change')))
+        check('MR-05 current evidence cannot invent a predecessor or change date', code == 200 and
+              temporal.get('context_sufficiency') == 'partial' and
+              len(temporal.get('evidence_coverage', {}).get('roles', [])) == 3)
+        grouped = dict(requirements, obligations=[dict(subject=key, relation='naming_convention', role='source_group')])
+        code, grouped_result = call(dict(evidence_requirements=grouped))
+        check('MR-05 source group uses scoped canonical origin lineage', code == 200 and
+              grouped_result.get('context_sufficiency') == 'complete')
+        independent = dict(requirements, obligations=[dict(subject=key, relation='naming_convention',
+                                                          role='independent_support', min_independent=2)])
+        code, uncertified = call(dict(evidence_requirements=independent))
+        check('MR-05 uncertified origins cannot satisfy independent support', code == 200 and
+              uncertified.get('context_sufficiency') == 'unknown')
+        execution_requirements = dict(unrelated, task_revision=key+'-recovery:1',
+                                      recovery_budget=dict(recovery_budget, max_elapsed_ms=2000))
+        code, executed = call(dict(evidence_requirements=execution_requirements, execute_recovery=True))
+        execution = executed.get('evidence_recovery', {}).get('execution', {})
+        check('MR-05 authenticated host executes one bounded canonical recovery round', code == 200 and
+              execution.get('rounds') == 1 and execution.get('new_items') == 0 and
+              execution.get('cost_microunits') == 0 and execution.get('attempts') and
+              executed.get('context_sufficiency') == 'insufficient')
+        code, duplicate = call(dict(evidence_requirements=execution_requirements, execute_recovery=True))
+        execution = duplicate.get('evidence_recovery', {}).get('execution', {})
+        check('MR-05 durable duplicate attempt cannot reset the recovery budget', code == 200 and
+              execution.get('state') == 'duplicate_blocked' and execution.get('rounds') == 0 and
+              execution.get('new_items') == 0 and all(a.get('state') == 'duplicate_blocked' for a in execution.get('attempts', [])))
         code, unknown = call(dict(evidence_requirements=dict(requirements, query_mode='timeline')))
         check('Unsupported evidence query mode remains unknown', code == 200 and unknown.get('context_sufficiency') == 'unknown')
         code, hidden_coverage = call(dict(evidence_requirements=requirements, project=key+'-hidden'))

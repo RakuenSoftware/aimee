@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,8 @@ type assertionTrace struct {
 	Rank    int     `json:"rank"`
 }
 type assertionHit struct {
+	OriginState           string              `json:"source_origin_state,omitempty"`
+	PriorVersionID        string              `json:"prior_version_id,omitempty"`
 	ID                    int64               `json:"assertion_id"`
 	Version               int                 `json:"version"`
 	Subject               string              `json:"subject"`
@@ -171,12 +174,13 @@ func assertionBeliefSQL(clock string) string {
 
 var assertionCurrent = `(` + assertionBeliefSQL("CURRENT_TIMESTAMP") + `
  AND (e.assertion_kind<>'world_fact' OR (` + memoryValiditySQL("e.") + `)))`
-var assertionFilter = `e.edge_class='semantic' AND e.suppressed=0 AND e.lifecycle_state IN ('persistent','promoted')
+var assertionFilter = `e.edge_class='semantic' AND e.suppressed=0 AND (e.lifecycle_state IN ('persistent','promoted') OR ($3 AND e.lifecycle_state='superseded'))
  AND ($1<>'' OR $3 OR (` + assertionBeliefSQL("CURRENT_TIMESTAMP") + `))
  AND ($1='' OR (` + assertionBeliefSQL(memoryTimeSQL("$1::text")) + `))
  AND ($2<>'' OR $3 OR e.assertion_kind<>'world_fact' OR (` + memoryValiditySQL("e.") + `))
  AND ($2='' OR (` + memoryValidityAtSQL("e.", memoryTimeSQL("$2::text")) + `)) AND ` + assertionVisible
-var assertionColumns = `e.id,e.version,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
+var assertionColumns = `e.id,e.version,COALESCE((SELECT predecessor.id::text FROM entity_edges predecessor
+ WHERE predecessor.id=e.prior_version_id AND ` + regexp.MustCompile(`\be\.`).ReplaceAllString(assertionFilter, "predecessor.") + `),''),(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
  e.authority_rank,e.confidence_class,e.confidence,e.valid_from,e.valid_until,e.asserted_at,e.superseded_at,
  NOT ` + assertionCurrent + `,
  (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' AND f.stance='supports'),
@@ -206,6 +210,10 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 		order = ` ORDER BY v.embedding <=> $8::vector,e.id DESC LIMIT $7`
 		params = append(params, vector)
 	}
+	if role := request.recoveryRole; role != nil && vector == "" {
+		from = ` FROM entity_edges e WHERE ` + assertionFilter + ` AND $4::text IS NOT NULL AND e.source=$8 AND e.relation=$9`
+		params = append(params, role.Subject, role.Relation)
+	}
 	parentsSQL := `'[]'::text`
 	if request.TypedContext != nil {
 		parentsSQL = assertionMemoryVersions
@@ -219,7 +227,7 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 	for rows.Next() {
 		h := assertionHit{Evidence: []assertionEvidence{}, Retrieval: []assertionTrace{}}
 		var parents string
-		if err = rows.Scan(&h.ID, &h.Version, &h.ownerID, &h.Subject, &h.Relation, &h.Object, &h.Kind, &h.Lifecycle, &h.Authority, &h.ConfidenceClass, &h.Confidence, &h.ValidFrom, &h.ValidUntil, &h.AssertedAt, &h.SupersededAt, &h.Historical, &h.Support, &h.Contradiction, &parents, &h.raw); err != nil {
+		if err = rows.Scan(&h.ID, &h.Version, &h.PriorVersionID, &h.ownerID, &h.Subject, &h.Relation, &h.Object, &h.Kind, &h.Lifecycle, &h.Authority, &h.ConfidenceClass, &h.Confidence, &h.ValidFrom, &h.ValidUntil, &h.AssertedAt, &h.SupersededAt, &h.Historical, &h.Support, &h.Contradiction, &parents, &h.raw); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(parents), &h.memoryParents); err != nil || len(h.memoryParents) > maxTypedMemoryParents {

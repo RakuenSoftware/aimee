@@ -17,13 +17,14 @@ import (
 )
 
 type typedContextOptions struct {
-	Requirements  *evidenceRequirementSet `json:"evidence_requirements,omitempty"`
-	ContextLimits *ContextLimits          `json:"context_limits,omitempty"`
-	Enabled       bool                    `json:"enabled"`
-	Flags         map[string]bool         `json:"flags"`
-	Budgets       map[string]int          `json:"budgets"`
-	Turns         []string                `json:"turns"`
-	Latest        string                  `json:"latest"`
+	ExecuteRecovery bool                    `json:"execute_recovery,omitempty"`
+	Requirements    *evidenceRequirementSet `json:"evidence_requirements,omitempty"`
+	ContextLimits   *ContextLimits          `json:"context_limits,omitempty"`
+	Enabled         bool                    `json:"enabled"`
+	Flags           map[string]bool         `json:"flags"`
+	Budgets         map[string]int          `json:"budgets"`
+	Turns           []string                `json:"turns"`
+	Latest          string                  `json:"latest"`
 }
 
 var typedChannelOrder = []string{"current_assertions", "historical_assertions", "episodes", "summaries", "observations", "approved_procedures", "working_context"}
@@ -60,6 +61,7 @@ type typedWatermark struct {
 	Reason       string `json:"reason,omitempty"`
 }
 type typedContextResult struct {
+	recoveryExecution  *evidenceRecoveryExecution
 	Recovery           *evidenceRecoveryPlan   `json:"evidence_recovery,omitempty"`
 	Requirements       *evidenceRequirementSet `json:"evidence_requirements,omitempty"`
 	Coverage           *evidenceCoverage       `json:"evidence_coverage,omitempty"`
@@ -146,11 +148,21 @@ func handleTypedContextResult(options handlerOptions, invocation bus.ModuleInvoc
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	cfg := typedOptions(args)
+	if raw, present := args["execute_recovery"]; present {
+		if string(raw) == "null" || json.Unmarshal(raw, &cfg.ExecuteRecovery) != nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+	}
 	if raw, present := args["evidence_requirements"]; present {
 		var err error
 		cfg.Requirements, err = decodeEvidenceRequirements(raw)
 		if err != nil {
 			return nil, bus.ModuleStatusInvalidRequest
+		}
+	}
+	if cfg.Requirements != nil && cfg.Requirements.QueryMode == "temporal_change" {
+		if _, explicit := args["enable_historical"]; !explicit {
+			cfg.Flags["historical_assertions"] = cfg.Flags["current_assertions"]
 		}
 	}
 	if raw, present := args["context_limits"]; present {
@@ -209,7 +221,7 @@ func (r *typedContextResult) trace(name, id string, tokens int, included bool, r
 	r.Trace = append(r.Trace, typedPackTrace{name, id, tokens, decision, reason})
 }
 func (r *typedContextResult) add(name string, item typedItem) {
-	if r.Requirements != nil && name == "current_assertions" {
+	if r.Requirements != nil && name != "working_context" {
 		r.coverageCandidates = append(r.coverageCandidates, item)
 	}
 	c := r.Channels[name]
@@ -523,7 +535,7 @@ func decodeTypedProjection(raw string) (*typedContextResult, error) {
 			r.Channels[name].Items = append(r.Channels[name].Items, value)
 			item := typedItem{value: value, id: ref.ID, source: ref.Source}
 			r.Channels[name].selected = append(r.Channels[name].selected, item)
-			if name == "current_assertions" && r.Requirements != nil {
+			if name != "working_context" && r.Requirements != nil {
 				r.coverageCandidates = append(r.coverageCandidates, item)
 			}
 			n++
@@ -591,7 +603,13 @@ func (s *postgresDataStore) typedObservations(ctx context.Context, request DataR
 	return items, rows.Err()
 }
 func (s *postgresDataStore) typedProcedures(ctx context.Context, request DataRequest, exact Scope) ([]typedItem, error) {
-	rows, err := s.db.Query(ctx, `WITH proposals AS (SELECT id,target_key,action_json,record_revision,CASE WHEN action_json IS JSON OBJECT THEN action_json::jsonb ELSE '{}'::jsonb END AS action FROM learning_proposals WHERE state='committed' AND sink='artifact'), scoped AS (SELECT *,COALESCE(action->>'scope_kind','') AS scope_kind,COALESCE(action->>'scope_id','') AS scope_id FROM proposals) SELECT id,target_key,action_json,record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1) FROM scoped WHERE action_json IS JSON OBJECT AND `+typedScopeSQL+` ORDER BY id DESC LIMIT 32`, typedScopeParams(request, exact)...)
+	targetSQL := ""
+	params := typedScopeParams(request, exact)
+	if request.recoveryRole != nil {
+		targetSQL = " AND target_key=$6"
+		params = append(params, request.recoveryRole.Subject)
+	}
+	rows, err := s.db.Query(ctx, `WITH proposals AS (SELECT id,target_key,action_json,record_revision,CASE WHEN action_json IS JSON OBJECT THEN action_json::jsonb ELSE '{}'::jsonb END AS action FROM learning_proposals WHERE state='committed' AND sink='artifact'), scoped AS (SELECT *,COALESCE(action->>'scope_kind','') AS scope_kind,COALESCE(action->>'scope_id','') AS scope_id FROM proposals) SELECT id,target_key,action_json,record_revision::text,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1) FROM scoped WHERE action_json IS JSON OBJECT AND `+typedScopeSQL+targetSQL+` ORDER BY id DESC LIMIT 32`, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -656,6 +674,9 @@ func (s *postgresDataStore) assembleTypedContext(ctx context.Context, trace uint
 				r.fail("current_assertions", "lexical fallback; vector unavailable")
 			}
 			for _, h := range result["assertions"].([]assertionHit) {
+				if cfg.Requirements.needsOriginGroups() {
+					h.OriginState = s.assertionOriginState(ctx, h)
+				}
 				name := "current_assertions"
 				if h.Historical {
 					name = "historical_assertions"
@@ -728,6 +749,11 @@ func (s *postgresDataStore) assembleTypedContext(ctx context.Context, trace uint
 	}
 	if err = r.finish(); err != nil {
 		return *r, err
+	}
+	if !invalid && cfg.ExecuteRecovery {
+		if err = s.executeEvidenceRecovery(ctx, request, exact, r); err != nil {
+			return *r, err
+		}
 	}
 	if invalid {
 		r.Reason = "invalid temporal request; no context assembled"

@@ -19302,6 +19302,31 @@ BEGIN
  END LOOP;
 END $memory_producer_registry_backfill$;
 
+-- MR-05 content-free recovery reservations survive cancelled outer reads and
+-- process crashes. A pending attempt is never silently replayed. Principal RLS
+-- isolates task metadata; no evidence payload or user query is retained here.
+CREATE TABLE IF NOT EXISTS memory_evidence_recovery (
+ actor_principal TEXT NOT NULL,
+ task_hash TEXT NOT NULL CHECK(task_hash ~ '^[0-9a-f]{64}$'),
+ requirement_hash TEXT NOT NULL,
+ admitted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+ duplicate_attempts BIGINT NOT NULL DEFAULT 0,
+ outcome JSONB NOT NULL DEFAULT '{"state":"pending"}'::jsonb,
+ PRIMARY KEY(actor_principal,task_hash)
+);
+ALTER TABLE memory_evidence_recovery ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS memory_evidence_recovery_actor ON memory_evidence_recovery;
+CREATE POLICY memory_evidence_recovery_actor ON memory_evidence_recovery
+ USING(actor_principal=current_setting('aimee.principal',true))
+ WITH CHECK(actor_principal=current_setting('aimee.principal',true));
+REVOKE ALL ON memory_evidence_recovery FROM PUBLIC;
+DO $memory_recovery_grants$
+BEGIN
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+  GRANT SELECT,INSERT,UPDATE ON memory_evidence_recovery TO aimee_store_runtime;
+ END IF;
+END $memory_recovery_grants$;
+
 -- Schema build metadata (recorded LAST, after every object above, so its presence
 -- at the current values proves a complete, current migration). A HARDENED-tier
 -- runtime kb connects as a non-owner role that CANNOT apply DDL; it reads these to
@@ -19324,5 +19349,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '42')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '43')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

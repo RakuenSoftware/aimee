@@ -37,6 +37,7 @@ func (b *evidenceRecoveryBudget) UnmarshalJSON(raw []byte) error {
 }
 
 type evidenceRecoveryAction struct {
+	Role     string `json:"role"`
 	Key      string `json:"attempt_key"`
 	Kind     string `json:"kind"`
 	Subject  string `json:"subject"`
@@ -49,16 +50,17 @@ type evidenceRecoveryGap struct {
 	Reason   string `json:"reason"`
 }
 type evidenceRecoveryPlan struct {
-	SchemaVersion     int                      `json:"schema_version"`
-	PlannerVersion    string                   `json:"planner_version"`
-	RequirementDigest string                   `json:"requirement_digest"`
-	SelectionDigest   string                   `json:"selection_digest"`
-	TaskRevision      string                   `json:"task_revision"`
-	Authority         string                   `json:"authority"`
-	State             string                   `json:"state"`
-	Budget            evidenceRecoveryBudget   `json:"proposed_budget"`
-	Actions           []evidenceRecoveryAction `json:"actions"`
-	Gaps              []evidenceRecoveryGap    `json:"remaining_gaps"`
+	Execution         *evidenceRecoveryExecution `json:"execution,omitempty"`
+	SchemaVersion     int                        `json:"schema_version"`
+	PlannerVersion    string                     `json:"planner_version"`
+	RequirementDigest string                     `json:"requirement_digest"`
+	SelectionDigest   string                     `json:"selection_digest"`
+	TaskRevision      string                     `json:"task_revision"`
+	Authority         string                     `json:"authority"`
+	State             string                     `json:"state"`
+	Budget            evidenceRecoveryBudget     `json:"proposed_budget"`
+	Actions           []evidenceRecoveryAction   `json:"actions"`
+	Gaps              []evidenceRecoveryGap      `json:"remaining_gaps"`
 }
 
 // Regenerate after each packing boundary. A serialized plan is never imported as
@@ -72,9 +74,10 @@ func (r *typedContextResult) planEvidenceRecovery() {
 	if p == nil || p.Recovery == nil || c == nil {
 		return
 	}
-	plan := &evidenceRecoveryPlan{SchemaVersion: 1, PlannerVersion: "current-state-recovery-v1", RequirementDigest: c.RequirementDigest, SelectionDigest: r.SelectionDigest, TaskRevision: p.TaskRevision, Authority: "proposal_only", State: "no_action", Budget: *p.Recovery, Actions: []evidenceRecoveryAction{}, Gaps: []evidenceRecoveryGap{}}
+	plan := &evidenceRecoveryPlan{SchemaVersion: 1, PlannerVersion: "task-recovery-v2", RequirementDigest: c.RequirementDigest, SelectionDigest: r.SelectionDigest, TaskRevision: p.TaskRevision, Authority: "proposal_only", State: "no_action", Budget: *p.Recovery, Actions: []evidenceRecoveryAction{}, Gaps: []evidenceRecoveryGap{}}
 	r.Recovery = plan
-	if !p.valid() || p.QueryMode != "current_state" {
+	plan.Execution = r.recoveryExecution
+	if _, supported := p.expandedRoles(); !p.valid() || !supported {
 		plan.State = "unsupported"
 		return
 	}
@@ -96,8 +99,17 @@ func (r *typedContextResult) planEvidenceRecovery() {
 		case len(plan.Actions) >= p.Recovery.MaxItems:
 			gap.Reason = "recovery_item_budget_exhausted"
 		default:
-			identity, _ := json.Marshal([]string{"current-state-recovery-v1", p.TaskRevision, role.Subject, role.Relation})
-			plan.Actions = append(plan.Actions, evidenceRecoveryAction{Key: fmt.Sprintf("sha256:%x", sha256.Sum256(identity)), Kind: "lookup_current_role", Subject: role.Subject, Relation: role.Relation})
+			identity, _ := json.Marshal([]string{"task-recovery-v2", p.TaskRevision, role.Subject, role.Relation, role.Role})
+			kind := "lookup_current_role"
+			switch role.Role {
+			case "historical_predecessor", "temporal_anchor":
+				kind = "lookup_source_chain"
+			case "approved_procedure":
+				kind = "lookup_reviewed_procedure"
+			case "counterexample":
+				kind = "expand_counterexample_span"
+			}
+			plan.Actions = append(plan.Actions, evidenceRecoveryAction{Key: fmt.Sprintf("sha256:%x", sha256.Sum256(identity)), Role: role.Role, Kind: kind, Subject: role.Subject, Relation: role.Relation})
 			gap.Reason = "host_admission_required"
 		}
 		plan.Gaps = append(plan.Gaps, gap)

@@ -11,7 +11,7 @@ import (
 )
 
 // Requirements describe answer obligations, never expected record IDs. Version 1
-// supports exact subject/relation current-state questions only. This is evidence
+// supports bounded, deterministic task templates over exact subject/relation obligations. This is evidence
 // coverage at the packing boundary, not answer correctness or release authority.
 type evidenceRequirementSet struct {
 	Recovery      *evidenceRecoveryBudget `json:"recovery_budget,omitempty"`
@@ -21,9 +21,11 @@ type evidenceRequirementSet struct {
 	Obligations   []evidenceObligation    `json:"obligations"`
 }
 type evidenceObligation struct {
-	Subject  string `json:"subject"`
-	Relation string `json:"relation"`
-	Optional bool   `json:"optional,omitempty"`
+	Role           string `json:"role,omitempty"`
+	MinIndependent int    `json:"min_independent,omitempty"`
+	Subject        string `json:"subject"`
+	Relation       string `json:"relation"`
+	Optional       bool   `json:"optional,omitempty"`
 }
 type evidenceRoleCoverage struct {
 	Subject  string   `json:"subject"`
@@ -34,14 +36,16 @@ type evidenceRoleCoverage struct {
 	Retained []string `json:"retained_ids"`
 }
 type evidenceCoverage struct {
-	PlannerVersion    string                 `json:"planner_version"`
-	TaskRevision      string                 `json:"task_revision"`
-	RequirementDigest string                 `json:"requirement_digest"`
-	SelectionDigest   string                 `json:"selection_digest"`
-	Boundary          string                 `json:"boundary"`
-	ReleaseState      string                 `json:"release_state"`
-	Status            string                 `json:"status"`
-	Roles             []evidenceRoleCoverage `json:"roles"`
+	RequirementsVersion int                    `json:"requirements_version"`
+	Reasons             []string               `json:"reasons"`
+	PlannerVersion      string                 `json:"planner_version"`
+	TaskRevision        string                 `json:"task_revision"`
+	RequirementDigest   string                 `json:"requirement_digest"`
+	SelectionDigest     string                 `json:"selection_digest"`
+	Boundary            string                 `json:"boundary"`
+	ReleaseState        string                 `json:"release_state"`
+	Status              string                 `json:"status"`
+	Roles               []evidenceRoleCoverage `json:"roles"`
 }
 
 func (p *evidenceRequirementSet) valid() bool {
@@ -51,11 +55,11 @@ func (p *evidenceRequirementSet) valid() bool {
 	if p.Recovery != nil && !p.Recovery.valid() {
 		return false
 	}
-	seen := map[[2]string]bool{}
+	seen := map[[3]string]bool{}
 	required := false
 	for _, o := range p.Obligations {
-		key := [2]string{o.Subject, o.Relation}
-		if strings.TrimSpace(o.Subject) == "" || strings.TrimSpace(o.Relation) == "" || len(o.Subject) > 256 || len(o.Relation) > 128 || seen[key] {
+		key := [3]string{o.Subject, o.Relation, o.Role}
+		if strings.TrimSpace(o.Subject) == "" || strings.TrimSpace(o.Relation) == "" || len(o.Subject) > 256 || len(o.Relation) > 128 || seen[key] || !validEvidenceRole(o.Role) || o.MinIndependent < 0 || o.MinIndependent > 16 || (o.MinIndependent != 0 && o.Role != "independent_support") {
 			return false
 		}
 		seen[key] = true
@@ -128,6 +132,7 @@ func (o *evidenceObligation) UnmarshalJSON(raw []byte) error {
 	var value evidenceObligation
 	if err := decodeEvidenceObject(raw, map[string]any{
 		"subject": &value.Subject, "relation": &value.Relation, "optional": &value.Optional,
+		"role": &value.Role, "min_independent": &value.MinIndependent,
 	}); err != nil {
 		return err
 	}
@@ -142,19 +147,30 @@ func decodeEvidenceRequirements(raw json.RawMessage) (*evidenceRequirementSet, e
 	return &p, nil
 }
 
-// Record only owner-selected candidates. Read counters, ranking confidence and
-// unversioned summaries cannot establish a role or independent support.
+// Record only owner-selected candidates. Read counters and confidence never
+// establish a role, chronology or independent support.
 func coverageAssertion(item typedItem) (assertionHit, bool) {
+	return coverageAssertionAt(item, false)
+}
+func coverageAssertionAt(item typedItem, historical bool) (assertionHit, bool) {
 	var h assertionHit
 	raw, err := json.Marshal(item.value)
-	if err != nil || json.Unmarshal(raw, &h) != nil || h.Historical || h.Object == "" || (h.Lifecycle != "persistent" && h.Lifecycle != "promoted") || item.source == nil || item.source.Kind != "semantic_assertion" || item.source.MemoryParentState != "observed" {
+	if err != nil || json.Unmarshal(raw, &h) != nil || h.Historical != historical || h.Object == "" ||
+		(h.Lifecycle != "persistent" && h.Lifecycle != "promoted" && !(historical && h.Lifecycle == "superseded")) ||
+		item.source == nil || item.source.Kind != "semantic_assertion" || item.source.MemoryParentState != "observed" {
 		return h, false
 	}
-	ref := typedProjectionRef{Channel: "current_assertions", ID: item.id, Source: item.source}
-	if !validTypedSourceItem(ref, raw) {
+	channel := "current_assertions"
+	if historical {
+		channel = "historical_assertions"
+	}
+	if !validTypedSourceItem(typedProjectionRef{Channel: channel, ID: item.id, Source: item.source}, raw) {
 		return h, false
 	}
-	if p := item.source.ReadPolicy; p != nil && (p.ValidAt != "" || p.BelievedAt != "") {
+	if p := item.source.ReadPolicy; p != nil && (p.ValidAt != "" || p.BelievedAt != "" || (historical && !p.Historical)) {
+		return h, false
+	}
+	if historical && (item.source.ReadPolicy == nil || !item.source.ReadPolicy.Historical) {
 		return h, false
 	}
 	return h, true
@@ -166,59 +182,32 @@ func (r *typedContextResult) evaluateCoverage() {
 		return
 	}
 	raw, _ := json.Marshal(p)
-	c := &evidenceCoverage{PlannerVersion: "current-state-roles-v1", TaskRevision: p.TaskRevision,
+	c := &evidenceCoverage{RequirementsVersion: 1, PlannerVersion: "task-roles-v2", TaskRevision: p.TaskRevision,
 		RequirementDigest: fmt.Sprintf("sha256:%x", sha256.Sum256(raw)), SelectionDigest: r.SelectionDigest,
-		Boundary: "typed_memory_projection", ReleaseState: "not_revalidated", Status: "unknown", Roles: []evidenceRoleCoverage{}}
+		Boundary: "typed_memory_projection", ReleaseState: "not_revalidated", Status: "unknown", Roles: []evidenceRoleCoverage{}, Reasons: []string{}}
 	r.Coverage = c
-	if !p.valid() || p.QueryMode != "current_state" {
+	obligations, supported := p.expandedRoles()
+	if !p.valid() || !supported {
 		r.Sufficiency = "unknown"
 		r.Reason = "unsupported evidence requirement shape"
+		c.Reasons = append(c.Reasons, "unsupported_task_shape")
 		return
 	}
-	channel := r.Channels["current_assertions"]
 	satisfied, required, uncertain := 0, 0, false
-	for i, o := range p.Obligations {
-		role := evidenceRoleCoverage{Subject: o.Subject, Relation: o.Relation, Role: "current_state", Optional: o.Optional, Status: "missing", Retained: []string{}}
-		objects := map[string]bool{}
-		candidates, conflicted := 0, false
-		for _, item := range r.coverageCandidates {
-			h, ok := coverageAssertion(item)
-			if !ok || h.Subject != o.Subject || h.Relation != o.Relation {
-				continue
-			}
-			candidates++
-			objects[h.Object] = true
-			conflicted = conflicted || h.Contradiction > 0
-		}
-		for _, item := range channel.selected {
-			h, ok := coverageAssertion(item)
-			if ok && h.Subject == o.Subject && h.Relation == o.Relation {
-				role.Retained = append(role.Retained, item.id)
-			}
-		}
-		switch {
-		case !channel.Enabled || channel.Status != "ok" || r.degraded || r.Status != "ok":
-			role.Status = "unavailable"
-		case conflicted || len(objects) > 1:
-			role.Status = "conflicted"
-		case len(role.Retained) > 0:
-			role.Status = "satisfied"
-		case candidates > 0:
-			role.Status = "budget_dropped"
-		}
-		// Repacking cannot cure an earlier conflict or unavailable role simply by
-		// omitting the offending evidence. Prior coverage can only restrict, never
-		// establish satisfaction in this new selection.
+	for i, o := range obligations {
+		role := r.evaluateEvidenceRole(o)
+		// Imported verdicts only restrict a freshly reconstructed retained selection.
+		// A lost conflicting or unavailable candidate can never improve coverage.
 		if prior := r.coveragePrior; prior != nil {
-			if prior.RequirementDigest != c.RequirementDigest || len(prior.Roles) != len(p.Obligations) {
+			if prior.RequirementDigest != c.RequirementDigest || len(prior.Roles) != len(obligations) {
 				role.Status = "unavailable"
 			} else {
 				old := prior.Roles[i]
-				if old.Subject != o.Subject || old.Relation != o.Relation {
+				if old.Subject != o.Subject || old.Relation != o.Relation || old.Role != o.Role {
 					role.Status = "unavailable"
 				} else if old.Status != "satisfied" {
 					switch old.Status {
-					case "missing", "budget_dropped", "conflicted", "unavailable":
+					case "missing", "budget_dropped", "conflicted", "unavailable", "stale":
 						role.Status = old.Status
 					default:
 						role.Status = "unavailable"
@@ -234,13 +223,16 @@ func (r *typedContextResult) evaluateCoverage() {
 			if role.Status == "unavailable" {
 				uncertain = true
 			}
+			if role.Status != "satisfied" {
+				c.Reasons = append(c.Reasons, role.Role+":"+role.Status)
+			}
 		}
 		c.Roles = append(c.Roles, role)
 	}
 	switch {
 	case uncertain:
 		c.Status = "unknown"
-	case satisfied == required:
+	case required > 0 && satisfied == required:
 		c.Status = "complete"
 	case satisfied > 0:
 		c.Status = "partial"
@@ -248,5 +240,5 @@ func (r *typedContextResult) evaluateCoverage() {
 		c.Status = "insufficient"
 	}
 	r.Sufficiency = c.Status
-	r.Reason = "explicit current-state obligations evaluated against retained owner-versioned assertions"
+	r.Reason = "declared task roles evaluated against retained owner-versioned evidence; answer correctness not assessed"
 }

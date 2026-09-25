@@ -949,3 +949,13 @@ CREATE TABLE IF NOT EXISTS kb_subject_erasure_owner_coverage (
  state TEXT NOT NULL DEFAULT 'pending',policy_revision TEXT NOT NULL DEFAULT 'memory-erasure-v2',
  deleted_count INTEGER NOT NULL DEFAULT 0,verified_at TEXT,PRIMARY KEY(request_id,owner_id)
 );
+
+CREATE TABLE IF NOT EXISTS memory_evidence_recovery (
+ actor_principal TEXT NOT NULL,
+ task_hash TEXT NOT NULL,
+ requirement_hash TEXT NOT NULL,
+ admitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ duplicate_attempts INTEGER NOT NULL DEFAULT 0,
+ outcome TEXT NOT NULL DEFAULT '{"state":"pending"}',
+ PRIMARY KEY(actor_principal,task_hash)
+);
