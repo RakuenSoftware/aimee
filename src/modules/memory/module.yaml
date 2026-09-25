@@ -197,7 +197,9 @@
     "server-go/modules/memory/evidence_recovery.go",
     "server-go/modules/memory/relation_invalidation.go",
     "server-go/modules/memory/provider_receipt.go",
-    "server-go/modules/memory/receipt_verification.go"
+    "server-go/modules/memory/receipt_verification.go",
+    "server-go/modules/memory/evidence_recovery_execution.go",
+    "server-go/modules/memory/evidence_tasks.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -354,11 +356,17 @@
     "server-go/modules/memory/evidence_recovery_test.go",
     "server-go/modules/memory/relation_invalidation_test.go",
     "server-go/modules/memory/provider_receipt_test.go",
-    "server-go/modules/memory/receipt_verification_test.go"
+    "server-go/modules/memory/receipt_verification_test.go",
+    "server-go/modules/memory/evidence_recovery_execution_test.go",
+    "server-go/modules/memory/evidence_tasks_test.go",
+    "server-go/modules/memory/evidence_tasks_postgres_test.go",
+    "server-go/modules/memory/evidence_frozen_eval_test.go"
   ],
   "public_headers": [],
   "private_headers": [],
-  "tests": [],
+  "tests": [
+    "tests/eval/memory_mr05_coverage_cases.json"
+  ],
   "docs": [
     "docs/modules/memory.md"
   ]
