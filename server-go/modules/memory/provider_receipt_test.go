@@ -376,13 +376,23 @@ func TestProviderReceiptRecoveryStages(t *testing.T) {
 					t.Fatal(string(raw))
 				}
 			}
-			prepared.Binding.RendererVersion = "changed-renderer"
-			changed, _ := json.Marshal(prepared)
-			rows[0]["detail"] = string(changed)
-			inspect["ledger_events"], _ = json.Marshal(rows)
-			raw, _ = inspectProviderReceipts(inspect)
-			if !strings.Contains(string(raw), `"status":"error"`) {
-				t.Fatal("changed binding accepted", string(raw))
+			for name, mutate := range map[string]func(*providerReceiptBinding){
+				"renderer": func(b *providerReceiptBinding) { b.RendererVersion = "changed-renderer" },
+				"policy":   func(b *providerReceiptBinding) { b.PolicyVersion = "changed-policy" },
+				"body":     func(b *providerReceiptBinding) { b.PayloadDigest = strings.Repeat("0", 64) },
+				"sources":  func(b *providerReceiptBinding) { b.SourcesDigest = strings.Repeat("0", 64) },
+			} {
+				changed := prepared
+				binding := *prepared.Binding
+				changed.Binding = &binding
+				mutate(changed.Binding)
+				detail, _ := json.Marshal(changed)
+				rows[0]["detail"] = string(detail)
+				inspect["ledger_events"], _ = json.Marshal(rows)
+				raw, _ = inspectProviderReceipts(inspect)
+				if !strings.Contains(string(raw), `"status":"error"`) {
+					t.Fatal("changed binding accepted", name, string(raw))
+				}
 			}
 		})
 	}
@@ -434,5 +444,17 @@ func TestProviderReceiptReplayRetention(t *testing.T) {
 	result = run()
 	if result["replay"] != "unavailable_erased" {
 		t.Fatal(result)
+	}
+	delete(inspect, "forget_replay")
+	delete(inspect, "replay_deleted")
+	inspect["replay_inputs"], _ = json.Marshal(map[string]string{prepared.AttemptID: "YQBi"})
+	prepared.Binding.ReplayExpiresAt = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+	prepared.BindingDigest = releaseDigest(prepared.Binding)
+	expired, _ := json.Marshal(prepared)
+	rows[0]["detail"] = string(expired)
+	inspect["ledger_events"], _ = json.Marshal(rows)
+	result = run()
+	if result["replay"] != "unavailable_expired" || result["payload_base64"] != "" || result["evidence"].(map[string]any)["chain_included"] != true {
+		t.Fatal("expired ciphertext was replayed", result)
 	}
 }

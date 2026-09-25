@@ -2347,7 +2347,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "bc0d39ed8f1cfc5ff97c88e89053fe548ec3d76a99f5f9eee3705cf8ed74ec53"
+      "sha256": "27eae0d8941655b3c8347692feb418e9787d9c9a57b2721bfe8cdfb5ee8456e9"
     },
     "src/tests/test_ir_module_plan.c": {
       "disposition": "host-fixture",

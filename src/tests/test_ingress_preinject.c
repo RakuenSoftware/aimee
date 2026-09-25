@@ -16,6 +16,7 @@
 #include <sqlite3.h>
 #include "aimee_sha256.h"
 #include "vault_service.h"
+#include "platform_test_util.h"
 #include <aimee/audit/audit_worm.h>
 #include "support/module_runtime_fixture.h"
 
@@ -1410,13 +1411,16 @@ static void test_unversioned_provider_body_receipt(void)
 
 static void test_replayable_provider_receipt(void)
 {
-   char directory[] = "/tmp/aimee-replay-receipt-XXXXXX";
+   char directory[1024];
+   int n =
+       snprintf(directory, sizeof directory, "%s/aimee-replay-receipt-XXXXXX", platform_tmpdir());
+   assert(n > 0 && (size_t)n < sizeof directory);
    assert(mkdtemp(directory));
    const char *old = getenv("AIMEE_HOME");
    char *previous_home = old ? strdup(old) : NULL;
    setenv("AIMEE_HOME", directory, 1);
    setenv("AIMEE_MEMORY_RECEIPT_RETENTION", "replayable", 1);
-   char path[512];
+   char path[1200];
    snprintf(path, sizeof path, "%s/receipt.db", directory);
    assert(audit_worm_init_at(path) == 0);
    request_context_t context = {0};
@@ -1465,6 +1469,7 @@ static void test_replayable_provider_receipt(void)
    }
    else
       unsetenv("AIMEE_HOME");
+   platform_test_rmrf(directory);
    puts("encrypted replay roundtrip, principal isolation and payload removal preserve receipt "
         "inclusion");
 }
