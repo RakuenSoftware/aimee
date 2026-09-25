@@ -29,14 +29,14 @@ func (s *postgresDataStore) revalidatePersonalSources(ctx context.Context, reque
 	query := `SELECT count(*) FROM jsonb_array_elements($1::jsonb) r(ref)
  WHERE r.ref#>>'{source_version,version,owner_id}'=(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1)
  AND CASE WHEN r.ref#>>'{source_version,record_kind}'='user_memory_collection'
- THEN r.ref#>>'{source_version,version,record_revision}'=(SELECT (generation+1)::text FROM user_memory_collection_generation WHERE id=1)
+ THEN ` + collectionDeadlineCheckSQL + ` AND r.ref#>>'{source_version,version,record_revision}'=(SELECT (generation+1)::text FROM user_memory_collection_generation WHERE id=1)
  ELSE EXISTS (SELECT 1 FROM user_memories m
  WHERE m.id=(r.ref->>'stable_id')::bigint
  AND m.record_revision::text=r.ref#>>'{source_version,version,record_revision}'
  AND m.lifecycle_state=CASE WHEN r.ref->>'channel'='native_open_commitments' THEN 'pending' ELSE 'active' END
  AND (m.valid_until IS NULL OR m.valid_until>now())) END`
 	if request.SendGuard == "acquire" {
-		query = strings.ReplaceAll(query, "now()", "clock_timestamp()")
+		query = strings.NewReplacer("now()", "clock_timestamp()", "CURRENT_TIMESTAMP", "clock_timestamp()").Replace(query)
 	}
 	err = s.db.QueryRow(ctx, query, string(raw)).Scan(&count)
 	if err == nil && count == len(request.Sources) && request.SendGuard == "acquire" {

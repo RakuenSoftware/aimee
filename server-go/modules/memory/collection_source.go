@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 )
 
 // A collection observation is captured before selection, including an empty
@@ -26,19 +28,19 @@ const collectionRevisionSQL = `(SELECT (1+COALESCE(sum(generation),0))::bigint::
  FROM memory_collection_generations WHERE memory_row_scope_visible(scope_type,scope_value))`
 
 func (s *postgresDataStore) observeRecallCollection(ctx context.Context) (*typedSourceVersion, error) {
-	var owner, revision, audience string
+	var owner, revision, audience, deadline string
 	kind := "memory_collection"
 	var err error
 	if s.placement == PlacementServer {
 		kind = "user_memory_collection"
-		err = s.db.QueryRow(ctx, `SELECT owner_id::text,(generation+1)::text,'[]' FROM user_memory_collection_generation WHERE id=1`).Scan(&owner, &revision, &audience)
+		err = s.db.QueryRow(ctx, `SELECT owner_id::text,(generation+1)::text,'[]',`+privateCollectionDeadlineSQL+` FROM user_memory_collection_generation WHERE id=1`).Scan(&owner, &revision, &audience, &deadline)
 	} else {
-		err = s.db.QueryRow(ctx, `SELECT owner_id::text,`+collectionRevisionSQL+`,`+collectionAudienceSQL+`::text FROM memory_collection_owner WHERE id=1`).Scan(&owner, &revision, &audience)
+		err = s.db.QueryRow(ctx, `SELECT owner_id::text,`+collectionRevisionSQL+`,`+collectionAudienceSQL+`::text,`+sharedCollectionDeadlineSQL+` FROM memory_collection_owner WHERE id=1`).Scan(&owner, &revision, &audience, &deadline)
 	}
 	if err != nil {
 		return nil, err
 	}
-	observation := &typedSourceVersion{Kind: kind, Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner, RecordID: "1", RecordRevision: revision}, MemoryParentState: "observed"}
+	observation := &typedSourceVersion{Kind: kind, Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner, RecordID: "1", RecordRevision: revision}, MemoryParentState: "observed", CollectionValidUntil: deadline}
 	if err = json.Unmarshal([]byte(audience), &observation.CollectionAudience); err != nil {
 		return nil, err
 	}
@@ -71,4 +73,29 @@ func validCollectionAudience(scopes []Scope) bool {
 		shared = shared || (scope.Type == ScopeWorkspace && scope.Value == "_shared")
 	}
 	return global && shared
+}
+
+// Stored counters do not move when a valid-time boundary passes. Bind the view
+// to the earliest future boundary in its visible collection, including records
+// which did not match the query. The release lease must fit before that boundary.
+var sharedCollectionDeadlineSQL = `(SELECT COALESCE(to_char(min(boundary) AT TIME ZONE 'UTC',
+ 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') FROM memories m CROSS JOIN LATERAL
+ (VALUES (` + memoryTimeSQL("m.valid_from") + `),(` + memoryTimeSQL("m.valid_until") + `)) limits(boundary)
+ WHERE boundary>CURRENT_TIMESTAMP)`
+
+const privateCollectionDeadlineSQL = `(SELECT COALESCE(to_char(min(valid_until) AT TIME ZONE 'UTC',
+ 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'') FROM user_memories WHERE valid_until>CURRENT_TIMESTAMP)`
+
+const collectionDeadlineCheckSQL = `(COALESCE(r.ref#>>'{source_version,collection_valid_until}','')=''
+ OR CURRENT_TIMESTAMP<(r.ref#>>'{source_version,collection_valid_until}')::timestamptz)`
+
+func validCollectionDeadline(value string) bool {
+	if value == "" {
+		return true
+	}
+	if len(value) > 32 || !strings.HasSuffix(value, "Z") {
+		return false
+	}
+	stamp, err := time.Parse(time.RFC3339Nano, value)
+	return err == nil && stamp.Year() > 0
 }

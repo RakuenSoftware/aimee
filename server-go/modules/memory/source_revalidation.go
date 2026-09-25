@@ -70,7 +70,7 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 	}
 	if collection {
 		query = strings.Replace(query, " WHEN 'semantic_assertion'", ` WHEN 'memory_collection' THEN (
- r.ref#>>'{source_version,version,record_revision}'=`+collectionRevisionSQL+`
+ `+collectionDeadlineCheckSQL+` AND r.ref#>>'{source_version,version,record_revision}'=`+collectionRevisionSQL+`
  AND r.ref#>'{source_version,collection_audience}'=`+collectionAudienceSQL+`)
  WHEN 'semantic_assertion'`, 1)
 	}

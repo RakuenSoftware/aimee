@@ -180,3 +180,23 @@ Complete validation for this component passed: the memory race suite took
 ownership, Go boundary, source registration, test registration, documentation
 and proposal links also passed. The production 0.4.5 installation is unchanged.
 Time-only applicability changes and non-memory collection coverage remain open.
+
+## Collection validity boundaries
+
+A future-dated constraint can become applicable without a database write. The
+regression reproduced the earlier collection-only check accepting a view across
+that boundary. Collection observations now also carry the earliest future valid
+time boundary in the visible collection. Release checks, including the end of
+the five-second send lease, must precede it. Private collections similarly bind
+the earliest expiry. Hidden rows cannot affect the exposed deadline.
+
+Focused PostgreSQL/race tests passed in 1.988 seconds, including both owner
+placements, hidden-boundary noninterference, syntax rejection and send-window
+expiry. The complete rerun is pending. This does not yet cover eligibility
+changes caused solely by lineage/auxiliary-table mutations or every non-memory
+collection; those remain open producer-coverage work.
+
+The temporal-boundary complete rerun passed: memory race suite 257.407 seconds
+and the exported-owner build check passed. Module ownership, source/test
+registration, documentation and proposal-link checks passed. Raw results are
+retained in `collection-time-full-race-export.txt`.

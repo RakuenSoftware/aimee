@@ -9,12 +9,13 @@ import (
 // from the same snapshot. It does not attest to transitive dependencies, current
 // authorization, or final release. Kind separates assertion, episode and memory IDs.
 type typedSourceVersion struct {
-	CollectionAudience []Scope               `json:"collection_audience,omitempty"`
-	Kind               string                `json:"record_kind"`
-	Version            MemoryRecordVersion   `json:"version"`
-	MemoryParents      []MemoryRecordVersion `json:"memory_parents,omitempty"`
-	MemoryParentState  string                `json:"memory_parent_state,omitempty"`
-	ReadPolicy         *sourceReadPolicy     `json:"read_policy,omitempty"`
+	CollectionValidUntil string                `json:"collection_valid_until,omitempty"`
+	CollectionAudience   []Scope               `json:"collection_audience,omitempty"`
+	Kind                 string                `json:"record_kind"`
+	Version              MemoryRecordVersion   `json:"version"`
+	MemoryParents        []MemoryRecordVersion `json:"memory_parents,omitempty"`
+	MemoryParentState    string                `json:"memory_parent_state,omitempty"`
+	ReadPolicy           *sourceReadPolicy     `json:"read_policy,omitempty"`
 }
 
 func directiveSourceParentsSQL(table string) string {
@@ -91,6 +92,10 @@ func validTypedSource(ref typedProjectionRef) bool {
 		}
 	}
 	if ref.Source.Kind != "memory_collection" && len(ref.Source.CollectionAudience) != 0 {
+		return false
+	}
+	if !validCollectionDeadline(ref.Source.CollectionValidUntil) ||
+		(ref.Source.CollectionValidUntil != "" && ref.Source.Kind != "memory_collection" && ref.Source.Kind != "user_memory_collection") {
 		return false
 	}
 	owner := ref.Source.Version.OwnerID

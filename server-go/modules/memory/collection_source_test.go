@@ -68,7 +68,7 @@ func TestCollectionEmptyRecallInvalidatedPostgres(t *testing.T) {
 	}
 	check(true)
 	exec(`SAVEPOINT hidden_insert; RESET ROLE;
- INSERT INTO memories(tier,kind,key,content,scope_type,scope_value) VALUES('L2','fact','hidden constraint','hidden contradiction','project','mr04-hidden');
+ INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,valid_from) VALUES('L2','fact','hidden constraint','hidden contradiction','project','mr04-hidden',(CURRENT_TIMESTAMP+interval '1 second')::text);
  SET LOCAL ROLE aimee_store_runtime`)
 	check(true)
 	afterHidden, err := backend.observeRecallCollection(ctx)
@@ -161,6 +161,21 @@ func TestCollectionEmptyRecallInvalidatedPostgres(t *testing.T) {
 		t.Fatal("test changed the cached descendant instead of its ancestor", unchanged, err)
 	}
 
+	// A future constraint can become applicable during the provider-send lease
+	// even when no stored revision or collection counter changes.
+	exec(`RESET ROLE`)
+	exec(`INSERT INTO memories(tier,kind,key,content,scope_type,scope_value,valid_from)
+ VALUES('L2','fact','future deployment constraint','requires review','project','mr04-visible',(CURRENT_TIMESTAMP+interval '2 seconds')::text)`)
+	exec(`SET LOCAL ROLE aimee_store_runtime`)
+	future, err := backend.observeRecallCollection(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Sources = []typedProjectionRef{{Channel: "native_memory_collection", ID: "1", Source: future}}
+	check(true)
+	request.SendGuard = "acquire"
+	check(false)
+
 }
 
 func TestPrivateCollectionEmptyRecallInvalidatedPostgres(t *testing.T) {
@@ -221,5 +236,32 @@ func TestPrivateCollectionEmptyRecallInvalidatedPostgres(t *testing.T) {
 	exec(`RESET ROLE; INSERT INTO user_memories(key,content) VALUES('deployment constraint','Deployment requires review'); SET LOCAL ROLE private_collection_test`)
 	if ok, err := backend.revalidatePersonalSources(ctx, request); err != nil || ok {
 		t.Fatal("new private constraint missed", ok, err)
+	}
+	exec(`RESET ROLE; UPDATE user_memories SET valid_until=CURRENT_TIMESTAMP+interval '2 seconds'; SET LOCAL ROLE private_collection_test`)
+	future, err := backend.observeRecallCollection(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Sources = []typedProjectionRef{{Channel: "native_memory_collection", ID: "1", Source: future}}
+	if ok, err := backend.revalidatePersonalSources(ctx, request); err != nil || !ok {
+		t.Fatal("fresh expiring private collection", ok, err)
+	}
+	request.SendGuard = "acquire"
+	if ok, err := backend.revalidatePersonalSources(ctx, request); err != nil || ok {
+		t.Fatal("private collection outlived expiry during send", ok, err)
+	}
+
+}
+
+func TestCollectionDeadlineSyntax(t *testing.T) {
+	for _, value := range []string{"", "2026-09-25T12:00:00Z", "2026-09-25T12:00:00.123456Z"} {
+		if !validCollectionDeadline(value) {
+			t.Fatal("valid deadline rejected", value)
+		}
+	}
+	for _, value := range []string{"now", "infinity", "2026-09-25", "2026-09-25T12:00:00+01:00", "0000-01-01T00:00:00Z", "2026-99-25T12:00:00Z"} {
+		if validCollectionDeadline(value) {
+			t.Fatal("invalid deadline accepted", value)
+		}
 	}
 }
