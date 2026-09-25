@@ -17796,6 +17796,9 @@ BEGIN
  RETURN ontology_package_migrate(prior_package,dry->>'preview_token');
 END $$;
 
+-- Bounded invocation trace; no payload or excluded-scope identities.
+ALTER TABLE recall_traces ADD COLUMN IF NOT EXISTS candidate_metadata TEXT NOT NULL DEFAULT '{}';
+
 CREATE OR REPLACE FUNCTION recall_trace_prune() RETURNS BIGINT LANGUAGE plpgsql AS $$
 DECLARE n BIGINT:=0; step_n BIGINT:=0; max_rows BIGINT;max_days BIGINT;
 BEGIN

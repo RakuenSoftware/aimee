@@ -873,7 +873,8 @@ CREATE TABLE IF NOT EXISTS recall_traces (
   turn_id TEXT NOT NULL DEFAULT '', query_fingerprint TEXT NOT NULL DEFAULT '',
   scope_kind TEXT NOT NULL DEFAULT 'global', scope_id TEXT NOT NULL DEFAULT '',
   sensitivity TEXT NOT NULL DEFAULT 'normal', persisted INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  candidate_metadata TEXT NOT NULL DEFAULT '{}'
 );
 CREATE TABLE IF NOT EXISTS recall_trace_results (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

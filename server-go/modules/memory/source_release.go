@@ -30,6 +30,8 @@ type sourceReleaseState struct {
 	receiptProducer string
 }
 type sourceReleaseEntry struct {
+	assemblyDigest                               string
+	assemblyMetadata                             json.RawMessage
 	sources                                      json.RawMessage
 	workspace, project, binding, digest, pending string
 	admitted                                     string
@@ -69,13 +71,13 @@ func (s *sourceReleaseState) expire(now time.Time) {
 	for token, receipt := range s.receipts {
 		if !now.Before(receipt.expires) {
 			delete(s.receipts, token)
-			s.receiptBytes -= len(receipt.prepared) + len(receipt.admitted) + len(receipt.observation)
+			s.receiptBytes -= len(receipt.prepared) + len(receipt.admitted) + len(receipt.observation) + len(receipt.started)
 		}
 	}
 	for token, e := range s.entries {
 		if !now.Before(e.expires) {
 			delete(s.entries, token)
-			s.bytes -= len(e.sources)
+			s.bytes -= len(e.sources) + len(e.assemblyMetadata)
 		}
 	}
 }
@@ -155,10 +157,14 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	if err != nil {
 		return "", err
 	}
-	if prior != nil && bytes.Equal(raw, prior.sources) {
+	if prior != nil && bytes.Equal(raw, prior.sources) && prior.assemblyDigest == releaseDigest(assembly) {
 		return previous, nil
 	}
-	if len(s.entries) >= sourceReleaseMaxEntries || s.bytes+len(raw) > sourceReleaseMaxBytes || len(raw) > maxDataBody/2 {
+	metadata, _ := json.Marshal(map[string]any{"packing_dispositions": assembly["packing_dispositions"], "context_accounting": assembly["context_accounting"], "projection_commitment": releaseDigest(assembly)})
+	if len(metadata) > 12000 {
+		metadata, _ = json.Marshal(map[string]any{"projection_commitment": releaseDigest(assembly), "truncated": true, "reason": "assembly_metadata_limit"})
+	}
+	if len(s.entries) >= sourceReleaseMaxEntries || s.bytes+len(metadata)+len(raw) > sourceReleaseMaxBytes || len(raw) > maxDataBody/2 {
 		return "", errors.New("source release capacity")
 	}
 	if s.entries == nil {
@@ -166,8 +172,8 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	}
 	// Assembly is not integrity acceptance. Keep the old handle immutable until
 	// the host either discards this candidate or uses it at the provider fence.
-	s.entries[token] = &sourceReleaseEntry{sources: raw, workspace: workspace, project: project, binding: binding, digest: releaseDigest(unique), previous: previous, expires: now.Add(sourceReleaseTTL)}
-	s.bytes += len(raw)
+	s.entries[token] = &sourceReleaseEntry{assemblyDigest: releaseDigest(assembly), assemblyMetadata: metadata, sources: raw, workspace: workspace, project: project, binding: binding, digest: releaseDigest(unique), previous: previous, expires: now.Add(sourceReleaseTTL)}
+	s.bytes += len(raw) + len(metadata)
 	return token, nil
 }
 
@@ -178,7 +184,7 @@ func (s *sourceReleaseState) drop(token, binding string, ancestors bool) {
 			return
 		}
 		delete(s.entries, token)
-		s.bytes -= len(entry.sources)
+		s.bytes -= len(entry.sources) + len(entry.assemblyMetadata)
 		if !ancestors {
 			return
 		}
@@ -193,6 +199,9 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	ticket := args.stringOr("source_release_ticket", "")
 	entry := s.entries[ticket]
 	operation := args.stringOr("operation", "")
+	if operation == "provider-receipt-started" {
+		return s.receiptStarted(args)
+	}
 	if operation == "provider-receipt-observe" {
 		return s.receiptObservation(args)
 	}

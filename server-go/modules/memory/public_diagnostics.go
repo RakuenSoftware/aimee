@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -98,6 +99,9 @@ func handleDiagnosticCommand(options handlerOptions, invocation bus.ModuleInvoca
 		result["row"] = rows[0]
 	} else {
 		result["rows"] = rows
+		if response.RankingTrace != nil {
+			result["ranking_trace"] = response.RankingTrace
+		}
 		if args.boolean("trace") {
 			attachDiagnosticTrace(options, invocation, args, request.Scope, response.Diagnostics, rows, result)
 		}
@@ -177,9 +181,15 @@ func diagnosticTraceRows(diagnostics []Diagnostic, rows []publicDiagnostic) []ma
 		if kind == "" {
 			kind = "world_fact"
 		}
+		nativeState := "not_captured"
+		for _, step := range p.RankingSteps {
+			if strings.HasPrefix(step.Operation, "native_") {
+				nativeState = "observed"
+			}
+		}
 		results = append(results, map[string]any{
 			"subject_kind": "memory", "subject_id": strconv.FormatInt(m.ID, 10), "lane": "hybrid",
-			"trace_scope": "returned_candidates", "native_score_state": "not_captured",
+			"trace_scope": "returned_candidates", "native_score_state": nativeState,
 			"ranking_policy": p.RankingPolicy, "score_evidence": p.ScoreEvidence, "ranking_steps": p.RankingSteps, "lane_rank": i + 1, "final_rank": i + 1, "scope_decision": "allowed",
 			"semantic_value": p.Semantic, "semantic_weight": 1, "keyword_value": p.Lexical + p.Coverage, "keyword_weight": 1,
 			"graph_value": p.GraphScore, "graph_weight": p.GraphWeight, "temporal_value": p.Temporal, "temporal_weight": 1,
@@ -239,6 +249,20 @@ func attachDiagnosticTrace(options handlerOptions, invocation bus.ModuleInvocati
 		err = tx.QueryRow(ctx, `SELECT recall_trace_record($1,$2,$3,$4,$5,$6,$7::jsonb,$8)::text`,
 			args.stringOr("retrieval_event_id", event), args.stringOr("turn_id", event), fingerprint, scope.Type, scope.Value,
 			args.stringOr("sensitivity", "normal"), string(traceRows), args.boolean("persist_trace")).Scan(&raw)
+	}
+	if err == nil && result["ranking_trace"] != nil {
+		var recorded struct {
+			ID        string `json:"trace_id"`
+			Persisted bool   `json:"persisted"`
+		}
+		if json.Unmarshal([]byte(raw), &recorded) == nil && recorded.Persisted && recorded.ID != "" {
+			metadata, encodeErr := json.Marshal(result["ranking_trace"])
+			if encodeErr != nil || len(metadata) > 256<<10 {
+				err = fmt.Errorf("ranking trace metadata exceeds bound")
+			} else {
+				_, err = tx.Exec(ctx, `UPDATE recall_traces SET candidate_metadata=$2 WHERE trace_id=$1`, recorded.ID, string(metadata))
+			}
+		}
 	}
 	if err == nil {
 		err = tx.Commit(ctx)

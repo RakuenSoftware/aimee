@@ -18,6 +18,15 @@
 #include "module_commands.h"
 #include "aimee_sha256.h"
 #include <aimee/audit/audit_worm.h>
+#include "modules/vault/vault_service.h"
+#include <openssl/evp.h>
+#include <openssl/crypto.h>
+extern vault_status_t vault_service_set_server_wrap(const char *, const char *, const char *,
+                                                    const char *) __attribute__((weak));
+extern vault_status_t vault_service_get_server_wrap(const char *, const char *, const char *,
+                                                    char *, size_t) __attribute__((weak));
+extern vault_status_t vault_service_delete(const char *, const char *, const char *)
+    __attribute__((weak));
 #include <stdbool.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -357,13 +366,19 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
       return 0;
    if ((!body && body_len) || ingress_preinject_revalidate_sources() != 0)
       return -1;
-   char digest[65], count[32];
+   char digest[65], count[32], owner[33];
+   if (audit_worm_dispatch_owner(owner) != 0)
+      return -1;
    if (aimee_sha256_hex(body, body_len, digest) != 0)
       return -1;
    snprintf(count, sizeof(count), "%zu", body_len);
    cJSON *request = cJSON_CreateObject();
    ingress_release_context(request, context);
    cJSON_AddStringToObject(request, "operation", "provider-receipt-plan");
+   cJSON_AddStringToObject(request, "dispatch_owner", owner);
+   const char *retention = getenv("AIMEE_MEMORY_RECEIPT_RETENTION");
+   cJSON_AddStringToObject(request, "receipt_retention",
+                           retention && *retention ? retention : "commitment_only");
    cJSON_AddStringToObject(request, "route", route ? route : "");
    cJSON_AddStringToObject(request, "provider", provider ? provider : "");
    cJSON_AddStringToObject(request, "model", model ? model : "");
@@ -393,16 +408,158 @@ int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const c
    const char *admitted =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "admitted_detail"));
    int rc = -1;
-   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "requires_durable_acceptance")) &&
-       ingress_append_receipt(id, "prepared", at, prepared, context) == 0 &&
-       ingress_append_receipt(id, "dispatch_admitted", at, admitted, context) == 0)
+   int storage_ok = 1;
+   int replay_stored = 0;
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "replay_store")))
    {
-      memcpy(attempt, id, 33);
-      rc = 0;
+      storage_ok = 0;
+      if (id && strlen(id) == 32 && body_len <= 49152 && vault_service_set_server_wrap)
+      {
+         size_t cap = 4 * ((body_len + 2) / 3) + 1;
+         char *encoded = malloc(cap);
+         if (encoded)
+         {
+            int n = EVP_EncodeBlock((unsigned char *)encoded, body, (int)body_len);
+            if (n >= 0 && vault_service_set_server_wrap(context->principal, "memory-receipts", id,
+                                                        encoded) == VAULT_OK)
+               storage_ok = replay_stored = 1;
+            OPENSSL_cleanse(encoded, cap);
+            free(encoded);
+         }
+      }
    }
+   const cJSON *assembly_events = cJSON_GetObjectItemCaseSensitive(plan, "assembly_events");
+   const cJSON *assembly_event = NULL;
+   if (storage_ok)
+      cJSON_ArrayForEach(assembly_event, assembly_events)
+      {
+         const char *stage =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(assembly_event, "stage"));
+         const char *detail =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(assembly_event, "detail"));
+         if (ingress_append_receipt(id, stage, at, detail, context) != 0)
+         {
+            storage_ok = 0;
+            break;
+         }
+      }
+   int prepared_ok = 0;
+   if (storage_ok &&
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "requires_durable_acceptance")))
+   {
+      prepared_ok = ingress_append_receipt(id, "prepared", at, prepared, context) == 0;
+      if (prepared_ok &&
+          ingress_append_receipt(id, "dispatch_admitted", at, admitted, context) == 0)
+      {
+         memcpy(attempt, id, 33);
+         rc = 0;
+      }
+   }
+   if (!prepared_ok && replay_stored && vault_service_delete)
+      (void)vault_service_delete(context->principal, "memory-receipts", id);
    cJSON_Delete(plan);
    if (rc != 0)
       (void)request_context_refuse_assembly("unavailable");
+   return rc;
+}
+
+cJSON *ingress_preinject_receipt_options(const char *request_id, int forget, int include_payload)
+{
+   const request_context_t *context = request_context_get();
+   char owner[33], err[256];
+   long head = 0, checkpoint = 0;
+   if (!context || !context->principal[0] || !request_id || !*request_id ||
+       strlen(request_id) > 256 || audit_worm_dispatch_owner(owner) != 0)
+      return NULL;
+   int verified = audit_worm_verify(err, sizeof err, &head, &checkpoint);
+   if (verified == AUDIT_WORM_VERIFY_RED)
+      return NULL;
+   cJSON *rows = audit_worm_read_request(context->principal, request_id);
+   if (!rows)
+      return NULL;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "provider-receipt-inspect");
+   cJSON_AddStringToObject(request, "receipt_request_id", request_id);
+   cJSON_AddStringToObject(request, "dispatch_owner", owner);
+   cJSON_AddTrueToObject(request, "chain_intact");
+   cJSON_AddStringToObject(request, "checkpoint_state",
+                           verified == AUDIT_WORM_VERIFY_GREEN ? "locally_attested"
+                                                               : "uncheckpointed_tail");
+   cJSON_AddItemToObject(request, "ledger_events", rows);
+   cJSON_AddBoolToObject(request, "forget_replay", forget);
+   cJSON_AddBoolToObject(request, "include_payload", include_payload);
+   cJSON *response = ingress_command(cJSON_Duplicate(request, 1), 0);
+   const cJSON *actions = cJSON_GetObjectItemCaseSensitive(response, "replay_actions");
+   if (cJSON_GetArraySize(actions) > 0)
+   {
+      cJSON *inputs = cJSON_CreateObject(), *deleted = cJSON_CreateObject();
+      const cJSON *action = NULL;
+      size_t total = 0;
+      cJSON_ArrayForEach(action, actions)
+      {
+         const char *id =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(action, "attempt_id"));
+         const char *verb =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(action, "action"));
+         if (!id || strlen(id) != 32 || !verb)
+            continue;
+         if (!strcmp(verb, "delete"))
+         {
+            int ok = vault_service_delete &&
+                     vault_service_delete(context->principal, "memory-receipts", id) == VAULT_OK;
+            cJSON_AddBoolToObject(deleted, id, ok);
+         }
+         else if (!strcmp(verb, "read"))
+         {
+            size_t cap = 4 * ((49152 + 2) / 3) + 1;
+            char *encoded = calloc(1, cap);
+            int ok = encoded && vault_service_get_server_wrap &&
+                     vault_service_get_server_wrap(context->principal, "memory-receipts", id,
+                                                   encoded, cap) == VAULT_OK;
+            size_t n = ok ? strlen(encoded) : 0;
+            if (total + n > 196608)
+               ok = 0;
+            else
+               total += n;
+            cJSON_AddStringToObject(inputs, id, ok ? encoded : "");
+            if (encoded)
+            {
+               OPENSSL_cleanse(encoded, cap);
+               free(encoded);
+            }
+         }
+      }
+      cJSON_AddItemToObject(request, "replay_inputs", inputs);
+      cJSON_AddItemToObject(request, "replay_deleted", deleted);
+      cJSON_Delete(response);
+      return ingress_command(request, 0);
+   }
+   cJSON_Delete(request);
+   return response;
+}
+
+cJSON *ingress_preinject_receipt(const char *request_id)
+{
+   return ingress_preinject_receipt_options(request_id, 0, 0);
+}
+
+int ingress_preinject_started_attempt(const char *attempt)
+{
+   const request_context_t *context = request_context_get();
+   if (!context || !attempt || !*attempt)
+      return -1;
+   cJSON *request = cJSON_CreateObject();
+   ingress_release_context(request, context);
+   cJSON_AddStringToObject(request, "operation", "provider-receipt-started");
+   cJSON_AddStringToObject(request, "attempt_id", attempt);
+   cJSON *plan = ingress_command(request, 0);
+   const char *detail =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "observation_detail"));
+   cJSON *event = detail ? cJSON_Parse(detail) : NULL;
+   const char *at = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "at"));
+   int rc = ingress_append_receipt(attempt, "dispatch_started", at, detail, context);
+   cJSON_Delete(event);
+   cJSON_Delete(plan);
    return rc;
 }
 

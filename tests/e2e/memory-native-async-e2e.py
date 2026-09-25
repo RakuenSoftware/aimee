@@ -326,6 +326,13 @@ def inside(output):
         mismatch = mismatch.get('result', {})
         check('public receipt verification detects changed provider bytes', status == 200 and
               mismatch.get('evidence', {}).get('payload_correspondence') == 'mismatch')
+        status, stored_receipts = api('/v1/memory/receipt', dict(request_id=prepared['binding']['request_id']))
+        own = [row for row in stored_receipts.get('receipts', []) if row.get('attempt_id') == prepared['attempt_id']]
+        check('authenticated receipt lookup reads actual durable acknowledgement', status == 200 and len(own) == 1 and
+              own[0].get('state') == 'acknowledged' and own[0].get('evidence', {}).get('chain_included') is True)
+        check('real provider write has a distinct durable started observation', 'dispatch_started' in own[0]['stages'])
+        check('commitment-only receipt does not invent replay or remote effects', own[0].get('replay') == 'unavailable_commitment_only' and
+              own[0].get('evidence', {}).get('effect_confirmed') is False and own[0].get('evidence', {}).get('decision_replayed') is False)
         before = len(captures)
         result, events = run('inherited zero byte cap', dict(schema_version=1, max_request_bytes=0))
         check('worker preserves inherited byte refusal', result.get('status') == 'failed' and

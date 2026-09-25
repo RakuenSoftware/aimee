@@ -298,6 +298,11 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		entries = append(entries, ingressEntry{"audit", "", "recommended (audit context):\n" + ingressTerminated(request.Audit)})
 		score = max(score, .4)
 	}
+	// Capture the candidate references before the packer mutates typed projections.
+	originalTyped := []typedProjectionRef{}
+	if typed != nil {
+		originalTyped = append(originalTyped, typed.Retained...)
+	}
 	block, omitted, selected, err := ingressRenderBlockSelected(entries, request.Budget, missing, projections)
 	if err != nil {
 		return nil, err
@@ -330,6 +335,47 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		"retained_memories": retainedMemories, "retained_code_indices": retainedCode,
 		"omitted_count": omitted, "headline_missing_count": missing, "folded_count": folded,
 		"folded_saved": saved, "facts_unavailable": factsUnavailable, "typed_unavailable": typedUnavailable}
+	selectedEntry := map[int]bool{}
+	for _, i := range selected {
+		selectedEntry[i] = true
+	}
+	dispositions := []map[string]any{}
+	addDisposition := func(channel, id string, kept bool) {
+		state := "budget_dropped"
+		if kept {
+			state = "assembled"
+		}
+		dispositions = append(dispositions, map[string]any{"channel": channel, "stable_id": id, "disposition": state})
+	}
+	for i, entry := range entries {
+		if memory, ok := memoryEntries[i]; ok {
+			addDisposition("memory", memory.ID, selectedEntry[i])
+			continue
+		}
+		if code, ok := codeEntries[i]; ok {
+			addDisposition("code", fmt.Sprint(code), selectedEntry[i])
+			continue
+		}
+		if i == factEntry && factSources != nil {
+			for _, ref := range factSources.Retained {
+				addDisposition(ref.Channel, ref.ID, selectedEntry[i])
+			}
+			continue
+		}
+		if entry.kind != "typed" {
+			addDisposition(entry.kind, fmt.Sprint(i), selectedEntry[i])
+		}
+	}
+	if typed != nil {
+		kept := map[string]bool{}
+		for _, ref := range typed.Retained {
+			kept[ref.Channel+":"+ref.ID] = true
+		}
+		for _, ref := range originalTyped {
+			addDisposition(ref.Channel, ref.ID, kept[ref.Channel+":"+ref.ID])
+		}
+	}
+	result["packing_dispositions"] = dispositions
 	if memoryProjection != nil {
 		final, err := newPreviewProjection(retainedMemorySources)
 		if err != nil {

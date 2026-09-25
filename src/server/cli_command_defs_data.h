@@ -57,6 +57,7 @@
      "  list             List memories\n"
      "  get              Read a memory by id (--as-of <ts>: was it in force then?)\n"
      "  evidence <id>    Inspect authorized evidence lineage (--json)\n"
+     "  receipt <request-id>  Inspect durable provider attempts (--json)\n"
      "  read             Assemble current memory context\n"},
     {"economizer", "Economizer telemetry", AIMEE_CMD_TIER_ADVANCED, 0,
      "  stats            Gateway-mutation counters, tool-condense savings, avoided-$\n"},

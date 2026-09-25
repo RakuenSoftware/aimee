@@ -1,7 +1,12 @@
 package memory
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"github.com/JBailes/aimee/server-go/bus"
 	"strings"
 	"testing"
 	"time"
@@ -303,5 +308,131 @@ func TestProviderReceiptPressureReclaimsOnlyDurablyConfirmedObservations(t *test
 	args["operation"] = json.RawMessage(`"provider-receipt-observe"`)
 	if expired := sourceReleaseCall(t, s, args); expired["status"] != "error" {
 		t.Fatal("reclaimed entry invented new observation", expired)
+	}
+}
+
+func TestProviderReceiptRecoveryStages(t *testing.T) {
+	for _, stage := range []string{"prepared", "dispatch_admitted", "dispatch_started", "outcome_unknown", "acknowledged"} {
+		t.Run(stage, func(t *testing.T) {
+			state := &sourceReleaseState{}
+			args := receiptTestAdmission(t, state)
+			args["dispatch_owner"], _ = json.Marshal(strings.Repeat("a", 32))
+			plan := sourceReleaseCall(t, state, args)
+			var prepared providerReceiptEvent
+			if json.Unmarshal([]byte(plan["prepared_detail"].(string)), &prepared) != nil {
+				t.Fatal(plan)
+			}
+			rows := []map[string]any{}
+			appendEvent := func(detail string) {
+				var e providerReceiptEvent
+				json.Unmarshal([]byte(detail), &e)
+				rows = append(rows, map[string]any{"sequence": fmt.Sprint(len(rows) + 1), "action": "memory.provider." + e.Stage, "attempt_id": e.AttemptID, "detail": detail, "row_hash": strings.Repeat("f", 64)})
+			}
+			appendEvent(plan["prepared_detail"].(string))
+			if stage != "prepared" {
+				appendEvent(plan["admitted_detail"].(string))
+			}
+			if stage == "dispatch_started" {
+				args["operation"] = json.RawMessage(`"provider-receipt-started"`)
+				args["attempt_id"], _ = json.Marshal(prepared.AttemptID)
+				started := sourceReleaseCall(t, state, args)
+				appendEvent(started["observation_detail"].(string))
+			}
+			if stage == "outcome_unknown" || stage == "acknowledged" {
+				status := -1
+				if stage == "acknowledged" {
+					status = 200
+				}
+				event := providerReceiptEvent{SchemaVersion: 1, Stage: stage, AttemptID: prepared.AttemptID, BindingDigest: prepared.BindingDigest, HTTPStatus: status}
+				raw, _ := json.Marshal(event)
+				appendEvent(string(raw))
+			}
+			inspect := sourceReleaseArgs(map[string]any{"dispatch_owner": strings.Repeat("b", 32), "receipt_request_id": "request", "chain_intact": true, "ledger_events": rows})
+			raw, code := inspectProviderReceipts(inspect)
+			var result map[string]any
+			body, decodeErr := bus.DecodeCommandResult(raw)
+			if decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			json.Unmarshal(body, &result)
+			if code != 0 || result["status"] != "ok" {
+				t.Fatal(string(raw), code)
+			}
+			receipt := result["receipts"].([]any)[0].(map[string]any)
+			want := "outcome_unknown"
+			if stage == "prepared" {
+				want = "prepared_without_dispatch"
+			}
+			if stage == "acknowledged" {
+				want = stage
+			}
+			if receipt["state"] != want || receipt["replay"] != "unavailable_commitment_only" {
+				t.Fatal(receipt)
+			}
+			if stage == "prepared" {
+				inspect["dispatch_owner"], _ = json.Marshal(strings.Repeat("a", 32))
+				raw, _ = inspectProviderReceipts(inspect)
+				if !strings.Contains(string(raw), "prepared_dispatch_owner_active") {
+					t.Fatal(string(raw))
+				}
+			}
+			prepared.Binding.RendererVersion = "changed-renderer"
+			changed, _ := json.Marshal(prepared)
+			rows[0]["detail"] = string(changed)
+			inspect["ledger_events"], _ = json.Marshal(rows)
+			raw, _ = inspectProviderReceipts(inspect)
+			if !strings.Contains(string(raw), `"status":"error"`) {
+				t.Fatal("changed binding accepted", string(raw))
+			}
+		})
+	}
+}
+
+func TestProviderReceiptReplayRetention(t *testing.T) {
+	state := &sourceReleaseState{}
+	args := receiptTestAdmission(t, state)
+	payload := []byte{'a', 0, 'b'}
+	digest := sha256.Sum256(payload)
+	args["dispatch_owner"], _ = json.Marshal(strings.Repeat("a", 32))
+	args["receipt_retention"] = json.RawMessage(`"replayable"`)
+	args["payload_sha256"], _ = json.Marshal(hex.EncodeToString(digest[:]))
+	args["payload_bytes"] = json.RawMessage(`"3"`)
+	plan := sourceReleaseCall(t, state, args)
+	if plan["replay_store"] != true {
+		t.Fatal(plan)
+	}
+	var prepared providerReceiptEvent
+	json.Unmarshal([]byte(plan["prepared_detail"].(string)), &prepared)
+	if _, ok := decodePreparedReceipt([]byte(plan["prepared_detail"].(string))); !ok {
+		t.Fatal("replayable schema refused")
+	}
+	rows := []map[string]any{{"sequence": "1", "action": "memory.provider.prepared", "attempt_id": prepared.AttemptID, "detail": plan["prepared_detail"], "row_hash": strings.Repeat("f", 64)}}
+	inspect := sourceReleaseArgs(map[string]any{"dispatch_owner": strings.Repeat("b", 32), "receipt_request_id": "request", "chain_intact": true, "ledger_events": rows, "include_payload": true, "replay_inputs": map[string]string{prepared.AttemptID: base64.StdEncoding.EncodeToString(payload)}})
+	run := func() map[string]any {
+		raw, _ := inspectProviderReceipts(inspect)
+		body, err := bus.DecodeCommandResult(raw)
+		var result map[string]any
+		if err != nil || json.Unmarshal(body, &result) != nil {
+			t.Fatal(err, string(body))
+		}
+		if result["status"] != "ok" {
+			t.Fatal(result)
+		}
+		return result["receipts"].([]any)[0].(map[string]any)
+	}
+	result := run()
+	if result["replay"] != "available_exact_payload" || result["payload_base64"] != "YQBi" {
+		t.Fatal(result)
+	}
+	inspect["replay_inputs"], _ = json.Marshal(map[string]string{prepared.AttemptID: ""})
+	result = run()
+	if result["replay"] != "unavailable_inputs" || result["evidence"].(map[string]any)["chain_included"] != true {
+		t.Fatal("deletion collapsed replay and inclusion", result)
+	}
+	inspect["forget_replay"] = json.RawMessage(`true`)
+	inspect["replay_deleted"], _ = json.Marshal(map[string]bool{prepared.AttemptID: true})
+	result = run()
+	if result["replay"] != "unavailable_erased" {
+		t.Fatal(result)
 	}
 }

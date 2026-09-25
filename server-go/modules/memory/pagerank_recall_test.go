@@ -199,6 +199,20 @@ func exercisePageRankRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, 
 	if status != bus.ModuleStatusOK || len(got.Diagnostics) != 6 {
 		t.Fatal(got, status)
 	}
+	if got.RankingTrace == nil || len(got.RankingTrace.Candidates) < 6 {
+		t.Fatal("graph candidate trace missing", got)
+	}
+	graphObserved := false
+	for _, candidate := range got.RankingTrace.Candidates {
+		for _, step := range candidate.Steps {
+			if step.Operation == "pagerank" {
+				graphObserved = true
+			}
+		}
+	}
+	if !graphObserved {
+		t.Fatal("actual graph contribution missing", got.RankingTrace)
+	}
 	for _, d := range got.Diagnostics {
 		p := d.Parts
 		if p.RankingPolicy != pageRankRecallPolicy || p.PageRank <= 0 || math.Abs(p.Total-p.RetrievalBase-p.PageRank) > 1e-12 {

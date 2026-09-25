@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"strconv"
 )
 
 // SearchVisible searches the shared KB's current project, workspace, and global
@@ -16,7 +17,7 @@ func (s *postgresDataStore) SearchVisible(ctx context.Context, req DataRequest) 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT `+queryRecordColumns+`
+	rows, err := s.db.Query(ctx, `SELECT `+queryRecordColumns+`,ts_rank_cd(to_tsvector('english',key||' '||content||' '||COALESCE(use_cases,'')),plainto_tsquery('english',$4))
 FROM memories
 WHERE `+currentMemorySQL("")+`
  AND ($1 OR scope_type='global' OR (scope_type='workspace' AND scope_value='_shared')
@@ -37,7 +38,20 @@ ORDER BY CASE WHEN scope_type='project' AND scope_value=$2 THEN 1
 	if err != nil {
 		return nil, err
 	}
-	records, err := scanRecordRows(rows, true)
+	records := []Record{}
+	for rows.Next() {
+		r := Record{observedVersion: &MemoryRecordVersion{SchemaVersion: 1}, currentRead: true}
+		var score float64
+		if err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.observedVersion.OwnerID, &r.observedVersion.RecordRevision, &score); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		r.observedVersion.RecordID = strconv.FormatInt(r.ID, 10)
+		recordNativeRank(ctx, &r, "lexical", len(records)+1, score, "pg_ts_rank_cd_exact_key_scope_priority")
+		records = append(records, r)
+	}
+	err = rows.Err()
+	rows.Close()
 	if err != nil {
 		return nil, err
 	}

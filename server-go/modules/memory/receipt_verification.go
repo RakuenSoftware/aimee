@@ -132,14 +132,31 @@ func decodePreparedReceipt(raw []byte) (*providerReceiptEvent, bool) {
 		return nil, false
 	}
 	_, err = time.Parse(time.RFC3339Nano, event.At)
-	if err != nil || event.SchemaVersion != 1 || event.Stage != "prepared" || event.ResponseRepresentation != "" || event.HTTPStatus != 0 || event.ResponseDigest != "" || event.ResponseBytes != "" || event.Reason != "" ||
+	if err != nil || event.SchemaVersion != 1 || event.Stage != "prepared" || len(event.Projection) != 0 || event.ResponseRepresentation != "" || event.HTTPStatus != 0 || event.ResponseDigest != "" || event.ResponseBytes != "" || event.Reason != "" ||
 		!releaseTokenValid(event.AttemptID) || event.AttemptID != b.AttemptID || !receiptDigestValid(event.BindingDigest) ||
-		b.SchemaVersion != 1 || !releaseTokenValid(b.ProducerID) || !receiptDigestValid(b.RequestBinding) ||
-		b.Retention != "commitment_only" || b.CountProvenance != "host_final_provider_bytes" || b.TokenCount != nil ||
+		(b.SchemaVersion != 1 && b.SchemaVersion != 2) || !releaseTokenValid(b.ProducerID) || !receiptDigestValid(b.RequestBinding) ||
+		(b.Retention != "commitment_only" && b.Retention != "replayable") || b.CountProvenance != "host_final_provider_bytes" || b.TokenCount != nil ||
 		!receiptDigestValid(b.PayloadDigest) || !receiptByteCount(b.PayloadBytes) || !receiptDigestValid(b.SourcesDigest) ||
 		!receiptDigestValid(b.CallerLimitsDigest) || !receiptDigestValid(b.OperatorLimitsDigest) ||
 		len(b.RequestID) > 256 || len(b.TurnID) > 128 || len(b.ProducerBuild) > 128 || len(b.Workspace) > 1024 || len(b.Project) > 1024 || len(b.Provider) > 1024 || len(b.Model) > 1024 ||
 		(b.Route != "openai_chat" && b.Route != "openai_responses" && b.Route != "anthropic_messages") {
+		return nil, false
+	}
+	if b.SchemaVersion == 2 {
+		if !releaseTokenValid(b.DispatchOwner) || b.RendererVersion == "" || len(b.RendererVersion) > 128 || b.PolicyVersion == "" || len(b.PolicyVersion) > 128 || !receiptDigestValid(b.AssemblyDigest) {
+			return nil, false
+		}
+	} else if b.DispatchOwner != "" || b.RendererVersion != "" || b.PolicyVersion != "" || b.AssemblyDigest != "" {
+		return nil, false
+	}
+	if b.Retention == "replayable" {
+		if b.SchemaVersion != 2 {
+			return nil, false
+		}
+		if _, err := time.Parse(time.RFC3339Nano, b.ReplayExpiresAt); err != nil {
+			return nil, false
+		}
+	} else if b.ReplayExpiresAt != "" {
 		return nil, false
 	}
 	return &event, true
@@ -196,5 +213,5 @@ func handleReceiptVerification(_ handlerOptions, invocation bus.ModuleInvocation
 			evidence["payload_correspondence"] = "matched"
 		}
 	}
-	return commandResult(map[string]any{"status": "ok", "schema_version": 1, "verification_scope": "caller_supplied_prepared_commitment", "retention_mode": "commitment_only", "source_coverage": event.Binding.SourceCoverage, "evidence": evidence})
+	return commandResult(map[string]any{"status": "ok", "schema_version": 1, "verification_scope": "caller_supplied_prepared_commitment", "retention_mode": event.Binding.Retention, "source_coverage": event.Binding.SourceCoverage, "evidence": evidence})
 }

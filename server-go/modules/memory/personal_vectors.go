@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 	"strconv"
@@ -235,7 +236,7 @@ func (p *personalVectors) searchWithStore(ctx context.Context, db store.Queryer,
 	if err != nil || after != serving {
 		return nil, errors.New("embedding service changed during recall")
 	}
-	rows, err := db.Query(ctx, `SELECT m.id,m.tier,m.kind,m.key,m.content,m.confidence
+	rows, err := db.Query(ctx, `SELECT m.id,m.tier,m.kind,m.key,m.content,m.confidence,1-(v.embedding <=> $2::vector),(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),m.record_revision::text
 FROM user_memories m JOIN user_memory_vectors v ON v.memory_id=m.id
 WHERE m.lifecycle_state='active' AND (m.valid_until IS NULL OR m.valid_until>now())
 AND v.serving_id=$1 AND v.content_fingerprint=md5(m.key||chr(31)||m.content)
@@ -249,10 +250,13 @@ ORDER BY CASE WHEN vector_dims(v.embedding)=vector_dims($2::vector) THEN v.embed
 	defer rows.Close()
 	var records []Record
 	for rows.Next() {
-		r := Record{Scope: Scope{Type: ScopeUser, Value: "_user"}}
-		if err = rows.Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence); err != nil {
+		var similarity float64
+		r := Record{observedVersion: &MemoryRecordVersion{SchemaVersion: 1}, Scope: Scope{Type: ScopeUser, Value: "_user"}}
+		if err = rows.Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &similarity, &r.observedVersion.OwnerID, &r.observedVersion.RecordRevision); err != nil {
 			return nil, err
 		}
+		r.observedVersion.RecordID = fmt.Sprint(r.ID)
+		recordNativeRank(ctx, &r, "semantic", len(records)+1, similarity, "cosine_similarity")
 		records = append(records, r)
 	}
 	return records, rows.Err()

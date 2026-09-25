@@ -519,3 +519,46 @@ func TestIngressPropagatesTypedOwnerRefusal(t *testing.T) {
 		}
 	}
 }
+
+// Every supplied channel remains visible in packing metadata even when no byte
+// fits. Assembly is not an assertion of provider delivery.
+func TestIngressPackingDispositionsEveryChannel(t *testing.T) {
+	cfg := typedTestOptions(t, `{}`)
+	for _, name := range typedChannelOrder {
+		cfg.Flags[name] = true
+		cfg.Budgets[name] = 4000
+	}
+	cfg.Budgets["total"] = 4096
+	typed := newTypedContext(DataRequest{TypedContext: cfg})
+	for i, name := range typedChannelOrder {
+		typed.add(name, typedItem{id: fmt.Sprint(i + 1), text: "evidence", value: map[string]any{"text": "evidence"}})
+	}
+	if err := typed.finish(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(typed)
+	facts := newFactProjection("fact\n", []typedProjectionRef{{Channel: "facts", ID: "99", Source: &typedSourceVersion{Kind: "semantic_assertion", Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: "00000000-0000-0000-0000-000000000001", RecordID: "99", RecordRevision: "1"}, MemoryParentState: "observed"}}})
+	factRaw, _ := json.Marshal(map[string]any{"status": "ok", "facts": "fact\n", "fact_projection": facts})
+	for _, budget := range []int{0, 32768} {
+		result, err := ingressAssemble(ingressAssemblyRequest{Budget: budget, ContextLimits: &ContextLimits{SchemaVersion: 1, MaxContextBytes: &budget}, TypedContextJSON: string(raw), FactsRequested: true, FactsResponse: factRaw, Code: []ingressCodeHit{{FilePath: "a.go", Snippet: "code"}}, Memories: []ingressMemoryPreview{{ID: "100", Headline: "memory"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]bool{}
+		want := "assembled"
+		if budget == 0 {
+			want = "budget_dropped"
+		}
+		for _, d := range result["packing_dispositions"].([]map[string]any) {
+			seen[d["channel"].(string)] = true
+			if d["disposition"] != want {
+				t.Fatal(budget, d)
+			}
+		}
+		for _, name := range append(append([]string{}, typedChannelOrder...), "facts", "memory", "code") {
+			if !seen[name] {
+				t.Fatal("missing channel", name, result)
+			}
+		}
+	}
+}

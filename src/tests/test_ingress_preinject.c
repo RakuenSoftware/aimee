@@ -15,6 +15,7 @@
 #include <stdatomic.h>
 #include <sqlite3.h>
 #include "aimee_sha256.h"
+#include "vault_service.h"
 #include <aimee/audit/audit_worm.h>
 #include "support/module_runtime_fixture.h"
 
@@ -1401,8 +1402,71 @@ static void test_unversioned_provider_body_receipt(void)
    unlink(path);
    snprintf(path, sizeof(path), "%s/receipt.db-shm", directory);
    unlink(path);
+   snprintf(path, sizeof(path), "%s/receipt.db.dispatch-owner", directory);
+   unlink(path);
    rmdir(directory);
    puts("unversioned host inputs receive durable body receipts with an explicit source gap");
+}
+
+static void test_replayable_provider_receipt(void)
+{
+   char directory[] = "/tmp/aimee-replay-receipt-XXXXXX";
+   assert(mkdtemp(directory));
+   const char *old = getenv("AIMEE_HOME");
+   char *previous_home = old ? strdup(old) : NULL;
+   setenv("AIMEE_HOME", directory, 1);
+   setenv("AIMEE_MEMORY_RECEIPT_RETENTION", "replayable", 1);
+   char path[512];
+   snprintf(path, sizeof path, "%s/receipt.db", directory);
+   assert(audit_worm_init_at(path) == 0);
+   request_context_t context = {0};
+   context.memory_receipt_required = 1;
+   strcpy(context.request_id, "replayable-provider-request");
+   strcpy(context.principal, "uid:1000");
+   request_context_set(&context);
+   const unsigned char body[] = {'a', 0, 'b'};
+   char attempt[33];
+   assert(ingress_preinject_prepare_attempt(body, sizeof body, "openai_chat", "test", "model",
+                                            attempt) == 0);
+   assert(ingress_preinject_started_attempt(attempt) == 0);
+   assert(ingress_preinject_started_attempt(attempt) == 0);
+   assert(audit_worm_count() == 3);
+   cJSON *result = ingress_preinject_receipt_options(context.request_id, 0, 1);
+   cJSON *receipt = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "receipts"), 0);
+   assert(receipt);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "replay")),
+                  "available_exact_payload"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "payload_base64")),
+                  "YQBi"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "state")),
+                  "outcome_unknown"));
+   cJSON_Delete(result);
+   char secret[64];
+   assert(vault_service_get_server_wrap("uid:1001", "memory-receipts", attempt, secret,
+                                        sizeof secret) == VAULT_NO_ENTRY);
+   result = ingress_preinject_receipt_options(context.request_id, 1, 0);
+   receipt = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "receipts"), 0);
+   assert(receipt &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(receipt, "replay")),
+                  "unavailable_erased"));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(receipt, "evidence"), "chain_included")));
+   cJSON_Delete(result);
+   assert(vault_service_get_server_wrap(context.principal, "memory-receipts", attempt, secret,
+                                        sizeof secret) == VAULT_NO_ENTRY);
+   assert(audit_worm_count() == 3);
+   audit_worm_close();
+   request_context_clear();
+   unsetenv("AIMEE_MEMORY_RECEIPT_RETENTION");
+   if (previous_home)
+   {
+      setenv("AIMEE_HOME", previous_home, 1);
+      free(previous_home);
+   }
+   else
+      unsetenv("AIMEE_HOME");
+   puts("encrypted replay roundtrip, principal isolation and payload removal preserve receipt "
+        "inclusion");
 }
 
 static void test_durable_provider_attempt(void)
@@ -1428,10 +1492,10 @@ static void test_durable_provider_attempt(void)
    char attempt[33], next[33];
    assert(ingress_preinject_prepare_attempt(body, sizeof(body), "openai_chat", "test", "model",
                                             attempt) == 0);
-   assert(strlen(attempt) == 32 && audit_worm_count() == 2);
+   assert(strlen(attempt) == 32 && audit_worm_count() == 4);
    long total = 0;
    cJSON *rows = audit_worm_read_page(0, 10, &total);
-   assert(total == 2);
+   assert(total == 4);
    cJSON *prepared = cJSON_Parse(cJSON_GetStringValue(
        cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 1), "detail")));
    cJSON *binding = cJSON_GetObjectItemCaseSensitive(prepared, "binding");
@@ -1445,14 +1509,14 @@ static void test_durable_provider_attempt(void)
    cJSON_Delete(rows);
    assert(ingress_preinject_observe_attempt(attempt, 200, "{}", 2) == 0);
    assert(ingress_preinject_observe_attempt(attempt, 200, "{}", 2) == 0);
-   assert(audit_worm_count() == 3);
+   assert(audit_worm_count() == 5);
    assert(ingress_preinject_observe_attempt(attempt, 200, "changed", 7) != 0);
-   assert(audit_worm_count() == 3);
+   assert(audit_worm_count() == 5);
    assert(ingress_preinject_prepare_attempt("{}", 2, "openai_responses", "test", "model", next) ==
           0);
    assert(strcmp(attempt, next) != 0);
    assert(ingress_preinject_observe_attempt(next, -1, NULL, 0) == 0);
-   assert(audit_worm_count() == 6);
+   assert(audit_worm_count() == 10);
    rows = audit_worm_read_page(0, 1, &total);
    cJSON *event = cJSON_Parse(cJSON_GetStringValue(
        cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 0), "detail")));
@@ -1463,7 +1527,7 @@ static void test_durable_provider_attempt(void)
    assert(ingress_preinject_prepare_attempt("{}", 2, "anthropic_messages", "test", "model", next) ==
           0);
    audit_worm_close();
-   assert(audit_worm_init_at(path) == 0 && audit_worm_count() == 8);
+   assert(audit_worm_init_at(path) == 0 && audit_worm_count() == 14);
    rows = audit_worm_read_page(0, 1, &total);
    assert(strcmp(cJSON_GetStringValue(
                      cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 0), "action")),
@@ -1481,8 +1545,29 @@ static void test_durable_provider_attempt(void)
                        "RAISE(ABORT,'fixture admission unavailable'); END",
                        NULL, NULL, NULL) == SQLITE_OK);
    assert(ingress_preinject_prepare_attempt("{}", 2, "openai_chat", "test", "model", next) != 0);
-   assert(!next[0] && request_context_get()->context_refused && audit_worm_count() == 9);
+   assert(!next[0] && request_context_get()->context_refused && audit_worm_count() == 17);
    sqlite3_close(injection);
+   cJSON *inspection = ingress_preinject_receipt("durable-provider-request");
+   assert(inspection &&
+          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(inspection, "receipts")) == 4);
+   cJSON *last = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(inspection, "receipts"), 3);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(last, "state")),
+                 "prepared_dispatch_owner_active") == 0);
+   cJSON_Delete(inspection);
+   audit_worm_close();
+   assert(audit_worm_init_at(path) == 0);
+   inspection = ingress_preinject_receipt("durable-provider-request");
+   assert(inspection);
+   last = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(inspection, "receipts"), 3);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(last, "state")),
+                 "prepared_without_dispatch") == 0);
+   cJSON_Delete(inspection);
+   strcpy(context.principal, "foreign-receipt-reader");
+   request_context_set(&context);
+   inspection = ingress_preinject_receipt("durable-provider-request");
+   assert(inspection &&
+          cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(inspection, "receipts")) == 0);
+   cJSON_Delete(inspection);
    ingress_preinject_finish_sources();
    request_context_clear();
    g_fact_projection = 0;
@@ -1491,6 +1576,8 @@ static void test_durable_provider_attempt(void)
    snprintf(path, sizeof(path), "%s/receipt.db-wal", directory);
    unlink(path);
    snprintf(path, sizeof(path), "%s/receipt.db-shm", directory);
+   unlink(path);
+   snprintf(path, sizeof(path), "%s/receipt.db.dispatch-owner", directory);
    unlink(path);
    assert(rmdir(directory) == 0);
    puts("provider preparations and admissions survive reopen; timeout and append failure remain "
@@ -1574,6 +1661,7 @@ int main(void)
 {
    test_send_guard_completion_retries();
    test_native_private_source_transport();
+   test_replayable_provider_receipt();
    test_durable_provider_attempt();
    test_unversioned_provider_body_receipt();
    test_source_revalidation_at_provider_fence();

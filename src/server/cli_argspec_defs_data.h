@@ -1021,3 +1021,5 @@
  ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
  ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
  "]}"},
+
+{"memory.receipt", "{\"bool_flags\":[\"replay\"],\"fields\":[{\"json\":\"request_id\",\"from\":\"positional\",\"index\":0,\"required\":true},{\"json\":\"replay\",\"from\":\"flag\",\"flag\":\"replay\",\"type\":\"bool\"}]}"},

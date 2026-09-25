@@ -103,6 +103,9 @@ func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest,
 		if limit <= 0 {
 			limit = req.Limit
 		}
+		for _, r := range result[min(len(result), max(0, limit)):] {
+			captureRankingCandidate(ctx, r, "caller_limit")
+		}
 		result = result[:min(len(result), max(0, limit))]
 		if req.Query != "" {
 			req.lanes.observe(result)

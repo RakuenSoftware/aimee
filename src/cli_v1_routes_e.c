@@ -252,6 +252,33 @@ cJSON *marshal_memory_search(int argc, char **argv)
 
 /* Decode CLI spelling only. Scope authorization and all budget policy remain
  * in the Go owner. Unsupported options must not silently become a dry run. */
+cJSON *marshal_memory_receipt(int argc, char **argv)
+{
+   cJSON *req = marshal_no_args("memory.receipt");
+   for (int i = 0; i < argc; i++)
+   {
+      if (!strcmp(argv[i], "--replay"))
+      {
+         cJSON_AddTrueToObject(req, "replay");
+         continue;
+      }
+      if (!strcmp(argv[i], "--json"))
+         continue;
+      if (argv[i][0] == '-' || cJSON_HasObjectItem(req, "request_id"))
+      {
+         cJSON_Delete(req);
+         return NULL;
+      }
+      cJSON_AddStringToObject(req, "request_id", argv[i]);
+   }
+   if (!cJSON_HasObjectItem(req, "request_id"))
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
+   return req;
+}
+
 cJSON *marshal_memory_validity(int argc, char **argv)
 {
    cJSON *req = marshal_no_args("memory.validity");

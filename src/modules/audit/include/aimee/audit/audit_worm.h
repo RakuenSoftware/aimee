@@ -56,10 +56,10 @@ extern "C"
     * appending another row; reusing it for different evidence fails closed.
     * The event ID is bound into the row hash. This is the shared delivery seam
     * used by the aimee-kb WORM worker. */
-   int audit_worm_append_idempotent(const char *event_id, const char *ts,
-                                    const char *actor_role, const char *actor_principal,
-                                    const char *action, const char *subject, const char *verdict,
-                                    const char *detail, long long *seq_out);
+   int audit_worm_append_idempotent(const char *event_id, const char *ts, const char *actor_role,
+                                    const char *actor_principal, const char *action,
+                                    const char *subject, const char *verdict, const char *detail,
+                                    long long *seq_out);
 
    /* Recompute the whole chain: for every row verify row_hash, prev_hash linkage,
     * and gap-free seq. Returns 0 if intact; -1 on the first break, writing a
@@ -90,8 +90,7 @@ extern "C"
     * existing chain and checkpoint MACs before the process accepts work, reject
     * any RED store, and checkpoint an intact non-empty head so the admitted
     * state is fully attested. Returns 0 only after a GREEN verification. */
-   int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq,
-                                 long *last_ckpt_seq);
+   int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq);
 
    /* Verify a sealed snapshot file (read-only) with the same chain + MAC checks.
     * 0 if intact, -1 on the first break (reason in err). */
@@ -113,6 +112,9 @@ extern "C"
    /* Append a metric.snapshot row (verdict-mix + total over the store), so the
     * metrics history is hash-chained + verifiable. 0 on success, -1 on failure. */
    int audit_worm_metric_snapshot(void);
+
+   int audit_worm_dispatch_owner(char out[33]);
+   struct cJSON *audit_worm_read_request(const char *principal, const char *request_id);
 
    /* Number of rows currently in the store (test/introspection). -1 on error. */
    long audit_worm_count(void);

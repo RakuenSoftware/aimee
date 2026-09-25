@@ -231,22 +231,29 @@ extern void ingress_preinject_release_send_guard(void *) __attribute__((weak));
 static int wire_send_acquire(void *opaque)
 {
    wire_attempt_t *attempt = opaque;
+   const request_context_t *context = request_context_get ? request_context_get() : NULL;
+   if (context && !context->memory_source_release[0])
+      return 0;
    if (!ingress_preinject_acquire_send_guard || !ingress_preinject_release_send_guard)
       return -1;
    return ingress_preinject_acquire_send_guard(&attempt->send_guard_state);
 }
+extern int ingress_preinject_started_attempt(const char *) __attribute__((weak));
 static void wire_send_release(void *opaque, int status)
 {
-   (void)status;
    wire_attempt_t *attempt = opaque;
    if (ingress_preinject_release_send_guard)
       ingress_preinject_release_send_guard(attempt->send_guard_state);
    attempt->send_guard_state = NULL;
+   if (status != -2 && attempt->attempt[0] && ingress_preinject_started_attempt &&
+       ingress_preinject_started_attempt(attempt->attempt) != 0)
+      fputs("provider dispatch observation unavailable; durable admission remains unresolved\n",
+            stderr);
 }
 static int wire_send_guard_required(void)
 {
    const request_context_t *context = request_context_get ? request_context_get() : NULL;
-   return context && context->memory_source_release[0];
+   return context && (context->memory_source_release[0] || context->memory_receipt_required);
 }
 
 static int wire_attempt_before(void *opaque, const void *body, size_t length)

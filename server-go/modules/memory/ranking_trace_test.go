@@ -118,3 +118,47 @@ func BenchmarkRankingTrace(b *testing.B) {
 		})
 	}
 }
+
+func TestRankingCandidateUniverseAndNestedIsolation(t *testing.T) {
+	for n := 0; n < 8; n++ {
+		t.Run(string(rune('a'+n)), func(t *testing.T) {
+			t.Parallel()
+			ctx := withRankingTrace(context.Background())
+			left := []Record{{ID: 1}, {ID: 2}, {ID: 3}}
+			right := []Record{{ID: 4}}
+			recordNativeRank(ctx, &right[0], "semantic", 1, .91, "cosine_similarity")
+			out := fuseRanked(ctx, left, right, 1, "lexical", "semantic")
+			trace := finishRankingCapture(ctx, out)
+			if len(trace.Candidates) != 4 || trace.Truncated || trace.Universe != "bounded_owner_admitted_candidates" {
+				t.Fatal(trace)
+			}
+			selected, dropped := 0, 0
+			for _, c := range trace.Candidates {
+				if c.Disposition == "selected" {
+					selected++
+				}
+				if c.Disposition == "caller_limit" {
+					dropped++
+				}
+				if c.ID == "4" && c.Steps[0].Score != .91 {
+					t.Fatal("lost dense score", c)
+				}
+			}
+			if selected != 1 || dropped != 3 {
+				t.Fatal(trace)
+			}
+			nested := context.WithValue(ctx, rankingCaptureKey{}, newRankingCapture())
+			recordNativeRank(nested, &Record{ID: 999}, "graph", 1, .7, "graph_score")
+			if len(finishRankingCapture(ctx, out).Candidates) != 4 || finishRankingCapture(nested, nil).ID == trace.ID {
+				t.Fatal("nested capture leaked")
+			}
+			for i := 0; i < 300; i++ {
+				captureRankingCandidate(ctx, Record{ID: int64(1000 + i)}, "candidate")
+			}
+			bounded := finishRankingCapture(ctx, out)
+			if !bounded.Truncated || len(bounded.Candidates) != 256 {
+				t.Fatal("unbounded trace")
+			}
+		})
+	}
+}

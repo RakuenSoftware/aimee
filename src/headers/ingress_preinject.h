@@ -33,6 +33,9 @@ void ingress_preinject_finish_sources(void);
  * request did not require a memory receipt; no receipt coverage is implied. */
 int ingress_preinject_prepare_attempt(const void *body, size_t body_len, const char *route,
                                       const char *provider, const char *model, char attempt[33]);
+cJSON *ingress_preinject_receipt_options(const char *request_id, int forget, int include_payload);
+cJSON *ingress_preinject_receipt(const char *request_id);
+int ingress_preinject_started_attempt(const char *attempt);
 int ingress_preinject_observe_attempt(const char *attempt, int http_status, const char *response,
                                       size_t response_len);
 int ingress_preinject_observe_commitment(const char *attempt, int http_status, const char *digest,

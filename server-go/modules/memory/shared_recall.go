@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"time"
@@ -106,7 +107,7 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
  OR (m.scope_type='project' AND m.scope_value=$5) OR (m.scope_type='workspace' AND m.scope_value=$6) END
  AND ($7='' OR m.kind=$7) AND ($8='' OR m.tier=$8)
  AND vector_dims(v.embedding)=vector_dims($10::vector)
- ) SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,c.similarity
+ ) SELECT m.id,m.scope_type,m.scope_value,m.tier,m.kind,m.key,m.content,m.confidence,c.similarity,(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),m.record_revision::text
  FROM candidates c JOIN memories m ON m.id=c.memory_id
  WHERE c.similarity >= $12 ORDER BY CASE
  WHEN $1 THEN 0 WHEN m.scope_type='project' AND m.scope_value=$5 THEN 0
@@ -121,10 +122,13 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 	for rows.Next() {
 		c := semanticCandidate{lanes: laneSemantic}
 		r := &c.record
-		if err := rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &c.score); err != nil {
+		r.observedVersion = &MemoryRecordVersion{SchemaVersion: 1}
+		if err := rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &c.score, &r.observedVersion.OwnerID, &r.observedVersion.RecordRevision); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		r.observedVersion.RecordID = fmt.Sprint(r.ID)
+		recordNativeRank(ctx, r, "semantic", len(whole)+1, c.score, "cosine_similarity_scope_priority")
 		whole = append(whole, c)
 	}
 	err = rows.Err()

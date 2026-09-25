@@ -4,6 +4,7 @@
 #include "server_state_internal.h"
 #include "aimee.h"
 #include "server.h"
+#include "ingress_preinject.h"
 #include "dashboard.h"
 #include "lsp.h"
 #include "platform_path.h"
@@ -83,4 +84,24 @@ int handle_evidence_fidelity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!resp)
       return server_send_error(conn, "knowledge service audit fidelity failed", NULL);
    return send_and_free(conn, resp);
+}
+
+/* Authenticated transport only; receipt interpretation stays in Go. */
+int handle_memory_receipt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *id = jo_str(req, "request_id", "");
+   cJSON *response = ingress_preinject_receipt_options(
+       id, 0, cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "replay")));
+   return response ? send_and_free(conn, response)
+                   : server_send_error(
+                         conn, "receipt ledger unavailable for this authenticated request", NULL);
+}
+
+int handle_memory_receipt_forget(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *response = ingress_preinject_receipt_options(jo_str(req, "request_id", ""), 1, 0);
+   return response ? send_and_free(conn, response)
+                   : server_send_error(conn, "receipt payload removal unavailable", NULL);
 }

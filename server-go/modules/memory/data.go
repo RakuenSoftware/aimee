@@ -249,6 +249,7 @@ type DataResponse struct {
 	Relations          []Relation           `json:"relations,omitempty"`
 	EntityProfile      *EntityProfile       `json:"entity_profile,omitempty"`
 	Payload            json.RawMessage      `json:"payload,omitempty"`
+	RankingTrace       *rankingCapture      `json:"ranking_trace,omitempty"`
 	Diagnostics        []Diagnostic         `json:"diagnostics,omitempty"`
 	Answer             *AnswerResult        `json:"answer,omitempty"`
 	Code               *int                 `json:"code,omitempty"`
@@ -745,7 +746,7 @@ func (s *postgresDataStore) Search(ctx context.Context, scope Scope, query, kind
 		err  error
 	)
 	if s.placement == PlacementServer {
-		rows, err = s.db.Query(ctx, `SELECT id, tier, kind, key, content, confidence
+		rows, err = s.db.Query(ctx, `SELECT id, tier, kind, key, content, confidence,(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),record_revision::text,ts_rank_cd(to_tsvector('english',key||' '||content),plainto_tsquery('english',$5))
 FROM user_memories
 WHERE lifecycle_state = 'active'
   AND (valid_until IS NULL OR valid_until > now())
@@ -756,7 +757,7 @@ ORDER BY (lower(key)=lower($5)) DESC,
   ts_rank_cd(to_tsvector('english', key || ' ' || content), plainto_tsquery('english', $5)) DESC,
   updated_at DESC, id DESC LIMIT $4`, pattern, kind, tier, limit, query)
 	} else {
-		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+`
+		rows, err = s.db.Query(ctx, `SELECT `+queryRecordColumns+`,ts_rank_cd(to_tsvector('english',key||' '||content||' '||COALESCE(use_cases,'')),plainto_tsquery('english',$7))
 FROM memories
 WHERE `+currentMemorySQL("")+` AND scope_type = $1 AND scope_value = $2
   AND ($7 = '' OR key ILIKE $3 OR content ILIKE $3 OR use_cases ILIKE $3
@@ -776,19 +777,23 @@ ORDER BY (lower(key)=lower($7)) DESC,
 	records := make([]Record, 0)
 	for rows.Next() {
 		var r Record
+		var nativeScore float64
+		r.observedVersion = &MemoryRecordVersion{SchemaVersion: 1}
 		if s.placement == PlacementServer {
 			r.Scope = scope
-			err = rows.Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
+			err = rows.Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence, &r.observedVersion.OwnerID, &r.observedVersion.RecordRevision, &nativeScore)
 		} else {
 			r.observedVersion = &MemoryRecordVersion{SchemaVersion: 1}
 			r.currentRead = true
 			err = rows.Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind,
-				&r.Key, &r.Content, &r.Confidence, &r.observedVersion.OwnerID, &r.observedVersion.RecordRevision)
+				&r.Key, &r.Content, &r.Confidence, &r.observedVersion.OwnerID, &r.observedVersion.RecordRevision, &nativeScore)
 			r.observedVersion.RecordID = strconv.FormatInt(r.ID, 10)
 		}
 		if err != nil {
 			return nil, err
 		}
+		r.observedVersion.RecordID = strconv.FormatInt(r.ID, 10)
+		recordNativeRank(ctx, &r, "lexical", len(records)+1, nativeScore, "pg_ts_rank_cd_exact_key_scope_priority")
 		records = append(records, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -2970,7 +2975,11 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			}
 			response.Block = &block
 		case "diagnose":
-			ctx = context.WithValue(ctx, rankingTraceKey{}, !request.IngressPreview)
+			if request.IngressPreview {
+				ctx = context.WithValue(ctx, rankingTraceKey{}, false)
+			} else {
+				ctx = context.WithValue(context.WithValue(ctx, rankingTraceKey{}, true), rankingCaptureKey{}, newRankingCapture())
+			}
 			if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
 				var records []Record
 				records, err = backend.SearchVisible(ctx, request)
@@ -2980,6 +2989,11 @@ set_config('aimee.memory_believed_at',$14,true)`,
 			} else {
 				response.Diagnostics, err = retrieval.Diagnose(ctx, scope, request.Query, request.Limit)
 			}
+			var selected []Record
+			for _, d := range response.Diagnostics {
+				selected = append(selected, d.Memory)
+			}
+			response.RankingTrace = finishRankingCapture(ctx, selected)
 		case "explain":
 			if request.ID <= 0 {
 				return nil, bus.ModuleStatusInvalidRequest

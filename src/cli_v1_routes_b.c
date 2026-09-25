@@ -1474,6 +1474,7 @@ static const struct
     {"memory.delete", marshal_memory_delete},
     {"memory.supersede", marshal_memory_supersede},
     {"memory.validity", marshal_memory_validity},
+    {"memory.receipt", marshal_memory_receipt},
     {"memory.hygiene", marshal_memory_hygiene},
     {"memory.get", marshal_memory_get},
     {"memory.evidence", marshal_memory_evidence},

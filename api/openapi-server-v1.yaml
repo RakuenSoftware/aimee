@@ -3600,6 +3600,50 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /memory/receipt/forget:
+    post:
+      summary: Remove the authenticated principal's encrypted replay payloads for a request
+      description: Requires memory write authority. Preserves the durable receipt and its chain inclusion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id]
+              properties:
+                request_id: { type: string, minLength: 1, maxLength: 256 }
+      responses:
+        "200":
+          description: Removal status for each attempt, including explicit pending failures
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/receipt:
+    post:
+      summary: Inspect the authenticated principal's durable provider attempt receipts
+      description: >-
+        Returns bounded complete attempt stages from the local WORM ledger.
+        Distinguishes resolved preparation without dispatch, active ownership,
+        admitted uncertainty and acknowledged transport. Commitment-only receipts
+        cannot reconstruct payloads. Ledger inclusion, local checkpoint status,
+        source availability and external effect confirmation are independent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id]
+              properties:
+                request_id: { type: string, minLength: 1, maxLength: 256 }
+                replay: { type: boolean, default: false, description: Return available matching retained payload bytes as base64. }
+      responses:
+        "200":
+          description: Receipt stages or an explicit unavailable response
+          content:
+            application/json:
+              schema: { type: object }
   /memory/validity:
     post:
       summary: Inspect the serving eligibility decision for one memory

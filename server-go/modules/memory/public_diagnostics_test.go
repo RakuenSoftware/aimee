@@ -97,8 +97,16 @@ func exerciseDiagnosticReplay(t *testing.T, ctx context.Context, tx pgx.Tx, hand
 		t.Fatal(err)
 	}
 	var decoded map[string]float64
-	if err := json.Unmarshal([]byte(features), &decoded); err != nil || decoded["ranking_trace_schema"] != 1 || decoded["stage.0.candidate_order.candidate_order.rank"] != 1 {
+	if err := json.Unmarshal([]byte(features), &decoded); err != nil || decoded["ranking_trace_schema"] != 1 || decoded["stage.1.candidate_order.candidate_order.rank"] != 1 || decoded["stage.0.native_pg_ts_rank_cd_exact_key_scope_priority.lexical.rank"] != 1 || decoded["stage.0.native_pg_ts_rank_cd_exact_key_scope_priority.score"] <= 0 {
 		t.Fatal("durable trace omitted observed rank", features, err)
+	}
+	var metadata string
+	if err := tx.QueryRow(ctx, `SELECT candidate_metadata FROM recall_traces WHERE retrieval_event_id='runtime-diagnostic' AND scope_id='runtime-project-b'`).Scan(&metadata); err != nil {
+		t.Fatal(err)
+	}
+	var capture rankingCapture
+	if json.Unmarshal([]byte(metadata), &capture) != nil || len(capture.Candidates) != 1 || capture.Candidates[0].Version == nil || capture.Candidates[0].Disposition != "selected" {
+		t.Fatal("lost durable candidate metadata", metadata)
 	}
 	var count int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM recall_traces t JOIN recall_trace_results r USING(trace_id) WHERE t.retrieval_event_id='runtime-diagnostic' AND t.scope_id='runtime-project-b' AND r.epistemic_kind='world_fact'`).Scan(&count); err != nil || count != 1 {

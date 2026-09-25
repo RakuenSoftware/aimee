@@ -126,6 +126,29 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 	if status != bus.ModuleStatusOK || len(got.Records) != 1 || got.Records[0].ID != ids["visible"] {
 		t.Fatal("semantic-only recall failed or leaked hidden/stale rows", got, status)
 	}
+	request.Operation = "diagnose"
+	traced, tracedStatus := call()
+	if tracedStatus != bus.ModuleStatusOK || traced.RankingTrace == nil || len(traced.RankingTrace.Candidates) != 1 {
+		t.Fatal("dense diagnostic trace", traced, tracedStatus)
+	}
+	candidate := traced.RankingTrace.Candidates[0]
+	native, fused := false, false
+	for _, step := range candidate.Steps {
+		if step.Operation == "native_cosine_similarity_scope_priority" && math.Abs(step.Score-1) < 1e-9 {
+			native = true
+		}
+		if step.Operation == "rrf60" {
+			for _, c := range step.Contributions {
+				if c.Arm == "semantic_parent" && c.Rank == 1 {
+					fused = true
+				}
+			}
+		}
+	}
+	if !native || !fused || candidate.Version == nil || candidate.Disposition != "selected" {
+		t.Fatal("dense contribution or source version unavailable", candidate)
+	}
+	request.Operation = "search"
 	// Multiple retrieval lanes share one request policy generation. The next
 	// request must still observe a changed policy rather than a process cache.
 	originalSettings := backend.settings

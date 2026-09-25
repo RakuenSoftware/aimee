@@ -2081,12 +2081,13 @@
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
       "symbols": [
+        "AIMEE_MEMORY_RECEIPT_RETENTION",
         "kb_client_memory_assemble_typed_context_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "e0edf04aea1d75007139e8aacda8601bcf8999afafad7223032aff5947982b44"
+      "sha256": "e9f72f3e7345873776effb5da24bdc3eeb995cb6c6b4ef410ddf22ce0ef76b21"
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2133,7 +2134,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "db11992919e07bf4c1a4f1570ac6f3b7a95ceb007b5cad3f5316c18940302b02"
+      "sha256": "36f64cefe9a6107a97632708e2ca09009d2dc0a7b43c21f397f607a3d50e61f4"
     },
     "src/server/server_facts.c": {
       "disposition": "host-transport",
@@ -2154,7 +2155,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "7dbaa5f68e46ce731c0662c012b8240f356bfd8994c8ec7441bdb634b6a0db46"
+      "sha256": "d87470778e7d1ea7e374a07d65df78e784ee522840246077d94b0689a987f2e9"
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2340,12 +2341,13 @@
     "src/tests/test_ingress_preinject.c": {
       "disposition": "host-fixture",
       "symbols": [
+        "AIMEE_MEMORY_RECEIPT_RETENTION",
         "kb_client_memory_assemble_typed_context_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "a55830897893937601dbe7b1eac9801fb122f75a65001a9bc669fbb485f28ed5"
+      "sha256": "bc0d39ed8f1cfc5ff97c88e89053fe548ec3d76a99f5f9eee3705cf8ed74ec53"
     },
     "src/tests/test_ir_module_plan.c": {
       "disposition": "host-fixture",
@@ -2582,11 +2584,11 @@
       "symbols": [
         "db2_memory_find_facts_like"
       ],
-      "sha256": "0c6a02a785a297c1b7b4ccc63f8b3831cecc824e80722e9d64f67dcc69d06073",
+      "sha256": "921d232c510d9a842cd5dbc103d3230df1003b4d944683407b2444f98b62430f",
       "inputs": {
         "src/gen_schema.py": "675dae349ead41e0984c5716ce9d8a11e7f46f081e0bed5b547bd2c14c9e041e",
-        "src/modules/db2/c/schema.sql": "34713d803868e695b0a657a9a689b681cb39e3e1f7cbca48f1b3f77aef7bd066",
-        "src/modules/db2/c/schema_sqlite.sql": "6db71d20667392b8a6158830d756381bc756df61b67ac6459497acc77119708d"
+        "src/modules/db2/c/schema.sql": "2e41c9debe9d3d242cdf4b7d1d359444dc216328f420366e8a1f41f1ff52e4a7",
+        "src/modules/db2/c/schema_sqlite.sql": "cd4b1b97539e8b6a9a5e59f79b4b5e4da2a3898a51c31953467303fff42cbdef"
       }
     },
     "src/server/openapi_server_data.h": {
@@ -2594,10 +2596,10 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "cd167abe7a121d37fe2bb5558cd102fcf2133cf914943bb41fb602d8b7f37018",
+      "sha256": "327aaf3c43de688b4ae2b8d1c502ef7a17908f9a499555b959220bc94259cda9",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "7d43157efa2591f731c9b50158d66dcb7bd70d941fd8e01fad6aa8999e55adee"
+        "api/openapi-server-v1.yaml": "997442a7408f159fb4c73083d36d98390b44a2914718160b3e13db72630826c6"
       }
     }
   }

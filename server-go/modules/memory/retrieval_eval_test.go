@@ -118,7 +118,8 @@ VALUES($1,'global','_global',$2,$3,$4,$5,0.8)`, id, fixture.Tier, fixture.Kind, 
 			t.Fatal(err)
 		}
 	}
-	_, err = tx.Exec(ctx, `CREATE TEMP TABLE user_memories (id bigint PRIMARY KEY,scope_type text,scope_value text,tier text,kind text,key text,content text,confidence double precision,lifecycle_state text,updated_at timestamptz DEFAULT now(),valid_until timestamptz) ON COMMIT DROP;
+	_, err = tx.Exec(ctx, `CREATE TEMP TABLE user_memory_collection_generation(id int PRIMARY KEY,owner_id uuid); INSERT INTO user_memory_collection_generation VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE user_memories (id bigint PRIMARY KEY,record_revision bigint NOT NULL DEFAULT 1,scope_type text,scope_value text,tier text,kind text,key text,content text,confidence double precision,lifecycle_state text,updated_at timestamptz DEFAULT now(),valid_until timestamptz) ON COMMIT DROP;
 INSERT INTO user_memories(id,scope_type,scope_value,tier,kind,key,content,confidence,lifecycle_state) SELECT id,scope_type,scope_value,tier,kind,key,content,confidence,lifecycle_state FROM memories`)
 	if err != nil {
 		t.Fatal(err)

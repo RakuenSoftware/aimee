@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <signal.h>
 
 #include <aimee/audit/audit_worm.h>
 #include "cJSON.h"
@@ -486,10 +488,54 @@ static void test_cross_engine_vector(void)
    printf("  test_cross_engine_vector: ok\n");
 }
 
+static void test_dispatch_owner_crash(void)
+{
+   char path[512];
+   snprintf(path, sizeof path, "%s/dispatch-crash.db", g_dir);
+   audit_worm_close();
+   int channel[2];
+   assert(pipe(channel) == 0);
+   pid_t child = fork();
+   assert(child >= 0);
+   if (child == 0)
+   {
+      close(channel[0]);
+      char owner[33];
+      assert(audit_worm_init_at(path) == 0);
+      assert(audit_worm_dispatch_owner(owner) == 0);
+      assert(audit_worm_append("host", "alice", "memory.provider.prepared", "attempt", "record",
+                               "{\"binding\":{\"request_id\":\"crash-request\"}}") == 0);
+      assert(write(channel[1], owner, 33) == 33);
+      for (;;)
+         pause();
+   }
+   close(channel[1]);
+   char prior[33], current[33];
+   assert(read(channel[0], prior, 33) == 33);
+   close(channel[0]);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_dispatch_owner(current) != 0);
+   assert(kill(child, SIGKILL) == 0);
+   int status;
+   assert(waitpid(child, &status, 0) == child && WIFSIGNALED(status));
+   assert(audit_worm_dispatch_owner(current) == 0 && strcmp(prior, current) != 0);
+   cJSON *rows = audit_worm_read_request("alice", "crash-request");
+   assert(rows && cJSON_GetArraySize(rows) == 1);
+   cJSON_Delete(rows);
+   rows = audit_worm_read_request("bob", "crash-request");
+   assert(rows && cJSON_GetArraySize(rows) == 0);
+   cJSON_Delete(rows);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   audit_worm_close();
+   puts("  test_dispatch_owner_crash: exclusive ownership and durable principal-filtered read "
+        "survive SIGKILL");
+}
+
 int main(void)
 {
    mk_tmpdir();
    assert(atexit(rm_tmpdir) == 0);
+   test_dispatch_owner_crash();
    test_cross_engine_vector();
    test_metric_snapshot();
    test_detail_capped();
