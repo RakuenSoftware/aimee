@@ -661,17 +661,9 @@ def typed_source_version_gate(kb, check):
               uncertified.get('context_sufficiency') == 'unknown')
         execution_requirements = dict(unrelated, task_revision=key+'-recovery:1',
                                       recovery_budget=dict(recovery_budget, max_elapsed_ms=2000))
-        code, executed = call(dict(evidence_requirements=execution_requirements, execute_recovery=True))
-        execution = executed.get('evidence_recovery', {}).get('execution', {})
-        check('MR-05 authenticated host executes one bounded canonical recovery round', code == 200 and
-              execution.get('rounds') == 1 and execution.get('new_items') == 0 and
-              execution.get('cost_microunits') == 0 and execution.get('attempts') and
-              executed.get('context_sufficiency') == 'insufficient')
-        code, duplicate = call(dict(evidence_requirements=execution_requirements, execute_recovery=True))
-        execution = duplicate.get('evidence_recovery', {}).get('execution', {})
-        check('MR-05 durable duplicate attempt cannot reset the recovery budget', code == 200 and
-              execution.get('state') == 'duplicate_blocked' and execution.get('rounds') == 0 and
-              execution.get('new_items') == 0 and all(a.get('state') == 'duplicate_blocked' for a in execution.get('attempts', [])))
+        code, unadmitted = call(dict(evidence_requirements=execution_requirements, execute_recovery=True))
+        check('MR-05 a service bearer alone cannot admit recovery work', code in (400, 403) and
+              not unadmitted.get('evidence_recovery', {}).get('execution'))
         code, unknown = call(dict(evidence_requirements=dict(requirements, query_mode='timeline')))
         check('Unsupported evidence query mode remains unknown', code == 200 and unknown.get('context_sufficiency') == 'unknown')
         code, hidden_coverage = call(dict(evidence_requirements=requirements, project=key+'-hidden'))
@@ -1058,6 +1050,23 @@ with tempfile.TemporaryDirectory() as directory:
             raise RuntimeError('authenticated review action transport returned HTTP ' + str(status))
         return result
     try:
+        recovery_requirements = dict(schema_version=1, task_revision=scope+'-recovery:1',
+            query_mode='current_state', obligations=[dict(subject=scope+'-missing', relation='uses')],
+            recovery_budget=dict(max_rounds=1, max_new_items=1, max_tokens=256,
+                                 max_elapsed_ms=2000, max_cost_microunits=0))
+        recovery_request = dict(query=scope, enable_observations=False, enable_approved_procedures=False,
+                                evidence_requirements=recovery_requirements, execute_recovery=True)
+        executed = action('assemble_typed_context', recovery_request)
+        execution = executed.get('evidence_recovery', {}).get('execution', {})
+        check('MR-05 authenticated host executes one bounded canonical recovery round',
+              execution.get('rounds') == 1 and execution.get('new_items') == 0 and
+              execution.get('cost_microunits') == 0 and bool(execution.get('attempts')) and
+              executed.get('context_sufficiency') == 'insufficient')
+        duplicate = action('assemble_typed_context', recovery_request)
+        execution = duplicate.get('evidence_recovery', {}).get('execution', {})
+        check('MR-05 durable duplicate attempt cannot reset the recovery budget',
+              execution.get('state') == 'duplicate_blocked' and execution.get('rounds') == 0 and
+              execution.get('new_items') == 0 and all(a.get('state') == 'duplicate_blocked' for a in execution.get('attempts', [])))
         created = action('store', dict(key='review-original', content='verified original',
             authority='user', tier='L2', confidence=0.95))
         check('review fixture has verified user authorship', created.get('status') == 'ok' and
