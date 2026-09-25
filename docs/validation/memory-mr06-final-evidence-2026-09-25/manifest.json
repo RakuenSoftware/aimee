@@ -1,0 +1,24 @@
+{
+  "application_commit": "50874e508",
+  "test_followup_commit": "d7071204d",
+  "harness_commits": {
+    "T2": "50874e508",
+    "T3": "bbc95e548"
+  },
+  "image": "sha256:28c8009bdcaca6193577ee435cd77a1a2f602ca4e5e9bd67b2193d18c47556f2",
+  "process_exits": {
+    "T2": 0,
+    "T3": 0
+  },
+  "passed_process_checks": {
+    "T2": 1224,
+    "T3": 680
+  },
+  "repository_checks": 77,
+  "shared_schema": 44,
+  "private_schema": 37,
+  "acceptance_inventory_sha256": "e1df9571cb91222e78e276e17410e89ff8f04a9506b82a409fba0f450d175e2d",
+  "production_release": "0.4.5",
+  "race_seconds": 450.711,
+  "export_seconds": 5.253
+}

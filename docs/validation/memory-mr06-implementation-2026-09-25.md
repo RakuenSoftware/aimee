@@ -1,6 +1,6 @@
 # MR-06 implementation contract — 2026-09-25
 
-Validation and completion are recorded separately in the MR-06 closeout.
+MR-06 is complete; see the [closeout and evidence](memory-mr06-closeout-2026-09-25.md).
 
 ## Ranking and packing
 

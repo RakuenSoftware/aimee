@@ -1,0 +1,10 @@
+{
+  "exit": 0,
+  "transport": "explicit test-container UDS",
+  "result": {
+    "complete": true,
+    "receipts": [],
+    "replay_actions": [],
+    "request_id": "mr06-unknown-request"
+  }
+}

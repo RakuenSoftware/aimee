@@ -18,7 +18,7 @@ or replace the C bus.
 | 1. G0 language/ownership cutover | Pure Go shared memory owner and module-side bus transport; native implementations and dead console retired; original file/API and external-owner ledger | [Closeout evidence](memory-reliability-g0-closeout.md). Go/PostgreSQL race, actual C-bus placements/restart, native transport, HTTP and P1 isolation pass. [Fresh `.253` release evidence](../../validation/memory-g0-2026-09-19.md) records T1/T2/T3, 0.4.1 upgrade/rollback, exploratory concurrency/int64/failure recovery and tested-revision CI. Whole-DB2 retirement is deferred. |
 | 2. Retrieval compatibility | Versioned whole-record/unit/temporal semantic recall, opt-in Go PageRank, independent-arm RRF with per-arm deduplication | [Compatibility decisions](memory-reliability-retrieval-compatibility.md) are recorded; the [paired quality/latency run](../../validation/memory-g0-2026-09-19.md) is recorded. [Performance follow-up](../../validation/memory-performance-2026-09-20.md) records reduced overhead and unchanged Go rankings. Extend the frozen corpus to the full adversarial matrix. |
 | 3. Evaluation and release evidence | Shared injected Go module; isolated corpus/dataset/QA/support/miss runners; scoped runtime-role and transport regressions; complete owner/evaluator race suite added to required packaged-DB2 CI | Initial frozen 105-case input and manifest-bound corpus baselines/per-case receipts are implemented; live CLI/Server benchmarks share the Go owner and refuse partial results; fresh-image paired quality/performance and bounded CLI/MCP/HTTP restart/failure coverage are [recorded](../../validation/memory-g0-2026-09-19.md). The complete MR-18 adversarial/cross-surface matrix remains. |
-| 4. MR-01–18 | MR-01 through MR-05 complete; 5 of 18 proposals | [MR-01 final closeout](../../validation/memory-mr01-closeout-2026-09-24.md). [MR-02 final closeout](../../validation/memory-mr02-closeout-2026-09-24.md). [MR-03 final closeout](../../validation/memory-mr03-closeout-2026-09-24.md). [MR-04 final closeout](../../validation/memory-mr04-closeout-2026-09-25.md). [MR-05 final closeout](../../validation/memory-mr05-closeout-2026-09-25.md). MR-06–18 remain pending. |
+| 4. MR-01–18 | MR-01 through MR-06 complete; 6 of 18 proposals | [MR-01 final closeout](../../validation/memory-mr01-closeout-2026-09-24.md). [MR-02 final closeout](../../validation/memory-mr02-closeout-2026-09-24.md). [MR-03 final closeout](../../validation/memory-mr03-closeout-2026-09-24.md). [MR-04 final closeout](../../validation/memory-mr04-closeout-2026-09-25.md). [MR-05 final closeout](../../validation/memory-mr05-closeout-2026-09-25.md). [MR-06 final closeout](../../validation/memory-mr06-closeout-2026-09-25.md). MR-07–18 remain pending. |
 
 The [MR-02 closeout checklist](memory-reliability-02-closeout.md) records its eight
 unchanged acceptance gates and completed validation.
@@ -30,8 +30,8 @@ unchanged acceptance gates and completed verification.
 
 Completion of all MR-01–18 implementation and acceptance work is the active goal.
 Execution is sequential by proposal, as requested on 2026-09-24: complete MR-01,
-then MR-02, continuing numerically through MR-18. MR-01 through MR-05 are now complete
-(5 of 18); MR-06 is next and has not been started. Previously implemented work for later proposals is retained, but new
+then MR-02, continuing numerically through MR-18. MR-01 through MR-06 are now complete
+(6 of 18); MR-07 is next and has not been started. Previously implemented work for later proposals is retained, but new
 work on those proposals waits for the preceding proposal's closeout. Integration
 work required to satisfy the active proposal and its validation remains in scope.
 The [MR-01 closeout checklist](memory-reliability-01-closeout.md) maps its seven
@@ -696,3 +696,11 @@ export passes; fresh deployment validation remains pending.
 prevents '%' and '_' in a canonical key from admitting unrelated predecessors.
 The public PostgreSQL race regression and export pass; combined fresh validation
 with the read-observation repair is pending.
+
+### MR-06 final acceptance — 2026-09-25
+
+[MR-06 closeout](../../validation/memory-mr06-closeout-2026-09-25.md) supersedes the
+historical partial-slice status above. Actual bounded candidate traces, complete
+channel packing dispositions, owned durable receipt inspection and encrypted
+replay retention pass the eight frozen clauses. Fresh CT109 T2/T3 processes pass;
+production remains released 0.4.5. MR-01 through MR-06 are complete (6 of 18).

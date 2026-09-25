@@ -1,0 +1,19 @@
+{
+  "application_commit": "50874e508",
+  "test_followup_commit": "d7071204d",
+  "recovery_harness_commit": "bbc95e548",
+  "initial_failures": {
+    "memory_race": "Minimal private retrieval corpus lacked the owner/revision tables now observed by ranking capture; dense assertion used semantic instead of the actual semantic_parent fusion arm. Fixed without changing corpus labels.",
+    "lint": "Replay test used a literal /tmp directory. Fixed to honor TMPDIR and remove its owned directory.",
+    "T3": "Native refresh recovery could accept a read before the terminating Go owner had exited; its next worker refused unavailable. Recovery harness now waits for old process exit before proving the replacement can serve the committed identity."
+  },
+  "cli_probe": "An unknown-request lookup during deliberate owner suspension returned unavailable. After recovery the explicit UDS CLI lookup returned complete with an empty receipt list.",
+  "evidence_limits": {
+    "ranking_universe": "bounded owner-admitted candidates; SQL-excluded hidden records are not enumerated",
+    "source_family": "not_assessed when retrieval supplies no claim-specific lineage projection",
+    "replay": "exact encrypted final payload, not recomputation of ranking",
+    "expiry": "one-hour replay access; lazy ciphertext deletion on lookup, or explicit forget",
+    "provider_effects": "HTTP acknowledgement does not certify remote effects",
+    "external_checkpoint": "not compared by this implementation"
+  }
+}

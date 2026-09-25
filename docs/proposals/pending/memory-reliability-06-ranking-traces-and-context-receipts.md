@@ -1,6 +1,6 @@
 # MR-06: Actual ranking traces, context receipts and evidence states
 
-- **State:** In progress; observed diagnostic ranking steps and corrected ingress evidence
+- **State:** Complete — implementation and acceptance validated 2026-09-25
 - **Priority:** P0 for receipt correctness; P1 for complete diagnostics
 - **Owner:** Go memory traces, with host/provider dispatch and audit receipts
 - **Depends on:** [MR-03](memory-reliability-03-final-payload-context-budgets.md); joins [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) and [MR-05](memory-reliability-05-context-sufficiency-and-bounded-recovery.md) outputs
@@ -109,3 +109,10 @@ Support two explicit retention modes. `commitment_only` allows verification agai
 Add trace fields compatibly, then switch final-selection events and governed preparation by surface. Cap candidate metadata and measure overhead. Preserve required durable receipts on rollback; disable optional detailed diagnostics separately.
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
+
+## Final acceptance — 2026-09-25
+
+All eight acceptance clauses are validated in the
+[MR-06 closeout and evidence](../../validation/memory-mr06-closeout-2026-09-25.md).
+Earlier slice notes above preserve their historical scope. The final closeout
+records the completed work and explicit unavailable-evidence/retention bounds.
