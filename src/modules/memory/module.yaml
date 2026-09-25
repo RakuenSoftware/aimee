@@ -300,6 +300,7 @@
     "server-go/modules/memory/evidence_coverage_test.go",
     "server-go/modules/memory/evidence_lineage_test.go",
     "server-go/modules/memory/evidence_lineage_store_test.go",
+    "server-go/modules/memory/erasure_lineage_test.go",
     "server-go/modules/memory/utility_horizon_test.go",
     "server-go/modules/memory/typed_context_test.go",
     "server-go/modules/memory/typed_source_version_test.go",

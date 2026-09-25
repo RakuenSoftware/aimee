@@ -200,3 +200,40 @@ The temporal-boundary complete rerun passed: memory race suite 257.407 seconds
 and the exported-owner build check passed. Module ownership, source/test
 registration, documentation and proposal-link checks passed. Raw results are
 retained in `collection-time-full-race-export.txt`.
+
+## Erasure and restoration checkpoint
+
+The subject eraser previously deleted one source and left its child and
+grandchild. A real PostgreSQL regression reproduces that count of one. Shared
+erasure now follows declared memory, cognification, episode-card and registry
+inputs through cycles, with a 10,000-node refusal bound. The privacy definer
+freezes canonical producer writes during traversal. It also removes linked
+artifact payloads, copied relation text, affected profiles, session tasks and
+learning evidence. Unrelated memories survive; retries return the first count.
+
+Private subject erasure now includes memories bound by session or verified
+author, their retained revisions, and the existing session cache graph. The
+append-only DB1 migration 36 records payload/session digests independently of
+restorable content. Shared schema 37 similarly retains scoped payload digests
+and erased identities. Restore guards reject erased identities and renamed
+snapshot payloads. Shared migration replay removes restored rows before reader
+readiness. Explicit user deletion arms the same intent capture for its one
+statement, restoring the transaction marker afterward; retention and compaction
+do not implicitly acquire explicit-erasure semantics.
+
+Newly declared dependencies cannot attach to erased inputs. A private producer
+with a pre-erasure repeatable-read snapshot is refused with SQLSTATE 40001 by
+the locked epoch, and a different connection replays the durable erasure result.
+Control tables remain inaccessible to runtime writers, including after hardened
+grant reapplication. Audit/control records contain hashes rather than erased
+payloads. This does not certify external exports, every unregistered legacy
+producer, or all cross-store coordinator crash boundaries.
+
+Validation: the updated schema applied atomically to the disposable shared
+store. The complete memory race suite passed in 227.234 seconds and exported
+owner build in 5.042 seconds; the complete private-store family race suite
+passed in 2.063 seconds. Focused restricted-role shared erasure/restore tests
+passed in 1.146 seconds. Schema parity, migration ordering, duplicate-table,
+module ownership and source/test registration checks passed. Production CT100
+server, database and embedder remain released 0.4.5 and healthy at 47 hours; the
+paired CLI reports HTTP 200. Fresh candidate process validation remains pending.

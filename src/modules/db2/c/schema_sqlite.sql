@@ -929,3 +929,15 @@ CREATE TABLE IF NOT EXISTS memory_correction_proposals (
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  UNIQUE(owner_id,target_id,target_revision,payload_digest)
 );
+
+-- Erasure control metadata mirrors the PostgreSQL storage owner. The SQLite
+-- shim is not a production erasure coordinator.
+CREATE TABLE IF NOT EXISTS memory_erasure_epoch (
+ id INTEGER PRIMARY KEY CHECK(id=1), generation INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO memory_erasure_epoch(id) VALUES(1);
+CREATE TABLE IF NOT EXISTS memory_erasure_intents (
+ memory_id INTEGER PRIMARY KEY, scope_type TEXT NOT NULL, scope_value TEXT NOT NULL,
+ payload_digest TEXT NOT NULL, erased_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS memory_erasure_payload_idx ON memory_erasure_intents(scope_type,scope_value,payload_digest);

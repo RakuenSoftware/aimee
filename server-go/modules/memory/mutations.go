@@ -199,7 +199,19 @@ func (s *postgresDataStore) DeleteAs(ctx context.Context, id int64, authority in
 	var query string
 	switch authority {
 	case AuthorityUser:
-		query = `DELETE FROM memories WHERE id=$1`
+		// The storage owner captures a payload-free intent in the same statement.
+		// Restore the request marker before audit/other mutations use this Tx.
+		err = s.db.QueryRow(ctx, `WITH previous AS MATERIALIZED (
+ SELECT COALESCE(current_setting('aimee.memory_explicit_erasure',true),'') AS value
+), armed AS MATERIALIZED (
+ SELECT set_config('aimee.memory_explicit_erasure','1',true) FROM previous
+), removed AS (
+ DELETE FROM memories USING armed WHERE memories.id=$1 RETURNING memories.id
+), reset AS MATERIALIZED (
+ SELECT set_config('aimee.memory_explicit_erasure',previous.value,true) FROM previous
+ WHERE (SELECT count(*) FROM removed)>=0
+) SELECT EXISTS(SELECT 1 FROM removed) FROM reset`, id).Scan(&changed)
+		return changed, err
 	case AuthorityModel:
 		var epistemic, origin string
 		if err := s.db.QueryRow(ctx, `SELECT epistemic_kind,provenance_category FROM memories WHERE id=$1 AND lifecycle_state='active' FOR UPDATE`, id).Scan(&epistemic, &origin); err != nil {

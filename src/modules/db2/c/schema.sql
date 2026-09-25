@@ -7704,11 +7704,47 @@ BEGIN
 
   SELECT COALESCE(array_agg(value),'{}'::TEXT[]) INTO v_sessions
     FROM jsonb_array_elements_text(p_session_ids);
+  -- Freeze canonical writers before traversing; late queued producers also
+  -- encounter the durable dependency guard after these locks are released.
+  LOCK TABLE memories,memory_lineage,memory_units,derived_memory_dependencies,
+    artifacts,artifact_citations IN SHARE ROW EXCLUSIVE MODE;
+  UPDATE memory_erasure_epoch SET generation=generation+1 WHERE id=1;
   SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_memories FROM memories
     WHERE owner_principal=p_subject OR source_session=ANY(v_sessions);
   SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_documents FROM kb_documents
     WHERE owner_principal=p_subject;
-  v_memory_count := cardinality(v_memories);
+  -- Follow declared derivation, never generic related links. UNION terminates
+  -- cycles. Exhausting the bound aborts the transaction instead of certifying
+  -- a partially erased subject. The privacy definer sees every required scope.
+  WITH RECURSIVE edges(child,parent) AS MATERIALIZED (
+    SELECT object_id,substring(source_ref FROM 8)::bigint FROM memory_lineage
+      WHERE object_type='memory' AND source_kind='memory' AND source_ref ~ '^memory:-?[0-9]+$'
+    UNION
+    SELECT object_id,(source_ref::jsonb->>'record_id')::bigint FROM memory_lineage
+      WHERE object_type='memory' AND source_kind='memory-cognify-input-v1'
+    UNION
+    SELECT u.memory_id,(input->>'record_id')::bigint FROM memory_units u
+      JOIN memory_lineage l ON l.object_type='memory_unit' AND l.object_id=u.id
+      CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN l.source_kind='episode-card-input-v1'
+        THEN l.source_ref::jsonb->'inputs' ELSE '[]'::jsonb END) input
+      WHERE u.is_episode_card=1 AND l.source_kind='episode-card-input-v1'
+    UNION
+    SELECT derived_memory_id::bigint,input_id::bigint FROM derived_memory_dependencies
+      WHERE derived_kind IN ('memory','cognified_memory','episode_card') AND input_kind='memory'
+  ), closure(id) AS (
+    SELECT unnest(v_memories)
+    UNION SELECT e.child FROM edges e JOIN closure c ON e.parent=c.id
+  ) SELECT COALESCE(array_agg(id),'{}'::bigint[]) INTO v_memories
+    FROM (SELECT id FROM closure LIMIT 10001) bounded;
+  IF cardinality(v_memories)>10000 THEN
+    RAISE EXCEPTION 'subject erasure dependency closure exceeds bound';
+  END IF;
+  INSERT INTO memory_erasure_intents(memory_id,scope_type,scope_value,payload_digest)
+    SELECT id,scope_type,scope_value,encode(sha256(convert_to(content,'UTF8')),'hex')
+    FROM memories WHERE id=ANY(v_memories) ON CONFLICT(memory_id) DO NOTHING;
+  -- Only retained payloads contribute to the reported deletion count.
+  SELECT count(*) INTO v_memory_count FROM memories WHERE id=ANY(v_memories);
+
   v_document_count := cardinality(v_documents);
 
   SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_units
@@ -7748,6 +7784,24 @@ BEGIN
   DELETE FROM prospective_memories WHERE source_session=ANY(v_sessions);
   DELETE FROM epistemic_directives WHERE source_session=ANY(v_sessions);
   DELETE FROM learning_signals WHERE source_session=ANY(v_sessions);
+  DELETE FROM tasks WHERE session_id=ANY(v_sessions);
+  DELETE FROM learning_proposals WHERE target_memory_id=ANY(v_memories);
+  DELETE FROM learning_signals WHERE target_memory_id=ANY(v_memories);
+  DELETE FROM learning_observations WHERE observation_id IN (
+    SELECT e.observation_id FROM learning_observation_evidence e
+      JOIN interaction_event_embeddings i ON i.source_event_id=e.source_event_id
+      WHERE i.session_id=ANY(v_sessions));
+  DELETE FROM interaction_event_embeddings WHERE session_id=ANY(v_sessions);
+  -- FK-backed units, summaries, episodes, history and embedding versions cascade.
+  -- Copied relations and profiles can instead belong to a different root.
+  DELETE FROM entity_profiles WHERE entity_id IN (
+    SELECT entity FROM memory_entities WHERE memory_id=ANY(v_memories));
+  DELETE FROM memory_relations WHERE id IN (
+    SELECT object_id FROM memory_lineage WHERE object_type='relation'
+      AND source_kind IN ('memory-relation-input-v1','memory-relation-input-v2')
+      AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)));
+  DELETE FROM artifacts WHERE payload->>'memory_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id))
+    OR payload->>'session_id'=ANY(v_sessions);
   DELETE FROM memories WHERE id=ANY(v_memories);
 
   DELETE FROM artifacts a WHERE EXISTS (
@@ -18784,6 +18838,134 @@ DROP TRIGGER IF EXISTS memory_send_truncate_guard ON memory_scopes;
 CREATE TRIGGER memory_send_truncate_guard BEFORE TRUNCATE ON memory_scopes FOR EACH STATEMENT EXECUTE FUNCTION memory_send_mutation_guard();
 -- END memory send guards
 
+-- BEGIN memory erasure intents
+-- Control metadata is independent of content snapshots. No payload or raw
+-- principal is retained. Content restoration must retain this table and run the
+-- replay below before readers start; runtime roles cannot clear the intent log.
+CREATE TABLE IF NOT EXISTS memory_erasure_epoch (
+ id INTEGER PRIMARY KEY CHECK(id=1), generation BIGINT NOT NULL DEFAULT 0
+);
+INSERT INTO memory_erasure_epoch(id) VALUES(1) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS memory_erasure_intents (
+ memory_id BIGINT PRIMARY KEY,
+ scope_type TEXT NOT NULL,
+ scope_value TEXT NOT NULL,
+ payload_digest TEXT NOT NULL CHECK(payload_digest ~ '^[0-9a-f]{64}$'),
+ erased_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS memory_erasure_payload_idx
+ ON memory_erasure_intents(scope_type,scope_value,payload_digest);
+
+CREATE OR REPLACE FUNCTION memory_erasure_restore_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE prohibited BOOLEAN; observed BIGINT;
+BEGIN
+ EXECUTE format('SELECT generation FROM %I.memory_erasure_epoch WHERE id=1 FOR SHARE',TG_TABLE_SCHEMA) INTO STRICT observed;
+ EXECUTE format('SELECT EXISTS(SELECT 1 FROM %I.memory_erasure_intents
+ WHERE memory_id=$1 OR (scope_type=$2 AND scope_value=$3 AND payload_digest=$4))',TG_TABLE_SCHEMA)
+ INTO prohibited USING NEW.id,NEW.scope_type,NEW.scope_value,
+   encode(sha256(convert_to(NEW.content,'UTF8')),'hex');
+ IF prohibited THEN RAISE EXCEPTION 'memory restoration prohibited by surviving erasure intent'
+   USING ERRCODE='23514'; END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON memory_erasure_intents,memory_erasure_epoch FROM PUBLIC;
+REVOKE ALL ON FUNCTION memory_erasure_restore_guard() FROM PUBLIC;
+DO $memory_erasure_acl$
+DECLARE recipient RECORD; role_name TEXT;
+BEGIN
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class relation,
+   LATERAL aclexplode(relation.relacl) acl
+   WHERE relation.oid IN ('memory_erasure_intents'::regclass,'memory_erasure_epoch'::regclass) AND acl.grantee<>relation.relowner
+ LOOP
+  role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+  EXECUTE format('REVOKE ALL ON memory_erasure_intents,memory_erasure_epoch FROM %s',role_name);
+ END LOOP;
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_proc routine,
+   LATERAL aclexplode(routine.proacl) acl
+   WHERE routine.oid='memory_erasure_restore_guard()'::regprocedure AND acl.grantee<>routine.proowner
+ LOOP
+  role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+  EXECUTE format('REVOKE ALL ON FUNCTION memory_erasure_restore_guard() FROM %s',role_name);
+ END LOOP;
+END $memory_erasure_acl$;
+DROP TRIGGER IF EXISTS memory_erasure_restore_guard ON memories;
+CREATE TRIGGER memory_erasure_restore_guard BEFORE INSERT OR UPDATE ON memories
+ FOR EACH ROW EXECUTE FUNCTION memory_erasure_restore_guard();
+-- A producer that was offline during erasure cannot later attach a new copy to
+-- a deleted input. This is a storage integrity fence, not freshness inference.
+CREATE OR REPLACE FUNCTION memory_erasure_dependency_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE parents TEXT[]:='{}'::text[]; prohibited BOOLEAN; observed BIGINT;
+BEGIN
+ EXECUTE format('SELECT generation FROM %I.memory_erasure_epoch WHERE id=1 FOR SHARE',TG_TABLE_SCHEMA) INTO STRICT observed;
+ IF TG_TABLE_NAME='memory_lineage' THEN
+  IF NEW.source_kind='memory' AND NEW.source_ref LIKE 'memory:%' THEN
+   parents:=ARRAY[substring(NEW.source_ref FROM 8)];
+  ELSIF NEW.source_kind IN ('memory-cognify-input-v1','memory-relation-input-v1','memory-relation-input-v2') THEN
+   parents:=ARRAY[NEW.source_ref::jsonb->>'record_id'];
+  ELSIF NEW.source_kind='episode-card-input-v1' THEN
+   SELECT COALESCE(array_agg(x->>'record_id'),'{}'::text[]) INTO parents
+     FROM jsonb_array_elements(NEW.source_ref::jsonb->'inputs') x;
+  END IF;
+ ELSIF TG_TABLE_NAME='derived_memory_dependencies' THEN
+  IF NEW.input_kind='memory' THEN parents:=ARRAY[NEW.input_id]; END IF;
+ ELSIF TG_TABLE_NAME='artifact_citations' THEN
+  IF NEW.source_kind='memory' THEN parents:=ARRAY[NEW.source_id]; END IF;
+ ELSIF TG_TABLE_NAME='artifacts' THEN
+  parents:=ARRAY[NEW.payload->>'memory_id'];
+ END IF;
+ IF cardinality(parents)=0 THEN RETURN NEW; END IF;
+ EXECUTE format('SELECT EXISTS(SELECT 1 FROM %I.memory_erasure_intents WHERE memory_id::text=ANY($1))',TG_TABLE_SCHEMA)
+ INTO prohibited USING parents;
+ IF prohibited THEN RAISE EXCEPTION 'derived input prohibited by surviving erasure intent'
+   USING ERRCODE='23514'; END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION memory_erasure_dependency_guard() FROM PUBLIC;
+-- Go arms this marker only around an admitted explicit user deletion. Retention
+-- and compaction keep their existing semantics and do not silently mint erasure.
+CREATE OR REPLACE FUNCTION memory_explicit_erasure_capture() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF current_setting('aimee.memory_explicit_erasure',true) IS DISTINCT FROM '1' THEN RETURN OLD; END IF;
+ EXECUTE format('UPDATE %I.memory_erasure_epoch SET generation=generation+1 WHERE id=1',TG_TABLE_SCHEMA);
+ EXECUTE format('INSERT INTO %I.memory_erasure_intents(memory_id,scope_type,scope_value,payload_digest)
+ VALUES($1,$2,$3,$4) ON CONFLICT(memory_id) DO NOTHING',TG_TABLE_SCHEMA)
+ USING OLD.id,OLD.scope_type,OLD.scope_value,encode(sha256(convert_to(OLD.content,'UTF8')),'hex');
+ RETURN OLD;
+END $$;
+REVOKE ALL ON FUNCTION memory_explicit_erasure_capture() FROM PUBLIC;
+DROP TRIGGER IF EXISTS memory_explicit_erasure_capture ON memories;
+CREATE TRIGGER memory_explicit_erasure_capture BEFORE DELETE ON memories
+ FOR EACH ROW EXECUTE FUNCTION memory_explicit_erasure_capture();
+
+DO $erasure_dependency_triggers$
+DECLARE target TEXT; recipient RECORD; role_name TEXT;
+BEGIN
+ FOREACH target IN ARRAY ARRAY['memory_lineage','derived_memory_dependencies','artifact_citations','artifacts'] LOOP
+  EXECUTE format('DROP TRIGGER IF EXISTS memory_erasure_dependency_guard ON %I',target);
+  EXECUTE format('CREATE TRIGGER memory_erasure_dependency_guard BEFORE INSERT OR UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION memory_erasure_dependency_guard()',target);
+ END LOOP;
+ FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_proc routine,
+   LATERAL aclexplode(routine.proacl) acl
+   WHERE routine.oid IN ('memory_erasure_dependency_guard()'::regprocedure,'memory_explicit_erasure_capture()'::regprocedure) AND acl.grantee<>routine.proowner
+ LOOP
+  role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
+  EXECUTE format('REVOKE ALL ON FUNCTION memory_erasure_dependency_guard(),memory_explicit_erasure_capture() FROM %s',role_name);
+ END LOOP;
+END $erasure_dependency_triggers$;
+
+-- Replay after a content-only restore, before recording reader readiness.
+UPDATE memory_erasure_epoch SET generation=generation+1 WHERE id=1;
+DELETE FROM memories m USING memory_erasure_intents i
+ WHERE m.id=i.memory_id OR (m.scope_type=i.scope_type AND m.scope_value=i.scope_value
+ AND encode(sha256(convert_to(m.content,'UTF8')),'hex')=i.payload_digest);
+DELETE FROM artifacts a WHERE a.payload->>'memory_id' IN (SELECT memory_id::text FROM memory_erasure_intents)
+ OR EXISTS(SELECT 1 FROM artifact_citations c JOIN memory_erasure_intents i
+ ON c.source_kind='memory' AND c.source_id=i.memory_id::text WHERE c.artifact_id=a.id);
+-- END memory erasure intents
+
 -- Schema build metadata (recorded LAST, after every object above, so its presence
 -- at the current values proves a complete, current migration). A HARDENED-tier
 -- runtime kb connects as a non-owner role that CANNOT apply DDL; it reads these to
@@ -18806,5 +18988,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '36')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '37')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

@@ -54,6 +54,9 @@ DB2_SHIM_ONLY_LEXICAL_INDEX_TABLES = {
 # DB1-local user/session/runtime tables. These belong only in the DB1 schema;
 # the DB2 schemas (sqlite shim and postgres) must not create them.
 DB1_ONLY_TABLES = {
+    "user_memory_erasure_epoch",
+    "user_memory_erasure_intents",
+    "user_memory_erasure_sessions",
     # pki_certs and pki_mtls_ramp were created lazily by pki_store.c with
     # CREATE TABLE IF NOT EXISTS and never appeared in a schema file, so this
     # check could not see them. The Go store declares them, so it can.

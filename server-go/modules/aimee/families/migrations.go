@@ -107,6 +107,7 @@ var schemaHistory = []struct {
 	{33, "schema_personal_memory_creation_retries.sql"},
 	{34, "schema_personal_memory_send_guards.sql"},
 	{35, "schema_personal_memory_send_guard_completion.sql"},
+	{36, "schema_personal_memory_erasure.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

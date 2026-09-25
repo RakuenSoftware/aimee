@@ -235,7 +235,27 @@ const (
 	// no reference to the immutable audit/WORM families.
 	serverSessionEraseSubjectSQL = `WITH subject_sessions AS MATERIALIZED (
 	                                    SELECT id FROM server_sessions WHERE principal=$1
-	                                  ), subject_delegations AS MATERIALIZED (
+	                                  ), subject_memories AS MATERIALIZED (
+                                        SELECT id,content FROM user_memories
+                                         WHERE author_principal=$1 OR source_session IN (SELECT id FROM subject_sessions)
+                                           OR id IN (SELECT memory_id FROM user_memory_versions
+                                             WHERE record->>'author_principal'=$1 OR record->>'source_session' IN (SELECT id FROM subject_sessions))
+                                         FOR UPDATE
+                                      ), memory_intents AS (
+                                        INSERT INTO user_memory_erasure_intents(memory_id,payload_digest)
+                                        SELECT id,encode(sha256(convert_to(content,'UTF8')),'hex') FROM subject_memories
+                                        UNION SELECT memory_id,encode(sha256(convert_to(record->>'content','UTF8')),'hex')
+                                          FROM user_memory_versions WHERE memory_id IN (SELECT id FROM subject_memories)
+                                        ON CONFLICT DO NOTHING RETURNING 1
+                                      ), session_intents AS (
+                                        INSERT INTO user_memory_erasure_sessions(session_digest)
+                                        SELECT encode(sha256(convert_to(id,'UTF8')),'hex') FROM subject_sessions
+                                        ON CONFLICT DO NOTHING RETURNING 1
+                                      ), d_private_memories AS (
+                                        DELETE FROM user_memories WHERE id IN (SELECT id FROM subject_memories)
+                                          AND (SELECT count(*) FROM memory_intents)>=0
+                                          AND (SELECT count(*) FROM session_intents)>=0
+                                      ), subject_delegations AS MATERIALIZED (
 	                                    SELECT delegation_id FROM delegation_spawns
 	                                     WHERE session_id IN (SELECT id FROM subject_sessions)
 	                                  ),
@@ -607,6 +627,14 @@ func serverSessionEraseSubject(ctx context.Context, q store.Queryer, f []string)
 		return 0, nil, err
 	}
 
+	// Freeze canonical inputs before the statement snapshot captures every
+	// retained revision; concurrent writers must not add a missed old version.
+	if _, err := q.Exec(ctx, `LOCK TABLE user_memories IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return 0, nil, err
+	}
+	if _, err := q.Exec(ctx, `UPDATE user_memory_erasure_epoch SET generation=generation+1 WHERE id=1`); err != nil {
+		return 0, nil, err
+	}
 	tag, err := q.Exec(ctx, serverSessionEraseSubjectSQL, principal)
 	if err != nil {
 		return 0, nil, err
