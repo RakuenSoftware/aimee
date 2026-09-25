@@ -5,6 +5,8 @@
  * calls migrate to the generated DB2 client. */
 
 #include "kb_service_backend.h"
+#include "kb_service.h"
+#include "module_commands.h"
 
 #include "aimee.h"
 
@@ -28,53 +30,69 @@
 #include "modules/db2/c/tool_registry.h"
 #include "trace_analysis.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <time.h>
 
+/* Serving and rendering belong to Go. Keep the exact owner JSON, including
+ * integer identities, and never fall back to unfiltered storage on refusal. */
+static cJSON *kbs_rule_view(const char *operation, int limit, const char *path)
+{
+   cJSON *args = cJSON_CreateObject(), *reply = NULL;
+   cJSON *context = kb_service_command_context();
+   if (!args || !context)
+   {
+      cJSON_Delete(args);
+      cJSON_Delete(context);
+      return NULL;
+   }
+   cJSON_AddStringToObject(args, "operation", operation);
+   cJSON_AddNumberToObject(args, "limit", limit);
+   if (path)
+      cJSON_AddStringToObject(args, "path", path);
+   int rc = aimee_module_commands_dispatch_internal_context_timeout("memory.runtime", args, context,
+                                                                    60000, &reply);
+   cJSON_Delete(context);
+   cJSON_Delete(args);
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "status"));
+   const char *raw = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "json"));
+   cJSON *result = NULL;
+   if (rc == 1 && status && !strcmp(status, "ok") && raw && strlen(raw) <= 1048576)
+   {
+      cJSON *parsed = cJSON_ParseWithOpts(raw, NULL, 1);
+      const char *owner_status =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parsed, "status"));
+      int valid = 0;
+      if (cJSON_IsObject(parsed) && owner_status && !strcmp(owner_status, "error"))
+         valid = 1;
+      else if (cJSON_IsObject(parsed) && owner_status && !strcmp(owner_status, "ok"))
+      {
+         if (!strcmp(operation, "rules-list"))
+            valid = cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(parsed, "rules"));
+         else if (!strcmp(operation, "rules-generate"))
+            valid = cJSON_IsString(cJSON_GetObjectItemCaseSensitive(parsed, "content"));
+         else if (!strcmp(operation, "rules-export"))
+         {
+            cJSON *count = cJSON_GetObjectItemCaseSensitive(parsed, "count");
+            valid = cJSON_IsNumber(count) && isfinite(count->valuedouble) &&
+                    count->valuedouble >= 0 && trunc(count->valuedouble) == count->valuedouble;
+         }
+      }
+      if (valid)
+         result = cJSON_CreateRaw(raw);
+      cJSON_Delete(parsed);
+   }
+   cJSON_Delete(reply);
+   return result;
+}
+
 cJSON *db2_kb_service_rules_list_json(int max_rules)
 {
-   if (max_rules < 1)
+   if (max_rules < 1 || max_rules > 1024)
       return NULL;
-   cJSON *resp = cJSON_CreateObject();
-   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "rules") : NULL;
-   if (!resp || !arr)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-
-   rule_t *rows = calloc((size_t)max_rules, sizeof(*rows));
-   if (!rows)
-   {
-      cJSON_Delete(resp);
-      return NULL;
-   }
-   int n = db2_rules_list(rows, max_rules);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *obj = cJSON_CreateObject();
-      if (!obj)
-      {
-         free(rows);
-         cJSON_Delete(resp);
-         return NULL;
-      }
-      cJSON_AddNumberToObject(obj, "id", rows[i].id);
-      cJSON_AddStringToObject(obj, "polarity", rows[i].polarity);
-      cJSON_AddStringToObject(obj, "title", rows[i].title);
-      cJSON_AddStringToObject(obj, "description", rows[i].description);
-      cJSON_AddNumberToObject(obj, "weight", rows[i].weight);
-      cJSON_AddStringToObject(obj, "domain", rows[i].domain);
-      cJSON_AddStringToObject(obj, "created_at", rows[i].created_at);
-      cJSON_AddStringToObject(obj, "updated_at", rows[i].updated_at);
-      cJSON_AddStringToObject(obj, "tier", db2_rules_tier(rows[i].weight));
-      cJSON_AddItemToArray(arr, obj);
-   }
-   free(rows);
-   return resp;
+   return kbs_rule_view("rules-list", max_rules, NULL);
 }
 
 /* Snapshot the full tool_registry table.  Used by aimee-server to
@@ -132,25 +150,7 @@ cJSON *db2_kb_service_tool_registry_lookup_json(const char *name)
 
 cJSON *db2_kb_service_rules_export_jsonl_json(const char *path)
 {
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   if (!path || !path[0])
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "missing path");
-      return resp;
-   }
-   int rc = db2_rules_export_jsonl(path);
-   if (rc < 0)
-   {
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "rules export failed");
-      return resp;
-   }
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddNumberToObject(resp, "count", rc);
-   return resp;
+   return kbs_rule_view("rules-export", 128, path ? path : "");
 }
 
 cJSON *db2_kb_service_rules_insert_json(const char *polarity, const char *title,
@@ -173,14 +173,7 @@ cJSON *db2_kb_service_rules_insert_json(const char *polarity, const char *title,
 
 cJSON *db2_kb_service_rules_generate_json(void)
 {
-   cJSON *resp = cJSON_CreateObject();
-   if (!resp)
-      return NULL;
-   char *markdown = db2_rules_generate();
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "content", markdown ? markdown : "");
-   free(markdown);
-   return resp;
+   return kbs_rule_view("rules-generate", 128, NULL);
 }
 
 cJSON *db2_kb_service_collab_rules_propose_json(const char *text, const char *reason,

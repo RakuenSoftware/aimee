@@ -410,6 +410,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-kb-client-search \
                $(TESTPREFIX)/unit-test-mcp-memory-answer \
                $(TESTPREFIX)/unit-test-agent-memory-transport \
+               $(TESTPREFIX)/unit-test-kb-rules-transport \
                $(TESTPREFIX)/unit-test-session-memory-transport \
                $(TESTPREFIX)/unit-test-mcp-directive-transport \
                $(TESTPREFIX)/unit-test-kb-client-memory \
@@ -7949,4 +7950,7 @@ $(TESTPREFIX)/unit-test-agent-memory-transport: $(OBJDIR)/tests/test_agent_memor
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-session-memory-transport: $(OBJDIR)/tests/test_session_memory_transport.o $(OBJDIR)/util.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-kb-rules-transport: $(OBJDIR)/tests/test_kb_rules_transport.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

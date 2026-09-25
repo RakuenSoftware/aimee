@@ -298,3 +298,26 @@ passes: memory race suite 321.479 seconds, exported Go owner 5.144 seconds. Sche
 parity (249 shared tables), ALTER ordering, ownership, module boundaries, source
 and test registration, documentation and proposal links also pass. This completes
 the registry-revision and projection-generation component, not MR-04 acceptance.
+
+
+## Generated rule checkpoint
+
+Cognify now declares exact memory input revisions for its copied rules and never
+adopts an independently authored title collision. List, markdown generation,
+export and hard-rule recall apply the Go owner’s current ancestry checks.
+Generated rules require global visibility throughout their ancestry; privileged
+callers cannot publish private ancestors through a global rule. Reinforcement
+and promotion preserve a binding to unchanged rule text, while edited text,
+missing observations and revoked inputs suppress the generated copy.
+
+Native KB rule serving delegates to the authenticated Go owner with no raw
+storage fallback. The transport test covers refusals, malformed envelopes and
+exact large integer preservation. Subject erasure removes generated rule copies.
+
+The [focused PostgreSQL replay](memory-mr04-lineage-2026-09-25/generated-rules-target.txt),
+[native transport test](memory-mr04-lineage-2026-09-25/generated-rules-native.txt) and
+[complete race/export run](memory-mr04-lineage-2026-09-25/generated-rules-full.txt)
+pass: full memory race suite 243.389 seconds; exported owner 6.330 seconds.
+Shared schema is 39 and current-validity policy is v15. Legacy untagged
+producers, session compaction and complete owner erasure/process acceptance
+remain open; this checkpoint does not close MR-04.

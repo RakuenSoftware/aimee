@@ -7800,6 +7800,10 @@ BEGIN
     SELECT object_id FROM memory_lineage WHERE object_type='relation'
       AND source_kind IN ('memory-relation-input-v1','memory-relation-input-v2')
       AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)));
+  DELETE FROM rules WHERE id IN (
+    SELECT object_id FROM memory_lineage WHERE object_type='rule' AND (
+      (source_kind='memory-cognify-input-v1' AND source_ref::jsonb->>'record_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id)))
+      OR (source_kind='metadata' AND source_ref=ANY(ARRAY(SELECT 'memory-cognify-rule-v1:'||id::text FROM unnest(v_memories) id)))));
   DELETE FROM artifacts WHERE payload->>'memory_id'=ANY(ARRAY(SELECT id::text FROM unnest(v_memories) id))
     OR payload->>'session_id'=ANY(v_sessions);
   DELETE FROM memories WHERE id=ANY(v_memories);
@@ -18031,7 +18035,7 @@ BEGIN
 END $projection_generation_acl$;
 CREATE OR REPLACE FUNCTION memory_capture_projection_change() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
-DECLARE roots TEXT; changes TEXT; changed JSONB; affected RECORD;
+DECLARE roots TEXT; changes TEXT; changed JSONB; affected RECORD; rule_changed BOOLEAN;
 BEGIN
  IF TG_OP='UPDATE' AND to_jsonb(OLD) IS NOT DISTINCT FROM to_jsonb(NEW) THEN RETURN NEW; END IF;
  IF TG_OP='TRUNCATE' THEN
@@ -18046,6 +18050,12 @@ BEGIN
    changes:='SELECT x FROM jsonb_array_elements($1) x';
  END IF;
  IF TG_TABLE_NAME='memory_lineage' THEN
+   EXECUTE format('WITH projection_changes AS MATERIALIZED(%s)
+     SELECT EXISTS(SELECT 1 FROM projection_changes WHERE x->>''object_type''=''rule'')',changes)
+     INTO rule_changed USING changed;
+   IF rule_changed THEN
+     EXECUTE format('UPDATE %I.memory_collection_owner SET rules_revision=rules_revision+1 WHERE id=1',TG_TABLE_SCHEMA);
+   END IF;
    roots:=format($q$
      SELECT (x->>'object_id')::bigint AS id FROM projection_changes WHERE x->>'object_type'='memory'
      UNION SELECT u.memory_id FROM projection_changes JOIN %1$I.memory_units u
@@ -19081,5 +19091,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '38')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '39')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

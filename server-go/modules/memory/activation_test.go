@@ -92,7 +92,7 @@ CREATE TEMP TABLE memories (
  cause text,priority bigint,state text,memory_a_id bigint,memory_b_id bigint,resolution_memory_id bigint,
  evidence text,source_session text,surfaced_count bigint,last_surfaced_at text,resolved_at text,
  valid_until text,created_at text,updated_at text);
- CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,polarity text,title text,description text,weight bigint,directive_type text,expires_at text);
+ CREATE TEMP TABLE rules(id bigint,record_revision bigint DEFAULT 1,polarity text,title text,description text,weight bigint,directive_type text,expires_at text,domain text DEFAULT '');
  CREATE SCHEMA activation_test;
  CREATE FUNCTION activation_test.memory_row_scope_visible(t text,v text) RETURNS boolean LANGUAGE sql AS $$ SELECT t='global' AND v='_global' $$;
  CREATE FUNCTION activation_test.pg_now_text() RETURNS text LANGUAGE sql AS $$ SELECT now()::text $$;

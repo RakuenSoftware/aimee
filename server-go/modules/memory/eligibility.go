@@ -3,7 +3,7 @@ package memory
 // Versioned current-state KB eligibility, evaluated before lane limits. The
 // storage transaction supplies one stable request clock through CURRENT_TIMESTAMP.
 // Scope/RLS and evidence-specific admission remain additional mandatory gates.
-const currentEligibilityPolicy = "current-validity-v14"
+const currentEligibilityPolicy = "current-validity-v15"
 
 // KB timestamps historically mix UTC wall time and RFC3339 offsets. Normalize
 // both at the adapter; invalid nonempty timestamps raise a query error rather

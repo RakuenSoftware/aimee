@@ -303,9 +303,7 @@ func (s *postgresDataStore) cognify(ctx context.Context, id int64, command strin
 		// Model extraction may refresh soft guidance, never a protected hard rule.
 		// A hard-rule collision also prevents a duplicate soft rule with that title.
 		if source.Scope.Type == ScopeGlobal && (out.MemoryKind == "procedural" || c.Kind == "preference" || c.Kind == "policy" || c.Kind == "procedure" || c.Kind == "workflow") {
-			_, err = s.db.Exec(ctx, `WITH updated AS (UPDATE rules SET description=$2,weight=LEAST(100,weight+50),updated_at=pg_now_text(),last_reinforced_at=pg_now_text()
- WHERE title=$1 AND directive_type='soft' RETURNING id) INSERT INTO rules(polarity,title,description,weight,domain,directive_type,created_at,updated_at,last_reinforced_at)
- SELECT 'principle',$1,$2,50,'','soft',pg_now_text(),pg_now_text(),pg_now_text() WHERE NOT EXISTS(SELECT 1 FROM rules WHERE title=$1)`, key, c.Value)
+			err = s.writeCognifyRule(ctx, id, record.ID, key, c.Value)
 			if err != nil {
 				return out, err
 			}

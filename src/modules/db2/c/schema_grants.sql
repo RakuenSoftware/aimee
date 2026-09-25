@@ -493,7 +493,7 @@ BEGIN
   GRANT SELECT ON fact_evidence,memory_entities TO aimee_kb_privacy_erasure;
   GRANT SELECT,INSERT ON memory_erasure_intents TO aimee_kb_privacy_erasure;
   GRANT SELECT,UPDATE ON memory_erasure_epoch TO aimee_kb_privacy_erasure;
-  GRANT SELECT,DELETE ON memory_lineage,tasks,learning_proposals,learning_observations,
+  GRANT SELECT,DELETE ON memory_lineage,rules,tasks,learning_proposals,learning_observations,
     interaction_event_embeddings,entity_profiles,memory_relations TO aimee_kb_privacy_erasure;
   GRANT SELECT ON learning_observation_evidence TO aimee_kb_privacy_erasure;
   GRANT SELECT,INSERT,UPDATE ON fact_graph_commits,fact_graph_changes,

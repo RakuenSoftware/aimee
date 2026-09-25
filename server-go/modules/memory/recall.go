@@ -328,7 +328,7 @@ func (s *postgresDataStore) recallHardRules(ctx context.Context, byteBudget int)
 	minimum, _ := json.Marshal(recallRule{})
 	maxRows := byteBudget/len(minimum) + 1
 	rows, err := s.db.Query(ctx, `WITH candidates AS MATERIALIZED (
- SELECT id,polarity,title,description,weight,record_revision FROM rules WHERE directive_type='hard' AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+`
+ SELECT id,polarity,title,description,weight,record_revision FROM rules WHERE directive_type='hard' AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+` AND `+currentRuleInputsSQL("rules.")+`
  ORDER BY weight DESC,title,id LIMIT $2
 ), bounded AS (
  SELECT *,SUM(octet_length(polarity)::bigint+octet_length(title)+octet_length(description))
@@ -337,7 +337,7 @@ func (s *postgresDataStore) recallHardRules(ctx context.Context, byteBudget int)
 SELECT COALESCE(bounded.id,0),CASE WHEN text_bytes <= $1 THEN polarity ELSE '' END,
  CASE WHEN text_bytes <= $1 THEN title ELSE '' END,
  CASE WHEN text_bytes <= $1 THEN description ELSE '' END,COALESCE(weight,0),COALESCE(text_bytes > $1,false),
- owner_id::text,rules_revision::text,COALESCE(record_revision,1)::text
+ owner_id::text,`+ruleCollectionRevisionSQL+`,COALESCE(record_revision,1)::text
  FROM memory_collection_owner LEFT JOIN bounded ON true WHERE memory_collection_owner.id=1 ORDER BY weight DESC,title,bounded.id`, byteBudget, maxRows)
 	if err != nil {
 		return nil, nil, err

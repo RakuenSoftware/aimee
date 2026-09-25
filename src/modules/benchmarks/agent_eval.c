@@ -16,6 +16,7 @@
 #include "memory.h"
 #include "cJSON.h"
 #include "module_commands.h"
+#include "modules/kb_client/kb_client.h"
 #include "json_fluent.h"
 #include "aimee_sha256.h"
 #include <ctype.h>
@@ -390,7 +391,7 @@ int eval_feedback_loop(void)
 
       /* Search for rules whose title words overlap with the failed task */
       rule_t rules[32];
-      int rcount = db2_rules_list(rules, 32);
+      int rcount = kb_client_rules_list(rules, 32);
       for (int i = 0; i < rcount; i++)
       {
          /* Check if rule title words appear in task name or error */
@@ -456,7 +457,7 @@ int eval_feedback_loop(void)
          continue;
 
       rule_t rules[32];
-      int rcount = db2_rules_list(rules, 32);
+      int rcount = kb_client_rules_list(rules, 32);
       for (int i = 0; i < rcount; i++)
       {
          char title_copy[256];

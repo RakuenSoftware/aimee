@@ -81,6 +81,13 @@ func TestSubjectErasureTransitiveCopiesPostgres(t *testing.T) {
  VALUES('memory',$1,'memory','memory:'||$2::bigint::text)`, ids[1], ids[2])
 	exec(`INSERT INTO memory_units(memory_id,unit_type,unit_text) VALUES($1,'fact','copied descendant unit')`, ids[2])
 	exec(`INSERT INTO artifacts(id,kind,operator_id,payload) VALUES('mr04-erasure-artifact','session_summary','kb.fold_session',jsonb_build_object('memory_id',$1::bigint,'content','copied descendant artifact'))`, ids[2])
+	var copiedRule int64
+	if err := tx.QueryRow(ctx, `INSERT INTO rules(polarity,title,description,domain,created_at,updated_at)
+ VALUES('positive','erased generated guidance','copied descendant rule','memory-cognify',pg_now_text(),pg_now_text()) RETURNING id`).Scan(&copiedRule); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ VALUES('rule',$1,'memory-cognify-input-v1',jsonb_build_object('record_id',$2::bigint::text)::text)`, copiedRule, ids[2])
 	var count, documents int64
 	var replay bool
 	erase := func() {
@@ -104,6 +111,10 @@ func TestSubjectErasureTransitiveCopiesPostgres(t *testing.T) {
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM memories WHERE id=$1`, ids[3]).Scan(&remaining); err != nil || remaining != 1 {
 		t.Fatal("unrelated memory erased", remaining, err)
+	}
+
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM rules WHERE id=$1`, copiedRule).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatal("derived rule retained", remaining, err)
 	}
 
 	for _, restore := range []struct {

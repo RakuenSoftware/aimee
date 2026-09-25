@@ -5,6 +5,12 @@ package memory
 // bound refuses eligibility instead of silently treating a prefix as complete.
 // Existing card validation still verifies its producer snapshot and digest.
 func currentDerivedMemoryInputsSQL(prefix string, historical bool) string {
+	return derivedMemoryInputsForAudienceSQL(prefix, historical, "TRUE")
+}
+
+// A globally published derivative requires globally releasable ancestors, even
+// when its caller could read additional project or workspace scopes.
+func derivedMemoryInputsForAudienceSQL(prefix string, historical bool, audience string) string {
 	if prefix == "" {
 		prefix = "memories."
 	}
@@ -12,6 +18,7 @@ func currentDerivedMemoryInputsSQL(prefix string, historical bool) string {
 	if historical {
 		policy = baseHistoricalMemoryInspectionSQL("lineage_parent.")
 	}
+	policy += " AND (" + audience + ")"
 	observation := `(CASE WHEN declared.source_kind='memory-cognify-input-v1' THEN declared.source_ref::jsonb END)`
 	return `(CASE WHEN NOT EXISTS(SELECT 1 FROM memory_lineage declared
  WHERE declared.object_type='memory' AND declared.object_id=` + prefix + `id

@@ -980,6 +980,8 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	}
 	maxLimit := 100
 	switch request.Operation {
+	case "rules-view":
+		maxLimit = 1024
 	case "ontology-walk":
 		maxLimit = 128
 	case "scene-members":
@@ -1841,6 +1843,13 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		}
 		embedded := EmbedRecord(ctx, invocation.TraceID, options.executor, options.data, request.ID, request.Command, request.Dimension)
 		response.Embedding = &embedded
+
+	case "rules-view":
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok || options.placement != PlacementKB || invocation.PrincipalRef != 0 {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Payload, err = backend.ruleView(ctx, request)
 
 	case "maintenance-dashboard":
 		backend, ok := options.data.(*postgresDataStore)

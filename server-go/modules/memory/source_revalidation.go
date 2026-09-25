@@ -93,9 +93,9 @@ var structuredSourceRevalidationSQL = buildSourceRevalidationSQL(true)
 var ruleSourceRevalidationSQL = strings.Replace(structuredSourceRevalidationSQL,
 	" WHEN 'memory_directive'", ` WHEN 'memory_rule_collection' THEN EXISTS (
  SELECT 1 FROM memory_collection_owner WHERE id=1
- AND rules_revision::text=r.ref#>>'{source_version,version,record_revision}')
+ AND `+ruleCollectionRevisionSQL+`=r.ref#>>'{source_version,version,record_revision}')
  WHEN 'memory_rule' THEN EXISTS (SELECT 1 FROM rules WHERE id=(r.ref->>'stable_id')::bigint
- AND directive_type='hard' AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+`
+ AND directive_type='hard' AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+` AND `+currentRuleInputsSQL("rules.")+`
  AND record_revision::text=r.ref#>>'{source_version,version,record_revision}')
  WHEN 'memory_directive'`, 1)
 
