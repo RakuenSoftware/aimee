@@ -1612,8 +1612,8 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
 }
 
 static int append_native_memory_projection(const cJSON *envelope, size_t available, char *buf,
-                                           size_t cap, size_t *pos, int mark_reminders, char *error,
-                                           size_t error_len)
+                                           size_t cap, size_t *pos, int mark_reminders,
+                                           int *native_started, char *error, size_t error_len)
 {
    /* The Go owner decides whether recall is usable. Preserve explicit
     * refusals instead of treating an absent recall member as empty memory.
@@ -1657,12 +1657,19 @@ static int append_native_memory_projection(const cJSON *envelope, size_t availab
          snprintf(error, error_len, "memory context refused: invalid_projection");
       return -1;
    }
-   if (ingress_preinject_accept_native_projection(projection) != 0)
+   cJSON *accepted_projection = cJSON_Duplicate(projection, 1);
+   if (!accepted_projection)
+      return -1;
+   cJSON_AddBoolToObject(accepted_projection, "append_sources", *native_started != 0);
+   int accepted = ingress_preinject_accept_native_projection(accepted_projection);
+   cJSON_Delete(accepted_projection);
+   if (accepted != 0)
    {
       if (error && error_len)
          snprintf(error, error_len, "memory context refused: source release unavailable");
       return -1;
    }
+   *native_started = 1;
    ctx_append_bytes(buf, cap, pos, text, strlen(text));
    if (text[0] && request_context_get())
       (void)request_context_require_memory_receipt();
@@ -1771,6 +1778,10 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       ctx_appendf(buf, cap, &pos, "%s\n\n", custom_prompt);
    }
 
+   /* Replace the prior native proof set once per complete context build;
+    * subsequent native blocks in this build add their retained proofs. */
+   int native_started = 0;
+
    /* Rules (budget: procedures) — DB2 lives in aimee-kb. */
 
    char *rules = NULL;
@@ -1840,8 +1851,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
       char *raw = kb_v1_action_request("memory.assemble_context", request);
       cJSON *reply = raw ? cJSON_Parse(raw) : NULL;
       free(raw);
-      if (append_native_memory_projection(reply, available, buf, cap, &pos, 0, error, error_len) !=
-          0)
+      if (append_native_memory_projection(reply, available, buf, cap, &pos, 0, &native_started,
+                                          error, error_len) != 0)
       {
          cJSON_Delete(reply);
          kb_client_memory_scope_context_clear();
@@ -1879,7 +1890,7 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
          cJSON *envelope = recall_envelope ? cJSON_Parse(recall_envelope) : NULL;
          free(recall_envelope);
          if (append_native_memory_projection(envelope, available, buf, cap, &pos, !skip_kb_client,
-                                             error, error_len) != 0)
+                                             &native_started, error, error_len) != 0)
          {
             cJSON_Delete(envelope);
             kb_client_memory_scope_context_clear();
@@ -1911,8 +1922,8 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
          char *matches_json = kb_v1_action_request("memory.prospective_match", match_args);
          cJSON *response = matches_json ? cJSON_Parse(matches_json) : NULL;
          free(matches_json);
-         if (append_native_memory_projection(response, available, buf, cap, &pos, 1, error,
-                                             error_len) != 0)
+         if (append_native_memory_projection(response, available, buf, cap, &pos, 1,
+                                             &native_started, error, error_len) != 0)
          {
             cJSON_Delete(response);
             kb_client_memory_scope_context_clear();

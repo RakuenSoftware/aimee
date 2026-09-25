@@ -31,6 +31,7 @@ func commandByteLimit(args commandArgs, name string) (*int, error) {
 }
 
 type nativeRecallProjection struct {
+	AppendSources   bool                 `json:"append_sources,omitempty"`
 	Version         int                  `json:"schema_version"`
 	Text            string               `json:"text"`
 	Bytes           int                  `json:"rendered_bytes"`
@@ -48,6 +49,9 @@ func projectNativeRecall(b recallBundle, limit int) (nativeRecallProjection, int
 	p := nativeRecallProjection{Version: 1, Limit: limit, Reminders: []string{}, Sources: []typedProjectionRef{}}
 	if b.CollectionSource != nil {
 		p.Sources = append(p.Sources, typedProjectionRef{Channel: "native_memory_collection", ID: "1", Source: b.CollectionSource})
+	}
+	if b.PersonalCollection != nil {
+		p.Sources = append(p.Sources, typedProjectionRef{Channel: "native_memory_collection", ID: "1", Source: b.PersonalCollection})
 	}
 	if b.RuleCollection != nil {
 		p.Sources = append(p.Sources, typedProjectionRef{Channel: "native_rule_collection", ID: "1", Source: b.RuleCollection})
@@ -225,7 +229,7 @@ func handleNativeSourceRelease(state *sourceReleaseState, args commandArgs) ([]b
 			return commandResult(commandError("invalid_projection", "native source contract unavailable"))
 		}
 	}
-	ticket, err := state.prepare(args, map[string]any{"native_projection": map[string]any{"retained_items": p.Sources}})
+	ticket, err := state.prepare(args, map[string]any{"native_projection": map[string]any{"retained_items": p.Sources}, "append_native_sources": p.AppendSources})
 	if err != nil {
 		return commandResult(commandError("unavailable", "native source release unavailable"))
 	}

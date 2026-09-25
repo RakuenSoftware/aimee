@@ -8,23 +8,24 @@ import (
 )
 
 type recallBundle struct {
-	CollectionSource *typedSourceVersion `json:"collection_source,omitempty"`
-	RuleCollection   *typedSourceVersion `json:"rule_collection_source,omitempty"`
-	AlwaysOnRules    []recallRule        `json:"always_on_rules"`
-	ActivationHeld   int                 `json:"activation_held"`
-	Identity         []RecallRecord      `json:"identity"`
-	Preferences      []RecallRecord      `json:"preferences"`
-	ActiveContext    []RecallRecord      `json:"active_context"`
-	OpenCommitments  []RecallRecord      `json:"open_commitments"`
-	Reminders        []recallReminder    `json:"reminders"`
-	Directives       []recallDirective   `json:"directives"`
-	LimitTokens      int                 `json:"limit_tokens"`
-	UsedTokens       int                 `json:"used_tokens"`
-	ApproxTokens     int                 `json:"approx_tokens"`
-	ElapsedMS        float64             `json:"elapsed_ms"`
-	BudgetExceeded   bool                `json:"budget_exceeded,omitempty"`
-	SessionStart     bool                `json:"session_start"`
-	Explain          []any               `json:"explain"`
+	CollectionSource   *typedSourceVersion `json:"collection_source,omitempty"`
+	PersonalCollection *typedSourceVersion `json:"personal_collection_source,omitempty"`
+	RuleCollection     *typedSourceVersion `json:"rule_collection_source,omitempty"`
+	AlwaysOnRules      []recallRule        `json:"always_on_rules"`
+	ActivationHeld     int                 `json:"activation_held"`
+	Identity           []RecallRecord      `json:"identity"`
+	Preferences        []RecallRecord      `json:"preferences"`
+	ActiveContext      []RecallRecord      `json:"active_context"`
+	OpenCommitments    []RecallRecord      `json:"open_commitments"`
+	Reminders          []recallReminder    `json:"reminders"`
+	Directives         []recallDirective   `json:"directives"`
+	LimitTokens        int                 `json:"limit_tokens"`
+	UsedTokens         int                 `json:"used_tokens"`
+	ApproxTokens       int                 `json:"approx_tokens"`
+	ElapsedMS          float64             `json:"elapsed_ms"`
+	BudgetExceeded     bool                `json:"budget_exceeded,omitempty"`
+	SessionStart       bool                `json:"session_start"`
+	Explain            []any               `json:"explain"`
 }
 
 func recallTokenLimit(tokens int, sessionStart bool) int {

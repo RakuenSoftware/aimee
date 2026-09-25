@@ -45,6 +45,8 @@ def inside(output):
     content = 'Complete native Go memory fixture 界🦊; preserve LIMIT_7 and identifier ' + prefix
     owner_pid, memory_id = None, None
     refresh_id = None
+    shared_change_id = None
+    has_shared = False
     refreshed_content = 'New memory committed before turn-six context refresh 界🦊 ' + prefix
     provider_failure = 'native fixture "quoted"; line\nbreak; path \\ evidence 界'
     scenario, scenario_start = 'single', 0
@@ -86,7 +88,7 @@ def inside(output):
             pass
 
         def do_POST(self):
-            nonlocal refresh_id
+            nonlocal refresh_id, shared_change_id
             raw = self.rfile.read(int(self.headers.get('Content-Length', '0')))
             body = json.loads(raw)
             # Independent read-only connection sees committed intent before the
@@ -155,18 +157,54 @@ def inside(output):
                 except Exception as exc:
                     provider_errors.append(type(exc).__name__ + ': ' + str(exc))
                 response = dict(error=dict(message='retryable fixture response after source correction'))
+            if scenario == 'shared-change-before-retry' and ordinal == 1:
+                try:
+                    status, stored = api('/v1/memory/store', dict(store='kb', scope='all', key=prefix+'-shared-change',
+                        content='New shared constraint: deployment requires explicit review.', tier='L2', kind='fact'))
+                    if status != 200 or stored.get('status') != 'ok':
+                        raise RuntimeError('shared constraint was not committed')
+                    shared_change_id = stored['id']
+                except Exception as exc:
+                    provider_errors.append(type(exc).__name__ + ': ' + str(exc))
+                response = dict(error=dict(message='retryable fixture response after shared insertion'))
             if scenario == 'provider-error':
                 response = dict(error=dict(message=provider_failure))
             data = json.dumps(response, ensure_ascii=False).encode()
-            self.send_response(500 if scenario == 'correction-before-retry' else
+            self.send_response(500 if scenario in ('correction-before-retry', 'shared-change-before-retry') else
                                400 if scenario == 'provider-error' else 200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             self.wfile.write(data)
 
+    def settle_shared_projection(name):
+        if not has_shared:
+            return
+        # Completed runs publish shared feedback whose deterministic indexing
+        # follows on the five-second worker tick. Isolate the next scenario
+        # after observing an unchanged head for a complete worker cycle.
+        deadline, previous, unchanged_since = time.monotonic()+90, None, None
+        while time.monotonic() < deadline:
+            status, reply = api('/v1/memory/recall', dict(store='kb', query=prefix, session_start=True, scope='all'))
+            recall = reply.get('recall', {})
+            memory = recall.get('collection_source')
+            rules = recall.get('rule_collection_source')
+            if status != 200 or not isinstance(memory, dict) or not isinstance(rules, dict):
+                raise RuntimeError('shared projection settling probe unavailable')
+            head = json.dumps([memory, rules], sort_keys=True)
+            now = time.monotonic()
+            if head != previous:
+                previous, unchanged_since = head, now
+            elif now-unchanged_since >= 6:
+                check('shared projection settled before '+name, True)
+                return
+            time.sleep(0.25)
+        check('shared projection settled before '+name, False)
+
     def run(name, limits=None, mode='single', input_text=None):
         nonlocal scenario, scenario_start
+        if name != 'paused Go memory owner':
+            settle_shared_projection(name)
         started, before = time.monotonic(), len(captures)
         scenario, scenario_start = mode, before
         status, created = api('/v1/runs', dict(model=prefix, input=input_text or 'Read the native memory fixture ' + prefix,
@@ -234,6 +272,7 @@ def inside(output):
 
     try:
         # Exercise configured automatic recall without changing product defaults.
+        has_shared = config('get', 'kb_mode')['value'] == 'remote'
         previous_recall = config('get', 'memory_recall_enabled')['value']
         config('set', 'memory_recall_enabled', '1')
         check('native fixture explicitly enables automatic recall',
@@ -275,6 +314,9 @@ def inside(output):
               any(ref.get('source_version', {}).get('record_kind') == 'user_memory_record' and
                   ref.get('source_version', {}).get('version') == observed_version
                   for ref in prepared['binding'].get('sources', [])))
+        check('native receipt retains the private collection dependency', any(
+            ref.get('source_version', {}).get('record_kind') == 'user_memory_collection'
+            for ref in prepared['binding'].get('sources', [])))
         check('supplied receipt does not claim producer or chain authentication',
               verification.get('evidence', {}).get('authenticated_producer') == 'unavailable' and
               verification.get('evidence', {}).get('chain_included') == 'not_checked' and
@@ -390,6 +432,13 @@ def inside(output):
             json.dumps(dict(error=dict(message=provider_failure)), ensure_ascii=False) in text
             for text in strings(events)))
         check('permanent provider error is not retried', len(captures) == before + 1)
+        if has_shared:
+            before = len(captures)
+            result, events = run('shared insertion before transport retry', mode='shared-change-before-retry')
+            check('provider fixture commits a new shared constraint', not provider_errors and shared_change_id is not None)
+            check('new shared constraint refuses stale native transport retry', result.get('status') == 'failed' and
+                  any('stale_context' in text for text in strings(events)))
+            check('new shared constraint prevents a second provider send', len(captures) == before+1)
         before = len(captures)
         result, events = run('private correction before transport retry', mode='correction-before-retry')
         check('provider fixture commits correction before retryable response', not provider_errors)
@@ -413,6 +462,9 @@ def inside(output):
         try:
             if owner_pid is not None:
                 recover()
+            if shared_change_id is not None:
+                status, retired = api('/v1/memory/delete', dict(store='kb', scope='all', id=str(shared_change_id)))
+                check('native fixture removes its shared constraint', status == 200 and retired.get('status') == 'ok')
             if refresh_id is not None:
                 status, retired = api('/v1/memory/delete', dict(id=str(refresh_id)))
                 check('native fixture retires its refreshed identity', status == 200 and retired.get('status') == 'ok')
@@ -430,6 +482,7 @@ def inside(output):
             provider.server_close()
             fixture_files.cleanup()
             Path(output).write_text(json.dumps(dict(checks=checks, runs=runs,
+                source_contracts=[entry['binding'].get('sources', []) for entry, _ in receipt_captures if entry is not None],
                 receipt_attempts=[entry['attempt_id'] for entry, _ in receipt_captures if entry is not None],
                 unresolved_attempts=sorted(expected_unresolved)), indent=2) + '\n')
     return 0

@@ -94,6 +94,8 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	}
 	previous := args.stringOr("source_release_ticket", "")
 	_, replaceNative := assembly["native_projection"]
+	appendNative, _ := assembly["append_native_sources"].(bool)
+	replaceNative = replaceNative && !appendNative
 	if len(refs) == 0 && !replaceNative {
 		return previous, nil
 	}

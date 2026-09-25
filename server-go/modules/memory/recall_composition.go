@@ -63,6 +63,11 @@ func (s *postgresDataStore) ComposeRecall(ctx context.Context, shared json.RawMe
 	if json.Unmarshal(envelope["recall"], &bundle) != nil || bundle.Identity == nil || bundle.Preferences == nil || bundle.ActiveContext == nil || bundle.OpenCommitments == nil || bundle.AlwaysOnRules == nil || bundle.Reminders == nil || bundle.Directives == nil {
 		return nil, errors.New("memory: incomplete shared recall bundle")
 	}
+	personalCollection, err := s.observeRecallCollection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	bundle.PersonalCollection = personalCollection
 	identity, err := s.recallRecords(ctx, `kind='fact' AND tier IN ('L2','L3','L4','L5') AND
  (key LIKE 'identity:%' OR key LIKE 'name:%' OR key LIKE 'role:%' OR key LIKE 'user:%' OR key LIKE 'self:%')`, 32)
 	if err != nil {

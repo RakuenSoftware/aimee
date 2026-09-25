@@ -261,7 +261,30 @@ func TestPrivateCollectionEmptyRecallInvalidatedPostgres(t *testing.T) {
 	if ok, err := backend.revalidatePersonalSources(ctx, request); err != nil || !ok {
 		t.Fatal("fresh private collection", ok, err)
 	}
+	// Composition must retain the private query proof even when it selected no
+	// personal rows, independently of the shared owner's collection.
+	bundle.CollectionSource = nil
+	shared, _ := json.Marshal(map[string]any{"status": "ok", "recall": bundle})
+	composed, err := backend.ComposeRecall(ctx, shared, 8192, false)
+	var envelope struct {
+		Recall recallBundle `json:"recall"`
+	}
+	if err != nil || json.Unmarshal(composed, &envelope) != nil || envelope.Recall.PersonalCollection == nil {
+		t.Fatal("empty composed private collection missing", err)
+	}
+	composedProjection, _, err := projectNativeRecall(envelope.Recall, 32768)
+	if err != nil || len(composedProjection.Sources) != 1 {
+		t.Fatal("composed private proof", composedProjection, err)
+	}
+	composedRequest := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("e", 32), Sources: composedProjection.Sources}
+	if ok, err := backend.revalidatePersonalSources(ctx, composedRequest); err != nil || !ok {
+		t.Fatal("fresh composed private collection", ok, err)
+	}
 	exec(`RESET ROLE; INSERT INTO user_memories(key,content) VALUES('deployment constraint','Deployment requires review'); SET LOCAL ROLE private_collection_test`)
+	if ok, err := backend.revalidatePersonalSources(ctx, composedRequest); err != nil || ok {
+		t.Fatal("new private constraint missed by composed view", ok, err)
+	}
+
 	if ok, err := backend.revalidatePersonalSources(ctx, request); err != nil || ok {
 		t.Fatal("new private constraint missed", ok, err)
 	}

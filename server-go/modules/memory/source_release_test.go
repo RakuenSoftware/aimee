@@ -1094,6 +1094,14 @@ func TestNativeRefreshReplacesOnlyNativeProofs(t *testing.T) {
 		t.Fatal("candidate rewrote accepted handle")
 	}
 	args["source_release_ticket"], _ = json.Marshal(second)
+	additional := releaseTestRef()
+	additional.Channel = "native_preferences"
+	additional.Source.Kind = "memory_record"
+	combined, err := state.prepare(args, map[string]any{"native_projection": map[string]any{"retained_items": []typedProjectionRef{additional}}, "append_native_sources": true})
+	if err != nil || json.Unmarshal(state.entries[combined].sources, &refs) != nil || len(refs) != 3 {
+		t.Fatal("second native block replaced first block proofs", refs, err)
+	}
+	args["source_release_ticket"], _ = json.Marshal(combined)
 	empty, err := native([]typedProjectionRef{})
 	if err != nil {
 		t.Fatal(err)

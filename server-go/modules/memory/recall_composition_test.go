@@ -154,6 +154,12 @@ func TestRecallCompositionPostgres(t *testing.T) {
 	}
 	for _, limit := range []int{128, 512} {
 		raw, status = call(string(sharedJSON), limit)
+		if limit == 128 {
+			if status != bus.ModuleStatusOK || !strings.Contains(string(raw), `"kind":"protected_context_overflow"`) {
+				t.Fatal("collection proof must fit beside hard rules", string(raw))
+			}
+			continue
+		}
 		if status != bus.ModuleStatusOK || json.Unmarshal(raw, &envelope) != nil || json.Unmarshal(envelope.Recall, &got) != nil {
 			t.Fatal(status, string(raw))
 		}
