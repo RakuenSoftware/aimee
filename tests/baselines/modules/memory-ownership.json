@@ -2076,7 +2076,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "01bcd6216d592b75721fb3e81a7c3ea6957dc97ba1c18366da41a06840abb106"
+      "sha256": "5841c398c5b1100fd356f43bbad6377d20d7373878b54ad5297777f2325d466a"
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",

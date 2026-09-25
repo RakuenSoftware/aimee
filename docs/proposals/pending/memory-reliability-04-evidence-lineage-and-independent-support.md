@@ -1,6 +1,6 @@
 # MR-04: Evidence lineage, independent corroboration and retraction
 
-- **State:** In progress — acceptance audit started 2026-09-25
+- **State:** Complete — implementation and acceptance validated 2026-09-25
 - **Priority:** P1: evidence foundation
 - **Owner:** Go memory lineage and freshness, with existing provenance/storage owners
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md)
@@ -77,10 +77,8 @@ Compute lineage/support in shadow before using it for ranking. Enable hard revoc
 
 [Program and common contracts](memory-reliability-00-program.md) · [Requirements coverage](memory-reliability-requirements-coverage.md)
 
-The [linked relation input repair](../../validation/memory-linked-relation-inputs-2026-09-23.md)
-binds generated relation text to every directly copied memory revision. Search,
-entity edges and profiles withhold changed, expired, hidden or unobserved inputs
-before limits and aggregation; rebuilding refreshes the observations. A packaged
-PostgreSQL replay reproduces the previous leak. The full PostgreSQL/race suite
-and exported owner pass; fresh-image validation remains pending. Transitive
-closure and automatic dependent rebuilding remain open.
+Implementation and all eight acceptance clauses are certified in the
+[MR-04 final closeout](../../validation/memory-mr04-closeout-2026-09-25.md).
+The [producer inventory](memory-reliability-04-producer-inventory.md) records
+retained-copy ownership, observed inputs and erasure boundaries. Earlier component
+checkpoints remain historical evidence; final status is recorded in the closeout.

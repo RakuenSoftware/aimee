@@ -1,6 +1,7 @@
 # MR-04 lineage implementation checkpoint — 2026-09-25
 
-MR-04 remains open. MR-01 through MR-03 remain complete (3 of 18).
+MR-04 is now complete; see the [final closeout](memory-mr04-closeout-2026-09-25.md).
+The checkpoints below preserve their original intermediate status and receipts.
 This checkpoint does not certify the eight acceptance gates.
 
 ## Reproduced release defect

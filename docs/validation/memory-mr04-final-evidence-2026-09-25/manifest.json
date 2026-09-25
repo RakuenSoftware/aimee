@@ -1,0 +1,41 @@
+{
+  "lint_ownership_review": "agent_runtime.c transport-only append flag reviewed; ownership hash updated in closeout commit",
+  "application_commit": "22f75f247",
+  "test_fixture_commit": "22f75f247",
+  "t2_harness_commit": "22f75f247",
+  "t3_harness_commit": "22f75f247",
+  "image": "sha256:3a108a42fa1d4cb1de4034d23f4c42c83dfa8578ac9e2d7d34aed5b884369e58",
+  "process_exits": {
+    "T2": 0,
+    "T3": 0
+  },
+  "passed_process_checks": {
+    "T2": 1214,
+    "T3": 677
+  },
+  "passed_memory_tests": [
+    "TestEvidenceLineageCopiesAndComposites",
+    "TestEvidenceLineageUnknownAndClaimBoundaries",
+    "TestEvidenceLineageIncompleteTraversal",
+    "TestEvidenceLineageIndependenceRequiresCertificate",
+    "TestEvidenceLineageSharedFixtureAndConflicts",
+    "TestMemoryEvidenceProjectionPostgres",
+    "TestEvidenceLineageCurrentReleasePostgres",
+    "TestRelationInvalidationDurableConsumer",
+    "TestErasureRequiresOfflineOwnerCoverage",
+    "TestSubjectErasureTransitiveCopiesPostgres",
+    "TestCollectionEmptyRecallInvalidatedPostgres",
+    "TestPrivateCollectionEmptyRecallInvalidatedPostgres",
+    "TestPrivateErasureStartupBarrier",
+    "TestLegacyRuleProducerObservationsPostgres",
+    "TestArchiveCommandsPostgres",
+    "TestRegistryTransitiveProducerInputsPostgres",
+    "TestNativeRefreshReplacesOnlyNativeProofs",
+    "TestMemoryRuntimeRoleReplay"
+  ],
+  "acceptance_inventory_sha256": "e1df9571cb91222e78e276e17410e89ff8f04a9506b82a409fba0f450d175e2d",
+  "shared_schema": 42,
+  "private_schema": 37,
+  "current_release_policy": "current-validity-v17",
+  "production_release": "0.4.5"
+}
