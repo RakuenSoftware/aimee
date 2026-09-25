@@ -8,22 +8,23 @@ import (
 )
 
 type recallBundle struct {
-	RuleCollection  *typedSourceVersion `json:"rule_collection_source,omitempty"`
-	AlwaysOnRules   []recallRule        `json:"always_on_rules"`
-	ActivationHeld  int                 `json:"activation_held"`
-	Identity        []RecallRecord      `json:"identity"`
-	Preferences     []RecallRecord      `json:"preferences"`
-	ActiveContext   []RecallRecord      `json:"active_context"`
-	OpenCommitments []RecallRecord      `json:"open_commitments"`
-	Reminders       []recallReminder    `json:"reminders"`
-	Directives      []recallDirective   `json:"directives"`
-	LimitTokens     int                 `json:"limit_tokens"`
-	UsedTokens      int                 `json:"used_tokens"`
-	ApproxTokens    int                 `json:"approx_tokens"`
-	ElapsedMS       float64             `json:"elapsed_ms"`
-	BudgetExceeded  bool                `json:"budget_exceeded,omitempty"`
-	SessionStart    bool                `json:"session_start"`
-	Explain         []any               `json:"explain"`
+	CollectionSource *typedSourceVersion `json:"collection_source,omitempty"`
+	RuleCollection   *typedSourceVersion `json:"rule_collection_source,omitempty"`
+	AlwaysOnRules    []recallRule        `json:"always_on_rules"`
+	ActivationHeld   int                 `json:"activation_held"`
+	Identity         []RecallRecord      `json:"identity"`
+	Preferences      []RecallRecord      `json:"preferences"`
+	ActiveContext    []RecallRecord      `json:"active_context"`
+	OpenCommitments  []RecallRecord      `json:"open_commitments"`
+	Reminders        []recallReminder    `json:"reminders"`
+	Directives       []recallDirective   `json:"directives"`
+	LimitTokens      int                 `json:"limit_tokens"`
+	UsedTokens       int                 `json:"used_tokens"`
+	ApproxTokens     int                 `json:"approx_tokens"`
+	ElapsedMS        float64             `json:"elapsed_ms"`
+	BudgetExceeded   bool                `json:"budget_exceeded,omitempty"`
+	SessionStart     bool                `json:"session_start"`
+	Explain          []any               `json:"explain"`
 }
 
 func recallTokenLimit(tokens int, sessionStart bool) int {
@@ -165,6 +166,10 @@ func (s *postgresDataStore) RecallBundleWithActivation(ctx context.Context, quer
 func (s *postgresDataStore) recallBundleActivated(ctx context.Context, query string, tokens int, sessionStart bool, snapshot *ActivationSnapshot) (json.RawMessage, error) {
 	started := time.Now()
 	defer runtimeMetricState.recallCalls.observe(started)
+	collectionSource, err := s.observeRecallCollection(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tokens = recallTokenLimit(tokens, sessionStart)
 	identityCap, preferencesCap, activeCap, commitmentsCap, remindersCap, directivesCap := 3, 4, 5, 3, 3, 2
 	if sessionStart {
@@ -275,7 +280,7 @@ FROM `+s.recallSource()+` WHERE lifecycle_state='pending' AND activation_suppres
 			}
 		}
 	}
-	bundle := recallBundle{Identity: recallItems(identity), Preferences: recallItems(preferences), ActiveContext: recallItems(active),
+	bundle := recallBundle{CollectionSource: collectionSource, Identity: recallItems(identity), Preferences: recallItems(preferences), ActiveContext: recallItems(active),
 		OpenCommitments: recallItems(commitments), AlwaysOnRules: rules, RuleCollection: ruleCollection, Reminders: []recallReminder{}, Directives: []recallDirective{},
 		LimitTokens: tokens, SessionStart: sessionStart, Explain: []any{}}
 	for _, r := range reminders {

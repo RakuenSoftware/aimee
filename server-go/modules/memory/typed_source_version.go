@@ -9,11 +9,12 @@ import (
 // from the same snapshot. It does not attest to transitive dependencies, current
 // authorization, or final release. Kind separates assertion, episode and memory IDs.
 type typedSourceVersion struct {
-	Kind              string                `json:"record_kind"`
-	Version           MemoryRecordVersion   `json:"version"`
-	MemoryParents     []MemoryRecordVersion `json:"memory_parents,omitempty"`
-	MemoryParentState string                `json:"memory_parent_state,omitempty"`
-	ReadPolicy        *sourceReadPolicy     `json:"read_policy,omitempty"`
+	CollectionAudience []Scope               `json:"collection_audience,omitempty"`
+	Kind               string                `json:"record_kind"`
+	Version            MemoryRecordVersion   `json:"version"`
+	MemoryParents      []MemoryRecordVersion `json:"memory_parents,omitempty"`
+	MemoryParentState  string                `json:"memory_parent_state,omitempty"`
+	ReadPolicy         *sourceReadPolicy     `json:"read_policy,omitempty"`
 }
 
 func directiveSourceParentsSQL(table string) string {
@@ -89,6 +90,9 @@ func validTypedSource(ref typedProjectionRef) bool {
 			return false
 		}
 	}
+	if ref.Source.Kind != "memory_collection" && len(ref.Source.CollectionAudience) != 0 {
+		return false
+	}
 	owner := ref.Source.Version.OwnerID
 	switch ref.Source.Kind {
 	case "learning_observation", "memory_relation":
@@ -135,6 +139,13 @@ func validTypedSource(ref typedProjectionRef) bool {
 		}
 	case "memory_episode":
 		if ref.Channel != "episodes" || ref.Source.MemoryParentState != "observed" || len(ref.Source.MemoryParents) != 1 {
+			return false
+		}
+	case "memory_collection", "user_memory_collection":
+		if ref.Channel != "native_memory_collection" || ref.ID != "1" || len(ref.Source.MemoryParents) != 0 || ref.Source.MemoryParentState != "observed" {
+			return false
+		}
+		if ref.Source.Kind == "memory_collection" && !validCollectionAudience(ref.Source.CollectionAudience) {
 			return false
 		}
 	case "user_memory_record":

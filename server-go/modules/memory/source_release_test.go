@@ -298,7 +298,12 @@ func TestNativeMixedOwnerReleaseRequiresBothAnswers(t *testing.T) {
 			shared.Source.Kind = "memory_record"
 			shared.Source.Version.OwnerID = "00000000-0000-4000-8000-000000000002"
 			p := nativeProjectionForText("accepted native context", 1000)
-			p.Sources = []typedProjectionRef{private}
+			collection := private
+			collectionSource := *private.Source
+			collection.Source = &collectionSource
+			collection.Channel, collection.ID = "native_memory_collection", "1"
+			collection.Source.Kind, collection.Source.Version.RecordID = "user_memory_collection", "1"
+			p.Sources = []typedProjectionRef{private, collection}
 			if scenario != "private-only" {
 				p.Sources = append(p.Sources, shared)
 			}
@@ -316,7 +321,7 @@ func TestNativeMixedOwnerReleaseRequiresBothAnswers(t *testing.T) {
 			local := plan["local_request"].(map[string]any)
 			localRaw, _ := json.Marshal(local["revalidation"])
 			var localCheck sourceRevalidation
-			if json.Unmarshal(localRaw, &localCheck) != nil || len(localCheck.Sources) != 1 || localCheck.Sources[0].Source.Kind != "user_memory_record" {
+			if json.Unmarshal(localRaw, &localCheck) != nil || len(localCheck.Sources) != 2 || localCheck.Sources[0].Source.Kind != "user_memory_record" || localCheck.Sources[1].Source.Kind != "user_memory_collection" {
 				t.Fatal("private routing", string(localRaw))
 			}
 			answer := func(check sourceRevalidation) map[string]any {

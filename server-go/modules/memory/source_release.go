@@ -221,7 +221,7 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 		}
 		local, shared := []typedProjectionRef{}, []typedProjectionRef{}
 		for _, ref := range refs {
-			if ref.Source.Kind == "user_memory_record" {
+			if ref.Source.Kind == "user_memory_record" || ref.Source.Kind == "user_memory_collection" {
 				local = append(local, ref)
 			} else {
 				shared = append(shared, ref)

@@ -106,8 +106,8 @@ func TestPersonalVectorPrivacyAndMutationRegression(t *testing.T) {
 	a, b := strings.Index(schema, "CREATE TABLE IF NOT EXISTS user_memories ("), strings.Index(schema, "CREATE INDEX IF NOT EXISTS user_memories_recall")
 	if _, err = tx.Exec(ctx, strings.Replace(schema[a:b], "CREATE TABLE IF NOT EXISTS", "CREATE TEMP TABLE", 1)+`
 ALTER TABLE user_memories ADD COLUMN record_revision bigint NOT NULL DEFAULT 1;
-CREATE TEMP TABLE user_memory_collection_generation(id int,owner_id uuid);
-INSERT INTO user_memory_collection_generation VALUES(1,'00000000-0000-4000-8000-000000000001');
+CREATE TEMP TABLE user_memory_collection_generation(id int,owner_id uuid,generation bigint DEFAULT 0);
+INSERT INTO user_memory_collection_generation(id,owner_id) VALUES(1,'00000000-0000-4000-8000-000000000001');
 CREATE TEMP TABLE memories(id bigint,content text);
 INSERT INTO memories VALUES(42,'shared secret must never be embedded by the personal owner');
 INSERT INTO user_memories(id,key,content) VALUES(42,'private-location','I keep my bicycle in the garden shed'),(43,'unrelated','unrelated astronomy');`); err != nil {
@@ -203,7 +203,7 @@ INSERT INTO user_memories(id,key,content) VALUES(42,'private-location','I keep m
 		t.Fatal("invalid recall")
 	}
 	projection, _, err := projectNativeRecall(bundle, 32768)
-	if err != nil || len(projection.Sources) != 1 || projection.Sources[0].Channel != "native_active_context" || projection.Sources[0].Source.Version.RecordID != "43" {
+	if err != nil || len(projection.Sources) != 2 || projection.Sources[0].Source.Kind != "user_memory_collection" || projection.Sources[1].Channel != "native_active_context" || projection.Sources[1].Source.Version.RecordID != "43" {
 		t.Fatalf("private active context lacks observed version: %+v %v", projection, err)
 	}
 	check := &sourceRevalidation{SchemaVersion: 1, CheckID: strings.Repeat("d", 32), Sources: projection.Sources}

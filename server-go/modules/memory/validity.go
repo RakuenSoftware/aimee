@@ -55,7 +55,7 @@ func (s *postgresDataStore) validity(ctx context.Context, id int64, policy *Memo
 			predicate += " AND " + memoryValidityAtSQL("m.", at)
 		}
 		err = s.db.QueryRow(ctx, `SELECT m.lifecycle_state,(`+predicate+`),`+memoryStartedAtSQL("m.valid_from", at)+`,`+memoryUnexpiredAtSQL("m.valid_until", at)+`,
-   m.activation_suppressed<>0,(`+currentEpisodeCardInputsSQL("m.", historical)+`),
+   m.activation_suppressed<>0,(`+currentDerivedMemoryInputsSQL("m.", historical)+`),
    (SELECT owner_id::text FROM memory_collection_owner WHERE id=1),m.record_revision::text,CURRENT_TIMESTAMP::text
    FROM memories m WHERE m.id=$1`, params...).Scan(&lifecycle, &eligible, &started, &unexpired, &suppressed, &inputs, &version.OwnerID, &version.RecordRevision, &clock)
 	}

@@ -89,7 +89,7 @@ func (s *postgresDataStore) recallSource() string {
  0 AS activation_suppressed FROM user_memories
  WHERE valid_until IS NULL OR valid_until > now()) AS recall_memories`
 	}
-	return `(SELECT * FROM memories WHERE ` + memoryValiditySQL("") + ` AND ` + currentEpisodeCardInputsSQL("", false) + `) AS recall_memories`
+	return `(SELECT * FROM memories WHERE ` + memoryValiditySQL("") + ` AND ` + currentDerivedMemoryInputsSQL("", false) + `) AS recall_memories`
 }
 
 // Owner and revision travel with the payload in the same statement snapshot.

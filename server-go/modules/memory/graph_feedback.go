@@ -77,7 +77,7 @@ func (s *postgresDataStore) feedbackPath(ctx context.Context, request DataReques
 	_, err = s.db.Exec(ctx, `WITH nodes AS (SELECT * FROM jsonb_to_recordset($1::jsonb) AS n(node text,credit double precision)),
  visible AS MATERIALIZED (SELECT id FROM memories WHERE `+currentMemorySQL("")+`),
  eligible AS (SELECT e.id,sum(n.credit) AS credit FROM entity_edges e JOIN nodes n ON n.node=e.source OR n.node=e.target
- WHERE e.edge_class<>'semantic' AND `+currentMemoryEvidenceSQL("e", "", false)+`
+ WHERE e.edge_class<>'semantic' AND `+memoryEvidenceSQL("e", "", false, "m.id IN (SELECT id FROM visible)")+`
  AND (e.edge_origin<>'code_projection' OR EXISTS(SELECT 1 FROM code_projection_generations g JOIN projects p ON p.name=g.project
  WHERE g.id=e.projection_generation_id AND g.state='visible' AND p.lifecycle_state='current'
  AND (current_setting('aimee.memory_scope_all',true)='1' OR p.name=current_setting('aimee.memory_project',true))))

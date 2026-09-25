@@ -48,9 +48,11 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 	}
 	var count int
 	query := sourceRevalidationSQL
-	structured, rules, auxiliary := false, false, false
+	structured, rules, auxiliary, collection := false, false, false, false
 	for _, ref := range request.Sources {
 		switch ref.Source.Kind {
+		case "memory_collection":
+			collection = true
 		case "learning_observation", "learning_procedure", "memory_relation":
 			auxiliary = true
 		case "memory_rule", "memory_rule_collection":
@@ -65,6 +67,12 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 		query = ruleSourceRevalidationSQL
 	} else if structured {
 		query = structuredSourceRevalidationSQL
+	}
+	if collection {
+		query = strings.Replace(query, " WHEN 'semantic_assertion'", ` WHEN 'memory_collection' THEN (
+ r.ref#>>'{source_version,version,record_revision}'=`+collectionRevisionSQL+`
+ AND r.ref#>'{source_version,collection_audience}'=`+collectionAudienceSQL+`)
+ WHEN 'semantic_assertion'`, 1)
 	}
 	if request.SendGuard == "acquire" {
 		query = strings.ReplaceAll(query, "CURRENT_TIMESTAMP", "clock_timestamp()")

@@ -46,6 +46,9 @@ type nativeRecallProjection struct {
 // the complete hard-rule set is reserved before any optional row is considered.
 func projectNativeRecall(b recallBundle, limit int) (nativeRecallProjection, int, error) {
 	p := nativeRecallProjection{Version: 1, Limit: limit, Reminders: []string{}, Sources: []typedProjectionRef{}}
+	if b.CollectionSource != nil {
+		p.Sources = append(p.Sources, typedProjectionRef{Channel: "native_memory_collection", ID: "1", Source: b.CollectionSource})
+	}
 	if b.RuleCollection != nil {
 		p.Sources = append(p.Sources, typedProjectionRef{Channel: "native_rule_collection", ID: "1", Source: b.RuleCollection})
 	}

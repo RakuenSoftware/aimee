@@ -127,3 +127,56 @@ fixtures lacked the already-deployed `record_revision` column. Both fixtures now
 include it. The combined domain/runtime/producer rerun passed in 2.717 seconds;
 the complete rerun passed: memory race suite 224.272 seconds, exported-owner build
 check 5.414 seconds.
+
+
+## Empty native recall observations
+
+Native shared and private recall now observe their memory collection before
+selecting rows. Even an empty or zero-text projection carries that observation
+through the existing source-release protocol. Shared observations bind the
+canonical effective audience and the sum of its visible monotonic collection
+heads; private observations remain local. Revision one represents generation
+zero. Owner and audience changes cannot reuse a coincidentally equal head.
+
+Restricted-role PostgreSQL tests exercise the actual recall producer and release
+check. A visible inserted constraint invalidates the earlier empty view without
+changing a selected parent. A hidden collection insert leaves the full scoped
+observation byte-identical. A different audience with an equal numeric head is
+rejected. The private producer similarly detects a new private constraint.
+Focused collection/native/activation/private/release tests passed in 3.357 seconds;
+a second private/owner-routing selection passed in 1.793 seconds. The broader
+runtime replay and complete-suite validation remain pending for this component.
+
+This binds native recall's memory collections. It does not certify collection
+coverage for every typed assertion, learning, reminder, directive, export or task
+producer; those remain part of the MR-04 producer inventory. The heads are durable
+control metadata and must survive content-only restoration.
+
+The first broader collection replay failed after 321.300 seconds when graph
+feedback exceeded the runtime fixture's deadline. Its evidence-parent check now
+reuses the same materialized eligible-memory set already used for node admission,
+instead of recomputing recursive ancestry for each parent. This preserves the
+same statement snapshot and hidden/missing-parent refusal. The rerun is pending.
+
+The cached-text regression retains only the actual selected descendant reference
+(without collection metadata), revokes its grandparent, and checks release refusal
+while the selected descendant's text and revision stay unchanged. Activation
+recall now uses the same transitive ancestry predicate before selecting rows;
+the regression checks its before/after behavior too. Ordinary pending commitments
+retain their existing selection contract.
+
+Production remains released 0.4.5: server, PostgreSQL and embedder were healthy
+at 46 hours; the paired local thinclient reached /v1/health with HTTP 200.
+
+The collection/runtime replay passed in 186.010 seconds after the graph-feedback
+change. A new ordinary-recall regression then reproduced one returned descendant
+after its ancestor was revoked. Ordinary recall now uses the transitive gate too,
+and validity diagnostics report `derived_inputs_unavailable`. The focused rerun
+passed. The serving policy advances to `current-validity-v14`; full-suite
+validation is pending.
+
+Complete validation for this component passed: the memory race suite took
+225.336 seconds and the exported-owner build check took 5.400 seconds. Module
+ownership, Go boundary, source registration, test registration, documentation
+and proposal links also passed. The production 0.4.5 installation is unchanged.
+Time-only applicability changes and non-memory collection coverage remain open.
