@@ -96,7 +96,7 @@ CREATE TEMP TABLE memories(id bigint PRIMARY KEY,record_revision bigint DEFAULT 
 CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
 CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
-CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text,valid_at text,invalid_at text,weight double precision,created_at text DEFAULT pg_now_text());
+CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,record_revision bigint DEFAULT 1,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text,valid_at text,invalid_at text,weight double precision,created_at text DEFAULT pg_now_text());
  INSERT INTO memory_relations(memory_id,episode_id,src_entity,relation,dst_entity,fact_text,valid_at,invalid_at,weight) VALUES
  (1,1,'app','uses','old','app used old','2025-01-01','2026-01-01',0.9),
  (3,1,'app','uses','new','app uses new','2026-01-01','',1);

@@ -87,7 +87,7 @@ rerun passed in 1.112 seconds. A complete race/export rerun remains pending; no 
 |---|---|---|
 | Cognified memories | Versioned direct inputs and transitive release predicate | Claim-specific origin projection and generation binding |
 | Episode cards | Versioned input set, payload digest and transitive release predicate | Collection dependency and end-to-end revoked-cache proof |
-| Deterministic relations and episodes | Versioned producer observations | Extend ownership coverage to cognified relations |
+| Deterministic relations and episodes | Versioned producer observations | Cognified relations now bind exact inputs; legacy unowned relations remain unclassified |
 | Cognified soft rules | Global-scope and protected-rule safeguards | Bind generated rule revisions and all rule consumers to their inputs |
 | Session folding | Legacy lineage; originals deleted by compaction | Retain verifiable origins without losing the successful compaction contract |
 | Derived artifact registry | Existing dependency inventory and rederivation queue | Versioned transitive closure and complete producer coverage |
@@ -98,3 +98,32 @@ rerun passed in 1.112 seconds. A complete race/export rerun remains pending; no 
 
 MR-04 remains the only active proposal. These checkpoints do not certify any of
 the eight frozen gates as complete.
+
+
+## Cognified relation checkpoint
+
+Cognification now registers its own relation ownership separately from the
+replacement index. It captures source and output revisions in the same locked
+producer transaction. Existing authored/indexed collisions retain their owner.
+The shared current/historical relation predicate requires observations for both
+known producers; cognification observations also verify owner and output revision.
+The serving policy identifier advances to `current-validity-v13`.
+
+The restricted-role PostgreSQL regression first reproduced a missing-observation
+leak (one eligible relation when zero was expected). The repaired predicate passes
+missing observation, wrong owner, changed source/output, hidden input, revoked
+input and revoked ancestor cases. Re-extraction replaces the old observation
+without duplicating the relation. A separate packaged-schema replay exercises
+the actual cognification writer and restricted runtime grants (1.947 seconds).
+
+The complete race/export rerun uses `PGOPTIONS=-c jit=off` so direct
+SQL fixtures use the same planner setting as production memory requests. Legacy
+relations without producer ownership, generated soft rules, folding, registry
+integration and the other unresolved gates remain open.
+
+The first relation full-suite run finished in 223.859 seconds and failed only
+`TestDomainPublicPostgres` and `TestRuntimePublicPostgres`: their minimal relation
+fixtures lacked the already-deployed `record_revision` column. Both fixtures now
+include it. The combined domain/runtime/producer rerun passed in 2.717 seconds;
+the complete rerun passed: memory race suite 224.272 seconds, exported-owner build
+check 5.414 seconds.

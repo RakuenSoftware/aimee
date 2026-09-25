@@ -229,9 +229,7 @@ func (s *postgresDataStore) cognify(ctx context.Context, id int64, command strin
 		if r.Subject == "" || r.Relation == "" || r.Object == "" {
 			continue
 		}
-		_, err = s.db.Exec(ctx, `INSERT INTO memory_relations(memory_id,src_entity,relation,dst_entity,fact_text)
- SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS(SELECT 1 FROM memory_relations
- WHERE memory_id=$1 AND src_entity=$2 AND relation=$3 AND dst_entity=$4 AND fact_text=$5 AND invalid_at='')`, id, r.Subject, r.Relation, r.Object, r.FactText)
+		err = s.writeCognifyRelation(ctx, id, r)
 		if err != nil {
 			return out, err
 		}

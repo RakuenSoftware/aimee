@@ -65,7 +65,7 @@ CREATE TEMP TABLE memory_lineage(object_type text,object_id bigint,source_kind t
 CREATE INDEX memory_lineage_card_fixture_idx ON memory_lineage(object_type,object_id);
 CREATE TEMP TABLE memory_summaries(id bigint PRIMARY KEY,memory_id bigint,record_revision bigint);
 CREATE TEMP TABLE derived_memory_dependencies(derived_kind text,derived_memory_id text,input_kind text,input_id text,input_version text,extractor_version text,derivation_policy_version text);
-CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text DEFAULT '',valid_at text DEFAULT '',invalid_at text DEFAULT '',weight double precision DEFAULT 1.5,created_at text DEFAULT pg_now_text());
+CREATE TEMP TABLE memory_relations(id bigserial PRIMARY KEY,record_revision bigint DEFAULT 1,memory_id bigint,episode_id bigint,src_entity text,relation text,dst_entity text,fact_text text DEFAULT '',valid_at text DEFAULT '',invalid_at text DEFAULT '',weight double precision DEFAULT 1.5,created_at text DEFAULT pg_now_text());
 CREATE TEMP TABLE tasks(id bigint PRIMARY KEY,parent_id bigint,title text);
 INSERT INTO memories(id,key,content) VALUES (1,'release','release the app');
 INSERT INTO memories(id,key,content,scope_type,scope_value) VALUES (2,'common','common conventions','global','_global'),(3,'private','secret project plan','project','private');

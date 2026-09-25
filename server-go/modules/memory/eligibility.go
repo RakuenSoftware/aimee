@@ -3,7 +3,7 @@ package memory
 // Versioned current-state KB eligibility, evaluated before lane limits. The
 // storage transaction supplies one stable request clock through CURRENT_TIMESTAMP.
 // Scope/RLS and evidence-specific admission remain additional mandatory gates.
-const currentEligibilityPolicy = "current-validity-v12"
+const currentEligibilityPolicy = "current-validity-v13"
 
 // KB timestamps historically mix UTC wall time and RFC3339 offsets. Normalize
 // both at the adapter; invalid nonempty timestamps raise a query error rather
@@ -140,12 +140,17 @@ func currentRelationInputsSQL(alias string) string {
 func relationInputsSQL(alias, parentPolicy string) string {
 	dependency := `(CASE WHEN dep.source_kind='memory-relation-input-v2' THEN dep.source_ref::jsonb END)`
 	return `(NOT EXISTS(SELECT 1 FROM memory_lineage own WHERE own.object_type='relation'
- AND own.object_id=` + alias + `.id AND own.source_kind='memory-index-v1') OR EXISTS(
+ AND own.object_id=` + alias + `.id AND own.source_kind IN ('memory-index-v1','memory-cognify-v1')) OR EXISTS(
  SELECT 1 FROM memory_lineage dep WHERE dep.object_type='relation' AND dep.object_id=` + alias + `.id
  AND dep.source_kind='memory-relation-input-v2' AND ` + dependency + `->>'record_id'=` + alias + `.memory_id::text))
  AND NOT EXISTS(SELECT 1 FROM memory_lineage dep LEFT JOIN LATERAL (
  SELECT m.id FROM memories m WHERE m.id=(` + dependency + `->>'record_id')::bigint
  AND m.record_revision::text=` + dependency + `->>'record_revision'
+ AND (NOT EXISTS(SELECT 1 FROM memory_lineage own WHERE own.object_type='relation'
+ AND own.object_id=` + alias + `.id AND own.source_kind='memory-cognify-v1')
+ OR (` + dependency + `->>'schema_version'='1'
+ AND ` + dependency + `->>'owner_id'=(SELECT owner_id::text FROM memory_collection_owner WHERE id=1)
+ AND ` + dependency + `->>'derived_revision'=` + alias + `.record_revision::text))
  AND ` + parentPolicy + `
  AND (NOT (` + dependency + ` ? 'link_id') OR EXISTS(SELECT 1 FROM memory_links input_link
  WHERE input_link.id=(` + dependency + `->>'link_id')::bigint

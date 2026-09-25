@@ -141,6 +141,21 @@ func exerciseCognifyReplay(t *testing.T, ctx context.Context, tx pgx.Tx, backend
 	if n := scalar(`SELECT count(*) FROM memory_relations WHERE memory_id=$1`, source); n != 1 {
 		t.Fatal("duplicate relation", n)
 	}
+	if n := scalar(`SELECT count(*) FROM memory_relations r WHERE memory_id=$1 AND `+currentRelationInputsSQL("r"), source); n != 1 {
+		t.Fatal("fresh cognified relation unavailable", n)
+	}
+	if _, err := tx.Exec(ctx, `SAVEPOINT cognify_relation_source`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE memories SET content=content||' changed' WHERE id=$1`, source); err != nil {
+		t.Fatal(err)
+	}
+	if n := scalar(`SELECT count(*) FROM memory_relations r WHERE memory_id=$1 AND `+currentRelationInputsSQL("r"), source); n != 0 {
+		t.Fatal("cognified relation retained stale source", n)
+	}
+	if _, err := tx.Exec(ctx, `ROLLBACK TO cognify_relation_source; RELEASE cognify_relation_source`); err != nil {
+		t.Fatal(err)
+	}
 	if n := scalar(`SELECT count(*) FROM memory_lineage WHERE source_kind='memory' AND source_ref=$1`, fmt.Sprintf("memory:%d", source)); n != 3 {
 		t.Fatal("duplicate lineage", n)
 	}
