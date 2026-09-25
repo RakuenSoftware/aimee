@@ -160,6 +160,16 @@ func handleTypedContextResult(options handlerOptions, invocation bus.ModuleInvoc
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 	}
+	if cfg.ExecuteRecovery {
+		caller := options.commandContext
+		if invocation.PrincipalRef != 0 || caller == nil || !caller.Authenticated || !caller.UserAuthority || caller.Principal == "" {
+			encoded, status := commandResult(commandError("recovery_not_admitted", "recovery execution requires authenticated host user authority"))
+			if envelope {
+				return runtimeJSONText(encoded, status)
+			}
+			return encoded, status
+		}
+	}
 	if cfg.Requirements != nil && cfg.Requirements.QueryMode == "temporal_change" {
 		if _, explicit := args["enable_historical"]; !explicit {
 			cfg.Flags["historical_assertions"] = cfg.Flags["current_assertions"]

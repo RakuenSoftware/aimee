@@ -662,7 +662,8 @@ def typed_source_version_gate(kb, check):
         execution_requirements = dict(unrelated, task_revision=key+'-recovery:1',
                                       recovery_budget=dict(recovery_budget, max_elapsed_ms=2000))
         code, unadmitted = call(dict(evidence_requirements=execution_requirements, execute_recovery=True))
-        check('MR-05 a service bearer alone cannot admit recovery work', code in (400, 403) and
+        check('MR-05 a service bearer alone cannot admit recovery work', code == 200 and unadmitted.get('status') == 'error' and
+              unadmitted.get('kind') == 'recovery_not_admitted' and
               not unadmitted.get('evidence_recovery', {}).get('execution'))
         code, unknown = call(dict(evidence_requirements=dict(requirements, query_mode='timeline')))
         check('Unsupported evidence query mode remains unknown', code == 200 and unknown.get('context_sufficiency') == 'unknown')

@@ -1,0 +1,287 @@
+[
+  {
+    "name": "KB application metadata contains no database or enrollment credential",
+    "passed": true
+  },
+  {
+    "name": "KB boots with standardized PostgreSQL and local embedding",
+    "passed": true
+  },
+  {
+    "name": "KB shared memory module stores a record",
+    "passed": true
+  },
+  {
+    "name": "Direct KB hygiene accepts its authenticated action envelope",
+    "passed": true
+  },
+  {
+    "name": "Direct KB hygiene still rejects domain mutation arguments",
+    "passed": true
+  },
+  {
+    "name": "Direct KB receipt verification reaches strict receipt validation",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence -1",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence 1.01",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence False",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence None",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence 'invalid'",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence []",
+    "passed": true
+  },
+  {
+    "name": "Direct KB store rejects confidence {}",
+    "passed": true
+  },
+  {
+    "name": "KB ranked search uses its local embedding service",
+    "passed": true
+  },
+  {
+    "name": "KB graph and memory retrieval survives the deepest worker path",
+    "passed": true
+  },
+  {
+    "name": "Typed projection retains both untrusted caller turns",
+    "passed": true
+  },
+  {
+    "name": "Typed projection identity binds rendered bytes and retained IDs",
+    "passed": true
+  },
+  {
+    "name": "Typed projection obeys byte limit 0",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds exact accounting at limit 0",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds retained IDs at limit 0",
+    "passed": true
+  },
+  {
+    "name": "Zero byte typed projection emits no wrappers or retained IDs",
+    "passed": true
+  },
+  {
+    "name": "Typed projection obeys byte limit 1",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds exact accounting at limit 1",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds retained IDs at limit 1",
+    "passed": true
+  },
+  {
+    "name": "Typed projection obeys byte limit 400",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds exact accounting at limit 400",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds retained IDs at limit 400",
+    "passed": true
+  },
+  {
+    "name": "Typed byte packing preserves the earlier small item",
+    "passed": true
+  },
+  {
+    "name": "Typed projection obeys byte limit 1062",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds exact accounting at limit 1062",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds retained IDs at limit 1062",
+    "passed": true
+  },
+  {
+    "name": "Typed projection obeys byte limit 1063",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds exact accounting at limit 1063",
+    "passed": true
+  },
+  {
+    "name": "Typed projection binds retained IDs at limit 1063",
+    "passed": true
+  },
+  {
+    "name": "Typed projection retains exact-fit serialized bytes",
+    "passed": true
+  },
+  {
+    "name": "Typed projection refuses unavailable max_context_tokens",
+    "passed": true
+  },
+  {
+    "name": "Typed projection refuses unavailable max_request_tokens",
+    "passed": true
+  },
+  {
+    "name": "Typed projection refuses unavailable reserved_response_tokens",
+    "passed": true
+  },
+  {
+    "name": "Typed projection refuses unavailable reserved_tool_tokens",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects null limits without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects null byte cap without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects null token cap without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects duplicate byte cap without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects escaped duplicate cap without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection rejects case alias without serving context",
+    "passed": true
+  },
+  {
+    "name": "Typed projection remains usable after malformed limit refusals",
+    "passed": true
+  },
+  {
+    "name": "Typed assembly references commit through authenticated evidence writer",
+    "passed": true
+  },
+  {
+    "name": "Typed evidence preserves exact references without invented source versions",
+    "passed": true
+  },
+  {
+    "name": "Repeated typed evidence merge preserves event identity",
+    "passed": true
+  },
+  {
+    "name": "Repeated typed evidence merge does not duplicate references",
+    "passed": true
+  },
+  {
+    "name": "Repacked typed selection joins the same turn event",
+    "passed": true
+  },
+  {
+    "name": "Distinct accepted projection identities remain distinguishable",
+    "passed": true
+  },
+  {
+    "name": "Empty typed evidence does not create a bare event",
+    "passed": true
+  },
+  {
+    "name": "Empty typed evidence trace remains explicitly unavailable",
+    "passed": true
+  },
+  {
+    "name": "Large typed evidence writer accepts the reference batch",
+    "passed": true
+  },
+  {
+    "name": "Bounded trace refuses a truncated event instead of reporting success",
+    "passed": true
+  },
+  {
+    "name": "Bounded-read refusal preserves subsequent event merge retries",
+    "passed": true
+  },
+  {
+    "name": "Typed assertion binds the exact owner record revision",
+    "passed": true
+  },
+  {
+    "name": "Typed selection digest includes source revision evidence",
+    "passed": true
+  },
+  {
+    "name": "Typed assertion binds its direct memory parent revision",
+    "passed": true
+  },
+  {
+    "name": "Typed coverage evaluates explicit current-state roles over retained evidence",
+    "passed": true
+  },
+  {
+    "name": "Typed coverage marks a packed-away role budget_dropped",
+    "passed": true
+  },
+  {
+    "name": "Unrelated retrieved evidence cannot fill a current-state obligation",
+    "passed": true
+  },
+  {
+    "name": "Missing role recovery remains a bounded host-admitted proposal",
+    "passed": true
+  },
+  {
+    "name": "Recovery cannot retry evidence removed by packing",
+    "passed": true
+  },
+  {
+    "name": "MR-05 one retained side cannot complete a comparison",
+    "passed": true
+  },
+  {
+    "name": "MR-05 current evidence cannot invent a predecessor or change date",
+    "passed": true
+  },
+  {
+    "name": "MR-05 source group uses scoped canonical origin lineage",
+    "passed": true
+  },
+  {
+    "name": "MR-05 uncertified origins cannot satisfy independent support",
+    "passed": true
+  },
+  {
+    "name": "MR-05 authenticated host executes one bounded canonical recovery round",
+    "passed": false
+  },
+  {
+    "name": "topology completed",
+    "passed": false,
+    "error": "MR-05 authenticated host executes one bounded canonical recovery round"
+  }
+]

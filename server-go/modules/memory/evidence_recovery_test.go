@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"github.com/JBailes/aimee/server-go/bus"
 	"strings"
 	"testing"
 )
@@ -122,5 +123,20 @@ func TestEvidenceRecoveryBudgetAdmission(t *testing.T) {
 	}
 	if r.Recovery.State != "unsupported" || len(r.Recovery.Actions) != 0 || r.Sufficiency != "unknown" {
 		t.Fatal(r.Recovery)
+	}
+}
+
+func TestEvidenceRecoveryAdmissionRefusalIsStructured(t *testing.T) {
+	args := commandArgs{"query": json.RawMessage(`"missing"`), "execute_recovery": json.RawMessage(`true`)}
+	for _, caller := range []*bus.CommandContext{nil, {Authenticated: true, Principal: "service", UserAuthority: false}} {
+		raw, status := handleTypedContextResult(handlerOptions{placement: PlacementKB, commandContext: caller}, bus.ModuleInvocation{}, args, false)
+		if status != bus.ModuleStatusOK {
+			t.Fatal(status)
+		}
+		body, err := bus.DecodeCommandResult(raw)
+		var result map[string]any
+		if err != nil || json.Unmarshal(body, &result) != nil || result["kind"] != "recovery_not_admitted" || result["status"] != "error" {
+			t.Fatal(err, string(body))
+		}
 	}
 }

@@ -1,0 +1,754 @@
+{
+  "checks": [
+    {
+      "name": "Fixture has a bounded deployment-owned provider byte ceiling",
+      "passed": true
+    },
+    {
+      "name": "Go private memory stores the Unicode and escaping fixture",
+      "passed": true
+    },
+    {
+      "name": "Go memory returns the exact content and current version",
+      "passed": true
+    },
+    {
+      "name": "Go recall selects the stored fixture",
+      "passed": true
+    },
+    {
+      "name": "chat to openai completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "chat to openai dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai uses OpenAI chat fields",
+      "passed": true
+    },
+    {
+      "name": "chat to openai preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "chat to openai preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "chat to openai includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "chat to openai includes standing memory guidance exactly once",
+      "passed": true
+    },
+    {
+      "name": "chat to openai admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "chat to openai exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "chat to openai one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai literal zero token cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai literal zero token cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai literal zero response reserve reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai literal zero response reserve sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai literal zero tool reserve reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai literal zero tool reserve sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to openai duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming zero cap emits a failure",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming zero cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai buffered raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "chat to openai streaming raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "responses to openai dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai uses OpenAI chat fields",
+      "passed": true
+    },
+    {
+      "name": "responses to openai preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "responses to openai preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "responses to openai includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "responses to openai includes standing memory guidance exactly once",
+      "passed": true
+    },
+    {
+      "name": "responses to openai recovers from one transient provider failure",
+      "passed": true
+    },
+    {
+      "name": "responses to openai performs exactly one admitted resend",
+      "passed": true
+    },
+    {
+      "name": "responses to openai resend preserves exact serialized bytes",
+      "passed": true
+    },
+    {
+      "name": "responses to openai admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "responses to openai exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "responses to openai one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai literal zero token cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai literal zero token cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai literal zero response reserve reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai literal zero response reserve sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai literal zero tool reserve reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai literal zero tool reserve sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses to openai duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses to openai buffered raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai uses OpenAI chat fields",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai includes standing memory guidance exactly once",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai literal zero token cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai literal zero token cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai literal zero response reserve reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai literal zero response reserve sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai literal zero tool reserve reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai literal zero tool reserve sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "responses_stream to openai streaming raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "messages to openai dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai uses OpenAI chat fields",
+      "passed": true
+    },
+    {
+      "name": "messages to openai preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "messages to openai preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "messages to openai includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "messages to openai admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "messages to openai exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "messages to openai one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai unavailable tokens reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai unavailable tokens sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai literal zero token cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai literal zero token cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai literal zero response reserve reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai literal zero response reserve sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai literal zero tool reserve reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai literal zero tool reserve sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai null cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai null cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai unknown field reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai unknown field sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai duplicate cap reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "messages to openai duplicate cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming zero cap emits a failure",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming zero cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai buffered raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming absent caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming absent caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming inherited caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming inherited caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming raised caller cap cannot bypass deployment ceiling",
+      "passed": true
+    },
+    {
+      "name": "messages to openai streaming raised caller cap sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic completes through the real provider adapter",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic dispatches exactly one request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic uses Anthropic system and tool fields",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic preserves the complete Go memory projection",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic preserves the user constraint",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic includes the tool schema in the final request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic captures provider serialization overhead",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic includes standing memory guidance exactly once",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic admits an exact final-byte fit",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic exact-fit dispatch preserves all provider bytes",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic one byte under reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic one byte under sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic literal zero reports explicit refusal",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic literal zero sends no provider request",
+      "passed": true
+    },
+    {
+      "name": "chat to anthropic unavailable tokens reports explicit refusal",
+      "passed": false
+    },
+    {
+      "name": "fixture memory is retired after capture",
+      "passed": true
+    }
+  ],
+  "accounting": [
+    {
+      "frontend": "chat",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8373,
+      "memory_projection_bytes": 1877,
+      "digest": "sha256:a8d55cc0d49d6a1d7dc8966d47f80be43f714e35e85792889ac1624b373a3889",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8373,
+      "memory_projection_bytes": 1877,
+      "digest": "sha256:a8d55cc0d49d6a1d7dc8966d47f80be43f714e35e85792889ac1624b373a3889",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "responses_stream",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8373,
+      "memory_projection_bytes": 1877,
+      "digest": "sha256:a8d55cc0d49d6a1d7dc8966d47f80be43f714e35e85792889ac1624b373a3889",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    },
+    {
+      "frontend": "messages",
+      "provider": "openai",
+      "endpoint": "/v1/chat/completions",
+      "boundary": "provider_http_body",
+      "count_state": "exact",
+      "unit": "utf8_bytes",
+      "request_bytes": 8371,
+      "memory_projection_bytes": 1877,
+      "digest": "sha256:290c66c7c5c00cba07fc3e45a441da9e32a6d4527a3b4b916e21c7c47c95895d",
+      "token_count_state": "unavailable",
+      "retention": "commitment_only"
+    }
+  ]
+}
