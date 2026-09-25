@@ -1,6 +1,6 @@
 # MR-05: Requirement-based context sufficiency and bounded recovery
 
-- **State:** In progress; nonempty typed results no longer claim complete task coverage
+- **State:** Complete — implementation and acceptance validated 2026-09-25
 - **Priority:** P0 for honest sufficiency; P1 for recovery
 - **Owner:** Go memory requirements and coverage, with host-governed recovery execution
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-03](memory-reliability-03-final-payload-context-budgets.md); [MR-04](memory-reliability-04-evidence-lineage-and-independent-support.md) for independence requirements
@@ -74,3 +74,10 @@ now emits opt-in current-state lookup proposals with work ceilings, stable attem
 keys and explicit host-admission status. Outer packing regenerates proposals;
 strict requirement decoding rejects ambiguous inputs. Host execution, durable
 attempt/outcome tracking and the complete recovery-loop gate remain open.
+
+## Final acceptance — 2026-09-25
+
+All seven acceptance clauses are validated in the
+[MR-05 closeout and evidence](../../validation/memory-mr05-closeout-2026-09-25.md).
+Earlier slice notes above preserve their historical scope; the final closeout
+records the delivered behavior, conservative rollout bounds and passing receipts.

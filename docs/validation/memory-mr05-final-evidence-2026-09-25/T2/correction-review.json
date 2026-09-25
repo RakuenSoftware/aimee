@@ -1,0 +1,157 @@
+[
+  {
+    "name": "MR-05 authenticated host executes one bounded canonical recovery round",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MR-05 durable duplicate attempt cannot reset the recovery budget",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "review fixture has verified user authorship",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP creates linked correction draft owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "model draft preserves authoritative current memory",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "draft inspection preserves model authority and cap",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "draft inspection obeys parent scope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "enrolled Server reaches restarted memory owner",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "Server observes the exact target version after KB restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP draft retry after KB restart owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "draft retry survives owner restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "restart and derived primary scope preserve target version",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "direct service bearer cannot claim human review authority",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "unauthenticated HTTP cannot review a draft",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "review binds exact draft digest",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "verified KB review approves the draft",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "approval separates model authorship from reviewer",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "approved model version keeps recomputed confidence",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "approved extraction remains model authored",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "review replay keeps one canonical commit",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP reviewed content requires another review owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "reviewed model text cannot be silently overwritten",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "verified reviewer rejects the exact follow-up",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP repeats rejected draft owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "rejected draft cannot reopen through another model call",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "review workflow retains exactly old and approved versions",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "rejected draft never enters recall storage",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit erasure removes original proposal parent",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "parent erasure removes draft payload",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP erased proposal retry owner envelope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "erasure does not free a committed proposal retry key",
+    "passed": true,
+    "detail": null
+  }
+]

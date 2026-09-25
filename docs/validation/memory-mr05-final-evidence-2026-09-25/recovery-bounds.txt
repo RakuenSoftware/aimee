@@ -1,0 +1,5 @@
+=== RUN   TestEvidenceRecoveryDurableRoundPostgres
+    runtime_role_test.go:35: runtime SQL: aimee: no rows in result set
+--- PASS: TestEvidenceRecoveryDurableRoundPostgres (0.17s)
+PASS
+ok  	github.com/JBailes/aimee/server-go/modules/memory	1.206s

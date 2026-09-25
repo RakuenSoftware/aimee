@@ -1,7 +1,8 @@
 # MR-05 implementation checkpoint — 2026-09-25
 
-MR-05 is in progress. This checkpoint records the implementation contract, not
-final acceptance or deployment certification. MR-01 through MR-04 are complete.
+MR-05 is now complete; see the [final closeout](memory-mr05-closeout-2026-09-25.md).
+This checkpoint preserves the implementation contract and intermediate validation
+state. MR-01 through MR-05 are complete.
 
 ## Requirements and retained evidence
 

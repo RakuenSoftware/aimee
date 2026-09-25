@@ -1,0 +1,74 @@
+PASS Typed assertion binds the exact owner record revision
+PASS Typed selection digest includes source revision evidence
+PASS Typed assertion binds its direct memory parent revision
+PASS Typed coverage evaluates explicit current-state roles over retained evidence
+PASS Typed coverage marks a packed-away role budget_dropped
+PASS Unrelated retrieved evidence cannot fill a current-state obligation
+PASS Missing role recovery remains a bounded host-admitted proposal
+PASS Recovery cannot retry evidence removed by packing
+PASS MR-05 one retained side cannot complete a comparison
+PASS MR-05 current evidence cannot invent a predecessor or change date
+PASS MR-05 source group uses scoped canonical origin lineage
+PASS MR-05 uncertified origins cannot satisfy independent support
+PASS MR-05 a service bearer alone cannot admit recovery work
+PASS Unsupported evidence query mode remains unknown
+PASS Hidden assertion cannot establish evidence coverage
+PASS Unchanged typed assertion retains its source binding
+PASS Final source check accepts unchanged assertion and parent
+PASS Final source check refuses a newly hidden parent
+PASS Final source check requires authenticated transport
+PASS Changed memory parent invalidates binding with identical assertion bytes
+PASS Final source check refuses parent changed after selection
+PASS Final source check accepts refreshed parent binding
+PASS Changed assertion revision cannot reuse the prior selection binding
+PASS Omitted typed assertion claims no retained source revision
+PASS Plain facts bind exact assertion and parent revisions
+PASS Plain facts digest binds rendered bytes and source selection
+PASS Unchanged plain facts preserve selection identity
+PASS Parent revision changes plain fact binding with identical text
+PASS Typed episode binds its own and parent revisions
+PASS Typed episode no-op preserves revision and selection
+PASS Episode provenance changes independently of its parent
+PASS Parent revision binds identical rendered episode bytes
+PASS Omitted typed episode claims no retained source revision
+PASS Generated episode without producer observations is withheld
+PASS Generated episode with exact observed inputs is served
+PASS Generated episode cannot borrow a new parent revision
+PASS Previously retained generated episode fails release after parent edit
+PASS Typed assertion binds the exact owner record revision
+PASS Typed selection digest includes source revision evidence
+PASS Typed assertion binds its direct memory parent revision
+PASS Typed coverage evaluates explicit current-state roles over retained evidence
+PASS Typed coverage marks a packed-away role budget_dropped
+PASS Unrelated retrieved evidence cannot fill a current-state obligation
+PASS Missing role recovery remains a bounded host-admitted proposal
+PASS Recovery cannot retry evidence removed by packing
+PASS MR-05 one retained side cannot complete a comparison
+PASS MR-05 current evidence cannot invent a predecessor or change date
+PASS MR-05 source group uses scoped canonical origin lineage
+PASS MR-05 uncertified origins cannot satisfy independent support
+PASS MR-05 a service bearer alone cannot admit recovery work
+PASS Unsupported evidence query mode remains unknown
+PASS Hidden assertion cannot establish evidence coverage
+PASS Unchanged typed assertion retains its source binding
+PASS Final source check accepts unchanged assertion and parent
+PASS Final source check refuses a newly hidden parent
+PASS Final source check requires authenticated transport
+PASS Changed memory parent invalidates binding with identical assertion bytes
+PASS Final source check refuses parent changed after selection
+PASS Final source check accepts refreshed parent binding
+PASS Changed assertion revision cannot reuse the prior selection binding
+PASS Omitted typed assertion claims no retained source revision
+PASS Plain facts bind exact assertion and parent revisions
+PASS Plain facts digest binds rendered bytes and source selection
+PASS Unchanged plain facts preserve selection identity
+PASS Parent revision changes plain fact binding with identical text
+PASS Typed episode binds its own and parent revisions
+PASS Typed episode no-op preserves revision and selection
+PASS Episode provenance changes independently of its parent
+PASS Parent revision binds identical rendered episode bytes
+PASS Omitted typed episode claims no retained source revision
+PASS Generated episode without producer observations is withheld
+PASS Generated episode with exact observed inputs is served
+PASS Generated episode cannot borrow a new parent revision
+PASS Previously retained generated episode fails release after parent edit
