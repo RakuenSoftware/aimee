@@ -146,6 +146,7 @@ void db2_lease_release_idle(void)
 static int g_erasure_begin_calls;
 static int g_erasure_complete_calls;
 static int g_erasure_reconcile_calls;
+static int g_erasure_pending_owners;
 
 int db2_subject_erasure_begin(const char *request_id, const char *subject,
                               const char *sessions_json, int64_t *memory_count,
@@ -170,6 +171,19 @@ int db2_subject_erasure_complete(const char *request_id, const char *actor, int6
    g_erasure_complete_calls++;
    *event_created = 1;
    return 0;
+}
+
+int db2_subject_erasure_ack(const char *request_id, const char *actor, const char *transport,
+                            int64_t db1_count, int *event_created, int *coverage_complete,
+                            int64_t *pending_owners)
+{
+   assert(transport != NULL);
+   int rc = db2_subject_erasure_complete(request_id, actor, db1_count, event_created);
+   *pending_owners = g_erasure_pending_owners;
+   *coverage_complete = g_erasure_pending_owners == 0;
+   if (g_erasure_pending_owners)
+      *event_created = 0;
+   return rc;
 }
 
 static const char *g_stub_kb_mode = "";
@@ -6562,7 +6576,12 @@ static void test_subject_erasure_routes_are_owner_gated_and_idempotent(void)
    assert(g_erasure_complete_calls == 0);
    assert(g_erasure_reconcile_calls == 0);
 
-   const char *complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1}";
+   const char *legacy_complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1}";
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        legacy_complete, (int)strlen(legacy_complete), buf, sizeof(buf));
+   assert(s == 409 && g_erasure_complete_calls == 0 && g_erasure_reconcile_calls == 0);
+   const char *complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1,\"receipt_"
+                          "policy\":\"memory-erasure-v2\"}";
    s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
                         complete, (int)strlen(complete), buf, sizeof(buf));
    assert(s == 200);
@@ -6570,6 +6589,14 @@ static void test_subject_erasure_routes_are_owner_gated_and_idempotent(void)
    assert(g_erasure_reconcile_calls == 1);
    assert(strstr(buf, "\"event_created\":true") != NULL);
    assert(strstr(buf, "\"orphan_blobs_unlinked\":4") != NULL);
+   assert(strstr(buf, "\"coverage_complete\":true") != NULL);
+   g_erasure_pending_owners = 1;
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        complete, (int)strlen(complete), buf, sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"status\":\"pending_owners\"") != NULL);
+   assert(strstr(buf, "\"coverage_complete\":false") != NULL);
+   assert(strstr(buf, "\"event_created\":false") != NULL);
+   g_erasure_pending_owners = 0;
 }
 
 static void test_maintenance_repair_missing_project(void)

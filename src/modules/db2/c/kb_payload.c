@@ -660,6 +660,44 @@ int db2_subject_erasure_complete(const char *request_id, const char *actor, int6
    return ok ? 0 : -1;
 }
 
+int db2_subject_erasure_ack(const char *request_id, const char *actor, const char *transport,
+                            int64_t db1_count, int *event_created, int *coverage_complete,
+                            int64_t *pending_owners)
+{
+   if (event_created)
+      *event_created = 0;
+   if (coverage_complete)
+      *coverage_complete = 0;
+   if (pending_owners)
+      *pending_owners = 0;
+   void *conn = db2_conn();
+   if (!conn || !request_id || !actor || !transport || db1_count < 0)
+      return -1;
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT event_created,coverage_complete,pending_owners "
+                                          "FROM kb_subject_erasure_ack(?1,?2,?3,?4)",
+                                          err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", request_id);
+   aimee_pg_bind_text(st, "?2", actor);
+   aimee_pg_bind_text(st, "?3", transport);
+   aimee_pg_bind_int64(st, "?4", db1_count);
+   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW;
+   if (ok)
+   {
+      if (event_created)
+         *event_created = aimee_pg_column_int(st, 0) != 0;
+      if (coverage_complete)
+         *coverage_complete = aimee_pg_column_int(st, 1) != 0;
+      if (pending_owners)
+         *pending_owners = aimee_pg_column_int64(st, 2);
+   }
+   aimee_pg_finalize(st);
+   return ok ? 0 : -1;
+}
+
 int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path,
                                       const char *file_hash, int chunk_index,
                                       const char *heading_path, int line_start, int line_end,

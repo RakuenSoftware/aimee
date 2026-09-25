@@ -1,0 +1,6 @@
+ok  	github.com/JBailes/aimee/server-go/modules/aimee	1.020s
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/cmd/peerprobe	1.013s
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/families	2.067s
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/peer	4.645s
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/peerwire	1.011s
+ok  	github.com/JBailes/aimee/server-go/modules/aimee/process	1.010s

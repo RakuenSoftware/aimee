@@ -155,6 +155,7 @@
     "server-go/modules/aimee/families/schema_personal_memory_send_guards.sql",
     "server-go/modules/aimee/families/schema_personal_memory_send_guard_completion.sql",
     "server-go/modules/aimee/families/schema_personal_memory_erasure.sql",
+    "server-go/modules/aimee/families/schema_subject_erasure_receipts.sql",
     "server-go/modules/aimee/families/schema_pki.sql",
     "server-go/modules/aimee/families/schema_roundtable.sql",
     "server-go/modules/aimee/families/schema_runtime.sql",

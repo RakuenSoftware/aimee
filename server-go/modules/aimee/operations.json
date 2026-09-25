@@ -10040,6 +10040,49 @@
       }
     },
     {
+      "family": "sessions",
+      "id": 27,
+      "name": "server_session_erasure_receipt",
+      "c_name": "db1_server_session_erasure_receipt",
+      "c_params": [
+        "request_id",
+        "principal"
+      ],
+      "c_returns": "text",
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "request_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "session_digests",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 524288
+      }
+    },
+    {
       "family": "runtime",
       "id": 1,
       "name": "runtime_state_set",

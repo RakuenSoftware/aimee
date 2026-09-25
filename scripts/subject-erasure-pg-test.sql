@@ -99,9 +99,9 @@ BEGIN
   IF second_run.deleted_memories<>1 OR second_run.deleted_documents<>1 OR NOT second_run.already_done THEN
     RAISE EXCEPTION 'erasure retry was not idempotent: %',row_to_json(second_run);
   END IF;
-  created := kb_subject_erasure_complete('erase-acceptance-0123456789','privacy-test-operator',1);
-  IF NOT created OR kb_subject_erasure_complete(
-      'erase-acceptance-0123456789','privacy-test-operator',1) THEN
+  SELECT event_created INTO created FROM kb_subject_erasure_ack('erase-acceptance-0123456789','privacy-test-operator','',1);
+  IF NOT created OR (SELECT event_created FROM kb_subject_erasure_ack(
+      'erase-acceptance-0123456789','privacy-test-operator','',1)) THEN
     RAISE EXCEPTION 'completion was not exactly once';
   END IF;
   sensitivity_reaped := kb_memory_sensitivity_retention_reap('restricted',30);

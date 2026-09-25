@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS collab_rules (  id INTEGER PRIMARY KEY AUTOINCREMENT,
 CREATE TABLE IF NOT EXISTS collab_rules_meta (  key TEXT PRIMARY KEY,  value TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_meta (  key TEXT PRIMARY KEY,  value TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_documents (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project TEXT NOT NULL,  generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),  file_path TEXT NOT NULL,  file_hash TEXT NOT NULL,  chunk_index INTEGER NOT NULL,  heading_path TEXT NOT NULL DEFAULT '',  line_start INTEGER NOT NULL DEFAULT 0,  line_end INTEGER NOT NULL DEFAULT 0,  content TEXT NOT NULL,  token_count INTEGER NOT NULL DEFAULT 0,  updated_at TEXT NOT NULL DEFAULT (datetime('now')), prev_chunk_id INTEGER DEFAULT NULL, next_chunk_id INTEGER DEFAULT NULL,  chunk_strategy TEXT NOT NULL DEFAULT 'heading',  doc_kind TEXT NOT NULL DEFAULT '',  chunk_context TEXT NOT NULL DEFAULT '',  page_start INTEGER DEFAULT NULL,  page_end INTEGER DEFAULT NULL,  sensitivity_class TEXT NOT NULL DEFAULT '',  quarantine_state TEXT NOT NULL DEFAULT '',  tsr_state TEXT NOT NULL DEFAULT '', owner_principal TEXT NOT NULL DEFAULT '');
-CREATE TABLE IF NOT EXISTS kb_subject_erasure_request (request_id TEXT PRIMARY KEY, subject_digest TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', memory_count INTEGER NOT NULL DEFAULT 0, document_count INTEGER NOT NULL DEFAULT 0, db1_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), completed_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS kb_subject_erasure_request (request_id TEXT PRIMARY KEY, coverage_policy TEXT NOT NULL DEFAULT 'legacy', subject_digest TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', memory_count INTEGER NOT NULL DEFAULT 0, document_count INTEGER NOT NULL DEFAULT 0, db1_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), completed_at TEXT NOT NULL DEFAULT '');
 -- structured-pdf Phase 1: per-line coordinate evidence index (see db2/schema.sql).
 CREATE TABLE IF NOT EXISTS kb_doc_regions (  id INTEGER PRIMARY KEY AUTOINCREMENT,  chunk_id INTEGER NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,  document_key TEXT NOT NULL DEFAULT '',  page_no INTEGER NOT NULL DEFAULT 0,  x0 REAL NOT NULL DEFAULT 0,  y0 REAL NOT NULL DEFAULT 0,  x1 REAL NOT NULL DEFAULT 0,  y1 REAL NOT NULL DEFAULT 0,  quote TEXT NOT NULL DEFAULT '',  line_index INTEGER NOT NULL DEFAULT 0,  content_type TEXT NOT NULL DEFAULT 'text',  sensitivity_class TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS kb_table_cells (  id INTEGER PRIMARY KEY AUTOINCREMENT,  region_id INTEGER NOT NULL REFERENCES kb_doc_regions(id) ON DELETE CASCADE,  document_key TEXT NOT NULL DEFAULT '',  page_no INTEGER NOT NULL DEFAULT 0,  cell_row INTEGER NOT NULL DEFAULT 0,  cell_col INTEGER NOT NULL DEFAULT 0,  cell_text TEXT NOT NULL DEFAULT '',  subject TEXT NOT NULL DEFAULT '',  relation TEXT NOT NULL DEFAULT '',  object TEXT NOT NULL DEFAULT '',  tsr_confidence INTEGER NOT NULL DEFAULT 0,  source_type TEXT NOT NULL DEFAULT 'table_cell',  sensitivity_class TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -942,3 +942,10 @@ CREATE TABLE IF NOT EXISTS memory_erasure_intents (
  payload_digest TEXT NOT NULL, erased_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS memory_erasure_payload_idx ON memory_erasure_intents(scope_type,scope_value,payload_digest);
+
+CREATE TABLE IF NOT EXISTS memory_erasure_sessions (session_digest TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS kb_subject_erasure_owner_coverage (
+ request_id TEXT NOT NULL REFERENCES kb_subject_erasure_request(request_id),owner_id TEXT NOT NULL,
+ state TEXT NOT NULL DEFAULT 'pending',policy_revision TEXT NOT NULL DEFAULT 'memory-erasure-v2',
+ deleted_count INTEGER NOT NULL DEFAULT 0,verified_at TEXT,PRIMARY KEY(request_id,owner_id)
+);

@@ -260,6 +260,7 @@
 #define AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_FINISH 24u
 #define AIMEE_DB1_OP_SERVER_SESSION_LIST_BY_SUBJECT         25u
 #define AIMEE_DB1_OP_SERVER_SESSION_ERASE_SUBJECT           26u
+#define AIMEE_DB1_OP_SERVER_SESSION_ERASURE_RECEIPT         27u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */

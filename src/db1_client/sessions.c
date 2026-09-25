@@ -487,6 +487,18 @@ int db1_server_session_erase_subject(const char *request_id, const char *princip
    return (int)strtoll(slot0, NULL, 10);
 }
 
+char *db1_server_session_erasure_receipt(const char *request_id, const char *principal)
+{
+ if (!request_id || !request_id[0] || !principal || !principal[0]) return NULL;
+ const char *fields[]={request_id,principal};
+ size_t capacity=512u*1024u;
+ char *receipt=malloc(capacity);if(!receipt)return NULL;
+ char *values[]={receipt};const size_t caps[]={capacity};
+ int status=call_stage(AIMEE_DB1_OP_SERVER_SESSION_ERASURE_RECEIPT,fields,2,values,caps,1,NULL);
+ if(status!=(int)AIMEE_DB1_STATUS_OK){free(receipt);return NULL;}
+ return receipt;
+}
+
 int db1_primary_session_save(const char *session_id, const char *agent_name, const char *provider, const char *messages_json)
 {
    if (!session_id || !session_id[0])

@@ -87,6 +87,8 @@ extern "C"
    int db1_server_session_list_by_subject(const char *principal, char (*out_ids)[DB1_SS_ID_LEN],
                                           int max);
    int db1_server_session_erase_subject(const char *request_id, const char *principal);
+   /* Caller owns the bounded JSON array of erased session digest locators. */
+   char *db1_server_session_erasure_receipt(const char *request_id, const char *principal);
 
 #ifdef __cplusplus
 }

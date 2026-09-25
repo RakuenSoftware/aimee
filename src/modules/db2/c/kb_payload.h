@@ -132,6 +132,9 @@ extern "C"
    int db2_subject_erasure_begin(const char *request_id, const char *subject,
                                  const char *sessions_json, int64_t *memory_count,
                                  int64_t *document_count, int *already_done);
+   int db2_subject_erasure_ack(const char *request_id, const char *actor, const char *transport,
+                               int64_t db1_count, int *event_created, int *coverage_complete,
+                               int64_t *pending_owners);
    int db2_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
                                     int *event_created);
 

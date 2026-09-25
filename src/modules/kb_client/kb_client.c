@@ -663,6 +663,7 @@ char *kb_client_subject_erasure_complete(const char *request_id, int64_t db1_cou
       return NULL;
    cJSON_AddStringToObject(req, "request_id", request_id);
    cJSON_AddNumberToObject(req, "db1_count", (double)db1_count);
+   cJSON_AddStringToObject(req, "receipt_policy", "memory-erasure-v2");
    char *resp = kb_client_v1_post_json_keep_error("/v1/privacy/erase-subject/complete", req, 120000,
                                                   status_out);
    cJSON_Delete(req);
@@ -1810,6 +1811,7 @@ char *kb_client_search_json_scoped_ex(const char *project, int all_projects, con
     * the kb_client_ws subscriber flushes the cache on every /v1/events
     * invalidation so results never outlive a release/ingest change. No-op
     * unless AIMEE_KB_CACHE_TTL_S (or config) enables it. */
+   uint64_t cache_generation = kb_cache_observe();
    char cache_key[480];
    int have_key =
        snprintf(cache_key, sizeof(cache_key), "search|%s|%d|%s|%d|%s|%s", query, max_results,
@@ -1872,7 +1874,7 @@ char *kb_client_search_json_scoped_ex(const char *project, int all_projects, con
          return kb_typed_error_json(kb_client_last_result_status(), detail);
       }
       if (have_key)
-         kb_cache_put(cache_key, resp);
+         kb_cache_put_observed(cache_key, resp, cache_generation);
       return resp;
    }
    if (http_status >= 100)

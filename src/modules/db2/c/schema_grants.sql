@@ -107,7 +107,7 @@ BEGIN
     FROM aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_audit_worm_submit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
     kb_audit_worm_pending() TO aimee_kb_runtime;
-  REVOKE ALL ON TABLE kb_subject_erasure_request,memory_erasure_intents,memory_erasure_epoch FROM aimee_kb_runtime;
+  REVOKE ALL ON TABLE kb_subject_erasure_request,kb_subject_erasure_owner_coverage,memory_erasure_intents,memory_erasure_sessions,memory_erasure_epoch FROM aimee_kb_runtime;
   REVOKE ALL ON TABLE memory_projection_generations FROM aimee_kb_runtime;
   GRANT SELECT ON TABLE memory_projection_generations TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_subject_erasure_begin(TEXT,TEXT,JSONB),
@@ -491,7 +491,7 @@ BEGIN
   -- active under this NOLOGIN definer; no runtime role gains erasure authority.
   GRANT INSERT,UPDATE ON kb_async_jobs TO aimee_kb_privacy_erasure;
   GRANT SELECT ON fact_evidence,memory_entities TO aimee_kb_privacy_erasure;
-  GRANT SELECT,INSERT ON memory_erasure_intents TO aimee_kb_privacy_erasure;
+  GRANT SELECT,INSERT ON memory_erasure_intents,memory_erasure_sessions TO aimee_kb_privacy_erasure;
   GRANT SELECT,UPDATE ON memory_erasure_epoch TO aimee_kb_privacy_erasure;
   GRANT SELECT,DELETE ON memory_lineage,rules,tasks,learning_proposals,learning_observations,
     interaction_event_embeddings,entity_profiles,memory_relations TO aimee_kb_privacy_erasure;
@@ -499,6 +499,8 @@ BEGIN
   GRANT SELECT,INSERT,UPDATE ON fact_graph_commits,fact_graph_changes,
     memory_evidence_events TO aimee_kb_privacy_erasure;
   GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO aimee_kb_privacy_erasure;
+  GRANT SELECT ON kb_server_registry TO aimee_kb_privacy_erasure;
+  GRANT SELECT,INSERT,UPDATE ON kb_subject_erasure_owner_coverage TO aimee_kb_privacy_erasure;
   GRANT SELECT,INSERT,UPDATE ON kb_subject_erasure_request TO aimee_kb_privacy_erasure;
   GRANT EXECUTE ON FUNCTION pg_now_text(TEXT),
     evidence_envelope_json(JSONB),kb_fact_commit_worm_seal(TEXT,TEXT),
@@ -507,6 +509,10 @@ BEGIN
     TO aimee_kb_privacy_erasure;
   ALTER FUNCTION kb_subject_erasure_begin(TEXT,TEXT,JSONB)
     OWNER TO aimee_kb_privacy_erasure;
+  ALTER FUNCTION kb_subject_erasure_require_owners(TEXT) OWNER TO aimee_kb_privacy_erasure;
+  ALTER FUNCTION kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT) OWNER TO aimee_kb_privacy_erasure;
+  REVOKE ALL ON FUNCTION kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT),kb_subject_erasure_require_owners(TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
   ALTER FUNCTION kb_subject_erasure_complete(TEXT,TEXT,BIGINT)
     OWNER TO aimee_kb_privacy_erasure;
   ALTER FUNCTION kb_memory_retention_reap(INTEGER)

@@ -7668,6 +7668,35 @@ BEGIN
   RETURN v_count;
 END; $$;
 
+-- A receipt is durable verified coverage from one retained owner, not a health
+-- check or delivery acknowledgement. Offline and revoked servers remain required.
+ALTER TABLE kb_subject_erasure_request ADD COLUMN IF NOT EXISTS coverage_policy TEXT NOT NULL DEFAULT 'legacy';
+CREATE TABLE IF NOT EXISTS kb_subject_erasure_owner_coverage (
+ request_id TEXT NOT NULL REFERENCES kb_subject_erasure_request(request_id),
+ owner_id TEXT NOT NULL,
+ state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','verified')),
+ policy_revision TEXT NOT NULL DEFAULT 'memory-erasure-v2',
+ deleted_count BIGINT NOT NULL DEFAULT 0 CHECK(deleted_count>=0),
+ verified_at TIMESTAMPTZ,
+ PRIMARY KEY(request_id,owner_id)
+);
+REVOKE ALL ON kb_subject_erasure_owner_coverage FROM PUBLIC;
+
+-- Called under the request row lock; a newly registered retained owner cannot
+-- disappear from coverage merely because another owner has already replied.
+CREATE OR REPLACE FUNCTION kb_subject_erasure_require_owners(p_request_id TEXT) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+ INSERT INTO kb_subject_erasure_owner_coverage(request_id,owner_id)
+ SELECT p_request_id,'server:'||server_id FROM kb_server_registry WHERE status<>'pending'
+ ON CONFLICT DO NOTHING;
+ IF NOT EXISTS(SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id) THEN
+  INSERT INTO kb_subject_erasure_owner_coverage(request_id,owner_id) VALUES(p_request_id,'standalone');
+ END IF;
+END $$;
+REVOKE ALL ON FUNCTION kb_subject_erasure_require_owners(TEXT) FROM PUBLIC;
+
+
 CREATE OR REPLACE FUNCTION kb_subject_erasure_begin(
   p_request_id TEXT, p_subject TEXT, p_session_ids JSONB
 ) RETURNS TABLE(deleted_memories BIGINT, deleted_documents BIGINT, already_done BOOLEAN)
@@ -7689,28 +7718,36 @@ BEGIN
      jsonb_typeof(COALESCE(p_session_ids,'[]'::JSONB)) <> 'array' THEN
     RAISE EXCEPTION 'invalid subject-erasure request' USING ERRCODE='22023';
   END IF;
+  IF jsonb_array_length(p_session_ids)>4096 OR EXISTS(
+   SELECT 1 FROM jsonb_array_elements(p_session_ids) value
+   WHERE jsonb_typeof(value)<>'string' OR length(value#>>'{}') NOT BETWEEN 1 AND 1024) THEN
+    RAISE EXCEPTION 'invalid subject-erasure session set' USING ERRCODE='22023';
+  END IF;
   v_digest := encode(sha256(convert_to(p_subject,'UTF8')),'hex');
-  INSERT INTO kb_subject_erasure_request(request_id,subject_digest)
-    VALUES(p_request_id,v_digest) ON CONFLICT(request_id) DO NOTHING;
+  INSERT INTO kb_subject_erasure_request(request_id,subject_digest,coverage_policy)
+    VALUES(p_request_id,v_digest,'memory-erasure-v2') ON CONFLICT(request_id) DO NOTHING;
   SELECT * INTO v_row FROM kb_subject_erasure_request
     WHERE request_id=p_request_id FOR UPDATE;
   IF v_row.subject_digest<>v_digest THEN
     RAISE EXCEPTION 'request id belongs to another subject' USING ERRCODE='22023';
   END IF;
-  IF v_row.state IN ('db2_done','completed') THEN
+  IF v_row.state='completed' THEN
     RETURN QUERY SELECT v_row.memory_count,v_row.document_count,true;
     RETURN;
   END IF;
 
-  SELECT COALESCE(array_agg(value),'{}'::TEXT[]) INTO v_sessions
+  PERFORM kb_subject_erasure_require_owners(p_request_id);
+  SELECT COALESCE(array_agg(CASE WHEN value ~ '^sha256:[0-9a-f]{64}$' THEN substring(value FROM 8)
+ ELSE encode(sha256(convert_to(value,'UTF8')),'hex') END),'{}'::TEXT[]) INTO v_sessions
     FROM jsonb_array_elements_text(p_session_ids);
   -- Freeze canonical writers before traversing; late queued producers also
   -- encounter the durable dependency guard after these locks are released.
   LOCK TABLE memories,memory_lineage,memory_units,derived_memory_dependencies,
     artifacts,artifact_citations IN SHARE ROW EXCLUSIVE MODE;
   UPDATE memory_erasure_epoch SET generation=generation+1 WHERE id=1;
+  INSERT INTO memory_erasure_sessions(session_digest) SELECT unnest(v_sessions) ON CONFLICT DO NOTHING;
   SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_memories FROM memories
-    WHERE owner_principal=p_subject OR source_session=ANY(v_sessions);
+    WHERE owner_principal=p_subject OR encode(sha256(convert_to(COALESCE(source_session,''),'UTF8')),'hex')=ANY(v_sessions);
   SELECT COALESCE(array_agg(id),'{}'::BIGINT[]) INTO v_documents FROM kb_documents
     WHERE owner_principal=p_subject;
   -- Follow declared derivation, never generic related links. UNION terminates
@@ -7828,9 +7865,11 @@ BEGIN
   DELETE FROM kb_file_index WHERE owner_principal=p_subject;
   DELETE FROM kb_documents WHERE id=ANY(v_documents);
 
+  v_memory_count:=v_memory_count+v_row.memory_count;
+  v_document_count:=v_document_count+v_row.document_count;
   UPDATE kb_subject_erasure_request SET state='db2_done',memory_count=v_memory_count,
     document_count=v_document_count WHERE request_id=p_request_id;
-  RETURN QUERY SELECT v_memory_count,v_document_count,false;
+  RETURN QUERY SELECT v_memory_count,v_document_count,(v_row.state='db2_done');
 END; $$;
 
 CREATE OR REPLACE FUNCTION kb_subject_erasure_complete(
@@ -7846,11 +7885,17 @@ BEGIN
   IF v_row.request_id IS NULL OR v_row.state='pending' OR p_actor='' OR p_db1_count<0 THEN
     RAISE EXCEPTION 'subject erasure is not ready to complete' USING ERRCODE='22023';
   END IF;
+  IF v_row.coverage_policy<>'memory-erasure-v2' OR NOT EXISTS(
+   SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id) OR EXISTS(
+   SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND state<>'verified') THEN
+    RETURN false;
+  END IF;
   IF v_row.state='completed' THEN RETURN false; END IF;
   v_detail := jsonb_build_object(
     'request_id',p_request_id,'subject_digest',v_row.subject_digest,
     'stores',jsonb_build_object('db1',p_db1_count,'memory',v_row.memory_count,
-      'documents',v_row.document_count),'policy_revision','data-governance-v1',
+      'documents',v_row.document_count),'policy_revision','memory-erasure-v2','coverage_scope','managed_application_stores',
+    'verified_owners',(SELECT count(*) FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND state='verified'),
     'outcome','completed')::TEXT;
   PERFORM kb_audit_worm_append('privacy-admin',p_actor,'subject.erase.completed',
     p_request_id,'allow',v_detail);
@@ -7858,6 +7903,40 @@ BEGIN
     completed_at=pg_now_text() WHERE request_id=p_request_id;
   RETURN true;
 END; $$;
+
+CREATE OR REPLACE FUNCTION kb_subject_erasure_ack(
+ p_request_id TEXT,p_actor TEXT,p_transport TEXT,p_db1_count BIGINT
+) RETURNS TABLE(event_created BOOLEAN,coverage_complete BOOLEAN,pending_owners BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE request kb_subject_erasure_request%ROWTYPE; owner_key TEXT; remaining BIGINT; emitted BOOLEAN:=FALSE;
+BEGIN
+ SELECT * INTO request FROM kb_subject_erasure_request WHERE request_id=p_request_id FOR UPDATE;
+ IF request.request_id IS NULL OR request.state='pending' OR request.coverage_policy<>'memory-erasure-v2'
+ OR p_actor='' OR p_db1_count<0 THEN RAISE EXCEPTION 'erasure coverage is not ready'; END IF;
+ SELECT CASE WHEN count(*)=1 THEN min('server:'||server_id) END INTO owner_key FROM kb_server_registry
+ WHERE status='active' AND p_transport='cert:'||client_issuer||':'||client_serial_norm;
+ IF owner_key IS NULL AND NOT EXISTS(SELECT 1 FROM kb_server_registry WHERE status<>'pending')
+ AND EXISTS(SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND owner_id='standalone') THEN
+  owner_key:='standalone';
+ END IF;
+ IF owner_key IS NULL THEN RAISE EXCEPTION 'authenticated retained owner receipt required'; END IF;
+ IF request.state='completed' THEN
+  IF NOT EXISTS(SELECT 1 FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND owner_id=owner_key AND state='verified') THEN
+   RAISE EXCEPTION 'owner is outside this completed erasure manifest';
+  END IF;
+  RETURN QUERY SELECT FALSE,TRUE,0::bigint; RETURN;
+ END IF;
+ PERFORM kb_subject_erasure_require_owners(p_request_id);
+ UPDATE kb_subject_erasure_owner_coverage SET state='verified',deleted_count=p_db1_count,verified_at=clock_timestamp()
+ WHERE request_id=p_request_id AND owner_id=owner_key AND state='pending';
+ SELECT count(*) INTO remaining FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id AND state<>'verified';
+ IF remaining=0 THEN
+  emitted:=kb_subject_erasure_complete(p_request_id,p_actor,
+   (SELECT COALESCE(sum(deleted_count),0)::bigint FROM kb_subject_erasure_owner_coverage WHERE request_id=p_request_id));
+ END IF;
+ RETURN QUERY SELECT emitted,remaining=0,remaining;
+END $$;
+REVOKE ALL ON FUNCTION kb_subject_erasure_ack(TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION kb_memory_retention_reap(INTEGER) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_memory_sensitivity_retention_reap(TEXT,INTEGER) FROM PUBLIC;
@@ -18992,30 +19071,35 @@ CREATE TABLE IF NOT EXISTS memory_erasure_intents (
 CREATE INDEX IF NOT EXISTS memory_erasure_payload_idx
  ON memory_erasure_intents(scope_type,scope_value,payload_digest);
 
+CREATE TABLE IF NOT EXISTS memory_erasure_sessions (
+ session_digest TEXT PRIMARY KEY CHECK(session_digest ~ '^[0-9a-f]{64}$')
+);
 CREATE OR REPLACE FUNCTION memory_erasure_restore_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE prohibited BOOLEAN; observed BIGINT;
 BEGIN
  EXECUTE format('SELECT generation FROM %I.memory_erasure_epoch WHERE id=1 FOR SHARE',TG_TABLE_SCHEMA) INTO STRICT observed;
  EXECUTE format('SELECT EXISTS(SELECT 1 FROM %I.memory_erasure_intents
- WHERE memory_id=$1 OR (scope_type=$2 AND scope_value=$3 AND payload_digest=$4))',TG_TABLE_SCHEMA)
+ WHERE memory_id=$1 OR (scope_type=$2 AND scope_value=$3 AND payload_digest=$4)) OR EXISTS(
+ SELECT 1 FROM %I.memory_erasure_sessions WHERE session_digest=$5)',TG_TABLE_SCHEMA,TG_TABLE_SCHEMA)
  INTO prohibited USING NEW.id,NEW.scope_type,NEW.scope_value,
-   encode(sha256(convert_to(NEW.content,'UTF8')),'hex');
+   encode(sha256(convert_to(NEW.content,'UTF8')),'hex'),
+   encode(sha256(convert_to(COALESCE(NEW.source_session,''),'UTF8')),'hex');
  IF prohibited THEN RAISE EXCEPTION 'memory restoration prohibited by surviving erasure intent'
    USING ERRCODE='23514'; END IF;
  RETURN NEW;
 END $$;
-REVOKE ALL ON memory_erasure_intents,memory_erasure_epoch FROM PUBLIC;
+REVOKE ALL ON memory_erasure_intents,memory_erasure_sessions,memory_erasure_epoch FROM PUBLIC;
 REVOKE ALL ON FUNCTION memory_erasure_restore_guard() FROM PUBLIC;
 DO $memory_erasure_acl$
 DECLARE recipient RECORD; role_name TEXT;
 BEGIN
  FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_class relation,
    LATERAL aclexplode(relation.relacl) acl
-   WHERE relation.oid IN ('memory_erasure_intents'::regclass,'memory_erasure_epoch'::regclass) AND acl.grantee<>relation.relowner
+   WHERE relation.oid IN ('memory_erasure_intents'::regclass,'memory_erasure_sessions'::regclass,'memory_erasure_epoch'::regclass) AND acl.grantee<>relation.relowner
  LOOP
   role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
-  EXECUTE format('REVOKE ALL ON memory_erasure_intents,memory_erasure_epoch FROM %s',role_name);
+  EXECUTE format('REVOKE ALL ON memory_erasure_intents,memory_erasure_sessions,memory_erasure_epoch FROM %s',role_name);
  END LOOP;
  FOR recipient IN SELECT DISTINCT acl.grantee FROM pg_proc routine,
    LATERAL aclexplode(routine.proacl) acl
@@ -19024,6 +19108,10 @@ BEGIN
   role_name:=CASE WHEN recipient.grantee=0 THEN 'PUBLIC' ELSE quote_ident(pg_get_userbyid(recipient.grantee)) END;
   EXECUTE format('REVOKE ALL ON FUNCTION memory_erasure_restore_guard() FROM %s',role_name);
  END LOOP;
+ IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_privacy_erasure') THEN
+  GRANT SELECT,INSERT ON memory_erasure_intents,memory_erasure_sessions TO aimee_kb_privacy_erasure;
+  GRANT SELECT,UPDATE ON memory_erasure_epoch TO aimee_kb_privacy_erasure;
+ END IF;
 END $memory_erasure_acl$;
 DROP TRIGGER IF EXISTS memory_erasure_restore_guard ON memories;
 CREATE TRIGGER memory_erasure_restore_guard BEFORE INSERT OR UPDATE ON memories
@@ -19100,6 +19188,8 @@ UPDATE memory_erasure_epoch SET generation=generation+1 WHERE id=1;
 DELETE FROM memories m USING memory_erasure_intents i
  WHERE m.id=i.memory_id OR (m.scope_type=i.scope_type AND m.scope_value=i.scope_value
  AND encode(sha256(convert_to(m.content,'UTF8')),'hex')=i.payload_digest);
+DELETE FROM memories m WHERE EXISTS(SELECT 1 FROM memory_erasure_sessions i
+ WHERE i.session_digest=encode(sha256(convert_to(COALESCE(m.source_session,''),'UTF8')),'hex'));
 DELETE FROM artifacts a WHERE a.payload->>'memory_id' IN (SELECT memory_id::text FROM memory_erasure_intents)
  OR EXISTS(SELECT 1 FROM artifact_citations c JOIN memory_erasure_intents i
  ON c.source_kind='memory' AND c.source_id=i.memory_id::text WHERE c.artifact_id=a.id);
@@ -19127,5 +19217,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '39')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '41')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

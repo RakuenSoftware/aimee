@@ -131,6 +131,9 @@ func applySchemaWaiting(ctx context.Context, db aimee.Store) error {
 	for attempt := 1; attempt <= attempts; attempt++ {
 		err = families.ApplySchema(ctx, db)
 		if err == nil {
+			_, err = families.ReplayErasureIntents(ctx, db)
+		}
+		if err == nil {
 			if attempt > 1 {
 				log.Printf("store: the postgres module answered after %ds", attempt-1)
 			}

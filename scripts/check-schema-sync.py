@@ -57,6 +57,7 @@ DB1_ONLY_TABLES = {
     "user_memory_erasure_epoch",
     "user_memory_erasure_intents",
     "user_memory_erasure_sessions",
+    "user_memory_erasure_delegations",
     # pki_certs and pki_mtls_ramp were created lazily by pki_store.c with
     # CREATE TABLE IF NOT EXISTS and never appeared in a schema file, so this
     # check could not see them. The Go store declares them, so it can.

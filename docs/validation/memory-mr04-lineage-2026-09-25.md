@@ -364,3 +364,44 @@ boundaries, source/test registration, schema parity/order, proposal links and
 whitespace checks pass. MR-04 owner coverage and final process acceptance remain
 open. Production CT100 and its database/embedder remain healthy on released
 0.4.5; the paired CLI reports the server healthy and the pre-existing KB disabled.
+
+
+## Verified erasure owner coverage
+
+Shared schema 41 records a required-owner manifest for each erasure request.
+Every non-pending registered server remains required, including offline and
+revoked servers. An authenticated transport can acknowledge only its own owner.
+Duplicate receipts do not change counts. Legacy count-only coordinators receive
+409 and cannot certify coverage. Standalone coverage applies only when there
+are no registered owners. An incomplete manifest reports `pending_owners`.
+
+The coordinator captures the session set in the private erasure transaction,
+then repeats shared erasure using the durable digest receipt before acknowledging
+completion. This closes the gap between the initial session read and private
+commit. Completion covers managed application stores only. Detached exports,
+operator backups and external provider copies require their own retention and
+deletion process; this API does not claim to verify their removal.
+
+Private migration 37 retains session/delegation digests and rejects delayed
+writes to session-owned payload stores. The unowned agent cache has no source
+observations: erasure clears it and further fills become cache misses. This can
+reduce cache performance after an erasure; uncached execution remains available.
+Native KB invalidation also fences fills that started before the invalidation.
+
+Content restoration must occur while serving is stopped and preserve the
+independent intent/epoch/receipt tables. Shared migration replays intent before
+schema readiness. Both private readers (Aimee session owner and direct memory
+owner) replay through the storage contract before advertising readiness, even
+when no migration is pending. A failed replay prevents startup. Immutable audit
+records retain payload-free receipts under their existing access controls.
+
+[Complete memory/export validation](memory-mr04-lineage-2026-09-25/owner-full.txt)
+passes (251.157/5.512 seconds), as do
+[all private module tests](memory-mr04-lineage-2026-09-25/owner-private-all.txt),
+[restricted-role erase/restore tests](memory-mr04-lineage-2026-09-25/owner-private-erasure.txt),
+[startup barrier tests](memory-mr04-lineage-2026-09-25/owner-startup.txt),
+[native coordinator](memory-mr04-lineage-2026-09-25/owner-coordinator.txt),
+[cache](memory-mr04-lineage-2026-09-25/owner-cache.txt), and
+[HTTP](memory-mr04-lineage-2026-09-25/owner-http.txt) tests.
+The startup barrier was added after the full-suite run and has its focused
+receipt above; final candidate process validation remains required.

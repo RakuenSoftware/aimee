@@ -14,32 +14,33 @@ const (
 	EventSessions uint32 = 11782
 	StageSessions uint32 = 6
 
-	opServerSessionCreate        uint32 = 1
-	opServerSessionGet           uint32 = 2
-	opServerSessionSetOutcome    uint32 = 3
-	opServerSessionDelete        uint32 = 4
-	opServerSessionListRecent    uint32 = 5
-	opServerSessionSearchByTitle uint32 = 6
-	opServerSessionCount         uint32 = 7
-	opServerSessionListExpired   uint32 = 8
-	opServerSessionDeleteExpired uint32 = 9
-	opPrimarySessionSave         uint32 = 10
-	opPrimarySessionLoad         uint32 = 11
-	opPrimarySessionDelete       uint32 = 12
-	opPrimarySessionAllocRecent  uint32 = 13
-	opPrimarySessionAllocSearch  uint32 = 14
-	opPrimarySessionGetLatest    uint32 = 15
-	opSessionWritePathRecord     uint32 = 16
-	opSessionStaleReads          uint32 = 17
-	opWebchatClaudeSessionGet    uint32 = 18
-	opWebchatClaudeOwnedByOther  uint32 = 19
-	opWebchatClaudeSessionBind   uint32 = 20
-	opWebchatLiveSet             uint32 = 21
-	opWebchatLiveGet             uint32 = 22
-	opPersonaDeliveryClaim       uint32 = 23
-	opPersonaDeliveryFinish      uint32 = 24
-	opServerSessionListBySubject uint32 = 25
-	opServerSessionEraseSubject  uint32 = 26
+	opServerSessionCreate         uint32 = 1
+	opServerSessionGet            uint32 = 2
+	opServerSessionSetOutcome     uint32 = 3
+	opServerSessionDelete         uint32 = 4
+	opServerSessionListRecent     uint32 = 5
+	opServerSessionSearchByTitle  uint32 = 6
+	opServerSessionCount          uint32 = 7
+	opServerSessionListExpired    uint32 = 8
+	opServerSessionDeleteExpired  uint32 = 9
+	opPrimarySessionSave          uint32 = 10
+	opPrimarySessionLoad          uint32 = 11
+	opPrimarySessionDelete        uint32 = 12
+	opPrimarySessionAllocRecent   uint32 = 13
+	opPrimarySessionAllocSearch   uint32 = 14
+	opPrimarySessionGetLatest     uint32 = 15
+	opSessionWritePathRecord      uint32 = 16
+	opSessionStaleReads           uint32 = 17
+	opWebchatClaudeSessionGet     uint32 = 18
+	opWebchatClaudeOwnedByOther   uint32 = 19
+	opWebchatClaudeSessionBind    uint32 = 20
+	opWebchatLiveSet              uint32 = 21
+	opWebchatLiveGet              uint32 = 22
+	opPersonaDeliveryClaim        uint32 = 23
+	opPersonaDeliveryFinish       uint32 = 24
+	opServerSessionListBySubject  uint32 = 25
+	opServerSessionEraseSubject   uint32 = 26
+	opServerSessionErasureReceipt uint32 = 27
 )
 
 // Persona delivery states. The claim is an UPDATE guarded on unclaimed, so of
@@ -235,30 +236,11 @@ const (
 	// no reference to the immutable audit/WORM families.
 	serverSessionEraseSubjectSQL = `WITH subject_sessions AS MATERIALIZED (
 	                                    SELECT id FROM server_sessions WHERE principal=$1
-	                                  ), subject_memories AS MATERIALIZED (
-                                        SELECT id,content FROM user_memories
-                                         WHERE author_principal=$1 OR source_session IN (SELECT id FROM subject_sessions)
-                                           OR id IN (SELECT memory_id FROM user_memory_versions
-                                             WHERE record->>'author_principal'=$1 OR record->>'source_session' IN (SELECT id FROM subject_sessions))
-                                         FOR UPDATE
-                                      ), memory_intents AS (
-                                        INSERT INTO user_memory_erasure_intents(memory_id,payload_digest)
-                                        SELECT id,encode(sha256(convert_to(content,'UTF8')),'hex') FROM subject_memories
-                                        UNION SELECT memory_id,encode(sha256(convert_to(record->>'content','UTF8')),'hex')
-                                          FROM user_memory_versions WHERE memory_id IN (SELECT id FROM subject_memories)
-                                        ON CONFLICT DO NOTHING RETURNING 1
-                                      ), session_intents AS (
-                                        INSERT INTO user_memory_erasure_sessions(session_digest)
-                                        SELECT encode(sha256(convert_to(id,'UTF8')),'hex') FROM subject_sessions
-                                        ON CONFLICT DO NOTHING RETURNING 1
-                                      ), d_private_memories AS (
-                                        DELETE FROM user_memories WHERE id IN (SELECT id FROM subject_memories)
-                                          AND (SELECT count(*) FROM memory_intents)>=0
-                                          AND (SELECT count(*) FROM session_intents)>=0
-                                      ), subject_delegations AS MATERIALIZED (
+	                                  ), subject_delegations AS MATERIALIZED (
 	                                    SELECT delegation_id FROM delegation_spawns
 	                                     WHERE session_id IN (SELECT id FROM subject_sessions)
 	                                  ),
+                                      unowned_cache AS (DELETE FROM agent_cache),
 	                                  d_delegation_messages AS (DELETE FROM delegation_messages
 	                                    WHERE delegation_id IN (SELECT delegation_id FROM subject_delegations)),
 	                                  d_delegation_checkpoint AS (DELETE FROM delegation_checkpoint
@@ -627,13 +609,15 @@ func serverSessionEraseSubject(ctx context.Context, q store.Queryer, f []string)
 		return 0, nil, err
 	}
 
-	// Freeze canonical inputs before the statement snapshot captures every
-	// retained revision; concurrent writers must not add a missed old version.
-	if _, err := q.Exec(ctx, `LOCK TABLE user_memories IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+	// The storage definer captures immutable intent under its source locks;
+	// runtime never receives direct write access to the control tables.
+	var sessionDigests string
+	var sessionCount int64
+	if err := q.QueryRow(ctx, `SELECT session_digests,session_count FROM user_memory_prepare_subject_erasure($1)`, principal).Scan(&sessionDigests, &sessionCount); err != nil {
 		return 0, nil, err
 	}
-	if _, err := q.Exec(ctx, `UPDATE user_memory_erasure_epoch SET generation=generation+1 WHERE id=1`); err != nil {
-		return 0, nil, err
+	if sessionCount > 4096 {
+		return store.StatusInvalid, nil, nil
 	}
 	tag, err := q.Exec(ctx, serverSessionEraseSubjectSQL, principal)
 	if err != nil {
@@ -641,11 +625,29 @@ func serverSessionEraseSubject(ctx context.Context, q store.Queryer, f []string)
 	}
 	deleted := tag.RowsAffected()
 	if _, err := q.Exec(ctx, `INSERT INTO db1_subject_erasure_request
-	                         (request_id,subject_digest,deleted_sessions) VALUES($1,$2,$3)`,
-		requestID, digest, deleted); err != nil {
+	                         (request_id,subject_digest,deleted_sessions,session_digests,receipt_policy) VALUES($1,$2,$3,$4::jsonb,'memory-erasure-v2')`,
+		requestID, digest, deleted, sessionDigests); err != nil {
 		return 0, nil, err
 	}
 	return store.StatusOK, []string{store.I64toa(deleted)}, nil
+}
+
+// A legacy count-only journal cannot certify the post-delete session set.
+func serverSessionErasureReceipt(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	if !validErasureRequestID(f[0]) || f[1] == "" || len(f[1]) > 600 {
+		return store.StatusInvalid, nil, nil
+	}
+	digest := sha256.Sum256([]byte(f[1]))
+	var receipt string
+	err := q.QueryRow(ctx, `SELECT session_digests::text FROM db1_subject_erasure_request
+ WHERE request_id=$1 AND subject_digest=$2 AND receipt_policy='memory-erasure-v2'`, f[0], hex.EncodeToString(digest[:])).Scan(&receipt)
+	if store.IsNoRows(err) {
+		return store.StatusInvalid, nil, nil
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	return store.StatusOK, []string{receipt}, nil
 }
 
 func validErasureRequestID(value string) bool {
@@ -925,31 +927,32 @@ var Sessions = store.Family{
 	Event: EventSessions,
 	Stage: StageSessions,
 	Ops: map[uint32]store.Op{
-		opServerSessionCreate:        {Name: "server_session_create", Args: 3, Tx: true, Run: serverSessionCreate},
-		opServerSessionGet:           {Name: "server_session_get", Cells: 10, Args: 1, Run: serverSessionGet},
-		opServerSessionSetOutcome:    {Name: "server_session_set_outcome", Args: 2, Tx: true, Run: serverSessionSetOutcome},
-		opServerSessionDelete:        {Name: "server_session_delete", Args: 1, Tx: true, Run: serverSessionDelete},
-		opServerSessionListRecent:    {Name: "server_session_list_recent", Cells: 10, Args: 1, Run: serverSessionListRecent},
-		opServerSessionSearchByTitle: {Name: "server_session_search_by_title", Cells: 10, Args: 2, Run: serverSessionSearchByTitle},
-		opServerSessionCount:         {Name: "server_session_count", Args: 1, Run: serverSessionCount},
-		opServerSessionListExpired:   {Name: "server_session_list_expired", Cells: 1, Args: 2, Run: serverSessionListExpired},
-		opServerSessionDeleteExpired: {Name: "server_session_delete_expired", Args: 1, Tx: true, Run: serverSessionDeleteExpired},
-		opPrimarySessionSave:         {Name: "primary_session_save", Args: 4, Tx: true, Run: primarySessionSave},
-		opPrimarySessionLoad:         {Name: "primary_session_load", Args: 3, Run: primarySessionLoad},
-		opPrimarySessionDelete:       {Name: "primary_session_delete", Args: 3, Tx: true, Run: primarySessionDelete},
-		opPrimarySessionAllocRecent:  {Name: "primary_session_alloc_recent", Cells: 6, Args: 1, Run: primarySessionAllocRecent},
-		opPrimarySessionAllocSearch:  {Name: "primary_session_alloc_search", Cells: 6, Args: 2, Run: primarySessionAllocSearch},
-		opPrimarySessionGetLatest:    {Name: "primary_session_get_latest", Cells: 6, Args: 1, Run: primarySessionGetLatest},
-		opSessionWritePathRecord:     {Name: "session_write_path_record", Args: 2, Tx: true, Run: sessionWritePathRecord},
-		opSessionStaleReads:          {Name: "session_stale_reads", Cells: 1, Args: 3, Run: sessionStaleReads},
-		opWebchatClaudeSessionGet:    {Name: "webchat_claude_session_get", Cells: 2, Args: 2, Run: webchatClaudeSessionGet},
-		opWebchatClaudeOwnedByOther:  {Name: "webchat_claude_session_owned_by_other", Args: 3, Run: webchatOwnedByOther},
-		opWebchatClaudeSessionBind:   {Name: "webchat_claude_session_bind", Args: 3, Tx: true, Run: webchatClaudeSessionBind},
-		opWebchatLiveSet:             {Name: "webchat_live_set", Args: 4, Tx: true, Run: webchatLiveSet},
-		opWebchatLiveGet:             {Name: "webchat_live_get", Cells: 4, Args: 2, Run: webchatLiveGet},
-		opPersonaDeliveryClaim:       {Name: "server_session_persona_delivery_claim", Args: 1, Tx: true, Run: personaDeliveryClaim},
-		opPersonaDeliveryFinish:      {Name: "server_session_persona_delivery_finish", Args: 2, Tx: true, Run: personaDeliveryFinish},
-		opServerSessionListBySubject: {Name: "server_session_list_by_subject", Cells: 1, Args: 2, Run: serverSessionListBySubject},
-		opServerSessionEraseSubject:  {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
+		opServerSessionCreate:         {Name: "server_session_create", Args: 3, Tx: true, Run: serverSessionCreate},
+		opServerSessionGet:            {Name: "server_session_get", Cells: 10, Args: 1, Run: serverSessionGet},
+		opServerSessionSetOutcome:     {Name: "server_session_set_outcome", Args: 2, Tx: true, Run: serverSessionSetOutcome},
+		opServerSessionDelete:         {Name: "server_session_delete", Args: 1, Tx: true, Run: serverSessionDelete},
+		opServerSessionListRecent:     {Name: "server_session_list_recent", Cells: 10, Args: 1, Run: serverSessionListRecent},
+		opServerSessionSearchByTitle:  {Name: "server_session_search_by_title", Cells: 10, Args: 2, Run: serverSessionSearchByTitle},
+		opServerSessionCount:          {Name: "server_session_count", Args: 1, Run: serverSessionCount},
+		opServerSessionListExpired:    {Name: "server_session_list_expired", Cells: 1, Args: 2, Run: serverSessionListExpired},
+		opServerSessionDeleteExpired:  {Name: "server_session_delete_expired", Args: 1, Tx: true, Run: serverSessionDeleteExpired},
+		opPrimarySessionSave:          {Name: "primary_session_save", Args: 4, Tx: true, Run: primarySessionSave},
+		opPrimarySessionLoad:          {Name: "primary_session_load", Args: 3, Run: primarySessionLoad},
+		opPrimarySessionDelete:        {Name: "primary_session_delete", Args: 3, Tx: true, Run: primarySessionDelete},
+		opPrimarySessionAllocRecent:   {Name: "primary_session_alloc_recent", Cells: 6, Args: 1, Run: primarySessionAllocRecent},
+		opPrimarySessionAllocSearch:   {Name: "primary_session_alloc_search", Cells: 6, Args: 2, Run: primarySessionAllocSearch},
+		opPrimarySessionGetLatest:     {Name: "primary_session_get_latest", Cells: 6, Args: 1, Run: primarySessionGetLatest},
+		opSessionWritePathRecord:      {Name: "session_write_path_record", Args: 2, Tx: true, Run: sessionWritePathRecord},
+		opSessionStaleReads:           {Name: "session_stale_reads", Cells: 1, Args: 3, Run: sessionStaleReads},
+		opWebchatClaudeSessionGet:     {Name: "webchat_claude_session_get", Cells: 2, Args: 2, Run: webchatClaudeSessionGet},
+		opWebchatClaudeOwnedByOther:   {Name: "webchat_claude_session_owned_by_other", Args: 3, Run: webchatOwnedByOther},
+		opWebchatClaudeSessionBind:    {Name: "webchat_claude_session_bind", Args: 3, Tx: true, Run: webchatClaudeSessionBind},
+		opWebchatLiveSet:              {Name: "webchat_live_set", Args: 4, Tx: true, Run: webchatLiveSet},
+		opWebchatLiveGet:              {Name: "webchat_live_get", Cells: 4, Args: 2, Run: webchatLiveGet},
+		opPersonaDeliveryClaim:        {Name: "server_session_persona_delivery_claim", Args: 1, Tx: true, Run: personaDeliveryClaim},
+		opPersonaDeliveryFinish:       {Name: "server_session_persona_delivery_finish", Args: 2, Tx: true, Run: personaDeliveryFinish},
+		opServerSessionListBySubject:  {Name: "server_session_list_by_subject", Cells: 1, Args: 2, Run: serverSessionListBySubject},
+		opServerSessionEraseSubject:   {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
+		opServerSessionErasureReceipt: {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
 	},
 }

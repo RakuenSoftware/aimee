@@ -97,6 +97,14 @@ int kb_http_subject_erasure_route(const char *method, const char *path, const ch
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"non-negative integer db1_count required\"}");
       return 400;
    }
+   const cJSON *policy = cJSON_GetObjectItemCaseSensitive(req, "receipt_policy");
+   if (!cJSON_IsString(policy) || strcmp(policy->valuestring, "memory-erasure-v2") != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"versioned private erasure receipt replay required\"}");
+      return 409;
+   }
    kb_blob_recon_stats_t recon;
    if (kb_blob_reconcile_run(config_kb_pdf_blob_orphan_alarm_mb(), 0, &recon) != 0)
    {
@@ -104,19 +112,33 @@ int kb_http_subject_erasure_route(const char *method, const char *path, const ch
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"orphan blob reconciliation failed\"}");
       return 500;
    }
-   int event_created = 0;
-   int rc = db2_subject_erasure_complete(jr->valuestring, actor_key, (int64_t)jc->valuedouble,
-                                         &event_created);
+   char transport[600] = "";
+   const kb_request_context_t *resolved = kb_reqctx_resolved();
+   if (resolved && resolved->has_transport &&
+       kb_identity_key(&resolved->transport, transport, sizeof(transport)) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"authenticated owner transport unavailable\"}");
+      return 403;
+   }
+   int event_created = 0, coverage_complete = 0;
+   int64_t pending_owners = 0;
+   int rc = db2_subject_erasure_ack(jr->valuestring, actor_key, transport, (int64_t)jc->valuedouble,
+                                    &event_created, &coverage_complete, &pending_owners);
    cJSON_Delete(req);
    if (rc != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"erasure completion failed\"}");
       return 500;
    }
-   snprintf(out_buf, (size_t)out_cap,
-            "{\"status\":\"completed\",\"event_created\":%s,"
-            "\"orphan_blobs_unlinked\":%lld}",
-            event_created ? "true" : "false", recon.orphans_unlinked);
+   snprintf(
+       out_buf, (size_t)out_cap,
+       "{\"status\":\"%s\",\"event_created\":%s,\"coverage_complete\":%s,\"pending_owners\":%lld,"
+       "\"coverage_scope\":\"managed_application_stores\",\"policy_revision\":\"memory-erasure-"
+       "v2\",\"orphan_blobs_unlinked\":%lld}",
+       coverage_complete ? "completed" : "pending_owners", event_created ? "true" : "false",
+       coverage_complete ? "true" : "false", (long long)pending_owners, recon.orphans_unlinked);
    return 200;
 }
 

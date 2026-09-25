@@ -170,3 +170,106 @@ func TestSubjectErasureTransitiveCopiesPostgres(t *testing.T) {
 		t.Fatal("erasure replay changed result", count, replay)
 	}
 }
+
+func TestErasureRequiresOfflineOwnerCoverage(t *testing.T) {
+	dsn := os.Getenv("AIMEE_DB2_REPLAY_URL")
+	if dsn == "" {
+		t.Skip("requires packaged PostgreSQL")
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, e := tx.Exec(ctx, q, args...); e != nil {
+			t.Fatal(e)
+		}
+	}
+	exec(`SET LOCAL jit=off; SELECT set_config('aimee.memory_scope_all','1',true)`)
+	var team int64
+	if err = tx.QueryRow(ctx, `INSERT INTO kb_team(name) VALUES('mr04-erasure-coverage') RETURNING id`).Scan(&team); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO kb_server_registry(server_id,cert_cn,mgmt_cert_cn,team_id,endpoint,status,client_issuer,client_serial_norm,last_seen)
+ VALUES('mr04-online','mr04-online','mr04-online-mgmt',$1,'https://online.invalid','active','mr04-ca','a1',now()),
+ ('mr04-offline','mr04-offline','mr04-offline-mgmt',$1,'https://offline.invalid','active','mr04-ca','a2',now()-interval '7 days')`, team)
+	exec(`SELECT * FROM kb_subject_erasure_begin('mr04-required-owners-0001','mr04-erased-principal','[]'::jsonb)`)
+	var complete bool
+	if err = tx.QueryRow(ctx, `SELECT kb_subject_erasure_complete('mr04-required-owners-0001','privacy-operator',0)`).Scan(&complete); err != nil {
+		t.Fatal(err)
+	}
+	if complete {
+		t.Fatal("claimed complete erasure without verifying offline owner's retained copies")
+	}
+	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN CREATE ROLE aimee_kb_runtime NOLOGIN NOBYPASSRLS; END IF; IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_kb_owner') THEN CREATE ROLE aimee_kb_owner NOLOGIN; END IF; END $$; GRANT USAGE ON SCHEMA public TO aimee_kb_runtime`)
+	grants, e := os.ReadFile("../../../src/modules/db2/c/schema_grants.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	start, end := strings.Index(string(grants), "DO $privacy_erasure_grants$"), strings.Index(string(grants), "$privacy_erasure_grants$;")
+	if start < 0 || end < start {
+		t.Fatal("privacy grants missing")
+	}
+	exec(string(grants[start : end+len("$privacy_erasure_grants$;")]))
+	ack := func(transport string, count int64, wantCreated, wantComplete bool, wantPending int64) {
+		t.Helper()
+		var created, done bool
+		var pending int64
+		exec(`SET LOCAL ROLE aimee_kb_runtime`)
+		if e := tx.QueryRow(ctx, `SELECT * FROM kb_subject_erasure_ack('mr04-required-owners-0001','privacy-operator',$1,$2)`, transport, count).Scan(&created, &done, &pending); e != nil || created != wantCreated || done != wantComplete || pending != wantPending {
+			t.Fatal("owner coverage", transport, created, done, pending, e)
+		}
+		exec(`RESET ROLE`)
+	}
+	// Private erasure captures a session created after the first enumeration.
+	// Replaying its digest receipt must delete its shared copies before any ACK.
+	var lateID int64
+	if err = tx.QueryRow(ctx, `INSERT INTO memories(key,content,source_session) VALUES('late copied session','private copied text','mr04-late-erased-session') RETURNING id`).Scan(&lateID); err != nil {
+		t.Fatal(err)
+	}
+	var memories, documents int64
+	var repeated bool
+	if err = tx.QueryRow(ctx, `SELECT * FROM kb_subject_erasure_begin('mr04-required-owners-0001','mr04-erased-principal',jsonb_build_array('sha256:'||encode(sha256(convert_to('mr04-late-erased-session','UTF8')),'hex')))`).Scan(&memories, &documents, &repeated); err != nil || memories != 1 {
+		t.Fatal("missed committed private session", memories, err)
+	}
+	exec(`SAVEPOINT late_copy`)
+	_, err = tx.Exec(ctx, `INSERT INTO memories(key,content,source_session) VALUES('queued late copy','new copied text','mr04-late-erased-session')`)
+	exec(`ROLLBACK TO SAVEPOINT late_copy; RELEASE SAVEPOINT late_copy`)
+	if err == nil {
+		t.Fatal("late queued producer resurrected erased session")
+	}
+	// Crash after receipt application but before commit cannot advance coverage.
+	exec(`SAVEPOINT crashed_owner`)
+	ack("cert:mr04-ca:a1", 2, false, false, 1)
+	exec(`ROLLBACK TO SAVEPOINT crashed_owner; RELEASE SAVEPOINT crashed_owner`)
+	var verified int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM kb_subject_erasure_owner_coverage WHERE request_id='mr04-required-owners-0001' AND state='verified'`).Scan(&verified); err != nil || verified != 0 {
+		t.Fatal("crash advanced owner receipt", verified, err)
+	}
+	ack("cert:mr04-ca:a1", 2, false, false, 1)
+	ack("cert:mr04-ca:a1", 999, false, false, 1)
+	exec(`SAVEPOINT unknown_owner`)
+	_, err = tx.Exec(ctx, `SELECT * FROM kb_subject_erasure_ack('mr04-required-owners-0001','privacy-operator','cert:forged:99',0)`)
+	exec(`ROLLBACK TO SAVEPOINT unknown_owner; RELEASE SAVEPOINT unknown_owner`)
+	if err == nil {
+		t.Fatal("accepted unregistered owner receipt")
+	}
+	// Recovery on the second owner completes exactly once; duplicate delivery
+	// cannot change original counts or append another completion event.
+	exec(`UPDATE kb_server_registry SET last_seen=now() WHERE server_id='mr04-offline'`)
+	ack("cert:mr04-ca:a2", 3, true, true, 0)
+	ack("cert:mr04-ca:a2", 999, false, true, 0)
+	var total int64
+	if err = tx.QueryRow(ctx, `SELECT db1_count FROM kb_subject_erasure_request WHERE request_id='mr04-required-owners-0001' AND state='completed'`).Scan(&total); err != nil || total != 5 {
+		t.Fatal("duplicate receipt changed aggregate", total, err)
+	}
+
+}

@@ -8,6 +8,7 @@
  * or cfg), so default behavior is unchanged. Thread-safe. */
 #ifndef DEC_KB_CLIENT_CACHE_H
 #define DEC_KB_CLIENT_CACHE_H 1
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -27,6 +28,9 @@ extern "C"
 
    /* Store a copy of value under key (no-op if disabled or value NULL). */
    void kb_cache_put(const char *key, const char *value);
+   /* Observe before the remote read; invalidation refuses late cache fills. */
+   uint64_t kb_cache_observe(void);
+   void kb_cache_put_observed(const char *key, const char *value, uint64_t generation);
 
    /* Drop all entries (called on a kb invalidation event). */
    void kb_cache_invalidate_all(void);
