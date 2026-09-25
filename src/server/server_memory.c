@@ -558,6 +558,23 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, memory_get_command(req));
 }
 
+cJSON *memory_evidence_command(cJSON *req)
+{
+   int selection = server_memory_store_selection(req);
+   if (selection < 0)
+      return memory_bad_store();
+   if (selection)
+      return kb_memory_owner_command("memory.evidence", req, MEMORY_AUTHORITY_MODEL, "evidence",
+                                     cJSON_Array);
+   return user_memory_owner_command("user-evidence", req);
+}
+
+int handle_memory_evidence(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_evidence_command(req));
+}
+
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

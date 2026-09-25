@@ -4163,6 +4163,49 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /memory/evidence:
+    post:
+      summary: Inspect authorized memory evidence lineage
+      description: >-
+        Uses a stable scoped snapshot. Inaccessible or unresolved ancestry
+        withholds counts and references. Distinct creation events do not prove
+        independent corroboration; unknown independent counts remain null.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:
+                  oneOf:
+                    - { type: integer, minimum: 1, maximum: 9007199254740991 }
+                    - { type: string, pattern: '^[1-9][0-9]*$' }
+                store: { type: string, enum: [user, kb], default: user }
+                project: { type: string }
+                workspace: { type: string }
+      responses:
+        "200":
+          description: Scoped lineage diagnostics and authorized evidence references
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid identity or scope
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: Memory unavailable in the selected scope
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Evidence owner unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/read:
     get:
       summary: Assemble the memory context

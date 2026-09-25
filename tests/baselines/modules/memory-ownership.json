@@ -2133,7 +2133,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "55b8c3c4bf0223dfea196fe8f4957112d1bb6249b788c8d32e99844e8e189b67"
+      "sha256": "db11992919e07bf4c1a4f1570ac6f3b7a95ceb007b5cad3f5316c18940302b02"
     },
     "src/server/server_facts.c": {
       "disposition": "host-transport",
@@ -2154,7 +2154,7 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "83560d68ff4fdf90c8bf452d3f28266d31f66e9137a4ffbeaf62be4d454852f6"
+      "sha256": "7dbaa5f68e46ce731c0662c012b8240f356bfd8994c8ec7441bdb634b6a0db46"
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2188,7 +2188,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "aaee28a906ac3c6def1ad413aee631d053103545a60e515da2ca52ed34702523"
+      "sha256": "a58c89cdec21e95427c0fc05f65c52d17bee6abfc2f66ed217bd4a991275bbfc"
     },
     "src/server/server_memory_benchmark.c": {
       "disposition": "host-transport",
@@ -2522,7 +2522,7 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "d8e4bc7551a7b818fcfb85d4161e02ffe11d70c568b4dd32e371fb4044b0d148"
+      "sha256": "0804b3f1ab57a7cfcc3c26f676d41ee1283f623309b764460cfe8df45203bb01"
     },
     "src/tests/test_server_prospective.c": {
       "disposition": "host-fixture",
@@ -2594,10 +2594,10 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "87a6e5723cf75dc8b6cdf46022a1bf09471224d8e79844e8e12fd65e9251f307",
+      "sha256": "cd167abe7a121d37fe2bb5558cd102fcf2133cf914943bb41fb602d8b7f37018",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "b832b971982d06afc3b2b1398ef806117276678bf2f3459079af19e71f587716"
+        "api/openapi-server-v1.yaml": "7d43157efa2591f731c9b50158d66dcb7bd70d941fd8e01fad6aa8999e55adee"
       }
     }
   }

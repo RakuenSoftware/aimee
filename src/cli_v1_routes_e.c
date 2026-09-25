@@ -590,6 +590,17 @@ cJSON *marshal_memory_get(int argc, char **argv)
    return req;
 }
 
+cJSON *marshal_memory_evidence(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("memory.evidence");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "id", opts.positional[0]);
+   marshal_add_memory_scope(req, &opts);
+   return req;
+}
+
 cJSON *marshal_memory_delete(int argc, char **argv)
 {
    cli_args_t opts;

@@ -1,0 +1,106 @@
+aimee: usage: aimee kb erase-subject <subject> [--request-id ID]
+aimee: usage: aimee kb erase-subject <subject> [--request-id ID]
+aimee: usage: aimee kb erase-subject <subject> [--request-id ID]
+aimee: usage: aimee kb erase-subject <subject> [--request-id ID]
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: memory identity: key too long (max 502 chars)
+aimee: usage: aimee memory identity <key> <value>   (or: identity <key> --content=<value>)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: memory prefer: key too long (max 506 chars)
+aimee: usage: aimee memory prefer <key> <value>   (or: prefer <key> --content=<value>)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: memory archive: key too long (max 503 chars)
+aimee: usage: aimee memory archive <key> <value>   (or: archive <key> --content=<value>)
+aimee: usage: aimee delegate log [--json]
+aimee: for a background job log, use `aimee jobs logs <job_id>`.
+aimee: usage: aimee delegate log [--json]; for a background job log, use `aimee jobs logs <job_id>`
+aimee: usage: aimee delegate log [--json]
+aimee: for a background job log, use `aimee jobs logs <job_id>`.
+aimee: usage: aimee delegate log [--json]; for a background job log, use `aimee jobs logs <job_id>`
+aimee: usage: aimee delegate log [--json]
+aimee: for a background job log, use `aimee jobs logs <job_id>`.
+aimee: usage: aimee delegate log [--json]; for a background job log, use `aimee jobs logs <job_id>`
+aimee: usage: aimee delegate log [--json]
+aimee: for a background job log, use `aimee jobs logs <job_id>`.
+aimee: usage: aimee delegate log [--json]; for a background job log, use `aimee jobs logs <job_id>`
+aimee: usage: aimee trigger status <id>
+aimee: usage: aimee trigger status <id>
+aimee: usage: aimee trigger cancel <id>
+aimee: usage: aimee trigger cancel <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron run <id>
+aimee: usage: aimee cron run <id>
+aimee: usage: aimee cron run <id>
+aimee: usage: aimee cron run <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron history <id>
+aimee: usage: aimee cron history <id>
+aimee: usage: aimee cron history <id>
+aimee: usage: aimee cron history <id>
+aimee: usage: aimee trajectory export <session_id> [--no-compress] [--max-result-bytes N]
+aimee: usage: aimee trajectory export <session_id> [--no-compress] [--max-result-bytes N]
+aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]
+aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]
+aimee: usage: aimee cron history <id>
+aimee: usage: aimee cron history <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron run <id>
+aimee: usage: aimee cron run <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee cron show <id>
+aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]
+aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]
+aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]
+aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]
+aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]
+aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]
+aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]
+aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir [--toolset-dist research] [--out dir]
+aimee: usage: aimee trajectory export <session_id> [--no-compress] [--max-result-bytes N]
+aimee: usage: aimee trajectory export <session_id> [--no-compress] [--max-result-bytes N]
+aimee: usage: aimee trigger cancel <id>
+aimee: usage: aimee trigger cancel <id>
+aimee: usage: aimee trigger status <id>
+aimee: usage: aimee trigger status <id>
+aimee: usage: aimee cron add <id> --schedule S [--mode llm|script|hybrid] [--script CMD] [--prompt TEXT]
+aimee: usage: aimee cron add <id> --schedule S [--mode llm|script|hybrid] [--script CMD] [--prompt TEXT]
+aimee: usage: aimee cron add <id> --schedule S [--mode llm|script|hybrid] [--script CMD] [--prompt TEXT]
+aimee: usage: aimee cron add <id> --schedule S [--mode llm|script|hybrid] [--script CMD] [--prompt TEXT]
+aimee: missing a required argument
+aimee: missing a required argument
+aimee: u
+PASS test_cli_argspec (128 shipped specs, 1250 differential samples)

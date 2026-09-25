@@ -25,6 +25,7 @@
     {"memory", "validity", "memory.validity", NULL, NULL, 60000},
     {"memory", "hygiene", "memory.hygiene", NULL, NULL, 60000},
     {"memory", "get", "memory.get", NULL, NULL, 60000},
+    {"memory", "evidence", "memory.evidence", NULL, NULL, 60000},
     {"memory", "delete", "memory.delete", NULL, NULL, 60000},
     {"memory", "supersede", "memory.supersede", NULL, NULL, 60000},
     {"memory", "show", "memory.get", NULL, NULL, 60000},

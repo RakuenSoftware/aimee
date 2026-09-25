@@ -528,6 +528,16 @@
  ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
  "]}"},
 
+{"memory.evidence",
+ "{\"fields\":["
+ "{\"json\":\"id\",\"from\":\"positional\",\"index\":0,\"type\":\"string\",\"empty\":\"emit\"}"
+ ",{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
+ ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
+ ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"}"
+ ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
+ ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
+ "]}"},
+
 {"memory.embed",
  "{\"bool_flags\":[\"all\"],\"fields\":["
  "{\"json\":\"all\",\"from\":\"flag\",\"flag\":\"all\",\"type\":\"true_if_set\"},"

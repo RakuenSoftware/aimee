@@ -775,7 +775,8 @@ func TestHardRuleSourceObservationsPostgres(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	exec(`DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$;
+	// Match handleData: bounded source checks disable JIT before planning.
+	exec(`SET LOCAL jit=off; DO $$ BEGIN IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='aimee_store_runtime') THEN CREATE ROLE aimee_store_runtime NOINHERIT NOBYPASSRLS; END IF; END $$;
  GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
  GRANT SELECT ON ALL TABLES IN SCHEMA public TO aimee_store_runtime;
  DELETE FROM rules;

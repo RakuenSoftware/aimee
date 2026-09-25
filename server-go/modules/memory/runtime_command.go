@@ -124,6 +124,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 		return handleIngressTaskState(&options.gateway.tasks, args)
 	case "gateway-plan", "gateway-recall", "gateway-outcome", "gateway-metrics", "gateway-enabled":
 		return handleGatewayCommand(options, invocation, args)
+	case "user-evidence":
+		return runtimeJSONText(handleLineageCommand(options, invocation, "evidence", args))
 	case "user-review-list":
 		encoded, status := handleUserCommand(options, invocation, "review-list", args)
 		if status != bus.ModuleStatusOK {

@@ -1476,6 +1476,7 @@ static const struct
     {"memory.validity", marshal_memory_validity},
     {"memory.hygiene", marshal_memory_hygiene},
     {"memory.get", marshal_memory_get},
+    {"memory.evidence", marshal_memory_evidence},
     {"memory.identity", marshal_memory_identity},
     {"memory.list", marshal_memory_list},
     {"memory.prefer", marshal_memory_prefer},

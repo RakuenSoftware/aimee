@@ -187,7 +187,8 @@ static const char *hygiene_reply;
 static cJSON *hygiene_request;
 char *kb_v1_action_request(const char *method, cJSON *request)
 {
-   if (!strcmp(method, "memory.hygiene") || !strcmp(method, "memory.validity"))
+   if (!strcmp(method, "memory.hygiene") || !strcmp(method, "memory.validity") ||
+       !strcmp(method, "memory.evidence"))
    {
       cJSON_Delete(hygiene_request);
       hygiene_request = request;
@@ -930,6 +931,37 @@ static void test_private_correction_review_transport(void)
    cJSON_Delete(request);
 }
 
+static void test_evidence_transport(void)
+{
+   cJSON *request = cJSON_Parse("{\"id\":\"9007199254740993\"}");
+   private_command_operation = "user-evidence";
+   private_command_reply = "{\"status\":\"ok\",\"store\":\"user\",\"evidence\":[],"
+                           "\"independent_support_count\":null}";
+   cJSON *response = materialize_reply(memory_evidence_command(request));
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(response, "evidence")));
+   assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(response, "independent_support_count")));
+   cJSON_Delete(response);
+   private_command_operation = private_command_reply = NULL;
+   cJSON_AddStringToObject(request, "store", "kb");
+   hygiene_reply = "{\"status\":\"ok\",\"store\":\"kb\",\"evidence\":[],"
+                   "\"independent_support_count\":null}";
+   response = materialize_reply(memory_evidence_command(request));
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(response, "evidence")));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hygiene_request, "id")),
+                  "9007199254740993"));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(hygiene_request, "scope_context")));
+   cJSON_Delete(response);
+   hygiene_reply = "{\"status\":\"ok\",\"evidence\":{}}";
+   response = materialize_reply(memory_evidence_command(request));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "kind")),
+                  SERVER_ERR_UNAVAILABLE));
+   cJSON_Delete(response);
+   cJSON_Delete(request);
+   hygiene_reply = NULL;
+   cJSON_Delete(hygiene_request);
+   hygiene_request = NULL;
+}
+
 int main(void)
 {
    test_user_namespace();
@@ -977,6 +1009,7 @@ int main(void)
    cJSON_Delete(request);
    expected_read_policy = NULL;
    expect_include_version = 0;
+   test_evidence_transport();
    test_store_confidence();
    test_review_transport();
    test_store_owner_envelope();

@@ -460,6 +460,7 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority);
 cJSON *memory_user_mcp_supersede_command(const cJSON *req);
 cJSON *memory_list_command(const cJSON *req);
 cJSON *memory_get_command(cJSON *req);
+cJSON *memory_evidence_command(cJSON *req);
 /* Takes the request's authenticated ACCOUNT because only a person's delete
  * DESTROYS; a caller with no account that clears CAP_MEMORY_ADMIN retires the
  * row instead. The response reports which happened via `destroyed`. */
@@ -481,6 +482,7 @@ int handle_memory_restore(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int memory_request_positive_id(cJSON *req, const char *field, int64_t *out);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_evidence(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

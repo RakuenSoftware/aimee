@@ -11,6 +11,7 @@ type commandRoute struct {
 }
 
 var sharedCommandRoutes = []commandRoute{
+	{"memory", "evidence", "Inspect scoped origin families and independent-support uncertainty.", handleLineageCommand, true},
 	{"memory", "validity", "Inspect the scoped serving decision for one record.", handleValidityCommand, true},
 	{"memory", "verify_receipt", "Compare a supplied prepared receipt with optional exact payload bytes.", handleReceiptVerification, true},
 	{"memory", "pack", "Manage memory profile packs.", handlePackCommand, true},

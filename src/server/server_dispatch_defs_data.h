@@ -84,6 +84,7 @@
     {"memory.restore", handle_memory_restore},
     {"memory.stats", handle_memory_stats},
     {"memory.get", handle_memory_get},
+    {"memory.evidence", handle_memory_evidence},
     {"memory.delete", handle_memory_delete},
     {"memory.supersede", handle_memory_supersede},
     {"memory.correction_proposals", handle_memory_correction_proposals},

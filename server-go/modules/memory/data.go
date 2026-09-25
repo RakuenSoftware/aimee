@@ -1337,12 +1337,18 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	// transaction now, so the non-owner runtime sees precisely this request's
 	// rows and pooled connections cannot retain another request's scope.
 	var transaction store.Tx
-	privateRead := options.placement == PlacementServer && (request.Operation == "get" || request.Operation == "list" || request.Operation == "search" || request.Operation == "validity" || request.Operation == "recall-bundle" || request.Operation == "personal-source-revalidate")
+	privateRead := options.placement == PlacementServer && (request.Operation == "evidence" || request.Operation == "get" || request.Operation == "list" || request.Operation == "search" || request.Operation == "validity" || request.Operation == "recall-bundle" || request.Operation == "personal-source-revalidate")
 	if backend, ok := options.data.(*postgresDataStore); ok && (options.placement == PlacementKB || privateRead) {
 		if db, ok := backend.db.(store.DB); ok {
 			transaction, err = db.Begin(ctx)
 			if err != nil {
 				return nil, bus.ModuleStatusInternal
+			}
+			if request.Operation == "evidence" {
+				if _, err = transaction.Exec(ctx, `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`); err != nil {
+					_ = transaction.Rollback(context.Background())
+					return nil, bus.ModuleStatusInternal
+				}
 			}
 			transaction = backend.auditTransaction(transaction)
 			defer transaction.Rollback(context.Background())
@@ -2137,6 +2143,33 @@ set_config('aimee.memory_believed_at',$14,true)`,
 		allowed := ShouldInject(RelSensitivity(request.Sensitivity), *request.Confidence,
 			request.TurnRequestsSensitive)
 		response.Allowed = &allowed
+	case "evidence":
+		if request.ID <= 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		backend, ok := options.data.(*postgresDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var result map[string]any
+		result, err = backend.memoryEvidence(ctx, request.ID)
+		if err == nil {
+			if options.placement == PlacementServer {
+				result["store"] = "user"
+			} else {
+				result["store"] = "kb"
+			}
+		}
+		if errors.Is(err, ErrMemoryNotFound) {
+			result = commandError("not_found", "memory not found")
+			err = nil
+		}
+		if err == nil {
+			if result["status"] == nil {
+				result["status"] = "ok"
+			}
+			response.Payload, err = json.Marshal(result)
+		}
 	case "change-feed":
 		// The feed carries private record identities. Only the embedding host
 		// may consume it; it is not an advertised model/public diagnostic tool.
