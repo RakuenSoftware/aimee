@@ -81,3 +81,29 @@ authorize locally. Additive rules must preserve fail-closed handling of unknown 
 Add an action class in `IR`, wire fixtures, normalization, policy evaluation, enforcement, audit mapping,
 and denial tests together. Removing a rule requires proving no caller depends on its reason semantics.
 Removing the module requires a reviewed replacement at every action seam; bypass is not a migration.
+
+## Exploration contract implementation status
+
+The legacy tool seam reports source discovery as observe-only metadata when no
+host-authenticated contract is available. Baseline forbidden-command, path and
+approval checks still decide authorization, including registered shell aliases.
+Compound commands and effectful `find`/`rg` invocations are not classified as
+pure discovery. The attention guard retains its explicit legacy operator cap;
+nonpositive legacy values remain disabled.
+
+The private exploration state machine models literal-zero limits, revision
+history, atomic in-process reservations, retry identities, conservative refunds,
+and host-observed recovery. A fallback requires a recorded empty/failed indexed
+attempt and a matching gap. It is restricted to one class, canonical path scope,
+contract revision and one-minute expiry; operator limits still apply. Two
+completed constrained turns can lower the adaptive tier without changing
+confidence provenance. These APIs are not exposed through model tool JSON.
+
+This is an MR-07 implementation checkpoint, not completion. The state machine
+still needs the authenticated task/session storage adapter, session-wide
+accounting across separate tasks/processes, final-memory-plan issuance, and the
+shared live decision path for the attention guard and execution-policy caller.
+The commit callback and restored snapshots in unit tests do not establish
+production durability or host authentication. Enforcement activation additionally
+requires the predeclared paired-workload calibration and noninferiority gate;
+no production workload is enabled by this checkpoint. MR-08 remains pending.

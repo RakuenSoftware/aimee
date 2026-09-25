@@ -84,6 +84,17 @@ static void test_classify(void)
    assert(attn_classify(NULL, NULL) == ATTN_OP_READ);
    assert(attn_is_raw_scan("Bash", "grep -r TODO src") == 1);
    assert(attn_is_raw_scan("Bash", "grep TODO src/file.c") == 0);
+   const char *shell_aliases[] = {"Bash", "terminal", "shell", "exec_command", "execute_command"};
+   for (size_t i = 0; i < sizeof(shell_aliases) / sizeof(shell_aliases[0]); ++i)
+   {
+      assert(attn_is_raw_scan(shell_aliases[i], "grep -r TODO src") == 1);
+      assert(attn_is_raw_scan(shell_aliases[i], "grep -r TODO src; touch result") == 0);
+      assert(attn_is_raw_scan(shell_aliases[i], "rg --files | tee result") == 0);
+      assert(attn_is_raw_scan(shell_aliases[i], "find . -delete") == 0);
+      assert(attn_is_raw_scan(shell_aliases[i], "find . -de\"le\"te") == 0);
+      assert(attn_is_raw_scan(shell_aliases[i], "find . -exec touch result") == 0);
+      assert(attn_is_raw_scan(shell_aliases[i], "find . -fprint result") == 0);
+   }
    printf("classify OK\n");
 }
 

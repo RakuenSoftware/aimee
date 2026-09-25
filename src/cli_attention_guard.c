@@ -227,6 +227,27 @@ static int bash_is_raw_recursive_scan(const char *cmd)
 {
    if (!cmd || !cmd[0])
       return 0;
+   /* An efficiency cap must not mistake a compound edit or an effectful find
+    * for pure discovery. Baseline worktree/destructive guards still apply. */
+   if (strpbrk(cmd, ";&|<>`$\n\r\\"))
+      return 0;
+   char normalized[4096];
+   size_t used = 0;
+   for (const char *p = cmd; *p; ++p)
+   {
+      if (*p == '\'' || *p == '"')
+         continue;
+      if (used + 1 >= sizeof(normalized))
+         return 0;
+      normalized[used++] = *p;
+   }
+   normalized[used] = '\0';
+   cmd = normalized;
+   if (cmd_has_token(cmd, "-delete") || cmd_has_token(cmd, "-exec") ||
+       cmd_has_token(cmd, "-execdir") || cmd_has_token(cmd, "-ok") ||
+       cmd_has_token(cmd, "-okdir") || cmd_has_token(cmd, "-fprint") ||
+       cmd_has_token(cmd, "-fprintf") || cmd_has_token(cmd, "-fls") || strstr(cmd, "--pre"))
+      return 0;
    int names_tool = (cmd_has_token(cmd, "grep") || cmd_has_token(cmd, "rg") ||
                      cmd_has_token(cmd, "find") || cmd_has_token(cmd, "ls"));
    if (!names_tool)
@@ -242,7 +263,7 @@ int attn_is_raw_scan(const char *tool_name, const char *bash_cmd)
       return 0;
    if (strcmp(tool_name, "Grep") == 0 || strcmp(tool_name, "Glob") == 0)
       return 1;
-   if (strcmp(tool_name, "Bash") == 0)
+   if (attn_tool_is_shell(tool_name))
       return bash_is_raw_recursive_scan(bash_cmd);
    return 0;
 }

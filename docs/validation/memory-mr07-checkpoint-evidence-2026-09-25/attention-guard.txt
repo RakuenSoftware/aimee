@@ -1,0 +1,20 @@
+aimee attention-guard: this session has hit its raw-scan cap (2). Aimee indexes this repo — explore through it instead: find_symbol, ast_grep_search, index command=hybrid, or get_context_block. Raise ingress_max_raw_scans in aimee.yaml to raise or lift the cap.
+aimee attention-guard: this session has hit its raw-scan cap (2). Aimee indexes this repo — explore through it instead: find_symbol, ast_grep_search, index command=hybrid, or get_context_block. Raise ingress_max_raw_scans in aimee.yaml to raise or lift the cap.
+aimee: internal session workspace isolation failed; tool call blocked
+aimee: internal session workspace isolation failed; tool call blocked
+aimee: internal session workspace isolation failed; tool call blocked
+aimee: internal session workspace isolation failed; tool call blocked
+aimee attention-guard: refusing a direct write to an external agent-memory store (~/.claude/projects/<project>/memory/...). Durable memories must be pushed to aimee's memory system, where they are indexed, recalled, and audited: use `aimee memory store <key> "<content>" [--tier L2] [--kind fact]` (recall via `aimee memory search` / the search_memory tool). Reading the file store is still allowed. An operator may set require_aimee_memory: false in aimee.yaml to disable this — there is no env-var bypass.
+aimee attention-guard: refusing a direct write to an external agent-memory store (~/.claude/projects/<project>/memory/...). Durable memories must be pushed to aimee's memory system, where they are indexed, recalled, and audited: use `aimee memory store <key> "<content>" [--tier L2] [--kind fact]` (recall via `aimee memory search` / the search_memory tool). Reading the file store is still allowed. An operator may set require_aimee_memory: false in aimee.yaml to disable this — there is no env-var bypass.
+aimee attention-guard: refusing a direct write to an external agent-memory store (~/.claude/projects/<project>/memory/...). Durable memories must be pushed to aimee's memory system, where they are indexed, recalled, and audited: use `aimee memory store <key> "<content>" [--tier L2] [--kind fact]` (recall via `aimee memory search` / the search_memory tool). Reading the file store is still allowed. An operator may set require_aimee_memory: false in aimee.yaml to disable this — there is no env-var bypass.
+attention_guard: classify OK
+weight OK
+score OK
+enforcement OK
+required discovery OK
+isolation decision OK
+isolation enforcement OK
+camelCase client path routing OK
+external-memory decision OK
+external-memory enforcement OK
+all tests passed
