@@ -77,8 +77,8 @@ def inside(output, budget_benchmark=False):
     retry_state = dict(remaining=0)
     lock = threading.Lock()
 
-    def check(name, passed):
-        checks.append(dict(name=name, passed=bool(passed)))
+    def check(name, passed, details=None):
+        checks.append(dict(name=name, passed=bool(passed), **(details or {})))
         if not passed:
             raise RuntimeError(name)
 
@@ -288,7 +288,12 @@ def inside(output, budget_benchmark=False):
                     check(name + ' ' + label + ' reports explicit refusal',
                           refused_status == (200 if body.get('stream') else expected_status) and
                           error in list(strings(refused)) and
-                          not any('MEMORY_BOUNDARY_OK' in text for text in strings(refused)))
+                          not any('MEMORY_BOUNDARY_OK' in text for text in strings(refused)),
+                          dict(observed_status=refused_status, expected_status=expected_status,
+                               expected_error=error, observed_reasons=sorted(set(strings(refused)) & {
+                                   'request_budget_exceeded','token_count_unavailable','invalid_budget',
+                                   'unavailable','stale_context','rate_limit_exceeded'}),
+                               provider_sends=len(captures)-before_budget))
                     check(name + ' ' + label + ' sends no provider request', len(captures) == before_budget)
                 if frontend in ('chat', 'messages'):
                     before_budget = len(captures)
