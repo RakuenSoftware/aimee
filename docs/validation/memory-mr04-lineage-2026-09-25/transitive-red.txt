@@ -1,0 +1,5 @@
+--- FAIL: TestEvidenceLineageCurrentReleasePostgres (0.89s)
+    evidence_lineage_test.go:199: transitive current release want false: true <nil>
+FAIL
+FAIL	github.com/JBailes/aimee/server-go/modules/memory	0.905s
+FAIL

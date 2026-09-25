@@ -3,7 +3,7 @@ package memory
 // Versioned current-state KB eligibility, evaluated before lane limits. The
 // storage transaction supplies one stable request clock through CURRENT_TIMESTAMP.
 // Scope/RLS and evidence-specific admission remain additional mandatory gates.
-const currentEligibilityPolicy = "current-validity-v11"
+const currentEligibilityPolicy = "current-validity-v12"
 
 // KB timestamps historically mix UTC wall time and RFC3339 offsets. Normalize
 // both at the adapter; invalid nonempty timestamps raise a query error rather
@@ -27,7 +27,7 @@ func memoryValiditySQL(prefix string) string {
 // This never grants serving authority: recall still applies currentMemorySQL.
 // Suppression and non-active lifecycle states prohibit this indexing route.
 func indexableMemorySQL(prefix string) string {
-	return baseIndexableMemorySQL(prefix) + ` AND ` + currentEpisodeCardInputsSQL(prefix, false)
+	return baseIndexableMemorySQL(prefix) + ` AND ` + currentDerivedMemoryInputsSQL(prefix, false)
 }
 
 func baseIndexableMemorySQL(prefix string) string {
@@ -35,7 +35,7 @@ func baseIndexableMemorySQL(prefix string) string {
 }
 
 func currentMemorySQL(prefix string) string {
-	return baseCurrentMemorySQL(prefix) + ` AND ` + currentEpisodeCardInputsSQL(prefix, false)
+	return baseCurrentMemorySQL(prefix) + ` AND ` + currentDerivedMemoryInputsSQL(prefix, false)
 }
 
 func baseCurrentMemorySQL(prefix string) string {
@@ -48,7 +48,7 @@ func baseCurrentMemorySQL(prefix string) string {
 // Revocation, quarantine, rejection and deletion must never become inspectable
 // simply because the caller supplied an as_of value. Unknown states fail closed.
 func historicalMemoryInspectionSQL(prefix string) string {
-	return baseHistoricalMemoryInspectionSQL(prefix) + ` AND ` + currentEpisodeCardInputsSQL(prefix, true)
+	return baseHistoricalMemoryInspectionSQL(prefix) + ` AND ` + currentDerivedMemoryInputsSQL(prefix, true)
 }
 
 func baseHistoricalMemoryInspectionSQL(prefix string) string {
@@ -63,7 +63,7 @@ func baseHistoricalMemoryInspectionSQL(prefix string) string {
 func alertMemoryInspectionSQL(prefix string) string {
 	return `(` + baseHistoricalMemoryInspectionSQL(prefix) + ` OR (` + prefix +
 		`lifecycle_state IN ('pending','fulfilled') AND ` + prefix + `activation_suppressed=0)) AND ` +
-		currentEpisodeCardInputsSQL(prefix, true)
+		currentDerivedMemoryInputsSQL(prefix, true)
 }
 
 // Clock expressions are fixed owner SQL or bound timestamp parameters, never

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -115,64 +114,17 @@ func (s *postgresDataStore) cognifySettings() (command string, async bool, err e
 	return command, configNumber(values, "memory_cognify_async_enabled") != 0, nil
 }
 
-// Walk memory ancestry before sending content or deriving anything from it.
-// Completed nodes allow a shared DAG; an active node denotes a cycle.
+// Apply the same versioned, scoped ancestry gate used by retrieval before
+// releasing source text to an extractor. Unknown or stale lineage fails closed.
 func (s *postgresDataStore) derivedSourcesAllowed(ctx context.Context, root int64) error {
-	state := map[int64]int{}
-	var visit func(int64, int) error
-	visit = func(id int64, depth int) error {
-		if id <= 0 || depth > 16 || state[id] == 1 {
-			return errDerivedSource
-		}
-		if state[id] == 2 {
-			return nil
-		}
-		if len(state) >= 256 {
-			return errDerivedSource
-		}
-		state[id] = 1
-		var allowed bool
-		err := s.db.QueryRow(ctx, `SELECT lifecycle_state='active' AND activation_suppressed=0 FROM memories WHERE id=$1`, id).Scan(&allowed)
-		if store.IsNoRows(err) || (err == nil && !allowed) {
-			return errDerivedSource
-		}
-		if err != nil {
-			return err
-		}
-		rows, err := s.db.Query(ctx, `SELECT source_ref FROM memory_lineage WHERE object_type='memory' AND object_id=$1 AND source_kind='memory' ORDER BY id LIMIT 65`, id)
-		if err != nil {
-			return err
-		}
-		refs := []string{}
-		for rows.Next() {
-			var ref string
-			if err = rows.Scan(&ref); err != nil {
-				rows.Close()
-				return err
-			}
-			refs = append(refs, ref)
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		if len(refs) > 64 {
-			return errDerivedSource
-		}
-		for _, ref := range refs {
-			source, err := strconv.ParseInt(strings.TrimPrefix(ref, "memory:"), 10, 64)
-			if err != nil {
-				return errDerivedSource
-			}
-			if err = visit(source, depth+1); err != nil {
-				return err
-			}
-		}
-		state[id] = 2
-		return nil
+	var allowed bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memories m WHERE m.id=$1 AND `+currentMemorySQL("m.")+`)`, root).Scan(&allowed); err != nil {
+		return err
 	}
-	return visit(root, 0)
+	if !allowed {
+		return errDerivedSource
+	}
+	return nil
 }
 
 func (s *postgresDataStore) cognifySource(ctx context.Context, id int64) (Record, error) {
@@ -332,6 +284,20 @@ func (s *postgresDataStore) cognify(ctx context.Context, id int64, command strin
  SELECT 'memory',$1,kind,ref,$3 FROM (VALUES('memory',$2),('metadata',$4)) AS refs(kind,ref)
  WHERE NOT EXISTS(SELECT 1 FROM memory_lineage WHERE object_type='memory' AND object_id=$1 AND source_kind=kind AND source_ref=ref)`, record.ID, fmt.Sprintf("memory:%d", id), confidence, fmt.Sprintf("memory-cognify-v1:%d", id))
 		if err != nil {
+			return out, err
+		}
+		// Bind the copied claim to both exact revisions while the canonical source
+		// remains locked. Observation replacement never rewrites the claim itself.
+		if _, err = s.db.Exec(ctx, `DELETE FROM memory_lineage WHERE object_type='memory'
+ AND object_id=$1 AND source_kind='memory-cognify-input-v1'`, record.ID); err != nil {
+			return out, err
+		}
+		if _, err = s.db.Exec(ctx, `INSERT INTO memory_lineage(object_type,object_id,source_kind,source_ref)
+ SELECT 'memory',child.id,'memory-cognify-input-v1',jsonb_build_object(
+ 'schema_version',1,'owner_id',(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),
+ 'record_id',parent.id::text,'record_revision',parent.record_revision::text,
+ 'derived_revision',child.record_revision::text)::text
+ FROM memories child,memories parent WHERE child.id=$1 AND parent.id=$2`, record.ID, id); err != nil {
 			return out, err
 		}
 		// The legacy rule table is global. Scoped preferences remain scoped memories

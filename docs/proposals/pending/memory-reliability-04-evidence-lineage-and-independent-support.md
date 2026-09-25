@@ -1,6 +1,6 @@
 # MR-04: Evidence lineage, independent corroboration and retraction
 
-- **State:** Proposed
+- **State:** In progress — acceptance audit started 2026-09-25
 - **Priority:** P1: evidence foundation
 - **Owner:** Go memory lineage and freshness, with existing provenance/storage owners
 - **Depends on:** [MR-01](memory-reliability-01-unified-eligibility-and-validity.md), [MR-02](memory-reliability-02-authority-preserving-mutations.md)
