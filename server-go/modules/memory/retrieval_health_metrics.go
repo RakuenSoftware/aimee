@@ -15,12 +15,13 @@ import (
 // from recall callers. The owner authenticates and filters the population before
 // aggregation; reports intentionally contain no record, family or task IDs.
 type healthRecord struct {
-	RecordID   string `json:"record_id"`
-	VersionID  string `json:"version_id"`
-	Kind       string `json:"kind"`
-	Family     string `json:"family,omitempty"`
-	LowTrust   *bool  `json:"low_trust"`
-	Historical bool   `json:"historical"`
+	Positions  []healthPosition `json:"final_positions,omitempty"`
+	RecordID   string           `json:"record_id"`
+	VersionID  string           `json:"version_id"`
+	Kind       string           `json:"kind"`
+	Family     string           `json:"family,omitempty"`
+	LowTrust   *bool            `json:"low_trust"`
+	Historical bool             `json:"historical"`
 	// Nil means no release-time verifier label, not a verified safe delivery.
 	LifecycleViolation *bool `json:"lifecycle_violation"`
 }

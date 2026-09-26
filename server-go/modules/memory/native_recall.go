@@ -32,6 +32,7 @@ func commandByteLimit(args commandArgs, name string) (*int, error) {
 }
 
 type nativeRecallProjection struct {
+	healthPositions  map[string][]int
 	HealthRecords    []healthRecord       `json:"health_records,omitempty"`
 	HealthQueryToken string               `json:"health_query_token,omitempty"`
 	AppendSources    bool                 `json:"append_sources,omitempty"`
@@ -50,6 +51,19 @@ type nativeRecallProjection struct {
 // the complete hard-rule set is reserved before any optional row is considered.
 func projectNativeRecall(b recallBundle, limit int) (nativeRecallProjection, int, error) {
 	p := nativeRecallProjection{Version: 1, Limit: limit, Reminders: []string{}, Sources: []typedProjectionRef{}}
+	if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" {
+		p.healthPositions = map[string][]int{}
+	}
+	position := func(source *typedSourceVersion, rank int) {
+		if source != nil && p.healthPositions != nil {
+			if rank > maxReleaseSources {
+				p.healthPositions = nil
+				return
+			}
+			key := healthVersionKey(healthRecord{RecordID: healthSourceIdentity(source), VersionID: source.Version.RecordRevision})
+			p.healthPositions[key] = append(p.healthPositions[key], rank)
+		}
+	}
 	if b.CollectionSource != nil {
 		p.Sources = append(p.Sources, typedProjectionRef{Channel: "native_memory_collection", ID: "1", Source: b.CollectionSource})
 	}
@@ -59,9 +73,10 @@ func projectNativeRecall(b recallBundle, limit int) (nativeRecallProjection, int
 	if b.RuleCollection != nil {
 		p.Sources = append(p.Sources, typedProjectionRef{Channel: "native_rule_collection", ID: "1", Source: b.RuleCollection})
 	}
-	for _, rule := range b.AlwaysOnRules {
+	for i, rule := range b.AlwaysOnRules {
 		if rule.Source != nil {
 			p.Sources = append(p.Sources, typedProjectionRef{Channel: "native_rules", ID: strconv.FormatInt(rule.ID, 10), Source: rule.Source})
+			position(rule.Source, i+1)
 		}
 	}
 	var out strings.Builder
@@ -109,6 +124,7 @@ func projectNativeRecall(b recallBundle, limit int) (nativeRecallProjection, int
 			count++
 			if source != nil {
 				p.Sources = append(p.Sources, *source)
+				position(source.Source, len(b.AlwaysOnRules)+count)
 			}
 			if reminder > 0 {
 				p.Reminders = append(p.Reminders, strconv.FormatInt(reminder, 10))
@@ -158,9 +174,10 @@ func projectNativeRecall(b recallBundle, limit int) (nativeRecallProjection, int
 			return p, 0, fmt.Errorf("invalid native recall source version")
 		}
 	}
-	reminders, sources := p.Reminders, p.Sources
+	reminders, sources, positions := p.Reminders, p.Sources, p.healthPositions
 	p = nativeProjectionForText(out.String(), limit)
 	p.Reminders, p.Sources = reminders, sources
+	p.healthPositions = positions
 	p.SelectionDigest = releaseDigest(sources)
 	return p, count, nil
 }
@@ -197,6 +214,7 @@ func nativeRecallEnvelope(raw []byte, args commandArgs) ([]byte, error) {
 	projection.SourceDigest = fmt.Sprintf("sha256:%x", sha256.Sum256(envelope["recall"]))
 	if os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" && len(raw) < 64<<10 {
 		projection.HealthRecords = nativeHealthRecords(b, projection.Sources)
+		projection.HealthRecords = nativeHealthPositions(projection.HealthRecords, projection)
 	}
 	if token := args.stringOr("_health_query_token", ""); os.Getenv("AIMEE_MEMORY_HEALTH_ENABLED") == "1" && releaseTokenValid(token) && len(raw) < 64<<10 {
 		projection.HealthQueryToken = token

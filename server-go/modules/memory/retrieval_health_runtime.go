@@ -110,18 +110,21 @@ func healthSnapshotFromReceipt(r inspectedHealthReceipt, j *healthJournal, ppm i
 		known[healthVersionKey(record)] = record
 	}
 	knownKinds, knownTrust, knownFamilies := len(e.Records) > 0, len(e.Records) > 0, len(e.Records) > 0
+	knownPositions := len(e.Records) > 0
 	for i, record := range e.Records {
 		if observed, ok := known[healthVersionKey(record)]; ok && healthLabelName(observed.Kind) {
 			record.Kind, record.LowTrust, record.Family = observed.Kind, observed.LowTrust, observed.Family
+			record.Positions = mergeHealthPositions(nil, observed.Positions, false)
 			e.Records[i] = record
 		}
 		knownKinds = knownKinds && record.Kind != "unknown"
 		knownTrust = knownTrust && record.LowTrust != nil
 		knownFamilies = knownFamilies && record.Family != ""
+		knownPositions = knownPositions && len(record.Positions) > 0
 	}
 	gaps := e.MetadataGaps[:0]
 	for _, gap := range e.MetadataGaps {
-		if !(gap == "memory_kind" && knownKinds || gap == "trust" && knownTrust || gap == "family" && knownFamilies) {
+		if !(gap == "memory_kind" && knownKinds || gap == "trust" && knownTrust || gap == "family" && knownFamilies || gap == "final_rank" && knownPositions) {
 			gaps = append(gaps, gap)
 		}
 	}

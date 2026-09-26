@@ -18,6 +18,12 @@ Join final selection to request/task/turn IDs, a keyed query fingerprint, query 
 
 Use a keyed, namespace-specific fingerprint for low-entropy queries rather than publishing a plain hash. Raw query and memory text are not required. Record IDs/family links remain access-controlled. High-cardinality identities belong in bounded event storage, not metric labels. Deduplicate by request/attempt and record/version.
 
+Final positions are one-based within a named, digest-bound rendered projection.
+Separate projections have no shared ranking scale. Preserve multiple positions
+when a record appears more than once, while concentration still counts that
+record only once per invocation. Native row positions include unversioned rows;
+source-fence deduplication is not a substitute for the renderer's ordering.
+
 Sample at the invocation level and retain sampling probability, policy and window. Do not independently sample individual records and then pretend the reconstructed list is complete. Keep required audit/invariant-violation counters separate from optional sampled health events; expose telemetry loss and incomplete windows.
 
 ## Metric definitions

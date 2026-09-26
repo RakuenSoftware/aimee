@@ -227,3 +227,23 @@ successful topologies were removed after evidence export. CT100 was unchanged.
 MR-08 remains in progress: the event metadata gaps and serving-overhead
 acceptance still need resolution. These deployed passes do not supply MR-07's
 activated paired-workload quality or cost measurements.
+
+## Final positions from the rendering owner
+
+Optional health metadata now retains each delivered record's one-based position
+within its exact rendered projection, bound to that projection's digest. Typed,
+fact and preview projections retain their final order before source-fence
+deduplication. The native renderer records positions while writing rows, so
+unversioned rules/rows still occupy their actual positions. Repeated appearances
+retain multiple positions without changing record-level concentration.
+
+Refresh removes old native positions and preserves retained ingress positions;
+explicit appends preserve both projections. Omitted versions cannot inherit
+positions, and malformed or absent positions retain the visible `final_rank`
+gap. No global rank is inferred across independently ranked projection blocks.
+The existing optional metadata pool and receipt bounds still apply.
+
+The focused health/native/source-release race suite passed in 2.95 seconds,
+including four new position regressions and the existing serving-content
+invariance check. Deployed validation of this addition remains pending; the
+ongoing serving-overhead experiment uses the earlier `be46915db` image.

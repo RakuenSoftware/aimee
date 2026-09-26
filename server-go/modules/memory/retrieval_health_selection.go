@@ -69,24 +69,36 @@ func mergeHealthSelectionMetadata(prior json.RawMessage, assembly map[string]any
 		Records []healthRecord `json:"health_records"`
 	}
 	_ = json.Unmarshal(prior, &previous)
+	_, native := assembly["native_projection"]
+	appendNative, _ := assembly["append_native_sources"].(bool)
 	records := map[string]healthRecord{}
 	for _, record := range previous.Records {
+		record.Positions = mergeHealthPositions(record.Positions, nil, native && !appendNative)
 		records[healthVersionKey(record)] = record
 	}
 	if current, ok := assembly["health_records"].([]healthRecord); ok {
 		for _, record := range current {
+			record.Positions = mergeHealthPositions(records[healthVersionKey(record)].Positions, record.Positions, false)
 			records[healthVersionKey(record)] = record
 		}
 	}
+	positions := healthAssemblyPositions(assembly)
 	var result []healthRecord
 	for _, ref := range selected {
 		if ref.Source == nil {
 			continue
 		}
 		key := healthVersionKey(healthRecord{RecordID: healthSourceIdentity(ref.Source), VersionID: ref.Source.Version.RecordRevision})
-		if record, ok := records[key]; ok && len(record.Kind) <= 64 {
+		record, ok := records[key]
+		if !ok && len(positions[key]) > 0 {
+			record = healthRecord{RecordID: healthSourceIdentity(ref.Source), VersionID: ref.Source.Version.RecordRevision, Kind: "unknown"}
+			ok = true
+		}
+		if ok && len(record.Kind) <= 64 {
+			record.Positions = mergeHealthPositions(record.Positions, positions[key], false)
 			result = append(result, record)
 			delete(records, key)
+			delete(positions, key)
 		}
 	}
 	return result
