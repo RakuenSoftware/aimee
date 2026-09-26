@@ -123,6 +123,14 @@ func TestExplorationCalibrationRejectsChangedLiveScopeAndGates(t *testing.T) {
 }
 
 func TestSessionCalibrationAdmissionRevocationAndOwnerRestart(t *testing.T) {
+	testSessionApprovalAdmission(t, false)
+}
+
+func TestSessionExperimentAdmissionRevocationAndOwnerRestart(t *testing.T) {
+	testSessionApprovalAdmission(t, true)
+}
+
+func testSessionApprovalAdmission(t *testing.T, experiment bool) {
 	now := time.Now()
 	c := calibrationContract(now)
 	c.Binding.Task = "session-task"
@@ -141,10 +149,20 @@ func TestSessionCalibrationAdmissionRevocationAndOwnerRestart(t *testing.T) {
 	}
 	a := calibrationFixture(t, c, now)
 	raw, _ := json.Marshal(a)
+	manifest := strings.Repeat("a", 64)
+	if experiment {
+		raw, _ = json.Marshal(explorationExperiment{Version: 1, Kind: "experiment", AuthorizedBy: "test-only",
+			Created: now.Add(-time.Minute), Expires: now.Add(time.Hour), ManifestSHA256: manifest,
+			Principal: c.Binding.Principal, Sessions: []string{c.Binding.Session}, Scope: calibrationScope(c), Limits: c.Limits})
+	}
 	optIn := true
 	approve := func(c explorationContract, now time.Time) string {
 		if !optIn {
 			return ""
+		}
+		if experiment {
+			receipt, _ := parseExplorationExperiment(raw, c, now, manifest)
+			return receipt
 		}
 		receipt, _ := parseExplorationCalibration(raw, c, now)
 		return receipt
@@ -165,6 +183,13 @@ func TestSessionCalibrationAdmissionRevocationAndOwnerRestart(t *testing.T) {
 	issued := apply(sessionExplorationRequest{Operation: "issue", Binding: c.Binding, Contract: &c})
 	if issued["contract"].(map[string]any)["tier"] != "enforce" {
 		t.Fatal(issued)
+	}
+	kind := "calibration"
+	if experiment {
+		kind = "experiment"
+	}
+	if issued["contract"].(map[string]any)["approval_kind"] != kind {
+		t.Fatal("approval provenance lost", issued)
 	}
 	check := sessionExplorationRequest{Operation: "check", Binding: c.Binding, Tool: "grep", Arguments: json.RawMessage(`{"path":".","pattern":"symbol"}`), AttemptID: "restricted",
 		IndexObservation: &explorationIndexObservation{Generation: c.Binding.IndexGeneration, HTTPStatus: 200, Body: `{"status":"ok","project":"project"}`},

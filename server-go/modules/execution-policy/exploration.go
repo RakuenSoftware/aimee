@@ -83,6 +83,7 @@ type explorationContract struct {
 	QueryClass           string             `json:"query_class"`
 	CoverageComplete     bool               `json:"coverage_complete"`
 	ConfidenceProvenance string             `json:"confidence_provenance"`
+	ApprovalKind         string             `json:"approval_kind,omitempty"`
 	CalibrationReceipt   string             `json:"calibration_receipt"`
 	SupportedClasses     []string           `json:"supported_classes"`
 	Created              time.Time          `json:"created"`

@@ -66,17 +66,7 @@ func parseExplorationCalibration(raw []byte, c explorationContract, now time.Tim
 		!a.Expires.After(now) || !a.Expires.After(a.Created) || a.Expires.Sub(a.Created) > 30*24*time.Hour {
 		return "", errors.New("invalid or expired reviewed calibration")
 	}
-	// v1 only calibrates raw discovery on a clean, exactly pinned checkout.
-	// Unknown coverage, stale index observations and pre-provider offers cannot
-	// accidentally activate even if a review file is overly broad.
-	b := c.Binding
-	if !c.valid(now) || !c.CoverageComplete || !b.HostWorktree || !b.IndexObservedCurrent || !b.OwnerObservedCurrent ||
-		c.QueryClass != "typed_requirements" || !strings.HasPrefix(b.WorktreeGeneration, "git-clean:") ||
-		b.ProducerBuild == "" || b.Workspace == "" || b.WorkingDirectory == "" || b.Route == "" || b.Provider == "" || b.Model == "" ||
-		!sha256Text(b.LimitsDigest) || !sha256Text(c.ReceiptDigest) || a.Scope != calibrationScope(c) ||
-		!reflect.DeepEqual(a.Limits, c.Limits) || !a.Limits.Enabled || a.Limits.RawScans == nil ||
-		a.Limits.Files != nil || a.Limits.Graph != nil || a.Limits.Bytes != nil || a.Limits.Tokens != nil ||
-		len(c.SupportedClasses) != 1 || c.SupportedClasses[0] != "raw_scan" {
+	if !explorationApprovalScope(c, now) || a.Scope != calibrationScope(c) || !reflect.DeepEqual(a.Limits, c.Limits) {
 		return "", errors.New("calibration does not cover this live contract")
 	}
 	var compact bytes.Buffer
@@ -88,6 +78,22 @@ func parseExplorationCalibration(raw []byte, c explorationContract, now time.Tim
 		return "", errors.New("paired workload gate is not satisfied")
 	}
 	return a.ReportSHA256, nil
+}
+
+// Every approval requires the same live owner, context and exact execution scope.
+// An experiment changes only the evidence required to authorize its named sessions.
+func explorationApprovalScope(c explorationContract, now time.Time) bool {
+	b := c.Binding
+	if !c.valid(now) || !c.CoverageComplete || !b.HostWorktree || !b.IndexObservedCurrent || !b.OwnerObservedCurrent ||
+		c.QueryClass != "typed_requirements" || !strings.HasPrefix(b.WorktreeGeneration, "git-clean:") ||
+		b.ProducerBuild == "" || b.Workspace == "" || b.WorkingDirectory == "" || b.Route == "" || b.Provider == "" || b.Model == "" ||
+		!sha256Text(b.LimitsDigest) || !sha256Text(c.ReceiptDigest) ||
+		!c.Limits.Enabled || c.Limits.RawScans == nil ||
+		c.Limits.Files != nil || c.Limits.Graph != nil || c.Limits.Bytes != nil || c.Limits.Tokens != nil ||
+		len(c.SupportedClasses) != 1 || c.SupportedClasses[0] != "raw_scan" {
+		return false
+	}
+	return true
 }
 
 // Validate the frozen scorer's result and quantitative gates, rather than
@@ -149,12 +155,17 @@ func reviewedExplorationReport(raw []byte) bool {
 // redirect the fixed operator artifact into a model-writable checkout. These
 // modules deploy on Linux; openat also avoids check-then-open replacement races.
 func readExplorationCalibration() ([]byte, error) {
+	return readExplorationApproval(explorationCalibrationPath)
+}
+
+// path is one of the two fixed deployment paths, never a request argument.
+func readExplorationApproval(path string) ([]byte, error) {
 	fd, err := syscall.Open("/", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { syscall.Close(fd) }()
-	parts := strings.Split(strings.TrimPrefix(explorationCalibrationPath, "/"), "/")
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
 	for i, part := range parts {
 		flags := syscall.O_RDONLY | syscall.O_CLOEXEC | syscall.O_NOFOLLOW | syscall.O_NONBLOCK
 		if i < len(parts)-1 {
@@ -174,13 +185,16 @@ func readExplorationCalibration() ([]byte, error) {
 			return nil, errors.New("invalid calibration artifact file")
 		}
 	}
-	file := os.NewFile(uintptr(fd), explorationCalibrationPath)
+	file := os.NewFile(uintptr(fd), path)
 	fd = -1 // file owns the descriptor after successful traversal
 	defer file.Close()
 	return io.ReadAll(io.LimitReader(file, 65537))
 }
 
 func approvedExplorationCalibration(c explorationContract, now time.Time) string {
+	if manifest := os.Getenv("AIMEE_EXPLORATION_EXPERIMENT"); manifest != "" {
+		return approvedExplorationExperiment(c, now, manifest)
+	}
 	if os.Getenv("AIMEE_EXPLORATION_ENFORCE") != "1" {
 		return ""
 	}

@@ -186,3 +186,10 @@ by an operator-trusted proxy. The PostgreSQL owner still checks principal/sessio
 ownership. Ordinary TCP/UDS session headers do not establish this identity, and
 native host session identity takes precedence. This does not add a general client
 API for authoring a task contract or a confidence value.
+
+A deployment-owned, time-bounded experimental authorization can collect the
+paired workload before calibration. It pins the frozen manifest, principal,
+pre-created sessions and all live scope/budget fields; it retains the same
+coverage, freshness and final-receipt checks. Contracts explicitly distinguish
+`approval_kind: "experiment"` from measured `calibration`. This is not release
+approval. See the [collection contract](../../benchmarks/memory/EXPLORATION_GATE.md#collection-before-calibration).

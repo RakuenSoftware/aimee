@@ -127,11 +127,17 @@ func sessionExploration(principal, session string, state, operationJSON []byte, 
 		} else {
 			req.Contract.Revision = 1
 		}
-		// Only deployment-owned reviewed measurements may activate a contract.
+		// Deployment approval distinguishes measured release calibration from a
+		// bounded collection experiment; neither is authored by the task.
 		req.Contract.Tier = "observe"
+		req.Contract.ApprovalKind = ""
 		req.Contract.CalibrationReceipt = calibration(*req.Contract, now)
 		if req.Contract.CalibrationReceipt != "" {
 			req.Contract.Tier = "enforce"
+			req.Contract.ApprovalKind = "calibration"
+			if strings.HasPrefix(req.Contract.CalibrationReceipt, "experiment:") {
+				req.Contract.ApprovalKind = "experiment"
+			}
 		}
 		err = l.issue(*req.Contract, now)
 		result = map[string]any{"status": "ok", "contract": req.Contract}

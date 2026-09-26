@@ -96,3 +96,33 @@ Implementation status: activation parsing and native freshness checks are
 implemented; no measured passing workload has been collected. Native requirement forwarding and hook freshness admission are implemented.
 Fresh process acceptance and measured workload acceptance remain required before
 MR-07 completion.
+
+## Collection before calibration
+
+A bounded experiment can collect treatment observations before a passing report
+exists. It is a separate authorization, not a calibration and not a promotion.
+Use only a disposable evaluation deployment. No experiment artifact is shipped.
+
+Set `AIMEE_EXPLORATION_EXPERIMENT` to the exact frozen manifest SHA-256 and install
+`/etc/aimee/exploration-experiment.json` through the deployment owner. The same
+root ownership, protected ancestors, no-symlink and 64 KiB bounds apply. Its fields
+are `schema_version: 1`, `kind: "experiment"`, `authorized_by`, `created`,
+`expires` (at most six hours), `manifest_sha256`, exact `principal`, `sessions`
+(one to 512 unique pre-created session IDs), `scope`, and `limits`. Scope and
+limits use the calibration schema above. Wildcards cannot authorize sessions.
+An experiment still requires complete Go coverage, current index and owner,
+clean host worktree, final receipt and matching provider/build/budgets.
+
+Contracts retain `approval_kind: "experiment"` and a tagged
+`calibration_receipt: "experiment:<manifest-sha256>"`. This field is a durable
+approval commitment; the experiment tag explicitly means no passing calibration
+exists. The calibration parser rejects an experiment envelope. Experimental
+opt-in takes precedence: a missing, invalid, expired or revoked experiment
+falls back to observe, without silently falling through to a release approval.
+Removing both opt-ins leaves observe mode and preserves all accounting.
+
+Freeze separate baseline/treatment sessions before collection. The baseline has
+no experiment opt-in. Record both raw provider usage and all declared stage cost
+components; unavailable usage/cost is an invalid cell, never an estimated zero.
+Experimental authorization alone is not evidence that the task-quality gates
+passed. The measured report still decides whether release review is eligible.

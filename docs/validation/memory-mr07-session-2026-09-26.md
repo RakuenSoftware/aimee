@@ -82,3 +82,20 @@ A production observation during this work found CT100 changed independently to
 After startup its Docker health passed five consecutive probes, and the paired
 thinclient reported the server `ok` and KB disabled. No MR-07 candidate was
 deployed to CT100 by this work; candidate execution remains on CT109.
+
+## Bounded experimental collection authorization
+
+The collection bootstrap is separate from release calibration. A protected
+root-owned experiment artifact and an explicit frozen-manifest opt-in authorize
+only named sessions of one principal, exact live scope and typed raw-scan limits,
+for at most six hours. Complete coverage, current Go owner/index observations,
+clean host worktree and final provider receipt remain mandatory. Contracts mark
+experimental approval distinctly; these observations cannot claim a passing
+calibration without the independent paired scorer and evidence review.
+
+Policy tests exercise both release and experiment approval through native and
+hook session admission, revocation, owner restart and retained operator ceilings.
+The non-PostgreSQL race suites for execution policy, memory and session families
+passed, and all 77 lint checks passed. This is implementation validation, not
+measured workload acceptance. No experimental or calibration artifact has been
+installed on production, and no passing paired workload is claimed.
