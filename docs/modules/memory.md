@@ -843,3 +843,53 @@ Generated relation search, entity edges and profile aggregation check the exact
 versions and current eligibility of all recorded copied inputs. Generator-owned
 rows without observations await reindexing; authored relations retain their
 existing parent policy. See [linked input validation](../validation/memory-linked-relation-inputs-2026-09-23.md).
+
+### Utility horizons (MR-10)
+
+`AIMEE_MEMORY_UTILITY_HORIZON_POLICY` is an optional operator-owned JSON artifact
+in the memory process environment. Restart both owners to switch it atomically
+with the deployment. An absent artifact preserves the existing eligibility
+rules. Malformed configuration refuses owner initialization. Requests and stored
+model text cannot supply this policy.
+
+The artifact has `mode` (`shadow` or `enforce`), a `policy`, and up to 128 exact
+record-version `overrides`. Policy schema 1 declares its revision,
+`transient_kinds`, `safety`, `domains`, `kinds`, and `unknown_rule` (`exclude` or
+`allow`). There is no wildcard or default duration for other kinds. A rule has
+an ID, `duration_seconds` (0 through ten years), `anchor` (`created` or
+`confirmed`), and an optional absolute `deadline` which can only shorten that
+rule's deadline. An example shadow artifact is:
+
+```json
+{"mode":"shadow","policy":{"schema_version":1,"revision":"task-state-1","transient_kinds":{"task_state":true},"kinds":{"task_state":{"id":"task-day","duration_seconds":86400,"anchor":"created"}},"unknown_rule":"exclude"}}
+```
+
+Precedence is safety rule, matching admitted override, domain rule, then kind
+rule. Shared domains are canonical `scope_type:scope_value` values; the private
+domain is `personal`. Overrides carry the complete `MemoryRecordVersion` and a
+rule. A confirmed-anchor override additionally names `confirmation_generation`:
+the protected MR-02 journal's update event for that exact current revision and
+scope. The operator's artifact is the confirmation admission; the existence of
+an arbitrary update alone does not confirm usefulness. A stale version or
+nonexistent event cannot renew a horizon. Creation anchors come from the
+protected insertion journal, including for records whose editable creation
+metadata changes. Legacy records without journal evidence remain unknown under
+the declared rule. Access counters never create an anchor.
+
+Enforcement joins the shared Go eligibility predicates before lexical, dense,
+graph and bundle limits and again at source release. Retained historical reads
+keep their existing authorization/lifecycle gates. Horizon expiry does not
+change valid time, retire a row, delete history, or remove its vector. Disabling
+the policy restores only horizon eligibility. Validity diagnostics expose the
+actual version, policy digest, anchor, deadline, mode and decision. Selected
+transient records and native ranking traces carry the observed decision; health
+reports distinguish measured would-exclude occurrences from unknowns.
+
+Collection projections bind the artifact digest and the next visible horizon
+boundary as well as canonical generations. A policy revision or elapsed deadline
+invalidates reuse even if there was no memory write. Current payloads retain
+release-time checks; diagnostics are not transferable authorization.
+
+The default stays off. Domain durations require separate historical-task and
+outcome evidence before operator promotion. No learned duration, universal
+expiration, or automatic policy tuning is installed by this implementation.

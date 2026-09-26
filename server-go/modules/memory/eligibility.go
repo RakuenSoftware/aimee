@@ -3,7 +3,7 @@ package memory
 // Versioned current-state KB eligibility, evaluated before lane limits. The
 // storage transaction supplies one stable request clock through CURRENT_TIMESTAMP.
 // Scope/RLS and evidence-specific admission remain additional mandatory gates.
-const currentEligibilityPolicy = "current-validity-v17"
+const currentEligibilityPolicy = "current-validity-v18"
 
 // KB timestamps historically mix UTC wall time and RFC3339 offsets. Normalize
 // both at the adapter; invalid nonempty timestamps raise a query error rather
@@ -39,7 +39,7 @@ func currentMemorySQL(prefix string) string {
 }
 
 func baseCurrentMemorySQL(prefix string) string {
-	return prefix + `lifecycle_state='active' AND ` + prefix + `activation_suppressed=0 AND ` + memoryValiditySQL(prefix)
+	return prefix + `lifecycle_state='active' AND ` + prefix + `activation_suppressed=0 AND ` + memoryValiditySQL(prefix) + ` AND ` + utilityHorizonSQL(prefix, false)
 }
 
 // Legacy as_of reads inspect an explicitly identified version and label its

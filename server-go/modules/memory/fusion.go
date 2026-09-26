@@ -38,7 +38,7 @@ type graphVisit struct {
 
 // Repeat the parent visibility predicate at both seed and result collection.
 // The store's RLS context remains an additional bound, including all-scope calls.
-var graphVisible = graphVisibleSQL(false)
+func graphVisible() string { return graphVisibleSQL(false) }
 
 func graphVisibleSQL(versioned bool) string {
 	columns := "id,scope_type,scope_value,tier,kind,key,content,confidence"
@@ -168,7 +168,7 @@ func (s *postgresDataStore) fuseMemoryGraph(ctx context.Context, req DataRequest
 		ids = append(ids, r.ID)
 	}
 	args := append(graphScopeArgs(req, exact), memoryIDsParameter(ids), req.Query)
-	rows, err := s.db.Query(ctx, `WITH visible AS MATERIALIZED (`+graphVisible+`)
+	rows, err := s.db.Query(ctx, `WITH visible AS MATERIALIZED (`+graphVisible()+`)
  SELECT e.entity FROM memory_entities e JOIN visible m ON m.id=e.memory_id
  WHERE m.id=ANY($9::text::bigint[]) OR lower(e.entity)=lower($10)
  GROUP BY e.entity ORDER BY bool_or(m.id=ANY($9::text::bigint[])) DESC,max(e.weight) DESC,e.entity LIMIT 32`, args...)

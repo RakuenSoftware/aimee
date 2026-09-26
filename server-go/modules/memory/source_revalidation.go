@@ -47,7 +47,7 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 		return false, err
 	}
 	var count int
-	query := sourceRevalidationSQL
+	query := sourceRevalidationSQL()
 	structured, rules, auxiliary, collection := false, false, false, false
 	for _, ref := range request.Sources {
 		switch ref.Source.Kind {
@@ -62,15 +62,15 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 		}
 	}
 	if auxiliary {
-		query = auxiliarySourceRevalidationSQL
+		query = auxiliarySourceRevalidationSQL()
 	} else if rules {
-		query = ruleSourceRevalidationSQL
+		query = ruleSourceRevalidationSQL()
 	} else if structured {
-		query = structuredSourceRevalidationSQL
+		query = structuredSourceRevalidationSQL()
 	}
 	if collection {
 		query = strings.Replace(query, " WHEN 'semantic_assertion'", ` WHEN 'memory_collection' THEN (
- `+collectionDeadlineCheckSQL+` AND r.ref#>>'{source_version,version,record_revision}'=`+collectionRevisionSQL+`
+ `+collectionDeadlineCheckSQL+` AND `+horizonCollectionPolicyCheckSQL()+` AND r.ref#>>'{source_version,version,record_revision}'=`+collectionRevisionSQL+`
  AND r.ref#>'{source_version,collection_audience}'=`+collectionAudienceSQL+`)
  WHEN 'semantic_assertion'`, 1)
 	}
@@ -85,19 +85,21 @@ func (s *postgresDataStore) revalidateSources(ctx context.Context, request *sour
 	return err == nil && count == len(request.Sources), err
 }
 
-// Compile fixed owner SQL once. Facts inspect all evidence locators; typed
+// Compile owner SQL against the effective utility horizon policy. Facts inspect all evidence locators; typed
 // assertions inspect live evidence. Both share the same bounded parent probes.
-var sourceRevalidationSQL = buildSourceRevalidationSQL(false)
-var structuredSourceRevalidationSQL = buildSourceRevalidationSQL(true)
+func sourceRevalidationSQL() string           { return buildSourceRevalidationSQL(false) }
+func structuredSourceRevalidationSQL() string { return buildSourceRevalidationSQL(true) }
 
-var ruleSourceRevalidationSQL = strings.Replace(structuredSourceRevalidationSQL,
-	" WHEN 'memory_directive'", ` WHEN 'memory_rule_collection' THEN EXISTS (
+func ruleSourceRevalidationSQL() string {
+	return strings.Replace(structuredSourceRevalidationSQL(),
+		" WHEN 'memory_directive'", ` WHEN 'memory_rule_collection' THEN EXISTS (
  SELECT 1 FROM memory_collection_owner WHERE id=1
  AND `+ruleCollectionRevisionSQL+`=r.ref#>>'{source_version,version,record_revision}')
  WHEN 'memory_rule' THEN EXISTS (SELECT 1 FROM rules WHERE id=(r.ref->>'stable_id')::bigint
  AND directive_type='hard' AND `+memoryUnexpiredAtSQL("expires_at", "CURRENT_TIMESTAMP")+` AND `+currentRuleInputsSQL("rules.")+`
  AND record_revision::text=r.ref#>>'{source_version,version,record_revision}')
  WHEN 'memory_directive'`, 1)
+}
 
 // Auxiliary learning tables have explicit scope fields instead of memory-row
 // RLS. Read them against the authenticated transaction audience and exact scope.
@@ -108,8 +110,9 @@ var auxiliarySourceScopeSQL = strings.NewReplacer(
 	"$4", "$2::text", "$5", "$3::text",
 ).Replace(typedScopeSQL)
 
-var auxiliarySourceRevalidationSQL = strings.Replace(ruleSourceRevalidationSQL,
-	" WHEN 'memory_rule_collection'", ` WHEN 'learning_observation' THEN EXISTS (
+func auxiliarySourceRevalidationSQL() string {
+	return strings.Replace(ruleSourceRevalidationSQL(),
+		" WHEN 'memory_rule_collection'", ` WHEN 'learning_observation' THEN EXISTS (
  SELECT 1 FROM learning_observations WHERE observation_id=r.ref->>'stable_id'
  AND memory_record_id::text=r.ref#>>'{source_version,version,record_id}'
  AND record_revision::text=r.ref#>>'{source_version,version,record_revision}'
@@ -129,6 +132,7 @@ var auxiliarySourceRevalidationSQL = strings.Replace(ruleSourceRevalidationSQL,
  AND EXISTS(SELECT 1 FROM memories m WHERE m.id=relation.memory_id AND `+currentMemorySQL("m.")+` AND ($2::text='' OR (m.scope_type=$2 AND m.scope_value=$3)))
  AND (`+relationSourceParentsSQL("relation")+`)::jsonb=COALESCE(r.ref#>'{source_version,memory_parents}','[]'::jsonb))
  WHEN 'memory_rule_collection'`, 1)
+}
 
 func buildSourceRevalidationSQL(structured bool) string {
 	filter := strings.NewReplacer(
@@ -136,7 +140,7 @@ func buildSourceRevalidationSQL(structured bool) string {
 		"$2", "COALESCE(r.ref#>>'{source_version,read_policy,valid_at}','')",
 		"$3", "COALESCE((r.ref#>>'{source_version,read_policy,include_historical}')::boolean,false)",
 		"$5", "$2::text", "$6", "$3::text",
-	).Replace(strings.ReplaceAll(assertionFilter, " AND f.invalidated_at=''", " AND (r.ref->>'channel'='facts' OR f.invalidated_at='')"))
+	).Replace(strings.ReplaceAll(assertionFilter(), " AND f.invalidated_at=''", " AND (r.ref->>'channel'='facts' OR f.invalidated_at='')"))
 	expectedParents := `COALESCE((SELECT jsonb_agg(jsonb_build_object('record_id',p->>'record_id',
  'record_revision',p->>'record_revision') ORDER BY (p->>'record_id')::bigint)
  FROM jsonb_array_elements(COALESCE(r.ref#>'{source_version,memory_parents}','[]'::jsonb)) p),'[]'::jsonb)`

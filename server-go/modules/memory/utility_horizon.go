@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Horizon evaluation is pure and shadow-only. Its inputs are owner snapshots;
+// Horizon evaluation is pure. Its inputs are owner snapshots;
 // this type is not a public write or an authorization mechanism. Integration
 // must acquire anchors from canonical creation/confirmed-update events, never
 // use last-access/use-count timestamps as confirmation.
@@ -32,6 +32,7 @@ type horizonRule struct {
 	ID              string `json:"id"`
 	DurationSeconds int64  `json:"duration_seconds"`
 	Anchor          string `json:"anchor"`
+	Deadline        string `json:"deadline,omitempty"`
 }
 type horizonPolicy struct {
 	SchemaVersion int    `json:"schema_version"`
@@ -62,6 +63,12 @@ type horizonDecision struct {
 }
 
 func validHorizonRule(r horizonRule) bool {
+	if r.Deadline != "" {
+		at, err := time.Parse(time.RFC3339Nano, r.Deadline)
+		if err != nil || at.Year() < 1 || at.Year() > 9999 {
+			return false
+		}
+	}
 	return r.ID != "" && len(r.ID) <= 128 && r.DurationSeconds >= 0 && r.DurationSeconds <= 10*366*24*60*60 && (r.Anchor == "created" || r.Anchor == "confirmed")
 }
 func (p horizonPolicy) valid() bool {
@@ -110,7 +117,9 @@ func evaluateUtilityHorizon(record horizonRecord, p horizonPolicy, purpose strin
 	switch purpose {
 	case "current", "historical", "diagnostic":
 	default:
-		return unknown("unsupported_purpose")
+		d = unknown("unsupported_purpose")
+		d.WouldExclude = true
+		return d
 	}
 	if !p.TransientKinds[record.Kind] {
 		d.Status = "not_applicable"
@@ -159,6 +168,12 @@ func evaluateUtilityHorizon(record horizonRecord, p horizonPolicy, purpose strin
 	deadline := at.Add(time.Duration(rule.DurationSeconds) * time.Second)
 	if deadline.Year() > 9999 {
 		return unknown("deadline_overflow")
+	}
+	if rule.Deadline != "" {
+		explicit, _ := time.Parse(time.RFC3339Nano, rule.Deadline)
+		if explicit.Before(deadline) {
+			deadline = explicit
+		}
 	}
 	d.AnchorEvent = anchor.EventID
 	d.Deadline = deadline.UTC().Format(time.RFC3339Nano)

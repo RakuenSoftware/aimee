@@ -19354,3 +19354,9 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- kb started against an older schema fails closed.
 INSERT INTO kb_meta (key, value) VALUES ('schema_version', '43')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+
+-- Utility horizon anchors are protected change events. Exact per-record probes
+-- must not scan the collection journal on each candidate eligibility check.
+CREATE INDEX IF NOT EXISTS memory_invalidation_anchor
+ ON memory_invalidation_outbox(memory_id,operation,record_revision,generation)
+ INCLUDE(recorded_at,scope_type,scope_value);

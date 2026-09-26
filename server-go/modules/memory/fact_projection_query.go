@@ -27,7 +27,7 @@ func (s *postgresDataStore) RecallFactProjection(ctx context.Context, entity, qu
  (SELECT owner_id::text FROM memory_collection_owner WHERE id=1),`+assertionMemoryVersions+`
  FROM unnest($1::text[]) WITH ORDINALITY AS n(entity,ordinality)
  CROSS JOIN LATERAL (
- SELECT e.* FROM entity_edges e WHERE e.source=n.entity AND `+currentFactRecallSQL+`
+ SELECT e.* FROM entity_edges e WHERE e.source=n.entity AND `+currentFactRecallSQL()+`
  ORDER BY e.confidence DESC,e.id ASC LIMIT $2
  ) e ORDER BY n.ordinality,e.confidence DESC,e.id ASC`, names, factRecallMaxFacts)
 	if err != nil {

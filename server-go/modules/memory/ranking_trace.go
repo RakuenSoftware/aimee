@@ -135,27 +135,29 @@ func fuseRanked(ctx context.Context, lexical, semantic []Record, limit int, left
 // enumerated to explain exclusion, and an SQL LIMIT never means exhaustive search.
 type rankingCaptureKey struct{}
 type rankingCandidate struct {
-	ID           string               `json:"id"`
-	Version      *MemoryRecordVersion `json:"source_version,omitempty"`
-	SourceFamily string               `json:"source_family_state"`
-	Eligibility  string               `json:"eligibility"`
-	Disposition  string               `json:"disposition"`
-	Steps        []rankingStep        `json:"steps"`
+	UtilityHorizon *horizonDecision     `json:"utility_horizon,omitempty"`
+	ID             string               `json:"id"`
+	Version        *MemoryRecordVersion `json:"source_version,omitempty"`
+	SourceFamily   string               `json:"source_family_state"`
+	Eligibility    string               `json:"eligibility"`
+	Disposition    string               `json:"disposition"`
+	Steps          []rankingStep        `json:"steps"`
 }
 type rankingCapture struct {
-	mu            sync.Mutex
-	ID            string             `json:"trace_id"`
-	SchemaVersion int                `json:"schema_version"`
-	Universe      string             `json:"candidate_universe"`
-	Exclusions    string             `json:"preselection_exclusions"`
-	Limit         int                `json:"candidate_metadata_limit"`
-	Truncated     bool               `json:"truncated"`
-	Candidates    []rankingCandidate `json:"candidates"`
+	UtilityHorizon *horizonPolicyIdentity `json:"utility_horizon_policy,omitempty"`
+	mu             sync.Mutex
+	ID             string             `json:"trace_id"`
+	SchemaVersion  int                `json:"schema_version"`
+	Universe       string             `json:"candidate_universe"`
+	Exclusions     string             `json:"preselection_exclusions"`
+	Limit          int                `json:"candidate_metadata_limit"`
+	Truncated      bool               `json:"truncated"`
+	Candidates     []rankingCandidate `json:"candidates"`
 }
 
 func newRankingCapture() *rankingCapture {
 	id, _ := releaseToken()
-	return &rankingCapture{ID: id, SchemaVersion: 1, Universe: "bounded_owner_admitted_candidates", Exclusions: "scope_lifecycle_policy_filtered_by_owner_not_enumerated", Limit: 256, Candidates: []rankingCandidate{}}
+	return &rankingCapture{UtilityHorizon: currentHorizonIdentity(), ID: id, SchemaVersion: 1, Universe: "bounded_owner_admitted_candidates", Exclusions: "scope_lifecycle_policy_filtered_by_owner_not_enumerated", Limit: 256, Candidates: []rankingCandidate{}}
 }
 func captureRankingCandidate(ctx context.Context, r Record, disposition string) {
 	c, _ := ctx.Value(rankingCaptureKey{}).(*rankingCapture)
@@ -169,7 +171,7 @@ func captureRankingCandidate(ctx context.Context, r Record, disposition string) 
 	if v == nil {
 		v = r.observedVersion
 	}
-	candidate := rankingCandidate{ID: id, Version: v, SourceFamily: "not_assessed", Eligibility: "owner_admitted", Disposition: disposition, Steps: append([]rankingStep(nil), r.rankingSteps...)}
+	candidate := rankingCandidate{UtilityHorizon: r.UtilityHorizon, ID: id, Version: v, SourceFamily: "not_assessed", Eligibility: "owner_admitted", Disposition: disposition, Steps: append([]rankingStep(nil), r.rankingSteps...)}
 	for i := range c.Candidates {
 		if c.Candidates[i].ID == id {
 			c.Candidates[i] = candidate

@@ -109,3 +109,29 @@ func TestUtilityHorizonUnknownAnchorsAndPolicyIdentity(t *testing.T) {
 		t.Fatal(d)
 	}
 }
+
+func TestUtilityHorizonExplicitDeadlineIsACap(t *testing.T) {
+	r, p, now := horizonFixture()
+	rule := p.Kinds[r.Kind]
+	rule.DurationSeconds = 7200
+	rule.Deadline = now.Format(time.RFC3339Nano)
+	p.Kinds[r.Kind] = rule
+	if d := evaluateUtilityHorizon(r, p, "current", now); !d.Elapsed || d.Deadline != rule.Deadline {
+		t.Fatal(d)
+	}
+	rule.Deadline = now.Add(10 * time.Hour).Format(time.RFC3339Nano)
+	p.Kinds[r.Kind] = rule
+	if d := evaluateUtilityHorizon(r, p, "current", now); d.Elapsed || d.Deadline != now.Add(time.Hour).Format(time.RFC3339Nano) {
+		t.Fatal("explicit deadline extended duration", d)
+	}
+	rule.Deadline = "tomorrow"
+	p.Kinds[r.Kind] = rule
+	if d := evaluateUtilityHorizon(r, p, "current", now); d.Status != "unknown" || !d.WouldExclude {
+		t.Fatal(d)
+	}
+	_, p, _ = horizonFixture()
+	p.UnknownRule = "allow"
+	if d := evaluateUtilityHorizon(r, p, "invented-purpose", now); !d.WouldExclude {
+		t.Fatal("unsupported purpose failed open", d)
+	}
+}

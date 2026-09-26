@@ -35,14 +35,17 @@ func (s *postgresDataStore) observeRecallCollection(ctx context.Context) (*typed
 	var err error
 	if s.placement == PlacementServer {
 		kind = "user_memory_collection"
-		err = s.db.QueryRow(ctx, `SELECT owner_id::text,(generation+1)::text,'[]',`+privateCollectionDeadlineSQL+` FROM user_memory_collection_generation WHERE id=1`).Scan(&owner, &revision, &audience, &deadline)
+		err = s.db.QueryRow(ctx, `SELECT owner_id::text,(generation+1)::text,'[]',`+horizonCollectionDeadlineSQL(true, privateCollectionDeadlineSQL)+` FROM user_memory_collection_generation WHERE id=1`).Scan(&owner, &revision, &audience, &deadline)
 	} else {
-		err = s.db.QueryRow(ctx, `SELECT owner_id::text,`+collectionRevisionSQL+`,`+collectionAudienceSQL+`::text,`+sharedCollectionDeadlineSQL+` FROM memory_collection_owner WHERE id=1`).Scan(&owner, &revision, &audience, &deadline)
+		err = s.db.QueryRow(ctx, `SELECT owner_id::text,`+collectionRevisionSQL+`,`+collectionAudienceSQL+`::text,`+horizonCollectionDeadlineSQL(false, sharedCollectionDeadlineSQL)+` FROM memory_collection_owner WHERE id=1`).Scan(&owner, &revision, &audience, &deadline)
 	}
 	if err != nil {
 		return nil, err
 	}
 	observation := &typedSourceVersion{Kind: kind, Version: MemoryRecordVersion{SchemaVersion: 1, OwnerID: owner, RecordID: "1", RecordRevision: revision}, MemoryParentState: "observed", CollectionValidUntil: deadline}
+	if identity := currentHorizonIdentity(); identity != nil {
+		observation.UtilityHorizonPolicyDigest = identity.Digest
+	}
 	if err = json.Unmarshal([]byte(audience), &observation.CollectionAudience); err != nil {
 		return nil, err
 	}

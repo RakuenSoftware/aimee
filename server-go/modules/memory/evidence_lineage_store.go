@@ -69,7 +69,7 @@ func (s *postgresDataStore) memoryEvidence(ctx context.Context, id int64) (map[s
  ON l.object_type='memory_unit' AND l.object_id=u.id AND l.source_kind='episode-card-input-v1'
  WHERE u.memory_id=m.id AND u.is_episode_card=1 AND u.unit_type='episode_card'
  LIMIT 257) entry),'[]')
- FROM memories m WHERE m.id=$1 AND (`+baseCurrentMemorySQL("m.")+` OR (m.id<>$2 AND `+compactedAncestorSQL("m.")+`))`, next, id).Scan(&revision, &nodeOwner, &event, &local, &raw)
+ FROM memories m WHERE m.id=$1 AND (`+baseCurrentMemorySQL("m.")+` OR (m.id<>$2 AND `+compactedAncestorSQL("m.")+` AND `+utilityHorizonSQL("m.", false)+`))`, next, id).Scan(&revision, &nodeOwner, &event, &local, &raw)
 		} else {
 			err = s.db.QueryRow(ctx, `SELECT m.record_revision::text,
  (SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),

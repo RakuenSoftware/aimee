@@ -131,7 +131,7 @@ func (s *postgresDataStore) ontologyWalk(ctx context.Context, req DataRequest, e
 	for hop := 1; hop <= req.Hops && len(frontier) > 0 && len(result) < req.Limit; hop++ {
 		next := []string{}
 		for _, node := range frontier {
-			rows, err := s.db.Query(ctx, `WITH visible AS (`+graphVisible+`)
+			rows, err := s.db.Query(ctx, `WITH visible AS (`+graphVisible()+`)
 SELECT e.source,e.relation,e.target,COALESCE(e.relation_id,12),COALESCE(e.subject_kind,99),COALESCE(e.object_kind,99),e.weight,e.edge_class
 FROM entity_edges e WHERE (e.source=$9 OR e.target=$9)
 AND (e.edge_class<>'semantic' OR (e.suppressed=0 AND e.superseded_at='' AND e.invalidated_at=''

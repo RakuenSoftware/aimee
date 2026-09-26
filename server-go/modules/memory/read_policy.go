@@ -21,16 +21,17 @@ type MemoryReadPolicy struct {
 // ineligible row produces the same empty result, including under RLS. This is
 // not an evidence assessment, mutation version or release-generation receipt.
 type MemoryReadResult struct {
-	SchemaVersion int    `json:"schema_version"`
-	PolicyVersion string `json:"policy_version"`
-	Mode          string `json:"mode"`
-	ValidAt       string `json:"valid_at,omitempty"`
-	ErrorCode     string `json:"error_code,omitempty"`
-	Message       string `json:"message,omitempty"`
+	UtilityHorizon *horizonPolicyIdentity `json:"utility_horizon_policy,omitempty"`
+	SchemaVersion  int                    `json:"schema_version"`
+	PolicyVersion  string                 `json:"policy_version"`
+	Mode           string                 `json:"mode"`
+	ValidAt        string                 `json:"valid_at,omitempty"`
+	ErrorCode      string                 `json:"error_code,omitempty"`
+	Message        string                 `json:"message,omitempty"`
 }
 
 func (p MemoryReadPolicy) validate(placement Placement, operation, legacyAsOf string) *MemoryReadResult {
-	r := &MemoryReadResult{SchemaVersion: 1, PolicyVersion: currentEligibilityPolicy, Mode: p.Mode}
+	r := &MemoryReadResult{SchemaVersion: 1, PolicyVersion: currentEligibilityPolicy, Mode: p.Mode, UtilityHorizon: currentHorizonIdentity()}
 	refuse := func(code, message string) *MemoryReadResult {
 		r.ErrorCode, r.Message = code, message
 		return r

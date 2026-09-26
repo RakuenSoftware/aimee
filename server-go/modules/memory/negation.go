@@ -111,6 +111,9 @@ func (s *postgresDataStore) finalizeRecall(ctx context.Context, req DataRequest,
 			req.lanes.observe(result)
 		}
 	}
+	if resultErr == nil {
+		resultErr = s.annotateUtilityHorizons(ctx, result, "current")
+	}
 	return result, resultErr
 }
 

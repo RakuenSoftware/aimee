@@ -87,7 +87,7 @@ func exerciseSharedRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 		}
 		ids[seed.key] = id
 	}
-	exec(embeddingInputs+`INSERT INTO memory_embedding_versions(version,point_id,memory_id,input_hash,embedding)
+	exec(embeddingInputs()+`INSERT INTO memory_embedding_versions(version,point_id,memory_id,input_hash,embedding)
  SELECT 'shared-recall-test',point_id,memory_id,input_hash,$1::vector FROM inputs WHERE input_key LIKE 'shared-recall-%'`, string(encoded))
 	// A perfectly matching legacy vector without the active generation is not
 	// semantically admissible. Re-embedding is required, not dimension guessing.

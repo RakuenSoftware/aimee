@@ -61,9 +61,11 @@ const (
 
 // Serving typed facts requires every memory source to remain current and
 // visible. Review/history queries retain their separate operator semantics.
-var currentFactRecallSQL = `e.edge_class='semantic' AND e.lifecycle_state IN ('persistent','promoted')
+func currentFactRecallSQL() string {
+	return `e.edge_class='semantic' AND e.lifecycle_state IN ('persistent','promoted')
  AND e.suppressed=0 AND ` + assertionCurrent + `
  AND ` + currentMemoryEvidenceSQL("e", "", false)
+}
 
 // Shared by plain compatibility recall and versioned fact selection.
 func factRecallLine(relation, target string, confidence float64, sensitive bool) string {
@@ -83,7 +85,7 @@ func factRecallLine(relation, target string, confidence float64, sensitive bool)
 func (s *postgresDataStore) recallFactBlock(ctx context.Context, entity string,
 	turnRequestsSensitive bool, capacity int) (string, int, error) {
 	rows, err := s.db.Query(ctx, `SELECT relation, target, confidence FROM entity_edges e
-WHERE source = $1 AND `+currentFactRecallSQL+`
+WHERE source = $1 AND `+currentFactRecallSQL()+`
 ORDER BY confidence DESC, id ASC LIMIT $2`, entity, factRecallMaxFacts)
 	if err != nil {
 		return "", 0, err
@@ -155,7 +157,7 @@ LIMIT $2`, query, factRecallMaxEntities)
 		return names, nil
 	}
 	rows, err = s.db.Query(ctx, `SELECT DISTINCT source FROM entity_edges e
-WHERE source <> 'user' AND length(source) >= 3 AND `+currentFactRecallSQL+`
+WHERE source <> 'user' AND length(source) >= 3 AND `+currentFactRecallSQL()+`
   AND lower($1) LIKE '%' || lower(source) || '%'
 ORDER BY source LIMIT $2`, query, factRecallMaxEntities)
 	if err != nil {

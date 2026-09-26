@@ -170,9 +170,10 @@ type DataRequest struct {
 }
 
 type Record struct {
-	Authorship *PersonalAuthorship  `json:"authorship,omitempty"`
-	Version    *MemoryRecordVersion `json:"version,omitempty"`
-	Historical bool                 `json:"historical,omitempty"`
+	UtilityHorizon *horizonDecision     `json:"utility_horizon,omitempty"`
+	Authorship     *PersonalAuthorship  `json:"authorship,omitempty"`
+	Version        *MemoryRecordVersion `json:"version,omitempty"`
+	Historical     bool                 `json:"historical,omitempty"`
 
 	observedVersion *MemoryRecordVersion
 	currentRead     bool
@@ -502,6 +503,9 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 	if placement != PlacementServer && placement != PlacementKB {
 		return nil, fmt.Errorf("memory: invalid placement %q", placement)
 	}
+	if _, err := configuredUtilityHorizon(); err != nil {
+		return nil, err
+	}
 	enabled, err := instanceGraphFusion()
 	if err != nil {
 		return nil, err
@@ -540,7 +544,7 @@ func (s *postgresDataStore) getAtVersioned(ctx context.Context, scope Scope, id 
 		r.Scope = scope
 		columns := "id,tier,kind,key,content,confidence"
 		destinations := []any{&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence}
-		if includeVersion {
+		if includeVersion || currentHorizonIdentity() != nil {
 			r.Version = &MemoryRecordVersion{SchemaVersion: 1, RecordID: strconv.FormatInt(id, 10)}
 			columns += ",(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),record_revision::text"
 			destinations = append(destinations, &r.Version.OwnerID, &r.Version.RecordRevision)
@@ -554,6 +558,15 @@ WHERE id = $1 AND `+personalCurrentMemorySQL(""), id).
 			Scan(destinations...)
 		if store.IsNoRows(err) {
 			return Record{}, ErrMemoryNotFound
+		}
+		if err == nil {
+			purpose := "current"
+			if historical {
+				purpose = "historical"
+			}
+			items := []Record{r}
+			err = s.annotateUtilityHorizons(ctx, items, purpose)
+			r = items[0]
 		}
 		return r, err
 	}
@@ -578,6 +591,15 @@ WHERE id = $1 AND `+personalCurrentMemorySQL(""), id).
 	err := s.db.QueryRow(ctx, "SELECT "+columns+" FROM memories WHERE id=$1 AND "+predicate, parameters...).Scan(destinations...)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
+	}
+	if err == nil {
+		purpose := "current"
+		if historical {
+			purpose = "historical"
+		}
+		items := []Record{r}
+		err = s.annotateUtilityHorizons(ctx, items, purpose)
+		r = items[0]
 	}
 	return r, err
 }
@@ -752,8 +774,7 @@ func (s *postgresDataStore) Search(ctx context.Context, scope Scope, query, kind
 	if s.placement == PlacementServer {
 		rows, err = s.db.Query(ctx, `SELECT id, tier, kind, key, content, confidence,(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),record_revision::text,ts_rank_cd(to_tsvector('english',key||' '||content),plainto_tsquery('english',$5))
 FROM user_memories
-WHERE lifecycle_state = 'active'
-  AND (valid_until IS NULL OR valid_until > now())
+WHERE `+personalCurrentMemorySQL("")+`
   AND ($5 = '' OR key ILIKE $1 OR content ILIKE $1
        OR to_tsvector('english', key || ' ' || content) @@ plainto_tsquery('english', $5))
   AND ($2 = '' OR kind = $2) AND ($3 = '' OR tier = $3)

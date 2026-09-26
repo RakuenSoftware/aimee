@@ -102,7 +102,7 @@ func exerciseUnitRecallReplay(t *testing.T, ctx context.Context, tx pgx.Tx, back
 	// Several qualifying units from one parent must not crowd out another parent.
 	exec(`INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text,weight,memory_kind) SELECT $1,'temporal',n::text,'opaque derived text',1,'episodic' FROM generate_series(1,4) n`, ids["temporal"])
 	exec(`UPDATE memory_units SET weight='NaN'::double precision WHERE id=$1`, units["nan"])
-	exec(embeddingInputs+`INSERT INTO memory_embedding_versions(version,point_id,memory_id,input_hash,embedding)
+	exec(embeddingInputs()+`INSERT INTO memory_embedding_versions(version,point_id,memory_id,input_hash,embedding)
  SELECT 'shared-recall-test',point_id,memory_id,input_hash,CASE WHEN record_type='unit' THEN $1::vector ELSE $2::vector END
  FROM inputs WHERE scope_value LIKE 'unit-recall-%'`, string(weakJSON), string(offJSON))
 	exec(`UPDATE memory_embedding_versions SET embedding=$2::vector WHERE version='shared-recall-test' AND point_id=$1`, ids["both"], string(strongJSON))

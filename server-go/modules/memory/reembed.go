@@ -14,7 +14,8 @@ import (
 
 // Hash every field that affects embedding input or retrieval payload. Confidence,
 // usage counters and timestamps do not invalidate an unchanged vector.
-var embeddingInputs = `WITH sources AS (
+func embeddingInputs() string {
+	return `WITH sources AS (
  SELECT m.id AS point_id,m.id AS memory_id,'memory'::text AS record_type,m.key AS input_key,
  m.content AS input_content,m.scope_type,m.scope_value,m.kind,''::text AS unit_type,
  ''::text AS unit_kind,0::double precision AS unit_weight,m.content AS source_content
@@ -24,6 +25,7 @@ var embeddingInputs = `WITH sources AS (
  u.unit_type,u.memory_kind,u.weight,m.content FROM memory_units u JOIN memories m ON m.id=u.memory_id
  WHERE m.lifecycle_state='active' AND m.activation_suppressed=0 AND ` + currentUnitInputsSQL("u") + `
 ), inputs AS (SELECT s.*,encode(sha256(convert_to(to_jsonb(s)::text,'UTF8')),'hex') AS input_hash FROM sources s) `
+}
 
 type reembedStatus struct {
 	ActiveVersion string      `json:"active_version"`
@@ -59,7 +61,7 @@ func (in embeddingInput) text() string {
 }
 
 func (s *postgresDataStore) reembedCounts(ctx context.Context, version string) (total, done int64, err error) {
-	err = s.db.QueryRow(ctx, embeddingInputs+`SELECT count(*),count(v.point_id) FILTER(WHERE v.input_hash=i.input_hash AND v.embedding IS NOT NULL)
+	err = s.db.QueryRow(ctx, embeddingInputs()+`SELECT count(*),count(v.point_id) FILTER(WHERE v.input_hash=i.input_hash AND v.embedding IS NOT NULL)
  FROM inputs i LEFT JOIN memory_embedding_versions v ON v.point_id=i.point_id AND v.version=$1`, version).Scan(&total, &done)
 	return
 }
@@ -140,7 +142,7 @@ func (s *postgresDataStore) reembedNext(ctx context.Context, version string, aft
 	if err := s.requireAllVectorScopes(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, embeddingInputs+`SELECT i.point_id FROM inputs i LEFT JOIN memory_embedding_versions v ON v.version=$1 AND v.point_id=i.point_id
+	rows, err := s.db.Query(ctx, embeddingInputs()+`SELECT i.point_id FROM inputs i LEFT JOIN memory_embedding_versions v ON v.version=$1 AND v.point_id=i.point_id
  WHERE i.point_id>$2 AND (v.point_id IS NULL OR v.input_hash<>i.input_hash OR v.embedding IS NULL) ORDER BY i.point_id LIMIT $3`, version, after, limit)
 	if err != nil {
 		return nil, err
@@ -158,7 +160,7 @@ func (s *postgresDataStore) reembedNext(ctx context.Context, version string, aft
 }
 func (s *postgresDataStore) embeddingInput(ctx context.Context, point int64) (embeddingInput, error) {
 	var in embeddingInput
-	source := strings.Replace(embeddingInputs, "FROM memories m WHERE m.lifecycle_state='active'", "FROM memories m WHERE m.id=$1 AND m.lifecycle_state='active'", 1)
+	source := strings.Replace(embeddingInputs(), "FROM memories m WHERE m.lifecycle_state='active'", "FROM memories m WHERE m.id=$1 AND m.lifecycle_state='active'", 1)
 	source = strings.Replace(source, "FROM memory_units u JOIN memories m ON m.id=u.memory_id\n WHERE ", "FROM memory_units u JOIN memories m ON m.id=u.memory_id\n WHERE u.id=$1-1000000000000 AND ", 1)
 	err := s.db.QueryRow(ctx, source+`SELECT point_id,memory_id,record_type,input_key,input_content,scope_type,scope_value,kind,unit_type,unit_kind,unit_weight,input_hash FROM inputs WHERE point_id=$1`, point).Scan(&in.PointID, &in.MemoryID, &in.RecordType, &in.Key, &in.Content, &in.ScopeType, &in.ScopeValue, &in.Kind, &in.UnitType, &in.UnitKind, &in.Weight, &in.Hash)
 	return in, err
@@ -309,7 +311,7 @@ func (s *postgresDataStore) cutoverReembed(ctx context.Context, version string) 
 		if _, err = bound.db.Exec(ctx, `DELETE FROM memory_embeddings WHERE record_type IN ('memory','unit')`); err != nil {
 			return err
 		}
-		_, err = bound.db.Exec(ctx, embeddingInputs+`INSERT INTO memory_embeddings(point_id,embedding,record_type,primary_scope,workspace,project,kind,payload_json)
+		_, err = bound.db.Exec(ctx, embeddingInputs()+`INSERT INTO memory_embeddings(point_id,embedding,record_type,primary_scope,workspace,project,kind,payload_json)
  SELECT i.point_id,v.embedding,i.record_type,i.scope_type,CASE WHEN i.scope_type='workspace' THEN i.scope_value ELSE '' END,
  CASE WHEN i.scope_type='project' THEN i.scope_value ELSE '' END,i.kind,
  (jsonb_build_object('record_type',i.record_type,'memory_id',i.memory_id,'kind',i.kind,'key',i.input_key,'primary_scope',i.scope_type,
@@ -319,7 +321,7 @@ func (s *postgresDataStore) cutoverReembed(ctx context.Context, version string) 
 		if err != nil {
 			return err
 		}
-		if _, err = bound.db.Exec(ctx, embeddingInputs+`INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,indexed_at,updated_at)
+		if _, err = bound.db.Exec(ctx, embeddingInputs()+`INSERT INTO vector_index_ops(point_id,collection,memory_id,status,attempts,last_error,indexed_at,updated_at)
  SELECT point_id,'memory',memory_id,'ok',0,'',pg_now_text(),pg_now_text() FROM inputs ON CONFLICT(point_id) DO UPDATE SET status='ok',attempts=0,last_error='',indexed_at=pg_now_text(),updated_at=pg_now_text()`); err != nil {
 			return err
 		}

@@ -166,10 +166,14 @@ func handleAssertionSearch(options handlerOptions, invocation bus.ModuleInvocati
 // LEFT JOIN is intentional: RLS-hidden parents must deny the derived assertion,
 // including assertions with a second, visible source. Apply exact scope before
 // the candidate cap, even when the host has include-all authority.
-var assertionParentPolicy = `(CASE WHEN $1<>'' OR $2<>'' THEN (` +
-	historicalMemoryInspectionSQL("m.") + ` AND ` + memoryValidityAtSQL("m.", "COALESCE("+memoryTimeSQL("$2::text")+",CURRENT_TIMESTAMP)") + `)
+func assertionParentPolicy() string {
+	return `(CASE WHEN $1<>'' OR $2<>'' THEN (` +
+		historicalMemoryInspectionSQL("m.") + ` AND ` + memoryValidityAtSQL("m.", "COALESCE("+memoryTimeSQL("$2::text")+",CURRENT_TIMESTAMP)") + `)
  WHEN $3 THEN (` + historicalMemoryInspectionSQL("m.") + `) ELSE (` + currentMemorySQL("m.") + `) END)`
-var assertionVisible = memoryEvidenceSQL("e", `$5='' OR (m.scope_type=$5 AND m.scope_value=$6)`, true, assertionParentPolicy)
+}
+func assertionVisible() string {
+	return memoryEvidenceSQL("e", `$5='' OR (m.scope_type=$5 AND m.scope_value=$6)`, true, assertionParentPolicy())
+}
 
 // Belief time and world-valid time are independent half-open intervals. Do not
 // truncate stored fractions or discard offsets when comparing either axis.
@@ -181,17 +185,22 @@ func assertionBeliefSQL(clock string) string {
 
 var assertionCurrent = `(` + assertionBeliefSQL("CURRENT_TIMESTAMP") + `
  AND (e.assertion_kind<>'world_fact' OR (` + memoryValiditySQL("e.") + `)))`
-var assertionFilter = `e.edge_class='semantic' AND e.suppressed=0 AND (e.lifecycle_state IN ('persistent','promoted') OR ($3 AND e.lifecycle_state='superseded'))
+
+func assertionFilter() string {
+	return `e.edge_class='semantic' AND e.suppressed=0 AND (e.lifecycle_state IN ('persistent','promoted') OR ($3 AND e.lifecycle_state='superseded'))
  AND ($1<>'' OR $3 OR (` + assertionBeliefSQL("CURRENT_TIMESTAMP") + `))
  AND ($1='' OR (` + assertionBeliefSQL(memoryTimeSQL("$1::text")) + `))
  AND ($2<>'' OR $3 OR e.assertion_kind<>'world_fact' OR (` + memoryValiditySQL("e.") + `))
- AND ($2='' OR (` + memoryValidityAtSQL("e.", memoryTimeSQL("$2::text")) + `)) AND ` + assertionVisible
-var assertionColumns = `e.id,e.version,COALESCE((SELECT predecessor.id::text FROM entity_edges predecessor
- WHERE predecessor.id=e.prior_version_id AND ` + regexp.MustCompile(`\be\.`).ReplaceAllString(assertionFilter, "predecessor.") + `),''),(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
+ AND ($2='' OR (` + memoryValidityAtSQL("e.", memoryTimeSQL("$2::text")) + `)) AND ` + assertionVisible()
+}
+func assertionColumns() string {
+	return `e.id,e.version,COALESCE((SELECT predecessor.id::text FROM entity_edges predecessor
+ WHERE predecessor.id=e.prior_version_id AND ` + regexp.MustCompile(`\be\.`).ReplaceAllString(assertionFilter(), "predecessor.") + `),''),(SELECT owner_id::text FROM memory_collection_owner WHERE id=1),e.source,e.relation,e.target,e.assertion_kind,e.lifecycle_state,
  e.authority_rank,e.confidence_class,e.confidence,e.valid_from,e.valid_until,e.asserted_at,e.superseded_at,
  NOT ` + assertionCurrent + `,
  (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' AND f.stance='supports'),
  (SELECT count(*) FROM fact_evidence f WHERE f.assertion_id=e.id AND f.invalidated_at='' AND f.stance='contradicts')`
+}
 
 // Observe dependencies in the same MVCC snapshot as the assertion. The extra
 // row detects overflow instead of silently certifying a prefix of the parents.
@@ -211,24 +220,24 @@ func (s *postgresDataStore) assertionCandidates(ctx context.Context, request Dat
 	score := `(` + baseScore + `+LEAST(0.125,GREATEST(-0.125,
  LEAST(0.0625,GREATEST(-0.0625,e.confidence::double precision/16.0))+
  LEAST(0.0625,GREATEST(-0.0625,e.authority_rank::double precision/1600.0)))))`
-	from := ` FROM entity_edges e WHERE ` + assertionFilter + ` AND (lower(e.source) LIKE '%'||$4||'%' OR lower(e.relation) LIKE '%'||$4||'%' OR lower(e.target) LIKE '%'||$4||'%' OR lower(e.source||' '||e.relation||' '||e.target) LIKE '%'||$4||'%')`
+	from := ` FROM entity_edges e WHERE ` + assertionFilter() + ` AND (lower(e.source) LIKE '%'||$4||'%' OR lower(e.relation) LIKE '%'||$4||'%' OR lower(e.target) LIKE '%'||$4||'%' OR lower(e.source||' '||e.relation||' '||e.target) LIKE '%'||$4||'%')`
 	order := ` ORDER BY score DESC,e.authority_rank DESC,e.id DESC LIMIT $7`
 	params = append(params, limit)
 	if vector != "" {
 		score = `1-(v.embedding <=> $8::vector)`
-		from = ` FROM entity_edges e JOIN memory_embeddings v ON v.point_id=e.id+2000000000000 AND v.record_type='semantic_assertion' AND v.kind='assertion_v'||e.version::text WHERE ` + assertionFilter + ` AND $4::text IS NOT NULL`
+		from = ` FROM entity_edges e JOIN memory_embeddings v ON v.point_id=e.id+2000000000000 AND v.record_type='semantic_assertion' AND v.kind='assertion_v'||e.version::text WHERE ` + assertionFilter() + ` AND $4::text IS NOT NULL`
 		order = ` ORDER BY v.embedding <=> $8::vector,e.id DESC LIMIT $7`
 		params = append(params, vector)
 	}
 	if role := request.recoveryRole; role != nil && vector == "" {
-		from = ` FROM entity_edges e WHERE ` + assertionFilter + ` AND $4::text IS NOT NULL AND e.source=$8 AND e.relation=$9`
+		from = ` FROM entity_edges e WHERE ` + assertionFilter() + ` AND $4::text IS NOT NULL AND e.source=$8 AND e.relation=$9`
 		params = append(params, role.Subject, role.Relation)
 	}
 	parentsSQL := `'[]'::text`
 	if request.TypedContext != nil {
 		parentsSQL = assertionMemoryVersions
 	}
-	rows, err := s.db.Query(ctx, `SELECT `+assertionColumns+`,`+parentsSQL+`,`+baseScore+`,`+score+` AS score`+from+order, params...)
+	rows, err := s.db.Query(ctx, `SELECT `+assertionColumns()+`,`+parentsSQL+`,`+baseScore+`,`+score+` AS score`+from+order, params...)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +313,7 @@ func (s *postgresDataStore) assertionVectors(ctx context.Context, trace uint64, 
 		modelVersion, _ = settings["embedder_model"].(string)
 	}
 	params := assertionParams(request, exact, "")
-	rows, err := s.db.Query(ctx, `SELECT e.id,e.version,e.source||' '||e.relation||' '||e.target||' ['||e.assertion_kind||']' FROM entity_edges e LEFT JOIN memory_embeddings v ON v.point_id=e.id+2000000000000 AND v.record_type='semantic_assertion' WHERE `+assertionFilter+` AND $4::text IS NOT NULL AND (v.point_id IS NULL OR v.kind<>'assertion_v'||e.version::text) ORDER BY e.id LIMIT 256`, params...)
+	rows, err := s.db.Query(ctx, `SELECT e.id,e.version,e.source||' '||e.relation||' '||e.target||' ['||e.assertion_kind||']' FROM entity_edges e LEFT JOIN memory_embeddings v ON v.point_id=e.id+2000000000000 AND v.record_type='semantic_assertion' WHERE `+assertionFilter()+` AND $4::text IS NOT NULL AND (v.point_id IS NULL OR v.kind<>'assertion_v'||e.version::text) ORDER BY e.id LIMIT 256`, params...)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -14,7 +14,8 @@ import (
 // fixed-size content buffer. Enrichment refuses changed payloads and mismatched
 // observed versions; a scoped READ COMMITTED transaction alone is not a snapshot.
 type publicMemoryRecord struct {
-	Version *MemoryRecordVersion `json:"version,omitempty"`
+	UtilityHorizon *horizonDecision     `json:"utility_horizon,omitempty"`
+	Version        *MemoryRecordVersion `json:"version,omitempty"`
 
 	ID                 int64   `json:"id"`
 	Tier               string  `json:"tier"`
@@ -96,6 +97,7 @@ FROM memories m WHERE m.id=ANY($1::text::bigint[])`, memoryIDsParameter(ids))
 			return nil, fmt.Errorf("memory: record %d version changed during public enrichment", record.ID)
 		}
 		r.Version = record.Version
+		r.UtilityHorizon = record.UtilityHorizon
 		r.Tier, r.Kind, r.Key, r.Content, r.Confidence = record.Tier, record.Kind, record.Key, record.Content, record.Confidence
 		result = append(result, r.publicMemoryRecord)
 	}

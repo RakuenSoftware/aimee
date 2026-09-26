@@ -238,7 +238,7 @@ func (p *personalVectors) searchWithStore(ctx context.Context, db store.Queryer,
 	}
 	rows, err := db.Query(ctx, `SELECT m.id,m.tier,m.kind,m.key,m.content,m.confidence,1-(v.embedding <=> $2::vector),(SELECT owner_id::text FROM user_memory_collection_generation WHERE id=1),m.record_revision::text
 FROM user_memories m JOIN user_memory_vectors v ON v.memory_id=m.id
-WHERE m.lifecycle_state='active' AND (m.valid_until IS NULL OR m.valid_until>now())
+WHERE `+personalCurrentMemorySQL("m.")+`
 AND v.serving_id=$1 AND v.content_fingerprint=md5(m.key||chr(31)||m.content)
 AND vector_dims(v.embedding)=vector_dims($2::vector)
 AND ($3='' OR m.kind=$3) AND ($4='' OR m.tier=$4)

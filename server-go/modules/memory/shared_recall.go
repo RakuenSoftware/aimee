@@ -97,7 +97,7 @@ func (s *postgresDataStore) fuseSharedSemantic(ctx context.Context, req DataRequ
 	}
 	// Fingerprints cover text, scope and kind, so moved/edited records need fresh
 	// embeddings. Whole-record and unit channels each get an eligible-parent budget.
-	rows, err := s.db.Query(ctx, embeddingInputs+`, candidates AS (
+	rows, err := s.db.Query(ctx, embeddingInputs()+`, candidates AS (
  SELECT i.memory_id, CASE WHEN vector_dims(v.embedding)=vector_dims($10::vector) AND vector_norm(v.embedding)>0
  THEN 1-(v.embedding <=> $10::vector) END AS similarity
  FROM inputs i JOIN memory_embedding_versions v

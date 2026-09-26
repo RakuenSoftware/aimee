@@ -84,12 +84,17 @@ func healthNativeRanking(records []healthRecord, raw json.RawMessage, placement 
 		return records
 	}
 	byVersion := map[string][]rankingStep{}
+	horizons := map[string]*bool{}
 	for _, candidate := range capture.Candidates {
 		if candidate.Version == nil || candidate.ID != candidate.Version.RecordID {
 			continue
 		}
 		// Owner identity and revision, not the numeric ID alone, join placements.
 		byVersion[releaseDigest(candidate.Version)] = validatedHealthRanking(candidate.Steps)
+		if d := candidate.UtilityHorizon; d != nil && d.RecordVersion == *candidate.Version && d.Purpose == "current" && (d.Mode == "shadow" || d.Mode == "enforce") && (d.Status == "eligible" || d.Status == "would_exclude" || d.Status == "excluded") && (d.Reason == "utility_horizon_elapsed" || d.Reason == "utility_horizon_unelapsed") && d.WouldExclude == d.Elapsed {
+			value := d.WouldExclude
+			horizons[releaseDigest(candidate.Version)] = &value
+		}
 	}
 	for i, record := range records {
 		var identity []string
@@ -98,6 +103,7 @@ func healthNativeRanking(records []healthRecord, raw json.RawMessage, placement 
 		}
 		version := MemoryRecordVersion{SchemaVersion: 1, OwnerID: identity[1], RecordID: identity[2], RecordRevision: record.VersionID}
 		records[i].RankingSteps = byVersion[releaseDigest(version)]
+		records[i].UtilityHorizonWouldExclude = horizons[releaseDigest(version)]
 	}
 	return records
 }

@@ -110,6 +110,7 @@ var schemaHistory = []struct {
 	{36, "schema_personal_memory_erasure.sql"},
 	{37, "schema_subject_erasure_receipts.sql"},
 	{38, "schema_session_exploration.sql"},
+	{39, "schema_personal_memory_horizon_index.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

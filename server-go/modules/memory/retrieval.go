@@ -90,9 +90,9 @@ func (s *postgresDataStore) recallSource() string {
 		return `(SELECT id, 'user'::text AS scope_type, '_user'::text AS scope_value,
  tier, kind, key, content, confidence, use_count, updated_at, lifecycle_state, record_revision,
  0 AS activation_suppressed FROM user_memories
- WHERE valid_until IS NULL OR valid_until > now()) AS recall_memories`
+ WHERE (valid_until IS NULL OR valid_until > now()) AND ` + utilityHorizonSQL("", true) + `) AS recall_memories`
 	}
-	return `(SELECT * FROM memories WHERE ` + memoryValiditySQL("") + ` AND ` + currentDerivedMemoryInputsSQL("", false) + `) AS recall_memories`
+	return `(SELECT * FROM memories WHERE ` + memoryValiditySQL("") + ` AND ` + utilityHorizonSQL("", false) + ` AND ` + currentDerivedMemoryInputsSQL("", false) + `) AS recall_memories`
 }
 
 // Owner and revision travel with the payload in the same statement snapshot.
@@ -134,7 +134,11 @@ func (s *postgresDataStore) readRecallRecords(ctx context.Context, query string,
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	return items, s.annotateUtilityHorizons(ctx, items, "current")
 }
 
 func (s *postgresDataStore) AssembleContext(ctx context.Context, scope Scope, query, blockType string, limit int) (string, error) {

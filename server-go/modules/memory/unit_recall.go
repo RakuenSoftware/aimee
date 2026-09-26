@@ -45,7 +45,7 @@ type semanticCandidate struct {
 
 func (s *postgresDataStore) unitSemanticCandidates(ctx context.Context, req DataRequest, exact bool, version, vector string, scale float64) ([]semanticCandidate, error) {
 	policy, _ := json.Marshal(semanticUnitPolicy(answerIntent(req.Query)))
-	rows, err := s.db.Query(ctx, embeddingInputs+`, candidates AS (
+	rows, err := s.db.Query(ctx, embeddingInputs()+`, candidates AS (
  SELECT i.memory_id,i.unit_type,
  CASE WHEN vector_dims(v.embedding)=vector_dims($10::vector) AND vector_norm(v.embedding)>0
  THEN 1-(v.embedding <=> $10::vector) END

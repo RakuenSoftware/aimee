@@ -171,7 +171,7 @@ func exerciseDerivedUnitsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 		}
 		visiblePoint(false)
 		var candidates int
-		if err := tx.QueryRow(ctx, embeddingInputs+`SELECT count(*) FROM inputs WHERE point_id=$1`, point).Scan(&candidates); err != nil || candidates != 0 {
+		if err := tx.QueryRow(ctx, embeddingInputs()+`SELECT count(*) FROM inputs WHERE point_id=$1`, point).Scan(&candidates); err != nil || candidates != 0 {
 			t.Fatal("stale reembedding input", candidates, err)
 		}
 		calls := executor.calls
@@ -194,7 +194,7 @@ func exerciseDerivedUnitsReplay(t *testing.T, ctx context.Context, tx pgx.Tx, ba
 		t.Fatal(err)
 	}
 	var summaryCandidates int
-	if err := tx.QueryRow(ctx, embeddingInputs+`SELECT count(*) FROM inputs WHERE point_id=$1`, summaryPoint).Scan(&summaryCandidates); err != nil || summaryCandidates != 0 {
+	if err := tx.QueryRow(ctx, embeddingInputs()+`SELECT count(*) FROM inputs WHERE point_id=$1`, summaryPoint).Scan(&summaryCandidates); err != nil || summaryCandidates != 0 {
 		t.Fatal("stale summary unit indexed", summaryCandidates, err)
 	}
 	visiblePoint(true)

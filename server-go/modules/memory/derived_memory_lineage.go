@@ -20,7 +20,11 @@ func derivedMemoryInputsForAudienceSQL(prefix string, historical bool, audience 
 	if historical {
 		policy = baseHistoricalMemoryInspectionSQL("lineage_parent.")
 	}
-	policy = "((lineage_parent.record_revision::text=walk.revision AND " + policy + ") OR (" + compactedAncestorSQL("lineage_parent.") + " AND " + compactionOriginSQL("lineage_parent.") + "->>'record_revision'=walk.revision)) AND (" + audience + ")"
+	compacted := compactedAncestorSQL("lineage_parent.")
+	if !historical {
+		compacted += " AND " + utilityHorizonSQL("lineage_parent.", false)
+	}
+	policy = "((lineage_parent.record_revision::text=walk.revision AND " + policy + ") OR (" + compacted + " AND " + compactionOriginSQL("lineage_parent.") + "->>'record_revision'=walk.revision)) AND (" + audience + ")"
 	observation := `(CASE WHEN declared.source_kind IN ('memory-cognify-input-v1','memory-fold-input-v1') THEN declared.source_ref::jsonb END)`
 	fold := `(to_jsonb(` + prefix[:len(prefix)-1] + `)->>'cognified_memory_kind'='session_checkpoint')`
 	legacy := legacyMemoryInputsSQL(prefix)

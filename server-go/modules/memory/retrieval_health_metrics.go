@@ -15,22 +15,23 @@ import (
 // from recall callers. The owner authenticates and filters the population before
 // aggregation; reports intentionally contain no record, family or task IDs.
 type healthRecord struct {
-	Provenance      string           `json:"provenance_class,omitempty"`
-	Families        []string         `json:"families,omitempty"`
-	SelectionPaths  []string         `json:"selection_paths,omitempty"`
-	RankingSteps    []rankingStep    `json:"ranking_steps,omitempty"`
-	Arms            []healthArm      `json:"arm_contributions,omitempty"`
-	State           string           `json:"lifecycle_state,omitempty"`
-	ConfidenceClass string           `json:"confidence_class,omitempty"`
-	ValidFrom       string           `json:"valid_from,omitempty"`
-	ValidUntil      string           `json:"valid_until,omitempty"`
-	Positions       []healthPosition `json:"final_positions,omitempty"`
-	RecordID        string           `json:"record_id"`
-	VersionID       string           `json:"version_id"`
-	Kind            string           `json:"kind"`
-	Family          string           `json:"family,omitempty"`
-	LowTrust        *bool            `json:"low_trust"`
-	Historical      bool             `json:"historical"`
+	UtilityHorizonWouldExclude *bool            `json:"utility_horizon_would_exclude,omitempty"`
+	Provenance                 string           `json:"provenance_class,omitempty"`
+	Families                   []string         `json:"families,omitempty"`
+	SelectionPaths             []string         `json:"selection_paths,omitempty"`
+	RankingSteps               []rankingStep    `json:"ranking_steps,omitempty"`
+	Arms                       []healthArm      `json:"arm_contributions,omitempty"`
+	State                      string           `json:"lifecycle_state,omitempty"`
+	ConfidenceClass            string           `json:"confidence_class,omitempty"`
+	ValidFrom                  string           `json:"valid_from,omitempty"`
+	ValidUntil                 string           `json:"valid_until,omitempty"`
+	Positions                  []healthPosition `json:"final_positions,omitempty"`
+	RecordID                   string           `json:"record_id"`
+	VersionID                  string           `json:"version_id"`
+	Kind                       string           `json:"kind"`
+	Family                     string           `json:"family,omitempty"`
+	LowTrust                   *bool            `json:"low_trust"`
+	Historical                 bool             `json:"historical"`
 	// Nil means no release-time verifier label, not a verified safe delivery.
 	LifecycleViolation *bool `json:"lifecycle_violation"`
 }
@@ -150,6 +151,7 @@ type healthRuns struct {
 }
 
 type healthMetrics struct {
+	UtilityHorizon          healthRatio                    `json:"utility_horizon_would_exclude"`
 	ReleaseVerifiers        map[string]int                 `json:"lifecycle_label_verifiers,omitempty"`
 	ByKind                  map[string]healthConcentration `json:"record_concentration_by_kind"`
 	Labels                  healthLabelMetrics             `json:"labelled_selection"`
@@ -323,6 +325,14 @@ func aggregateHealth(events []healthInvocation, population healthPopulation) (he
 				}
 			}
 			if !record.Historical {
+				if record.UtilityHorizonWouldExclude == nil {
+					r.UtilityHorizon.Unknown++
+				} else {
+					r.UtilityHorizon.Denominator++
+					if *record.UtilityHorizonWouldExclude {
+						r.UtilityHorizon.Numerator++
+					}
+				}
 				if record.LifecycleViolation == nil {
 					r.Lifecycle.Unknown++
 				} else {
@@ -385,6 +395,7 @@ func aggregateHealth(events []healthInvocation, population healthPopulation) (he
 	r.Records, r.Versions = healthConcentrationOf(records), healthConcentrationOf(versions)
 	r.Repeat.finish()
 	r.Lifecycle.finish()
+	r.UtilityHorizon.finish()
 	return r, nil
 }
 

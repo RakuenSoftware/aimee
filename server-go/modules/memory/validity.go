@@ -13,6 +13,7 @@ import (
 // statement snapshot. Unknown evidence/authority is not inferred from relevance.
 // It is an observation, not authorization for a subsequent provider dispatch.
 type EligibilityDecision struct {
+	UtilityHorizon        *horizonDecision     `json:"utility_horizon,omitempty"`
 	SchemaVersion         int                  `json:"schema_version"`
 	PolicyVersion         string               `json:"policy_version"`
 	Mode                  string               `json:"mode"`
@@ -28,6 +29,9 @@ type EligibilityDecision struct {
 }
 
 func personalCurrentMemorySQL(prefix string) string {
+	return personalBaseCurrentMemorySQL(prefix) + ` AND ` + utilityHorizonSQL(prefix, true)
+}
+func personalBaseCurrentMemorySQL(prefix string) string {
 	return prefix + `lifecycle_state='active' AND (` + prefix + `valid_until IS NULL OR ` + prefix + `valid_until>CURRENT_TIMESTAMP)`
 }
 
@@ -85,6 +89,18 @@ func (s *postgresDataStore) validity(ctx context.Context, id int64, policy *Memo
 	}
 	if !inputs {
 		result.ReasonCodes = append(result.ReasonCodes, "derived_inputs_unavailable")
+	}
+	horizon, err := s.utilityHorizonDecision(ctx, id, version, policy.Mode, len(result.ReasonCodes) == 0)
+	if err != nil {
+		return result, err
+	}
+	result.UtilityHorizon = horizon
+	if horizon != nil && horizon.WouldExclude {
+		result.ReasonCodes = append(result.ReasonCodes, horizon.Reason)
+		if horizon.Mode == "enforce" {
+			result.Eligible = false
+			eligible = false
+		}
 	}
 	if eligible {
 		result.ReasonCodes = []string{"eligible"}

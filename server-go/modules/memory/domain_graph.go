@@ -13,8 +13,10 @@ const domainScopeRankSQL = `CASE
  WHEN scope_type='workspace' AND scope_value=current_setting('aimee.memory_workspace',true) THEN 2
  ELSE 1 END`
 
-var domainVisibleParents = `SELECT id,` + domainScopeRankSQL + ` AS scope_rank FROM memories
+func domainVisibleParents() string {
+	return `SELECT id,` + domainScopeRankSQL + ` AS scope_rank FROM memories
  WHERE ` + currentMemorySQL("")
+}
 
 const episodeColumns = `id,memory_id,episode_key,episode_text,source_session,reference_time,created_at`
 
@@ -29,7 +31,7 @@ func (s *postgresDataStore) episodeList(ctx context.Context, query string, limit
 	if err := s.requireKBDomain(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents+` AND ($3='' OR (scope_type=$3 AND scope_value=$4))) SELECT `+episodeColumns+` FROM memory_episodes e
+	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents()+` AND ($3='' OR (scope_type=$3 AND scope_value=$4))) SELECT `+episodeColumns+` FROM memory_episodes e
 WHERE ($1='' OR episode_key ILIKE '%'||$1||'%' OR episode_text ILIKE '%'||$1||'%')
 AND memory_id IN (SELECT id FROM visible) AND `+currentEpisodeInputsSQL("e")+`
 ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,reference_time DESC,created_at DESC,id DESC LIMIT $2`, query, limit, exact.Type, exact.Value)
@@ -53,7 +55,7 @@ func (s *postgresDataStore) EpisodeGet(ctx context.Context, key string) (Episode
 		return Episode{}, err
 	}
 	var item Episode
-	err := scanEpisode(s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents+`) SELECT `+episodeColumns+` FROM memory_episodes e
+	err := scanEpisode(s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents()+`) SELECT `+episodeColumns+` FROM memory_episodes e
 WHERE episode_key=$1 AND memory_id IN (SELECT id FROM visible) AND `+currentEpisodeInputsSQL("e")+` ORDER BY id DESC LIMIT 1`, key), &item)
 	if store.IsNoRows(err) {
 		return Episode{}, ErrMemoryNotFound
@@ -103,7 +105,7 @@ func (s *postgresDataStore) EntityEdges(ctx context.Context, entity string, limi
 	if err := s.requireKBDomain(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents+`) SELECT `+relationColumns+` FROM memory_relations r
+	rows, err := s.db.Query(ctx, `WITH visible AS (`+domainVisibleParents()+`) SELECT `+relationColumns+` FROM memory_relations r
 WHERE (lower(src_entity)=lower($1) OR lower(dst_entity)=lower($1))
 AND memory_id IN (SELECT id FROM visible) AND `+currentRelationInputsSQL("r")+` AND `+relationValidityAtSQL("r.", "CURRENT_TIMESTAMP")+`
 ORDER BY (SELECT scope_rank FROM visible WHERE id=memory_id) DESC,weight DESC,created_at DESC LIMIT $2`, entity, limit)
@@ -121,7 +123,7 @@ func (s *postgresDataStore) entityProfile(ctx context.Context, entity string, ex
 	if err := s.requireKBDomain(); err != nil {
 		return result, err
 	}
-	err := s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents+` AND ($2='' OR (scope_type=$2 AND scope_value=$3))),
+	err := s.db.QueryRow(ctx, `WITH visible AS (`+domainVisibleParents()+` AND ($2='' OR (scope_type=$2 AND scope_value=$3))),
 visible_relations AS (SELECT * FROM memory_relations r WHERE memory_id IN (SELECT id FROM visible) AND `+currentRelationInputsSQL("r")+` AND `+relationValidityAtSQL("r.", "CURRENT_TIMESTAMP")+`)
 SELECT
 (SELECT COUNT(DISTINCT memory_id) FROM memory_entities
